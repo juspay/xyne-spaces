@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
+import { governance, toolMetaOf, type GovernedAgent } from "./governance-hooks.js";
 import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
 import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
 import { checkTwinDelivery } from "./twin-delivery-check.js";
@@ -1857,7 +1858,7 @@ export interface RunTaskOptions {
   sessionId?: string | undefined;
   images?: ImageContent[] | undefined;
   fileAttachments?: FileAttachmentContent[] | undefined;
-  skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[] }[] | undefined;
+  skills?: { slug?: string; name: string; description?: string; content: string; files?: { relativePath: string; content: string; contentType?: string | null }[]; versionId?: string; contentSha256?: string }[] | undefined;
   /** Trusted, package-owned skill roots for a built-in run mode. Unlike
    * session skills these are not user supplied and are not deleted at exit. */
   extraSkillPaths?: string[] | undefined;
@@ -3099,6 +3100,18 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     recorder,
     fastMode: fastMode === true,
     ...(provider ? { provider } : {}),
+  });
+
+  // Governance hooks, installed last so they wrap every hook above; a no-op without the private extension.
+  governance.installRun(session.agent as unknown as GovernedAgent, {
+    sessionId: sessionId ?? conversationId ?? "unknown",
+    userId,
+    conversationId: conversationId ?? undefined,
+    agentSlug: progressMeta?.agentSlug ?? undefined,
+    role: "parent",
+    toolMeta: allCustomTools.map((t) => toolMetaOf(t as unknown as { name: string } & Record<string, unknown>)),
+    loaded: (skills ?? []).flatMap((s) => (s.versionId ? [{ versionId: s.versionId, sha256: s.contentSha256 ?? "", slug: s.slug ?? s.name }] : [])),
+    request: { text: opts.task, typedByPerson: !opts.automationRun },
   });
 
   // Attach the judge sink only once capture has started: it flushes every Jev

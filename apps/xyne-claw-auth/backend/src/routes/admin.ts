@@ -140,7 +140,7 @@ router.get("/audit-logs", requireClawAdmin, asyncHandler(async (req: Request, re
   const endDate = endRaw ? new Date(endRaw) : undefined;
   const validStart = startDate && !Number.isNaN(startDate.getTime()) ? startDate : undefined;
   const validEnd = endDate && !Number.isNaN(endDate.getTime()) ? endDate : undefined;
-  // TODO(admin-org-scope): agent_audit_logs has no orgId; scope through actor user org where possible.
+  // Rows written before orgId existed are scoped through the actor's org.
   const actorIds = scope.orgId
     ? await prisma.user.findMany({
       where: { orgId: scope.orgId },
@@ -148,8 +148,8 @@ router.get("/audit-logs", requireClawAdmin, asyncHandler(async (req: Request, re
     }).then((rows) => rows.map((u) => u.id))
     : null;
   const [logs, total] = await Promise.all([
-    auditLogRepository.list({ eventType, targetId, startDate: validStart, endDate: validEnd, limit, offset, actorUserIds: actorIds ?? undefined }),
-    auditLogRepository.count({ eventType, targetId, startDate: validStart, endDate: validEnd, actorUserIds: actorIds ?? undefined }),
+    auditLogRepository.list({ eventType, targetId, startDate: validStart, endDate: validEnd, limit, offset, orgId: scope.orgId, actorUserIds: actorIds ?? undefined }),
+    auditLogRepository.count({ eventType, targetId, startDate: validStart, endDate: validEnd, orgId: scope.orgId, actorUserIds: actorIds ?? undefined }),
   ]);
   const logActorIds = Array.from(new Set(logs.map((l) => l.actorUserId).filter((id): id is string => Boolean(id))));
   const actors = logActorIds.length

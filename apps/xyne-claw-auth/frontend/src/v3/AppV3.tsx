@@ -33,6 +33,7 @@ import { AgentsDashboardPageV3 } from "./components/AgentsDashboardPageV3";
 import { WorkflowsPageV3 } from "./components/WorkflowsPageV3";
 import { DigitalTwinPageV3 } from "./components/digital-twin/DigitalTwinPageV3";
 import { AdminPageV3 } from "./components/AdminPageV3";
+import { extensionRoutes } from "./components/extensionRoutes";
 import { MetricsPageV3 } from "./components/MetricsPageV3";
 import { RunsPageV3 } from "./components/RunsPageV3";
 import { EvalsPageV3 } from "./components/EvalsPageV3";
@@ -254,6 +255,17 @@ export function AppV3() {
                 <Navigate to="/v3/home" replace />
               )
             } />
+            {extensionRoutes.map((route) => (
+              <Route key={route.path} path={route.path} element={
+                !route.adminOnly || isAdmin ? (
+                  <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                    <route.Component userId={userId} />
+                  </div>
+                ) : isAdminLoading ? null : (
+                  <Navigate to="/v3/home" replace />
+                )
+              } />
+            ))}
             <Route path="/v3/search-evals" element={
               hasSearchEvalAccess ? (
                 <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">

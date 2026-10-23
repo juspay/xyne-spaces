@@ -12,6 +12,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { governance, blockedToolResultText } from "../lib/governance-hooks.js";
 import { errMsg } from "../lib/errors.js";
 import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
@@ -602,6 +603,12 @@ router.post("/callback", async (req: Request, res: Response) => {
       }
 
       // Google (custom) tools — execute directly via xyne-claw-shared
+      const gate = await governance.gateCall({ site: "app_callback", userId: writeUserId, agentSlug, conversationId: actionConversationId, serverType, tool, params, writeTool: true });
+      if (gate.enforce && gate.decision === "block") {
+        log.warn(`[app-callback] ${blockedToolResultText(gate)} tool=${tool}`);
+        return;
+      }
+
       if (serverType === "google") {
         const { getAllCustomTools } = await import("xyne-claw-shared");
         const toolDef = getAllCustomTools().find((t) => t.slug === tool);

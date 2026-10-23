@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
+import { governance } from "./governance-hooks.js";
 
 const log = createLogger("skill-apply");
 
@@ -89,6 +90,8 @@ export async function applyCreateSkill(
     }
     throw err;
   }
+  // The owner's approval of the card carries the agent's write into the registry.
+  await governance.commitSkillVersion({ id: created.id, orgId: skillOrgId, slug, name, description, content: content.trim(), scope: "personal", files: [] }, { writtenBy: "agent", userId, approvedVia: "owner" });
   log.info(`[skill-apply] create-skill approved slug=${slug} owner=${userId} org=${skillOrgId}`);
   return { status: "created", id: created.id, name, slug, message: `Skill "${name}" created.` };
 }

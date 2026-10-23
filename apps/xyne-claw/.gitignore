@@ -1,0 +1,3 @@
+# Private extension code (shipped from juspay/xyne-spaces-private; loaded by src/extension.ts when present)
+src/extensions/
+test/extensions/

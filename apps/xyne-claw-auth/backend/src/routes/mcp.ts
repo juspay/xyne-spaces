@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { listToolsForUser, callTool } from "../mcp/runner.js";
+import { listToolsForUser, callTool, cachedToolDescription } from "../mcp/runner.js";
 import { agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition, isWriteToolUnderPolicy } from "../mcp/connector-definitions.js";
@@ -79,6 +79,7 @@ import {
   parseGatewayToolSelectionKey,
 } from "../mcpgateway/key-format.js";
 import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
+import { effectiveGrant, governance as governanceHooks, blockedToolResultText, type C1Handoff } from "../lib/governance-hooks.js";
 import { buildAgentCallProposalFlow, isEmptyToolsSelection, parseToolsConfig, resolveAgentToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
 import { findUnresolvedConfiguredServers, visibleConnectors, type UnresolvedConfiguredServer } from "../lib/connector-access.js";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
@@ -1712,12 +1713,14 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
       ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId, userId)
       : undefined;
-    const { serverType, tool, params, permission, backendId, subagentId } = req.body as {
+    const { serverType, tool, params, permission, backendId, subagentId, governance } = req.body as {
       serverType?: string;
       tool?: string;
       params?: Record<string, unknown>;
       permission?: string;
       backendId?: string;
+      /** C1's decision, sent by xyne-claw; C2 verifies instead of deciding again. */
+      governance?: C1Handoff;
       // Set by xyne-claw when the invoking tool belongs to a subagent's
       // palette. Selects a SubagentMcpConnection identity in the resolver.
       subagentId?: string;
@@ -1756,6 +1759,11 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       }
       if (!agentSlug) {
         res.status(400).json({ success: false, error: "agentSlug is required for KB tools" });
+        return;
+      }
+      const gate = await governanceHooks.gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: params ?? {}, permissionHint: permission, writeTool: false, c1: governance });
+      if (gate.enforce && gate.decision === "block") {
+        res.json({ success: true, data: { content: blockedToolResultText(gate) } });
         return;
       }
       try {
@@ -2054,7 +2062,14 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       }
 
       const requiresApproval = requiresGatewayToolApproval(descriptor);
-      const effectivePermission = requiresApproval ? "ask" : (permission ?? "allow");
+      let effectivePermission = effectiveGrant(permission, requiresApproval);
+      const gate = await governanceHooks.gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: params ?? {}, grant: permission, permissionHint: effectivePermission, writeTool: requiresApproval ? true : typeof descriptor.isWriteTool === "boolean" ? descriptor.isWriteTool : undefined, description: descriptor.description, c1: governance });
+      if (gate.enforce && gate.decision === "block") {
+        res.json({ success: true, data: { content: blockedToolResultText(gate) } });
+        return;
+      }
+      // An enforced ask (a kill switch, or policy under enforce) takes the approval card, like a write tool.
+      if (gate.enforce && gate.decision === "ask" && effectivePermission === "allow") effectivePermission = "ask";
 
       log.info(
         `[mcp/call] user=${userId} server=${serverType} tool=${tool} permission=${effectivePermission}${requiresApproval ? " (gateway approval required, forced ask)" : ""}`,
@@ -2198,7 +2213,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const isWriteTool = definition?.writePolicy
       ? isWriteToolUnderPolicy(definition.writePolicy, tool)
       : (definition?.writeTools?.includes(tool) ?? false);
-    const effectivePermission = isWriteTool ? "ask" : (permission ?? "allow");
+    let effectivePermission = effectiveGrant(permission, isWriteTool);
+    // A declared write policy settles reads too; without one only a write is known.
+    const gate = await governanceHooks.gateCall({ site: "mcp_call", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: effectiveParams, grant: permission, permissionHint: effectivePermission, writeTool: isWriteTool || (definition?.writePolicy || definition?.writeTools ? false : undefined), description: cachedToolDescription(serverType, tool), c1: governance });
+    if (gate.enforce && gate.decision === "block") {
+      res.json({ success: true, data: { content: blockedToolResultText(gate) } });
+      return;
+    }
+    // An enforced ask (a kill switch, or policy under enforce) takes the approval card, like a write tool.
+    if (gate.enforce && gate.decision === "ask" && effectivePermission === "allow") effectivePermission = "ask";
 
     log.info(
       `[mcp/call] user=${userId} server=${serverType} tool=${tool} permission=${effectivePermission}${isWriteTool ? " (write-tool, forced ask)" : ""}`,
@@ -2670,6 +2693,12 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       log.warn(
         `[mcp/call] would-deny by agent config (permissive mode): agent=${agentSlug ?? spacesAppId ?? "?"} server=${serverType} tool=${tool}`,
       );
+    }
+
+    const gate = await governanceHooks.gateCall({ site: "actions_sign", userId, agentSlug, orgId: sessionAgentOrgId, sessionId: req.params.sessionId, serverType, tool, params: actionParams, permissionHint: "ask", writeTool: true });
+    if (gate.enforce && gate.decision === "block") {
+      res.status(403).json({ success: false, error: blockedToolResultText(gate) });
+      return;
     }
 
     // Revalidate gateway actions before issuing a signature.

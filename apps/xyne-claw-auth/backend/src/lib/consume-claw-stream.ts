@@ -113,7 +113,15 @@ export async function consumeClawStream(opts: ConsumeClawStreamOptions): Promise
   const response = await fetch(opts.url, fetchInit);
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(`Claw SSE upstream returned ${response.status}: ${text.slice(0, 500)}`);
+    let detail = text.slice(0, 500);
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error.trim()) detail = parsed.error.trim();
+    } catch {
+      // not JSON
+    }
+    // A refusal (a kill switch, a policy) reads as the sentence claw-auth wrote, not as a transport error.
+    throw new Error(response.status === 403 ? detail : `Claw SSE upstream returned ${response.status}: ${detail}`);
   }
   if (!response.body) {
     throw new Error("Claw SSE response has no body");

@@ -17,6 +17,7 @@
  */
 
 import { prisma } from "../db.js";
+import { governance, blockedToolResultText } from "./governance-hooks.js";
 import { errMsg } from "./errors.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -75,6 +76,8 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
   if (!verifyActionSignature(actionCore, signature)) {
     return { ok: false, content: "", error: "Signature verification failed — action may have been tampered with." };
   }
+  const gate = await governance.gateCall({ site: "write_action", userId, serverType, tool, params, writeTool: true });
+  if (gate.enforce && gate.decision === "block") return { ok: false, content: "", error: blockedToolResultText(gate) };
 
   try {
     // 2a. MCP gateway tools: serverType is encoded as gateway:<service>[:<backendId>]

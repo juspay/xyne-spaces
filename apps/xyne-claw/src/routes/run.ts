@@ -1,5 +1,6 @@
 import { loopFromPayload, loopModeLog, resolveLoop, withLoopKind, type LoopKey } from "xyne-claw-shared";
 import { randomUUID } from "node:crypto";
+import { governance } from "../governance-hooks.js";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
@@ -235,6 +236,9 @@ export interface ActiveRunControl {
   abortController: AbortController;
   /** Owner of the run. Used to reject cross-user cancellation. */
   userId: string;
+  orgId?: string;
+  /** Set when a kill switch aborted the run, with the reason the user sees. */
+  killReason?: string;
   /** For inflight-kill forensics: who/what this run is + when it began. */
   agentSlug?: string;
   startedAtMs?: number;
@@ -269,13 +273,14 @@ const activeRuns = new Map<string, ActiveRunControl>();
 
 export function ensureActiveRun(
   sessionId: string,
-  payload: { userId?: string; agentSlug?: string; callbackUrl?: string },
+  payload: { userId?: string; agentSlug?: string; callbackUrl?: string; orgId?: string },
 ): ActiveRunControl {
   const existing = activeRuns.get(sessionId);
   if (existing) return existing;
   const activeRun: ActiveRunControl = {
     abortController: new AbortController(),
     userId: (payload.userId ?? "").trim(),
+    ...(payload.orgId ? { orgId: payload.orgId } : {}),
     agentSlug: payload.agentSlug ?? "unknown",
     startedAtMs: Date.now(),
     hasCallbackUrl: typeof payload.callbackUrl === "string" && !!payload.callbackUrl.trim(),
@@ -384,6 +389,13 @@ function expandCustomSelection(custom: string[] | undefined): Set<string> {
   }
   return selected;
 }
+
+// The kill-switch sync aborts the runs this pod owns that a stop switch matches.
+governance.registerKillableRuns(() =>
+  [...activeRuns.entries()]
+    .filter(([, a]) => !a.abortController.signal.aborted)
+    .map(([sessionId, a]) => ({ sessionId, userId: a.userId, agentSlug: a.agentSlug, orgId: a.orgId, abort: (reason: string) => { a.killReason = reason; a.abortController.abort(); } })),
+);
 
 export function describeActiveRuns(): Array<{ sessionId: string; agentSlug: string; userId: string; ageS: number }> {
   const now = Date.now();
@@ -1512,7 +1524,7 @@ export async function processTask(
   scheduledJobId: string | undefined,
   traceId: string | undefined,
   skills:
-    | { slug?: string; name: string; description?: string; content: string }[]
+    | { slug?: string; name: string; description?: string; content: string; versionId?: string; contentSha256?: string }[]
     | undefined,
   provider: string | undefined,
   providerOrder: string[] | undefined,
@@ -4967,6 +4979,8 @@ export async function processTask(
     clog.info(
       `[follow-ups] callback sessionId=${sessionId} pendingQuestions=${pendingQuestions.length} followUpCount=${pendingQuestions.find((question) => question.purpose === "follow_up_suggestions")?.options?.length ?? 0}`,
     );
+    // D: the answer passes the output check before it leaves the run (shadow records, enforce strips).
+    const governedResultText = governance.governanceForRun(sessionId)?.inspectAnswer(callbackResultText).text ?? callbackResultText;
     await sendCallback(callbackUrl, sessionToken, {
       sessionId,
       userId,
@@ -4974,7 +4988,7 @@ export async function processTask(
       agentSlug: agentSlug ?? null,
       fastMode: fastModeForCallback,
       status: "completed",
-      result: callbackResultText,
+      result: governedResultText,
       ...(emptyReason ? { emptyReason } : {}),
       ...(emptyReasonDetail ? { emptyReasonDetail } : {}),
       // Raw JSON for machine consumers (chain-workflows/triggers). Present only
@@ -5049,6 +5063,7 @@ export async function processTask(
       provider: completedProvider,
       model: completedModel,
     });
+    void governance.governanceForRun(sessionId)?.finish();
     if (followUpOutcome === "parallel_pending" && followUpPromise && lateFollowUpDeliveryUrl) {
       // Attached only after the main result callback above has been sent, so
       // claw-auth always sees the answer before its follow-up suggestions.

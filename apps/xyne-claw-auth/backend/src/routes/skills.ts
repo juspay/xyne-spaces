@@ -35,6 +35,7 @@ import {
   topSkillsSh,
 } from "../lib/skill-import.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { governance } from "../lib/governance-hooks.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("skills");
@@ -48,7 +49,7 @@ const router = Router();
  * admin; internal S2S callers (the runner) are trusted. A not-readable skill
  * resolves to 404 — never 403 — so the slug is not confirmed to someone probing.
  */
-async function assertSkillReadable(
+export async function assertSkillReadable(
   skill: { slug: string; scope: string; ownerUserId: string | null },
   req: Request,
 ): Promise<void> {
@@ -281,6 +282,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     // Phase-2: stamp the creating org.
     org: { connect: { id: orgId } },
   });
+  await governance.commitSkillVersion({ ...skill, files: [] }, { writtenBy: "person", userId: requesterId, approvedVia: requesterId ? "owner" : undefined });
 
   ok(res, skill);
 }));
@@ -294,8 +296,9 @@ router.put("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Re
   }
 
   const requesterId = getRequesterId(req);
+  let admin = false;
   if (requesterId) {
-    const admin = await isClawAdmin(requesterId);
+    admin = await isClawAdmin(requesterId);
     const isOwner = existing.ownerUserId === requesterId;
     if (!admin && !isOwner) {
       throw forbidden("Only the owner or admins can edit this skill");
@@ -316,6 +319,9 @@ router.put("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Re
   if (enabled !== undefined) data.enabled = enabled;
 
   const skill = await skillRepository.update(req.params.slug, existing.orgId, data);
+  if (content !== undefined || name !== undefined || description !== undefined) {
+    await governance.commitSkillVersion(skill, { writtenBy: admin ? "admin" : "person", userId: requesterId, approvedVia: admin ? "claw_admin" : requesterId ? "owner" : undefined });
+  }
   ok(res, skill);
 }));
 
@@ -360,6 +366,13 @@ router.post("/:slug/promote", requireClawAdmin, asyncHandler(async (req: Request
     throw notFound("Skill not found");
   }
   if (skill.scope === "global") throw badRequest("Skill is already global");
+  // Promotion needs the live version, the bytes on the row right now, to be approved.
+  const live = await governance.currentSkillVersion(skill);
+  if (!live || live.approvalStatus !== "approved") {
+    const why = live ? `${live.approvalStatus} (parser ${live.parserVerdict ?? "none"})` : "unregistered";
+    if (governance.componentMode("registry") === "enforce") throw badRequest(`The skill's current version is ${why}; only an approved version can be promoted`);
+    log.warn(`[skills/promote] shadow: ${skill.slug} current version is ${why}; enforce would refuse`);
+  }
 
   const updated = await skillRepository.update(req.params.slug, skill.orgId, { scope: "global", promotedBy: requesterId, promotedAt: new Date() });
 
@@ -493,10 +506,11 @@ router.put("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, r
     throw notFound("Skill not found");
   }
   // ACL: the skill's own owner (personal OR global), OR a CLAW_ADMIN.
+  const callerIsAdmin = await isClawAdmin(requesterId);
   const authz = authorizeSkillFileUpdate({
     ownerUserId: skill.ownerUserId,
     callerUserId: requesterId,
-    callerIsAdmin: await isClawAdmin(requesterId),
+    callerIsAdmin,
   });
   if (!authz.ok) {
     throw new HttpError(authz.code, authz.reason);
@@ -532,6 +546,7 @@ router.put("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, r
   } catch (err) {
     throw badRequest(errMsg(err));
   }
+  await governance.commitSkillVersion({ ...skill, files: sanitized }, { writtenBy: callerIsAdmin ? "admin" : "person", userId: requesterId, approvedVia: callerIsAdmin ? "claw_admin" : "owner" });
 
   const files = await skillRepository.listFiles(skill.id);
   ok(res, files.map((f) => ({
@@ -816,11 +831,12 @@ export async function resolveSkillUpdateRequest(
   });
   if (!approver.ok || !approver.approverUserId) return { ok: false, code: 409, error: "Skill has no valid approver" };
 
+  const callerIsAdmin = await isClawAdmin(callerUserId);
   const authz = authorizeSkillUpdateApproval({
     approverUserId: approver.approverUserId,
     requiresAdmin: approver.requiresAdmin,
     callerUserId,
-    callerIsAdmin: await isClawAdmin(callerUserId),
+    callerIsAdmin,
     currentContentHash: hashSkillContent(skill.content),
     baseContentHash: request.baseContentHash ?? "",
   });
@@ -857,6 +873,7 @@ export async function resolveSkillUpdateRequest(
       return { ok: false, code: 409, error: "Proposed content failed integrity check" };
     }
     await skillRepository.update(skill.slug, skill.orgId, { content: normalizeSkillContent(proposed) });
+    await governance.commitSkillVersion({ ...skill, content: normalizeSkillContent(proposed) }, { writtenBy: "agent", userId: callerUserId, approvedVia: callerIsAdmin ? "claw_admin" : "owner" });
   } catch (err) {
     await agentRequestRepository.revertSkillUpdateToPending(request.id).catch(() => {});
     throw err;

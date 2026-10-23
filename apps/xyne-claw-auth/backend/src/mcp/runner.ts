@@ -10,6 +10,7 @@ import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./t
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition, effectiveWriteTools } from "./connector-definitions.js";
+import { governance } from "../lib/governance-hooks.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
@@ -505,6 +506,18 @@ export function clearToolListCache(): void {
   toolListSkipUntil.clear();
 }
 
+/** The description a listing in this process cached for a tool, so the gate can classify a name that has no verb. */
+export function cachedToolDescription(serverType: string, tool: string): string | undefined {
+  const shared = toolListCache.get(serverType)?.tools.find((t) => t.name === tool);
+  if (shared) return shared.description || undefined;
+  for (const [key, entry] of userToolListCache) {
+    if (key.split(":")[1] !== serverType) continue;
+    const hit = entry.tools.find((t) => t.name === tool);
+    if (hit) return hit.description || undefined;
+  }
+  return undefined;
+}
+
 const ROTATING_CREDENTIAL_FIELD = /token|secret|password|expires|refresh|cookie/i;
 
 function credentialFingerprint(credentials: Record<string, unknown>): string {
@@ -603,7 +616,7 @@ export async function listToolsForUser(
   const writeTools = definition?.writePolicy
     ? effectiveWriteTools(definition.writePolicy, tools.map((t) => t.name))
     : (definition?.writeTools ?? []);
-  return { serverType, serverName, tools, writeTools };
+  return { serverType, serverName, tools, writeTools, writePolicyDeclared: Boolean(definition?.writePolicy || definition?.writeTools) };
 }
 
 export class McpToolListUnavailableError extends Error {}
@@ -810,6 +823,9 @@ export async function callTool(
   lane?: SessionLane,
   instance?: string,
 ): Promise<McpCallResult> {
+  // Server and tool kill switches apply to every lane, artifact apps and health checks included.
+  const killed = governance.killSwitchForTool(serverType, tool);
+  if (killed && governance.componentMode("kill") === "enforce") throw new Error(`Blocked by policy (GOV-KILL-${killed.mode.toUpperCase()}): ${serverType}/${tool} is switched off.`);
   const { client, credentials: resolved } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
   const callMeta = PER_CALL_AUTH_SERVER_TYPES.has(serverType) ? spacesCallAuthMeta(resolved) : undefined;
 

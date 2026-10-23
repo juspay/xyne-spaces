@@ -12,7 +12,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 interface AuditContext {
-  actorUserId?: string;
+  readonly actorUserId?: string | undefined;
 }
 
 const storage = new AsyncLocalStorage<AuditContext>();
