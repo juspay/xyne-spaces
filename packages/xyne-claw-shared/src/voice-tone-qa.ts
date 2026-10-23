@@ -45,7 +45,12 @@ export interface VoiceToneFinding {
 }
 
 const FENCE = /^\s*(?:```|~~~)/;
-const MARKDOWN_HEADING = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
+/** Three adjacent quantifiers that all match a space — `(.+?)`, `\s*`, `\s*`
+ *  — backtracked against each other. The closing hashes of an ATX heading are
+ *  stripped after the match instead, with ATX_CLOSING_HASHES. */
+const MARKDOWN_HEADING = /^\s{0,3}(#{1,6})\s+(\S.*)$/;
+/** `## Title ##` — the optional closing run, removed after the match. */
+const ATX_CLOSING_HASHES = /\s*#+\s*$/;
 /** A line that is nothing but a link reads as a call to action. */
 const STANDALONE_LINK = /^\s*\*{0,2}\[([^\]]+)\]\([^)]*\)\*{0,2}\s*$/;
 
@@ -80,10 +85,26 @@ const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\
 
 const collapse = (value: string): string => value.replace(/\s+/g, " ").trim();
 
+/** One pass, not `/<!--[\s\S]*?-->/g`: that restarts its lazy scan at every
+ *  `<!--` and runs to the end of the input, so markup holding many unclosed
+ *  ones costs quadratic time. An unclosed comment runs to the end, which is
+ *  what a browser does. */
+function stripHtmlComments(text: string): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const start = text.indexOf("<!--", from);
+    if (start === -1) return out + text.slice(from);
+    out += `${text.slice(from, start)} `;
+    const end = text.indexOf("-->", start + 4);
+    if (end === -1) return out;
+    from = end + 3;
+  }
+}
+
 /** Tags, inline code and link syntax gone; what is left is what a reader sees. */
 function visibleText(line: string): string {
-  return line
-    .replace(/<!--[\s\S]*?-->/g, " ")
+  return stripHtmlComments(line)
     .replace(/`[^`]*`/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<[^>]*>/g, " ")
@@ -411,7 +432,7 @@ export function checkVoiceToneCompliance(
       if (fenced[index]) continue;
       const markdown = MARKDOWN_HEADING.exec(lines[index] ?? "");
       if (!markdown) continue;
-      const text = collapse(visibleText(markdown[2] ?? ""));
+      const text = collapse(visibleText((markdown[2] ?? "").replace(ATX_CLOSING_HASHES, "")));
       if (text) headings.push({ text, line: index + 1 });
     }
     headings.push(...htmlCandidates(masked, HTML_HEADING, 2, starts, fenced));

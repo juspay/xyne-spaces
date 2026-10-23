@@ -91,6 +91,16 @@ describe("extractVoiceSection", () => {
     expect(section).not.toContain("Typography");
   });
 
+  it("stays linear on a file of heading-shaped whitespace", () => {
+    // `/^(#{1,6})\s+(.+?)\s*$/` had a lazy dot and a trailing `\s*` competing
+    // for the same spaces — CodeQL's js/polynomial-redos. DESIGN.md is
+    // model-written, so this is reachable input.
+    const pathological = `## Voice\n#${" ".repeat(60_000)}\n- **Avoid:** delve\n`;
+    const started = Date.now();
+    expect(parseVoiceSection(pathological).bannedPhrases).toEqual(["delve"]);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("runs to the end of the file when nothing follows", () => {
     expect(extractVoiceSection("## Voice\n\n- **Avoid:** delve")).toContain("delve");
   });

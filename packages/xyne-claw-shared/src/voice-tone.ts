@@ -103,7 +103,11 @@ export function hasVoiceRules(rules: VoiceRules): boolean {
 }
 
 const FENCE = /^\s*(?:```|~~~)/;
-const HEADING = /^(#{1,6})\s+(.+?)\s*$/;
+/** `(\S.*)` rather than `(.+?)\s*$`: a lazy dot and a trailing `\s*` both match
+ *  a space, so the two backtrack against each other — quadratic on a line of
+ *  spaces, which is CodeQL's js/polynomial-redos. Trailing whitespace is
+ *  dropped by normalizeHeading downstream, so nothing changes but the cost. */
+const HEADING = /^(#{1,6})\s+(\S.*)$/;
 
 /** Lowercased, `&` spelled out, emphasis and trailing punctuation gone. */
 function normalizeHeading(text: string): string {
@@ -266,7 +270,9 @@ function fieldForLabel(label: string): VoiceField | null {
 const LIST_MARKER = /^\s*(?:[-*+]|\d+[.)])\s+/;
 /** `Label: value`, after the list marker and emphasis are stripped. An em or en
  *  dash is accepted as the separator because drafters reach for it. */
-const LABELLED = /^([A-Za-z][A-Za-z0-9 /&'’()-]{0,40}?)\s*(?::|—|–)\s*(.*)$/;
+/** No `\s*` before the separator: the label class already contains a space, so
+ *  the two competed for it. The label is trimmed by normalizeHeading anyway. */
+const LABELLED = /^([A-Za-z][A-Za-z0-9 /&'’()-]{0,40}?)(?::|—|–)\s*(.*)$/;
 
 /** Emphasis, inline code and markdown links reduced to their text. Link syntax
  *  is flattened rather than kept so a URL cannot ride into a phrase. */
