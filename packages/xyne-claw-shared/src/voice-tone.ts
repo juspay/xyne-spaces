@@ -336,13 +336,19 @@ function splitList(value: string): string[] {
  * The separator only — the two sides are sliced off either end of it.
  *
  * `/^(.*?)\s+(?:over|…)\s+(.*)$/` had a lazy dot immediately followed by
- * `\s+`, so the two backtracked against each other on a run of spaces: the
- * same js/polynomial-redos as the heading pattern, and the one I missed when I
- * fixed that. Matching the separator alone has no such pair, and `exec` still
- * finds the FIRST one, so `"a over b over c"` splits where it always did.
+ * `\s+`, so the two backtracked against each other on a run of spaces.
+ * Matching the separator alone removed that pair, and `exec` still finds the
+ * FIRST one, so `"a over b over c"` splits where it always did.
+ *
+ * The separators then match a LITERAL single space rather than `\s+`, which
+ * removes the last quantifier that could backtrack: an unanchored `\s+` before
+ * a literal is still quadratic on a run of spaces, from every start position.
+ * That is sound only because `ingest` collapses whitespace before any value
+ * reaches here — these patterns assume collapsed input, and are private to this
+ * module so nothing else can feed them otherwise.
  */
-const PAIR_OVER_SEPARATOR = /\s+(?:over|instead of|rather than|not)\s+/i;
-const PAIR_ARROW_SEPARATOR = /\s*(?:→|=>|->|⇒)\s*/;
+const PAIR_OVER_SEPARATOR = / (?:over|instead of|rather than|not) /i;
+const PAIR_ARROW_SEPARATOR = / ?(?:→|=>|->|⇒) ?/;
 
 function parsePair(piece: string): VoicePreferredWording | null {
   const arrow = PAIR_ARROW_SEPARATOR.exec(piece);
@@ -360,7 +366,7 @@ function parsePair(piece: string): VoicePreferredWording | null {
   return null;
 }
 
-const PAIR_SEPARATOR = /→|=>|->|⇒|\s+(?:over|instead of|rather than|not)\s+/gi;
+const PAIR_SEPARATOR = /→|=>|->|⇒| (?:over|instead of|rather than|not) /gi;
 
 function splitPairs(value: string): VoicePreferredWording[] {
   const pieces = value.split(/[;\n]/).flatMap((piece) => {
