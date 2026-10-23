@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: juspay/xyne-spaces/.github/workflows/ci.yml@main
+    uses: juspay/xyne-spaces/.github/workflows/ci.yml@feature/XYNE-67274-split-ci-automation-steps
     secrets: inherit
     permissions:
       contents: read

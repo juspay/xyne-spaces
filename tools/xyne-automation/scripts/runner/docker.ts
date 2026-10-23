@@ -104,6 +104,24 @@ export async function dockerBuild(
   return { ...result, id: 'docker-build', title: 'Build Docker images' };
 }
 
+// Pulls the prebuilt (non-`build:`) images so `up` doesn't pull them after the build finishes.
+// Best-effort: a failed pull is retried by `up`.
+export async function dockerPull(
+  opts: DockerOpts,
+  artifactDir: string,
+  renderer: OutputRenderer
+): Promise<StepEntry> {
+  const logDir = path.join(artifactDir, 'docker-logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  const result = await exec(
+    'docker',
+    ['compose', ...composeArgs(opts), 'pull', '--ignore-buildable', '--quiet'],
+    { cwd: opts.cwd, env: opts.env, logFile: path.join(logDir, 'pull.log') },
+    renderer
+  );
+  return { ...result, id: 'docker-pull', title: 'Pull service images' };
+}
+
 export async function dockerUp(
   opts: DockerOpts,
   artifactDir: string,

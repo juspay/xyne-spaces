@@ -10,14 +10,20 @@ import {
   copyReports,
   dockerBuild,
   dockerDown,
+  dockerPull,
   dockerUp,
   runTests,
 } from '@/scripts/runner/docker';
 import { createRenderer } from '@/scripts/runner/output';
 import { buildPortMap, portMapToEnv, type RunMode } from '@/scripts/runner/ports';
 
+// `setup` builds images and starts services, then leaves them running; `test` runs Gauge
+// against them and tears down. CI calls them as separate steps; `all` does both.
+type RunPhase = 'all' | 'setup' | 'test';
+
 interface CLIArgs {
   mode?: RunMode;
+  phase: RunPhase;
   targets: string[];
   plain: boolean;
   parallel?: number;
@@ -25,7 +31,7 @@ interface CLIArgs {
 
 function parseArgs(argv: string[]): CLIArgs {
   const args = argv.slice(2);
-  const result: CLIArgs = { targets: [], plain: false };
+  const result: CLIArgs = { phase: 'all', targets: [], plain: false };
 
   for (const arg of args) {
     if (arg.startsWith('--mode=')) {
@@ -34,6 +40,14 @@ function parseArgs(argv: string[]): CLIArgs {
         result.mode = mode;
       } else {
         console.error(`Invalid mode: ${mode}. Use 'local' or 'ci'.`);
+        process.exit(1);
+      }
+    } else if (arg.startsWith('--phase=')) {
+      const phase = arg.slice('--phase='.length);
+      if (phase === 'all' || phase === 'setup' || phase === 'test') {
+        result.phase = phase;
+      } else {
+        console.error(`Invalid phase: ${phase}. Use 'all', 'setup' or 'test'.`);
         process.exit(1);
       }
     } else if (arg.startsWith('--parallel=')) {
@@ -62,6 +76,8 @@ Usage: ts-node scripts/runner/index.ts [options] [targets...]
 
 Options:
   --mode=local|ci    Force mode (auto-detected if omitted)
+  --phase=setup|test Run only setup (build + start services, left running) or only
+                     test (Gauge + teardown, against a prior setup). Default: both
   --parallel=N       Number of parallel Gauge runners (defaults to 3 in local, 1 in ci)
   --plain            Force plain text output (no TUI)
   -h, --help         Show this help
@@ -78,6 +94,7 @@ Examples:
   ts-node scripts/runner/index.ts --mode=ci
   ts-node scripts/runner/index.ts --parallel=2 tests/03_e2e
   ts-node scripts/runner/index.ts --plain tests/01_api
+  ts-node scripts/runner/index.ts --phase=setup && ts-node scripts/runner/index.ts --phase=test
 `);
 }
 
@@ -250,6 +267,23 @@ function findMonorepoRoot(start: string): string {
   }
 }
 
+// Handed from `--phase=setup` to `--phase=test` so both talk to the same compose project.
+const PHASE_STATE_FILE = 'phase-state.json';
+
+interface PhaseState {
+  composeProjectName: string;
+  projectRoot: string;
+  portMap: Record<string, number>;
+  results: StepEntry[];
+}
+
+function readPhaseState(file: string): PhaseState {
+  if (!fs.existsSync(file)) {
+    throw new Error(`No setup state at ${file} — run with --phase=setup first.`);
+  }
+  return JSON.parse(fs.readFileSync(file, 'utf-8')) as PhaseState;
+}
+
 const MAX_DOCKER_START_ATTEMPTS = 3;
 const PORT_BIND_CONFLICT_REGEX =
   /address already in use|failed to bind host port|port is already allocated/i;
@@ -264,13 +298,18 @@ async function main(): Promise<void> {
   const mode = detectMode(cliArgs.mode);
   const originalRoot = process.cwd();
   const commitHash = getCommitHash(originalRoot);
-  const composeProjectName = generateComposeProjectName();
+  const { phase } = cliArgs;
 
   const artifactDir = path.join(originalRoot, 'xyne-automation', 'reports', `${commitHash}-runner`);
-  prepareArtifactDirectory(artifactDir);
+  const phaseStateFile = path.join(artifactDir, PHASE_STATE_FILE);
+  // The test phase keeps the setup phase's artifacts (build/startup logs) instead of wiping them.
+  const setupState = phase === 'test' ? readPhaseState(phaseStateFile) : null;
+  if (!setupState) prepareArtifactDirectory(artifactDir);
 
-  let portMap = await buildPortMap(mode);
-  const projectRoot = await resolveProjectRoot(mode, originalRoot, !cliArgs.plain);
+  const composeProjectName = setupState?.composeProjectName ?? generateComposeProjectName();
+  let portMap = setupState?.portMap ?? (await buildPortMap(mode));
+  const projectRoot =
+    setupState?.projectRoot ?? (await resolveProjectRoot(mode, originalRoot, !cliArgs.plain));
 
   const monorepoRoot = findMonorepoRoot(projectRoot);
 
@@ -301,9 +340,13 @@ async function main(): Promise<void> {
     cwd: monorepoRoot,
   };
 
-  const totalSteps = mode === 'ci' ? 6 : 5;
+  // Setup: [clean (ci)], build, start. Test: run, copy reports, tear down.
+  const setupSteps = mode === 'ci' ? 3 : 2;
+  const testSteps = 3;
+  const totalSteps =
+    phase === 'setup' ? setupSteps : phase === 'test' ? testSteps : setupSteps + testSteps;
   const renderer = createRenderer(mode, cliArgs.plain);
-  const results: StepEntry[] = [];
+  const results: StepEntry[] = setupState?.results ?? [];
   let failed = false;
   let shuttingDown = false;
   let stepIndex = 0;
@@ -389,7 +432,7 @@ async function main(): Promise<void> {
     return { ...result, duration: Date.now() - startTime };
   };
 
-  if (mode === 'ci') {
+  if (phase !== 'test' && mode === 'ci') {
     renderer.startStep(stepIndex, 'Clean old artifacts');
     const cleanStart = Date.now();
     try {
@@ -422,15 +465,24 @@ async function main(): Promise<void> {
     stepIndex++;
   }
 
-  renderer.startStep(stepIndex++, 'Build Docker images');
-  await runStep(() => dockerBuild(dockerOpts, artifactDir, renderer));
+  if (phase !== 'test') {
+    renderer.startStep(stepIndex++, 'Build Docker images');
+    // Pull the prebuilt service images alongside the build; they are otherwise pulled
+    // serially by `up` (minutes for the larger ones).
+    const pull = dockerPull(dockerOpts, artifactDir, renderer);
+    await runStep(() => dockerBuild(dockerOpts, artifactDir, renderer));
+    const pullResult = await pull;
+    if (pullResult.status === 'failed') {
+      renderer.log('Image pre-pull failed; `up` will pull the remaining images.');
+    }
+  }
 
-  if (!failed) {
+  if (phase !== 'test' && !failed) {
     renderer.startStep(stepIndex++, 'Start all Docker services');
     await runStep(startDockerServices);
   }
 
-  if (!failed) {
+  if (phase !== 'setup' && !failed) {
     renderer.startStep(stepIndex++, 'Run Gauge tests');
     const envParallel = Number.parseInt(process.env.PARALLEL ?? '', 10);
     const envParallelValid = Number.isInteger(envParallel) && envParallel >= 1;
@@ -443,7 +495,11 @@ async function main(): Promise<void> {
     );
   }
 
-  if (!shuttingDown) {
+  if (phase === 'setup' && !failed) {
+    // Services stay up for the `--phase=test` run, which copies reports and tears down.
+    const state: PhaseState = { composeProjectName, projectRoot, portMap, results };
+    fs.writeFileSync(phaseStateFile, JSON.stringify(state, null, 2));
+  } else if (!shuttingDown) {
     await cleanup();
   }
 
