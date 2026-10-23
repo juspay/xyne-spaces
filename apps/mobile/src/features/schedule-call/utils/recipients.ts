@@ -10,12 +10,13 @@ export type Recipients =
 export const toRecipients = (
   { users, channel }: ScheduleCallParticipants,
   members: ScheduleCallUser[] | null,
+  hadExclusions = false,
 ): Recipients => {
   if (!channel) return { targetUserIds: users.map(u => u.id) };
   const excluded = new Set(channel.excludedUserIds);
   // The form blocks submit while exclusions exist but members are not loaded, so `!members` here
   // only means "nothing was left out".
-  if (excluded.size === 0 || !members) return { channelId: channel.id };
+  if ((excluded.size === 0 && !hadExclusions) || !members) return { channelId: channel.id };
   return {
     channelId: channel.id,
     targetUserIds: members.filter(m => !excluded.has(m.id)).map(m => m.id),

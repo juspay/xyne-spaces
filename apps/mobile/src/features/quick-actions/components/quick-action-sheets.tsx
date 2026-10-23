@@ -1,15 +1,60 @@
-import { type ReactElement } from 'react';
+import { useCallback, useRef, type ReactElement } from 'react';
 import { useValue } from '@legendapp/state/react';
+import { useRouter } from 'expo-router';
 
 import { CreateChannelDrawer } from '@/src/components/chat/create-channel-drawer';
 import { CreateDmDrawer } from '@/src/components/chat/create-dm-drawer';
-import { InstantCallSheet } from '@/src/components/call/instant-call-sheet';
+import { useMountWhileOpen } from '@/src/features/global-search/hooks/use-mount-while-open';
+import { PeopleSheet } from '@/src/features/schedule-call/components/PeopleSheet';
+import {
+  NO_PARTICIPANTS,
+  type ScheduleCallParticipants,
+} from '@/src/features/schedule-call/hooks/useScheduleCallForm';
+import { useInstantCall } from '@/src/hooks/useInstantCall';
 
 import {
   closeQuickActionSheet,
   isQuickActionSheetMounted,
   quickActionSheets$,
 } from '../state/sheet-store';
+
+/** Same people picker as the Calls tab's instant call; the call starts once the sheet has closed. */
+function InstantCallSheet({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}): ReactElement | null {
+  const router = useRouter();
+  const { startCall } = useInstantCall();
+  const picked = useRef<ScheduleCallParticipants | null>(null);
+  const sheet = useMountWhileOpen(isOpen, onClose);
+  const { onDismiss } = sheet.sheetProps;
+  const handleDismiss = useCallback((): void => {
+    onDismiss();
+    const participants = picked.current;
+    picked.current = null;
+    if (participants) {
+      startCall(participants);
+      router.push('/(protected)/native-call');
+    }
+  }, [onDismiss, router, startCall]);
+
+  if (!sheet.shouldRender) return null;
+  return (
+    <PeopleSheet
+      {...sheet.sheetProps}
+      onDismiss={handleDismiss}
+      participants={NO_PARTICIPANTS}
+      onApply={participants => {
+        picked.current = participants;
+      }}
+      title='Start an instant call'
+      confirmLabel='Start call'
+    />
+  );
+}
 
 /**
  * The surfaces the quick actions open, mounted once for the whole shell.

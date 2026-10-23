@@ -71,6 +71,7 @@ export const getWeekdayOccurrence = (
     occurrence,
     weekday: WEEKDAY_NAMES[targetWeekday] ?? 'Monday',
     isLast,
-    ordinalWord: ORDINAL_WORDS[occurrence - 1] || `${occurrence}th`,
+    // A 5th weekday exists only some months; "last" (BYDAY=-1) is what the rule means by it.
+    ordinalWord: occurrence === 5 ? 'last' : ORDINAL_WORDS[occurrence - 1] || `${occurrence}th`,
   };
 };

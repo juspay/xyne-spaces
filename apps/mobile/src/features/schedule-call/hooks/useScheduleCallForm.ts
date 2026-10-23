@@ -92,6 +92,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   const [participants, setParticipants] = useState(prefill?.participants ?? NO_PARTICIPANTS);
   const participantCount = countParticipants(participants);
   const [guests, setGuests] = useState<string[]>(prefill?.guests ?? []);
+  const [guestDraftPending, setGuestDraftPending] = useState(false);
 
   const channelMembers = useChannelMembers(participants.channel?.id ?? null);
   const excludedIds = useMemo(
@@ -108,6 +109,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
   // As on the dashboard, an edited channel call starts with the members who were not on it
   // unchecked, once the member list is in, so the form shows who is really invited.
   const exclusionsSeeded = useRef(false);
+  const hadExclusions = useRef(false);
   useEffect(() => {
     const channel = participants.channel;
     if (exclusionsSeeded.current || !editCall || !channelMembers || !channel) return;
@@ -116,6 +118,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     const invited = new Set(editCall.participants.filter(p => !p.isExternal).map(p => p.userId));
     const excludedUserIds = channelMembers.filter(m => !invited.has(m.id)).map(m => m.id);
     if (excludedUserIds.length > 0) {
+      hadExclusions.current = true;
       setParticipants({ ...participants, channel: { ...channel, excludedUserIds } });
     }
   }, [channelMembers, editCall, participants]);
@@ -239,7 +242,11 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     if (!isSeriesSubmit) {
       return { startsAtError: startsAtChanged ? startsAtError : null, endsAtError };
     }
-    const recurringError = validateRecurringCallTimes(recurringStartTime, recurringEndTime);
+    // A series is sent as start/end times of day only, so the end date can't differ from the start.
+    const recurringError =
+      endsAt.toDateString() !== startsAt.toDateString()
+        ? 'A repeating call must end on the day it starts'
+        : validateRecurringCallTimes(recurringStartTime, recurringEndTime);
     const tooFar =
       startsAt.getTime() - Date.now() > MAX_SERIES_START_AHEAD_MS
         ? 'A repeating call can start at most 60 days ahead'
@@ -272,6 +279,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     participantCount === 0 ? 'Add at least one person' : null,
     allMembersExcluded ? 'Include at least one channel participant' : null,
     membersLoading ? 'Loading channel members…' : null,
+    guestDraftPending ? 'Add or clear the guest email' : null,
     timeErrors.startsAtError,
     timeErrors.endsAtError,
     postUpdates.updateChannelError && !participantsOnly ? 'Pick a channel for post updates' : null,
@@ -286,7 +294,7 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     inFlight.current = true;
     setIsSubmitting(true);
     try {
-      const recipients = toRecipients(participants, channelMembers);
+      const recipients = toRecipients(participants, channelMembers, hadExclusions.current);
       const callUpdatesChannel =
         postUpdates.postCallUpdates && selectedChannelId
           ? { callUpdatesChannel: selectedChannelId }
@@ -351,7 +359,10 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
       }
       return true;
     } catch (error) {
-      logger.error(Event.ERROR, { context: 'schedule-call submit', error: String(error) });
+      logger.error(Event.API_CALL_FAILED, {
+        context: 'schedule-call submit',
+        error: String(error),
+      });
       showMessageToast(editCall ? 'Error updating call' : 'Failed to schedule call', 'error');
       return false;
     } finally {
@@ -402,6 +413,8 @@ export const useScheduleCallForm = (editCall: EditCallData | null = null): Sched
     setExcludedMembers,
     guests,
     setGuests,
+    setGuestDraftPending,
+    membersReady: !!channelMembers,
     postUpdates,
     canSubmit,
     blockers,
@@ -436,6 +449,8 @@ export interface ScheduleCallForm {
   setExcludedMembers: (excludedUserIds: string[]) => void;
   guests: string[];
   setGuests: (emails: string[]) => void;
+  setGuestDraftPending: (pending: boolean) => void;
+  membersReady: boolean;
   postUpdates: PostCallUpdates;
   canSubmit: boolean;
   /** Why the action is disabled; empty when it can be submitted. */

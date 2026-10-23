@@ -1,5 +1,5 @@
 import type { MonthlyType, RecurrenceFrequency, SeriesEndsType } from './types';
-import { getWeekdayOccurrence, ORDINAL_WORDS } from './dateTime';
+import { getWeekdayOccurrence } from './dateTime';
 
 const RRULE_FREQ: Record<RecurrenceFrequency, string> = {
   DAY: 'DAILY',
@@ -62,7 +62,7 @@ export function buildRecurrenceRule({
     } else if (monthlyType === 'monthly_nth_weekday') {
       const { occurrence, weekday } = getWeekdayOccurrence(startsAt);
       const weekdayCode = weekday.substring(0, 2).toUpperCase();
-      rule += `;BYDAY=${occurrence}${weekdayCode}`;
+      rule += `;BYDAY=${occurrence === 5 ? -1 : occurrence}${weekdayCode}`;
     }
   }
 
@@ -132,8 +132,7 @@ export function getRecurrenceLabel({
           ? `Monthly on day ${dayOfMonth}`
           : `Every ${repeatValue} months on day ${dayOfMonth}`;
     } else {
-      const { occurrence, weekday } = getWeekdayOccurrence(startsAt);
-      const ordinalWord = ORDINAL_WORDS[occurrence - 1] || `${occurrence}th`;
+      const { weekday, ordinalWord } = getWeekdayOccurrence(startsAt);
       baseLabel =
         repeatValue === 1
           ? `Monthly on ${ordinalWord} ${weekday}`

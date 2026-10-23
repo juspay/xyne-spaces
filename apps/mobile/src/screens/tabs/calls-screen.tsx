@@ -218,7 +218,6 @@ const CallsScreen = (): ReactElement => {
     }, [scrollListToTop]),
   );
   const zero = useZero();
-  const router = useRouter();
   const isFocused = useTabPageIsFocused();
   const [hasFirstLayout, setHasFirstLayout] = useState(false);
   const liveDataEnabled = useDeferredLiveData({

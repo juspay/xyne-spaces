@@ -357,7 +357,10 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
           onDeleted?.(call.id);
         });
       } catch (error) {
-        logger.error(Event.ERROR, { context: 'call-details delete', error: String(error) });
+        logger.error(Event.API_CALL_FAILED, {
+          context: 'call-details delete',
+          error: String(error),
+        });
         Alert.alert('Error', 'Failed to delete call');
       }
     };

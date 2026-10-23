@@ -56,7 +56,15 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
   const [editCall] = useState(getEditSession);
   const isEditMode = editCall !== null;
   const form = useScheduleCallForm(editCall);
-  const { postUpdates, selectRepeat, participants, setParticipants, guests, setGuests } = form;
+  const {
+    postUpdates,
+    selectRepeat,
+    participants,
+    setParticipants,
+    guests,
+    setGuests,
+    setGuestDraftPending,
+  } = form;
   const placeholderColor = useCSSVariable('--color-settings-description') as string;
 
   // Written on the UI thread by the scroll handler; the header and the big title read it in their
@@ -142,10 +150,12 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
     isMembersOpen,
     useCallback((): void => setIsMembersOpen(false), []),
   );
+  const { membersReady } = form;
   const openMembersPicker = useCallback((): void => {
+    if (!membersReady) return;
     Keyboard.dismiss();
     setIsMembersOpen(true);
-  }, []);
+  }, [membersReady]);
 
   const { selectedChannel, selectChannel, setPostCallUpdates } = postUpdates;
   const [isChannelOpen, setIsChannelOpen] = useState(false);
@@ -266,7 +276,12 @@ export default function ScheduleCallScreen({ onClose }: ScheduleCallScreenProps)
               externalCardY.current = event.nativeEvent.layout.y;
             }}
           >
-            <ExternalGuestsCard guests={guests} onChange={setGuests} onAdded={showGuestList} />
+            <ExternalGuestsCard
+              guests={guests}
+              onChange={setGuests}
+              onAdded={showGuestList}
+              onPendingChange={setGuestDraftPending}
+            />
           </View>
         )}
 

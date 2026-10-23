@@ -271,7 +271,22 @@ export const PeopleSheet = ({
           const rows = await zero.run(queries.getUserGroupMembers({ userGroupId: groupId }), {
             type: 'complete',
           });
-          ids = rows.map(m => m.userId).filter(id => id !== self?.id);
+          // Only active, known users: the same set toggling adds, so the row's tick matches it.
+          const selectable = new Set(
+            stateMachineActor
+              .getSnapshot()
+              .context.users.filter(u => !isUserDeactivated(u))
+              .map(u => u.id),
+          );
+          const others = rows.map(m => m.userId).filter(id => id !== self?.id);
+          ids = others.filter(id => selectable.has(id));
+          const skipped = others.length - ids.length;
+          if (skipped > 0) {
+            showMessageToast(
+              `${skipped} deactivated or unavailable ${skipped === 1 ? 'member' : 'members'} skipped`,
+              'warning',
+            );
+          }
           const loaded = ids;
           setGroupMembers(prev => ({ ...prev, [groupId]: loaded }));
         } catch {

@@ -1,4 +1,4 @@
-import { memo, useState, type ReactElement } from 'react';
+import { memo, useEffect, useState, type ReactElement } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { Globe, Mail, X } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
@@ -24,6 +24,8 @@ interface ExternalGuestsCardProps {
   onChange: (guests: string[]) => void;
   /** Called after new guests are added, so the form can scroll the whole list into view. */
   onAdded?: () => void;
+  /** Reports whether the field holds text that was typed but not added yet. */
+  onPendingChange?: (pending: boolean) => void;
 }
 
 /** Guests invited by email: an inline field with an Add button, and the added guests below it. */
@@ -31,12 +33,18 @@ const ExternalGuestsCardBase = ({
   guests,
   onChange,
   onAdded,
+  onPendingChange,
 }: ExternalGuestsCardProps): ReactElement => {
   const { accentBg, accentText } = useBubbleAccent();
   const descriptionColor = useCSSVariable('--color-settings-description') as string;
   const [draft, setDraft] = useState('');
   const [invalid, setInvalid] = useState(false);
   const canAdd = draft.trim().length > 0;
+
+  useEffect(() => {
+    onPendingChange?.(canAdd);
+    return () => onPendingChange?.(false);
+  }, [canAdd, onPendingChange]);
 
   /** Adds every address in the field (comma separated, so a pasted list works); flags bad ones. */
   const commit = (): void => {
