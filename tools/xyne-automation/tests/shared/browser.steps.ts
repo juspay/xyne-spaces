@@ -1252,10 +1252,16 @@ export default class BrowserSteps {
     await removeButton.waitFor({ state: 'visible', timeout: 60000 });
     // The tile (and its remove button) shows as soon as the file is picked; the
     // composer keeps its send button disabled until the bytes finish uploading.
+    // Only look inside the attachment's own composer: an ancestor that wraps a
+    // dialog (e.g. the page behind the create-ticket modal) holds some other
+    // composer's send button. Forms without one (ticket modal) upload on submit.
     const sendButton = removeButton
-      .locator('xpath=ancestor::*[.//*[@data-testid="send-message-button"]][1]')
+      .locator(
+        'xpath=ancestor::*[.//*[@data-testid="send-message-button"]][not(.//*[@role="dialog"])][1]'
+      )
       .locator('[data-testid="send-message-button"]')
       .first();
+    if ((await sendButton.count()) === 0) return;
     await expect(sendButton).toBeEnabled({ timeout: 60000 });
   }
 
