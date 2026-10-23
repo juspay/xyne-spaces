@@ -95,3 +95,29 @@ export function formatToISTLocaleString(date: Date): string {
     hour12: true,
   });
 }
+
+/**
+ * Timezone used for backend-rendered, user-facing date strings (system messages,
+ * notifications). Backend processes run with TZ=UTC, so an unqualified
+ * `toLocaleDateString()` renders the UTC calendar day, which is NOT what the user
+ * picked.
+ */
+export const DISPLAY_TIME_ZONE = 'Asia/Kolkata';
+
+/**
+ * Format a timestamp as `DD/MM/YYYY` in the display timezone.
+ *
+ * Ticket / stage ETAs are picked in the browser as a LOCAL wall-clock value
+ * (`<input type="datetime-local">`) and stored as epoch ms. A date picked as
+ * 00:00 IST is 18:30 UTC on the PREVIOUS day, so rendering it on a UTC server
+ * shifts the calendar day back by one. Always format ETA-style timestamps with
+ * this helper instead of a bare `toLocaleDateString()`.
+ */
+export function formatDisplayDate(value: number | string | Date): string {
+  return new Date(value).toLocaleDateString('en-GB', {
+    timeZone: DISPLAY_TIME_ZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
