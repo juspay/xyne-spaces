@@ -7,10 +7,10 @@ import { sanitizeFilePath } from '../../../../utils/validation.js';
  */
 
 /**
- * Validate and normalize file path for writing (accepts both relative and absolute paths like )
+ * Resolve and normalize a file path (accepts both relative and absolute paths).
+ * Rejects relative paths that traverse outside `cwd`. Shared by the write and edit tools.
  */
-export function validateWriteFilePath(filePath: string, cwd?: string): string {
-  // Accept both absolute and relative paths like 
+export function resolveFilePath(filePath: string, cwd?: string): string {
   // Check for path traversal attempts that go outside the current directory
   if (!path.isAbsolute(filePath)) {
     const resolved = path.resolve(cwd || process.cwd(), filePath);
@@ -27,6 +27,15 @@ export function validateWriteFilePath(filePath: string, cwd?: string): string {
   const resolved = path.isAbsolute(sanitized) 
     ? path.normalize(sanitized)
     : path.resolve(cwd || process.cwd(), sanitized);
+  
+  return resolved;
+}
+
+/**
+ * Validate and normalize file path for writing (accepts both relative and absolute paths)
+ */
+export function validateWriteFilePath(filePath: string, cwd?: string): string {
+  const resolved = resolveFilePath(filePath, cwd);
   
   // Check for dangerous file extensions
   const dangerousExtensions: string[] = [
