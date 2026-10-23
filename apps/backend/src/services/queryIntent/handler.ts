@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { classifyQueryIntent } from './index';
+import { cacContextFromRequest } from '@/services/cacConfigService';
 
 /** GET /api/vespaSearch/intent?q= → `{ success, data: QueryIntent | null }` */
 export const queryIntentHandler = async (req: Request, res: Response): Promise<void> => {
@@ -14,6 +15,10 @@ export const queryIntentHandler = async (req: Request, res: Response): Promise<v
     return;
   }
 
-  const intent = await classifyQueryIntent(req.query.q as string, { userId, workspaceId });
+  const intent = await classifyQueryIntent(req.query.q as string, {
+    userId,
+    workspaceId,
+    cac: cacContextFromRequest(req),
+  });
   res.json({ success: true, data: intent });
 };
