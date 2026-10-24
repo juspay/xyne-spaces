@@ -327,7 +327,7 @@ export interface NotifyTarget {
   template?: MessageTemplate;
 }
 
-function isRunning(account: ChannelAccount): boolean {
+export function isRunning(account: ChannelAccount): boolean {
   return account.config.desiredState === "running" && account.config.connState !== "logged_out";
 }
 

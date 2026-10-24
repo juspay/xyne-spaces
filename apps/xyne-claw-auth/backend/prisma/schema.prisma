@@ -1831,6 +1831,11 @@ enum AgentAuditEvent {
   DESIGN_SYSTEM_CREATED
   DESIGN_SYSTEM_UPDATED
   DESIGN_SYSTEM_DELETED
+  // Messaging number links (WhatsApp). Added by migration
+  // 20261023100100_channel_number_audit_events (ALTER TYPE ADD VALUE) — kept
+  // here so a fresh `prisma generate` accepts them.
+  CHANNEL_NUMBER_LINKED
+  CHANNEL_NUMBER_UNLINKED
 }
 
 model AgentAuditLog {
