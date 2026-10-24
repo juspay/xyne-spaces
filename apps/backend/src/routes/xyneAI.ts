@@ -113,6 +113,9 @@ router.put('/v2/chat-projects/reorder', chatProjectsLimiter, authMiddleware.auth
 router.get('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.getChatProject);
 router.patch('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.updateChatProject);
 router.delete('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteChatProject);
+router.get('/v2/chat-projects/:projectId/knowledge', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.listChatProjectKnowledge);
+router.post('/v2/chat-projects/:projectId/knowledge', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.addChatProjectKnowledge);
+router.delete('/v2/chat-projects/:projectId/knowledge/:knowledgeId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.deleteChatProjectKnowledge);
 
 // DELETE /api/xyne-ai/v2/conversations/:convId - Delete a claw conversation
 router.delete('/v2/conversations/:convId', authMiddleware.authenticate, xyneAIControllerV2.deleteConversation);

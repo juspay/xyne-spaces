@@ -45,6 +45,10 @@ import {
   publishClawDesignShare,
   getClawDesignShare,
   revokeClawDesignShare,
+  listClawProjectKnowledge,
+  addClawProjectKnowledge,
+  deleteClawProjectKnowledge,
+  type ClawChatProjectKnowledgeInput,
   type ClawRunRequest,
   type ClawChatProjectInput,
 } from '@/services/clawAgentService';
@@ -1561,6 +1565,69 @@ export class XyneAIControllerV2 {
       );
     } catch (error) {
       this.projectFailure(res, 'reorderChatProjects', error);
+    }
+  };
+
+  listChatProjectKnowledge = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { projectId } = req.params;
+    if (!projectId) {
+      res.status(400).json({ success: false, error: 'projectId is required' });
+      return;
+    }
+    try {
+      res.json(await listClawProjectKnowledge({ headers: req.headers, userId }, projectId));
+    } catch (error) {
+      this.projectFailure(res, 'listChatProjectKnowledge', error);
+    }
+  };
+
+  addChatProjectKnowledge = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { projectId } = req.params;
+    if (!projectId) {
+      res.status(400).json({ success: false, error: 'projectId is required' });
+      return;
+    }
+    try {
+      const created = await addClawProjectKnowledge(
+        { headers: req.headers, userId },
+        projectId,
+        (req.body ?? {}) as ClawChatProjectKnowledgeInput
+      );
+      res.status(201).json(created);
+    } catch (error) {
+      this.projectFailure(res, 'addChatProjectKnowledge', error);
+    }
+  };
+
+  deleteChatProjectKnowledge = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { projectId, knowledgeId } = req.params;
+    if (!projectId || !knowledgeId) {
+      res
+        .status(400)
+        .json({ success: false, error: 'projectId and knowledgeId are required' });
+      return;
+    }
+    try {
+      res.json(
+        await deleteClawProjectKnowledge({ headers: req.headers, userId }, projectId, knowledgeId)
+      );
+    } catch (error) {
+      this.projectFailure(res, 'deleteChatProjectKnowledge', error);
     }
   };
 

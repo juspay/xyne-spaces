@@ -16,6 +16,7 @@ export function ProjectRow({
   project,
   isExpanded,
   onToggle,
+  onOpen,
   onRename,
   onDelete,
   onNewChat,
@@ -35,28 +36,37 @@ export function ProjectRow({
         type='button'
         onClick={onToggle}
         aria-expanded={isExpanded}
-        className='flex min-w-0 flex-1 items-center gap-2.5 py-1 text-left text-sm'
+        aria-label={isExpanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
+        className='relative flex size-5 shrink-0 items-center justify-center rounded'
         data-track-category='XyneAI'
         data-track-name='TOGGLE_CHAT_PROJECT'
         data-track-metadata={JSON.stringify({ surface: 'page', projectId: project.id })}
       >
-        <span className='relative flex size-5 shrink-0 items-center justify-center'>
-          <span
-            className='transition-opacity group-focus-within:opacity-0 group-hover:opacity-0'
-            aria-hidden
-          >
-            {renderEmoji(project.icon ?? DEFAULT_PROJECT_ICON, 'w-5 h-5', 'text-base')}
-          </span>
-          <ChevronBigDown
-            size={12}
-            className={cn(
-              'absolute opacity-0 transition-[opacity,transform] duration-200 group-focus-within:opacity-100 group-hover:opacity-100',
-              !isExpanded && '-rotate-90',
-            )}
-            aria-hidden
-          />
+        <span
+          className='transition-opacity group-focus-within:opacity-0 group-hover:opacity-0'
+          aria-hidden
+        >
+          {renderEmoji(project.icon ?? DEFAULT_PROJECT_ICON, 'w-5 h-5', 'text-base')}
         </span>
-        <span className='block min-w-0 flex-1 truncate'>{project.name}</span>
+        <ChevronBigDown
+          size={12}
+          className={cn(
+            'absolute opacity-0 transition-[opacity,transform] duration-200 group-focus-within:opacity-100 group-hover:opacity-100',
+            !isExpanded && '-rotate-90',
+          )}
+          aria-hidden
+        />
+      </button>
+
+      <button
+        type='button'
+        onClick={onOpen}
+        className='block min-w-0 flex-1 truncate py-1 pl-2.5 text-left text-sm'
+        data-track-category='XyneAI'
+        data-track-name='OPEN_CHAT_PROJECT'
+        data-track-metadata={JSON.stringify({ surface: 'page', projectId: project.id })}
+      >
+        {project.name}
       </button>
 
       <button
