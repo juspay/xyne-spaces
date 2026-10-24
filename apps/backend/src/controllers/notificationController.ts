@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
+import { getDeviceKey } from '@/services/authSessionService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
 
@@ -82,6 +83,8 @@ export class NotificationController {
         ...validated,
         sessionId,
         appVersion: req.headers['x-app-version'] as string | undefined,
+        orgMemberId: req.user?.memberId,
+        deviceKey: getDeviceKey(req),
       });
 
       res.json({ success: true });
@@ -108,7 +111,10 @@ export class NotificationController {
       mobileUnregisterSchema.parse(req.body ?? {});
       const sessionId = this.resolveSessionId(req);
 
-      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined);
+      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined, {
+        orgMemberId: req.user?.memberId,
+        deviceKey: getDeviceKey(req),
+      });
 
       res.json({ success: true });
     } catch (error) {

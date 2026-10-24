@@ -801,9 +801,13 @@ class NotificationService {
 
   async unregisterMobilePushToken(
     userId: string,
-    sessionId?: string
+    sessionId?: string,
+    device?: { orgMemberId?: string; deviceKey?: string }
   ): Promise<void> {
     try {
+      if (device?.orgMemberId && device.deviceKey) {
+        await fcmPushService.clearDevicePushToken(device.orgMemberId, device.deviceKey);
+      }
       if (sessionId) {
         await fcmPushService.clearSessionPushToken(sessionId);
       } else {
