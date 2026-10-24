@@ -1593,7 +1593,11 @@ export class EmailService {
 
       // When an app-desk source link is requested, the Email upsert and the
       // link write share one transaction so neither can be lost on its own.
-      const email = externalSourceId ? await addEmailToConversationTx(this, emailData, externalMessageId, externalThreadId, externalSourceId, channel?.workspaceId ?? undefined) : await this.emailRepository.create(emailData);
+      const { email, created } = externalSourceId
+        ? { email: await addEmailToConversationTx(this, emailData, externalMessageId, externalThreadId, externalSourceId, channel?.workspaceId ?? undefined), created: true }
+        : await this.emailRepository.createIfAbsent(emailData);
+      // A concurrent ingest of this message stored it first and runs the side effects below.
+      if (!created) return { email, conversation };
       if (!deferChannelSideEffects) void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.

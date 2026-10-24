@@ -28,6 +28,8 @@ export interface CursorCatchupJobData {
   sourceId: string;
   watchHistoryId: string;
   requesterUserId?: string;
+  /** Times this catch-up found the mailbox busy and was put back for later. */
+  busyRetries?: number;
 }
 
 export type EmailFetchQueueJobData =
@@ -117,11 +119,14 @@ class EmailFetchQueue {
 
 export const emailFetchQueue = new EmailFetchQueue();
 
-export async function enqueueCursorCatchup(params: CursorCatchupJobData): Promise<void> {
+export async function enqueueCursorCatchup(params: CursorCatchupJobData, delayMs?: number): Promise<void> {
   try {
     if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+    // A put-back catch-up needs its own id: the job putting it back still holds the original one.
+    const retrySuffix = params.busyRetries ? `:retry${params.busyRetries}` : '';
     await emailFetchQueue.getQueue().add('cursor-catchup', params, {
-      jobId: `catchup:${params.sourceId}:${params.watchHistoryId}`,
+      jobId: `catchup:${params.sourceId}:${params.watchHistoryId}${retrySuffix}`,
+      delay: delayMs,
       removeOnFail: true,
     });
     logger.info('[EMAIL-FETCH-QUEUE] Queued cursor catch-up', { sourceId: params.sourceId });
@@ -130,5 +135,29 @@ export async function enqueueCursorCatchup(params: CursorCatchupJobData): Promis
       sourceId: params.sourceId,
       error,
     });
+  }
+}
+
+/** Dated fetch for mail the cursor can no longer reach; one job per desk and window. */
+export async function enqueueGapFetch(params: EmailFetchJobData): Promise<boolean> {
+  try {
+    if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+    await emailFetchQueue.getQueue().add('refetch', params, {
+      jobId: `gapfetch:${params.sourceId}:${params.targetChannelId ?? params.channelId}:${params.startDate}`,
+      removeOnComplete: true,
+      removeOnFail: true,
+    });
+    logger.info('[EMAIL-FETCH-QUEUE] Queued gap fetch', {
+      sourceId: params.sourceId,
+      channelId: params.channelId,
+      startDate: params.startDate,
+    });
+    return true;
+  } catch (error) {
+    logger.error('[EMAIL-FETCH-QUEUE] Failed to queue gap fetch', {
+      sourceId: params.sourceId,
+      error,
+    });
+    return false;
   }
 }

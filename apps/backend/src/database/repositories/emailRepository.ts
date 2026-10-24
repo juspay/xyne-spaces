@@ -5,38 +5,37 @@ import { withWorkspaceScope } from '../tenant/context';
 import { syncTicketEmailCount } from '../syncTicketEmailCount';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
 
+export interface CreateEmailData {
+  type: EmailType;
+  subject: string;
+  body: string;
+  to: string[];
+  from: string;
+  cc?: string[];
+  bcc?: string[];
+  replyTo?: string[];
+  conversationId: string;
+  channelId: string;
+  externalThreadId: string;
+  externalMessageId: string;
+  sentByUserId?: string;
+  rfcMessageId?: string | null;
+  rating?: number;
+  clientVersionName?: string;
+  clientVersionCode?: string;
+  createdAt?: Date;
+}
+
 export class EmailRepository {
   private db = DatabaseClient.getInstance();
 
-  async create(data: {
-    type: EmailType;
-    subject: string;
-    body: string;
-    to: string[];
-    from: string;
-    cc?: string[];
-    bcc?: string[];
-    replyTo?: string[];
-    conversationId: string;
-    channelId: string;
-    externalThreadId: string;
-    externalMessageId: string;
-    sentByUserId?: string;
-    rfcMessageId?: string | null;
-    rating?: number;
-    clientVersionName?: string;
-    clientVersionCode?: string;
-    createdAt?: Date;
-  }, tx?: Prisma.TransactionClient, options?: { workspaceId?: string }): Promise<Email> {
+  async create(
+    data: CreateEmailData,
+    tx?: Prisma.TransactionClient,
+    options?: { workspaceId?: string },
+  ): Promise<Email> {
     const db = tx ?? this.db;
-    const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
-    const workspaceId = options?.workspaceId ?? (await db.channel.findUnique({
-      where: { id: data.channelId },
-      select: { workspaceId: true },
-    }))?.workspaceId;
-    if (!workspaceId) {
-      throw new Error(`Could not find workspaceId for channel ${data.channelId}`);
-    }
+    const row = await this.buildEmailRow(data, tx, options?.workspaceId);
     const email = await db.email.upsert({
       where: {
         externalMessageId_channelId: {
@@ -45,28 +44,67 @@ export class EmailRepository {
         },
       },
       update: {},
-      create: {
-        type: data.type,
-        workspaceId,
-        subject: data.subject,
-        body: data.body,
-        to: data.to,
-        from: data.from,
-        cc: data.cc || [],
-        bcc: data.bcc || [],
-        replyTo: data.replyTo || [],
-        conversationId: data.conversationId,
-        channelId: data.channelId,
-        externalThreadId: data.externalThreadId,
-        externalMessageId: data.externalMessageId,
-        ...(data.sentByUserId && { sentByUserId: data.sentByUserId }),
-        ...(rfcMessageId && { rfcMessageId }),
-        ...(data.rating != null && { rating: data.rating }),
-        ...(data.clientVersionName && { clientVersionName: data.clientVersionName }),
-        ...(data.clientVersionCode && { clientVersionCode: data.clientVersionCode }),
-        ...(data.createdAt && { createdAt: data.createdAt }),
-      },
+      create: row,
     });
+    await this.afterEmailInsert(data, tx);
+    return email;
+  }
+
+  /** Insert-only create(): `created` is false when a concurrent ingest stored this message first. */
+  async createIfAbsent(data: CreateEmailData): Promise<{ email: Email; created: boolean }> {
+    const row = await this.buildEmailRow(data);
+    let email: Email;
+    try {
+      email = await this.db.email.create({ data: row });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error;
+      const existing = await this.findByExternalMessageIdAndChannel(data.externalMessageId, data.channelId);
+      if (!existing) throw error;
+      return { email: existing, created: false };
+    }
+    await this.afterEmailInsert(data);
+    return { email, created: true };
+  }
+
+  private async buildEmailRow(
+    data: CreateEmailData,
+    tx?: Prisma.TransactionClient,
+    knownWorkspaceId?: string,
+  ): Promise<Prisma.EmailUncheckedCreateInput> {
+    const db = tx ?? this.db;
+    const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
+    const workspaceId = knownWorkspaceId ?? (await db.channel.findUnique({
+      where: { id: data.channelId },
+      select: { workspaceId: true },
+    }))?.workspaceId;
+    if (!workspaceId) {
+      throw new Error(`Could not find workspaceId for channel ${data.channelId}`);
+    }
+    return {
+      type: data.type,
+      workspaceId,
+      subject: data.subject,
+      body: data.body,
+      to: data.to,
+      from: data.from,
+      cc: data.cc || [],
+      bcc: data.bcc || [],
+      replyTo: data.replyTo || [],
+      conversationId: data.conversationId,
+      channelId: data.channelId,
+      externalThreadId: data.externalThreadId,
+      externalMessageId: data.externalMessageId,
+      ...(data.sentByUserId && { sentByUserId: data.sentByUserId }),
+      ...(rfcMessageId && { rfcMessageId }),
+      ...(data.rating != null && { rating: data.rating }),
+      ...(data.clientVersionName && { clientVersionName: data.clientVersionName }),
+      ...(data.clientVersionCode && { clientVersionCode: data.clientVersionCode }),
+      ...(data.createdAt && { createdAt: data.createdAt }),
+    };
+  }
+
+  private async afterEmailInsert(data: CreateEmailData, tx?: Prisma.TransactionClient): Promise<void> {
+    const rfcMessageId = normalizeRfcMessageId(data.rfcMessageId);
     if (rfcMessageId) {
       await this.backfillRfcMessageIdByExternalMessageId(
         data.channelId,
@@ -75,8 +113,7 @@ export class EmailRepository {
         tx,
       );
     }
-    await syncTicketEmailCount(db, data.conversationId);
-    return email;
+    await syncTicketEmailCount(tx ?? this.db, data.conversationId);
   }
 
   async findById(id: string): Promise<Email | null> {

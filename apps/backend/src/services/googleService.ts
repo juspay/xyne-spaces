@@ -252,6 +252,19 @@ export class GoogleService {
     }
   }
 
+  /** False when Gmail no longer keeps history from `startHistoryId` (older than about a week). */
+  async hasHistoryFrom(startHistoryId: string): Promise<boolean> {
+    try {
+      await withGmailRetry(`history.list ${startHistoryId}`, () =>
+        this.gmail.users.history.list({ userId: 'me', startHistoryId, maxResults: 1 }),
+      );
+      return true;
+    } catch (error) {
+      if (getHttpStatus(error) === 404) return false;
+      throw error;
+    }
+  }
+
   /** Current mailbox historyId — used to seed the cursor when history is unavailable. */
   async getCurrentHistoryId(): Promise<string | null> {
     try {
