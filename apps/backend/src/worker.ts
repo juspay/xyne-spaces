@@ -327,6 +327,10 @@ class WorkerService {
         this.automationTemplateCleanupTimer.unref();
       }
 
+      if (appConfig.deskReportScheduler.enabled) {
+        await workerScheduler.startDeskReportScheduler();
+      }
+
       if (appConfig.enableEmailFetchWorker) {
         logger.info('Initializing notification service for email refetch worker...');
         await notificationService.initialize();
@@ -565,6 +569,10 @@ class WorkerService {
 
       if (appConfig.enableEtaDeadlineWorker) {
         await etaDeadlineWorker.shutdown();
+      }
+
+      if (appConfig.deskReportScheduler.enabled) {
+        await workerScheduler.stopDeskReportScheduler();
       }
 
       if (appConfig.enableEmailFetchWorker) {
