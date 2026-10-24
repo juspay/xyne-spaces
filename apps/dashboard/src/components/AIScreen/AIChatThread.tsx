@@ -62,7 +62,7 @@ import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
 import { AboutAgentPanel } from './AboutAgentPanel';
-import { AgentByline, AgentRecipient } from './ConversationAgents';
+import { AgentByline } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
   anchorFromArgs,
@@ -653,7 +653,6 @@ function ChatMessageBubble({
   onRatingChange,
   trackContext,
   agentSlug,
-  recipientAgentSlug,
   onPendingActionResolved,
   onApproveAndContinue,
   conversationId,
@@ -668,8 +667,6 @@ function ChatMessageBubble({
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
-  /** Agent a user message was sent to — shown as "To <agent>" above it. */
-  recipientAgentSlug?: string | undefined;
   onPendingActionResolved?: (() => void) | undefined;
   onApproveAndContinue?: ((message: Message, action: PendingAction) => Promise<void>) | undefined;
   onCopy?: () => void;
@@ -1092,9 +1089,6 @@ function ChatMessageBubble({
             isEditing ? 'w-full max-w-[90%]' : 'max-w-[78%]',
           )}
         >
-          {recipientAgentSlug && !isEditing && (
-            <AgentRecipient slug={recipientAgentSlug} className='pr-2' />
-          )}
           <div className='flex w-full items-start justify-end gap-1'>
             <div
               className={cn(
@@ -2775,9 +2769,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       <ChatMessageBubble
                         trackContext={messageTrackContext}
                         message={message}
-                        recipientAgentSlug={
-                          isV2 && message.type === 'user' ? message.agentSlug : undefined
-                        }
                         conversationId={conversationId || undefined}
                         // A pending action belongs to the agent that proposed
                         // it, which after a switch may not be the one picked.

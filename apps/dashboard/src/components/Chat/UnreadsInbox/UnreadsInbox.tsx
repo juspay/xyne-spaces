@@ -18,9 +18,10 @@ import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
 import { ThreadMessages } from '../ThreadPannel';
 
 // Collapsed-row estimate (measureElement corrects it after first paint) plus the
-// space-y-4 gap, baked in here since virtualized rows are absolutely positioned
-// and can't rely on margin-between-siblings like a normal-flow list can.
-const ROW_GAP = 16;
+// gap between rows, baked in here since virtualized rows are absolutely positioned
+// and can't rely on margin-between-siblings like a normal-flow list can. Rows sit
+// flush, separated by their bottom border.
+const ROW_GAP = 0;
 const COLLAPSED_ROW_ESTIMATE = 56 + ROW_GAP;
 
 // Fallback until a channel's real content height is measured (contentHeights
@@ -203,7 +204,7 @@ const UnreadsInbox = (): ReactElement => {
 
       <div
         ref={setScrollContainer}
-        className='relative z-0 flex-1 isolate overflow-y-auto overflow-x-hidden px-4 pb-4 pt-0'
+        className='relative z-0 flex-1 isolate overflow-y-auto overflow-x-hidden px-0 pb-4 pt-0'
       >
         {unreadItems.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full text-center'>
@@ -248,7 +249,7 @@ const UnreadsInbox = (): ReactElement => {
                   }}
                 >
                   <div
-                    className={`border rounded-lg bg-card transition-colors shadow-sm relative ${isOpen ? 'isolate overflow-visible border-border/50' : 'overflow-hidden border-border/30 hover:bg-accent'}`}
+                    className={`border-b bg-card transition-colors relative ${isOpen ? 'isolate overflow-visible border-border/50' : 'overflow-hidden border-border/30'}`}
                   >
                     <div
                       aria-expanded={isOpen}
@@ -260,7 +261,9 @@ const UnreadsInbox = (): ReactElement => {
                           handleItemClick(e, channel.id);
                         }
                       }}
-                      className={`px-2 py-1 cursor-pointer flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 rounded-t-lg bg-background border-b border-border/20' : ''}`}
+                      // One small step darker than the card in any theme: the card colour with a
+                      // 4% dark wash on top. Opaque, so the sticky header hides rows under it.
+                      className={`px-2 py-1 cursor-pointer flex items-center bg-card bg-[linear-gradient(rgb(0_0_0/0.04),rgb(0_0_0/0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 border-b border-border/20' : 'hover:bg-accent'}`}
                       data-track-category='UNREADS_INBOX'
                       data-track-name='TOGGLE_CHANNEL_ACCORDION'
                     >
@@ -291,7 +294,7 @@ const UnreadsInbox = (): ReactElement => {
                     </div>
 
                     {isOpen && (
-                      <div className='overflow-hidden rounded-b-lg'>
+                      <div className='overflow-hidden'>
                         <div
                           className='animate-in slide-in-from-top-2 fade-in duration-200 flex flex-col relative z-0'
                           style={{ height: getOpenPanelHeight(contentHeights[channel.id]) }}
