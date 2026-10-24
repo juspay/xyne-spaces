@@ -3690,6 +3690,25 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       clog.info(`[webhook/result] silent channel run finished session=${sessionId}`);
       return;
     }
+    // Plan mode Turn 1 (propose-plan): the plan IS the answer — a numbered
+    // list plus Approve/Reject, or a trivial plan run straight away, which
+    // keeps this conversation's slot for its Turn 2.
+    if (ctx.mode === "plan" && payload.pendingPlan?.todos?.length && channelUserId && ctx.conversationId && ctx.agentSlug) {
+      const { deliverChannelPlan } = await import("../surfaces/messaging/plans.js");
+      const turn2 = await deliverChannelPlan({
+        target: channelTarget,
+        userId: channelUserId,
+        conversationId: ctx.conversationId,
+        agentSlug: ctx.agentSlug,
+        ...(ctx.agentOrgId ? { orgId: ctx.agentOrgId } : {}),
+        plan: payload.pendingPlan,
+      }).catch((err) => {
+        clog.warn(`[webhook/result] channel plan delivery failed for session ${sessionId}: ${errMsg(err)}`);
+        return null;
+      });
+      if (turn2) skipQueueDrain = true;
+      return;
+    }
     await deliverChannelResult({
       target: channelTarget,
       status: channelStatus,
@@ -5562,7 +5581,8 @@ async function doRenderPlanCard(
   // first-todo-write that races the seed still updates the SAME card instead of
   // being dropped by a momentary getSession miss.
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
-  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
+  // A messaging-channel run has no appToken: its list goes to the chat below.
+  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || (!ctx.appToken && !ctx.channelDelivery)) return;
 
   // Per-agent opt-out (agent.config.postTodos === false): suppress the live
   // plan/todo card in the Spaces thread for agents whose owner turned this off.
@@ -5617,6 +5637,19 @@ async function doRenderPlanCard(
   const allDone =
     renderTodos.length > 0 && renderTodos.every((t) => t.status === "completed" || t.status === "failed");
   const phase = allDone ? "done" : "executing";
+  // WhatsApp & co: no card to update in place, so the list is re-sent as a
+  // message, rate-limited (surfaces/messaging/plans.ts).
+  if (ctx.channelDelivery) {
+    const { sendChannelPlanProgress } = await import("../surfaces/messaging/plans.js");
+    await sendChannelPlanProgress({
+      target: ctx.channelDelivery,
+      conversationId: snapConversationId,
+      ...(execMeta?.title ? { title: execMeta.title } : {}),
+      todos: renderTodos,
+      allDone,
+    });
+    return;
+  }
   // Auto-approved chip: read from the durable exec meta (deterministic; not the
   // racy Turn-2 session flag) so a trivial plan's card shows "Auto-approved" on
   // every render including the first.
