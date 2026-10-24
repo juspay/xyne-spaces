@@ -34,6 +34,7 @@ import { conversationIngestionWorker } from '@/workers/conversationIngestionWork
 import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
 import { dataSourceIngestionWorker } from '@/workers/dataSourceIngestionWorker';
 import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
+import { pollLifecycleWorker } from '@/workers/pollLifecycleWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
@@ -434,6 +435,13 @@ class WorkerService {
         await delayedMessageWorker.reenqueuePendingMessages();
       }
 
+      if (appConfig.enablePollLifecycleWorker) {
+        logger.info('Starting poll lifecycle worker...');
+        await notificationService.initialize();
+        await pollLifecycleWorker.start();
+        await pollLifecycleWorker.reenqueuePendingPolls();
+      }
+
       if (enableNotificationProducer) {
         logger.info('Starting notification producer for real-time notifications...');
         await notificationService.initialize();
@@ -624,6 +632,10 @@ class WorkerService {
       const delayedMessageWorkerEnabled = appConfig.enableDelayedMessageWorker;
       if (delayedMessageWorkerEnabled) {
         await delayedMessageWorker.shutdown();
+      }
+
+      if (appConfig.enablePollLifecycleWorker) {
+        await pollLifecycleWorker.shutdown();
       }
 
       await DatabaseClient.disconnect()
