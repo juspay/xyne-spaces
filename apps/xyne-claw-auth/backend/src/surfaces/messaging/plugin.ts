@@ -151,6 +151,22 @@ export interface MessageRef {
   raw?: unknown;
 }
 
+/** The earlier message an inbound one quotes (a WhatsApp "reply"). Context
+ *  for the turn only: someone else may have written it, so the core quotes it
+ *  to the agent as content and never as instructions (quoted-context.ts). */
+export interface QuotedMessage {
+  /** Its text or caption. Empty when the channel did not deliver it (the
+   *  WhatsApp Cloud API sends only the quoted message's id). */
+  text: string;
+  /** Who wrote it, as a readable label (a name or "+<number>"), when known. */
+  author?: string;
+  /** Sent from this account: one of the agent's own earlier replies, or —
+   *  on a personal number — something its owner typed. */
+  fromSelf?: boolean;
+  /** The quoted message carried a file of this kind ("image", "document"…). */
+  mediaKind?: string;
+}
+
 /** A native message normalised by the plugin. Ids are messenger ids: for
  *  WhatsApp a JID, for Telegram a chat/user id as a string. */
 export interface InboundMessage {
@@ -168,6 +184,14 @@ export interface InboundMessage {
    *  reports it. Lets the threaded path route an answer back to the task whose
    *  message was quoted. */
   replyToMessageId?: string;
+  /** What this message quotes, when it is a reply to an earlier message.
+   *  Passed to the agent as delimited context; routing still uses
+   *  `replyToSelf` / `replyToMessageId`. */
+  quotedMessage?: QuotedMessage;
+  /** The person forwarded this message rather than writing it. Its `text` is
+   *  then someone else's words: the core passes it as quoted context, not as
+   *  the request itself. */
+  forwarded?: boolean;
   /** Sent by the account itself (own echo) — always dropped by the core. */
   fromSelf: boolean;
   /** Typed by the person who owns this account, on the device they linked —

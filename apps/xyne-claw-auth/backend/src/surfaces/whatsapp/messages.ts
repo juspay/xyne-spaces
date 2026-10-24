@@ -16,7 +16,7 @@ import {
   type WAMessage,
   type proto,
 } from "@whiskeysockets/baileys";
-import type { InboundMessage, MessageRef } from "../messaging/plugin.js";
+import type { InboundMessage, MessageRef, QuotedMessage } from "../messaging/plugin.js";
 import { phoneFromJid } from "./schema.js";
 
 export interface SelfIdentity {
@@ -58,6 +58,28 @@ export interface InboundWithMedia extends InboundMessage {
   media?: MediaDescriptor;
   /** JIDs of the other people @mentioned in the text (never us). */
   mentions?: string[];
+  /** Who wrote the quoted message, when it was not us — for the plugin to
+   *  turn into `quotedMessage.author` (a name needs the socket). */
+  quotedAuthorJid?: string;
+}
+
+/** The message a reply quotes, as WhatsApp embeds it in the reply itself.
+ *  The copy is WhatsApp's own: we never have to have seen the original. */
+function quotedOf(
+  ctx: proto.IContextInfo | null,
+  self: SelfIdentity,
+): { quoted: QuotedMessage; authorJid?: string } | null {
+  if (!ctx?.quotedMessage) return null;
+  const content = normalizeMessageContent(ctx.quotedMessage);
+  const text = extractText(content).trim();
+  const media = mediaOf(content);
+  if (!text && !media) return null;
+  const fromSelf = sameUser(ctx.participant, self);
+  const authorJid = !fromSelf && ctx.participant ? normalize(ctx.participant) : undefined;
+  return {
+    quoted: { text, ...(fromSelf ? { fromSelf: true } : {}), ...(media ? { mediaKind: media.kind } : {}) },
+    ...(authorJid ? { authorJid } : {}),
+  };
 }
 
 function mediaOf(content: proto.IMessage | null | undefined): MediaDescriptor | null {
@@ -180,6 +202,9 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
   const ctx = contextInfoOf(content);
   const mentionedSelf = (ctx?.mentionedJid ?? []).some((jid) => sameUser(jid, self));
   const replyToSelf = !!ctx?.stanzaId && sameUser(ctx.participant, self);
+  const quoted = quotedOf(ctx, self);
+  // Forwarded text is someone else's words; the core quotes it, not obeys it.
+  const forwarded = ctx?.isForwarded === true || (ctx?.forwardingScore ?? 0) > 0;
 
   const mentions = [
     ...new Set((ctx?.mentionedJid ?? []).filter((jid) => !!jid && !sameUser(jid, self)).map((jid) => normalize(jid))),
@@ -204,6 +229,9 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
     text,
     mentionedSelf,
     replyToSelf,
+    ...(quoted ? { quotedMessage: quoted.quoted } : {}),
+    ...(quoted?.authorJid ? { quotedAuthorJid: quoted.authorJid } : {}),
+    ...(forwarded ? { forwarded: true } : {}),
     ...(media ? { media } : {}),
     ...(mentions.length ? { mentions } : {}),
     fromSelf: fromMe && !fromOwner,

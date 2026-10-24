@@ -86,6 +86,10 @@ export const UNLINKED_NOTICE_TTL_S = 60 * 60;
 export const GROUP_HISTORY_LIMIT = 50;
 /** Chatter is only useful while it is recent; it is never durable state. */
 export const GROUP_CONTEXT_TTL_S = 15 * 24 * 60 * 60;
+/** Longest quoted or forwarded message passed to the agent as context. Same
+ *  per-message cap as overheard group lines: enough for a long message, not
+ *  enough for one paste to crowd out the request it came with. */
+export const QUOTED_CONTEXT_MAX_CHARS = 2000;
 
 export const FAILURE_TEXT = "The agent couldn't complete this request. Please try again.";
 /** A run that succeeded and said nothing. Rare, and almost always the model
