@@ -21,7 +21,7 @@ envsubst '${CACHE_TTL}' < /opt/edge/proxy-origin.conf.template > /var/run/edge/p
 (
   set +e # the loop must survive a non-zero exit from the app
   while :; do
-    node /opt/edge/app/dist/main.js
+    node --use-openssl-ca /opt/edge/app/dist/main.js
     echo "edge app exited with $?, restarting in 1s" >&2
     sleep 1
   done

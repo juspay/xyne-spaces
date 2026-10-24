@@ -107,6 +107,15 @@ export interface ComposerModelControl {
   /** The list belongs to the previous agent while the new one loads. */
   loading?: boolean;
   disabled?: boolean;
+  provider?: ComposerProviderControl | null;
+}
+
+export interface ComposerProviderControl {
+  options: ReadonlyArray<{ value: string; label: string }>;
+  selected: string;
+  onSelect: (value: string) => void;
+  saving?: boolean;
+  disabled?: boolean;
 }
 
 export interface ComposerFastControl {

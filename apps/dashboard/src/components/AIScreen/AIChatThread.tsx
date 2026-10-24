@@ -11,6 +11,7 @@ import {
   forwardRef,
   useImperativeHandle,
   type ReactElement,
+  type ReactNode,
 } from 'react';
 import {
   Menu,
@@ -36,7 +37,7 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { useQueryClient } from '@tanstack/react-query';
 import { conversationArtifactsQueryKey } from '../../services/XyneAI/XyneAIArtifactsService';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
@@ -60,7 +61,8 @@ import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './
 import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
-import { AgentByline, AgentRecipient } from './ConversationAgents';
+import { AboutAgentPanel } from './AboutAgentPanel';
+import { AgentByline } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
   anchorFromArgs,
@@ -284,10 +286,12 @@ function ChatTopbar({
   onOpenSidebar,
   onToggleSidebar,
   sidebarCollapsed,
+  agentInfo,
 }: {
   onOpenSidebar?: () => void;
   onToggleSidebar?: (() => void) | undefined;
   sidebarCollapsed?: boolean | undefined;
+  agentInfo?: ReactNode;
 }): ReactElement {
   return (
     <header
@@ -321,6 +325,7 @@ function ChatTopbar({
           <SidebarLeftOpen size={16} aria-hidden='true' />
         </button>
       )}
+      {agentInfo}
     </header>
   );
 }
@@ -648,7 +653,6 @@ function ChatMessageBubble({
   onRatingChange,
   trackContext,
   agentSlug,
-  recipientAgentSlug,
   onPendingActionResolved,
   onApproveAndContinue,
   conversationId,
@@ -663,8 +667,6 @@ function ChatMessageBubble({
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
-  /** Agent a user message was sent to — shown as "To <agent>" above it. */
-  recipientAgentSlug?: string | undefined;
   onPendingActionResolved?: (() => void) | undefined;
   onApproveAndContinue?: ((message: Message, action: PendingAction) => Promise<void>) | undefined;
   onCopy?: () => void;
@@ -1087,9 +1089,6 @@ function ChatMessageBubble({
             isEditing ? 'w-full max-w-[90%]' : 'max-w-[78%]',
           )}
         >
-          {recipientAgentSlug && !isEditing && (
-            <AgentRecipient slug={recipientAgentSlug} className='pr-2' />
-          )}
           <div className='flex w-full items-start justify-end gap-1'>
             <div
               className={cn(
@@ -1642,6 +1641,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // specific tool call; null means show the whole turn (opened via the toolbar
   // debug button).
   const [debugFocusToolCallId, setDebugFocusToolCallId] = useState<string | null>(null);
+  const [debugAgentSlug, setDebugAgentSlug] = useState<string | null>(null);
   const hasAutoSubmitted = useRef(false);
   const isLoadingSession = useRef(false);
   // Captures whether this thread instance was opened on an existing session
@@ -2548,6 +2548,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   });
 
   const isAnyMessageStreaming = messages.some(m => m.isStreaming);
+  const chatAgentSlug =
+    [...displayMessages].reverse().find(m => m.agentSlug)?.agentSlug ||
+    effectiveAgentSlug ||
+    'ask-ai';
 
   const streamingBotTurnIndex = useMemo(() => {
     const idx = displayMessages.findIndex(m => m.type === 'bot' && m.isStreaming);
@@ -2566,6 +2570,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       setDebugSessionId(null);
     }
   }, [streamingBotTurnIndex]);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const debugRunParam = searchParams.get('debugRun');
+  const debugAgentParam = searchParams.get('debugAgent');
+  useEffect(() => {
+    if (!isV2 || !debugRunParam) return;
+    setDebugAgentSlug(debugAgentParam);
+    setDebugTurnIndex(null);
+    setDebugSessionId(debugRunParam);
+    setDebugFocusToolCallId(null);
+    setShowDebugger(true);
+    setSearchParams(
+      current => {
+        const next = new URLSearchParams(current);
+        next.delete('debugRun');
+        next.delete('debugAgent');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [isV2, debugRunParam, debugAgentParam, setSearchParams]);
 
   // Flat union of every visible message's toolInvocations. Powers the
   // ConversationToolInvocationsContext so a citation chip rendered in turn N
@@ -2643,6 +2668,22 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)}
           onToggleSidebar={onToggleSidebar}
           sidebarCollapsed={sidebarCollapsed}
+          agentInfo={
+            isV2 ? (
+              <AboutAgentPanel
+                agentSlug={chatAgentSlug}
+                conversationId={conversationId}
+                running={isAnyMessageStreaming}
+                onOpenDebugger={(): void => {
+                  setDebugAgentSlug(chatAgentSlug);
+                  setDebugTurnIndex(null);
+                  setDebugSessionId(null);
+                  setDebugFocusToolCallId(null);
+                  setShowDebugger(true);
+                }}
+              />
+            ) : undefined
+          }
         />
 
         {/* Non-scrolling frame around the scroller. The prompt rail lives HERE,
@@ -2728,9 +2769,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       <ChatMessageBubble
                         trackContext={messageTrackContext}
                         message={message}
-                        recipientAgentSlug={
-                          isV2 && message.type === 'user' ? message.agentSlug : undefined
-                        }
                         conversationId={conversationId || undefined}
                         // A pending action belongs to the agent that proposed
                         // it, which after a switch may not be the one picked.
@@ -2777,6 +2815,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 // null falls back to turn-index for unlinked live runs.
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(null);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2787,6 +2826,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 setDebugTurnIndex(botTurnIndex);
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(toolCallId);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2883,7 +2923,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           inline
           open={showDebugger}
           conversationId={conversationId}
-          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          agentSlug={debugAgentSlug ?? (effectiveAgentSlug || 'ask-ai')}
           liveEvents={debugEvents}
           running={isAnyMessageStreaming}
           artifactsReadyVersion={debugArtifactsReadyVersion}

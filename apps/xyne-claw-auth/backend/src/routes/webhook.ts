@@ -8,7 +8,12 @@
 import { ingestSandboxPreviewSignals } from "../lib/conversation-artifact-signals.js";
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
-import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
+import {
+  deliveredDesignCommand,
+  recordDeliveredArtifacts,
+  type DeliveredDesignShare,
+} from "../lib/delivered-artifacts.js";
+import { publishDesignShareMessage } from "../lib/design-share-message.js";
 import crypto from "node:crypto";
 import { claimAutomationStep } from "../lib/automation-step-dedup.js";
 import { automationRunAllowsSandboxWrite, automationRunIsHeadlessBulk } from "../lib/automation-write-policy.js";
@@ -2898,8 +2903,8 @@ async function ingestDeliveredFiles(
   runOwnerId: string,
   chatMessageId: string,
   created: Array<{ id: string; originalFilename: string; mimeType: string }>,
-): Promise<{ designShareUrl: string | null }> {
-  if (!ctx.conversationId || !runOwnerId || created.length === 0) return { designShareUrl: null };
+): Promise<DeliveredDesignShare> {
+  if (!ctx.conversationId || !runOwnerId || created.length === 0) return { designShareUrl: null, designShareId: null };
   return recordDeliveredArtifacts({
     conversationId: ctx.conversationId,
     userId: runOwnerId,
@@ -2913,22 +2918,22 @@ async function ingestDeliveredFiles(
 
 async function publishThreadArtifactShare(
   ctx: SessionContext,
-  designShareLink: string | null,
+  delivered: DeliveredDesignShare,
 ): Promise<void> {
   try {
     const command = deliveredDesignCommand(ctx.task);
-    if (!command || !designShareLink) return;
+    if (!command || !delivered.designShareUrl || !delivered.designShareId) return;
     if (ctx.responseMode !== "conversation" || !ctx.conversationId || !ctx.agentOrgId) return;
-    await postAgentMessage(
-      { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+    const outcome = await publishDesignShareMessage(
       {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
-        markdownText: `**Live ${command}:** ${designShareLink}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
-        metadata: { contentFormat: "markdown" },
-      }
+        spacesAppUserId: ctx.spacesAppUserId,
+        appToken: ctx.appToken,
+      },
+      { id: delivered.designShareId, link: delivered.designShareUrl, command },
     );
-    clog.info(`[webhook/result] posted design share link conv=${ctx.conversationId}`);
+    clog.info(`[webhook/result] design share link ${outcome} conv=${ctx.conversationId}`);
   } catch (err) {
     clog.warn(`[webhook/result] design share publish failed (non-fatal): ${errMsg(err)}`);
   }
@@ -4017,7 +4022,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         .then(async (msg) => ({ msg, created: await persistCallbackAttachments(msg.id, runOwnerId, payload.attachments) }))
         .then(async ({ msg, created }) => {
           const delivered = await ingestDeliveredFiles(ctx, runOwnerId, msg.id, created);
-          await publishThreadArtifactShare(ctx, delivered.designShareUrl);
+          await publishThreadArtifactShare(ctx, delivered);
         })
         .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
     }
@@ -4110,7 +4115,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       .then(async (msg) => ({ msg, created: await persistCallbackAttachments(msg.id, runOwnerId, payload.attachments) }))
       .then(async ({ msg, created }) => {
         const delivered = await ingestDeliveredFiles(ctx, runOwnerId, msg.id, created);
-        await publishThreadArtifactShare(ctx, delivered.designShareUrl);
+        await publishThreadArtifactShare(ctx, delivered);
       })
       .catch((e) => log.warn("Failed to save assistant ChatMessage", { error: errMsg(e) }));
   }

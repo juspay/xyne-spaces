@@ -17,9 +17,14 @@ import {
   DetailEmptyState,
   DetailSection,
 } from '../../../shared/primitives/DetailPrimitives';
+import { EditScheduleDialog } from './EditScheduleDialog';
+import { ScheduleActions } from './ScheduleActions';
+import { describeSchedule } from './scheduledJobEdit';
+import type { ScheduledJob, ScheduledJobPatch } from '@/services/claw/clawScheduledJobsService';
 import { useAgentChainWorkflows } from './chainWorkflowsService';
 import { createScheduledJob, type NewScheduledJob } from './createScheduledJob';
 import { CreateScheduleDialog } from './CreateScheduleDialog';
+import { RunDetailDialog } from './RunDetailDialog';
 
 const ICON_BUTTON =
   'flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
@@ -52,19 +57,19 @@ function relativeTime(value: string | null): string {
   return days < 14 ? `${days}d ago` : new Date(parsed).toLocaleDateString();
 }
 
-function scheduleCadence(cron: string | null, nextRunAt: string | null): string {
-  if (cron) return `Repeats · ${cron}`;
-  if (!nextRunAt) return 'One-off';
-  const parsed = new Date(nextRunAt);
-  return Number.isNaN(parsed.getTime()) ? 'One-off' : `Runs once · ${parsed.toLocaleString()}`;
-}
+const SCHEDULE_TONE: Record<string, 'success' | 'warning' | 'neutral'> = {
+  active: 'success',
+  paused: 'warning',
+};
 
 export function AgentActivityTabV2({
   agent,
   canEdit,
+  canManageRuns,
 }: {
   agent: Agent;
   canEdit: boolean;
+  canManageRuns: boolean;
 }): ReactElement {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -73,9 +78,11 @@ export function AgentActivityTabV2({
   const [creating, setCreating] = useState(false);
   const [scheduleQuery, setScheduleQuery] = useState('');
   const [scheduleSearchOpen, setScheduleSearchOpen] = useState(false);
+  const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
   const [runQuery, setRunQuery] = useState('');
   const [runSearchOpen, setRunSearchOpen] = useState(false);
   const [runStatus, setRunStatus] = useState<AgentRunStatusFilter>('all');
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
   const scheduleSearchRef = useRef<HTMLInputElement>(null);
   const runSearchRef = useRef<HTMLInputElement>(null);
 
@@ -84,18 +91,49 @@ export function AgentActivityTabV2({
   const workflows = useAgentChainWorkflows(agent.slug);
   const runs = useClawAgentRuns(agent.slug, { status: runStatus, allUsers: true });
 
-  const scheduleItems = useMemo<DetailListItem[]>(() => {
+  const pauseSchedule = (id: string, name: string): void => {
+    jobMutations.pause.mutate(id, {
+      onSuccess: () => toast.success(`${name} paused`),
+      onError: err => toast.error(clawErrorText(err, 'Could not pause that schedule')),
+    });
+  };
+
+  const resumeSchedule = (id: string, name: string): void => {
+    jobMutations.resume.mutate(id, {
+      onSuccess: () => toast.success(`${name} resumed`),
+      onError: err => toast.error(clawErrorText(err, 'Could not resume that schedule')),
+    });
+  };
+
+  const scheduleJobs = useMemo(() => {
     const q = scheduleQuery.trim().toLowerCase();
-    return (jobs.data ?? [])
-      .map(job => ({
-        key: job.id,
-        name: job.label || job.task,
-        description: scheduleCadence(job.cronExpression, job.nextRunAt),
-        badge: <Pill tone={job.status === 'active' ? 'success' : 'neutral'}>{job.status}</Pill>,
-        ...(job.runsCount || job.runCount ? { meta: `${job.runsCount ?? job.runCount} runs` } : {}),
-      }))
-      .filter(item => !q || item.name.toLowerCase().includes(q));
+    return (jobs.data ?? []).filter(job => !q || (job.label || job.task).toLowerCase().includes(q));
   }, [jobs.data, scheduleQuery]);
+
+  const scheduleBusy = jobMutations.pause.isPending || jobMutations.resume.isPending;
+  const scheduleItems: DetailListItem[] = scheduleJobs.map(job => {
+    const name = job.label || job.task;
+    return {
+      key: job.id,
+      name,
+      description: describeSchedule(job),
+      badge: <Pill tone={SCHEDULE_TONE[job.status] ?? 'neutral'}>{job.status}</Pill>,
+      ...(job.runsCount || job.runCount ? { meta: `${job.runsCount ?? job.runCount} runs` } : {}),
+      ...(canEdit
+        ? {
+            actions: (
+              <ScheduleActions
+                job={job}
+                busy={scheduleBusy}
+                onEdit={() => setEditingJob(job)}
+                onPause={() => pauseSchedule(job.id, name)}
+                onResume={() => resumeSchedule(job.id, name)}
+              />
+            ),
+          }
+        : {}),
+    };
+  });
 
   const workflowItems = useMemo<DetailListItem[]>(
     () =>
@@ -122,6 +160,8 @@ export function AgentActivityTabV2({
     );
   }, [runs.data, runQuery]);
 
+  const openRun = openRunId ? runs.data?.find(run => run.sessionId === openRunId) : undefined;
+
   const createSchedule = async (job: NewScheduledJob): Promise<void> => {
     if (!user?.id || creating) return;
     setCreating(true);
@@ -137,6 +177,19 @@ export function AgentActivityTabV2({
     } finally {
       setCreating(false);
     }
+  };
+
+  const saveSchedule = (job: { id: string }, patch: ScheduledJobPatch): void => {
+    jobMutations.update.mutate(
+      { id: job.id, patch },
+      {
+        onSuccess: () => {
+          toast.success('Schedule updated');
+          setEditingJob(null);
+        },
+        onError: err => toast.error(clawErrorText(err, 'Could not update that schedule')),
+      },
+    );
   };
 
   const removeSchedule = (id: string, name: string): void => {
@@ -313,9 +366,14 @@ export function AgentActivityTabV2({
             </DetailEmpty>
           ) : (
             runItems.slice(0, 20).map(run => (
-              <div
+              <button
+                type='button'
                 key={run.id}
-                className='flex w-full items-center gap-3 border-b border-border p-4 last:border-b-0'
+                onClick={() => setOpenRunId(run.sessionId)}
+                data-testid='agent-run-row'
+                data-track-category='Claw Agents'
+                data-track-name='Agent detail v2: open run detail'
+                className='flex w-full items-center gap-3 border-b border-border p-4 text-left transition-colors last:border-b-0 hover:bg-muted/50'
               >
                 <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                   <span className='flex min-w-0 items-center gap-1.5'>
@@ -336,7 +394,7 @@ export function AgentActivityTabV2({
                     aria-hidden
                   />
                 )}
-              </div>
+              </button>
             ))
           )}
 
@@ -348,12 +406,29 @@ export function AgentActivityTabV2({
         </DetailCard>
       </DetailSection>
 
+      {openRun && (
+        <RunDetailDialog
+          run={openRun}
+          canManage={canManageRuns}
+          onClose={() => setOpenRunId(null)}
+        />
+      )}
+
       <CreateScheduleDialog
         open={scheduleOpen}
         onOpenChange={setScheduleOpen}
         agentSlug={agent.slug}
         saving={creating}
         onCreate={job => void createSchedule(job)}
+      />
+
+      <EditScheduleDialog
+        job={editingJob}
+        saving={jobMutations.update.isPending}
+        onOpenChange={open => {
+          if (!open) setEditingJob(null);
+        }}
+        onSave={saveSchedule}
       />
     </div>
   );

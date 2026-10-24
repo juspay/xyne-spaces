@@ -919,15 +919,9 @@ export async function getAwakeningStatus(agentId: string): Promise<AwakeningStat
   return data.data;
 }
 
-/** Regenerates the card Spaces routes unprompted questions by. */
-export async function regenerateRoutingCard(
-  slug: string,
-): Promise<{ text: string; sourceHash: string; generatedAt: string }> {
-  const data = await request<{ success: boolean; data: { text: string; sourceHash: string; generatedAt: string } }>(
-    `${AUTH_API_URL}/api/v1/agents/${slug}/proactivity/card`,
-    { method: "POST" },
-  );
-  return data.data;
+/** Starts rewriting the card Spaces routes unprompted questions by; it lands on the agent's config. */
+export async function regenerateRoutingCard(slug: string): Promise<void> {
+  await request<{ success: boolean }>(`${AUTH_API_URL}/api/v1/agents/${slug}/proactivity/card`, { method: "POST" });
 }
 
 export async function updateAgentDesignSystem(

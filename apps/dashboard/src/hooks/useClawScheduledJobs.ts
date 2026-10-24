@@ -4,6 +4,8 @@ import {
   listScheduledJobsForAgent,
   listScheduledJobRuns,
   updateScheduledJob,
+  pauseScheduledJob,
+  resumeScheduledJob,
   deleteScheduledJob,
   type ScheduledJob,
   type ScheduledJobPatch,
@@ -47,9 +49,17 @@ export const useClawScheduledJobMutations = (agentSlug: string) => {
       updateScheduledJob(id, patch),
     onSuccess: invalidate,
   });
+  const pause = useMutation({
+    mutationFn: pauseScheduledJob,
+    onSuccess: invalidate,
+  });
+  const resume = useMutation({
+    mutationFn: resumeScheduledJob,
+    onSuccess: invalidate,
+  });
   const remove = useMutation({
     mutationFn: deleteScheduledJob,
     onSuccess: invalidate,
   });
-  return { update, remove };
+  return { update, pause, resume, remove };
 };
