@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM node:22-slim
+FROM node:22.23.4-slim
 
 ARG user=nixuser
 ARG group=xyne

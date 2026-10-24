@@ -1,0 +1,18 @@
+# PodDisruptionBudget for xyne-claw (XYNE-67289).
+# Now that xyne-claw autoscales (KEDA, 5-15) this caps how many pods a VOLUNTARY
+# disruption (node drain/upgrade) may take down at once, so the run fleet keeps
+# capacity. Involuntary pod loss is already covered by run-ownership + dead-pod
+# takeover (runs resume from GCS). Keyed on the stable `app` label only — NOT
+# `version`, which changes every deploy.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: xyne-claw
+  namespace: xyne-apps
+  labels:
+    app.kubernetes.io/name: xyne-claw
+spec:
+  maxUnavailable: 25%
+  selector:
+    matchLabels:
+      app: xyne-claw

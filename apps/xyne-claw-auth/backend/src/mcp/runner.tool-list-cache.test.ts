@@ -244,8 +244,8 @@ describe("listToolsForUser cutoff for slow or failing servers", () => {
     let release!: () => void;
     state.listGate = new Promise<void>((resolve) => { release = resolve; });
     const first = listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {}, undefined, CUT);
-    const firstResult = expect(first).rejects.toThrow(/exceeded 8000ms/);
-    await vi.advanceTimersByTimeAsync(8_000);
+    const firstResult = expect(first).rejects.toThrow(/exceeded 1000ms/);
+    await vi.advanceTimersByTimeAsync(1_000);
     await firstResult;
     await expect(listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, CUT)).rejects.toThrow(/skipped/);
     release();

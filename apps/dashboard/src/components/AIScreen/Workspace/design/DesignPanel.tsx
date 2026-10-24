@@ -46,6 +46,7 @@ import {
   type DesignVersion,
 } from './designDocument';
 import { designSelectionPayload, useDesignStudio } from './designStudioContext';
+import { DesignShareButton } from './DesignShareButton';
 import { UnmountWhenCovered } from '../../../../hooks/usePageCoverage';
 import {
   CANVAS_BACKGROUNDS,
@@ -387,6 +388,8 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
     : { width: '100%', height: '100%' };
 
   const heading = title ?? artifact?.title ?? 'Design preview';
+  const activeAttachmentId =
+    active?.source.kind === 'attachment' ? active.source.attachmentId : null;
 
   return (
     <div
@@ -457,6 +460,12 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
             </button>
           </div>
         )}
+        <DesignShareButton
+          conversationId={artifact?.conversationId ?? null}
+          attachmentId={activeAttachmentId}
+          title={heading}
+          hasUnsavedEdits={manualEdits.length > 0}
+        />
         {fullscreen && (
           <button
             type='button'

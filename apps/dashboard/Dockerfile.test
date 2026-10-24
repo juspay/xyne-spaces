@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Build context is the repo root (the pnpm workspace root).
-FROM mirror.gcr.io/library/node:22.22.3-slim
+FROM mirror.gcr.io/library/node:22.23.4-slim
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 

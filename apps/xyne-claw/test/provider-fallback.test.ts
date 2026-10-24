@@ -1,5 +1,5 @@
 import { test, expect, vi } from "vitest";
-import { runWithProviderFallback } from "../src/provider-fallback.js";
+import { producedNothingVisible, runWithProviderFallback } from "../src/provider-fallback.js";
 
 // Minimal attempt/result shapes mirroring the real ones.
 type A = { provider: string | undefined };
@@ -149,4 +149,27 @@ test("mixed: empty → quota → success", async () => {
   expect(calls[0]!.forceCompact).toBe(false); // first call
   expect(calls[1]!.forceCompact).toBe(true);  // after empty
   expect(calls[2]!.forceCompact).toBe(false); // after quota (not empty)
+});
+
+test("a posted question counts as a reply, follow-up chips alone do not", () => {
+  const none = { text: "", attachments: 0, pendingResponses: 0, pendingActions: 0, pendingQuestions: [] };
+  expect(producedNothingVisible(none)).toBe(true);
+  expect(producedNothingVisible({ ...none, pendingQuestions: [{ purpose: "clarification" }] })).toBe(false);
+  expect(producedNothingVisible({ ...none, pendingQuestions: [{}] })).toBe(false);
+  expect(producedNothingVisible({ ...none, pendingQuestions: [{ purpose: "follow_up_suggestions" }] })).toBe(true);
+  expect(producedNothingVisible({ ...none, text: "hi" })).toBe(false);
+  expect(producedNothingVisible({ ...none, pendingActions: 1 })).toBe(false);
+});
+
+test("a question-only attempt does not fall back to the next provider", async () => {
+  const { runAttempt, calls } = scripted([{ text: "" }]);
+  const out = await runWithProviderFallback<A, R>(
+    base({
+      runAttempt,
+      producedNothing: (r) =>
+        producedNothingVisible({ text: r.text, attachments: 0, pendingResponses: 0, pendingActions: 0, pendingQuestions: [{ purpose: "clarification" }] }),
+    }),
+  );
+  expect(calls.map((c) => c.provider)).toEqual(["codex"]);
+  expect(out.fellBackProvider).toBeNull();
 });

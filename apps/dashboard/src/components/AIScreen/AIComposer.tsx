@@ -43,6 +43,7 @@ import {
   readFastModePreference,
   writeFastModePreference,
 } from '../../services/XyneAI/fastModePreference';
+import { useChatProvider } from '../../hooks/useChatProvider';
 import { useUserPreference } from '../../machines/userPreferencesMachine';
 import { useRoutedSubmit, type AssistantRouting } from '../Assistant/useRoutedSubmit';
 import { buddy } from '../Assistant/buddy';
@@ -275,6 +276,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   useEffect(() => {
     warmClawAgent(modelAgentSlug);
   }, [modelAgentSlug]);
+  const chatProvider = useChatProvider(modelAgentSlug, pending);
   const prevModelAgentSlug = useRef(modelAgentSlug);
   useEffect(() => {
     if (prevModelAgentSlug.current === modelAgentSlug) return;
@@ -904,6 +906,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           onSelectThinking: setThinkingLevel,
           loading: modelsArePreviousAgent || modelsLoading,
           disabled: pending,
+          provider: chatProvider,
         }}
         fast={instant ? null : { enabled: fastMode, onToggle: toggleFastMode, disabled: pending }}
         onEnterVoiceMode={() => setVoiceMode(true)}

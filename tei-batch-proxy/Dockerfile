@@ -4,7 +4,7 @@
 # (e.g. 1885 chunks) never exceeds TEI's --max-client-batch-size and 413s.
 #
 # Pure Node stdlib (http + global fetch) — no npm dependencies, no package.json needed.
-FROM node:20-alpine
+FROM node:22.23.4-alpine
 
 WORKDIR /app
 COPY tei-batch-proxy.js /app/tei-batch-proxy.js
