@@ -24,6 +24,7 @@
 import { Router, type Request, type Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { designSystemRepository } from "../repositories/index.js";
 import { errMsg } from "../lib/errors.js";
 import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
@@ -121,15 +122,19 @@ router.post("/backfill-design-systems", async (req: Request, res: Response): Pro
         }
 
         try {
-          const created = await prisma.designSystem.create({
-            data: {
-              orgId: agent.orgId,
+          // Through the repository, not prisma directly, so the row gets its v1
+          // version snapshot like every other system (XYNE-66824). A raw create
+          // here would leave a backfilled system with an empty version history.
+          const created = await designSystemRepository.create(
+            agent.orgId,
+            agent.ownerUserId ?? requesterId,
+            {
               name: `${agent.name} design system`,
               designMd: text.trim(),
               source: "manual",
-              createdBy: agent.ownerUserId ?? requesterId,
+              changeSummary: "Created by the agent-config backfill",
             },
-          });
+          );
 
           const linked = await linkAgent(agent.id, created.id);
           if (!linked) {

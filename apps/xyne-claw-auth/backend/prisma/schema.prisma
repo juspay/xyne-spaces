@@ -3479,10 +3479,47 @@ model DesignSystem {
   updatedAt DateTime @updatedAt
 
   conversationPins ChatConversationDesignSystem[]
+  versions         DesignSystemVersion[]
 
   @@index([orgId])
   @@index([orgId, name])
   @@map("design_systems")
+}
+
+/// One archived revision of a design system (XYNE-66824). Written in the same
+/// transaction as the row it describes, so every version from 1 to
+/// `DesignSystem.version` exists here, including the current one — a version
+/// history that cannot answer for the version in use is not a history.
+///
+/// `orgId` is denormalised from the parent so a history read is org-scoped
+/// without a join, matching LoopCommandVersion. The parent is the authority:
+/// a row whose orgId disagrees would be a bug, not a second opinion.
+model DesignSystemVersion {
+  id             String @id @default(cuid())
+  orgId          String
+  designSystemId String
+  version        Int
+
+  designMd  String @db.Text
+  tokensCss String @db.Text
+
+  /// Descriptors only, copied from the parent. The bytes live in GCS and are
+  /// NOT versioned, so an overwritten logo renders through an old version too.
+  assets Json?
+
+  /// One human-readable line about what moved, from `formatDiffSummary`.
+  /// Stored rather than recomputed: the revision it was computed against is
+  /// the previous row, and a history list should not diff to render itself.
+  changeSummary String?
+
+  createdBy String
+  createdAt DateTime @default(now())
+
+  designSystem DesignSystem @relation(fields: [designSystemId], references: [id], onDelete: Cascade)
+
+  @@unique([designSystemId, version])
+  @@index([orgId, designSystemId])
+  @@map("design_system_versions")
 }
 
 /// A single chat pinned to a design system, overriding its agent's default.
