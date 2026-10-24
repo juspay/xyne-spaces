@@ -188,6 +188,7 @@ export interface ComposerProps {
   plus: ComposerPlusControl;
   agent: ComposerAgentControl | null;
   model: ComposerModelControl | null;
+  designSystem?: ReactNode;
   fast?: ComposerFastControl | null;
 
   lastUserMessage?: string;

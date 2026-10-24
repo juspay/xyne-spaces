@@ -129,6 +129,17 @@ export const designSystemRepository = {
     return result.count === 1;
   },
 
+  findConversationPin: async (
+    conversationId: string,
+    orgId: string,
+  ): Promise<DesignSystem | null> => {
+    const pin = await prisma.chatConversationDesignSystem.findFirst({
+      where: { conversationId, orgId },
+      include: { designSystem: true },
+    });
+    return pin?.designSystem ?? null;
+  },
+
   /**
    * The one resolution order every caller must share: a conversation's own pin
    * beats the agent's default, which beats the pre-migration

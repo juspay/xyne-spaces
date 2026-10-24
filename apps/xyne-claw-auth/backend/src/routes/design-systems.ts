@@ -188,6 +188,18 @@ async function assertConversationAccess(req: Request, conversationId: string): P
   }
 }
 
+designSystemsRouter.get(
+  "/conversations/:conversationId",
+  asyncHandler(async (req: Request<{ conversationId: string }>, res: Response) => {
+    const caller = requireCaller(req);
+    await assertConversationAccess(req, req.params.conversationId);
+    ok(res, await designSystemRepository.findConversationPin(
+      req.params.conversationId,
+      caller.orgId,
+    ));
+  }),
+);
+
 designSystemsRouter.put(
   "/conversations/:conversationId",
   asyncHandler(async (req: Request<{ conversationId: string }>, res: Response) => {

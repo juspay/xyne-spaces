@@ -27,7 +27,7 @@ import {
   CheckTickSingle,
   SidebarLeftClose,
 } from '@xyne/icons';
-import { Download, Server, X } from 'lucide-react';
+import { Download, PaintBucket, Server, X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
@@ -156,6 +156,13 @@ export const NAV_ITEMS: AINavItem[] = [
     icon: Server as NavIcon,
     to: '/ai/environments',
     sdlcAdminOnly: true,
+  },
+  {
+    key: 'design-systems',
+    label: 'Design systems',
+    description: 'Palettes, type and scale a /design run is held to',
+    icon: PaintBucket as NavIcon,
+    to: '/ai/design-systems',
   },
   {
     key: 'digital-twin',

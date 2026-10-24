@@ -2904,6 +2904,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               // an empty thread hands the pick up (fresh chat for that agent).
               onAgentChange={conversationId ? undefined : onAgentChange}
               showAgentSelector={isV2}
+              conversationId={conversationId}
               initialExtras={composerSeed}
               onContextChange={onContextChange}
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
