@@ -21,6 +21,8 @@ import {
   MousePointerClick,
   RefreshCw,
   RotateCcw,
+  SlidersHorizontal,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../../../utils/classNames';
@@ -32,7 +34,10 @@ import {
   htmlFromMessage,
   normalizeDesignNodeSelection,
   withDesignInspector,
+  withSliderOverrides,
   DESIGN_EDIT_EVENT,
+  DESIGN_SET_TOKEN_EVENT,
+  DESIGN_TOKENS_EVENT,
   DESIGN_INSPECTOR_EVENT,
   DESIGN_INSPECTOR_MODE_EVENT,
   DESIGN_SCROLL_EVENT,
@@ -45,6 +50,13 @@ import {
   type DesignPreviewSource,
   type DesignVersion,
 } from './designDocument';
+import {
+  buildTokenControls,
+  changedOverrides,
+  formatControlValue,
+  isColorControl,
+  type TokenControl,
+} from './tokenSliders';
 import { designSelectionPayload, useDesignStudio } from './designStudioContext';
 import { DesignShareButton } from './DesignShareButton';
 import { UnmountWhenCovered } from '../../../../hooks/usePageCoverage';
@@ -212,6 +224,15 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
   const [showCode, setShowCode] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [canvasBackground, setCanvasBackground] = useState<CanvasBackground>('light');
+  const [showTokens, setShowTokens] = useState(false);
+  // The `:root` custom properties this document declares, as the frame reports
+  // them. Controls are built from these and nothing else, so a slider can never
+  // address a variable the design does not have (XYNE-66834).
+  const [declaredTokens, setDeclaredTokens] = useState<Record<string, string>>({});
+  /** Dragged but not saved. Applied live over postMessage, never in the HTML. */
+  const [tokenOverrides, setTokenOverrides] = useState<Record<string, string>>({});
+  /** Committed by "Save to design", folded into the document below. */
+  const [savedTokenOverrides, setSavedTokenOverrides] = useState<Record<string, string>>({});
   const [reloadKey, setReloadKey] = useState(0);
   const [copied, setCopied] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -242,7 +263,12 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
     () => (rawHtml === null ? null : applyManualEdits(rawHtml, manualEdits)),
     [rawHtml, manualEdits],
   );
-  const editedHtml = applied?.html ?? null;
+  // Saved slider overrides ride into the document; live ones do not. Dragging
+  // must not rebuild srcDoc, because that reloads the frame on every tick.
+  const editedHtml = useMemo(
+    () => (applied === null ? null : withSliderOverrides(applied.html, savedTokenOverrides)),
+    [applied, savedTokenOverrides],
+  );
 
   useEffect(() => {
     if (!applied) return;
@@ -265,10 +291,21 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
         enabled?: boolean;
         edit?: unknown;
         selection?: unknown;
+        declared?: unknown;
       };
       if (!data || typeof data.type !== 'string') return;
       if (data.type === DESIGN_VERIFY_RESULT_EVENT) {
         setSelectionStale(data.ok === false);
+        return;
+      }
+      if (data.type === DESIGN_TOKENS_EVENT) {
+        const declared = data.declared;
+        if (declared && typeof declared === 'object') {
+          const entries = Object.entries(declared as Record<string, unknown>).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string',
+          );
+          setDeclaredTokens(Object.fromEntries(entries));
+        }
         return;
       }
       if (data.type === DESIGN_SCROLL_EVENT) {
@@ -336,7 +373,12 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
   const setPendingEdit = studio?.setPendingEdit;
   useEffect(() => {
     if (!setPendingEdit) return;
-    const hasEdits = !!editedHtml && manualEdits.length > 0;
+    // Saved slider overrides count as edits. Without them in this condition,
+    // "Save to design" would show in the preview and then be dropped on the next
+    // turn — and the pending edit is the only thing that carries a hand edit
+    // forward, so the save would have quietly meant nothing.
+    const hasEdits =
+      !!editedHtml && (manualEdits.length > 0 || Object.keys(savedTokenOverrides).length > 0);
     if (!hasEdits && !selection) {
       setPendingEdit(null);
       return;
@@ -347,11 +389,60 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
       ...(selection ? { selection: designSelectionPayload(selection, scope) } : {}),
       clear: () => {
         setManualEdits([]);
+        setSavedTokenOverrides({});
         setSelection(null);
       },
     });
     return () => setPendingEdit(null);
-  }, [setPendingEdit, editedHtml, manualEdits, selection, scope]);
+  }, [setPendingEdit, editedHtml, manualEdits, savedTokenOverrides, selection, scope]);
+
+  // A drag belongs to the document it was made against. Switching version or
+  // reloading re-mounts the frame with none of the inline overrides on it, so
+  // keeping them would leave a slider showing a value the preview is not using.
+  useEffect(() => {
+    setTokenOverrides({});
+  }, [activeIndex, reloadKey]);
+
+  const tokenControls = useMemo(() => buildTokenControls(declaredTokens), [declaredTokens]);
+  const movedTokens = useMemo(
+    () => changedOverrides(tokenControls, tokenOverrides),
+    [tokenControls, tokenOverrides],
+  );
+
+  /** Straight to the frame. No state round-trip, no srcDoc rebuild, no reload —
+   *  this is what makes dragging feel like dragging. */
+  const postTokenVars = useCallback((vars: Record<string, string | null>): void => {
+    iframeRef.current?.contentWindow?.postMessage({ type: DESIGN_SET_TOKEN_EVENT, vars }, '*');
+  }, []);
+
+  const setTokenValue = useCallback(
+    (control: TokenControl, next: number | string): void => {
+      const value = formatControlValue(control, next);
+      setTokenOverrides(current => ({ ...current, [control.name]: value }));
+      postTokenVars({ [control.name]: value });
+    },
+    [postTokenVars],
+  );
+
+  const resetTokens = useCallback((): void => {
+    // Removing the inline property rather than writing the old value back: the
+    // document's own rule is still there underneath, so this returns the design
+    // to exactly what it declared instead of pinning a copy of it.
+    const cleared: Record<string, string | null> = {};
+    for (const control of tokenControls) cleared[control.name] = null;
+    postTokenVars(cleared);
+    setTokenOverrides({});
+  }, [tokenControls, postTokenVars]);
+
+  const saveTokensToDesign = useCallback((): void => {
+    if (Object.keys(movedTokens).length === 0) return;
+    // Folded into the document, which rebuilds srcDoc and reloads the frame
+    // once. The frame then re-reports its tokens, so these values become the
+    // new originals and Reset means "back to the saved design".
+    setSavedTokenOverrides(current => ({ ...current, ...movedTokens }));
+    setTokenOverrides({});
+    toast.success('Saved to this design');
+  }, [movedTokens]);
 
   const undoEdit = useCallback((index: number): void => {
     setManualEdits(current => current.filter((_, i) => i !== index));
@@ -507,6 +598,15 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
               {inspecting && <Check className='h-4 w-4' />}
             </DropdownMenuItem>
             <DropdownMenuItem
+              onSelect={() => setShowTokens(value => !value)}
+              data-track-category='AskAI'
+              data-track-name='design-token-sliders-toggle'
+            >
+              <SlidersHorizontal className='h-4 w-4' />
+              <span className='flex-1'>Adjust tokens</span>
+              {showTokens && <Check className='h-4 w-4' />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
               onSelect={() => setShowCode(value => !value)}
               data-track-category='AskAI'
               data-track-name='design-view-code'
@@ -624,6 +724,116 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
                 className='border-0 bg-white'
               />
             </UnmountWhenCovered>
+          </div>
+        )}
+        {showTokens && srcDoc && (
+          <div className='absolute right-3 top-3 z-10 w-64 overflow-hidden rounded-lg border border-border bg-background/95 shadow-lg backdrop-blur'>
+            <div className='flex items-center gap-2 border-b border-border px-3 py-2'>
+              <SlidersHorizontal className='h-3.5 w-3.5 text-muted-foreground' />
+              <span className='flex-1 text-xs font-medium text-foreground'>Tokens</span>
+              <button
+                type='button'
+                onClick={() => setShowTokens(false)}
+                className='rounded p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground'
+                aria-label='Close token controls'
+                title='Close'
+                data-track-category='AskAI'
+                data-track-name='design-token-sliders-close'
+              >
+                <X className='h-3.5 w-3.5' />
+              </button>
+            </div>
+            {tokenControls.length === 0 ? (
+              // Not a failure, and worth saying why rather than showing an
+              // empty box: a design that hardcodes its values has nothing to
+              // drag, and the fix is a word to the model, not a retry here.
+              <p className='px-3 py-3 text-[11px] leading-relaxed text-muted-foreground'>
+                This design declares no adjustable tokens. Ask for its colours, radii and spacing as
+                CSS variables under <code className='font-mono'>:root</code> and they will show up
+                here.
+              </p>
+            ) : (
+              <>
+                <div className='max-h-[min(22rem,50vh)] overflow-y-auto px-3 py-2'>
+                  {tokenControls.map(control => {
+                    const current = tokenOverrides[control.name];
+                    return (
+                      <div key={control.name} className='py-1.5'>
+                        <div className='flex items-baseline gap-2'>
+                          <span
+                            className='min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground'
+                            title={control.name}
+                          >
+                            {control.label}
+                          </span>
+                          <span className='font-mono text-[11px] text-foreground'>
+                            {current ?? control.originalValue}
+                          </span>
+                        </div>
+                        {isColorControl(control) ? (
+                          <input
+                            type='color'
+                            value={current ?? control.value}
+                            onChange={event => setTokenValue(control, event.target.value)}
+                            className='mt-1 h-6 w-full cursor-pointer rounded border border-border bg-transparent p-0.5'
+                            aria-label={control.label}
+                            data-track-category='AskAI'
+                            data-track-name='design-token-slider-color'
+                          />
+                        ) : (
+                          <input
+                            type='range'
+                            min={control.min}
+                            max={control.max}
+                            step={control.step}
+                            value={
+                              current === undefined ? control.value : Number.parseFloat(current)
+                            }
+                            onChange={event =>
+                              setTokenValue(control, Number.parseFloat(event.target.value))
+                            }
+                            className='mt-1 w-full accent-primary'
+                            aria-label={control.label}
+                            data-track-category='AskAI'
+                            data-track-name='design-token-slider-range'
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className='flex items-center gap-1.5 border-t border-border px-3 py-2'>
+                  <button
+                    type='button'
+                    onClick={resetTokens}
+                    disabled={Object.keys(movedTokens).length === 0}
+                    className='rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40'
+                    data-track-category='AskAI'
+                    data-track-name='design-token-sliders-reset'
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type='button'
+                    onClick={saveTokensToDesign}
+                    disabled={Object.keys(movedTokens).length === 0}
+                    className='rounded bg-action-primary px-2 py-1 text-[11px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40'
+                    data-track-category='AskAI'
+                    data-track-name='design-token-sliders-save-design'
+                  >
+                    Save to design
+                  </button>
+                  <button
+                    type='button'
+                    disabled
+                    title='Needs the design systems page (XYNE-66820) to reach the system from here'
+                    className='ml-auto cursor-not-allowed rounded px-1.5 py-1 text-[11px] text-muted-foreground opacity-50'
+                  >
+                    Save to system
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
         {selection && selectionStale && (
