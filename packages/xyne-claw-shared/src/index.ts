@@ -59,12 +59,15 @@ export {
   hashSkillContent,
   skillHashEquals,
   computeSkillDiff,
+  MAX_DIFF_CELLS,
   formatSkillDiffForCard,
   resolveSkillUpdateApprover,
   authorizeSkillUpdateApproval,
   authorizeSkillFileUpdate,
 } from "./skill-diff/index.js";
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
+export { diffDesignTokens, diffDesignMarkdown, formatDiffSummary, formatContentChangeSummary } from "./design-diff.js";
+export type { TokenDiffSummary, TokenAdded, TokenChanged, TokenRemoved } from "./design-diff.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
 export { FORK_TO_CONVERSATION_TOOL, forkToConversationTool } from "./tools/conversation-fork/index.js";
 export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildProviderSuggestFlow, type ProviderSuggestItem, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildEmailSentFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams, withSpacesAppId } from "./flow/builder.js";

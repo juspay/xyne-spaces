@@ -32,7 +32,7 @@ import { DESIGN_SYSTEM_MAX_CHARS } from "../repositories/designSystemRepository.
 import { getOrgId, getRequesterId, isClawAdmin, isOrgAdmin } from "../middleware/agent-acl.js";
 import { getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import { writeAuditLog } from "../lib/audit.js";
-import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound } from "../lib/http.js";
+import { asyncHandler, ok, badRequest, conflict, unauthorized, forbidden, notFound } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("design-systems");
@@ -56,7 +56,12 @@ const createSchema = z.object({
   sourceCommit: z.string().max(128).nullable().optional(),
 });
 
-const updateSchema = createSchema.partial();
+const updateSchema = createSchema.partial().extend({
+  /** Optional optimistic-concurrency guard. A caller that showed the user a
+   *  diff against a version sends that version, and the write is refused with
+   *  409 if the row has moved since. Absent, last write wins as before. */
+  expectedVersion: z.number().int().positive().optional(),
+});
 
 /** 32k is the cap the claw runtime enforces before injecting
  *  (apps/xyne-claw/src/task-commands.ts). Rejecting at write time keeps a saved
@@ -128,6 +133,83 @@ designSystemsRouter.get("/:id", asyncHandler(async (req: Request<{ id: string }>
   ok(res, row);
 }));
 
+// Version history (XYNE-66824). Reads, so org scope is the only gate — the same
+// rule as `GET /:id`. Editing is still creator-or-admin; being able to read a
+// system's current content and not its previous content would be a strange
+// line to draw.
+//
+// No route-order note needed: `:id` matches a single segment, so `/:id/versions`
+// cannot be swallowed by `/:id` whichever is registered first.
+designSystemsRouter.get(
+  "/:id/versions",
+  asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+    const { orgId } = requireCaller(req);
+    // The parent read is what enforces "exists, and in your org"; it also
+    // supplies `version`, which is how a row is marked current.
+    const row = await designSystemRepository.findById(req.params.id, orgId);
+    if (!row) throw notFound("Design system not found");
+    const versions = await designSystemRepository.listVersions(row.id, orgId);
+    ok(
+      res,
+      versions.map((v) => ({
+        version: v.version,
+        changeSummary: v.changeSummary,
+        createdBy: v.createdBy,
+        createdAt: v.createdAt,
+        current: v.version === row.version,
+      })),
+    );
+  }),
+);
+
+designSystemsRouter.get(
+  "/:id/versions/:version",
+  asyncHandler(async (req: Request<{ id: string; version: string }>, res: Response) => {
+    const { orgId } = requireCaller(req);
+    const version = Number(req.params.version);
+    if (!Number.isInteger(version) || version < 1) {
+      throw badRequest("version must be a positive integer");
+    }
+    const row = await designSystemRepository.findById(req.params.id, orgId);
+    if (!row) throw notFound("Design system not found");
+    const archived = await designSystemRepository.getVersion(row.id, version, orgId);
+    if (!archived) {
+      // The current version always answers, even with no row behind it. During
+      // a rollout an old pod can still save without writing a snapshot, which
+      // would leave the version the system is ON returning 404 — the one read a
+      // client is most likely to make. The parent row holds that content
+      // anyway, so serve it rather than deny it.
+      if (version === row.version) {
+        ok(res, {
+          version: row.version,
+          designMd: row.designMd,
+          tokensCss: row.tokensCss,
+          assets: row.assets,
+          changeSummary: null,
+          createdBy: row.createdBy,
+          createdAt: row.updatedAt,
+          current: true,
+        });
+        return;
+      }
+      // A real miss: a system edited before version history existed keeps only
+      // the revision that survived the migration, so an earlier number is gone
+      // rather than wrong.
+      throw notFound(`Version ${version} not found for this design system`);
+    }
+    ok(res, {
+      version: archived.version,
+      designMd: archived.designMd,
+      tokensCss: archived.tokensCss,
+      assets: archived.assets,
+      changeSummary: archived.changeSummary,
+      createdBy: archived.createdBy,
+      createdAt: archived.createdAt,
+      current: archived.version === row.version,
+    });
+  }),
+);
+
 designSystemsRouter.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
   const caller = requireCaller(req);
   const input = parseBody(updateSchema, req.body);
@@ -136,11 +218,21 @@ designSystemsRouter.patch("/:id", asyncHandler(async (req: Request<{ id: string 
   if (!existing) throw notFound("Design system not found");
   await assertCanWrite(existing.createdBy, caller);
 
-  const updated = await designSystemRepository.update(existing.id, caller.orgId, {
+  const result = await designSystemRepository.update(existing.id, caller.orgId, {
     ...input,
     assets: toJsonInput(input.assets),
+    updatedBy: caller.requesterId,
   });
-  if (!updated) throw notFound("Design system not found");
+  if (result.status === "not-found") throw notFound("Design system not found");
+  if (result.status === "conflict") {
+    // Someone saved between this caller's read and its write. Returning the
+    // current version rather than just refusing, so a re-import can re-diff
+    // against it instead of asking the user to guess what changed.
+    throw conflict(
+      `This design system has moved on to version ${result.currentVersion} since you loaded it. Reload and reapply your change.`,
+    );
+  }
+  const updated = result.row;
 
   await writeAuditLog({
     actorUserId: caller.requesterId,
