@@ -127,6 +127,16 @@ export class DeskTagsConfigController {
     const configKey = deskEmailConfigKey(channelId);
     const shape: TagsConfigShape = parsed.data;
 
+    // priority / sentiment are built in: they can't be removed and only prompt and colour are editable.
+    for (const [name, builtIn] of Object.entries(DEFAULT_DESK_EMAIL_CONFIG.categories)) {
+      const config = shape.categories[name];
+      shape.categories[name] = {
+        ...builtIn,
+        color: config?.color ?? builtIn.color,
+        prompt: config?.prompt ?? builtIn.prompt,
+      };
+    }
+
     try {
       await tagService.upsertConfig(configKey, DESK_EMAIL_SOURCE_TYPE, workspaceId, shape, userId);
       // Evict the worker-side Redis cache so the pipeline picks up the new config
@@ -416,7 +426,9 @@ export class DeskTagsConfigController {
 
       // Advisory lock scoped to (sourceType, sourceId, category) serializes concurrent
       // manual tag adds for the same entity+category without requiring serializable isolation.
-      await addDeskEmailTagTx(emailId, category, tag, catConfig, workspaceId, configKey, userId);
+      const setBy = req.user?.displayName || req.user?.name;
+      const reason = setBy ? `Set by ${setBy}` : null;
+      await addDeskEmailTagTx(emailId, category, tag, catConfig, workspaceId, configKey, userId, reason);
 
       // Sync ticket tags outside the transaction — raw tx bypasses tagService hooks.
       void syncTicketTagsFromEmail(emailId);

@@ -42,6 +42,8 @@ interface CategoryFormState {
   isNewTagAllowed: boolean;
 }
 
+const BUILT_IN_CATEGORIES = ['priority', 'sentiment'];
+
 const DEFAULT_COLOR = '#0891b2';
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const normalizeColor = (color?: string): string =>
@@ -295,6 +297,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const fieldDisabled = !canManage || isSaving;
+  const builtInLocked = fieldDisabled || BUILT_IN_CATEGORIES.includes(editingName ?? '');
   const categoryEntries = Object.entries(categories);
   const showBlacklistAndCount = form?.method !== 'manual';
   const hasLlmCategories = Object.values(categories).some(c => c.method === 'llm');
@@ -391,6 +394,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                     className='size-auto p-0 text-desk-muted hover:bg-transparent hover:text-destructive'
                     onClick={() => void handleDelete(name)}
                     disabled={editingName !== null || isSaving}
+                    hidden={BUILT_IN_CATEGORIES.includes(name)}
                     data-track-category='DeskSettings'
                     data-track-name='DeleteTagCategory'
                   >
@@ -427,7 +431,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   onFocus={() => setShowNameSuggestions(true)}
                   onBlur={() => setShowNameSuggestions(false)}
                   placeholder='eg. topic'
-                  disabled={fieldDisabled}
+                  disabled={builtInLocked}
                   autoComplete='off'
                   className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
@@ -489,7 +493,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 onValueChange={value =>
                   setForm({ ...form, method: value as TagCategoryConfig['method'] })
                 }
-                disabled={fieldDisabled}
+                disabled={builtInLocked}
               >
                 <SelectTrigger id='tag-category-method' className='w-full max-w-[300px]'>
                   <SelectValue />
@@ -540,7 +544,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                 onChange={tags => setForm({ ...form, tags })}
                 onDuplicate={tag => setLocalError(`Tag "${tag}" already exists in Allowed tags`)}
                 placeholder='eg. billing, login, feature-request'
-                disabled={fieldDisabled}
+                disabled={builtInLocked}
                 data-track-category='DeskSettings'
                 data-track-name='TagCategoryAllowedTags'
               />
@@ -560,7 +564,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                     setLocalError(`Tag "${tag}" already exists in Blacklisted tags`)
                   }
                   placeholder='eg. spam'
-                  disabled={fieldDisabled}
+                  disabled={builtInLocked}
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryBlacklist'
                 />
@@ -584,7 +588,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                     if (['.', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
                   }}
                   placeholder='eg. 3'
-                  disabled={fieldDisabled}
+                  disabled={builtInLocked}
                   className='w-full max-w-[120px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryMaxTags'
@@ -599,7 +603,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   type='checkbox'
                   checked={form.isNewTagAllowed}
                   onChange={e => setForm({ ...form, isNewTagAllowed: e.target.checked })}
-                  disabled={fieldDisabled}
+                  disabled={builtInLocked}
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryAllowNewTags'
                 />
