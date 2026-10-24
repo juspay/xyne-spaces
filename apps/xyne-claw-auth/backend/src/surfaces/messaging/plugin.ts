@@ -28,7 +28,7 @@ import type { AccountConfig } from "./schema.js";
 
 /** Every channel key the core may see. Keep in sync with the `surfaces` seed
  *  rows; the type keeps `triggerSource` unions closed and greppable. */
-export const MESSAGING_CHANNEL_KEYS = ["whatsapp", "whatsapp-cloud"] as const;
+export const MESSAGING_CHANNEL_KEYS = ["whatsapp", "whatsapp-cloud", "teams"] as const;
 export type MessagingChannelKey = (typeof MESSAGING_CHANNEL_KEYS)[number];
 
 export function isMessagingChannelKey(value: unknown): value is MessagingChannelKey {
@@ -297,6 +297,10 @@ export interface ChannelPlugin<Handle = unknown, ChannelConfig = unknown> {
    *  and manage accounts here, who may see them, and whether the account may
    *  answer strangers at all. */
   readonly accountScope: AccountScope;
+  /** What a sender with no linked identity is told. Default: the "add your
+   *  number in Claw" notice, which only makes sense on a phone-number channel;
+   *  a channel whose identities come from somewhere else says so here. */
+  readonly unlinkedText?: string;
   /** Values an admin must supply for a `token` login (tokens, ids, secrets).
    *  Each is stored encrypted under its `key` in the account's auth state. */
   readonly loginFields?: ReadonlyArray<{
@@ -323,8 +327,14 @@ export interface ChannelPlugin<Handle = unknown, ChannelConfig = unknown> {
   ): Promise<boolean> | boolean;
   /** `authState` is handed over because a webhook payload names its media by
    *  id, not by URL: fetching the bytes needs the account's own credentials,
-   *  and the webhook can land on any pod, including one holding no handle. */
-  parseInbound?(payload: unknown, account: ChannelAccount, authState: AuthStateStore): InboundMessage[];
+   *  and the webhook can land on any pod, including one holding no handle.
+   *  May be async for a plugin that must persist something before the core
+   *  answers (Teams: where to send the reply); the core awaits it. */
+  parseInbound?(
+    payload: unknown,
+    account: ChannelAccount,
+    authState: AuthStateStore,
+  ): InboundMessage[] | Promise<InboundMessage[]>;
   /** Provider handshake that proves we own the endpoint (Meta's GET with
    *  hub.verify_token). Return true to echo the challenge back. */
   verifyChallenge?(account: ChannelAccount, authState: AuthStateStore, token: string): Promise<boolean>;

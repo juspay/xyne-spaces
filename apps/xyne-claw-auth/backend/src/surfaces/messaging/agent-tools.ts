@@ -48,10 +48,13 @@ function channelToolPrefix(channel: MessagingChannelKey): string {
  * decides.
  */
 export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
-  const label = channel.startsWith("whatsapp") ? "WhatsApp" : channel;
   const prefix = channelToolPrefix(channel);
   const plugin = getChannel(channel);
+  const label = channel.startsWith("whatsapp") ? "WhatsApp" : (plugin?.displayName ?? channel);
   const groups = plugin?.capabilities.groups ?? false;
+  // Being in groups is not the same as being able to enumerate them: a Teams
+  // bot is in channels but has no Bot Connector call that lists them.
+  const listableGroups = groups && !!plugin?.listGroups;
   const reactions = plugin?.capabilities.reactions ?? false;
   // A shared business number is something people message, not something that
   // opens conversations — so it is never given a way to address another chat.
@@ -113,7 +116,7 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
       },
     }]
       : []),
-    ...(groups
+    ...(listableGroups
       ? [{
       name: `${prefix}_list_groups`,
       description: `List the ${label} groups this account is a member of (id, name, participant count).`,
