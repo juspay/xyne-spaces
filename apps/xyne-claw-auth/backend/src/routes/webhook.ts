@@ -115,6 +115,13 @@ import {
 import { deliverSlackResult } from "../surfaces/slack/delivery.js";
 import { deliverChannelResult, enqueueOutbound } from "../surfaces/messaging/delivery.js";
 import { sendInterimMessage } from "../surfaces/messaging/interim.js";
+import {
+  deliverChannelDesignShare,
+  deliverChannelPrStatus,
+  deliverChannelSandboxPreview,
+  deliverWebhookPrStatus,
+  readChannelPrTarget,
+} from "../surfaces/messaging/run-links.js";
 import { claimOrQueue } from "../lib/conversation-gate.js";
 import { buildHandoffContext, downloadRootAttachments, mergeHandoffAttachments, toRootAttachmentRefs } from "../lib/workflow-handoff.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
@@ -3667,9 +3674,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     const channelStatus = payload.emptyReason === "no_output" ? "failed" : (payload.status ?? "failed");
     // Transcript row, same as the conversation path below — without it the
     // channel conversation shows only the person's side in Claw.
+    let savedChannelFiles: Promise<{ messageId: string; created: Awaited<ReturnType<typeof persistCallbackAttachments>> } | null> =
+      Promise.resolve(null);
     if (resultWithCitations.trim() && channelUserId && ctx.conversationId && ctx.agentSlug && ctx.agentOrgId) {
       const parentId = await chatMessageRepository.latestMessageId(ctx.conversationId, ctx.agentSlug).catch(() => null);
-      chatMessageRepository.create({
+      savedChannelFiles = chatMessageRepository.create({
         conversationId: ctx.conversationId,
         agentSlug: ctx.agentSlug,
         userId: channelUserId,
@@ -3680,8 +3689,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         status: channelStatus === "completed" ? "completed" : "failed",
         ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
       })
-        .then((msg) => persistCallbackAttachments(msg.id, channelUserId, payload.attachments))
-        .catch((e) => clog.warn(`[webhook/result] failed to save channel assistant ChatMessage session=${sessionId}: ${errMsg(e)}`));
+        .then(async (msg) => ({ messageId: msg.id, created: await persistCallbackAttachments(msg.id, channelUserId, payload.attachments) }))
+        .catch((e) => {
+          clog.warn(`[webhook/result] failed to save channel assistant ChatMessage session=${sessionId}: ${errMsg(e)}`);
+          return null;
+        });
     }
     // A silent run (an /experiment checker) records its result but never
     // speaks in the chat — a verdict landing after the person's next message
@@ -3698,6 +3710,18 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }).catch((err) => {
       clog.warn(`[webhook/result] channel delivery failed for session ${sessionId}: ${errMsg(err)}`);
     });
+    // /design and /dashboard: the same live share link a Spaces thread gets, as
+    // a message under the reply. Chained only now, so it is queued after it.
+    const designCommand = channelStatus === "completed" ? deliveredDesignCommand(ctx.task) : null;
+    if (designCommand && channelUserId) {
+      void savedChannelFiles
+        .then(async (saved) => {
+          if (!saved) return;
+          const { designShareUrl } = await ingestDeliveredFiles(ctx, channelUserId, saved.messageId, saved.created);
+          if (designShareUrl) await deliverChannelDesignShare(channelTarget, designCommand, designShareUrl);
+        })
+        .catch((err) => clog.warn(`[webhook/result] channel design share failed for session ${sessionId}: ${errMsg(err)}`));
+    }
     // Cards the run queued, translated for the messenger — after the reply,
     // so each lands under the text that explains it.
     if (channelUserId) {
@@ -5788,6 +5812,25 @@ async function doRenderPrCard(
   // recovery → conv-index), so a refired run that minted a fresh sessionId still
   // lands the card in the right thread.
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
+  // A chat run (WhatsApp, …) has no card surface: the PR goes out as a short
+  // message, once per status (surfaces/messaging/run-links.ts).
+  if (ctx?.channelDelivery) {
+    // The binding's org is what later webhook deliveries check the account
+    // against, so never store one without it.
+    if (!ctx.agentOrgId) {
+      clog.warn(`PR card skipped for chat run: no agent org (sessionId=${sessionId})`);
+      return;
+    }
+    await deliverChannelPrStatus({
+      sessionId,
+      target: ctx.channelDelivery,
+      orgId: ctx.agentOrgId,
+      conversationId: ctx.conversationId,
+      agentSlug: ctx.agentSlug ?? null,
+      pr,
+    });
+    return;
+  }
   if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) {
     clog.warn(
       `[pr-card] skipping render for ${sessionId}: ctx=${ctx ? "yes" : "MISSING"} ` +
@@ -5985,6 +6028,18 @@ async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
   const title = ev.title ?? cardData.title;
   if (binding.status === ev.status && title === cardData.title) {
     return { outcome: "skipped", reason: "dedup-same-status" };
+  }
+
+  // The PR was opened from a chat run: the status change is a new message there.
+  const channelTarget = readChannelPrTarget(binding);
+  if (channelTarget) {
+    return deliverWebhookPrStatus(binding, channelTarget, {
+      status: ev.status,
+      title,
+      ...(cardData.url ? { url: cardData.url } : {}),
+      ...(cardData.repo ? { repo: cardData.repo } : {}),
+      ...(cardData.number !== undefined ? { number: cardData.number } : {}),
+    });
   }
 
   const agentRow = await agentRepository.findBySpacesAppId(binding.spacesAppId);
@@ -6630,6 +6685,20 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     // router's access check (and the Workspace pane) depend on it.
     if (await isLivePreviewMessageHidden(ctx, log)) {
       log.info(`Sandbox preview message suppressed by agent config (sandboxId=${sandboxId} agentId=${ctx.agentId ?? "-"} agentSlug=${ctx.agentSlug ?? "-"})`);
+      return;
+    }
+    // A chat run (WhatsApp, …): the same links as one short message to the chat.
+    if (ctx.channelDelivery) {
+      const links = ingest.recorded
+        ? {
+            previewUrl: sandboxPreviewUrl,
+            ...(sandboxCodePreviewUrl ? { codePreviewUrl: sandboxCodePreviewUrl } : {}),
+            ...(sandboxTermUrl ? { termUrl: sandboxTermUrl } : {}),
+          }
+        : null;
+      await deliverChannelSandboxPreview(sessionId, ctx.channelDelivery, links).catch((err) =>
+        log.warn("Failed to send sandbox preview to chat", { error: errMsg(err) }),
+      );
       return;
     }
     if (!ingest.recorded) {
