@@ -135,7 +135,9 @@ interface ResolvedContextSection {
   fileCharCount?: number;
 }
 
-const MAX_CONTEXT_TOTAL = 20;
+/** Exported so a caller adding a second set of items to one turn budgets
+ *  against the same ceiling instead of capping its own set separately. */
+export const MAX_CONTEXT_TOTAL = 20;
 const PER_TYPE_LIMIT = 20;
 const INLINE_THRESHOLD = 2_000;
 const TICKET_MESSAGE_LIMIT = 12;
@@ -269,6 +271,10 @@ export async function buildAttachedContextPayload(
     workflowExecutionId?: string;
     /** The run's user — artifact apps are resolved against their access. */
     userId?: string;
+    /** `user-attached` (the default) claims the user attached these to this
+     *  message and asks the agent to ground its answer in all of them — wrong
+     *  for a project's standing items, which apply to every message. */
+    framing?: "user-attached" | "project-knowledge";
   },
 ): Promise<{ promptPrefix?: string; contextFiles: ContextFile[] }> {
   const threadConversationId = opts?.threadConversationId;
@@ -339,11 +345,18 @@ export async function buildAttachedContextPayload(
     sections.unshift(buildWorkflowScopeSection(workflowId, workflowExecutionId));
   }
 
-  const lines: string[] = [
-    "# Attached context",
-    "",
-    "I have attached the following item(s) with my message:",
-  ];
+  const isProjectKnowledge = opts?.framing === "project-knowledge";
+  const lines: string[] = isProjectKnowledge
+    ? [
+        "# Project context",
+        "",
+        "The following item(s) are attached to this chat's project. They are standing background for every message here, not part of what I just asked:",
+      ]
+    : [
+        "# Attached context",
+        "",
+        "I have attached the following item(s) with my message:",
+      ];
   const contextFiles: ContextFile[] = [];
 
   for (const section of sections) {
@@ -398,7 +411,9 @@ export async function buildAttachedContextPayload(
   lines.push(
     "",
     "---",
-    "Refer to these attached item(s) to answer my query. The details above are only a stub — fetch fresh data with each item's noted `spaces-*` / `kb-*` tools before answering, and ground your answer in all of them.",
+    isProjectKnowledge
+      ? "These are reference material, not a request. The details above are only a stub — when one of them bears on what I asked, fetch it with its noted `spaces-*` / `kb-*` tools before answering. Do NOT fetch the ones my question does not touch, and do not try to tie my question back to them when it stands on its own."
+      : "Refer to these attached item(s) to answer my query. The details above are only a stub — fetch fresh data with each item's noted `spaces-*` / `kb-*` tools before answering, and ground your answer in all of them.",
     ...callGuidance,
     ...(callGuidance.length > 0 ? [""] : []),
     "- If my message isn't really a question (just a greeting or small talk), reply normally instead of forcing it onto the attached items.",
