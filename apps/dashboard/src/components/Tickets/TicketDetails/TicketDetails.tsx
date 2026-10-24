@@ -254,6 +254,7 @@ interface TicketReferenceWithTicket extends TicketReferenceMapping {
     title?: string | null;
     xyneId?: string | null;
     boardId?: string | null;
+    channelId?: string | null;
     stageName?: string | null;
     priority?: TicketPriority;
     assignedTo?: string | null;
@@ -263,6 +264,7 @@ interface TicketReferenceWithTicket extends TicketReferenceMapping {
     title?: string | null;
     xyneId?: string | null;
     boardId?: string | null;
+    channelId?: string | null;
     stageName?: string | null;
     priority?: TicketPriority;
     assignedTo?: string | null;
@@ -2491,10 +2493,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const buildTicketLink = (refTicket?: {
     id?: string;
+    xyneId?: string | null;
     boardId?: string | null;
+    channelId?: string | null;
   }): string | undefined => {
     if (!refTicket?.id) {
       return undefined;
+    }
+    // Desk tickets live in the Support screen, not under /projects
+    if (
+      refTicket.channelId &&
+      refTicket.xyneId &&
+      isDeskChannelType(channelTypeMap.get(refTicket.channelId))
+    ) {
+      const workspaceId = location.pathname.split('/')[1];
+      return `/${workspaceId}/support/${refTicket.channelId}/${refTicket.xyneId}?selectedTab=thread`;
     }
     const boardId = refTicket.boardId || ticket.boardId;
     return `/projects/${ticket.projectId}/${boardId}/${refTicket.id}`;
