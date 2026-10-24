@@ -94,10 +94,11 @@ const writeColumnLayout = (key: string, patch: Partial<ColumnLayout>): void => {
   }
 };
 
+const MemoTicketCard = React.memo(TicketCard);
+
 const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   ticket,
-  tags,
-  onClick,
+  onTicketClick,
   availableTags = [],
   onLoadMoreTags,
   hasMoreTags = false,
@@ -118,6 +119,31 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
     transition,
     opacity: isDragging ? 0 : 1,
   };
+  const tags = React.useMemo(
+    () =>
+      // Use tagMappings from Zero/DB, or fall back to tags from Vespa search results
+      ((ticket as TicketWithTags).tagMappings ?? []).length > 0
+        ? ((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
+            workspaceId: m.workspaceId,
+            id: m.id,
+            name: m.tagName,
+            ticketId: m.ticketId,
+          }))
+        : ((ticket as TicketWithTags).tags ?? []).map(t => {
+            const name = typeof t === 'string' ? t : (t.name ?? '');
+            return {
+              workspaceId: typeof t === 'string' ? '' : (t.workspaceId ?? ''),
+              id: (typeof t === 'string' ? undefined : t.id) ?? `${ticket.id}:${name}`,
+              name,
+              ticketId: ticket.id,
+            };
+          }),
+    [ticket],
+  );
+  const onClick = React.useCallback(
+    (e: React.MouseEvent | KeyboardEvent): void => onTicketClick(e, ticket),
+    [onTicketClick, ticket],
+  );
 
   return (
     <div
@@ -129,7 +155,7 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
       data-track-name='DragTicketCard'
       data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
     >
-      <TicketCard
+      <MemoTicketCard
         ticket={ticket}
         isCompact={true}
         tags={tags}
@@ -293,30 +319,11 @@ const VirtualizedStageList: React.FC<{
             >
               <SortableTicketCard
                 ticket={ticket}
-                tags={
-                  // Use tagMappings from Zero/DB, or fall back to tags from Vespa search results
-                  ((ticket as TicketWithTags).tagMappings ?? []).length > 0
-                    ? ((ticket as TicketWithTags).tagMappings ?? []).map(m => ({
-                        workspaceId: m.workspaceId,
-                        id: m.id,
-                        name: m.tagName,
-                        ticketId: m.ticketId,
-                      }))
-                    : ((ticket as TicketWithTags).tags ?? []).map(t => {
-                        const name = typeof t === 'string' ? t : (t.name ?? '');
-                        return {
-                          workspaceId: typeof t === 'string' ? '' : (t.workspaceId ?? ''),
-                          id: (typeof t === 'string' ? undefined : t.id) ?? `${ticket.id}:${name}`,
-                          name,
-                          ticketId: ticket.id,
-                        };
-                      })
-                }
                 availableTags={availableTags}
                 onLoadMoreTags={onLoadMoreTags}
                 hasMoreTags={hasMoreTags}
                 onSearchTags={onSearchTags}
-                onClick={e => onTicketClick(e, ticket)}
+                onTicketClick={onTicketClick}
                 visibleColumns={visibleColumns}
                 {...(activeTicketId !== undefined && { activeTicketId })}
                 {...(showEmailReads !== undefined && { showEmailReads })}
@@ -735,6 +742,15 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
 
     return counts;
   }, [stages, stageCounts, ticketsByStage]);
+  const onTicketClickRef = React.useRef(onTicketClick);
+  React.useLayoutEffect(() => {
+    onTicketClickRef.current = onTicketClick;
+  });
+  const handleTicketClick = React.useCallback(
+    (e: React.MouseEvent | KeyboardEvent, ticket: Ticket): void =>
+      onTicketClickRef.current(e, ticket),
+    [],
+  );
   const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
 
   const layoutKey = [layoutScope, ...stages.map(stage => stage.id).sort()].join('|');
@@ -895,7 +911,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     visibleColumns={visibleColumns}
                     {...(activeTicketId !== undefined && { activeTicketId })}
                     {...(showEmailReads !== undefined && { showEmailReads })}
-                    onTicketClick={onTicketClick}
+                    onTicketClick={handleTicketClick}
                     {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                     {...(slaPolicies !== undefined && { slaPolicies })}
                     {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
@@ -919,7 +935,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     visibleColumns={visibleColumns}
                     {...(activeTicketId !== undefined && { activeTicketId })}
                     {...(showEmailReads !== undefined && { showEmailReads })}
-                    onTicketClick={onTicketClick}
+                    onTicketClick={handleTicketClick}
                     {...(slaPolicies !== undefined && { slaPolicies })}
                   />
                 ) : (
@@ -936,7 +952,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       visibleColumns={visibleColumns}
                       {...(activeTicketId !== undefined && { activeTicketId })}
                       {...(showEmailReads !== undefined && { showEmailReads })}
-                      onTicketClick={onTicketClick}
+                      onTicketClick={handleTicketClick}
                       {...(handleAddTicket ? { onAddTicket: handleAddTicket } : {})}
                       {...(slaPolicies !== undefined && { slaPolicies })}
                       expandableSubTickets={expandableSubTickets}

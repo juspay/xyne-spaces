@@ -1,0 +1,6 @@
+# The image is built from the manifest and the sources alone.
+*
+!Cargo.toml
+!Cargo.lock
+!clippy.toml
+!src

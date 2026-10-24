@@ -19,6 +19,9 @@ import { AgentsPageV3 } from "./components/AgentsPageV3";
 import { AgentDetailPageV3 } from "./components/AgentDetailPageV3";
 import { SubagentsPageV3 } from "./components/SubagentsPageV3";
 import { SubagentEditPageV3 } from "./components/SubagentEditPageV3";
+import { FastSubagentsOpsPage } from "./components/FastSubagentsOpsPage";
+import { LoopCommandsPage } from "./components/LoopCommandsPage";
+import { LoopGraphEditor } from "./components/loops/LoopGraphEditor";
 import { SkillsPageV3 } from "./components/SkillsPageV3";
 import { GatewaysPageV3 } from "./components/GatewaysPageV3";
 import { McpGatewayRegistryPageV3 } from "./components/McpGatewayRegistryPageV3";
@@ -170,6 +173,21 @@ export function AppV3() {
             <Route path="/v3/subagents" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                 <SubagentsPageV3 userId={userId} />
+              </div>
+            } />
+            <Route path="/v3/loop-commands/editor" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                <LoopGraphEditor />
+              </div>
+            } />
+            <Route path="/v3/loop-commands" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                <LoopCommandsPage />
+              </div>
+            } />
+            <Route path="/v3/fast-subagents" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                <FastSubagentsOpsPage isAdmin={isAdmin} />
               </div>
             } />
             <Route path="/v3/subagents/:name" element={

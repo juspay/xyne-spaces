@@ -460,11 +460,15 @@ router.get(
     const conversationId =
       typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : '';
     if (!conversationId) throw new AppError('conversationId is required', 400);
+    const threadConversationId =
+      typeof req.query.threadConversationId === 'string'
+        ? req.query.threadConversationId.trim() || undefined
+        : undefined;
     try {
       const context = await sdlcAgentContext.buildForHub(
         actorFromRequest(req),
         req.params.channelId,
-        { conversationId }
+        { conversationId, threadConversationId }
       );
       res.status(200).json({ success: true, context });
     } catch (error) {

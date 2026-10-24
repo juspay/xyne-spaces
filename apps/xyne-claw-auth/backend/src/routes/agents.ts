@@ -14,7 +14,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository, designSystemRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, hashSkillContent } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, isAgentInvocableBy, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, hashSkillContent } from "xyne-claw-shared";
 import { draftSpecFromCreateAgentParams, createAgentQueueError, createAgentNotGranted } from "../lib/agent-draft-card.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -47,6 +47,8 @@ import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig, validateAwakeningConfig } from "../lib/agent-config-validation.js";
+import { resolveProactivityConfig, validateProactivityConfig } from "../agent-proactivity/config.js";
+import { refreshRoutingCard } from "../agent-proactivity/card.js";
 import { syncAwakeningState } from "../awakening/lifecycle.js";
 import { removeAgentFromIndex, syncAgentToIndexBestEffort } from "../services/agent-index/index.js";
 import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
@@ -118,6 +120,10 @@ function lightAgentProjection(agent: Record<string, unknown>, orgNames?: Map<str
     activePromptVersion: agent["activePromptVersion"],
     kbScope: agent["kbScope"],
     fastModeConfigured,
+    // What the Spaces proactivity policy matches channel questions against to pick an
+    // agent. The rest of the config stays private.
+    // Everyone in a channel reads an unprompted answer: only an agent anyone may call.
+    proactivity: isAgentInvocableBy(cfg, null) ? resolveProactivityConfig(cfg) : { description: "" },
     modelId: agent["modelId"],
     spacesAppId: agent["spacesAppId"],
     spacesAppUserId: agent["spacesAppUserId"],
@@ -1010,6 +1016,11 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
         res.status(400).json({ success: false, error: awakeningCheck.error });
         return;
       }
+      const proactivityCheck = validateProactivityConfig(normalizedConfig as Record<string, unknown>);
+      if (!proactivityCheck.ok) {
+        res.status(400).json({ success: false, error: proactivityCheck.error });
+        return;
+      }
       logAgentConfigWriteDiff(existing.slug, requesterId ?? undefined, existing.config, normalizedConfig);
       data.config = normalizedConfig as Prisma.InputJsonValue;
     }
@@ -1068,6 +1079,13 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     // Refresh the routing index so discovery reflects this edit. Same
     // best-effort contract as the awakening sync below.
     syncAgentToIndexBestEffort(agent.id, existing.orgId, existing.slug);
+
+    // A prompt or tools edit changes what the routing card says; a no-op when it doesn't.
+    if (normalizedConfig !== undefined || systemPrompt !== undefined || description !== undefined) {
+      void refreshRoutingCard(existing.id).catch((e) =>
+        log.warn(`[agents] routing card refresh failed for ${existing.slug}:`, e instanceof Error ? e.message : e),
+      );
+    }
 
     // Create/park the scheduler state row so the awakening tick starts or
     // stops seeing this agent. Best-effort: a failure here must not fail the
@@ -3506,6 +3524,30 @@ router.get("/:slug/knowledge-base", async (req: Request<{ slug: string }>, res: 
 });
 
 // ── Agent Skill attach/detach (mirrors tool pattern) ──────────────────
+
+// Regenerate the agent's routing card for answering without a mention. Writing it is an
+// LLM call that can outlast the gateway, so this only starts it; the page polls the agent.
+router.post("/:slug/proactivity/card", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!agent) {
+      logAgentScopedMiss(req, "agents/proactivity-card", req.params.slug);
+      res.status(404).json({ success: false, error: "Agent not found" });
+      return;
+    }
+    if (!agent.spacesAppUserId) {
+      res.status(400).json({ success: false, error: "This agent has no Spaces bot to answer as" });
+      return;
+    }
+    void refreshRoutingCard(agent.id, { force: true }).catch((err) =>
+      log.error(`[agents] routing card error for ${agent.slug}:`, err),
+    );
+    res.status(202).json({ success: true });
+  } catch (err) {
+    log.error("[agents] routing card error:", err);
+    res.status(500).json({ success: false, error: "Could not start writing the routing card" });
+  }
+});
 
 router.get("/:slug/skills", async (req: Request<{ slug: string }>, res: Response) => {
   try {

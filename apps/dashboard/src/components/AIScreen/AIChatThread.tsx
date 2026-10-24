@@ -11,6 +11,7 @@ import {
   forwardRef,
   useImperativeHandle,
   type ReactElement,
+  type ReactNode,
 } from 'react';
 import {
   Menu,
@@ -36,12 +37,14 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { useQueryClient } from '@tanstack/react-query';
 import { conversationArtifactsQueryKey } from '../../services/XyneAI/XyneAIArtifactsService';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useXyneAIStream } from '../../hooks/useXyneAIStream';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIVersion } from '../../hooks/useAskAIVersion';
 import type {
+  ApprovedActionPayload,
   Message,
+  PendingAction,
   PlanTodo,
   MessageAttachment,
   ToolInvocation as ToolInvocationType,
@@ -58,7 +61,8 @@ import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './
 import { ASSISTANT_PANEL_ATTR } from '../Assistant/buddy/constants';
 import { ReadonlyContextPills, useSentMentions } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides, withoutPickedContext } from './composerContext';
-import { AgentByline, AgentRecipient } from './ConversationAgents';
+import { AboutAgentPanel } from './AboutAgentPanel';
+import { AgentByline } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
   anchorFromArgs,
@@ -104,6 +108,11 @@ import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
+import {
+  DeliveredArtifactChip,
+  splitDeliveredAttachments,
+  useDeliveredArtifacts,
+} from './Workspace/deliveredArtifacts';
 import { FlowScreenManager } from '../flowUI/FlowScreenManager';
 import { useFlowActionComplete } from '../../hooks/useFlowActionComplete';
 import {
@@ -135,7 +144,10 @@ import { TurnErrorCard } from '../Chat/XyneAISidebar/components/TurnErrorCard';
 import { isErrorOnlyContent } from '../Chat/XyneAISidebar/components/turnAnswer';
 import { turnDurationLabel, turnFinishedAt } from '../Chat/XyneAISidebar/components/activityShared';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
-import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
+import {
+  pendingActionErrorMessage,
+  respondToPendingAction,
+} from '../../services/XyneAI/XyneAIPendingActionService';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 import {
   resolveActivePath,
@@ -264,6 +276,7 @@ function stripUnknownCiteLinks(content: string, validCitationKeys: Set<string>):
  *  Four hours keeps one sitting under a single stamp while still marking a
  *  thread picked back up later in the day. */
 const TURN_SEPARATOR_GAP_MS = 4 * 60 * 60 * 1000;
+const APPROVE_AND_CONTINUE_PROMPT = 'Continue with the approved result.';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Topbar
@@ -273,10 +286,12 @@ function ChatTopbar({
   onOpenSidebar,
   onToggleSidebar,
   sidebarCollapsed,
+  agentInfo,
 }: {
   onOpenSidebar?: () => void;
   onToggleSidebar?: (() => void) | undefined;
   sidebarCollapsed?: boolean | undefined;
+  agentInfo?: ReactNode;
 }): ReactElement {
   return (
     <header
@@ -310,6 +325,7 @@ function ChatTopbar({
           <SidebarLeftOpen size={16} aria-hidden='true' />
         </button>
       )}
+      {agentInfo}
     </header>
   );
 }
@@ -637,8 +653,8 @@ function ChatMessageBubble({
   onRatingChange,
   trackContext,
   agentSlug,
-  recipientAgentSlug,
   onPendingActionResolved,
+  onApproveAndContinue,
   conversationId,
   onFlowActionComplete,
   readOnly = false,
@@ -651,9 +667,8 @@ function ChatMessageBubble({
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
-  /** Agent a user message was sent to — shown as "To <agent>" above it. */
-  recipientAgentSlug?: string | undefined;
   onPendingActionResolved?: (() => void) | undefined;
+  onApproveAndContinue?: ((message: Message, action: PendingAction) => Promise<void>) | undefined;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue?: FeedbackValue;
@@ -1015,10 +1030,16 @@ function ChatMessageBubble({
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
   // Everything an assistant message attached EXCEPT its React artifacts, which
   // MessageReactArtifacts renders as the app itself.
-  const botAttachments = useMemo(
-    () => (message.attachments ?? []).filter(a => toArtifactRef(a) === null),
-    [message.attachments],
-  );
+  const deliveredArtifacts = useDeliveredArtifacts();
+  const { botAttachments, botArtifacts } = useMemo(() => {
+    if (isUser) return { botAttachments: [], botArtifacts: [] };
+    const split = splitDeliveredAttachments(
+      message.id,
+      (message.attachments ?? []).filter(a => toArtifactRef(a) === null),
+      deliveredArtifacts,
+    );
+    return { botAttachments: split.attachments, botArtifacts: split.artifacts };
+  }, [isUser, message.id, message.attachments, deliveredArtifacts]);
   const hasAttachedContext =
     isUser && !!message.attachedContext && message.attachedContext.length > 0;
   const passage = isUser ? message.pageSelection : undefined;
@@ -1068,9 +1089,6 @@ function ChatMessageBubble({
             isEditing ? 'w-full max-w-[90%]' : 'max-w-[78%]',
           )}
         >
-          {recipientAgentSlug && !isEditing && (
-            <AgentRecipient slug={recipientAgentSlug} className='pr-2' />
-          )}
           <div className='flex w-full items-start justify-end gap-1'>
             <div
               className={cn(
@@ -1284,6 +1302,14 @@ function ChatMessageBubble({
                 );
                 onPendingActionResolved?.();
               }}
+              {...(onApproveAndContinue
+                ? {
+                    onApproveAndContinue: async (action: PendingAction): Promise<void> => {
+                      await onApproveAndContinue(message, action);
+                      onPendingActionResolved?.();
+                    },
+                  }
+                : {})}
               onDecline={async action => {
                 await respondToPendingAction(
                   message,
@@ -1308,6 +1334,18 @@ function ChatMessageBubble({
               row under every generated app — the raw bytes of the thing sitting
               directly above it. `toArtifactRef` is the same predicate that
               component selects on, so the two can never disagree. */}
+          {!isUser && botArtifacts.length > 0 && deliveredArtifacts && (
+            <div className='mt-2 space-y-2'>
+              {botArtifacts.map(artifact => (
+                <DeliveredArtifactChip
+                  key={artifact.id}
+                  artifact={artifact}
+                  onOpen={deliveredArtifacts.open}
+                />
+              ))}
+            </div>
+          )}
+
           {!isUser && botAttachments.length > 0 && (
             <div className='mt-2 space-y-2'>
               {botAttachments.map((attachment, index) => (
@@ -1603,6 +1641,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   // specific tool call; null means show the whole turn (opened via the toolbar
   // debug button).
   const [debugFocusToolCallId, setDebugFocusToolCallId] = useState<string | null>(null);
+  const [debugAgentSlug, setDebugAgentSlug] = useState<string | null>(null);
   const hasAutoSubmitted = useRef(false);
   const isLoadingSession = useRef(false);
   // Captures whether this thread instance was opened on an existing session
@@ -1724,6 +1763,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const voiceChatTitle = useMemo(
     () => chatTitleOf(savedChatTitle, transcriptMessages),
     [savedChatTitle, transcriptMessages],
+  );
+  const lastUserMessage = useMemo(
+    () => [...transcriptMessages].reverse().find(message => message.type === 'user')?.content,
+    [transcriptMessages],
   );
   const generatedTitle = useMemo(() => {
     if (!conversationId) return undefined;
@@ -2362,6 +2405,49 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [submitQuery, isLegacyConversation, displayMessages, messages, designStudio, pageSelection],
   );
 
+  const handleApproveAndContinue = useCallback(
+    async (message: Message, action: PendingAction): Promise<void> => {
+      const ownerSlug = message.agentSlug || effectiveAgentSlug || 'ask-ai';
+      let approvedAction: ApprovedActionPayload;
+      let failure: unknown = null;
+      try {
+        const { resultText } = await respondToPendingAction(
+          message,
+          action,
+          requirePendingActionIndex(message.pendingActions, action),
+          true,
+          ownerSlug,
+        );
+        approvedAction = { tool: action.tool, result: resultText };
+      } catch (err) {
+        failure = err;
+        approvedAction = { tool: action.tool, error: pendingActionErrorMessage(err) };
+      }
+
+      isAtBottomRef.current = true;
+      setShowJumpPill(false);
+      const parentMessageId =
+        !isLegacyConversation && !usesDraftStreamKeyRef.current
+          ? displayMessages[displayMessages.length - 1]?.id
+          : undefined;
+      await submitQuery(
+        APPROVE_AND_CONTINUE_PROMPT,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        parentMessageId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { agentSlug: ownerSlug, approvedAction },
+      );
+      if (failure) throw new Error(pendingActionErrorMessage(failure));
+    },
+    [effectiveAgentSlug, isLegacyConversation, displayMessages, submitQuery],
+  );
+
   const handleStop = useCallback((): void => {
     abortCurrentRequest();
   }, [abortCurrentRequest]);
@@ -2462,6 +2548,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   });
 
   const isAnyMessageStreaming = messages.some(m => m.isStreaming);
+  const chatAgentSlug =
+    [...displayMessages].reverse().find(m => m.agentSlug)?.agentSlug ||
+    effectiveAgentSlug ||
+    'ask-ai';
 
   const streamingBotTurnIndex = useMemo(() => {
     const idx = displayMessages.findIndex(m => m.type === 'bot' && m.isStreaming);
@@ -2480,6 +2570,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       setDebugSessionId(null);
     }
   }, [streamingBotTurnIndex]);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const debugRunParam = searchParams.get('debugRun');
+  const debugAgentParam = searchParams.get('debugAgent');
+  useEffect(() => {
+    if (!isV2 || !debugRunParam) return;
+    setDebugAgentSlug(debugAgentParam);
+    setDebugTurnIndex(null);
+    setDebugSessionId(debugRunParam);
+    setDebugFocusToolCallId(null);
+    setShowDebugger(true);
+    setSearchParams(
+      current => {
+        const next = new URLSearchParams(current);
+        next.delete('debugRun');
+        next.delete('debugAgent');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [isV2, debugRunParam, debugAgentParam, setSearchParams]);
 
   // Flat union of every visible message's toolInvocations. Powers the
   // ConversationToolInvocationsContext so a citation chip rendered in turn N
@@ -2557,6 +2668,22 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)}
           onToggleSidebar={onToggleSidebar}
           sidebarCollapsed={sidebarCollapsed}
+          agentInfo={
+            isV2 ? (
+              <AboutAgentPanel
+                agentSlug={chatAgentSlug}
+                conversationId={conversationId}
+                running={isAnyMessageStreaming}
+                onOpenDebugger={(): void => {
+                  setDebugAgentSlug(chatAgentSlug);
+                  setDebugTurnIndex(null);
+                  setDebugSessionId(null);
+                  setDebugFocusToolCallId(null);
+                  setShowDebugger(true);
+                }}
+              />
+            ) : undefined
+          }
         />
 
         {/* Non-scrolling frame around the scroller. The prompt rail lives HERE,
@@ -2642,13 +2769,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       <ChatMessageBubble
                         trackContext={messageTrackContext}
                         message={message}
-                        recipientAgentSlug={
-                          isV2 && message.type === 'user' ? message.agentSlug : undefined
-                        }
                         conversationId={conversationId || undefined}
                         // A pending action belongs to the agent that proposed
                         // it, which after a switch may not be the one picked.
                         agentSlug={message.agentSlug ?? effectiveAgentSlug ?? undefined}
+                        {...(isV2 ? { onApproveAndContinue: handleApproveAndContinue } : {})}
                         onPendingActionResolved={() => {
                           if (!conversationId) return;
                           const refreshArtifacts = (): void => {
@@ -2690,6 +2815,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 // null falls back to turn-index for unlinked live runs.
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(null);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2700,6 +2826,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                                 setDebugTurnIndex(botTurnIndex);
                                 setDebugSessionId(message.debugSessionId ?? null);
                                 setDebugFocusToolCallId(toolCallId);
+                                setDebugAgentSlug(null);
                                 setShowDebugger(true);
                               }
                             : undefined
@@ -2785,6 +2912,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               voiceStageHost={voiceStageHost}
               voiceMessages={transcriptMessages}
               voiceChatTitle={voiceChatTitle}
+              lastUserMessage={lastUserMessage}
             />
           </div>
         </div>
@@ -2795,7 +2923,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           inline
           open={showDebugger}
           conversationId={conversationId}
-          agentSlug={effectiveAgentSlug || 'ask-ai'}
+          agentSlug={debugAgentSlug ?? (effectiveAgentSlug || 'ask-ai')}
           liveEvents={debugEvents}
           running={isAnyMessageStreaming}
           artifactsReadyVersion={debugArtifactsReadyVersion}

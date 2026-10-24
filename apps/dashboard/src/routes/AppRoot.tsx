@@ -49,6 +49,7 @@ import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
 import { SdlcFrameProvider } from './SdlcScreen/SdlcFrameContext';
 import { useSdlcFrameBridge } from './SdlcScreen/useSdlcFrameBridge';
+import { useSdlcResourceRoom } from './SdlcScreen/sdlcResourceChanged';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -180,6 +181,7 @@ import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
+import { UserGroupDialog } from '../components/UserGroup/UserGroupDialog/UserGroupDialog';
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { RoleManagementScreen } from './RoleManagementScreen';
@@ -194,6 +196,7 @@ import {
   MembersTab,
   RepositoryCredentialsTab,
   ToolbarTab,
+  AgentActivityTab,
 } from './WorkspaceManagementScreen';
 import OrganisationsModuleScreen, {
   LegacyOrganisationsRedirect,
@@ -516,6 +519,10 @@ const AppRoot = (): ReactElement => {
   // the host must not also render one (that would double it).
   const isSdlcRoute =
     /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
+  // Not inside the SDLC frame or a panel webview: they have no socket, and the host relays to the frame.
+  useSdlcResourceRoom(
+    !isInPanelWebview && /\/(sdlc|ai\/library|ai\/environments)(\/|$)/.test(location.pathname),
+  );
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -974,6 +981,7 @@ const AppRoot = (): ReactElement => {
                       )}
                       <AttachmentGalleryModal />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                       <AttachmentCitationPreview />
                       <ErrorReportModal
@@ -1903,6 +1911,16 @@ export const router = createBrowserRouter(
                       ),
                     },
                     {
+                      path: 'agent-activity',
+                      element: (
+                        <OrganisationsSectionGuard section='agent-activity'>
+                          <OrganisationsPage wide>
+                            <AgentActivityTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
                       path: 'user-groups',
                       element: (
                         <OrganisationsSectionGuard section='user-groups'>
@@ -2106,6 +2124,7 @@ export const router = createBrowserRouter(
                       <AttachmentGalleryModal />
                       <AttachmentCitationPreview />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                     </EditProvider>
                   </InitialStateLoader>
@@ -2160,6 +2179,7 @@ export const router = createBrowserRouter(
                       <AttachmentGalleryModal />
                       <AttachmentCitationPreview />
                       <ThreadCitationModal />
+                      <UserGroupDialog />
                       <TranscriptCitationModal />
                     </EditProvider>
                   </InitialStateLoader>
@@ -2189,6 +2209,7 @@ export const router = createBrowserRouter(
                       <CreateTicketWindow />
                     </div>
                     <AttachmentGalleryModal />
+                    <UserGroupDialog />
                   </EditProvider>
                 </InitialStateLoader>
               </ZeroFallbackProvider>

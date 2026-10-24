@@ -25,6 +25,10 @@ import { PrismaClient } from '@prisma/client';
      title: string; // Channel name for messages, document title for others
      subtitle: string;
      context?: string; // Message content for display (used by SearchResultItem)
+     /** Collection hits under the `claw` summary: the matched chunks, best first. `index` is the
+      *  chunk's position in the file (what kb-get-chunks pages by), left off when it can't be
+      *  recovered. */
+     chunks?: Array<{ index?: number; text: string }>;
      relevanceScore: number;
      avatar?: string;
      metadata: {
@@ -722,6 +726,37 @@ function pickBestChunk(hit: VespaSearchHit, doc: VespaFileDocument): string {
 /**
  * Transform collection document (knowledge base file)
  */
+/** How many chunks the `claw` summary returns: claw_best_chunks in vespa-core's file.sd is
+ *  `top(3, chunk_scores)`. */
+const CLAW_CHUNK_COUNT = 3;
+
+/**
+ * claw_chunks are the top CLAW_CHUNK_COUNT chunks by chunk_scores, but in document order and
+ * without their indices. The top chunk_scores indices, sorted ascending, line up with them, which
+ * recovers each chunk's index and lets them be ordered best first. If that can't be done cleanly
+ * (no scores, a count mismatch, a tie at the cut-off) they keep document order and no index.
+ */
+function rankClawChunks(
+  cells: Record<string, unknown> | undefined,
+  clawChunks: string[] | undefined,
+): Array<{ index?: number; text: string }> {
+  const texts = (clawChunks ?? []).map((c) => (typeof c === 'string' ? c : ''));
+  const scored = Object.entries(cells ?? {})
+    .filter((e): e is [string, number] => typeof e[1] === 'number')
+    .map(([idx, score]) => ({ index: parseInt(idx, 10), score }))
+    .sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, CLAW_CHUNK_COUNT);
+  const tieAtCut = scored.length > CLAW_CHUNK_COUNT && scored[CLAW_CHUNK_COUNT - 1].score === scored[CLAW_CHUNK_COUNT].score;
+  const ranked: Array<{ index?: number; text: string }> = top.length === texts.length && !tieAtCut
+    ? [...top]
+        .sort((a, b) => a.index - b.index)
+        .map((s, i) => ({ index: s.index, score: s.score, text: texts[i] }))
+        .sort((a, b) => b.score - a.score)
+        .map(({ index, text }) => ({ index, text }))
+    : texts.map((text) => ({ text }));
+  return ranked.filter((c) => c.text.trim() !== '');
+}
+
 function transformCollection(
   hit: VespaSearchHit,
   doc: VespaFileDocument,
@@ -763,7 +798,12 @@ function transformCollection(
     chunkIndex = 0;
   }
 
-  const chunkContent = doc.chunks?.[chunkIndex] || '';
+  // The `claw` summary carries only the matched chunks (claw_chunks) and no `chunks`, so the
+  // chunk_scores index above doesn't point into it; use all of them, best first, instead.
+  const matchedChunks = rankClawChunks(chunkScores?.cells, doc.claw_chunks);
+  const chunkContent = matchedChunks.length > 0
+    ? matchedChunks.map((c) => c.text).join('\n\n')
+    : doc.chunks?.[chunkIndex] || '';
 
   // Parse metadata for collection name if available
   let collectionName: string | undefined;
@@ -784,6 +824,7 @@ function transformCollection(
     title: docName || 'Unknown Document',
     subtitle: collectionName || 'Unknown Collection',
     context: chunkContent || doc.description || '',
+    ...(matchedChunks.length > 0 ? { chunks: matchedChunks } : {}),
     relevanceScore: hit.relevance,
     avatar: doc.ownerId,
     metadata: {

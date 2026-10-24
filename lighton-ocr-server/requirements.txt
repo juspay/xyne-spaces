@@ -4,6 +4,8 @@ uvicorn[standard]>=0.24.0
 python-multipart>=0.0.20
 python-dotenv>=1.0.0
 httpx>=0.26.0
+# eMudhra emSign G3 CA compromise: certifi 2026.10.19 drops the compromised roots
+certifi>=2026.10.19
 redis>=5.0.0
 pillow>=10.4,<11.0
 pymupdf>=1.24

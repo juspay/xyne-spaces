@@ -7,6 +7,16 @@ export { chatMessageRepository } from "./chatMessageRepository.js";
 export { chatConversationMetaRepository } from "./chatConversationMetaRepository.js";
 export { chatProjectRepository } from "./chatProjectRepository.js";
 export type { ChatProjectInput, ChatProjectUpdate, ChatProjectMembership } from "./chatProjectRepository.js";
+export {
+  chatProjectKnowledgeRepository,
+  isChatProjectKnowledgeType,
+  DuplicateKnowledgeError,
+  CHAT_PROJECT_KNOWLEDGE_TYPES,
+} from "./chatProjectKnowledgeRepository.js";
+export type {
+  ChatProjectKnowledgeInput,
+  ChatProjectKnowledgeType,
+} from "./chatProjectKnowledgeRepository.js";
 export { chatAttachmentRepository } from "./chatAttachmentRepository.js";
 export { designSystemRepository, DESIGN_SYSTEM_SOURCES, isDesignSystemSource } from "./designSystemRepository.js";
 export type { DesignSystemSource, DesignSystemOrigin, ResolvedDesignSystem, DesignSystemInput, DesignSystemUpdate } from "./designSystemRepository.js";

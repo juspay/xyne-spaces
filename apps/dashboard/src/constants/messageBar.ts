@@ -32,17 +32,12 @@ export const MESSAGE_MENU_COPY_IDS: readonly MessageBarActionId[] = [
   'forward',
 ];
 
-export const BAR_DRAG_THRESHOLD = 4;
 export const BAR_TILE_SIZE = 28;
 export const BAR_TILE_GLYPH_INSET = 6;
 export const BAR_TILE_LIFT = 1.08;
-export const BAR_ROW_LIFT = 1.02;
 export const BAR_HIDE_SCALE = 0.9;
 export const BAR_MAX_TILT = 8;
 export const BAR_DROP_REACH = 28;
-export const BAR_EASE_OUT = 'cubic-bezier(0.23, 1, 0.32, 1)';
-export const BAR_EASE_OUT_CURVE = [0.23, 1, 0.32, 1] as const;
-export const BAR_DRAG_CURSOR_CSS = '*{cursor:grabbing!important;user-select:none!important}';
 
 export const BAR_SOCKET_CLASS =
   'pointer-events-none absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0';

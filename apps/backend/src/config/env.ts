@@ -162,8 +162,15 @@ const envSchema = Joi.object({
   TAG_GENERATION_CONCURRENCY: Joi.number().integer().min(1).max(20).default(1),
   TAG_GENERATION_LLM_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
   ENABLE_STITCH_WORKER: Joi.boolean().default(false),
+  // Compatible (H.264 SDR) video renditions. Consumer only runs where this is true (needs ffmpeg).
+  ENABLE_VIDEO_RENDITION_WORKER: Joi.boolean().default(false),
+  // Serve /stream?variant=compat (else the API answers 404 for the variant and clients keep the original).
+  VIDEO_RENDITION_ENABLED: Joi.boolean().default(false),
+  // Also enqueue a rendition job for every uploaded video (otherwise only on first compat request).
+  VIDEO_RENDITION_ON_UPLOAD: Joi.boolean().default(false),
   ENABLE_CALL_TRANSCRIPTION_WORKER: Joi.boolean().default(false),
   ENABLE_AI_PROVISIONING_WORKER: Joi.boolean().default(false),
+  ENABLE_PROACTIVITY_WORKER: Joi.boolean().default(false),
   ENABLE_USER_AI_PROVISIONING: Joi.boolean().default(false),
   XYNE_CLAW_AUTH_INTERNAL_URL: Joi.string().uri().allow('').default(''),
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
@@ -358,6 +365,7 @@ const envSchema = Joi.object({
   DECISION_ENGINE: Joi.string().valid('xor', 'jev').default('xor'),
   // Decision evaluation: every decision is also queued for the other engines, to compare them.
   DECISION_EVAL_ENABLED: Joi.boolean().default(false),
+  DECISION_EVAL_CONCURRENCY: Joi.number().integer().min(1).default(4),
   ELEVENLABS_API_KEY: Joi.string().allow('').default(''),
   ELEVENLABS_API_URL: Joi.string().uri().default('https://api.elevenlabs.io'),
   ELEVENLABS_STT_MODEL: Joi.string().default('scribe_v2_realtime'),
@@ -904,8 +912,12 @@ export const config = {
   tagGenerationConcurrency: envVars.TAG_GENERATION_CONCURRENCY as number,
   tagGenerationLlmTimeoutMs: envVars.TAG_GENERATION_LLM_TIMEOUT_MS as number,
   enableStitchWorker: envVars.ENABLE_STITCH_WORKER,
+  enableVideoRenditionWorker: envVars.ENABLE_VIDEO_RENDITION_WORKER as boolean,
+  videoRenditionEnabled: envVars.VIDEO_RENDITION_ENABLED as boolean,
+  videoRenditionOnUpload: envVars.VIDEO_RENDITION_ON_UPLOAD as boolean,
   enableCallTranscriptionWorker: envVars.ENABLE_CALL_TRANSCRIPTION_WORKER,
   enableAiProvisioningWorker: envVars.ENABLE_AI_PROVISIONING_WORKER,
+  enableProactivityWorker: envVars.ENABLE_PROACTIVITY_WORKER,
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
@@ -1054,6 +1066,7 @@ export const config = {
   decisionEngine: envVars.DECISION_ENGINE as 'xor' | 'jev',
   decisionEval: {
     enabled: envVars.DECISION_EVAL_ENABLED,
+    concurrency: envVars.DECISION_EVAL_CONCURRENCY as number,
   },
   elevenLabs: {
     apiKey: envVars.ELEVENLABS_API_KEY as string,

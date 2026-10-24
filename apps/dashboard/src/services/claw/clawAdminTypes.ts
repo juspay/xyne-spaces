@@ -74,6 +74,8 @@ export interface AdminScheduledJob {
   nextRunAt: string | null;
   lastRunAt: string | null;
   label: string | null;
+  replyMode?: string | null;
+  channelId?: string | null;
   createdAt: string;
   orgId?: string;
   orgName?: string | null;

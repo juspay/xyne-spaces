@@ -10,12 +10,22 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import {
   keepPreviousData,
   useInfiniteQuery,
+  useQuery,
   useQueryClient,
   type InfiniteData,
+  type QueryClient,
 } from '@tanstack/react-query';
 import {
+  createV2ChatProject,
+  deleteV2ChatProject,
+  fetchV2ChatProjects,
   fetchV2Conversations,
+  moveV2ConversationToProject,
+  reorderV2ChatProjects,
+  updateV2ChatProject,
   type AgentConversationCount,
+  type ChatProject,
+  type ChatProjectInput,
   type V2ConversationPage,
 } from '../services/XyneAI/XyneAISessionsV2Service';
 import type { ConversationHistory } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -25,6 +35,9 @@ import type { ConversationHistory } from '../components/Chat/XyneAISidebar/utils
 // ============================================================================
 
 const V2_SESSIONS_KEY = ['xyne-ai-v2-sessions'] as const;
+export const V2_CHAT_PROJECTS_KEY = ['xyne-ai-v2-chat-projects'] as const;
+/** Index of the project filter inside a sessions query key. */
+const SESSIONS_KEY_PROJECT_INDEX = 3;
 const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readonly string[] =>
   agentSlug
     ? ['xyne-ai-v2-session', convId, 'messages', agentSlug]
@@ -35,6 +48,7 @@ const v2SessionMessagesKey = (convId: string, agentSlug?: string | null): readon
 // ============================================================================
 
 const NO_AGENTS: AgentConversationCount[] = [];
+const NO_PROJECT_COUNTS: Record<string, number> = {};
 
 interface V2SessionsListOptions {
   /** Keep only this agent's conversations (server-side). */
@@ -44,6 +58,8 @@ interface V2SessionsListOptions {
   enabled?: boolean;
   /** Refetch whenever the list mounts — for panels the user opens to look. */
   refetchOnMount?: boolean | 'always';
+  /** A project id to list, or `'none'` for unfiled chats (server-side). */
+  projectId?: string | null;
 }
 
 /**
@@ -57,10 +73,14 @@ export function useV2SessionsList({
   query = '',
   enabled = true,
   refetchOnMount = true,
+  projectId = null,
 }: V2SessionsListOptions = {}) {
   const result = useInfiniteQuery({
-    queryKey: [...V2_SESSIONS_KEY, agentSlug ?? '', query],
-    queryFn: ({ pageParam }) => fetchV2Conversations({ agentSlug, q: query, cursor: pageParam }),
+    // The project filter is part of the key so each view caches separately —
+    // and so the optimistic move can tell which views a chat still belongs in.
+    queryKey: [...V2_SESSIONS_KEY, agentSlug ?? '', query, projectId ?? ''],
+    queryFn: ({ pageParam }) =>
+      fetchV2Conversations({ agentSlug, q: query, cursor: pageParam, projectId }),
     initialPageParam: null as string | null,
     getNextPageParam: page => page.nextCursor ?? undefined,
     // Changing the filter or search keeps the current rows on screen until
@@ -79,6 +99,9 @@ export function useV2SessionsList({
   return {
     conversations,
     agents: result.data?.pages[0]?.agents ?? NO_AGENTS,
+    /** Chats per project id, for the sidebar. Every project's total, not just
+     *  the one being viewed. */
+    projectCounts: result.data?.pages[0]?.projectCounts ?? NO_PROJECT_COUNTS,
     isLoading: result.isLoading,
     hasMore: result.hasNextPage,
     isLoadingMore: result.isFetchingNextPage,
@@ -173,4 +196,266 @@ export function useV2SessionPatcher() {
   );
 
   return { patchSession };
+}
+
+// ============================================================================
+// Chat projects
+// ============================================================================
+
+type SessionsEntry = [readonly unknown[], InfiniteData<V2ConversationPage> | undefined];
+
+/**
+ * Would a cached list view still show a chat that now sits in `projectId`?
+ *
+ * `''` is the unfiltered view and keeps everything; `'none'` holds only
+ * unfiled chats. This is what makes a move more than a field edit: in a
+ * filtered view the row has to LEAVE, and the existing session patcher only
+ * rewrites fields in place.
+ */
+export function viewHoldsProject(viewFilter: string, projectId: string | null): boolean {
+  if (!viewFilter) {
+    return true;
+  }
+  if (viewFilter === 'none') {
+    return projectId === null;
+  }
+  return viewFilter === projectId;
+}
+
+function sessionsEntries(queryClient: QueryClient): SessionsEntry[] {
+  return queryClient.getQueriesData<InfiniteData<V2ConversationPage>>({
+    queryKey: V2_SESSIONS_KEY,
+  });
+}
+
+function rollbackTo(queryClient: QueryClient, previous: SessionsEntry[]): () => void {
+  return () => {
+    previous.forEach(([key, data]) => queryClient.setQueryData(key, data));
+  };
+}
+
+function viewFilterOf(key: readonly unknown[]): string {
+  const raw = key[SESSIONS_KEY_PROJECT_INDEX];
+  return typeof raw === 'string' ? raw : '';
+}
+
+/**
+ * Move a chat between projects in every cached list view at once, and hand
+ * back a rollback.
+ *
+ * In views the chat no longer belongs to it is removed rather than patched.
+ * A view it has moved INTO cannot gain the row here — that page may not be
+ * loaded, and inventing a row would put it in the wrong sort position — so
+ * those views are refetched by the caller instead.
+ */
+export function moveSessionInCache(
+  queryClient: QueryClient,
+  rowId: string,
+  projectId: string | null,
+): () => void {
+  const previous = sessionsEntries(queryClient);
+  for (const [key, data] of previous) {
+    if (!data) {
+      continue;
+    }
+    const keeps = viewHoldsProject(viewFilterOf(key), projectId);
+    queryClient.setQueryData<InfiniteData<V2ConversationPage>>(key, {
+      ...data,
+      pages: data.pages.map(page => ({
+        ...page,
+        conversations: page.conversations.flatMap(row => {
+          if (row.id !== rowId) {
+            return [row];
+          }
+          return keeps ? [{ ...row, projectId }] : [];
+        }),
+      })),
+    });
+  }
+  return rollbackTo(queryClient, previous);
+}
+
+/**
+ * Delete a project optimistically: drop it from the project list, and unfile
+ * its chats wherever they are cached. claw-auth never deletes the chats
+ * themselves, so they must reappear in the main list rather than vanish.
+ */
+export function removeProjectFromCache(queryClient: QueryClient, projectId: string): () => void {
+  const previousProjects = queryClient.getQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY);
+  queryClient.setQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY, (projects): ChatProject[] =>
+    (projects ?? []).filter(project => project.id !== projectId),
+  );
+
+  const previous = sessionsEntries(queryClient);
+  for (const [key, data] of previous) {
+    if (!data) {
+      continue;
+    }
+    const filter = viewFilterOf(key);
+    queryClient.setQueryData<InfiniteData<V2ConversationPage>>(key, {
+      ...data,
+      pages: data.pages.map(page => ({
+        ...page,
+        conversations: page.conversations.flatMap(row => {
+          if (row.projectId !== projectId) {
+            return [row];
+          }
+          // The chat is now unfiled: it leaves this project's view, stays in
+          // the unfiltered one, and belongs in `none`.
+          return filter === projectId ? [] : [{ ...row, projectId: null }];
+        }),
+      })),
+    });
+  }
+
+  const restoreSessions = rollbackTo(queryClient, previous);
+  return () => {
+    queryClient.setQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY, previousProjects);
+    restoreSessions();
+  };
+}
+
+/** Rename or otherwise patch a project in the cached list, with a rollback. */
+export function patchProjectInCache(
+  queryClient: QueryClient,
+  projectId: string,
+  patch: Partial<ChatProject>,
+): () => void {
+  const previous = queryClient.getQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY);
+  queryClient.setQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY, (projects): ChatProject[] =>
+    (projects ?? []).map(project =>
+      project.id === projectId ? { ...project, ...patch } : project,
+    ),
+  );
+  return () => {
+    queryClient.setQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY, previous);
+  };
+}
+
+/** The caller's chat projects, ordered as they arranged them. */
+export function useV2ChatProjects({ enabled = true }: { enabled?: boolean } = {}) {
+  const result = useQuery({
+    queryKey: V2_CHAT_PROJECTS_KEY,
+    queryFn: fetchV2ChatProjects,
+    staleTime: 30_000,
+    enabled,
+  });
+  return {
+    projects: result.data ?? NO_PROJECTS,
+    isLoading: result.isLoading,
+  };
+}
+
+const NO_PROJECTS: ChatProject[] = [];
+
+/**
+ * Project writes that show instantly and roll back on failure.
+ *
+ * Same reasoning as useV2SessionPatcher: invalidate-then-refetch alone makes a
+ * success wait a round trip and makes a FAILURE look like a silent revert,
+ * because the refetch returns the server's unchanged row.
+ */
+export function useV2ChatProjectActions() {
+  const queryClient = useQueryClient();
+
+  const invalidateProjects = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: V2_CHAT_PROJECTS_KEY });
+  }, [queryClient]);
+
+  const moveChatToProject = useCallback(
+    async (
+      rowId: string,
+      conversationId: string,
+      projectId: string | null,
+      agentSlug?: string | null,
+    ): Promise<void> => {
+      const rollback = moveSessionInCache(queryClient, rowId, projectId);
+      try {
+        await moveV2ConversationToProject(conversationId, projectId, agentSlug);
+      } catch (error) {
+        rollback();
+        throw error;
+      }
+      // Counts changed, and the destination view may not hold this row yet.
+      void queryClient.invalidateQueries({ queryKey: V2_SESSIONS_KEY });
+      invalidateProjects();
+    },
+    [queryClient, invalidateProjects],
+  );
+
+  const updateProject = useCallback(
+    async (projectId: string, patch: ChatProjectInput): Promise<void> => {
+      const rollback = patchProjectInCache(queryClient, projectId, patch);
+      try {
+        await updateV2ChatProject(projectId, patch);
+      } catch (error) {
+        rollback();
+        throw error;
+      }
+      invalidateProjects();
+    },
+    [queryClient, invalidateProjects],
+  );
+
+  const renameProject = useCallback(
+    async (projectId: string, name: string): Promise<void> => {
+      await updateProject(projectId, { name });
+    },
+    [updateProject],
+  );
+
+  const deleteProject = useCallback(
+    async (projectId: string): Promise<void> => {
+      const rollback = removeProjectFromCache(queryClient, projectId);
+      try {
+        await deleteV2ChatProject(projectId);
+      } catch (error) {
+        rollback();
+        throw error;
+      }
+      void queryClient.invalidateQueries({ queryKey: V2_SESSIONS_KEY });
+      invalidateProjects();
+    },
+    [queryClient, invalidateProjects],
+  );
+
+  const createProject = useCallback(
+    async (input: ChatProjectInput): Promise<ChatProject> => {
+      // Not optimistic: the server mints the id and the sort position, and a
+      // placeholder row would have neither.
+      const created = await createV2ChatProject(input);
+      invalidateProjects();
+      return created;
+    },
+    [invalidateProjects],
+  );
+
+  const reorderProjects = useCallback(
+    async (projectIds: string[]): Promise<void> => {
+      const previous = queryClient.getQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY);
+      const order = new Map(projectIds.map((id, index) => [id, index]));
+      queryClient.setQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY, (projects): ChatProject[] =>
+        [...(projects ?? [])].sort(
+          (a, b) => (order.get(a.id) ?? a.sortOrder) - (order.get(b.id) ?? b.sortOrder),
+        ),
+      );
+      try {
+        await reorderV2ChatProjects(projectIds);
+      } catch (error) {
+        queryClient.setQueryData<ChatProject[]>(V2_CHAT_PROJECTS_KEY, previous);
+        throw error;
+      }
+      invalidateProjects();
+    },
+    [queryClient, invalidateProjects],
+  );
+
+  return {
+    moveChatToProject,
+    updateProject,
+    renameProject,
+    deleteProject,
+    createProject,
+    reorderProjects,
+  };
 }

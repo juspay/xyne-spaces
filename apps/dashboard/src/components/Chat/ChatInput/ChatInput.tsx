@@ -1431,7 +1431,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     return (
       <>
         {channel?.isArchived ? (
-          <div className='px-4 py-3 bg-muted border-t border-border'>
+          <div
+            className='px-4 py-3 bg-muted border-t border-border'
+            data-testid='archived-channel-banner'
+          >
             <p className='text-sm text-status-pending text-center'>
               {conversationId
                 ? 'You are viewing a thread from an archived channel'
@@ -1514,7 +1517,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               hasAgentActivity={agentActive}
               agentSlot={
                 <AgentProgressIndicator
-                  sessionId={agentProgressConversationId ?? currentSessionId}
+                  sessionId={agentProgressConversationId}
                   conversationId={agentProgressConversationId}
                   onActiveChange={setAgentActive}
                 />

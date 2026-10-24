@@ -136,6 +136,11 @@ import {
   UnscopedACL,
 } from './tables'
 import { UserActivityEventsAcl } from './tables/user_activity_acl'
+import {
+  AgentProactivityDecisionsACL,
+  AgentProactivityXorCallsACL,
+  AgentProactivityXorQuestionsACL,
+} from './tables/agent-proactivity-decisions-acl'
 
 export class ACLFactory {
   static getACL(
@@ -158,6 +163,13 @@ export class ACLFactory {
       return new ApplicationsACL(ctx, prisma)
     case 'applicationReleaseTicket':
       return new ApplicationReleaseTicketsACL(ctx, prisma)
+    case 'authSessionWorkspaceAccess':
+      // Child of authSession; same pre-workspace-context write path, so also unscoped.
+      return new UnscopedACL(ctx, prisma)
+    case 'authSession':
+      // Org-scoped device session table; written during login/refresh before any
+      // workspace context exists, so it is deliberately not workspace-scoped.
+      return new UnscopedACL(ctx, prisma)
     case 'board':
       return new BoardsACL(ctx, prisma)
     case 'boardComplexityScore':
@@ -199,6 +211,12 @@ export class ACLFactory {
     // userId) by radarRuleStore — there is no route that reads anyone else's.
     case 'radarRule':
       return new BaseQueryACL(ctx, prisma)
+    case 'agentProactivityDecision':
+      return new AgentProactivityDecisionsACL(ctx, prisma)
+    case 'agentProactivityXorCall':
+      return new AgentProactivityXorCallsACL(ctx, prisma)
+    case 'agentProactivityXorQuestion':
+      return new AgentProactivityXorQuestionsACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
     case 'channelBoardMapping':

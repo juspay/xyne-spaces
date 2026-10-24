@@ -107,6 +107,21 @@ export interface ComposerModelControl {
   /** The list belongs to the previous agent while the new one loads. */
   loading?: boolean;
   disabled?: boolean;
+  provider?: ComposerProviderControl | null;
+}
+
+export interface ComposerProviderControl {
+  options: ReadonlyArray<{ value: string; label: string }>;
+  selected: string;
+  onSelect: (value: string) => void;
+  saving?: boolean;
+  disabled?: boolean;
+}
+
+export interface ComposerFastControl {
+  enabled: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
 }
 
 /** One knowledge-base scope: a collection, a folder in one, or a single file. */
@@ -173,7 +188,9 @@ export interface ComposerProps {
   plus: ComposerPlusControl;
   agent: ComposerAgentControl | null;
   model: ComposerModelControl | null;
+  fast?: ComposerFastControl | null;
 
+  lastUserMessage?: string;
   onEnterVoiceMode?: () => void;
   /** Files pasted into the editor (a large text paste arrives as a file). */
   onFilesPasted: (files: File[]) => void;

@@ -1,7 +1,7 @@
 import { ReactElement, useMemo } from 'react';
 import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { apiInstance } from '@/services/clients/apiClient';
 import { useCachedQuery } from '@/hooks/useCachedQuery';
 import { queries } from '@/zero/queries';
@@ -20,6 +20,22 @@ import {
 } from '../shared/components/LibraryTabShell';
 import { LibraryToolbarPortal } from '../shared/components/LibraryToolbarSlot';
 import { useCategoryFilter } from '../shared/hooks/useCategoryFilter';
+
+export const useHubAgents = (
+  hubId: string | null,
+): UseQueryResult<{ memberSlugs: string[]; pendingSlugs: string[] }> =>
+  useQuery({
+    queryKey: ['sdlc-hub-agents', hubId],
+    queryFn: async () =>
+      (
+        await apiInstance.get<{ memberSlugs: string[]; pendingSlugs: string[] }>(
+          `/sdlc/channels/${encodeURIComponent(hubId ?? '')}/agents`,
+        )
+      ).data,
+    enabled: Boolean(hubId),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
 
 const AgentsV2 = ({
   query,
@@ -59,16 +75,7 @@ const AgentsV2 = ({
         .sort((a, b) => a.name.localeCompare(b.name)),
     [channelStatuses],
   );
-  const hub = useQuery({
-    queryKey: ['sdlc-hub-agents', hubId],
-    queryFn: async () =>
-      (
-        await apiInstance.get<{ memberSlugs: string[]; pendingSlugs: string[] }>(
-          `/sdlc/channels/${encodeURIComponent(hubId ?? '')}/agents`,
-        )
-      ).data,
-    enabled: Boolean(hubId),
-  });
+  const hub = useHubAgents(hubId);
   const agents = useMemo(() => {
     if (!hubId) return data ?? [];
     const inHub = new Set([...(hub.data?.memberSlugs ?? []), ...(hub.data?.pendingSlugs ?? [])]);

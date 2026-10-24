@@ -96,19 +96,32 @@ async function buildAuthContext(req: Request): Promise<{ ctx: Context; authData:
   return { ctx, authData };
 }
 
-function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
+/**
+ * What makes one API version differ from another: the label it reports and the
+ * operation ids it resolves. Everything else — parsers, direct routes, the
+ * error envelope — is shared, so a new version is a new resolver plus whatever
+ * routes only it serves, never a copy of this file.
+ */
+export interface SdkVersion {
+  readonly label: 'v1' | 'v2';
+  readonly resolve: (op: string) => V1Target | undefined;
+  /** Routes only this version serves, matched before the shared direct routes. */
+  readonly routers?: readonly Router[];
+}
+
+function operationHandler(version: SdkVersion, endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
   return handle(async (req: Request, res: Response) => {
     const { ctx, authData } = await buildAuthContext(req);
 
     const { op, args } = v1Request.parse(req.body);
 
-    const target = resolveV1Operation(op);
+    const target = version.resolve(op);
     req.sdkCall = {
       op,
       kind: !target || target.kind === 'retired' ? 'unknown' : target.kind,
     };
     if (!target) {
-      throw new SdkApiError('not_found', `Unknown operation "${op}" in API v1.`);
+      throw new SdkApiError('not_found', `Unknown operation "${op}" in API ${version.label}.`);
     }
     if (target.kind === 'retired') {
       throw new SdkApiError('not_found', `Operation "${op}" was retired: ${target.reason}`);
@@ -125,7 +138,7 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
       // bug, and the fix is mechanical.
       throw new SdkApiError(
         'validation_failed',
-        `Operation "${op}" is a ${target.kind}; send it to /api/sdk/v1/${
+        `Operation "${op}" is a ${target.kind}; send it to /api/sdk/${version.label}/${
           target.kind === 'mutator' ? 'mutate' : target.kind
         }.`,
       );
@@ -182,15 +195,14 @@ function runDirect(
   });
 }
 
-/**
- * The authenticated v1 surface. Mounted behind authMiddleware.authenticate
- * (cookie-based auth, same as dashboard) — see `app.ts`.
- */
-export function createSdkV1Router(): Router {
+/** One versioned surface: operation endpoints, its own routes, then the shared direct routes. */
+export function createSdkVersionRouter(version: SdkVersion): Router {
   const router = Router();
 
-  router.post('/query', v1Handler('query'));
-  router.post('/mutate', v1Handler('mutator'));
+  router.post('/query', operationHandler(version, 'query'));
+  router.post('/mutate', operationHandler(version, 'mutator'));
+
+  for (const own of version.routers ?? []) router.use(own);
 
   // Direct controller routes, reachable under their versioned paths. These still
   // carry their own path in the client, which is the remaining half of the
@@ -199,6 +211,15 @@ export function createSdkV1Router(): Router {
   router.use(directRouter);
 
   return router;
+}
+
+/**
+ * The authenticated v1 surface. Mounted behind authMiddleware.authenticate
+ * (cookie-based auth, same as dashboard) — see `app.ts`. Frozen: published
+ * 0.1.x clients call it, so new routes go to v2.
+ */
+export function createSdkV1Router(): Router {
+  return createSdkVersionRouter({ label: 'v1', resolve: resolveV1Operation });
 }
 
 export { V1_MAPPER, v1OperationIds, resolveV1Operation } from './mapper';

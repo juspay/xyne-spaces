@@ -13,6 +13,7 @@ import type {
   EngineRun,
   LlmReply,
   RunOutcome,
+  TokenUsage,
 } from './types';
 
 const CLASSIFIER_TIMEOUT_MS = 10_000;
@@ -41,6 +42,10 @@ const leastConfidence = (answers: Record<string, DecisionAnswer>): number | unde
     : undefined;
 };
 
+/** A run's token fields, so recordRun counts what the engine reported. */
+const tokensOf = (usage: TokenUsage | undefined): Pick<EngineRun<unknown>, 'promptTokens' | 'completionTokens'> =>
+  usage ? { promptTokens: usage.promptTokens, completionTokens: usage.completionTokens } : {};
+
 /** A reply without a usable answer is an abstention; no reply at all is a failure. */
 export const classifierOutcome = (answered: boolean, failure: AskFailure | undefined): RunOutcome =>
   answered ? 'answered' : failure && failure.kind !== 'unusable' ? 'failed' : 'abstained';
@@ -57,18 +62,22 @@ async function runClassifier<T>(engine: ClassifierEngine, task: DecisionTask<T>)
 
   const startedAt = performance.now();
   let failure: AskFailure | undefined;
+  let usage: TokenUsage | undefined;
   const answers = await requestClassifierAnswers(task.question.state, task.question.questions, CLASSIFIER_TIMEOUT_MS, undefined, {
     target,
     engine,
     onFailure: (f) => {
       failure = f;
     },
+    onUsage: (u) => {
+      usage = u;
+    },
   });
   const latencyMs = elapsedSince(startedAt);
   const answer = answers ? task.readAnswers(answers, engine) : null;
   const outcome = classifierOutcome(answer !== null, failure);
   const confidence = answers && answer !== null ? leastConfidence(answers) : undefined;
-  return { engine, outcome, answer, latencyMs, model: target.model, confidence };
+  return { engine, outcome, answer, latencyMs, model: target.model, confidence, ...tokensOf(usage) };
 }
 
 /**
@@ -131,6 +140,7 @@ const askClassifier =
     const target = classifierTarget(engine);
     const startedAt = performance.now();
     let failure: AskFailure | undefined;
+    let usage: TokenUsage | undefined;
     const answer = await requestClassifierAnswers(state, questions, timeoutMs, signal, {
       partial,
       target,
@@ -139,9 +149,12 @@ const askClassifier =
         failure = f;
         onFailure?.(f);
       },
+      onUsage: (u) => {
+        usage = u;
+      },
     });
     const outcome = classifierOutcome(answer !== null, failure);
-    return { engine, outcome, answer, latencyMs: elapsedSince(startedAt), model: target.model };
+    return { engine, outcome, answer, latencyMs: elapsedSince(startedAt), model: target.model, ...tokensOf(usage) };
   };
 
 export const askXor: Ask = askClassifier('xor');

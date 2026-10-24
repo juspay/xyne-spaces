@@ -71,6 +71,7 @@ export interface ComposerContext {
   /** Per-run thinking level from the composer's thinking dropdown.
    *  null = the agent's configured default. */
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
+  fast: boolean;
   sandboxMode: 'remote' | 'local' | 'container';
 }
 
@@ -99,6 +100,7 @@ export const EMPTY_COMPOSER_CONTEXT: ComposerContext = {
   model: null,
   modelProvider: null,
   thinkingLevel: null,
+  fast: false,
   sandboxMode: 'remote',
 };
 
@@ -149,7 +151,8 @@ export function hasComposerContext(ctx: ComposerContext): boolean {
     ctx.createCanvasEnabled ||
     ctx.instant ||
     ctx.model !== null ||
-    ctx.thinkingLevel !== null
+    ctx.thinkingLevel !== null ||
+    ctx.fast
   );
 }
 
@@ -204,6 +207,7 @@ export function toStreamOverrides(ctx: ComposerContext): StreamOverrides {
       ? { model: ctx.model, ...(ctx.modelProvider ? { modelProvider: ctx.modelProvider } : {}) }
       : {}),
     ...(ctx.thinkingLevel ? { thinkingLevel: ctx.thinkingLevel } : {}),
+    ...(ctx.fast ? { speed: 'fast' as const } : {}),
     ...(ctx.sandboxMode !== 'remote' ? { sandboxMode: ctx.sandboxMode } : {}),
     researchContext: ctx.research,
   };

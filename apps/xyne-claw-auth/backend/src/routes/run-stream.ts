@@ -5,9 +5,10 @@ import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
-import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { matchesAuthenticatedUserId, getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveProjectInstructions } from "../lib/project-context.js";
 import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -32,6 +33,7 @@ import { gcsService } from "../services/storageService.js";
 import { maybeGenerateConversationTitle } from "../services/chatTitleClient.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
+import { personalProviderDispatch, resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { resolveSdlcHubContextForUser, resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
@@ -707,10 +709,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...lines,
         'When they say "this page", "this doc" or "what is open", they mean that one.',
         channelId && folderId
-          ? `Anything you create for them belongs here too: pass channelId="${channelId}" and ` +
-            `sdlcFolderId="${folderId}" to spaces-create-canvas so it is filed in this folder ` +
-            "rather than left unfiled. For an SDLC artifact (PRD, Tech Doc, ...) pass the same id as trackFolderId " +
-            "to spaces-sdlc-write-artifact create, with that folder's trackId."
+          ? `Anything you create for them belongs here too: create it with spaces-sdlc-write-artifact create, ` +
+            `channelId="${channelId}", trackFolderId="${folderId}" and that folder's trackId, never spaces-create-canvas.`
           : "",
       ]
         .filter(Boolean)
@@ -856,16 +856,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       ? rawThinkingLevel
       : undefined;
     const effectiveSpeed = speedOverride ?? agentDefaultSpeed(agentRow.config);
-    const resolvedProviders = await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
-    const resolvedProvider = resolvedProviders?.provider ?? (provider as string | undefined);
-    const resolvedProviderConfigs =
-      resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
-        ? resolvedProviders.providerConfigs
-        : (providerConfigs as Record<string, unknown> | undefined);
-    const resolvedProviderOrder =
-      resolvedProviders && resolvedProviders.providerOrder.length > 0
-        ? resolvedProviders.providerOrder
-        : undefined;
     const pinnedOverride = (providerOverride ?? undefined) as { provider?: string; model?: string } | undefined;
     const harnessPinned = pinnedOverride?.provider === "local-harness";
     const serverPinned =
@@ -874,9 +864,37 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       Boolean(pinnedOverride?.model);
     const forwardedProviderOverride = harnessPinned ? undefined : providerOverride;
 
-    const rawPersonalProvider = CONFIG.localHarnessEnabled
-      ? (await userAgentConfigRepository.findByUserAndAgent(userId, orgId, slug).catch(() => null))?.provider
-      : undefined;
+    const personalConfigProvider = (await userAgentConfigRepository.findByUserAndAgent(userId, orgId, slug).catch(() => null))?.provider;
+    const rawPersonalProvider = CONFIG.localHarnessEnabled ? personalConfigProvider : undefined;
+    const personalDispatch =
+      !harnessPinned &&
+      !serverPinned &&
+      personalConfigProvider &&
+      personalConfigProvider !== "spaces" &&
+      !isLocalHarnessProvider(personalConfigProvider)
+        ? personalProviderDispatch(
+            await resolveProvidersForDispatch({
+              targetUserId: userId,
+              agent: { id: agentRow.id, orgId, slug },
+              agentRow,
+              speed: effectiveSpeed,
+            }).catch(() => null),
+          )
+        : undefined;
+    const resolvedProviders = personalDispatch
+      ? null
+      : await resolveAgentProviderConfigs(agentRow, { speed: effectiveSpeed }).catch(() => null);
+    const resolvedProvider = personalDispatch?.provider ?? resolvedProviders?.provider ?? (provider as string | undefined);
+    const resolvedProviderConfigs =
+      personalDispatch?.providerConfigs ??
+      (resolvedProviders && Object.keys(resolvedProviders.providerConfigs).length > 0
+        ? resolvedProviders.providerConfigs
+        : (providerConfigs as Record<string, unknown> | undefined));
+    const resolvedProviderOrder =
+      personalDispatch?.providerOrder ??
+      (resolvedProviders && resolvedProviders.providerOrder.length > 0
+        ? resolvedProviders.providerOrder
+        : undefined);
     const rawAgentProviderOrder = (agentRow.config as Record<string, unknown> | null)?.["providerOrder"];
     const agentConfiguredProviderOrder: string[] = Array.isArray(rawAgentProviderOrder)
       ? rawAgentProviderOrder.filter((p): p is string => typeof p === "string")
@@ -1429,6 +1447,18 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
     // Composed here so both the base field and the design/page override use it.
+    // Project instructions are NOT added here. This body is forwarded to
+    // /internal/run, and prepareRun injects them after the user's own — adding
+    // them here too would send them twice, ahead of the user's, and double the
+    // per-turn cost. The local-harness path below never reaches prepareRun, so
+    // it does its own injection.
+    const projectInstructions = await resolveProjectInstructions(
+      convId,
+      // Aliases, not the canonical id alone: a chat filed under the caller's
+      // raw Spaces id is still theirs, and a single-id lookup would miss it.
+      [...new Set([userId, ...getRequesterAliases(req)].filter(Boolean))],
+      orgId,
+    );
     const aiScreenInstructions = withAiScreenPresentationInstructions(
       typeof additionalInstructions === "string" ? additionalInstructions : undefined,
     );
@@ -1669,6 +1699,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
     const harnessInstructionBlocks = [
       typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+      // A harness run builds its own context and never reaches prepareRun, so
+      // the project's instructions have to be added here or they never arrive.
+      projectInstructions ?? "",
       designSelectionInstruction,
       pageSelectionInstruction,
       openItemsInstruction,

@@ -201,7 +201,7 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app" | "delegation" | MessagingChannelKey;
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "proactivity" | "app" | "delegation" | MessagingChannelKey;
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
@@ -470,6 +470,7 @@ function recordRunStats(sessionId: string, pending: PendingRunStats): void {
         llmCalls: pending.llmCalls ? (stripNulDeep(pending.llmCalls) as unknown[]) : undefined,
         toolsUsed: pending.toolsUsed,
         citationOutcome: pending.citationOutcome,
+        invocations: pending.invocations,
       }]),
       { timeout: 10_000, maxWait: 5_000 },
     );
@@ -615,7 +616,7 @@ export const agentRunRepository = {
     // "running" placeholders (see below).
     const existingRow = await tx.agentRun.findUnique({
       where: { sessionId },
-      select: { id: true, orgId: true, toolInvocations: true, toolsUsed: true, userId: true, agentSlug: true, metadata: true },
+      select: { id: true, orgId: true, toolInvocations: true, toolsUsed: true, userId: true, agentSlug: true, metadata: true, model: true },
     });
     const existing = Array.isArray(existingRow?.toolInvocations)
       ? (existingRow!.toolInvocations as Array<Record<string, unknown>>)
@@ -728,6 +729,7 @@ export const agentRunRepository = {
             agentSlug: existingRow.agentSlug,
             completedAt,
             error: input.error ?? null,
+            model: modelBackstop ?? input.model ?? existingRow.model ?? null,
           },
           invocations: cleanInvocations ?? [],
           answer: input.result ?? null,
@@ -921,6 +923,8 @@ export const agentRunRepository = {
         ratingComment: true,
         ratedAt: true,
         usedUserToken: true,
+        provider: true,
+        model: true,
         startedAt: true,
         completedAt: true,
         chatMessageId: true,

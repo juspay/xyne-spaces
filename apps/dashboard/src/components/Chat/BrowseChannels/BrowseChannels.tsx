@@ -132,7 +132,7 @@ const BrowseChannels = (): ReactElement => {
   };
 
   return (
-    <div className='h-full flex flex-col bg-background'>
+    <div data-testid='browse-channels-page' className='h-full flex flex-col bg-background'>
       {/* Header */}
       <div className='flex items-center gap-3 p-4 border-b border-border'>
         <button
@@ -158,6 +158,7 @@ const BrowseChannels = (): ReactElement => {
               />
               <Input
                 placeholder='Search channels...'
+                data-testid='browse-channels-search'
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className='pl-9'

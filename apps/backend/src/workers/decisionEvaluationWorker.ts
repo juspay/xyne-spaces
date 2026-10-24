@@ -1,3 +1,4 @@
+import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { EmailClassificationService } from '@/services/emailClassificationService';
 import { compare, evaluate } from '@/services/decision/evaluation';
@@ -12,7 +13,7 @@ import {
 } from '@/queues/decisionEvaluationQueue';
 
 /** Per job type; each job is a few LLM and Jev calls that only feed metrics. */
-const CONCURRENCY = 4;
+const CONCURRENCY = config.decisionEval.concurrency;
 const EXPIRY_SWEEP_MS = 10 * 60 * 1000;
 
 /** Older than the TTL, counted from when it was queued, so a late retry is dropped too. */

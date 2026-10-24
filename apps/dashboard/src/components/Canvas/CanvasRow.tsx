@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   CopyDefault,
   FileText,
@@ -24,7 +24,7 @@ import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { CanvasShareModal } from './CanvasShareModal';
 import { cn } from '../../utils/classNames';
 import { getCanvasLabelDotClassName, getCanvasLabels } from './canvasLabelUtils';
-import { canvasLabelsApi } from '../../api/canvasLabelsApi';
+import { useStoredCanvasLabels } from './useCanvasLabels';
 
 interface CanvasRowTrackNames {
   canvasOpen: string;
@@ -100,7 +100,11 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [restLabels, setRestLabels] = useState<Canvas['labels'] | undefined>(undefined);
+  // Rows rendered without labels read them from the shared label store, which batches
+  // requests across rows and updates the row when labels change.
+  const restLabels = useStoredCanvasLabels(
+    Array.isArray(canvas.labels) || !canvas.id ? null : canvas.id,
+  );
   const isSelected = selectedCanvasId === canvas.id;
   const isOwner = canvas.createdBy === currentUserId;
   const isEditor = canvas.accessLevel === CanvasRole.EDITOR;
@@ -110,31 +114,6 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   const canvasLabels = getCanvasLabels(canvasWithRestLabels);
   const visibleLabels = canvasLabels.slice(0, 2);
   const hiddenLabelCount = Math.max(0, canvasLabels.length - visibleLabels.length);
-
-  useEffect(() => {
-    if (Array.isArray(canvas.labels) || !canvas.id || canvas.id === 'new') {
-      setRestLabels(undefined);
-      return;
-    }
-
-    let cancelled = false;
-    canvasLabelsApi
-      .getCanvasLabels([canvas.id])
-      .then(labelsByCanvasId => {
-        if (!cancelled) {
-          setRestLabels(labelsByCanvasId[canvas.id] ?? []);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRestLabels(undefined);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canvas.id, canvas.labels]);
 
   // The frame uses `file/file-text` for canvas rows. Public canvases keep the
   // globe so the (exceptional) shared state stays legible at a glance.

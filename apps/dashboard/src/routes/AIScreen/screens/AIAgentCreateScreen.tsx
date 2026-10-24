@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { AIShell } from '../../../components/AIScreen/AIShell';
 import ClawAgentCreateV2 from '../library/agents/create/ClawAgentCreateV2';
 import { AgentDraftBuilderPanel } from '../library/agents/create/AgentDraftBuilderPanel';
@@ -12,6 +13,7 @@ import {
 import { useAIChatHandoff } from '../useAIChatHandoff';
 import { useClawAgentDetail } from '../../../hooks/useClawAgentDetail';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { linkAgentToHub } from '../../../hooks/useCreateClawAgent';
 import { wizardStateFromAgent } from '../library/agents/create/agentDraft';
 
 const AUTOSAVE_DELAY_MS = 1200;
@@ -65,12 +67,16 @@ const AIAgentCreateScreen = (): ReactElement => {
     refetch: refetchCreatedAgent,
   } = useClawAgentDetail(createdSlug ?? undefined);
 
+  const queryClient = useQueryClient();
+  // Created from an SDLC hub: the chat card creates it, so link it to the hub here.
+  const sdlcChannelId = useSearchParams()[0].get('sdlcChannelId');
   const syncedSlugRef = useRef<string | null>(null);
   useEffect(() => {
     if (!createdAgent || syncedSlugRef.current === createdAgent.slug) return;
     syncedSlugRef.current = createdAgent.slug;
     setDraft(wizardStateFromAgent(createdAgent));
-  }, [createdAgent]);
+    if (sdlcChannelId) void linkAgentToHub(queryClient, sdlcChannelId, createdAgent);
+  }, [createdAgent, sdlcChannelId, queryClient]);
 
   const registerSave = useCallback(
     (save: ((options?: { quiet?: boolean }) => Promise<void>) | null) => {

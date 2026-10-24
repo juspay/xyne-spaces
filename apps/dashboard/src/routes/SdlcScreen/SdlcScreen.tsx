@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  ChannelAddUserPolicy,
   ChannelRole,
   ChannelType,
   SDLC_HUB_KNOWLEDGE_FOLDER,
@@ -334,7 +335,7 @@ type SdlcDocumentKind = 'artifact' | 'knowledge' | 'wiki';
 const HUB_DOCUMENT_HINT: Record<SdlcDocumentKind, string> = {
   artifact: 'Adding to this hub',
   knowledge:
-    'Agents in this hub see it by name. Pin it for everyone to have every run read it in full.',
+    'Agents in this hub see its title. Set it to Always read to have every run read it in full.',
   wiki: 'Adding to the research you are viewing',
 };
 
@@ -783,6 +784,18 @@ export default function SdlcScreen(): ReactElement {
       ),
     [channel, auth.userID],
   );
+  // Same rule as the channel's Add members button: an agent joins as a channel member.
+  const addAgentBlockedReason = useMemo((): string | null => {
+    const me = (channel?.participants ?? []).find(
+      participant => participant.userId === auth.userID,
+    );
+    if (!me) return 'Join this hub to add agents.';
+    return me.role === ChannelRole.ADMIN ||
+      (channel?.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE) ===
+        ChannelAddUserPolicy.EVERYONE
+      ? null
+      : 'Only hub admins can add agents to this hub.';
+  }, [channel, auth.userID]);
   // Archiving takes one click, so the toast names what went and offers the way back.
   const archiveArtifact = (canvasId: string, archived: boolean, title?: string): void => {
     void apiInstance
@@ -1294,7 +1307,6 @@ export default function SdlcScreen(): ReactElement {
   );
   const hubWorkflowId = knowledgeWorkflowShown ? (hubWorkflowLink?.workflow?.id ?? null) : null;
   const state = useHubWorkflow(hubWorkflowId);
-  const knowledgeRunning = state.phase === 'RUNNING';
   useHubWorkflowFinishedToast('Skills', state);
   useHubWorkflowFinishedToast('Deep research', wikiState);
 
@@ -1959,7 +1971,7 @@ export default function SdlcScreen(): ReactElement {
   closeCanvasRef.current = closeCanvas;
   const closeOpenCanvas = useCallback((): void => closeCanvasRef.current(), []);
   const hubDocumentNoun =
-    section === 'wiki' ? 'Research page' : section === 'knowledge' ? 'Knowledge File' : 'Document';
+    section === 'wiki' ? 'Research page' : section === 'knowledge' ? 'Knowledge file' : 'Document';
   const openArtifactArchived =
     Boolean(selectedWikiPage?.archived) ||
     canvases.find(canvas => canvas.id === selectedCanvasId)?.sdlcArtifact?.artifactStatus ===
@@ -2192,6 +2204,7 @@ export default function SdlcScreen(): ReactElement {
     /** Outline where the page has its own primary action beside it. */
     startVariant: 'default' | 'outline' = 'default',
     cancelLabel = 'Cancel',
+    buttonClassName?: string,
   ): { status: ReactElement; button: ReactElement } => {
     const running = workflow.phase === 'RUNNING';
     const busyKey = `hub-workflow:${label}`;
@@ -2221,6 +2234,7 @@ export default function SdlcScreen(): ReactElement {
           <Button
             size='sm'
             variant={running ? 'outline' : startVariant}
+            className={buttonClassName}
             loading={busy === busyKey}
             disabled={busy === busyKey}
             onClick={() =>
@@ -2257,31 +2271,6 @@ export default function SdlcScreen(): ReactElement {
     'default',
     'Cancel run',
   );
-
-  const renderWorkflowHeader = (input: {
-    icon: typeof Boxes;
-    title: string;
-    description: string;
-    /** Either the workflow the page runs, or its own actions. */
-    workflow?: HubWorkflow;
-    actions?: ReactNode;
-  }): ReactElement => {
-    const Icon = input.icon;
-    return (
-      <div className='mb-6 flex items-center justify-between gap-6 border-b pb-5'>
-        <div className='flex min-w-0 flex-1 items-center gap-3'>
-          <div className='grid size-10 shrink-0 place-items-center rounded-xl border bg-background text-primary shadow-sm'>
-            <Icon size={19} />
-          </div>
-          <div className='min-w-0'>
-            <h2 className='text-xl font-semibold tracking-tight'>{input.title}</h2>
-            <p className='mt-0.5 text-sm text-muted-foreground'>{input.description}</p>
-          </div>
-        </div>
-        {input.actions ?? (input.workflow && renderWorkflowControls(input.title, input.workflow))}
-      </div>
-    );
-  };
 
   useEffect(() => {
     if (sdlcChatTab !== 'ai') return;
@@ -2607,7 +2596,7 @@ export default function SdlcScreen(): ReactElement {
     clearArtifactDialogFields();
     const target =
       kind === 'knowledge'
-        ? { id: knowledgeFolderId ?? '', name: 'Knowledge File', kind }
+        ? { id: knowledgeFolderId ?? '', name: 'Knowledge file', kind }
         : { id: wikiScope?.folderId ?? '', name: 'Research page', kind };
     const draft = dismissedHubDraft.current;
     dismissedHubDraft.current = null;
@@ -2993,6 +2982,12 @@ export default function SdlcScreen(): ReactElement {
     return true;
   };
 
+  // The New knowledge file form shares the Skills page dialogs' shell; other kinds keep theirs.
+  const newDocDialog = !addItemParent && artifactDialogKind === 'knowledge';
+  // Sentence case, as "New skill" is; artifact type names keep their own case.
+  const newDialogTitle = newDocDialog
+    ? 'New knowledge file'
+    : `New ${artifactDialog?.name ?? 'document'}`;
   const artifactDetailsStep = (
     <form
       className='flex flex-1 flex-col'
@@ -3010,7 +3005,10 @@ export default function SdlcScreen(): ReactElement {
     >
       <div className='flex flex-col gap-4 pb-5 pt-1'>
         <div className='flex flex-col gap-1.5'>
-          <label htmlFor='sdlc-artifact-title' className='text-[12.5px] font-medium'>
+          <label
+            htmlFor='sdlc-artifact-title'
+            className={cn('font-medium', newDocDialog ? 'text-sm' : 'text-[12.5px]')}
+          >
             Title
           </label>
           <Input
@@ -3019,7 +3017,7 @@ export default function SdlcScreen(): ReactElement {
             autoFocus
             value={artifactTitle}
             onChange={event => setArtifactTitle(event.target.value)}
-            className='h-[38px] text-[13.5px]'
+            className={newDocDialog ? 'h-9' : 'h-[38px] text-[13.5px]'}
             placeholder='Clear, outcome-focused title'
             aria-invalid={artifactTitleMissing}
             aria-describedby={artifactTitleMissing ? 'sdlc-artifact-title-error' : undefined}
@@ -3230,9 +3228,13 @@ export default function SdlcScreen(): ReactElement {
           )}
         </div>
 
-        <div className='flex flex-col gap-1.5'>
+        {/* The Skills page has Create with AI for that; this path is the blank knowledge file. */}
+        <div className={cn('flex flex-col gap-1.5', newDocDialog && 'hidden')}>
           <div className='flex items-baseline gap-1.5'>
-            <label htmlFor='sdlc-artifact-ai-prompt' className='text-[12.5px] font-medium'>
+            <label
+              htmlFor='sdlc-artifact-ai-prompt'
+              className={cn('font-medium', newDocDialog ? 'text-sm' : 'text-[12.5px]')}
+            >
               Direction for Ask AI
             </label>
             <span className='text-xs text-muted-foreground'>optional</span>
@@ -3241,7 +3243,7 @@ export default function SdlcScreen(): ReactElement {
             id='sdlc-artifact-ai-prompt'
             value={artifactAiPrompt}
             onChange={event => setArtifactAiPrompt(event.target.value)}
-            className='h-[74px] min-h-0 resize-none text-[13.5px]'
+            className={cn('h-[74px] min-h-0 resize-none', !newDocDialog && 'text-[13.5px]')}
             placeholder='e.g. focus on retry semantics and the ledger contract; skip the mobile flow.'
             data-track-category='SdlcHub'
             data-track-name='ArtifactAiPromptChanged'
@@ -3250,47 +3252,78 @@ export default function SdlcScreen(): ReactElement {
         </div>
       </div>
 
-      <div className='sticky bottom-0 -mx-6 mt-auto flex items-center gap-2.5 rounded-b-lg border-t border-border bg-background px-6 py-3.5'>
-        <button
-          type='button'
-          onClick={resetArtifactDialog}
-          className='text-[12.5px] text-muted-foreground hover:text-foreground'
-          data-track-category='SdlcHub'
-          data-track-name='ArtifactDialogCancelled'
-        >
-          Cancel
-        </button>
-        <div className='ml-auto flex items-center gap-2'>
-          <Button
+      <div
+        className={cn(
+          'mt-auto flex items-center gap-2.5',
+          // The New knowledge file footer sits on the dialog surface, as HubDialog's do.
+          newDocDialog
+            ? 'justify-end pb-6 pt-2'
+            : 'sticky bottom-0 -mx-6 rounded-b-lg border-t border-border bg-background px-6 py-3.5',
+        )}
+      >
+        {!newDocDialog && (
+          <button
             type='button'
-            variant='outline'
-            className='h-[34px]'
-            loading={busy === 'artifact'}
-            onClick={() => {
-              if (artifactSubmitBlocked()) return;
-              void call(
-                'artifact',
-                () => Promise.resolve(createArtifact()),
-                'Creation request sent to Ask AI',
-              );
-            }}
+            onClick={resetArtifactDialog}
+            className='text-[12.5px] text-muted-foreground hover:text-foreground'
             data-track-category='SdlcHub'
-            data-track-name='ArtifactAskAiCreated'
+            data-track-name='ArtifactDialogCancelled'
           >
-            <Sparkles />
-            Ask AI to create
-          </Button>
+            Cancel
+          </button>
+        )}
+        <div className='ml-auto flex items-center gap-2'>
+          {newDocDialog && (
+            <Button
+              type='button'
+              variant='outline'
+              onClick={resetArtifactDialog}
+              data-track-category='SdlcHub'
+              data-track-name='ArtifactDialogCancelled'
+            >
+              Cancel
+            </Button>
+          )}
+          {!newDocDialog && (
+            <Button
+              type='button'
+              variant='outline'
+              className='h-[34px]'
+              loading={busy === 'artifact'}
+              onClick={() => {
+                if (artifactSubmitBlocked()) return;
+                void call(
+                  'artifact',
+                  () => Promise.resolve(createArtifact()),
+                  'Creation request sent to Ask AI',
+                );
+              }}
+              data-track-category='SdlcHub'
+              data-track-name='ArtifactAskAiCreated'
+            >
+              <Sparkles />
+              Ask AI to create
+            </Button>
+          )}
           {/* The primary action in every hub create dialog: AI is the opt-in. */}
           <Button
             type='submit'
-            className='h-[34px]'
             loading={busy === 'artifact-blank'}
-            title='Create an empty document with just the title — no AI'
+            {...(!newDocDialog && {
+              className: 'h-[34px]',
+              title: 'Create an empty document with just the title — no AI',
+            })}
             data-track-category='SdlcHub'
             data-track-name='BlankArtifactCreated'
           >
-            <Pencil />
-            Write it myself
+            {newDocDialog ? (
+              'Create'
+            ) : (
+              <>
+                <Pencil />
+                Write it myself
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -4289,7 +4322,76 @@ export default function SdlcScreen(): ReactElement {
                 />
               ) : section === 'agents' ? (
                 <div className='min-h-0 flex-1 overflow-auto bg-background'>
-                  <LibraryV2 channelId={channelId} />
+                  <LibraryV2 channelId={channelId} addAgentBlockedReason={addAgentBlockedReason} />
+                </div>
+              ) : section === 'knowledge' ? (
+                // Its own scroll, so the toolbar can stick; the hub pages' wide width and padding.
+                <div className='min-h-0 flex-1 overflow-y-auto bg-background [scrollbar-gutter:stable]'>
+                  <div className='mx-auto flex min-h-full w-full max-w-6xl flex-col px-8 pb-8 pt-8'>
+                    <SdlcKnowledgeSection
+                      generateControl={renderWorkflowControls(
+                        'Skills',
+                        state,
+                        // Says where it writes from. Docs written by hand are not a run.
+                        state.runId ? 'Update from repositories' : 'Generate from repositories',
+                        'outline',
+                        'Cancel',
+                        'h-10',
+                      )}
+                      channelName={channel.name}
+                      channelId={channel.id}
+                      isHubAdmin={isHubAdmin}
+                      generating={state.phase === 'RUNNING'}
+                      files={knowledgeDocs.map(canvas => ({
+                        id: canvas.id,
+                        title: canvas.title,
+                        status:
+                          canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
+                            ? 'archived'
+                            : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
+                              ? 'generating'
+                              : 'ready',
+                      }))}
+                      showArchived={showArchivedKnowledge}
+                      onShowArchivedChange={setShowArchivedKnowledge}
+                      filesLoaded={
+                        knowledgeDocs.length > 0 ||
+                        // No folder counts as none only once the hub itself has arrived in full.
+                        (knowledgeFolderId ? knowledgeDetails : repoQueryDetails).type ===
+                          'complete'
+                      }
+                      // A Knowledge File opens for reading, as a Wiki page does: Discussions
+                      // opens from its button. Not through openCanvas, which carries the panel over.
+                      onOpenFile={canvasId => {
+                        setRelatedSourceId(null);
+                        void navigate(
+                          `/sdlc/${channel.id}/knowledge?${new URLSearchParams({ canvas: canvasId, discussion: '0' }).toString()}`,
+                        );
+                      }}
+                      onArchiveFile={(canvasId, archived) =>
+                        archiveArtifact(
+                          canvasId,
+                          archived,
+                          knowledgeDocs.find(canvas => canvas.id === canvasId)?.title,
+                        )
+                      }
+                      onNewFile={() => openHubDocumentCreate('knowledge')}
+                      onCreateWithAi={draft => {
+                        const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
+                        const saveAs = {
+                          file: `Save it as ${asFile}.`,
+                          skill: 'Save it as a skill: call create-skill.',
+                          auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
+                        }[draft.kind];
+                        askSdlcAssistant(
+                          `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
+                            `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
+                          undefined,
+                          true,
+                        );
+                      }}
+                    />
+                  </div>
                 </div>
               ) : section === 'environments' ? (
                 <div className='min-h-0 flex-1 overflow-hidden bg-background'>
@@ -4297,7 +4399,7 @@ export default function SdlcScreen(): ReactElement {
                     key={channelId}
                     channelId={channelId}
                     hubRepoIds={channelRepos.map(repo => repo.id)}
-                    onAddRepository={() => setHubDialog('manage')}
+                    onAddRepository={isHubAdmin ? () => setHubDialog('manage') : undefined}
                   />
                 </div>
               ) : (
@@ -4319,6 +4421,8 @@ export default function SdlcScreen(): ReactElement {
                     onScroll={event => setTrackPageScrolled(event.currentTarget.scrollTop > 0)}
                     className={cn(
                       'min-h-0 flex-1 overflow-auto bg-background p-7',
+                      // The hub pages' horizontal padding.
+                      (section === 'overview' || section === 'wiki') && 'px-8',
                       // Under the tabs. Files fills the tab and scrolls its own rows,
                       // which fade out at the bottom edge, so no gap is left under it.
                       onTrackPage && 'flex flex-col pt-4',
@@ -4331,7 +4435,7 @@ export default function SdlcScreen(): ReactElement {
                     )}
                   >
                     {section === 'overview' && (
-                      <section>
+                      <section className='mx-auto max-w-6xl'>
                         <h1 className='mb-5 text-2xl font-semibold tracking-tight'>
                           {channel.name}
                         </h1>
@@ -4368,85 +4472,6 @@ export default function SdlcScreen(): ReactElement {
                     )}
 
                     {section === 'tracks' && renderTrack()}
-
-                    {section === 'knowledge' && (
-                      <section className='mx-auto max-w-6xl'>
-                        <SdlcKnowledgeSection
-                          renderHeader={actions =>
-                            renderWorkflowHeader({
-                              icon: Zap,
-                              title: 'Skills',
-                              description: 'What agents know in this hub.',
-                              actions,
-                            })
-                          }
-                          generateControl={renderWorkflowControls(
-                            'Skills',
-                            state,
-                            // Names what it writes, as the deep research run button does. Files written by hand are not a run.
-                            state.runId ? 'Update Knowledge Files' : 'Generate Knowledge Files',
-                            'outline',
-                          )}
-                          channelId={channel.id}
-                          isHubAdmin={isHubAdmin}
-                          files={knowledgeDocs.map(canvas => ({
-                            id: canvas.id,
-                            title: canvas.title,
-                            status:
-                              canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
-                                ? 'archived'
-                                : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
-                                  ? 'generating'
-                                  : 'ready',
-                          }))}
-                          showArchived={showArchivedKnowledge}
-                          onShowArchivedChange={setShowArchivedKnowledge}
-                          emptyFilesText={
-                            knowledgeRunning
-                              ? 'Skills generation is in progress.'
-                              : isHubAdmin
-                                ? 'No Knowledge Files yet. Press Generate Knowledge Files above to write them from the repositories, or use Add to write one.'
-                                : 'No Knowledge Files yet. A hub admin can generate or add them.'
-                          }
-                          filesLoaded={
-                            knowledgeDocs.length > 0 ||
-                            // No folder counts as none only once the hub itself has arrived in full.
-                            (knowledgeFolderId ? knowledgeDetails : repoQueryDetails).type ===
-                              'complete'
-                          }
-                          // A Knowledge File opens for reading, as a Wiki page does: Discussions
-                          // opens from its button. Not through openCanvas, which carries the panel over.
-                          onOpenFile={canvasId => {
-                            setRelatedSourceId(null);
-                            void navigate(
-                              `/sdlc/${channel.id}/knowledge?${new URLSearchParams({ canvas: canvasId, discussion: '0' }).toString()}`,
-                            );
-                          }}
-                          onArchiveFile={(canvasId, archived) =>
-                            archiveArtifact(
-                              canvasId,
-                              archived,
-                              knowledgeDocs.find(canvas => canvas.id === canvasId)?.title,
-                            )
-                          }
-                          onNewFile={() => openHubDocumentCreate('knowledge')}
-                          onCreateWithAi={draft => {
-                            const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
-                            const saveAs = {
-                              file: `Save it as ${asFile}.`,
-                              skill: 'Save it as a skill: call create-skill.',
-                              auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
-                            }[draft.kind];
-                            askSdlcAssistant(
-                              `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
-                                `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
-                              undefined,
-                              true,
-                            );
-                          }}
-                        />
-                      </section>
-                    )}
 
                     {section === 'wiki' &&
                       (wikiScope ? (
@@ -4940,12 +4965,13 @@ export default function SdlcScreen(): ReactElement {
           event.preventDefault();
           artifactTitleRef.current.focus();
         }}
-        title={addItemParent ? 'Add to folder' : `New ${artifactDialog?.name ?? 'document'}`}
-        className='max-w-[860px]'
+        title={addItemParent ? 'Add to folder' : newDialogTitle}
+        // A knowledge file has one field, so it takes the Skills page dialogs' width.
+        className={newDocDialog ? 'max-w-xl' : 'max-w-[860px]'}
       >
-        <div className='flex max-h-[78vh] min-h-[440px] flex-col'>
+        <div className={cn('flex max-h-[78vh] flex-col', !newDocDialog && 'min-h-[440px]')}>
           <div className='flex items-center gap-2.5 px-6 pt-5'>
-            {!addItemParent ? (
+            {newDocDialog ? null : !addItemParent ? (
               <AddItemHeaderIcon kind={artifactDialogKind} />
             ) : addItemParent.type === 'FOLDER' ? (
               <Folder className='size-5 shrink-0 fill-primary/25 text-primary/70' />
@@ -4953,14 +4979,24 @@ export default function SdlcScreen(): ReactElement {
               <Layers className='size-5 shrink-0 text-muted-foreground' />
             )}
             <div className='min-w-0 flex-1'>
-              <h2 className='truncate text-[17px] font-semibold leading-tight tracking-[-0.01em]'>
+              <h2
+                className={cn(
+                  'truncate font-semibold',
+                  newDocDialog ? 'text-lg' : 'text-[17px] leading-tight tracking-[-0.01em]',
+                )}
+              >
                 {!addItemParent
-                  ? `New ${artifactDialog?.name ?? 'document'}`
+                  ? newDialogTitle
                   : addItemParent.type === 'FOLDER'
                     ? addItemParent.name
                     : (selectedTrack?.name ?? 'Track')}
               </h2>
-              <p className='text-[11.5px] text-muted-foreground'>
+              <p
+                className={cn(
+                  'text-muted-foreground',
+                  newDocDialog ? 'mt-1 text-sm' : 'text-[11.5px]',
+                )}
+              >
                 {!addItemParent
                   ? artifactDialogKind === 'wiki' && wikiScope
                     ? `Adding to the ${wikiScope.name} research`

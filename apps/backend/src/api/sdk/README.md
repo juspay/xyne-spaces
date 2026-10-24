@@ -18,8 +18,13 @@ same function within a few frames of stack.
 |---|---|
 | `v1/mapper.ts` | SDK operation id → catalog operation or route |
 | `v1/parser.ts` | SDK operation id → the arguments its target expects |
-| `v1/index.ts` | The versioned router |
+| `v1/index.ts` | The versioned router (`createSdkVersionRouter`), and v1 itself |
 | `v1/types.ts` | Shared types for the two above |
+| `v2/index.ts` | v2: v1's operation ids and routes, plus the Claw routes below |
+| `claw/proxy.ts` | `/claw/api/*`: Claw's product API, forwarded as the caller |
+| `claw/allowlist.ts` | Which Claw routes the proxy forwards |
+| `claw/session.ts` | The caller's session, rebuilt as the cookie Claw reads |
+| `claw/run-stream.ts` | `/claw/runs/stream`: a run as a live event stream |
 | `query.ts` | Run one catalog query |
 | `mutation.ts` | Run one catalog mutator |
 | `direct.ts` | Call the product controllers behind the catalog gaps |
@@ -59,6 +64,15 @@ second thing to keep correct.
 
 Both are mounted *before* the auth middleware on purpose, so a probe can tell
 "the API is misconfigured" from "your session is bad".
+
+### Versions
+
+`/api/sdk/v1` and `/api/sdk/v2` are both served. **v1 is frozen**: SDK 0.1.x
+calls it, so nothing it serves changes. v2 (SDK 0.2.0 and later) is v1 plus
+the Claw routes: the same operation ids resolve to the same targets, unless
+`V2_OVERRIDES` in `v2/index.ts` says otherwise, and every direct route below is
+served under both prefixes. New routes go to v2 only. Tables below write `v1`;
+read it as either.
 
 ### v1
 
@@ -219,19 +233,62 @@ params are JSON-encoded string arrays, as the dashboard sends them.
 
 ### Claw
 
-Remote agents, **relayed through Spaces** rather than reached directly:
+Xyne Claw (`apps/xyne-claw-auth`) is a separate service. Two ways in:
+
+**Relayed with the deployment's service credential** (v1 and v2):
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/claw/agents` | Agents this deployment can run |
+| `GET /api/sdk/v1/claw/agents` | Agents this caller can dispatch |
 | `POST /api/sdk/v1/claw/runs` | Dispatch a run → `{ sessionId }` |
 | `GET /api/sdk/v1/claw/runs/:sessionId` | Poll status and result |
 
-Claw is a separate service (`apps/xyne-claw-auth`) with its own credential.
-Rather than making callers hold two, `clawAgentService` relays with the
-deployment's service credential. `runS2SClawAgent` is used rather than
-`runClawAgent`: it takes an explicit identity that maps one-to-one onto
+`runScopedClawAgent` takes an explicit identity that maps one-to-one onto
 `AuthData`, and returns a pollable session id.
+
+**As the caller** (v2 only):
+
+| | |
+|---|---|
+| `POST /api/sdk/v2/claw/runs/stream` | `{ agent, task, conversationId?, channelId?, provider?, attachedContext?, thinkingLevel?, … }` → `text/event-stream` |
+| `POST /api/sdk/v2/claw/runs/stream/cancel` | `{ sessionId }` (the `traceId` of `start`) → `{ sessionId, status }` |
+| `* /api/sdk/v2/claw/api/<path>` | Claw's `/claw/api/v1/<path>`, if `claw/allowlist.ts` allows it |
+
+How "as the caller" works: claw-auth never checks a Spaces JWT itself. It
+forwards the request's `Cookie` to Spaces `/api/auth/me`, which reads
+`xyne_last_workspace` and then `xyne_ws_<ws>_token`. `claw/session.ts` rebuilds
+exactly that cookie from the JWT that just authenticated the SDK call (Bearer
+first, then the workspace cookie). claw-auth sees the user's ordinary session:
+it passes `requireAuth`, the cookie-only `requireUserAuth` and
+`requireNoAccessToken`, and every Claw ACL runs as that user. No S2S key is
+sent, and no identity header from the caller is forwarded. App guest tokens are
+refused (`forbidden`).
+
+The run stream calls `runClawAgentStream` (the Ask AI v2 path) with debugger
+frames off, so it sends the dashboard's frames: `start`, `delta`,
+`reasoning_delta`, `tool_invocation`, `plan`, `attachment`, `ui_flow`,
+`complete`, `follow_ups`, `error`, a `ping` every 20 s, and `end` last. A caller
+hanging up stops the upstream fetch, not the run.
+
+The proxy:
+
+- **Allowlist, deny by default.** Allowed: the user-facing mounts (agents,
+  subagents, skills, tools, memory, runs, run cancel/interrupt, agent-chat,
+  scheduled jobs, KB, the caller's users/connections/OAuth, servers, settings,
+  artifacts, artifact apps, design systems/shares, chain workflows, spaces,
+  organizations (GET), daily brief, proactive inbox, sandbox (GET), digital twin,
+  local harness devices, gateway registry, dashboard, research agent). Denied:
+  every internal, webhook, pod-session, CLI, OAuth-callback and admin route,
+  and admin-only routes inside allowed mounts. A denied route is `not_found`
+  without reaching Claw.
+- **Request:** method, path, query and body pass through. JSON and form bodies
+  are re-encoded; anything else (multipart) is streamed unread. Only
+  `content-type`, `content-length`, `accept` and the request id are forwarded.
+- **Response:** Claw's 2xx JSON body verbatim (`{ success, data, ... }`; the SDK
+  unwraps it). Event streams and binary bodies are piped as they arrive. Claw's
+  4xx/5xx becomes the SDK envelope by status, with Claw's `code` as `reason`
+  (409 `SLUG_TAKEN` is `validation_failed`, reason `SLUG_TAKEN`; a 503 is
+  `internal`, retryable).
 
 ### Connectors
 

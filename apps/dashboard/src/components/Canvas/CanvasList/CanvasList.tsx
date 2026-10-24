@@ -23,6 +23,7 @@ import {
   Folder,
   Layers,
   Bot,
+  Plus,
 } from 'lucide-react';
 import {
   CanvasListProps,
@@ -30,7 +31,7 @@ import {
   type CanvasFolder,
   type CanvasParticipant,
 } from '../Canvas.types';
-import { CanvasVisibility, ChannelScopeType, type User } from '@xyne/shared';
+import { CanvasRole, CanvasVisibility, ChannelScopeType, type User } from '@xyne/shared';
 import Input from '../../ui/Input';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { searchUsers, useActiveUsers, useUsers } from '../../../hooks/useUsers';
@@ -77,11 +78,18 @@ import {
 import {
   mergeCanvasRestLabels,
   type CanvasLabelMap,
+  CANVAS_LABEL_REFRESH_STALE_MS,
   useCanvasLabelMapResult,
 } from '../useCanvasLabels';
+import {
+  ChannelCanvasDropTarget,
+  ChannelCanvasMoveDndProvider,
+  DraggableChannelCanvas,
+} from '../ChannelCanvasList/ChannelCanvasMoveDnd';
 import { isElectronApp, toStandalonePath } from '../../../utils/electronApp';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
+type CanvasCreatorFilter = 'me' | 'others';
 type CanvasCursor = { id: string; updatedAt: number };
 type CanvasSearchScope = 'direct' | 'via_channel' | 'all';
 type CanvasSearchScopeMenuView = 'main' | 'channels';
@@ -113,6 +121,7 @@ type CanvasCardMenuItem = {
 
 const CANVAS_PAGE_SIZE = 25;
 const CANVAS_FILTERED_PAGE_SIZE = 200;
+const CANVAS_PREFETCH_COUNT = 3;
 const CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD = 8;
 const MONTH_SECTION_FORMATTER = new Intl.DateTimeFormat(undefined, { month: 'long' });
 const WEEKDAY_FORMATTER = new Intl.DateTimeFormat(undefined, { weekday: 'long' });
@@ -641,6 +650,9 @@ const CanvasPageSubscription: React.FC<{
   searchQuery?: string | undefined;
   includeArchived: boolean;
   onlyArchived: boolean;
+  includePublicChannelCanvases?: boolean | undefined;
+  creatorFilter?: CanvasCreatorFilter | undefined;
+  createdByUserId?: string | undefined;
   onPageComplete: (page: Canvas[], previousPageIds: Set<string>, pageSize: number) => void;
   onLoadingChange: (isLoading: boolean) => void;
 }> = ({
@@ -650,6 +662,9 @@ const CanvasPageSubscription: React.FC<{
   searchQuery,
   includeArchived,
   onlyArchived,
+  includePublicChannelCanvases,
+  creatorFilter,
+  createdByUserId,
   onPageComplete,
   onLoadingChange,
 }) => {
@@ -673,9 +688,22 @@ const CanvasPageSubscription: React.FC<{
       start: cursor,
       includeArchived,
       onlyArchived,
+      ...(includePublicChannelCanvases ? { includePublicChannelCanvases: true } : {}),
+      ...(creatorFilter ? { creatorFilter } : {}),
+      ...(creatorFilter === 'others' && createdByUserId ? { createdByUserId } : {}),
       ...(trimmedSearchQuery ? { searchQuery: trimmedSearchQuery } : {}),
     });
-  }, [channelId, cursor, includeArchived, onlyArchived, pageSize, searchQuery]);
+  }, [
+    channelId,
+    createdByUserId,
+    creatorFilter,
+    cursor,
+    includeArchived,
+    includePublicChannelCanvases,
+    onlyArchived,
+    pageSize,
+    searchQuery,
+  ]);
 
   const [page, pageDetails] = useCachedQuery(query as never, { cursorEnabled: true });
   const isLoading = pageDetails.type !== 'complete';
@@ -717,6 +745,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onAvailableLabelsChange: (folderId: string, labels: CanvasLabelCount[] | null) => void;
   selectedCanvasLabelSnapshot?: Canvas | undefined;
   renderCanvasItem: (canvas: Canvas) => React.ReactNode;
+  onCreateCanvasInFolder?: (folder: CanvasFolder) => void | Promise<void>;
+  onMoveCanvas?: (canvas: Canvas, folderId: string | null) => void | Promise<void>;
 }> = ({
   folder,
   isCollapsed,
@@ -739,6 +769,8 @@ const ChannelScopeFolderGroupSection: React.FC<{
   onAvailableLabelsChange,
   selectedCanvasLabelSnapshot,
   renderCanvasItem,
+  onCreateCanvasInFolder,
+  onMoveCanvas,
 }) => {
   const [folderCanvasesResult, folderCanvasesDetails] = useCachedQuery(
     queries.hierarchyCanvases({
@@ -855,32 +887,74 @@ const ChannelScopeFolderGroupSection: React.FC<{
 
   return (
     <section>
-      <button
-        type='button'
-        className='flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent'
-        onClick={() => onToggleFolder(folder.id)}
-        data-track-category='CANVAS'
-        data-track-name='Toggle_Channel_Folder_Filter_Group'
-        data-track-metadata={JSON.stringify({
-          folderId: folder.id,
-          channelId: selectedScopeChannelId,
-        })}
-      >
-        {isCollapsed ? (
-          <ChevronRight className='size-3.5 shrink-0 text-sidebar-foreground/55' />
-        ) : (
-          <ChevronDown className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+      <ChannelCanvasDropTarget id={`canvas-folder:${folder.id}`} folderId={folder.id}>
+        {isOver => (
+          <div
+            className={cn(
+              'flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent',
+              isOver && 'bg-sidebar-accent',
+            )}
+          >
+            <button
+              type='button'
+              className='flex min-w-0 flex-1 items-center gap-1.5 text-left'
+              onClick={() => onToggleFolder(folder.id)}
+              data-track-category='CANVAS'
+              data-track-name='Toggle_Channel_Folder_Filter_Group'
+              data-track-metadata={JSON.stringify({
+                folderId: folder.id,
+                channelId: selectedScopeChannelId,
+              })}
+            >
+              {isCollapsed ? (
+                <ChevronRight className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+              ) : (
+                <ChevronDown className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+              )}
+              <Folder className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+              <span className='min-w-0 flex-1 truncate text-[13px] font-semibold'>
+                {folder.name}
+              </span>
+              <span className='text-[12px] text-sidebar-foreground/45'>
+                {isFolderLoading ? '...' : visibleFolderCanvases.length}
+              </span>
+            </button>
+            {onCreateCanvasInFolder && (
+              <button
+                type='button'
+                className='flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                onClick={() => void onCreateCanvasInFolder(folder)}
+                aria-label={`Create canvas in ${folder.name}`}
+                title='Create canvas in folder'
+                data-track-category='CANVAS'
+                data-track-name='CREATE_CANVAS_IN_FOLDER'
+              >
+                <Plus className='size-4' />
+              </button>
+            )}
+          </div>
         )}
-        <Folder className='size-3.5 shrink-0 text-sidebar-foreground/55' />
-        <span className='min-w-0 flex-1 truncate text-[13px] font-semibold'>{folder.name}</span>
-        <span className='text-[12px] text-sidebar-foreground/45'>
-          {isFolderLoading ? '...' : visibleFolderCanvases.length}
-        </span>
-      </button>
+      </ChannelCanvasDropTarget>
       {!isCollapsed && (
         <div className='space-y-0.5 pl-5'>
           {visibleFolderCanvases.map(canvas => (
-            <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
+            <DraggableChannelCanvas
+              key={canvas.id}
+              canvas={canvas}
+              disabled={
+                !onMoveCanvas ||
+                Boolean(canvas.isArchived) ||
+                Boolean(searchQuery.trim()) ||
+                (canvas.createdBy !== currentUserId && canvas.accessLevel !== CanvasRole.EDITOR)
+              }
+            >
+              {dragHandle => (
+                <div className='flex items-center gap-1'>
+                  {dragHandle}
+                  <div className='min-w-0 flex-1'>{renderCanvasItem(canvas)}</div>
+                </div>
+              )}
+            </DraggableChannelCanvas>
           ))}
         </div>
       )}
@@ -907,6 +981,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   includeArchived = false,
   onlyArchived = false,
   onToggleStar,
+  onCreateCanvasInFolder,
+  onMoveCanvas,
 }) => {
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -949,6 +1025,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [hasMore, setHasMore] = useState(true);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const canvasVirtuosoRef = useRef<VirtuosoHandle>(null);
+  // Rows currently on screen; the hover label refresh only re-fetches these.
+  const visibleCanvasIdsRef = useRef<string[]>([]);
 
   const { prefetchTopCanvases, handleMouseEnter, handleMouseLeave } = useCanvasPrefetch();
 
@@ -1056,24 +1134,30 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     return snapshot ? mergeCanvasRestLabels(snapshot, labelsByCanvasId) : null;
   }, [labelsByCanvasId, selectedCanvasLabelSnapshotResult]);
 
+  // Public canvases in the viewer's regular channels used to come from one
+  // channelCanvasesPaginated subscription per channel (~140 for heavy users). They now come
+  // from the single user query via includePublicChannelCanvases; only an explicitly
+  // selected channel keeps its own channel query.
   const extraChannelSourceIds = useMemo(() => {
-    if (channelId || !paginated) return [];
-    if (isGlobalCanvasLookupActive) {
-      return selectableScopeChannels.map(channel => channel.id);
-    }
+    if (channelId || !paginated || isGlobalCanvasLookupActive) return [];
     if (searchScope === 'via_channel' && selectedScopeChannelId) return [selectedScopeChannelId];
-    if (searchScope === 'all' || searchScope === 'via_channel') {
-      return selectableScopeChannels.map(channel => channel.id);
-    }
     return [];
-  }, [
-    channelId,
-    isGlobalCanvasLookupActive,
-    paginated,
-    searchScope,
-    selectableScopeChannels,
-    selectedScopeChannelId,
-  ]);
+  }, [channelId, isGlobalCanvasLookupActive, paginated, searchScope, selectedScopeChannelId]);
+  const includePublicChannelCanvases =
+    !channelId &&
+    (isGlobalCanvasLookupActive ||
+      searchScope === 'all' ||
+      (searchScope === 'via_channel' && !selectedScopeChannelId));
+  // The tab filter runs in the query whenever the list comes from the user query alone.
+  // Channel queries don't take it, so with one mounted the browser still filters.
+  const isCreatorFilterServerSide = !channelId && extraChannelSourceIds.length === 0;
+  const serverCreatorFilter: CanvasCreatorFilter | undefined = !isCreatorFilterServerSide
+    ? undefined
+    : activeFilter === 'created_by_me'
+      ? 'me'
+      : activeFilter === 'shared'
+        ? 'others'
+        : undefined;
 
   const rawItems = useMemo(
     () =>
@@ -1136,6 +1220,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     selectedScopeChannelId,
     selectedSharedByUserId,
     showStarredOnly,
+    selectedLabel,
+    includePublicChannelCanvases,
+    serverCreatorFilter,
   ]);
 
   useEffect(() => {
@@ -1271,20 +1358,32 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (rawItems.length > 0) {
-      const collaborativeCanvases = rawItems.filter(c => c.isCollaborative !== false);
-      void prefetchTopCanvases(
-        collaborativeCanvases.map(c => ({
-          id: c.id,
-          ...(c.channelId ? { channelId: c.channelId } : {}),
-          ...(c.isCollaborative !== undefined ? { isCollaborative: c.isCollaborative } : {}),
-          title: c.title,
+  // Prefetch the top 3 collaborative canvases. rawItems changes on every Zero update, so
+  // key the effect on the top-3 ids: it only runs when they change. The open canvas is
+  // skipped because its editor already holds a live connection.
+  const prefetchCandidates = useMemo(
+    () =>
+      rawItems
+        .filter(canvas => canvas.isCollaborative !== false && canvas.id !== selectedCanvasId)
+        .slice(0, CANVAS_PREFETCH_COUNT)
+        .map(canvas => ({
+          id: canvas.id,
+          ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
+          ...(canvas.isCollaborative !== undefined
+            ? { isCollaborative: canvas.isCollaborative }
+            : {}),
+          title: canvas.title,
         })),
-        3,
-      );
-    }
-  }, [rawItems, activeFilter, prefetchTopCanvases]);
+    [rawItems, selectedCanvasId],
+  );
+  const prefetchCandidatesKey = prefetchCandidates.map(canvas => canvas.id).join(',');
+  const prefetchCandidatesRef = useRef(prefetchCandidates);
+  prefetchCandidatesRef.current = prefetchCandidates;
+
+  useEffect(() => {
+    if (!prefetchCandidatesKey) return;
+    void prefetchTopCanvases(prefetchCandidatesRef.current, CANVAS_PREFETCH_COUNT);
+  }, [prefetchCandidatesKey, prefetchTopCanvases]);
 
   useEffect(() => {
     if (isMobile) return;
@@ -1392,15 +1491,21 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const shouldShowStarredSection = isStarredSectionVisible;
   const hasClientSideResultFilters =
     effectiveSearchScope === 'direct' ||
-    activeFilter !== 'all' ||
+    (effectiveSearchScope === 'via_channel' && !isSpecificChannelScope) ||
+    (activeFilter !== 'all' && !serverCreatorFilter) ||
     Boolean(selectedLabel) ||
     trimmedSearchQuery.length > 0 ||
     showStarredOnly ||
     onlyCallGeneratedCanvases ||
     onlyRecordingGeneratedCanvases;
+  // Browser-only filters (call / recording exclusions, which default on) can hide every row
+  // of a server-filtered page. Keep paging until a minimum number of rows is visible so a
+  // tab never shows an empty state, or stalls, while matching canvases exist further down.
+  const needsMinimumVisibleRows =
+    hasPrimaryCanvasFilters && filteredCanvases.length < CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD;
   const shouldScanFilteredUserPages =
-    hasClientSideResultFilters &&
-    effectiveSearchScope !== 'via_channel' &&
+    (hasClientSideResultFilters || needsMinimumVisibleRows) &&
+    !isSpecificChannelScope &&
     hasMore &&
     Boolean(nextCursor);
   const shouldScanFilteredChannelSources =
@@ -1684,12 +1789,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   }, [requestNextChannelSourcePages, requestNextPage]);
 
   useEffect(() => {
-    if (
-      !paginated ||
-      shouldRenderChannelFolderGroups ||
-      !hasClientSideResultFilters ||
-      isLoadingNext
-    ) {
+    if (!paginated || shouldRenderChannelFolderGroups || isLoadingNext) {
       return;
     }
 
@@ -1697,7 +1797,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
     requestNextResults();
   }, [
-    hasClientSideResultFilters,
     isLoadingNext,
     paginated,
     requestNextResults,
@@ -1708,6 +1807,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   const handleVisibleRangeChanged = useCallback(
     (range: { startIndex: number; endIndex: number }): void => {
+      visibleCanvasIdsRef.current = filteredCanvases
+        .slice(Math.max(0, range.startIndex), Math.max(0, range.endIndex) + 1)
+        .map(canvas => canvas.id);
       if (
         !paginated ||
         hasPrimaryCanvasFilters ||
@@ -2113,12 +2215,43 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 onAvailableLabelsChange={handleChannelFolderAvailableLabelsChange}
                 selectedCanvasLabelSnapshot={selectedCanvasLabelSnapshot ?? undefined}
                 renderCanvasItem={renderCanvasItem}
+                {...(onCreateCanvasInFolder ? { onCreateCanvasInFolder } : {})}
+                {...(onMoveCanvas ? { onMoveCanvas } : {})}
               />
             );
           })}
 
+          <ChannelCanvasDropTarget id='canvas-channel-root' folderId={null}>
+            {isOver => (
+              <div
+                className={cn(
+                  'flex min-h-8 items-center gap-2 rounded-md px-2 text-xs text-sidebar-foreground/55',
+                  isOver && 'bg-sidebar-accent text-sidebar-foreground',
+                )}
+              >
+                <Folder className='size-3.5 shrink-0' />
+                <span>Channel root</span>
+              </div>
+            )}
+          </ChannelCanvasDropTarget>
           {selectedChannelRootCanvases.map(canvas => (
-            <div key={canvas.id}>{renderCanvasItem(canvas)}</div>
+            <DraggableChannelCanvas
+              key={canvas.id}
+              canvas={canvas}
+              disabled={
+                !onMoveCanvas ||
+                Boolean(canvas.isArchived) ||
+                Boolean(searchQuery.trim()) ||
+                (canvas.createdBy !== currentUserId && canvas.accessLevel !== CanvasRole.EDITOR)
+              }
+            >
+              {dragHandle => (
+                <div className='flex items-center gap-1'>
+                  {dragHandle}
+                  <div className='min-w-0 flex-1'>{renderCanvasItem(canvas)}</div>
+                </div>
+              )}
+            </DraggableChannelCanvas>
           ))}
         </div>
       ) : (
@@ -2131,7 +2264,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     <div
       className='flex flex-col h-full'
       data-testid='canvas-list'
-      onMouseEnter={() => refreshCanvasLabelsIfStale()}
+      onMouseEnter={() =>
+        refreshCanvasLabelsIfStale(CANVAS_LABEL_REFRESH_STALE_MS, visibleCanvasIdsRef.current)
+      }
     >
       {paginated && (
         <CanvasPageSubscription
@@ -2144,6 +2279,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           searchQuery={trimmedSearchQuery}
           includeArchived={includeArchived}
           onlyArchived={onlyArchived}
+          includePublicChannelCanvases={includePublicChannelCanvases}
+          creatorFilter={serverCreatorFilter}
+          createdByUserId={selectedSharedByUserId ?? undefined}
           onPageComplete={handlePageComplete}
           onLoadingChange={handlePageLoadingChange}
         />
@@ -2630,7 +2768,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
           </div>
         ) : shouldRenderChannelFolderGroups ? (
-          renderChannelFolderGroupedList()
+          <ChannelCanvasMoveDndProvider onMoveCanvas={onMoveCanvas}>
+            {renderChannelFolderGroupedList()}
+          </ChannelCanvasMoveDndProvider>
         ) : filteredCanvases.length === 0 && isFilteredScanIncomplete ? (
           <div className='flex items-center justify-center h-64'>
             <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>

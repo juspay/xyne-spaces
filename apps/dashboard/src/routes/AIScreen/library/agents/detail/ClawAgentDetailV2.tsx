@@ -283,7 +283,11 @@ const ClawAgentDetailV2 = (): ReactElement => {
             ) : tab === 'call-graph' && canManageDelegation ? (
               <AgentCallGraphTabV2 agent={agent} />
             ) : (
-              <AgentActivityTabV2 agent={agent} canEdit={actions.permissions?.canEdit ?? false} />
+              <AgentActivityTabV2
+                agent={agent}
+                canEdit={actions.permissions?.canEdit ?? false}
+                canManageRuns={actions.isOwner || actions.isAdmin}
+              />
             )}
           </>
         )}

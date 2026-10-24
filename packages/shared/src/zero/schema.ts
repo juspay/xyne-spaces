@@ -16,6 +16,7 @@ export * from './types';
 
 import {
   AccessType,
+  AgentProactivityMode,
   ActivityClassification,
   ActivityClassificationJobType,
   ActivityType,
@@ -76,6 +77,7 @@ import {
   RecapEntityType,
   RecurringCallSeriesStatus,
   RingStatus,
+  CallRingNotification,
   ReenterMode,
   ReleaseEventType,
   ReleaseTrackingMode,
@@ -794,6 +796,7 @@ export const channelTable = table('channels')
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
+    agentProactivityMode: enumeration<AgentProactivityMode>().optional(), // Agents answering without a mention
     connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
@@ -1280,6 +1283,7 @@ export const callParticipantTable = table('call_participants')
     email: string().optional(),
     isExternal: boolean(),
     ringStatus: enumeration<RingStatus>().optional(),
+    ringNotification: enumeration<CallRingNotification>().optional(),
   })
   .primaryKey('id');
 
@@ -1320,6 +1324,7 @@ export const recurringCallParticipantTable = table('recurring_call_participants'
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringNotification: enumeration<CallRingNotification>().optional(),
   })
   .primaryKey('id');
 
@@ -1751,6 +1756,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     metricsGuestVisibility: string().optional(),
+    metricsMinAccess: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),

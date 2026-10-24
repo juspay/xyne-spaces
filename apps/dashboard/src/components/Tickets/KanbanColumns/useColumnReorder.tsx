@@ -11,15 +11,23 @@ import {
   useVelocity,
   type MotionValue,
 } from 'framer-motion';
+import { DRAG_EASE_OUT, DRAG_EASE_OUT_CURVE, DRAG_TILT_SPRING } from '../../../constants/drag';
+import {
+  contentOf,
+  createValueStore,
+  edgeScroll,
+  socketOf,
+  type ValueStore,
+} from '../../../utils/drag';
+import { usePointerDrag, type PointerSession } from '../../../hooks/usePointerDrag';
 
-const DRAG_THRESHOLD = 4;
 const PRESS_SCALE = 0.985;
 const LIFT_SCALE = 1.03;
 const MAX_TILT = 4;
+const TILT_VELOCITY = 1800;
 const EDGE_ZONE = 80;
 const EDGE_SPEED = 22;
-const EASE_OUT = 'cubic-bezier(0.23, 1, 0.32, 1)';
-const EASE_OUT_CURVE = [0.23, 1, 0.32, 1] as const;
+const SOCKET = 'data-column-socket';
 const SCROLLABLE = '[class*="overflow-"]';
 
 interface DragSession {
@@ -37,15 +45,8 @@ interface DragValues {
   shadow: MotionValue<number>;
 }
 
-interface PointerDrag {
-  phase: 'press' | 'drag' | 'settle';
+interface ColumnDrag extends PointerSession {
   sourceId: string;
-  pointerId: number;
-  handle: HTMLElement;
-  startX: number;
-  startY: number;
-  lastX: number;
-  lastY: number;
   startScroll: number;
   ids: string[];
   rects: DOMRect[];
@@ -54,41 +55,7 @@ interface PointerDrag {
   targetIndex: number;
   sourceShift: number;
   stripRect: DOMRect | null;
-  frame: number;
 }
-
-interface SessionStore {
-  get: () => DragSession | null;
-  set: (session: DragSession | null) => void;
-  subscribe: (listener: () => void) => () => void;
-}
-
-const createSessionStore = (): SessionStore => {
-  let session: DragSession | null = null;
-  const listeners = new Set<() => void>();
-  return {
-    get: (): DragSession | null => session,
-    set: (next): void => {
-      session = next;
-      listeners.forEach(listener => listener());
-    },
-    subscribe: (listener): (() => void) => {
-      listeners.add(listener);
-      return (): void => {
-        listeners.delete(listener);
-      };
-    },
-  };
-};
-
-const socketOf = (column: HTMLElement): HTMLElement | null =>
-  column.querySelector<HTMLElement>(':scope > [data-column-socket]');
-
-const contentOf = (column: HTMLElement): HTMLElement[] =>
-  Array.from(column.children).filter(
-    (child): child is HTMLElement =>
-      child instanceof HTMLElement && !child.hasAttribute('data-column-socket'),
-  );
 
 const scrolledWithin = (root: HTMLElement): Array<[HTMLElement, number]> =>
   Array.from(root.querySelectorAll<HTMLElement>(SCROLLABLE))
@@ -103,17 +70,22 @@ const moveTo = (ids: string[], from: number, to: number): string[] => {
 };
 
 const ColumnDragLayer: React.FC<{
-  store: SessionStore;
+  store: ValueStore<DragSession>;
   values: DragValues;
   layerRef: React.RefObject<HTMLDivElement | null>;
   reduceMotion: boolean;
 }> = ({ store, values, layerRef, reduceMotion }) => {
   const session = React.useSyncExternalStore(store.subscribe, store.get);
   const velocity = useVelocity(values.x);
-  const tiltTarget = useTransform(velocity, [-1800, 0, 1800], [-MAX_TILT, 0, MAX_TILT], {
-    clamp: true,
-  });
-  const tilt = useSpring(tiltTarget, { stiffness: 320, damping: 24, mass: 0.6 });
+  const tiltTarget = useTransform(
+    velocity,
+    [-TILT_VELOCITY, 0, TILT_VELOCITY],
+    [-MAX_TILT, 0, MAX_TILT],
+    {
+      clamp: true,
+    },
+  );
+  const tilt = useSpring(tiltTarget, DRAG_TILT_SPRING);
   const transform = useMotionTemplate`translate3d(${values.x}px, ${values.y}px, 0) rotate(${
     reduceMotion ? '0' : tilt
   }deg) scale(${values.scale})`;
@@ -178,21 +150,20 @@ export const useColumnReorder = ({
   const layerRef = React.useRef<HTMLDivElement>(null);
   const columnsRef = React.useRef(new Map<string, HTMLDivElement>());
   const columnRefCallbacks = React.useRef(new Map<string, (node: HTMLDivElement | null) => void>());
-  const [store] = React.useState(createSessionStore);
+  const [store] = React.useState(() => createValueStore<DragSession>());
   const [values] = React.useState<DragValues>(() => ({
     x: motionValue(0),
     y: motionValue(0),
     scale: motionValue(1),
     shadow: motionValue(0),
   }));
-  const dragRef = React.useRef<PointerDrag | null>(null);
+  const frameRef = React.useRef(0);
   const pendingRef = React.useRef<{
     key: string;
     scrolled: Array<[HTMLElement, number]>;
   } | null>(null);
   const latest = React.useRef({ stageIds, onReorder, reduceMotion });
   latest.current = { stageIds, onReorder, reduceMotion };
-  const listenersRef = React.useRef<(() => void) | null>(null);
 
   const columnRef = React.useCallback((stageId: string) => {
     let callback = columnRefCallbacks.current.get(stageId);
@@ -213,10 +184,10 @@ export const useColumnReorder = ({
       column.style.transformOrigin = '';
       column.style.opacity = '';
       column.style.backgroundColor = '';
-      contentOf(column).forEach(child => {
+      contentOf(column, SOCKET).forEach(child => {
         child.style.opacity = '';
       });
-      const socket = socketOf(column);
+      const socket = socketOf(column, SOCKET);
       if (socket) {
         socket.style.transition = '';
         socket.style.opacity = '';
@@ -224,15 +195,9 @@ export const useColumnReorder = ({
     });
   };
 
-  const teardown = (): void => {
-    const drag = dragRef.current;
-    if (drag) {
-      cancelAnimationFrame(drag.frame);
-      drag.handle.style.cursor = '';
-    }
-    listenersRef.current?.();
-    listenersRef.current = null;
-    dragRef.current = null;
+  const teardown = (drag: ColumnDrag): void => {
+    cancelAnimationFrame(frameRef.current);
+    pointer.finish(drag);
     if (layerRef.current) layerRef.current.style.display = 'none';
     store.set(null);
     values.x.jump(0);
@@ -243,7 +208,7 @@ export const useColumnReorder = ({
 
   const shiftDuration = (): number => (latest.current.reduceMotion ? 120 : 320);
 
-  const applyShifts = (drag: PointerDrag): void => {
+  const applyShifts = (drag: ColumnDrag): void => {
     const { ids, rects, gap, fromIndex: from, targetIndex: to } = drag;
     const sourceWidth = rects[from]?.width ?? 0;
     let sourceShift = 0;
@@ -266,7 +231,7 @@ export const useColumnReorder = ({
     if (source) source.style.transform = sourceShift ? `translate3d(${sourceShift}px, 0, 0)` : '';
   };
 
-  const updateTarget = (drag: PointerDrag): void => {
+  const updateTarget = (drag: ColumnDrag): void => {
     const strip = stripRef.current;
     const source = drag.rects[drag.fromIndex];
     if (!strip || !source) return;
@@ -282,22 +247,17 @@ export const useColumnReorder = ({
   };
 
   const autoScroll = (): void => {
-    const drag = dragRef.current;
+    const drag = pointer.current();
     const strip = stripRef.current;
     if (!drag || drag.phase !== 'drag' || !strip || !drag.stripRect) return;
-    const fromLeft = drag.lastX - drag.stripRect.left;
-    const fromRight = drag.stripRect.right - drag.lastX;
-    const speed = (distance: number): number =>
-      EDGE_SPEED * Math.pow((EDGE_ZONE - Math.max(distance, 0)) / EDGE_ZONE, 2);
-    if (fromLeft < EDGE_ZONE) strip.scrollLeft -= speed(fromLeft);
-    else if (fromRight < EDGE_ZONE) strip.scrollLeft += speed(fromRight);
-    drag.frame = requestAnimationFrame(autoScroll);
+    edgeScroll(strip, 'x', drag.lastX, drag.stripRect, EDGE_ZONE, EDGE_SPEED);
+    frameRef.current = requestAnimationFrame(autoScroll);
   };
 
-  const beginDrag = (drag: PointerDrag): void => {
+  const begin = (drag: ColumnDrag): boolean => {
     const strip = stripRef.current;
     const source = columnsRef.current.get(drag.sourceId);
-    if (!strip || !source) return;
+    if (!strip || !source) return false;
     const { reduceMotion: reduce } = latest.current;
 
     source.style.transition = 'none';
@@ -308,9 +268,8 @@ export const useColumnReorder = ({
     );
     const fromIndex = ids.indexOf(drag.sourceId);
     const sourceRect = rects[fromIndex];
-    if (fromIndex === -1 || !sourceRect) return;
+    if (fromIndex === -1 || !sourceRect) return false;
 
-    drag.phase = 'drag';
     drag.ids = ids;
     drag.rects = rects;
     drag.gap = rects.length > 1 && rects[0] && rects[1] ? rects[1].left - rects[0].right : 0;
@@ -318,7 +277,6 @@ export const useColumnReorder = ({
     drag.targetIndex = fromIndex;
     drag.startScroll = strip.scrollLeft;
     drag.stripRect = strip.getBoundingClientRect();
-    drag.handle.style.cursor = 'grabbing';
 
     const scrollables = Array.from(source.querySelectorAll<HTMLElement>(SCROLLABLE));
     const cloneScrollTops: Array<[number, number]> = [];
@@ -331,7 +289,7 @@ export const useColumnReorder = ({
     clone.style.transition = '';
     clone.style.transform = '';
     clone.style.transformOrigin = '';
-    socketOf(clone)?.remove();
+    socketOf(clone, SOCKET)?.remove();
     const grabber = clone.querySelector<HTMLElement>('[data-column-grabber]');
     if (grabber) grabber.style.opacity = '1';
 
@@ -357,9 +315,9 @@ export const useColumnReorder = ({
       reduce ? 1 : LIFT_SCALE,
       reduce ? { duration: 0 } : { type: 'spring', duration: 0.35, bounce: 0.25 },
     );
-    animate(values.shadow, 1, { duration: 0.2, ease: EASE_OUT_CURVE });
+    animate(values.shadow, 1, { duration: 0.2, ease: DRAG_EASE_OUT_CURVE });
 
-    const transition = `transform ${shiftDuration()}ms ${EASE_OUT}, opacity 200ms ${EASE_OUT}`;
+    const transition = `transform ${shiftDuration()}ms ${DRAG_EASE_OUT}, opacity 200ms ${DRAG_EASE_OUT}`;
     ids.forEach(id => {
       const column = columnsRef.current.get(id);
       if (!column) return;
@@ -368,40 +326,23 @@ export const useColumnReorder = ({
       column.style.opacity = '0.9';
     });
     source.style.backgroundColor = 'transparent';
-    contentOf(source).forEach(child => {
+    contentOf(source, SOCKET).forEach(child => {
       child.style.opacity = '0';
     });
-    const socket = socketOf(source);
+    const socket = socketOf(source, SOCKET);
     if (socket) {
-      socket.style.transition = `opacity 150ms ${EASE_OUT}`;
+      socket.style.transition = `opacity 150ms ${DRAG_EASE_OUT}`;
       socket.style.opacity = '1';
     }
 
-    drag.frame = requestAnimationFrame(autoScroll);
+    frameRef.current = requestAnimationFrame(autoScroll);
+    return true;
   };
 
-  const settle = (commit: boolean): void => {
-    const drag = dragRef.current;
+  const settle = (drag: ColumnDrag, commit: boolean): void => {
     const strip = stripRef.current;
-    if (!drag || !strip) return;
-    if (drag.phase === 'press') {
-      const source = columnsRef.current.get(drag.sourceId);
-      if (source) {
-        source.style.transform = '';
-        window.setTimeout(() => {
-          if (dragRef.current) return;
-          source.style.transition = '';
-          source.style.transformOrigin = '';
-        }, 200);
-      }
-      listenersRef.current?.();
-      listenersRef.current = null;
-      dragRef.current = null;
-      return;
-    }
-    if (drag.phase !== 'drag') return;
-    drag.phase = 'settle';
-    cancelAnimationFrame(drag.frame);
+    if (!strip) return;
+    cancelAnimationFrame(frameRef.current);
     if (!commit && drag.targetIndex !== drag.fromIndex) {
       drag.targetIndex = drag.fromIndex;
       applyShifts(drag);
@@ -415,19 +356,19 @@ export const useColumnReorder = ({
 
     const { reduceMotion: reduce } = latest.current;
     const landing = reduce
-      ? { duration: 0.18, ease: EASE_OUT_CURVE }
+      ? { duration: 0.18, ease: DRAG_EASE_OUT_CURVE }
       : ({ type: 'spring', duration: 0.5, bounce: 0.2 } as const);
     const targetX = drag.sourceShift - (strip.scrollLeft - drag.startScroll);
     void Promise.all([
       animate(values.x, targetX, landing),
       animate(values.y, 0, landing),
       animate(values.scale, 1, landing),
-      animate(values.shadow, 0, { duration: 0.3, ease: EASE_OUT_CURVE }),
+      animate(values.shadow, 0, { duration: 0.3, ease: DRAG_EASE_OUT_CURVE }),
     ]).then(() => {
-      if (dragRef.current !== drag) return;
+      if (pointer.current() !== drag) return;
       if (drag.targetIndex === drag.fromIndex) {
         resetColumns();
-        teardown();
+        teardown(drag);
         return;
       }
       const next = moveTo(drag.ids, drag.fromIndex, drag.targetIndex);
@@ -439,97 +380,67 @@ export const useColumnReorder = ({
         if (pendingRef.current?.key !== next.join('|')) return;
         pendingRef.current = null;
         resetColumns();
-        teardown();
+        teardown(drag);
       });
     });
   };
 
+  const pointer = usePointerDrag<ColumnDrag>({
+    begin,
+    move: drag => {
+      const dy = drag.lastY - drag.startY;
+      values.x.set(drag.lastX - drag.startX);
+      values.y.set(Math.sign(dy) * Math.min(Math.abs(dy) * 0.25, 24));
+      updateTarget(drag);
+    },
+    settle,
+    abandon: drag => {
+      const source = columnsRef.current.get(drag.sourceId);
+      if (!source) return;
+      source.style.transform = '';
+      window.setTimeout(() => {
+        if (pointer.current()) return;
+        source.style.transition = '';
+        source.style.transformOrigin = '';
+      }, 200);
+    },
+    scroller: () => stripRef.current,
+  });
+
   const startPress = (stageId: string, event: React.PointerEvent<HTMLElement>): void => {
-    if (event.button !== 0 || event.pointerType === 'touch' || dragRef.current) return;
+    if (event.button !== 0 || event.pointerType === 'touch' || pointer.current()) return;
     if ((event.target as Element).closest('button, a, input, [role="menuitem"]')) return;
     if (latest.current.stageIds.length < 2) return;
     const source = columnsRef.current.get(stageId);
     const strip = stripRef.current;
     if (!source || !strip) return;
 
-    const handle = event.currentTarget;
-    handle.setPointerCapture(event.pointerId);
-    const drag: PointerDrag = {
-      phase: 'press',
-      sourceId: stageId,
-      pointerId: event.pointerId,
-      handle,
-      startX: event.clientX,
-      startY: event.clientY,
-      lastX: event.clientX,
-      lastY: event.clientY,
-      startScroll: strip.scrollLeft,
-      ids: [],
-      rects: [],
-      gap: 0,
-      fromIndex: -1,
-      targetIndex: -1,
-      sourceShift: 0,
-      stripRect: null,
-      frame: 0,
-    };
-    dragRef.current = drag;
-
-    if (!latest.current.reduceMotion) {
-      const sourceRect = source.getBoundingClientRect();
-      source.style.transformOrigin = `${event.clientX - sourceRect.left}px ${event.clientY - sourceRect.top}px`;
-      source.style.transition = `transform 160ms ${EASE_OUT}`;
-      source.style.transform = `scale(${PRESS_SCALE})`;
-    }
-
-    const onMove = (moveEvent: PointerEvent): void => {
-      if (moveEvent.pointerId !== drag.pointerId) return;
-      drag.lastX = moveEvent.clientX;
-      drag.lastY = moveEvent.clientY;
-      if (drag.phase === 'press') {
-        const distance = Math.hypot(drag.lastX - drag.startX, drag.lastY - drag.startY);
-        if (distance >= DRAG_THRESHOLD) beginDrag(drag);
-        return;
-      }
-      if (drag.phase !== 'drag') return;
-      const dy = drag.lastY - drag.startY;
-      values.x.set(drag.lastX - drag.startX);
-      values.y.set(Math.sign(dy) * Math.min(Math.abs(dy) * 0.25, 24));
-      updateTarget(drag);
-    };
-    const onUp = (upEvent: PointerEvent): void => {
-      if (upEvent.pointerId === drag.pointerId) settle(true);
-    };
-    const onCancel = (): void => settle(false);
-    const onKey = (keyEvent: KeyboardEvent): void => {
-      if (keyEvent.key !== 'Escape') return;
-      keyEvent.preventDefault();
-      keyEvent.stopPropagation();
-      settle(false);
-    };
-    const onScroll = (): void => {
-      if (drag.phase === 'drag') updateTarget(drag);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-    window.addEventListener('blur', onCancel);
-    window.addEventListener('keydown', onKey, true);
-    strip.addEventListener('scroll', onScroll, { passive: true });
-    listenersRef.current = (): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      window.removeEventListener('blur', onCancel);
-      window.removeEventListener('keydown', onKey, true);
-      strip.removeEventListener('scroll', onScroll);
-    };
+    const drag = pointer.start(
+      event,
+      {
+        sourceId: stageId,
+        startScroll: strip.scrollLeft,
+        ids: [],
+        rects: [],
+        gap: 0,
+        fromIndex: -1,
+        targetIndex: -1,
+        sourceShift: 0,
+        stripRect: null,
+      },
+      { captureOnPress: true },
+    );
+    if (!drag || latest.current.reduceMotion) return;
+    const sourceRect = source.getBoundingClientRect();
+    source.style.transformOrigin = `${event.clientX - sourceRect.left}px ${event.clientY - sourceRect.top}px`;
+    source.style.transition = `transform 160ms ${DRAG_EASE_OUT}`;
+    source.style.transform = `scale(${PRESS_SCALE})`;
   };
 
   const orderKey = stageIds.join('|');
   React.useLayoutEffect(() => {
     const pending = pendingRef.current;
+    const drag = pointer.current();
     if (pending) {
       if (pending.key !== orderKey) return;
       pendingRef.current = null;
@@ -537,20 +448,19 @@ export const useColumnReorder = ({
       pending.scrolled.forEach(([element, top]) => {
         element.scrollTop = top;
       });
-      teardown();
+      if (drag) teardown(drag);
       return;
     }
-    if (dragRef.current && dragRef.current.phase !== 'press') {
+    if (drag && drag.phase !== 'press') {
       resetColumns();
-      teardown();
+      teardown(drag);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on order changes only
   }, [orderKey]);
 
   React.useEffect(
     () => (): void => {
-      listenersRef.current?.();
-      listenersRef.current = null;
+      cancelAnimationFrame(frameRef.current);
       store.set(null);
     },
     [store],

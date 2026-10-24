@@ -1,8 +1,10 @@
 import { ComponentType, ReactElement, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PlusDefault, SearchDefault } from '@xyne/icons';
+import { X } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button/index';
+import { Tooltip } from '@/components/ui/Tooltip';
 import AgentsV2 from './agents/AgentsV2';
 import SubagentsV2 from './subagents/SubagentsV2';
 import SkillsV2 from './skills/SkillsV2';
@@ -12,6 +14,9 @@ import DevelopersV2 from './developers/DevelopersV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
 import { CreateAppDialog } from '@/routes/AppsMarketplaceScreen/CreateAppDialog';
 import { CreateAgentDialog } from './agents/create/CreateAgentDialog';
+import { AddHubAgentDialog } from './agents/AddHubAgentDialog';
+import { Dialog } from '@/components/ui/Dialog/Dialog';
+import { AddSkillList } from '@/routes/SdlcScreen/AddSkillList';
 
 interface LibraryTab {
   id: string;
@@ -72,7 +77,13 @@ const LIBRARY_TABS = [
 const TAB_SCOPED_PARAMS = ['q', 'category', 'source', 'hub'];
 
 /** `channelId` scopes the hub to one SDLC hub's agents: its members plus agents pending approval. */
-const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): ReactElement => {
+const LibraryV2 = ({
+  channelId,
+  addAgentBlockedReason = null,
+}: {
+  channelId?: string | undefined;
+  addAgentBlockedReason?: string | null;
+} = {}): ReactElement => {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const tabs = channelId ? LIBRARY_TABS.slice(0, 1) : LIBRARY_TABS;
@@ -94,6 +105,8 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
   const TabContent = activeTab.content;
 
   const [createAgentOpen, setCreateAgentOpen] = useState(false);
+  const [addAgentOpen, setAddAgentOpen] = useState(false);
+  const [importSkillOpen, setImportSkillOpen] = useState(false);
   const query = searchParams.get('q') ?? '';
   const [searchOpen, setSearchOpen] = useState(query.length > 0);
 
@@ -124,7 +137,13 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
   };
 
   return (
-    <div className='max-w-ai-content mx-auto flex w-full flex-col px-6 pb-16'>
+    // Inside an SDLC hub it takes the hub pages' width; the AI screen keeps its own.
+    <div
+      className={cn(
+        'mx-auto flex w-full flex-col pb-16',
+        channelId ? 'max-w-6xl px-8' : 'max-w-ai-content px-6',
+      )}
+    >
       <div className='bg-background sticky top-0 z-10 flex flex-col'>
         <div className='flex items-center gap-5 pt-5'>
           <div className='flex min-w-0 flex-1 flex-col justify-center gap-1'>
@@ -132,9 +151,46 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
               Agent Hub
             </h1>
             <p className='text-[15px] leading-[1.2] text-muted-foreground'>
-              View and manage agents, subagent, skills and MCP.
+              {channelId && addAgentBlockedReason
+                ? `${addAgentBlockedReason} You can still create agents for yourself.`
+                : 'View and manage agents, subagent, skills and MCP.'}
             </p>
           </div>
+          {activeTab.id === 'skills' && (
+            <Button
+              type='button'
+              variant='outline'
+              className='shrink-0'
+              onClick={() => setImportSkillOpen(true)}
+              data-track-category='Claw Agents'
+              data-track-name='Import skill'
+            >
+              Import
+            </Button>
+          )}
+          {channelId &&
+            (addAgentBlockedReason ? (
+              <Tooltip content={addAgentBlockedReason}>
+                {/* A disabled button gets no hover or focus, so the wrapper carries the tooltip. */}
+                {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- its tooltip must open from the keyboard */}
+                <span className='shrink-0' tabIndex={0}>
+                  <Button type='button' variant='outline' disabled>
+                    Add agent
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button
+                type='button'
+                variant='outline'
+                className='shrink-0'
+                onClick={() => setAddAgentOpen(true)}
+                data-track-category='Claw Agents'
+                data-track-name='Add hub agent'
+              >
+                Add agent
+              </Button>
+            ))}
           {activeTab.create && (
             <Button
               type='button'
@@ -232,7 +288,62 @@ const LibraryV2 = ({ channelId }: { channelId?: string | undefined } = {}): Reac
       </LibraryToolbarSlotProvider>
 
       <CreateAppDialog open={createAppOpen} onOpenChange={setCreateAppOpen} />
-      <CreateAgentDialog open={createAgentOpen} onOpenChange={setCreateAgentOpen} />
+      <CreateAgentDialog
+        open={createAgentOpen}
+        onOpenChange={setCreateAgentOpen}
+        // Linked to the hub only when its Add members rule allows: approval then adds it there.
+        createPath={
+          addAgentBlockedReason
+            ? `${LIBRARY_TABS[0].create.path}?${new URLSearchParams({ returnTo: pathname })}`
+            : createPath(LIBRARY_TABS[0].create.path)
+        }
+        note={
+          !channelId
+            ? undefined
+            : addAgentBlockedReason
+              ? `${addAgentBlockedReason} This agent will be yours only.`
+              : 'It shows here as Pending approval, and joins this hub once a claw admin approves it.'
+        }
+      />
+      {channelId && !addAgentBlockedReason && (
+        <AddHubAgentDialog
+          channelId={channelId}
+          open={addAgentOpen}
+          onOpenChange={setAddAgentOpen}
+        />
+      )}
+      {/* The hub's Add existing skill dialog, without a hub: it only imports into your skills. */}
+      <Dialog
+        open={importSkillOpen}
+        onOpenChange={setImportSkillOpen}
+        title='Import skill'
+        description='Import a skill from skills.sh or a GitHub repo.'
+        className='max-w-2xl'
+      >
+        <div className='flex h-[min(560px,80vh)] max-h-[85vh] flex-col'>
+          <div className='flex items-start gap-3 px-6 pb-4 pt-6'>
+            <div className='min-w-0 flex-1'>
+              <h2 className='text-lg font-semibold'>Import skill</h2>
+              <p className='mt-1 text-sm text-muted-foreground'>
+                Import a skill from skills.sh or a GitHub repo.
+              </p>
+            </div>
+            <button
+              type='button'
+              aria-label='Close'
+              onClick={() => setImportSkillOpen(false)}
+              data-track-category='Claw Agents'
+              data-track-name='Import skill closed'
+              className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            >
+              <X size={15} />
+            </button>
+          </div>
+          <div className='flex min-h-0 flex-1 flex-col overflow-auto px-6 pb-6'>
+            {importSkillOpen && <AddSkillList />}
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 };

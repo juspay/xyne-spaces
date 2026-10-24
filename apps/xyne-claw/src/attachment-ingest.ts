@@ -65,6 +65,7 @@ export interface IngestedAttachments {
   derivedContextFiles: ContextFile[];
   /** Raw PDF bytes kept alongside the extracted markdown. */
   pdfBuffers: Array<{ fileName: string; buf: Buffer }>;
+  xlsxBuffers: Array<{ fileName: string; buf: Buffer }>;
   /** Keyframes extracted from videos, injected into the opening prompt. */
   videoKeyframes: VideoKeyframe[];
   /** Raw recordings retained only for /record-skill's sandbox analyzer. */
@@ -251,6 +252,7 @@ export async function ingestAttachments(
   // paths, and a type missing from that block is invisible to the agent even
   // though its markdown sibling is on disk.
   const xlsxAttachments = all.filter((a) => isXlsxAttachment(a.fileName, a.mimeType));
+  const xlsxBuffers = xlsxAttachments.map((a) => ({ fileName: a.fileName, buf: decode(a) }));
   const docxAttachments = all.filter((a) => isDocxAttachment(a.fileName, a.mimeType));
   const pptxAttachments = all.filter((a) => isPptxAttachment(a.fileName, a.mimeType));
   const htmlAttachments = all.filter((a) => isHtmlAttachment(a.fileName, a.mimeType));
@@ -325,6 +327,7 @@ export async function ingestAttachments(
   return {
     derivedContextFiles,
     pdfBuffers,
+    xlsxBuffers,
     videoKeyframes,
     videoBuffers,
     imageAttachments,

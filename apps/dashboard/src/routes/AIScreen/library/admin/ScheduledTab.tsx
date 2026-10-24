@@ -9,6 +9,12 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import Tooltip from '@/components/ui/Tooltip';
 import { listClawAuthAgents } from '@/services/claw/clawAuthAgentsService';
 import { cancelScheduledJob, listAdminScheduledJobs } from '@/services/claw/clawAdminService';
+import {
+  pauseScheduledJob,
+  resumeScheduledJob,
+  updateScheduledJob,
+  type ScheduledJobPatch,
+} from '@/services/claw/clawScheduledJobsService';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { AdminOrgScope, AdminScheduledJob } from '@/services/claw/clawAdminTypes';
 import { TabMessage } from './components/TabMessage';
@@ -20,18 +26,21 @@ import { PersonPill } from '../shared/primitives/PersonPill';
 import { AdminFooterPortal, AdminToolbarPortal } from './components/AdminToolbarSlot';
 import { AdminSearchField } from './components/AdminSearchField';
 import { HighlightMatch } from './components/HighlightMatch';
+import { EditScheduleDialog } from '../agents/detail/activity/EditScheduleDialog';
+import { ScheduleActions } from '../agents/detail/activity/ScheduleActions';
 
 const PAGE_SIZE = 50;
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All statuses' },
   { value: 'active', label: 'Active' },
+  { value: 'paused', label: 'Paused' },
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
 ] as const;
 
-const statusVariant = (status: string): 'success' | 'secondary' =>
-  status === 'active' ? 'success' : 'secondary';
+const statusVariant = (status: string): 'success' | 'outline' | 'secondary' =>
+  status === 'active' ? 'success' : status === 'paused' ? 'outline' : 'secondary';
 
 const formatDate = (value: string | null): string =>
   value ? new Date(value).toLocaleString() : '—';
@@ -56,6 +65,7 @@ export function ScheduledTab({
   const [jobUserId, setJobUserId] = useState('');
   const [query, setQuery] = useState('');
   const [cancelTarget, setCancelTarget] = useState<AdminScheduledJob | null>(null);
+  const [editTarget, setEditTarget] = useState<AdminScheduledJob | null>(null);
 
   const { data: agents } = useQuery({
     queryKey: auditAgentOptionsKey(userId),
@@ -106,6 +116,34 @@ export function ScheduledTab({
       void queryClient.invalidateQueries({ queryKey: ['claw-admin-scheduled'] });
     },
     onError: error => toast.error(clawErrorText(error, 'Could not cancel the job')),
+  });
+
+  const refreshJobs = (): void => {
+    void queryClient.invalidateQueries({ queryKey: ['claw-admin-scheduled'] });
+  };
+
+  const editJob = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: ScheduledJobPatch }) =>
+      updateScheduledJob(id, patch),
+    onSuccess: () => {
+      toast.success('Scheduled job updated');
+      setEditTarget(null);
+      refreshJobs();
+    },
+    onError: error => toast.error(clawErrorText(error, 'Could not update the job')),
+  });
+
+  const toggleJob = useMutation({
+    mutationFn: ({ id, pause }: { id: string; pause: boolean }) =>
+      pause ? pauseScheduledJob(id) : resumeScheduledJob(id),
+    onSuccess: (_result, { pause }) => {
+      toast.success(pause ? 'Scheduled job paused' : 'Scheduled job resumed');
+      refreshJobs();
+    },
+    onError: (error, { pause }) =>
+      toast.error(
+        clawErrorText(error, pause ? 'Could not pause the job' : 'Could not resume the job'),
+      ),
   });
 
   const resetTo = (apply: () => void): void => {
@@ -203,7 +241,7 @@ export function ScheduledTab({
           { label: 'Last run' },
           { label: 'Runs' },
           { label: 'Status' },
-          { label: '', align: 'right' as const, width: 'w-14' },
+          { label: '', align: 'right' as const, width: 'w-32' },
         ]}
       >
         {visible.map((job: AdminScheduledJob) => (
@@ -258,23 +296,34 @@ export function ScheduledTab({
               </Badge>
             </td>
             <td className='px-4 py-3 text-right align-top leading-5'>
-              <Tooltip content='Cancel scheduled job' side='top'>
-                <span className='inline-flex'>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    disabled={job.status !== 'active' || cancelJob.isPending}
-                    onClick={() => setCancelTarget(job)}
-                    className='-my-2 text-muted-foreground hover:text-destructive'
-                    aria-label='Cancel scheduled job'
-                    data-track-category='Claw Admin'
-                    data-track-name='Cancel scheduled job'
-                  >
-                    <DeleteDustbin01 className='size-3.5 text-current' />
-                  </Button>
-                </span>
-              </Tooltip>
+              <span className='-my-2 inline-flex items-center justify-end gap-0.5'>
+                <ScheduleActions
+                  job={job}
+                  busy={toggleJob.isPending || editJob.isPending}
+                  onEdit={() => setEditTarget(job)}
+                  onPause={() => toggleJob.mutate({ id: job.id, pause: true })}
+                  onResume={() => toggleJob.mutate({ id: job.id, pause: false })}
+                />
+                <Tooltip content='Cancel scheduled job' side='top'>
+                  <span className='inline-flex'>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      disabled={
+                        (job.status !== 'active' && job.status !== 'paused') || cancelJob.isPending
+                      }
+                      onClick={() => setCancelTarget(job)}
+                      className='text-muted-foreground hover:text-destructive'
+                      aria-label='Cancel scheduled job'
+                      data-track-category='Claw Admin'
+                      data-track-name='Cancel scheduled job'
+                    >
+                      <DeleteDustbin01 className='size-3.5 text-current' />
+                    </Button>
+                  </span>
+                </Tooltip>
+              </span>
             </td>
           </tr>
         ))}
@@ -296,6 +345,15 @@ export function ScheduledTab({
           onNext={() => setOffset(current => current + PAGE_SIZE)}
         />
       </AdminFooterPortal>
+
+      <EditScheduleDialog
+        job={editTarget}
+        saving={editJob.isPending}
+        onOpenChange={open => {
+          if (!open) setEditTarget(null);
+        }}
+        onSave={(job, patch) => editJob.mutate({ id: job.id, patch })}
+      />
 
       <ConfirmDialog
         open={cancelTarget !== null}

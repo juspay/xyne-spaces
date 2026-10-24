@@ -1,4 +1,4 @@
-FROM node:22.22.3-slim AS base
+FROM node:22.23.4-slim AS base
 
 # Install build dependencies for native modules and OpenSSL
 RUN apt-get update && apt-get install -y \
@@ -58,7 +58,7 @@ RUN pnpm store prune || true
 # ---------------------------------------------------------------------------
 # Production image
 # ---------------------------------------------------------------------------
-FROM node:22.22.3-slim AS runner
+FROM node:22.23.4-slim AS runner
 WORKDIR /repo/apps/backend
 
 RUN apt-get update && apt-get install -y \
@@ -71,7 +71,15 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     ca-certificates \
     libreoffice \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# ffmpeg is used by the recording stitch worker and the compatible-video
+# rendition worker. The HDR -> SDR tone-map needs zscale (libzimg) and the
+# rendition needs libx264; fail the build rather than the first transcode.
+RUN ffmpeg -hide_banner -filters | grep -q ' zscale ' \
+    && ffmpeg -hide_banner -filters | grep -q ' tonemap ' \
+    && ffmpeg -hide_banner -encoders | grep -q ' libx264 '
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 

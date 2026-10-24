@@ -69,7 +69,7 @@ const ClawSkillDetailV2 = (props: {
                 <ChevronBigLeft className='size-4' aria-hidden />
               </span>
               <span className='text-base font-semibold leading-6 tracking-[-0.32px] text-foreground'>
-                {hub ? 'Hub Knowledge' : 'Skills'}
+                Skills
               </span>
             </button>
 

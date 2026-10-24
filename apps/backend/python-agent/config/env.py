@@ -37,7 +37,7 @@ class Config:
     chutes_stt_api_key: Optional[str]
 
     # STT Provider Configuration (google, azure, or deepgram)
-    stt_model: str  # 'google', 'azure', or 'deepgram'
+    stt_model: str  # 'google', 'azure', 'deepgram', or 'neurolink'
     voice_input_stt_model: str  # STT provider for voice-input dictation flow (overrides stt_model for this path)
     google_voice_credentials_json: Optional[str]
     google_stt_model: str  # Model for Google STT (e.g., chirp_3)
