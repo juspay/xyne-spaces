@@ -42,6 +42,9 @@ import {
   updateClawChatProject,
   deleteClawChatProject,
   reorderClawChatProjects,
+  publishClawDesignShare,
+  getClawDesignShare,
+  revokeClawDesignShare,
   type ClawRunRequest,
   type ClawChatProjectInput,
 } from '@/services/clawAgentService';
@@ -283,6 +286,12 @@ const FeedbackRequestSchema = z.object({
  * logs for a Spaces session that is perfectly valid.
  */
 const PASSTHROUGH_CLAW_STATUSES = new Set([400, 404, 409]);
+
+const designShareBodySchema = z.object({
+  attachmentId: z.string().trim().min(1).max(200),
+  conversationId: z.string().trim().min(1).max(300),
+  title: z.string().trim().max(160).optional(),
+});
 
 function clawStatusFor(error: unknown): number {
   return error instanceof ClawRequestError && PASSTHROUGH_CLAW_STATUSES.has(error.status)
@@ -1375,6 +1384,60 @@ export class XyneAIControllerV2 {
             ? 404
             : 503;
       res.status(status).json({ success: false, error: message });
+    }
+  };
+
+  publishDesignShare = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const parsed = designShareBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: 'attachmentId and conversationId are required' });
+      return;
+    }
+    try {
+      res.json(await publishClawDesignShare({ headers: req.headers, userId }, parsed.data));
+    } catch (error) {
+      this.projectFailure(res, 'publishDesignShare', error);
+    }
+  };
+
+  getDesignShare = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+    try {
+      res.json(await getClawDesignShare({ headers: req.headers, userId }, convId));
+    } catch (error) {
+      this.projectFailure(res, 'getDesignShare', error);
+    }
+  };
+
+  revokeDesignShare = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { shareId } = req.params;
+    if (!shareId) {
+      res.status(400).json({ success: false, error: 'shareId is required' });
+      return;
+    }
+    try {
+      res.json(await revokeClawDesignShare({ headers: req.headers, userId }, shareId));
+    } catch (error) {
+      this.projectFailure(res, 'revokeDesignShare', error);
     }
   };
 

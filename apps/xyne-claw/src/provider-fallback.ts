@@ -122,3 +122,21 @@ export async function runWithProviderFallback<A, R>(
   // Loop guarantees result + completedAttempt are set when lastErr is undefined.
   return { result: result as R, completedAttempt: completedAttempt as A, fellBackProvider };
 }
+
+export interface VisibleOutput {
+  text: string;
+  attachments: number;
+  pendingResponses: number;
+  pendingActions: number;
+  pendingQuestions: ReadonlyArray<{ purpose?: string | undefined }>;
+}
+
+export function producedNothingVisible(output: VisibleOutput): boolean {
+  return (
+    !output.text.trim() &&
+    output.attachments === 0 &&
+    output.pendingResponses === 0 &&
+    output.pendingActions === 0 &&
+    !output.pendingQuestions.some((q) => q.purpose !== "follow_up_suggestions")
+  );
+}

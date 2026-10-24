@@ -13,6 +13,7 @@ export interface DetailListItem {
   iconType?: string;
   badge?: ReactNode;
   meta?: string;
+  actions?: ReactNode;
 }
 
 export function DetailListRow({
@@ -47,6 +48,8 @@ export function DetailListRow({
           {item.meta}
         </span>
       )}
+
+      {item.actions}
 
       {canEdit && (
         <button
