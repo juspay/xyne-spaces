@@ -23,6 +23,7 @@ import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { decide } from '@/services/decision/decide';
 import type { DecisionEngine, DecisionTask, TaskFeature, TaskInput } from '@/services/decision/types';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
 const AGENT_NAME = 'EmailClassification';
@@ -347,6 +348,9 @@ export class EmailClassificationService {
         ticketId,
         updatedFieldIds: writtenFieldIds,
       });
+      // The thread summary quotes these fields and related detection scopes by them, and
+      // the ticket's first summary ran before they existed.
+      void ticketThreadSummaryQueue.enqueue(ticketId);
     }
   }
 

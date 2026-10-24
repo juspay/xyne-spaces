@@ -335,6 +335,119 @@ const scoresForLog = (result: TicketDuplicateOutput | null) =>
   result?.matches?.map(match => [match.id, Math.round(match.score * 100) / 100, match.relation ?? null, match.tier]) ?? [];
 
 // ============================================================================
+// Related tickets (Jev)
+// ============================================================================
+
+const RELATED_JEV_CONFIG_KEY = 'ticket_related_jev_config';
+
+export interface TicketRelatedJevConfig {
+  /** Min probability to link a candidate Jev put in `same_cause`. */
+  sameCauseThreshold: number;
+  /**
+   * Min probability to link a candidate Jev put in `same_symptom_cause_unknown`.
+   * Higher: its resolution may not apply, so only a confident same-problem match is shown.
+   */
+  sameSymptomThreshold: number;
+  /** Cap on a ticket's related links overall, not per run. */
+  maxLinks: number;
+  /** Only tickets created within this many days before the ticket; 0 means no limit. */
+  lookbackDays: number;
+}
+
+// Starting points only. The question is a relation choice, not the yes/no the hand-checked
+// merchant-desk run was tuned on, so re-tune these against a labelled sample.
+const DEFAULT_RELATED_JEV_CONFIG: TicketRelatedJevConfig = {
+  sameCauseThreshold: 0.6,
+  sameSymptomThreshold: 0.75,
+  maxLinks: 3,
+  lookbackDays: 180,
+};
+
+export const getRelatedJevConfig = async (): Promise<TicketRelatedJevConfig> => {
+  try {
+    const remote = (await superpositionClient.getObjectValue(RELATED_JEV_CONFIG_KEY, {}, {})) as Partial<TicketRelatedJevConfig> | null;
+    return { ...DEFAULT_RELATED_JEV_CONFIG, ...remote };
+  } catch {
+    return DEFAULT_RELATED_JEV_CONFIG;
+  }
+};
+
+export type TicketRelatedRelation = 'same_cause' | 'same_symptom_cause_unknown' | 'different_cause' | 'different';
+
+/** Re-tune ticket_related_jev_config thresholds whenever this wording or RELATED_CRITERIA changes. */
+const RELATED_INSTRUCTIONS =
+  'How does this existing ticket relate to `new_ticket`? Judge the specific problem and what ' +
+  'caused it, not the category or product area: two failed refunds are the same problem only ' +
+  'if they failed for the same reason. Compare the Details and Cause lines where both have them.';
+
+const RELATED_CRITERIA: Record<TicketRelatedRelation, string> = {
+  same_cause:
+    'The same specific problem for the same cause, so how the existing ticket was handled or resolved applies to `new_ticket`.',
+  same_symptom_cause_unknown:
+    'The same specific problem, but `new_ticket` does not yet show what caused it, so the existing ticket may or may not apply.',
+  different_cause:
+    "The same symptom or category but a different cause, so the existing ticket's resolution would not fix `new_ticket`.",
+  different: 'A different problem, even if some words, the product area or the category match.',
+};
+
+const RELATED_RELATIONS = new Set<string>(Object.keys(RELATED_CRITERIA));
+
+export interface TicketRelatedScore {
+  readonly id: string;
+  readonly relation: TicketRelatedRelation;
+  /** Jev's probability for `relation`. */
+  readonly score: number;
+}
+
+/**
+ * One Jev call asking, per candidate, how it relates to the new ticket. Null when Jev is
+ * off or can't answer — related links are Jev-only, no LLM fallback. Never throws.
+ */
+export async function scoreRelatedTickets(
+  input: TicketDuplicateInput,
+  context: TicketDuplicateContext,
+): Promise<TicketRelatedScore[] | null> {
+  if (input.candidates.length === 0 || !(await isJevScoringEnabled())) return null;
+
+  const candidates = input.candidates.slice(0, JEV_MAX_CANDIDATES);
+  const state = {
+    new_ticket: {
+      title: normalizePromptText(input.title, MAX_TITLE_LENGTH),
+      description: normalizePromptText(input.description, JEV_NEW_TICKET_DESCRIPTION_LENGTH),
+    },
+  };
+  const questions: Record<string, JevQuestion> = {};
+  candidates.forEach((candidate, i) => {
+    questions[`relation${i}`] = {
+      type: 'choice',
+      instructions: `${quoteCandidate(candidate)}\n${RELATED_INSTRUCTIONS}`,
+      criteria: RELATED_CRITERIA,
+    };
+  });
+
+  const answers = await askJev(state, questions, JEV_TIMEOUT_MS, undefined, { partial: true });
+  if (!answers) return null;
+
+  const scores = candidates.flatMap((candidate, i): TicketRelatedScore[] => {
+    const answer = answers[`relation${i}`];
+    if (answer?.type !== 'choice' || !RELATED_RELATIONS.has(answer.choice)) return [];
+    const score = answer.probabilities[answer.choice] ?? answer.confidence;
+    if (score === undefined) return [];
+    return [{ id: candidate.id, relation: answer.choice as TicketRelatedRelation, score }];
+  });
+
+  logger.info(`[${AGENT_NAME}] Related verdict`, {
+    source: 'jev',
+    model: envConfig.jev.model,
+    ticketId: context.ticketId,
+    candidateCount: candidates.length,
+    scores: scores.map(s => [s.id, s.relation, Math.round(s.score * 100) / 100]),
+  });
+
+  return scores.length > 0 ? scores : null;
+}
+
+// ============================================================================
 // Execution Function
 // ============================================================================
 

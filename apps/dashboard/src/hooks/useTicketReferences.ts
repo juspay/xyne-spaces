@@ -46,6 +46,8 @@ export const formatReferenceLabel = (relationType: TicketReferenceRelation): str
       return 'Possible duplicate';
     case TicketReferenceRelation.MERGED_INTO:
       return 'Merged into';
+    case TicketReferenceRelation.RELATED_POSSIBLE:
+      return 'Related';
     case TicketReferenceRelation.LINKED:
     default:
       return 'Linked';
@@ -60,6 +62,8 @@ export const formatIncomingReferenceLabel = (relationType: TicketReferenceRelati
       return 'Possibly Duplicated By';
     case TicketReferenceRelation.MERGED_INTO:
       return 'Merged';
+    case TicketReferenceRelation.RELATED_POSSIBLE:
+      return 'Related';
     case TicketReferenceRelation.LINKED:
     default:
       return 'Linked By';
@@ -96,6 +100,10 @@ export const useTicketReferences = ({
       {
         value: TicketReferenceRelation.LINKED,
         label: formatReferenceLabel(TicketReferenceRelation.LINKED),
+      },
+      {
+        value: TicketReferenceRelation.RELATED_POSSIBLE,
+        label: formatReferenceLabel(TicketReferenceRelation.RELATED_POSSIBLE),
       },
       {
         value: TicketReferenceRelation.DUPLICATE_POSSIBLE,

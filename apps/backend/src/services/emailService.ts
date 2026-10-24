@@ -77,6 +77,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue';
 import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
@@ -1415,6 +1416,8 @@ export class EmailService {
       });
     }
 
+    void ticketThreadSummaryQueue.enqueue(ticket.id, { immediate: true });
+
     // Fire-and-forget: enrich the ticket description via the AI agent. Never
     // blocks ingestion; ticket keeps the raw email body if this fails or times out.
     void this.enrichTicketDescription({
@@ -2267,6 +2270,8 @@ export class EmailService {
     // Post-commit so refetched label unread counts see the new emails.
     if (txResult.ticketId) {
       websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+      // A customer email on an existing ticket is summarised when an agent next opens it.
+      if (txResult.isNew) void ticketThreadSummaryQueue.enqueue(txResult.ticketId, { immediate: true });
     }
 
     const insertedIdSet = new Set(txResult.insertedEmailIds);

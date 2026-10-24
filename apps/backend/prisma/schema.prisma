@@ -178,6 +178,7 @@ model Ticket {
   conversation       Conversation           @relation("TicketConversation", fields: [conversationId], references: [conversationId])
   emailReads         EmailRead[]
   ticketDescription TicketDescription?
+  threadSummary    TicketSummary?
 
   @@index([status])
   @@index([assignedTo, status])
@@ -231,6 +232,28 @@ model TicketDescription {
   @@index([channelConnectId]) // Slack Connect: no channelId/workspaceId index to mirror; channelConnectId is its scope filter
   @@map("ticket_descriptions")
   @@schema("public")
+}
+
+// AI summary of a desk ticket's whole thread (problem, details, cause, resolution).
+// Feeds related-ticket matching only; lives in non_zero so Zero never syncs it.
+model TicketSummary {
+  ticketId    String   @id
+  workspaceId String // denormalized tenant key (stamped on insert)
+  channelId   String // the desk the ticket is on: backfill, cause-key lookup and cleanup are per desk
+  channelConnectId String? // Slack Connect: the channel's connect_group handle; null when the row has no channel / un-backfilled
+  summary     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations (relationMode="prisma", no DB FK).
+  ticket  Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  channel Channel @relation(fields: [channelId], references: [id])
+
+  @@index([workspaceId])
+  @@index([channelId])
+  @@index([channelConnectId]) // Slack Connect: mirrors the channelId index
+  @@map("ticket_summaries")
+  @@schema("non_zero")
 }
 
 model SubTicket {
@@ -2035,6 +2058,7 @@ model Channel {
   sdlcEntityLinks    SdlcEntityLink[] @relation("SdlcChannelLink")
   collectionPermissions CollectionPermission[]
   ticketDescriptions    TicketDescription[]
+  ticketSummaries       TicketSummary[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility

@@ -15,6 +15,7 @@ import {
   closeDriveImportQueue,
 } from '@/services/driveImport/driveImportWorker'
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
+import { ticketThreadSummaryQueue } from '@/queues/ticketThreadSummaryQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
@@ -215,6 +216,13 @@ class WorkerService {
       if (appConfig.decisionEval.enabled) {
         logger.info('Starting decision evaluation worker...');
         await decisionEvaluationWorker.start();
+      }
+
+      // Desk ticket thread summaries feed related-ticket matching.
+      if (appConfig.ticketThreadSummaryEnabled) {
+        logger.info('Starting ticket thread summary worker service...')
+        await ticketThreadSummaryQueue.initialize()
+        ticketThreadSummaryQueue.startProcessing()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
@@ -535,6 +543,10 @@ class WorkerService {
       }
       if (appConfig.decisionEval.enabled) {
         await decisionEvaluationWorker.shutdown();
+      }
+
+      if (appConfig.ticketThreadSummaryEnabled) {
+        await ticketThreadSummaryQueue.shutdown()
       }
 
       if (workflowsEnabled) {

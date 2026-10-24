@@ -27,6 +27,8 @@ function formatTicketReferenceRelationLabel(relationType: TicketReferenceRelatio
       return 'Possible duplicate';
     case TicketReferenceRelation.MERGED_INTO:
       return 'Merged into';
+    case TicketReferenceRelation.RELATED_POSSIBLE:
+      return 'Related';
     case TicketReferenceRelation.LINKED:
     default:
       return 'Linked';
