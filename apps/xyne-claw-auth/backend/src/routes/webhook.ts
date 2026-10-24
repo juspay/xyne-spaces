@@ -6625,6 +6625,14 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       });
     }
     if (ctx.responseMode !== "conversation") return;
+    // Slack and messaging-channel (WhatsApp, Telegram, …) runs have no Spaces
+    // thread: channelId/conversationId point at the chat and appToken is empty,
+    // so postAgentMessage can only fail. The ownership row above is still
+    // written so the link stays valid for that surface's own delivery.
+    if (ctx.slackDelivery || ctx.channelDelivery) {
+      log.info(`Sandbox preview not posted to Spaces: run delivered via ${ctx.slackDelivery ? "slack" : ctx.channelDelivery?.channel} (sandboxId=${sandboxId})`);
+      return;
+    }
     // Per-agent opt-out (agent.config.hideLivePreview). Only the thread message is
     // suppressed — the ownership row above is still written, because the sandbox
     // router's access check (and the Workspace pane) depend on it.
