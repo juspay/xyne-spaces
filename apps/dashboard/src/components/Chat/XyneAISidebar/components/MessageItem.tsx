@@ -96,7 +96,7 @@ import {
   requirePendingActionIndex,
   unpresentedPendingActions,
 } from '../utils/XyneAITypes';
-import { AgentByline, AgentRecipient } from '../../../AIScreen/ConversationAgents';
+import { AgentByline } from '../../../AIScreen/ConversationAgents';
 import { FollowUpSuggestions } from '../../../AIScreen/FollowUpSuggestions';
 import { PendingActionBlock } from './PendingActionBlock';
 import {
@@ -1329,9 +1329,6 @@ export const MessageItem = React.memo(
               : 'flex-1 max-w-full overflow-hidden'
           }
         >
-          {isV2 && message.type === 'user' && !isEditing && message.agentSlug && (
-            <AgentRecipient slug={message.agentSlug} className='pr-1' />
-          )}
           {isV2 && message.type === 'bot' && message.agentSlug && (
             <AgentByline slug={message.agentSlug} className='mb-2' />
           )}
