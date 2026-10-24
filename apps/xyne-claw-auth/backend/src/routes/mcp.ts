@@ -15,7 +15,13 @@ import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/g
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
-import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
+import {
+  SLACK_CUSTOM_TOOLS,
+  SLACK_SURFACE_CONNECTION_PREFIX,
+  handleSlackFindChannel,
+  slackSurfaceReadBlockReason,
+  type SlackRequester,
+} from "../mcp/adapters/slack.js";
 import {
   channelAgentTools,
   findNotifyTarget,
@@ -852,9 +858,20 @@ async function loadSlackSurfaceCredentials(
   return {
     credentials: { botToken, teamId: delivery.teamId },
     source: "agent",
-    connectionId: `slack-surface:${delivery.connectedSurfaceId ?? delivery.surfaceAgentId}:${delivery.teamId}`,
+    connectionId: `${SLACK_SURFACE_CONNECTION_PREFIX}${delivery.connectedSurfaceId ?? delivery.surfaceAgentId}:${delivery.teamId}`,
     isUserOwned: false,
   };
+}
+
+/** The Slack user who started the run, when these credentials are the Slack-surface bot's. */
+export async function slackSurfaceRequester(
+  effective: EffectiveCredentials,
+  sessionId: string,
+): Promise<SlackRequester | null> {
+  if (!effective.connectionId.startsWith(SLACK_SURFACE_CONNECTION_PREFIX)) return null;
+  const { getSession } = await import("./webhook.js");
+  const runCtx = await getSession(sessionId).catch(() => null);
+  return { slackUserId: runCtx?.slackDelivery?.slackUserId || undefined };
 }
 
 /**
@@ -2233,6 +2250,22 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       effectiveParams = { ...effectiveParams, adoptApproved: effectivePermission === "ask" };
     }
 
+    // A Slack-surface run reads with the workspace bot's token, which sees
+    // every channel the bot was added to. Scope channel reads to the Slack
+    // user who started the run, so the bot can't read a private channel or
+    // DM for someone who is not in it. Other Slack connections (a user's own
+    // token, an agent or global connection) are left as they are.
+    const slackRequester =
+      serverType === "slack" ? await slackSurfaceRequester(effective, req.params.sessionId) : null;
+    if (slackRequester) {
+      const blockReason = await slackSurfaceReadBlockReason(credentials, slackRequester, tool, effectiveParams);
+      if (blockReason) {
+        log.info(`[mcp/call] slack-surface read blocked for user=${userId} tool=${tool}`);
+        res.json({ success: true, data: { content: blockReason } });
+        return;
+      }
+    }
+
     if (effectivePermission === "ask") {
       const validationError = await validateWriteAction(serverType, tool, effectiveParams, {
         ...credentials,
@@ -2311,7 +2344,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
 
     // Slack: private-aware, paginated channel resolver (name → ID)
     if (serverType === "slack" && tool === "slack_find_channel") {
-      const content = await handleSlackFindChannel(credentials, params ?? {});
+      const content = await handleSlackFindChannel(credentials, params ?? {}, slackRequester ?? undefined);
       res.json({ success: true, data: { content } });
       return;
     }
