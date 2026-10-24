@@ -1,15 +1,20 @@
 import {
+  cloneElement,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
+  type PointerEvent,
+  type PointerEventHandler,
   type ReactElement,
+  type Ref,
 } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
-import { ArrowLeft, BookOpen, Check, ChevronRight, FileText, Loader2 } from 'lucide-react';
-import { FolderDefault } from '@xyne/icons';
+import { BookOpen, Check, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileText, FolderDefault } from '@xyne/icons';
+import { Tooltip } from '../ui/Tooltip';
 import { useQuery as useZeroQuery } from '../../hooks/useQuery';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useSelf } from '../../hooks/useUsers';
@@ -26,6 +31,7 @@ import {
   MENU_ROW,
   MENU_SURFACE,
   focusFirstMenuItem,
+  usePlusMenuClose,
   usePlusSubmenu,
 } from './ComposerControls';
 
@@ -90,8 +96,8 @@ export function CollectionsSubmenu({
           </span>
         )}
         <ChevronRight
-          className={cn('size-4 shrink-0 text-muted-foreground', count === 0 && 'ml-auto')}
-          aria-hidden
+          size={16}
+          className={cn('shrink-0 text-muted-foreground', count === 0 && 'ml-auto')}
         />
       </Menu.SubTrigger>
       <Menu.Portal>
@@ -99,7 +105,7 @@ export function CollectionsSubmenu({
           sideOffset={10}
           alignOffset={-6}
           collisionPadding={12}
-          className={cn(MENU_SURFACE, 'flex w-[300px] flex-col')}
+          className={cn(MENU_SURFACE, 'flex w-[246px] flex-col')}
         >
           {/* Mounted only while open, so it always opens on the top level. */}
           <CollectionBrowser
@@ -113,6 +119,91 @@ export function CollectionsSubmenu({
         </Menu.SubContent>
       </Menu.Portal>
     </Menu.Sub>
+  );
+}
+
+// 1px slack absorbs sub-pixel rounding, which reports a fitting label as clipped.
+const isClipped = (el: HTMLElement | null): boolean => !!el && el.scrollWidth > el.clientWidth + 1;
+const rowLabel = (row: HTMLElement | null): HTMLElement | null =>
+  row?.querySelector<HTMLElement>('[data-row-label]') ?? null;
+
+/**
+ * A row whose name is cut off shows it whole in a pill to the right of the
+ * submenu, level with the row. The pill anchors to the row (the trigger) but
+ * the measured element is its `[data-row-label]` span. As in TruncatedTooltip,
+ * an unclipped row renders bare: vetoing via controlled `open` would strand the
+ * shared provider's delay state. The menu focuses the row under the pointer
+ * and Radix opens a tooltip on focus, so hover and keyboard highlight both show
+ * it, at once.
+ */
+function FullNameTooltip({
+  name,
+  children,
+}: {
+  name: string;
+  children: ReactElement<{
+    ref?: Ref<HTMLElement>;
+    onPointerEnter?: PointerEventHandler<HTMLElement>;
+  }>;
+}): ReactElement {
+  // In state, not a ref: Radix's Slot recomposes the child ref every render.
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const [clipped, setClipped] = useState(false);
+  const isOpenRef = useRef(false);
+  const staleWhileOpenRef = useRef(false);
+  const closeMenu = usePlusMenuClose();
+
+  // Never un-wrap while open — dropping `Root` mid-open skips Radix's close
+  // bookkeeping. Hold the verdict and apply it on close instead.
+  const applyClipped = useCallback((next: boolean): void => {
+    if (!next && isOpenRef.current) {
+      staleWhileOpenRef.current = true;
+      return;
+    }
+    setClipped(next);
+  }, []);
+
+  useEffect(() => {
+    const el = rowLabel(node);
+    if (!el) return undefined;
+    const observer = new ResizeObserver((): void => applyClipped(isClipped(el)));
+    observer.observe(el);
+    return (): void => observer.disconnect();
+  }, [node, name, applyClipped]);
+
+  const child = cloneElement(children, {
+    ref: setNode,
+    onPointerEnter: (event: PointerEvent<HTMLElement>): void => {
+      children.props.onPointerEnter?.(event);
+      applyClipped(isClipped(rowLabel(node)));
+    },
+  });
+  if (!clipped) return child;
+
+  return (
+    <Tooltip
+      content={name}
+      side='right'
+      align='center'
+      // Row edge → the menu's 8px padding + 1px border + a ~5px gap.
+      sideOffset={14}
+      collisionPadding={12}
+      delayDuration={300}
+      showArrow={false}
+      className='max-w-[320px] whitespace-normal break-words rounded-[10px] border border-border/70 bg-popover px-2.5 py-2 text-sm leading-5 text-popover-foreground shadow-[0_8px_24px_-12px_rgba(0,0,0,0.18)]'
+      // The open pill is the top layer and takes Escape before the menu does,
+      // so it closes the menu too: one Escape still dismisses everything.
+      onEscapeKeyDown={() => closeMenu?.()}
+      onOpenChange={open => {
+        isOpenRef.current = open;
+        if (!open && staleWhileOpenRef.current) {
+          staleWhileOpenRef.current = false;
+          setClipped(isClipped(rowLabel(node)));
+        }
+      }}
+    >
+      {child}
+    </Tooltip>
   );
 }
 
@@ -304,69 +395,72 @@ function CollectionBrowser({
     onOpen?: () => void;
     trackName: string;
   }): ReactElement => (
-    <Menu.Item
-      key={item.id}
-      // How many clicks this is (0 = Enter/Space), read before onSelect runs.
-      onClick={e => {
-        clicksRef.current = e.detail;
-      }}
-      onSelect={e => {
-        // Stays open, so several can be picked in one go.
-        e.preventDefault();
-        const clicks = clicksRef.current;
-        clicksRef.current = 0;
-        if (!onOpen || clicks === 0) {
-          onPick();
-          return;
-        }
-        if (clicks >= 2) {
-          onOpen();
-          return;
-        }
-        cancelPendingPick();
-        pickTimerRef.current = setTimeout(() => {
-          pickTimerRef.current = null;
-          onPick();
-        }, 220);
-      }}
-      onKeyDown={e => {
-        if (e.key === 'ArrowRight' && onOpen) {
+    <FullNameTooltip key={item.id} name={item.name}>
+      <Menu.Item
+        // How many clicks this is (0 = Enter/Space), read before onSelect runs.
+        onClick={e => {
+          clicksRef.current = e.detail;
+        }}
+        onSelect={e => {
+          // Stays open, so several can be picked in one go.
           e.preventDefault();
-          e.stopPropagation();
-          onOpen();
-        }
-      }}
-      aria-checked={selected}
-      role='menuitemcheckbox'
-      {...(onOpen ? { title: 'Click to add · double-click to open' } : {})}
-      className={cn(MENU_ROW, onOpen && 'pr-1')}
-      data-track-category='XyneAI'
-      data-track-name={trackName}
-      data-track-metadata={JSON.stringify({ id: item.id, selected: !selected })}
-    >
-      {icon}
-      <span className='min-w-0 flex-1 truncate'>{item.name}</span>
-      {selected && <Check className='size-4 shrink-0' aria-hidden />}
-      {onOpen && (
-        <button
-          type='button'
-          tabIndex={-1}
-          aria-label={`Open ${item.name}`}
-          title={`Open ${item.name}`}
-          onClick={e => {
-            // Opening is not picking: keep the click off the row.
+          const clicks = clicksRef.current;
+          clicksRef.current = 0;
+          if (!onOpen || clicks === 0) {
+            onPick();
+            return;
+          }
+          if (clicks >= 2) {
+            onOpen();
+            return;
+          }
+          cancelPendingPick();
+          pickTimerRef.current = setTimeout(() => {
+            pickTimerRef.current = null;
+            onPick();
+          }, 220);
+        }}
+        onKeyDown={e => {
+          if (e.key === 'ArrowRight' && onOpen) {
             e.preventDefault();
             e.stopPropagation();
             onOpen();
-          }}
-          className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
-          data-track-category='XyneAI'
-          data-track-name='OPEN_KB_FOLDER'
-        >
-          <ChevronRight className='size-4' aria-hidden />
-        </button>
-      )}
-    </Menu.Item>
+          }
+        }}
+        aria-checked={selected}
+        role='menuitemcheckbox'
+        {...(onOpen ? { title: 'Click to add · double-click to open' } : {})}
+        className={cn(MENU_ROW, onOpen && 'pr-0.5')}
+        data-track-category='XyneAI'
+        data-track-name={trackName}
+        data-track-metadata={JSON.stringify({ id: item.id, selected: !selected })}
+      >
+        {icon}
+        <span data-row-label className='min-w-0 flex-1 truncate'>
+          {item.name}
+        </span>
+        {selected && <Check className='size-4 shrink-0' aria-hidden />}
+        {onOpen && (
+          <button
+            type='button'
+            tabIndex={-1}
+            aria-label={`Open ${item.name}`}
+            title={`Open ${item.name}`}
+            onClick={e => {
+              // Opening is not picking: keep the click off the row.
+              e.preventDefault();
+              e.stopPropagation();
+              onOpen();
+            }}
+            className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground'
+            data-track-category='XyneAI'
+            data-track-name='OPEN_KB_FOLDER'
+          >
+            <ChevronRight size={16} />
+          </button>
+        )}
+      </Menu.Item>
+    </FullNameTooltip>
   );
 
   const note = (text: string): ReactElement => (
@@ -382,7 +476,7 @@ function CollectionBrowser({
             ...subfolders.map(f =>
               row({
                 item: f,
-                icon: <FolderDefault className={MENU_ICON} />,
+                icon: <FolderDefault size={16} className={MENU_ICON} />,
                 selected: knowledge.folders.some(s => s.id === f.id),
                 onPick: () => pickFolder(f),
                 onOpen: () => open(f),
@@ -392,7 +486,7 @@ function CollectionBrowser({
             ...files.map(f =>
               row({
                 item: f,
-                icon: <FileText className={MENU_ICON} aria-hidden strokeWidth={1.75} />,
+                icon: <FileText size={16} className={MENU_ICON} />,
                 selected: knowledge.files.some(s => s.id === f.id),
                 onPick: () => pickFile(f),
                 trackName: 'SELECT_FILE_SCOPE',
@@ -427,7 +521,7 @@ function CollectionBrowser({
 
   return (
     <div role='presentation' onKeyDown={onKeyDown} className='flex min-h-0 flex-col'>
-      <div className={cn('flex items-center gap-1.5 px-2.5', inFolder && 'pl-1')}>
+      <div className={cn('flex h-9 items-center px-2', inFolder && 'gap-1 pl-0.5')}>
         {/* Inside a collection, back sits where the search field starts. */}
         {inFolder && (
           <button
@@ -439,7 +533,7 @@ function CollectionBrowser({
             data-track-category='XyneAI'
             data-track-name='KB_FOLDER_BACK'
           >
-            <ArrowLeft className='size-4' aria-hidden strokeWidth={1.75} />
+            <ChevronLeft size={16} />
           </button>
         )}
         <input
@@ -460,17 +554,17 @@ function CollectionBrowser({
             // The menu's own keys (typeahead, ← closing it) stay out of the field.
             if (e.key !== 'Escape') e.stopPropagation();
           }}
-          placeholder={inFolder ? 'Search…' : 'Search collections'}
+          placeholder={inFolder ? 'Search this folder…' : 'Search collections'}
           aria-label={inFolder ? 'Search this folder' : 'Search collections'}
-          className='h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+          className='h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-foreground/40'
           data-track-category='XyneAI'
           data-track-name={inFolder ? 'KB_FOLDER_SEARCH_INPUT' : 'COLLECTION_SEARCH_INPUT'}
         />
       </div>
-      <div className='max-h-[min(340px,55vh)] overflow-y-auto'>
+      <div className='scrollbar-minimal max-h-[min(340px,55vh)] overflow-y-auto'>
         {inFolder && (
-          <div className='truncate px-2.5 pb-1 pt-1.5 text-sm text-muted-foreground'>
-            {path.map(n => n.name).join(' / ')}
+          <div className='flex h-9 items-center px-2 text-sm text-muted-foreground'>
+            <span className='truncate'>{path.map(n => n.name).join(' / ')}</span>
           </div>
         )}
         {body}
