@@ -398,7 +398,7 @@ class MultiUserTranscriber:
         azure_api_key: str,
         azure_api_version: str,
         azure_deployment: str,
-        stt_model: str = "azure",
+        stt_model: str = "google",
         google_voice_credentials_json: Optional[str] = None,
         google_stt_model: str = "chirp_3",
         google_stt_language: str = "en-US",
