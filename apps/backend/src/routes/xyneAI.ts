@@ -116,6 +116,7 @@ router.delete('/v2/chat-projects/:projectId', chatProjectsLimiter, authMiddlewar
 
 // `conversations/...` before `/:id`, or a conversation id is read as a system id.
 router.get('/v2/design-systems', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.listDesignSystems);
+router.post('/v2/design-systems', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.createDesignSystem);
 router.get('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.getConversationDesignSystem);
 router.put('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.pinConversationDesignSystem);
 router.delete('/v2/design-systems/conversations/:conversationId', chatProjectsLimiter, authMiddleware.authenticate, xyneAIControllerV2.unpinConversationDesignSystem);

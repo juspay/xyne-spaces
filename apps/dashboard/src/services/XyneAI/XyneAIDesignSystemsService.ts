@@ -29,6 +29,20 @@ export async function fetchDesignSystems(): Promise<DesignSystemRecord[]> {
   return response.data.success ? (response.data.data ?? []) : [];
 }
 
+export interface CreateDesignSystemInput {
+  name: string;
+  designMd?: string;
+  tokensCss?: string;
+  source?: string;
+}
+
+export async function createDesignSystem(
+  input: CreateDesignSystemInput,
+): Promise<DesignSystemRecord> {
+  const response = await apiInstance.post<Envelope<DesignSystemRecord>>(DESIGN_SYSTEMS_URL, input);
+  return response.data.data;
+}
+
 export async function updateDesignSystem(
   id: string,
   patch: { name?: string; designMd?: string; tokensCss?: string },
