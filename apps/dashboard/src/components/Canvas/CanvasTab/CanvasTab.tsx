@@ -218,7 +218,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId, getCanvasRoute }): Rea
 
       const participants =
         (targetCanvas as Canvas & { participants?: CanvasParticipant[] }).participants ?? [];
-      if (isChannelAdmin && isHubKnowledgeArtifactType(targetCanvas.sdlcArtifact?.artifactType)) {
+      const artifactType = targetCanvas.sdlcArtifact?.artifactType;
+      if (isChannelAdmin && (isHubKnowledgeArtifactType(artifactType) || artifactType === 'WIKI')) {
         return CanvasRole.EDITOR;
       }
       const inheritedRoles = participants

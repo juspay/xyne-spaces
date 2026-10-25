@@ -24,6 +24,8 @@ import {
   seedHubWorkflow,
 } from '@/sdlc/seedHubWorkflow';
 import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
+import { wikiStatus } from '@/sdlc/wiki/wikiStatus';
+import { resetWiki } from '@/sdlc/wiki/resetWiki';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
 import { listEnvironments } from '@/sdlc/sdlcEnvironment';
@@ -128,6 +130,16 @@ router.post(
   })
 );
 
+/** Deletes one hub's Wiki pages and runs, so the next run starts from each repository's first commit. */
+router.post(
+  '/admin/reset-wiki',
+  authorize('SDLC', AccessType.ADMIN),
+  route(async (req, res) => {
+    const input = z.object({ channelId: z.string().min(1), dryRun: z.boolean().default(true) }).parse(req.body ?? {});
+    res.status(200).json({ success: true, ...(await resetWiki(actorFromRequest(req), input.channelId, input.dryRun)) });
+  })
+);
+
 const legacyCleanupSchema = z.object({
   dryRun: z.boolean().default(true),
   redis: z.boolean().default(false),
@@ -161,6 +173,15 @@ router.post(
       input.repoIds
     );
     res.status(200).json({ success: true, ...result });
+  })
+);
+
+router.get(
+  '/channels/:channelId/wiki/status',
+  route(async (req, res) => {
+    // Reading the hub checks the caller may see it.
+    await sdlcHub.getChannel(actorFromRequest(req), req.params.channelId);
+    res.status(200).json({ success: true, repositories: await wikiStatus(req.params.channelId) });
   })
 );
 

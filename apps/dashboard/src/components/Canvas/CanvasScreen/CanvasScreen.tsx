@@ -143,6 +143,10 @@ interface CanvasScreenProps {
   onNotFoundBack?: () => void;
   /** The host's own way out of the canvas (mobile back arrow, canvas deleted), in place of the canvas route. */
   onBack?: () => void;
+  /** No edits, whatever the viewer's role: the host has its own edit mode. */
+  readOnly?: boolean;
+  /** How the title reads while the viewer cannot edit it. */
+  formatTitle?: (title: string) => string;
 }
 
 // Latency thresholds (ms) above which a canvas load/save is flagged slow.
@@ -188,6 +192,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   notFoundBackLabel,
   onNotFoundBack,
   onBack,
+  readOnly = false,
+  formatTitle,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
   const askAIAvailable = useAskAIAvailable();
@@ -427,7 +433,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       const userParticipant = resolvedCanvasData.participants?.find(p => p.userId === user?.id);
       let accessLevel = userParticipant?.role;
       const isAdminEditableHubKnowledge =
-        isHubKnowledgeArtifactType(canvasData.sdlcArtifact?.artifactType) &&
+        (isHubKnowledgeArtifactType(canvasData.sdlcArtifact?.artifactType) ||
+          canvasData.sdlcArtifact?.artifactType === 'WIKI') &&
         Boolean(canvasData.channelId && adminChannelIds.has(canvasData.channelId));
 
       if (isAdminEditableHubKnowledge) accessLevel = CanvasRole.EDITOR;
@@ -763,6 +770,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   };
 
   const canEdit =
+    !readOnly &&
     !selectedCanvas?.isArchived &&
     !selectedCanvas?.channel?.isArchived &&
     (isCreating ||
@@ -772,6 +780,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       selectedCanvas?.accessLevel === CanvasRole.OWNER ||
       selectedCanvas?.createdBy === user?.id);
   const canArchiveSelectedCanvas = selectedCanvas?.createdBy === user?.id;
+  const shownTitle = !canEdit && formatTitle ? formatTitle(currentTitle) : currentTitle;
   const handleRenameVersion = useCanvasVersionRename({
     canEdit,
     previewVersionRef,
@@ -1326,6 +1335,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   // around it.
   const canvasTitleHeader = !selectedCanvas?.id ? null : (
     <div className='canvas-block-row group/canvas-editor-title'>
+      {/* Wiki pages read as a docs site: the page opens with its title. */}
+      {pinnedOutline && currentTitle && (
+        <h1 className='mb-2 text-3xl font-bold tracking-tight text-foreground'>{shownTitle}</h1>
+      )}
       <CanvasLabelManager
         canvas={selectedCanvas}
         workspaceId={user?.workspaceId}
@@ -1342,7 +1355,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
       {/* Main Content Area */}
-      <main className='flex-1 overflow-hidden flex flex-col'>
+      {/* relative: the pinned outline sits inside the page, so the version history panel beside it stays clear. */}
+      <main className='relative flex-1 overflow-hidden flex flex-col'>
         {isCreating || selectedCanvas ? (
           <>
             {/* Canvas Header — Electron window-drag region; interactive
@@ -1378,7 +1392,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       <Input
                         type='text'
                         aria-label='Canvas title'
-                        value={currentTitle}
+                        value={shownTitle}
                         data-testid='canvas-title-input'
                         style={APP_NO_DRAG_STYLE}
                         onChange={e => {

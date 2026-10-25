@@ -1,5 +1,6 @@
 import {
   ChannelRole,
+  SDLC_AGENT_SLUG,
   SDLC_HUB_KNOWLEDGE_FOLDER,
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_WORKFLOW_RELATION,
@@ -30,6 +31,7 @@ export function buildHubKnowledgeConfig(channelId: string): WorkflowConfig {
       title: definition.title,
       config: {
         channelId,
+        agentSlug: SDLC_AGENT_SLUG,
         artifactType: 'Hub Knowledge',
         artifactTitle: definition.title,
         sections: definition.sections.map((section) => ({
@@ -199,6 +201,8 @@ async function createHubWorkflow(actor: SdlcActor, hub: Hub, workflow: HubWorkfl
 export interface SeedHubWorkflowResult {
   status: 'seeded' | 'reset' | 'skipped';
   wikiTriggerUpdated?: boolean;
+  /** A reset's dry run: whether each stored workflow differs from what the code builds. */
+  workflows?: Array<{ name: string; configDiffers: boolean }>;
 }
 
 /** Call after createChannel commits: createWorkflow cannot join a Prisma transaction. */
@@ -218,7 +222,7 @@ export async function seedHubWorkflow(
   return { status: seeded ? 'seeded' : 'skipped', wikiTriggerUpdated };
 }
 
-/** Backfill moves existing Wiki workflows to the text start commits, keeping builder edits to steps. */
+/** Backfill moves existing Wiki workflows to the input-free trigger, keeping builder edits to steps. */
 async function syncWikiTrigger(channelId: string, dryRun: boolean): Promise<boolean> {
   const link = await findHubWorkflowLink(channelId, SDLC_WIKI_WORKFLOW_RELATION);
   const workflow = link
@@ -236,12 +240,33 @@ async function syncWikiTrigger(channelId: string, dryRun: boolean): Promise<bool
   return true;
 }
 
+/** JSON with object keys sorted, so a stored config that only reorders keys compares equal. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, nested: unknown) =>
+    nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? Object.fromEntries(Object.entries(nested).sort(([left], [right]) => left.localeCompare(right)))
+      : nested
+  );
+}
+
 export async function resetHubWorkflow(
   actor: SdlcActor,
   channelId: string,
-  dryRun = false,
+  dryRun = true,
 ): Promise<SeedHubWorkflowResult> {
-  if (dryRun) return { status: 'reset' };
+  if (dryRun) {
+    // Never touches runs: a reset only rewrites the stored configs.
+    const workflows = [];
+    for (const workflow of HUB_WORKFLOWS) {
+      const link = await findHubWorkflowLink(channelId, workflow.relation);
+      const stored = link
+        ? await db.workflow.findUnique({ where: { id: link.targetId }, select: { context: true } })
+        : null;
+      const built = canonicalJson(workflow.build(channelId));
+      workflows.push({ name: workflow.name, configDiffers: !stored?.context || canonicalJson(JSON.parse(stored.context)) !== built });
+    }
+    return { status: 'reset', workflows };
+  }
   const hub = await prepareHub(actor, channelId);
   for (const workflow of HUB_WORKFLOWS) {
     const link = await findHubWorkflowLink(channelId, workflow.relation);
@@ -281,6 +306,7 @@ export interface BackfillResult {
   skipped: number;
   wikiTriggersUpdated: number;
   failed: Array<{ channelId: string; error: string }>;
+  hubs: Array<{ channelId: string; workflows: Array<{ name: string; configDiffers: boolean }> }>;
 }
 
 export interface HubWorkflowScope {
@@ -302,12 +328,13 @@ async function walkHubs(
     select: { id: true },
   });
 
-  const result: BackfillResult = { dryRun, seeded: 0, reset: 0, skipped: 0, wikiTriggersUpdated: 0, failed: [] };
+  const result: BackfillResult = { dryRun, seeded: 0, reset: 0, skipped: 0, wikiTriggersUpdated: 0, failed: [], hubs: [] };
   for (const hub of hubs) {
     try {
       const outcome = await apply(actor, hub.id, dryRun);
       result[outcome.status] += 1;
       if (outcome.wikiTriggerUpdated) result.wikiTriggersUpdated += 1;
+      if (outcome.workflows) result.hubs.push({ channelId: hub.id, workflows: outcome.workflows });
     } catch (error) {
       result.failed.push({
         channelId: hub.id,

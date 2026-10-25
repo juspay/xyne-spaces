@@ -360,6 +360,7 @@ export interface S2SClawRunStatus {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   result?: string | null;
   error?: string | null;
+  completedAt?: string | null;
 }
 
 export interface ConversationInsight {
@@ -2355,8 +2356,9 @@ async function dispatchClawAgent(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new Error(
-      `[ClawAgentService] ${caller}: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`
+    throw Object.assign(
+      new Error(`[ClawAgentService] ${caller}: failed to reach claw-auth webhook at ${url}: ${err instanceof Error ? err.message : String(err)}`),
+      { cause: err }
     );
   }
 
@@ -2407,9 +2409,11 @@ export async function cancelS2SClawRun(
 
 export async function getS2SClawRunStatus(
   sessionId: string,
-  userId: string
+  userId: string,
+  /** Read the latest session of a recovered run, and `running` while recovery is under way. */
+  followRecovery = false
 ): Promise<S2SClawRunStatus | null> {
-  const url = `${getClawBaseUrl()}/claw/api/v1/runs/${encodeURIComponent(sessionId)}`;
+  const url = `${getClawBaseUrl()}/claw/api/v1/runs/${encodeURIComponent(sessionId)}${followRecovery ? '?followRecovery=1' : ''}`;
   const response = await fetch(url, {
     headers: {
       ...getS2SHeaders(),

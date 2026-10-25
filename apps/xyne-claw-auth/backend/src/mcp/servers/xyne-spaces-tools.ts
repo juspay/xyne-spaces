@@ -5610,7 +5610,13 @@ function sdlcActor(args: Record<string, unknown>): Record<string, unknown> {
 }
 
 function sdlcTool(def: Omit<ToolDef, "appHandler">): ToolDef {
-  return { ...def, appHandler: def.handler };
+  // Act as the person who started the run (claw-auth sets sdlcActingUserId from the run's verified context): on the
+  // app-tools server ctx.userId is the bot, which Spaces rejects as an acting user.
+  const handler: ToolDef["handler"] = (args, ctx) => {
+    const { sdlcActingUserId, ...rest } = args;
+    return def.handler(rest, typeof sdlcActingUserId === "string" && sdlcActingUserId ? { ...ctx, userId: sdlcActingUserId } : ctx);
+  };
+  return { ...def, handler, appHandler: handler };
 }
 
 const spacesSdlcListRepositories = sdlcTool({
@@ -5741,8 +5747,9 @@ const spacesSdlcListArtifacts = sdlcTool({
   name: SDLC_TOOL_NAMES.listArtifacts,
   description:
     "List one SDLC Hub's artifacts without their bodies. kind ARTIFACT (default) lists PRDs, Tech Docs, custom types and Hub Knowledge " +
-    "with url, artifactType, track and trackFolder; filter by artifactTypeId, trackId or trackFolderId. kind WIKI lists one Wiki's pages with their folderPath: " +
-    "pass repoId for that repository's Wiki, omit it for the Hub Wiki. Read one with spaces-sdlc-read-artifact.",
+    "with url, artifactType, track and trackFolder; filter by artifactTypeId, trackId or trackFolderId. kind WIKI lists one Wiki's pages with their folderPath and diagram count: " +
+    "pass repoId for that repository's Wiki, omit it for the Hub Wiki, and changedPaths for only the pages that document one of those paths. " +
+    "Read one with spaces-sdlc-read-artifact.",
   inputSchema: {
     type: "object",
     properties: {
@@ -5753,6 +5760,11 @@ const spacesSdlcListArtifacts = sdlcTool({
       trackFolderId: { type: "string", minLength: 1, description: `Artifacts filed directly in one track folder. ${SDLC_TRACK_FOLDER}` },
       repoId: { type: "string", minLength: 1, description: "WIKI only: the repository whose Wiki to list." },
       includeArchived: { type: "boolean", description: "Include archived artifacts and pages." },
+      changedPaths: {
+        type: "array",
+        items: { type: "string", minLength: 1 },
+        description: "WIKI only: repository paths, such as a git diff's file list. Returns the pages whose \"Relevant source files\" name one of them or a folder holding one.",
+      },
     },
     required: ["channelId"],
   },
@@ -5760,7 +5772,7 @@ const spacesSdlcListArtifacts = sdlcTool({
     args["kind"] === "WIKI"
       ? sdlcInternalCall("SDLC Wiki", "/api/internal/sdlc/wiki/pages/list", {
           ...sdlcActor(args),
-          ...pick(args, ["channelId", "repoId", "includeArchived"]),
+          ...pick(args, ["channelId", "repoId", "includeArchived", "changedPaths"]),
         }, ctx)
       : sdlcInternalCall("SDLC artifacts", "/api/internal/sdlc/artifact-versions/current/list", {
           ...sdlcActor(args),
@@ -5874,7 +5886,8 @@ const spacesSdlcWriteArtifact = sdlcTool({
     "artifactTypeId of Hub Knowledge takes the artifact out of its track into Hub Knowledge (no parentId). " +
     "move also files an existing non-SDLC canvas the user owns into the hub (and makes it visible to hub members): pass artifactTypeId, plus parentId unless the type is Hub Knowledge. " +
     "Wiki pages take canvasId and folderPath. " +
-    "Wiki actions always take channelId and the repoId of that Wiki. Cite code as markdown links pinned to a commit.",
+    "Wiki actions always take channelId and the repoId of that Wiki. Cite code as markers the server links: [path](), [path:10-42](), [commit abc1234](); " +
+    "end a marker with @sha, as in [path:10-42@abc1234](), to pin that commit. Keep the @sha a read returns.",
   inputSchema: {
     type: "object",
     properties: {

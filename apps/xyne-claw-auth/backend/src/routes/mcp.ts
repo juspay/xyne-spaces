@@ -14,7 +14,7 @@ import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, 
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
+import { SDLC_TOOL_NAMES, trustedSdlcToolBindings, type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import {
   channelAgentTools,
@@ -1123,7 +1123,8 @@ async function buildMcpResolutionEntries(args: {
     runCtx?.resolveMentions === true ||
     !!runCtx?.externalResultCallback;
   let automationAppSwap = false;
-  if (isAutomationRun) {
+  // SDLC tools check the acting user against the run's author; the app-tools server acts as the bot.
+  if (isAutomationRun && !runCtx?.sdlcProfile) {
     // Only swap when the app token actually resolves AND the app-tools
     // server row exists — otherwise we'd strip Spaces access and silently
     // break the run. Keep the user server and log loudly instead.
@@ -2191,6 +2192,17 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         ...(scalars.executionId ? { executionId: scalars.executionId } : {}),
         ...(scalars.focusedStepId ? { focusedStepId: scalars.focusedStepId } : {}),
       };
+    }
+
+    // SDLC tools send this as the acting user (sdlcTool): only the run's verified SDLC context sets it, never the model.
+    if (serverType === "xyne-spaces" || serverType === "xyne-spaces-app-tools") {
+      const { sdlcActingUserId: _forged, ...rest } = effectiveParams;
+      effectiveParams = rest;
+      const run = await prisma.agentRun
+        .findUnique({ where: { sessionId: req.params.sessionId }, select: { metadata: true } })
+        .catch(() => null);
+      const bound = trustedSdlcToolBindings((run?.metadata as Record<string, unknown> | null)?.["sdlcContext"])?.[tool];
+      if (typeof bound?.["actorUserId"] === "string") effectiveParams = { ...effectiveParams, sdlcActingUserId: bound["actorUserId"] };
     }
 
     // Write tools always require approval — cannot be overridden by agent config

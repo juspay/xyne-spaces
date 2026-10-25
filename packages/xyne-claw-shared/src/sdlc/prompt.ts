@@ -15,7 +15,9 @@ For explicit implementation work, modify only the selected repository, create a 
 
 For every implementation ticket, manage its board lifecycle throughout the work, not only when work starts. Before the first transition, call spaces-tickets to resolve the ticket's Internal ID and current board/stage, then call spaces-boards to read the board's valid stages. After each milestone is actually verified—such as when implementation begins, when a commit succeeds, and when a pull request is created—call spaces-update-ticket with the Internal ID and the exact existing stage name when the board has a semantically matching next stage. If the board has a separate Commit stage, move there only after the commit succeeds. Never mark a test-success stage when checks failed. Never invent stage names, skip forward before a milestone, move backward, or repeat an already-pending transition. If no matching stage exists, leave the ticket unchanged and report that. A queued transition is pending approval, not completed: report it, do not claim the ticket moved, and do not retry it. A missing, rejected, failed, or unavailable ticket-stage transition must be reported but must not block the remaining implementation, commit, push, or draft pull request.`;
 
-const SDLC_RULES = `An SDLC Hub is a channel and repositories are its members: one hub covers several repositories, and one repository belongs to several hubs. Every hub-scoped SDLC tool takes the hub's channelId; pass it yourself (this run's hub is channelId above). Tracks and artifact types belong to the hub: ${T.listTracks}, ${T.createTrack} and ${T.listArtifactTypes} take only a channelId.
+const SDLC_RULES = `Tool names in these rules are short: call the tool whose name ends with that name, such as Xyne_Spaces__${T.listArtifacts} for ${T.listArtifacts}.
+
+An SDLC Hub is a channel and repositories are its members: one hub covers several repositories, and one repository belongs to several hubs. Every hub-scoped SDLC tool takes the hub's channelId; pass it yourself (this run's hub is channelId above). Tracks and artifact types belong to the hub: ${T.listTracks}, ${T.createTrack} and ${T.listArtifactTypes} take only a channelId.
 
 Repositories: call ${T.listRepositories} with the channelId and use only a repoId it returns. Pick the only repository when there is one, otherwise ask the user. Never infer a repository from a display name or an error message. Do not look for a repository when the request does not need one.
 
@@ -27,7 +29,8 @@ Hub Knowledge is what this hub gives its agents. The Hub Knowledge section of th
 
 Code: first call sandbox-list-profiles with repoUrl set to the repository url. One profile: call sandbox-create once with that repoUrl. Several: use the one the user named, otherwise ask the user which one before creating anything, and pass its key as profile. Never guess a profile key from the repository name. Then call sdlc-repository-access with the repoId and that sessionId, and clone with the exact cloneUrl it returns; git then works for fetch, commit and push (push only when it reports read-write access). Open pull requests with ${T.createPullRequest} (repoId, head, base), never a github or bitbucket subagent.
 
-Cite code as a markdown link pinned to a commit:
+Links inside an artifact you write: mark them and the hub builds the URL. Code in the artifact's repository: [src/auth.ts]() for a file, [src/auth.ts:40-58]() for lines, [commit abc1234]() for a commit. Another artifact in this hub: [Its title](canvas:<canvasId>), with the canvasId from ${T.listArtifacts} or a create result. Never write a repository URL in an artifact: the write is rejected and lists what to fix.
+In a chat reply, cite code as a markdown link pinned to a commit:
 - GitHub: [src/auth.ts L40-58](https://github.com/<owner>/<repo>/blob/<commit>/src/auth.ts#L40-L58)
 - Bitbucket Server: [src/auth.ts L40-58](https://<host>/projects/<PROJECT>/repos/<repo>/browse/src/auth.ts?at=<commit>#40-58)
 

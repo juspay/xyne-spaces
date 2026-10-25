@@ -41,6 +41,15 @@ export const ClawAgentConfigSchema = z.object({
 
 export type ClawAgentConfig = z.infer<typeof ClawAgentConfigSchema>;
 
+export async function listClawAgents(): Promise<AgentDescriptor[]> {
+  const agents = await listDispatchableClawAgents();
+  return agents.map((agent) => ({
+    id: agent.slug,
+    name: agent.name,
+    ...(agent.description ? { description: agent.description } : {}),
+  }));
+}
+
 /** The envelope claw POSTs to the callback URL when a run finishes. */
 interface ClawCallbackEnvelope {
   status?: unknown;
@@ -58,12 +67,7 @@ export class ClawAgentProvider
 
   /** Backs the agent picker on `agentSlug` (served through the step's `getOptions`). */
   override async listAgents(_ctx: XyneCtx): Promise<AgentDescriptor[]> {
-    const agents = await listDispatchableClawAgents();
-    return agents.map((agent) => ({
-      id: agent.slug,
-      name: agent.name,
-      ...(agent.description ? { description: agent.description } : {}),
-    }));
+    return listClawAgents();
   }
 
   async dispatch(
@@ -136,7 +140,9 @@ export class ClawAgentProvider
 }
 
 /** Claw joins the agent's last text messages, so a mid-run note can precede the JSON. */
-function jsonAtEnd(text: string): string | null {
+function jsonAtEnd(answer: string): string | null {
+  // The JSON often closes a ```json fence after prose.
+  const text = answer.replace(/\s*```\s*$/, '');
   for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
     try {
       JSON.parse(text.slice(start));
@@ -286,6 +292,8 @@ export function buildTask(input: AgentRunInput): string {
     parts.push(
       '',
       'Respond ONLY with a valid JSON object — no markdown, no commentary, no code fence.',
+      'Send this JSON when you did the task, also when you checked and decided nothing needs to change.',
+      'If you could not do the task (a tool you need is missing or keeps failing), do not send this JSON: reply in plain text with the tool and the error.',
     );
     if (input.outputSchema) {
       parts.push('It must match this exact shape:', JSON.stringify(input.outputSchema, null, 2));

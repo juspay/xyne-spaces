@@ -19,12 +19,15 @@ import { logger } from '@/utils/logger';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from '../sdlcCanvasSync';
+import { requireSdlcLinks, sdlcLinkMarkers } from '../sdlcLinks';
 import { ensureHubWikiFolder, ensureRepositoryWikiFolder } from '../hubFolders';
 import { mutateMarkdownSection } from '../markdownSection';
 import { isSdlcHubAdmin } from '../sdlcChannelMembership';
 import { SDLC_AGENT_STEP_TYPE } from '@/workflowsV2/agents/sdlc-agent-provider';
-import { sdlcAuthorOf } from '@/workflowsV2/agents/sdlc-dispatch';
+import { sdlcActorOfExecution } from '@/workflowsV2/agents/sdlc-dispatch';
 import { TERMINAL_EXECUTION_STATUSES } from '@/workflowsV2/constants';
+import { leafStepId } from '@xyne/workflow-sdk';
+import { HUB_CORRECTOR_STEP_ID, HUB_GENERATOR_STEP_ID } from './wikiPlanStep';
 
 export interface WikiScopeInput {
   workspaceId: string;
@@ -39,15 +42,25 @@ export interface WikiScope {
   channelId: string;
   projectId: string;
   folderId: string;
+  /** Absent for the Hub Wiki. */
+  repoId?: string;
 }
 
 export interface WikiPageEntry {
   canvasId: string;
   title: string;
   folderPath: string;
-  archived: boolean;
-  lastCommitSha: string | null;
-  updatedAt: string;
+  /** Mermaid diagrams on the page. */
+  diagrams: number;
+  /** Only with includeArchived. */
+  archived?: boolean;
+}
+
+interface PagesFilter {
+  includeArchived?: boolean | undefined;
+  /** Only pages whose "Relevant source files" name one of these paths or a folder that holds one. */
+  changedPaths?: string[] | undefined;
+  canvasId?: string | undefined;
 }
 
 export type PageAction<T extends SdlcWikiPageAction['action']> = Extract<SdlcWikiPageAction, { action: T }>;
@@ -59,6 +72,96 @@ function splitFolderPath(folderPath: string | undefined): string[] {
     .filter(Boolean);
 }
 
+interface Block {
+  type?: string;
+  props?: { level?: number; language?: string };
+  content?: unknown;
+  children?: Block[];
+}
+
+function textOf(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((item: { text?: string; content?: unknown }) => item.text ?? textOf(item.content))
+    .join('');
+}
+
+/** The paths under a page's "Relevant source files" heading and its Mermaid diagram count, read from the stored blocks. */
+export function pageFacts(content: unknown): { sourcePaths: string[]; diagrams: number } {
+  const blocks: Block[] = [];
+  const walk = (list: unknown): void => {
+    if (!Array.isArray(list)) return;
+    for (const block of list as Block[]) {
+      blocks.push(block);
+      walk(block.children);
+    }
+  };
+  walk(content);
+  const sourcePaths: string[] = [];
+  let inSources = false;
+  for (const block of blocks) {
+    if (block.type === 'heading') {
+      inSources = /^relevant source files$/i.test(textOf(block.content).trim());
+    } else if (inSources && block.type === 'bulletListItem') {
+      const path = textOf(block.content).trim().replace(/^`|`$/g, '');
+      if (/^\S+$/.test(path)) sourcePaths.push(path);
+    }
+  }
+  const diagrams = blocks.filter((block) => block.type === 'codeBlock' && block.props?.language === 'mermaid').length;
+  return { sourcePaths: [...new Set(sourcePaths)], diagrams };
+}
+
+/** A page path names a changed file itself, or a folder that holds it. */
+function touches(sourcePaths: string[], changedPaths: string[]): boolean {
+  return sourcePaths.some((source) => {
+    const folder = source.replace(/\/+$/, '');
+    return changedPaths.some((changed) => changed === folder || changed.startsWith(`${folder}/`));
+  });
+}
+
+const HUB_STEP_IDS: ReadonlySet<string> = new Set([HUB_GENERATOR_STEP_ID, HUB_CORRECTOR_STEP_ID]);
+
+const NUMBERED_TITLE = /^\d+(\.\d+)+ \S/;
+const NUMBERED_FOLDER = /^\d+(\.\d+)* \S/;
+const OVERVIEW_TITLE = '1 Overview';
+
+/** The Wiki's numbered outline, checked on every write. Each problem names exactly what to send instead. */
+export function outlineProblems(page: { title?: string | undefined; folderPath?: string | undefined; markdown?: string | undefined }): string[] {
+  const problems: string[] = [];
+  const folders = splitFolderPath(page.folderPath);
+  for (const folder of folders) {
+    if (!NUMBERED_FOLDER.test(folder)) {
+      problems.push(`Folder "${folder}" needs its number: name it "<next free section number> ${folder}", such as "2 ${folder}".`);
+    }
+  }
+  if (page.title !== undefined) {
+    const section = /^(\d+(?:\.\d+)*) /.exec(folders.at(-1) ?? '')?.[1];
+    if (page.title === OVERVIEW_TITLE) {
+      if (folders.length) problems.push(`"${OVERVIEW_TITLE}" belongs at the root: move it with folderPath "".`);
+    } else if (folders.length && page.title === folders.at(-1)) {
+      // A folder's own page, which the sidebar opens from the folder name.
+    } else if (!folders.length) {
+      problems.push(`Only "${OVERVIEW_TITLE}" sits at the root: put "${page.title}" in a numbered section folder such as "2 Architecture".`);
+    } else if (!NUMBERED_TITLE.test(page.title)) {
+      problems.push(`Title "${page.title}" needs its number: use "${section ?? '<section>'}.<next free number> ${page.title}".`);
+    } else if (section && !page.title.startsWith(`${section}.`)) {
+      problems.push(`Title "${page.title}" is in folder "${folders.at(-1)}": number it "${section}.<next free number> ...", or move it to the folder its number names.`);
+    }
+  }
+  if (page.markdown !== undefined && /^\s*# /.test(page.markdown)) {
+    problems.push('Remove the "# " heading: the Wiki shows the title above the page.');
+  }
+  if (page.markdown !== undefined && !page.markdown.split('\n').some((line) => /^##\s+relevant source files\s*$/i.test(line.trim()))) {
+    problems.push('Add "## Relevant source files" just before "## See also": a bullet list of the paths the page documents.');
+  }
+  return problems;
+}
+
+function requireOutline(page: Parameters<typeof outlineProblems>[0]): void {
+  const problems = outlineProblems(page);
+  if (problems.length) throw new AppError(problems.join(' '), 400);
+}
+
 export function versionName(action: string, commitSha: string | undefined): string {
   return commitSha ? `Wiki ${commitSha.slice(0, 12)}: ${action}` : `Wiki: ${action}`;
 }
@@ -66,37 +169,41 @@ export function versionName(action: string, commitSha: string | undefined): stri
 export class SdlcWikiPageStore {
   constructor(readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
-  async listPages(input: WikiScopeInput & { includeArchived?: boolean }): Promise<WikiPageEntry[]> {
-    return this.pagesIn(await this.scope(input, true), input.includeArchived ?? false);
+  async listPages(input: WikiScopeInput & PagesFilter): Promise<WikiPageEntry[]> {
+    return this.pagesIn(await this.scope(input, true), input);
   }
 
-  private async pagesIn(scope: WikiScope, includeArchived: boolean): Promise<WikiPageEntry[]> {
+  // Reads every page's content: the stored blocks are the truth after a person edits a page.
+  private async pagesIn(scope: WikiScope, filter: PagesFilter): Promise<WikiPageEntry[]> {
     const tree = await this.tree(scope);
+    const ids = [...tree.canvasParents.keys()];
     const canvases = await this.prisma.canvas.findMany({
-      where: { id: { in: [...tree.canvasParents.keys()] }, channelId: scope.channelId },
-      select: {
-        id: true,
-        title: true,
-        updatedAt: true,
-        sdlcArtifact: { select: { artifactStatus: true, generationCommit: true } },
-      },
+      where: { id: filter.canvasId ? filter.canvasId : { in: ids }, channelId: scope.channelId },
+      select: { id: true, title: true, content: true, sdlcArtifact: { select: { artifactStatus: true } } },
     });
+    const changedPaths = filter.changedPaths;
     return canvases
-      .map((canvas) => ({
-        canvasId: canvas.id,
-        title: canvas.title,
-        folderPath: tree.folderPath(tree.canvasParents.get(canvas.id)!),
-        archived: canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED',
-        lastCommitSha: canvas.sdlcArtifact?.generationCommit ?? null,
-        updatedAt: canvas.updatedAt.toISOString(),
-      }))
-      .filter((page) => includeArchived || !page.archived)
+      .filter((canvas) => tree.canvasParents.has(canvas.id))
+      .filter((canvas) => filter.includeArchived || canvas.sdlcArtifact?.artifactStatus !== 'ARCHIVED')
+      .flatMap((canvas) => {
+        const facts = pageFacts(canvas.content);
+        if (changedPaths && !touches(facts.sourcePaths, changedPaths)) return [];
+        return [{
+          canvasId: canvas.id,
+          title: canvas.title,
+          folderPath: tree.folderPath(tree.canvasParents.get(canvas.id)!),
+          diagrams: facts.diagrams,
+          ...(filter.includeArchived ? { archived: canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED' } : {}),
+        }];
+      })
       .sort((left, right) =>
-        `${left.folderPath}/${left.title}`.localeCompare(`${right.folderPath}/${right.title}`)
+        // Numeric: "10 Operations" comes after "2 Architecture".
+        `${left.folderPath}/${left.title}`.localeCompare(`${right.folderPath}/${right.title}`, undefined, { numeric: true })
       );
   }
 
-  async write(input: WriteSdlcWikiPageInput): Promise<WikiPageEntry> {
+  /** `agent`: an agent's write, held to the numbered outline. People editing in the dashboard are not. */
+  async write(input: WriteSdlcWikiPageInput, { agent = false } = {}): Promise<WikiPageEntry> {
     if (
       !(await this.isGenerationRun(input))
       && !(await isSdlcHubAdmin(this.prisma, { userId: input.actorUserId }, input.channelId))
@@ -105,23 +212,26 @@ export class SdlcWikiPageStore {
     }
     const scope = await this.scope(input);
     const { page } = input;
+    if (agent && (page.action === 'create' || page.action === 'move')) requireOutline({ title: page.title, folderPath: page.folderPath });
     switch (page.action) {
       case 'create':
-        return this.create(scope, page, input.generationCommit);
+        return this.create(scope, page, input.generationCommit, agent);
       case 'update':
       case 'replace_section':
       case 'insert_section':
       case 'remove_section':
-        return this.edit(scope, page, input.generationCommit);
+        return this.edit(scope, page, input.generationCommit, agent);
       case 'move':
-        return this.move(scope, page);
+        return this.move(scope, page, agent);
     }
   }
 
   /** Wiki generation runs as the workflow author, who may not be an admin: trust the commit only if that run is live. */
   async isGenerationRun(input: Pick<WriteSdlcWikiPageInput, 'channelId' | 'actorUserId' | 'repoId' | 'generationCommit'>): Promise<boolean> {
     const commit = input.generationCommit;
-    if (!commit) return false;
+    // Hub Wiki steps describe no single commit: a Hub Wiki write is theirs while one waits on its agent.
+    const hubWrite = !commit && !input.repoId;
+    if (!commit && !hubWrite) return false;
     const link = await this.prisma.sdlcEntityLink.findFirst({
       where: {
         channelId: input.channelId,
@@ -136,27 +246,32 @@ export class SdlcWikiPageStore {
       where: { id: link.targetId },
       select: { metadata: true },
     });
-    if (sdlcAuthorOf(workflow?.metadata) !== input.actorUserId) return false;
-    const executions = await this.prisma.workflowExecution.findMany({
+    const live = await this.prisma.workflowExecution.findMany({
       where: { workflowId: link.targetId, status: { notIn: [...TERMINAL_EXECUTION_STATUSES] } },
       select: { id: true },
     });
+    // Only runs acting as this user: whoever started it, else the workflow author.
+    const executions = [];
+    for (const execution of live) {
+      if ((await sdlcActorOfExecution(execution.id, workflow?.metadata ?? null, this.prisma)) === input.actorUserId) executions.push(execution);
+    }
     if (!executions.length) return false;
     // A dispatched SDLC agent step waits in EXTERNAL_WAIT with its resolved config as `input`.
     const steps = await this.prisma.workflowStep.findMany({
       where: {
         workflowExecutionId: { in: executions.map((execution) => execution.id) },
         status: 'EXTERNAL_WAIT',
-        data: { contains: commit },
+        data: { contains: commit ?? SDLC_AGENT_STEP_TYPE },
       },
-      select: { data: true },
+      select: { data: true, stepName: true },
     });
     return steps.some((step) => {
       try {
-        const data = JSON.parse(step.data ?? '{}') as { type?: unknown; input?: { repoId?: unknown; generationCommit?: unknown } };
-        return data.type === SDLC_AGENT_STEP_TYPE
-          && data.input?.generationCommit === commit
-          && (data.input.repoId ?? null) === (input.repoId ?? null);
+        const data = JSON.parse(step.data ?? '{}') as { type?: unknown; input?: { generationCommit?: unknown } };
+        if (data.type !== SDLC_AGENT_STEP_TYPE) return false;
+        if (hubWrite) return HUB_STEP_IDS.has(leafStepId(step.stepName ?? ''));
+        // No repoId: window steps carry none, and a sha only names a commit of its own repository.
+        return data.input?.generationCommit === commit;
       } catch {
         return false;
       }
@@ -208,6 +323,7 @@ export class SdlcWikiPageStore {
       channelId: input.channelId,
       projectId: channel.projectId,
       folderId,
+      ...(input.repoId ? { repoId: input.repoId } : {}),
     };
   }
 
@@ -314,16 +430,18 @@ export class SdlcWikiPageStore {
   private async create(
     scope: WikiScope,
     page: PageAction<'create'>,
-    commitSha: string | undefined
+    commitSha: string | undefined,
+    agent: boolean
   ): Promise<WikiPageEntry> {
+    const markdown = await this.prepareMarkdown(scope, page.markdown, commitSha, agent, true, `${scope.folderId}/${page.title}`);
     const [parentId, typeFolderId] = await Promise.all([
       this.ensureFolderPath(scope, page.folderPath),
       this.wikiTypeFolderId(scope),
     ]);
-    const content = await convertMarkdownToBlockNote(page.markdown);
+    const content = await convertMarkdownToBlockNote(markdown);
     const actor = { workspaceId: scope.workspaceId, userId: scope.actorUserId };
     const canvasId = await commitAndSyncCanvasArtifact(
-      () => createTx(this, scope, page, content, typeFolderId, commitSha, actor, parentId),
+      () => createTx(this, scope, { ...page, markdown }, content, typeFolderId, commitSha, actor, parentId),
       syncToYSweet,
       scope.actorUserId
     );
@@ -334,7 +452,8 @@ export class SdlcWikiPageStore {
   private async edit(
     scope: WikiScope,
     page: PageAction<'update' | 'replace_section' | 'insert_section' | 'remove_section'>,
-    commitSha: string | undefined
+    commitSha: string | undefined,
+    agent: boolean
   ): Promise<WikiPageEntry> {
     const existing = await this.requirePage(scope, page.canvasId);
     let markdown: string;
@@ -342,11 +461,16 @@ export class SdlcWikiPageStore {
       markdown = page.markdown;
     } else {
       markdown = mutateMarkdownSection({
-        markdown: await readCanvasMarkdown(existing),
+        markdown: sdlcLinkMarkers(await readCanvasMarkdown(existing)),
         action: page.action,
         heading: page.heading,
         ...(page.action === 'remove_section' ? {} : { sectionMarkdown: page.markdown }),
       });
+    }
+    // Section edits leave the rest of a page alone, including pages written before the outline rules.
+    markdown = await this.prepareMarkdown(scope, markdown, commitSha, agent, page.action === 'update', existing.id);
+    if (agent && page.action === 'update' && page.title) {
+      requireOutline({ title: page.title, folderPath: (await this.entry(scope, existing.id)).folderPath });
     }
     const content = await convertMarkdownToBlockNote(markdown);
     // Wiki canvases give the hub read-only access, so sync as the creator, who can edit.
@@ -359,15 +483,40 @@ export class SdlcWikiPageStore {
     return this.entry(scope, existing.id);
   }
 
-  private async move(scope: WikiScope, page: PageAction<'move'>): Promise<WikiPageEntry> {
+  private async move(scope: WikiScope, page: PageAction<'move'>, agent: boolean): Promise<WikiPageEntry> {
     const existing = await this.requirePage(scope, page.canvasId);
+    if (agent && !page.title) requireOutline({ title: existing.title, folderPath: page.folderPath });
     const parentId = await this.ensureFolderPath(scope, page.folderPath);
     await moveTx(this, scope, existing, parentId, page);
     return this.entry(scope, existing.id);
   }
 
+  /** For agents: checks the outline and builds the marked links, code ones pinned to the commit the page describes. */
+  private async prepareMarkdown(
+    scope: WikiScope,
+    markdown: string,
+    commitSha: string | undefined,
+    agent: boolean,
+    wholePage: boolean,
+    /** The page, for the rejected-write count: a new page's folder and title, else its canvas id. */
+    key: string
+  ): Promise<string> {
+    if (!agent) return markdown;
+    if (wholePage) requireOutline({ markdown });
+    const repo = scope.repoId && commitSha
+      ? await this.prisma.repo.findFirst({ where: { id: scope.repoId }, select: { canonicalUrl: true, url: true } })
+      : null;
+    return requireSdlcLinks({
+      markdown,
+      workspaceId: scope.workspaceId,
+      channelId: scope.channelId,
+      code: repo && commitSha ? { url: repo.canonicalUrl ?? repo.url, ref: commitSha } : null,
+      key: `wiki:${key}`,
+    });
+  }
+
   private async entry(scope: WikiScope, canvasId: string): Promise<WikiPageEntry> {
-    const page = (await this.pagesIn(scope, true)).find((candidate) => candidate.canvasId === canvasId);
+    const [page] = await this.pagesIn(scope, { includeArchived: true, canvasId });
     if (!page) throw new AppError('Wiki page not found in this scope', 404);
     return page;
   }
