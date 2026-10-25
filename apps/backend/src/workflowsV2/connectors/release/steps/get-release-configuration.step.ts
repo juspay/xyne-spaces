@@ -70,7 +70,16 @@ export class GetReleaseConfigurationStep extends BaseActionStep<
         releaseTrackingMode: true,
         project: { select: { code: true } },
         mainReleaseApplications: {
-          select: { id: true, name: true, boardId: true, regex: true, repoUrl: true, envPaths: true, migrationPaths: true, channelId: true },
+          select: {
+            id: true,
+            name: true,
+            boardId: true,
+            regex: true,
+            repo: { select: { url: true, canonicalUrl: true } },
+            envPaths: true,
+            migrationPaths: true,
+            channelId: true,
+          },
           orderBy: { name: 'asc' },
         },
       },
@@ -81,7 +90,13 @@ export class GetReleaseConfigurationStep extends BaseActionStep<
     if (services.length === 0) {
       throw new Error(`Board ${board.name} has no services, so it is not a main release board`);
     }
-    const repoUrls = [...new Set(services.map((service) => service.repoUrl.trim().replace(/\/+$/, '')))];
+    const repoUrls = [
+      ...new Set(
+        services.map((service) =>
+          (service.repo?.canonicalUrl || service.repo?.url || '').trim().replace(/\/+$/, ''),
+        ),
+      ),
+    ];
     const repoUrl = repoUrls[0];
     if (repoUrls.length !== 1 || !repoUrl) {
       throw new Error(`Services on board ${board.name} do not share one repository URL: ${repoUrls.join(', ')}`);

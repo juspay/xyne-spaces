@@ -10,6 +10,8 @@ import { DeepResearchStep } from './steps/deep-research.step';
 import { GetTicketStep } from './steps/get-ticket.step';
 import { CreateTicketStep } from './steps/create-ticket.step';
 import { CreateCanvasStep } from './steps/create-canvas.step';
+import { UpdateCanvasStep } from './steps/update-canvas.step';
+import { AddTicketAttachmentStep } from './steps/add-ticket-attachment.step';
 
 export class XyneSpacesConnector extends BaseConnector {
   readonly id = 'xyne-spaces';
@@ -33,5 +35,7 @@ export class XyneSpacesConnector extends BaseConnector {
     new GetTicketStep(),
     new CreateTicketStep(),
     new CreateCanvasStep(),
+    new UpdateCanvasStep(),
+    new AddTicketAttachmentStep(),
   ];
 }

@@ -9,12 +9,17 @@ import { workspaceOf } from '../../xyne-spaces/context';
 const AddTicketsUnderReleaseConfigSchema = z.object({
   ticket: variableRef(z.string().min(1)).describe("Ticket id or ID like PLAT-12 of the release's service ticket"),
   xyneIds: variableRef(z.array(z.string().min(1))).describe('IDs like PLAT-12 of the tickets to add'),
+  isHotfix: z
+    .boolean()
+    .optional()
+    .describe('Mark the tickets as hotfixes on the release, also ones already under it. Off: only a Hotfix release marks them'),
 });
 type AddTicketsUnderReleaseConfig = z.infer<typeof AddTicketsUnderReleaseConfigSchema>;
 
 const AddTicketsUnderReleaseOutputSchema = z.object({
   added: z.array(z.string()),
   alreadyLinked: z.array(z.string()),
+  markedHotfix: z.array(z.string()).describe('Tickets already under the release that are now marked as hotfixes'),
   notFound: z.array(z.string()).describe('IDs with no ticket in this workspace'),
 });
 type AddTicketsUnderReleaseOutput = z.infer<typeof AddTicketsUnderReleaseOutputSchema>;
@@ -30,7 +35,7 @@ export class AddTicketsUnderReleaseStep extends BaseActionStep<
   readonly outputSchema = AddTicketsUnderReleaseOutputSchema;
   readonly name = 'Add tickets under release';
   readonly description =
-    "Adds dev tickets, by ID, to a release under one of its service tickets. Tickets already there are skipped.";
+    "Adds dev tickets, by ID, to a release under one of its service tickets. Tickets already there are skipped, or only marked as hotfixes.";
   readonly category = 'release';
   readonly icon = 'ListPlus';
 
@@ -71,21 +76,24 @@ export class AddTicketsUnderReleaseStep extends BaseActionStep<
 
     const existing = await db.applicationReleaseTicket.findMany({
       where: { applicationReleaseId: release.subTicketId, ticketId: { in: tickets.map((ticket) => ticket.id) } },
-      select: { ticketId: true },
+      select: { ticketId: true, isHotfix: true },
     });
     const linkedIds = new Set(existing.map((row) => row.ticketId));
     const toAdd = tickets.filter((ticket) => !linkedIds.has(ticket.id));
+    const unmarkedIds = new Set(config.isHotfix ? existing.filter((row) => !row.isHotfix).map((row) => row.ticketId) : []);
+    // The repository skips rows that exist and flips them to hotfix, so linked tickets go along when marking.
     await applicationRepository.createApplicationReleaseTicketMappings(
-      toAdd.map((ticket) => ({
+      (config.isHotfix ? tickets : toAdd).map((ticket) => ({
         applicationReleaseId: release.subTicketId,
         releaseId: release.ticket.id,
         devTicketId: ticket.id,
-        isHotfix: release.ticket.ticketType === BaseTicketType.Hotfix,
+        isHotfix: config.isHotfix === true || release.ticket.ticketType === BaseTicketType.Hotfix,
       })),
     );
     return {
       added: toAdd.map((ticket) => ticket.xyneId),
       alreadyLinked: tickets.filter((ticket) => linkedIds.has(ticket.id)).map((ticket) => ticket.xyneId),
+      markedHotfix: tickets.filter((ticket) => unmarkedIds.has(ticket.id)).map((ticket) => ticket.xyneId),
       notFound,
     };
   }

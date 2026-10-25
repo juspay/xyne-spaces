@@ -8,7 +8,7 @@ import {
   type ReactElement,
   type SyntheticEvent,
 } from 'react';
-import { ArrowLeft, Clock, ListChecks, Plus, SearchX, Sparkles } from 'lucide-react';
+import { ArrowLeft, Clock, ListChecks, Plus, SearchX /* , Sparkles */ } from 'lucide-react';
 import {
   BoardType,
   ReleaseTrackingMode,
@@ -57,7 +57,7 @@ import {
   useAssignReleaseQa,
   useReleaseFieldEditor,
   useReleaseRepositories,
-  useRerunReleaseAnalysis,
+  // useRerunReleaseAnalysis,
 } from './useSdlcReleases';
 import { InfoCard, RepoPill } from './SdlcReleasePrimitives';
 import { SdlcReleaseChanges } from './SdlcReleaseChanges';
@@ -556,8 +556,8 @@ function DetailTabs({
 }
 
 function TicketsTab({
-  releaseId,
-  canRerun,
+  // releaseId,
+  // canRerun,
   tickets,
   qaByTicketId,
   projectId,
@@ -683,7 +683,7 @@ function TicketsTab({
             setShowOverdueOnly(false);
           }}
         />
-        {canRerun && <RerunAnalysisButton releaseId={releaseId} className='ml-auto' />}
+        {/* {canRerun && <RerunAnalysisButton releaseId={releaseId} className='ml-auto' />} */}
       </div>
       <div className='flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-border bg-background'>
         <div
@@ -771,7 +771,7 @@ function ReleaseQaPill({
 }
 
 function NoTicketsCard({
-  releaseId,
+  // releaseId,
   repo,
   range,
 }: {
@@ -813,7 +813,7 @@ function NoTicketsCard({
               : "None of the commits in this range reference a ticket. Link commits to tickets, then re-run analysis to build what's in it, env and migration changes, and release notes."}
           </span>
         </div>
-        {!isVersionRelease && <RerunAnalysisButton releaseId={releaseId} />}
+        {/* {!isVersionRelease && <RerunAnalysisButton releaseId={releaseId} />} */}
       </div>
       <div className='grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-6 gap-y-3.5 border-t border-border/70 bg-muted/30 px-5 py-3.5'>
         {facts.map(fact => (
@@ -834,26 +834,26 @@ function NoTicketsCard({
   );
 }
 
-function RerunAnalysisButton({
-  releaseId,
-  className,
-}: {
-  releaseId: string;
-  className?: string;
-}): ReactElement {
-  const { rerunning, rerun } = useRerunReleaseAnalysis(releaseId);
-  return (
-    <Button
-      variant='outline'
-      size='sm'
-      onClick={() => void rerun()}
-      disabled={rerunning}
-      className={cn('h-[30px] gap-1.5', className)}
-      data-track-category={TRACK_CATEGORY}
-      data-track-name='ReleaseReRunAnalysis'
-    >
-      <Sparkles className={cn('size-3.5 text-status-paused', rerunning && 'animate-pulse')} />
-      {rerunning ? 'Re-running…' : 'Re-run analysis'}
-    </Button>
-  );
-}
+// function RerunAnalysisButton({
+//   releaseId,
+//   className,
+// }: {
+//   releaseId: string;
+//   className?: string;
+// }): ReactElement {
+//   const { rerunning, rerun } = useRerunReleaseAnalysis(releaseId);
+//   return (
+//     <Button
+//       variant='outline'
+//       size='sm'
+//       onClick={() => void rerun()}
+//       disabled={rerunning}
+//       className={cn('h-[30px] gap-1.5', className)}
+//       data-track-category={TRACK_CATEGORY}
+//       data-track-name='ReleaseReRunAnalysis'
+//     >
+//       <Sparkles className={cn('size-3.5 text-status-paused', rerunning && 'animate-pulse')} />
+//       {rerunning ? 'Re-running…' : 'Re-run analysis'}
+//     </Button>
+//   );
+// }

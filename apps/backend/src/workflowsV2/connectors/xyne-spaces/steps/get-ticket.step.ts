@@ -1,11 +1,25 @@
-import { BaseActionStep, variableRef } from '@xyne/workflow-sdk';
+import type { Readable } from 'node:stream';
+import {
+  ATTACHMENT_ARRAY_JSON_SCHEMA,
+  AttachmentSchema,
+  BaseActionStep,
+  variableRef,
+  zodToJsonSchemaRecord,
+} from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
+import { AttachmentEntityType } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
+import { storageService } from '@/services/storage';
+import { logger } from '@/utils/logger';
 import { workspaceOf } from '../context';
 
 const GetTicketConfigSchema = z.object({
   ticket: variableRef(z.string().min(1)).describe('Ticket id or ID like PLAT-12'),
+  includeAttachments: z
+    .boolean()
+    .optional()
+    .describe("Also return the ticket's attached files, copied so later steps can use them"),
 });
 type GetTicketConfig = z.infer<typeof GetTicketConfigSchema>;
 
@@ -36,17 +50,49 @@ const GetTicketOutputSchema = z.object({
   createdBy: z.string(),
   createdAt: z.string(),
   subTickets: z.array(SubTicketSchema),
+  attachments: z
+    .array(
+      z.object({
+        attachmentId: z.string(),
+        fileName: z.string(),
+        mimeType: z.string(),
+        size: z.number(),
+        uploadedAt: z.string(),
+        copied: z.boolean().describe('False when the file is over 50 MB or could not be read, so it is not in files'),
+      }),
+    )
+    .optional()
+    .describe('Set when includeAttachments is on'),
+  files: z
+    .array(AttachmentSchema)
+    .optional()
+    .describe('The attached files, for steps that take files. Set when includeAttachments is on'),
 });
 type GetTicketOutput = z.infer<typeof GetTicketOutputSchema>;
+
+// Copying is a full read and write of each file, so very large ones (recordings, videos) are left out.
+const MAX_COPY_BYTES = 50 * 1024 * 1024;
 
 export class GetTicketStep extends BaseActionStep<typeof GetTicketConfigSchema, GetTicketOutput> {
   readonly type = 'GET_TICKET';
   readonly configSchema = GetTicketConfigSchema;
   readonly outputSchema = GetTicketOutputSchema;
   readonly name = 'Get a ticket';
-  readonly description = "Reads a ticket's details and its sub-tickets.";
+  readonly description = "Reads a ticket's details and its sub-tickets, and optionally its attached files.";
   readonly category = 'ticket';
   readonly icon = 'Ticket';
+
+  override resolveOutputJsonSchema(config: Record<string, unknown>): Record<string, unknown> {
+    const schema = zodToJsonSchemaRecord(this.outputSchema);
+    const properties = { ...(schema['properties'] as Record<string, unknown>) };
+    if (config['includeAttachments'] === true) {
+      properties['files'] = ATTACHMENT_ARRAY_JSON_SCHEMA;
+    } else {
+      delete properties['attachments'];
+      delete properties['files'];
+    }
+    return { ...schema, properties };
+  }
 
   async execute(config: GetTicketConfig, ctx: StepExecutionContext): Promise<GetTicketOutput> {
     const identifier = (config.ticket as string).trim();
@@ -68,7 +114,38 @@ export class GetTicketStep extends BaseActionStep<typeof GetTicketConfigSchema, 
       },
     });
 
+    const attached = config.includeAttachments
+      ? await db.messageAttachment.findMany({
+          where: { entityType: AttachmentEntityType.TICKET, entityId: ticket.id, isDeleted: false },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, originalFilename: true, mimetype: true, size: true, url: true, createdAt: true },
+        })
+      : [];
+    const attachments: NonNullable<GetTicketOutput['attachments']> = [];
+    const files: NonNullable<GetTicketOutput['files']> = [];
+    for (const row of attached) {
+      let copied = false;
+      if (ctx.files.available && row.size <= MAX_COPY_BYTES) {
+        try {
+          const stream = (await storageService.createReadStream(row.url)) as Readable;
+          files.push(await ctx.files.put({ name: row.originalFilename, mimeType: row.mimetype, stream }));
+          copied = true;
+        } catch (error) {
+          logger.warn(`[GET_TICKET] Could not copy attachment ${row.id} of ticket ${ticket.xyneId}:`, error);
+        }
+      }
+      attachments.push({
+        attachmentId: row.id,
+        fileName: row.originalFilename,
+        mimeType: row.mimetype,
+        size: row.size,
+        uploadedAt: row.createdAt.toISOString(),
+        copied,
+      });
+    }
+
     return {
+      ...(config.includeAttachments ? { attachments, files } : {}),
       id: ticket.id,
       xyneId: ticket.xyneId,
       title: ticket.title,

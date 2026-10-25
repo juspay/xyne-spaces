@@ -5,6 +5,7 @@ import { AddTicketsUnderReleaseStep } from './steps/add-tickets-under-release.st
 import { AddChangeUnderReleaseStep } from './steps/add-change-under-release.step';
 import { UpdateDeployedCommitStep } from './steps/update-deployed-commit.step';
 import { LinkReleaseNotesStep } from './steps/link-release-notes.step';
+import { FindReleaseForBranchStep } from './steps/find-release-for-branch.step';
 
 export class ReleaseConnector extends BaseConnector {
   readonly id = 'release';
@@ -21,5 +22,6 @@ export class ReleaseConnector extends BaseConnector {
     new AddChangeUnderReleaseStep(),
     new UpdateDeployedCommitStep(),
     new LinkReleaseNotesStep(),
+    new FindReleaseForBranchStep(),
   ];
 }

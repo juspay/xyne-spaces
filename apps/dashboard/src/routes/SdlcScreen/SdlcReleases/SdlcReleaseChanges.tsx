@@ -4,13 +4,19 @@ import {
   ChevronRight,
   CircleCheck,
   Copy,
+  FileCode,
   FileText,
-  RotateCw,
-  Sparkles,
+  // RotateCw,
+  // Sparkles,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { useSelector } from '@xstate/react';
+// import { toast } from 'sonner';
 import { Button } from '../../../components/ui/Button';
 import { getAvatarColorClassNames } from '../../../components/ui/Avatar/Avatar';
+import {
+  attachmentViewerActor,
+  type AttachmentViewerState,
+} from '../../../machines/attachmentViewerMachine';
 import { Skeleton } from '../../../components/ui/Skeleton';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import {
@@ -23,11 +29,11 @@ import {
   buildValuesByChangeId,
 } from '../../../components/Release/releaseChanges.utils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
+// import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { useCopyButton } from '../../../hooks/useCopyButton';
-import { apiInstance } from '../../../services/clients/apiClient';
+// import { apiInstance } from '../../../services/clients/apiClient';
 import { queries } from '../../../zero/queries';
-import { getApiErrorMessage } from '../../../utils/apiError';
+// import { getApiErrorMessage } from '../../../utils/apiError';
 import { cn } from '../../../utils/classNames';
 import type { ReleaseChangeRow, SdlcReleaseChangesProps } from './SdlcReleases.types';
 import {
@@ -316,6 +322,9 @@ function CodeViewer({ row }: { row: ReleaseChangeRow }): ReactElement {
   );
 }
 
+const RELEASE_NOTE_CARD_CLASS =
+  'flex w-[400px] max-w-full items-center gap-3 rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm';
+
 function ReleaseNotes({
   release,
   devTicketCount,
@@ -333,60 +342,85 @@ function ReleaseNotes({
   repoName: string | null;
   onOpenCanvas: (canvasId: string) => void;
 }): ReactElement {
-  const [analyzing, setAnalyzing] = useState(false);
-  const { confirm, ConfirmDialog } = useConfirmDialog();
+  // const [analyzing, setAnalyzing] = useState(false);
+  // const { confirm, ConfirmDialog } = useConfirmDialog();
+
+  const [ticketAttachments] = useCachedQuery(queries.attachmentsByTicket({ ticketId: release.id }));
+  const attachments = ticketAttachments ?? [];
+  const isViewerOpen = useSelector(
+    attachmentViewerActor,
+    (state: AttachmentViewerState) => state.value !== 'closed',
+  );
+  // Same gallery the ticket's files open in, so every attachment of the release can be paged through.
+  const openAttachment = (attachmentId: string): void => {
+    attachmentViewerActor.send({
+      type: isViewerOpen ? 'UPDATE' : 'OPEN',
+      attachments: attachments.map(attachment => ({
+        attachmentId: attachment.id,
+        fileName: attachment.originalFilename,
+        fileUrl: `/attachments/${attachment.id}/download`,
+        mimeType: attachment.mimetype,
+        fileSize: attachment.size,
+        thumbnailUrl: attachment.thumbnailUrl,
+      })),
+      startIndex: Math.max(
+        0,
+        attachments.findIndex(attachment => attachment.id === attachmentId),
+      ),
+    });
+  };
 
   const insights = readReleaseInsights(release.metadata);
-  const running = analyzing || readIsGeneratingInsights(release.metadata);
+  const running = /* analyzing || */ readIsGeneratingInsights(release.metadata);
   const notesUrl = (release.metadata as { releaseNotesCanvasUrl?: unknown } | null | undefined)
     ?.releaseNotesCanvasUrl;
   const notesCanvasId =
     typeof notesUrl === 'string' ? (/\/canvas\/([^/?#]+)/.exec(notesUrl)?.[1] ?? null) : null;
 
-  const analyze = async (): Promise<void> => {
-    if (
-      insights &&
-      !(await confirm({
-        title: 'Re-analyze this release?',
-        description:
-          'This replaces the current summary, stats and risk assessment with a freshly generated set.',
-        confirmLabel: 'Re-analyze',
-      }))
-    ) {
-      return;
-    }
-    setAnalyzing(true);
-    try {
-      const response = await apiInstance.post<{ success: boolean; error?: string }>(
-        `/tickets/${release.id}/release-insights`,
-        {},
-      );
-      if (response.data?.success) toast.success('Release insights generated.');
-      else toast.error(response.data?.error ?? 'Analysis failed');
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Analysis failed'));
-    } finally {
-      setAnalyzing(false);
-    }
-  };
+  // const analyze = async (): Promise<void> => {
+  //   if (
+  //     insights &&
+  //     !(await confirm({
+  //       title: 'Re-analyze this release?',
+  //       description:
+  //         'This replaces the current summary, stats and risk assessment with a freshly generated set.',
+  //       confirmLabel: 'Re-analyze',
+  //     }))
+  //   ) {
+  //     return;
+  //   }
+  //   setAnalyzing(true);
+  //   try {
+  //     const response = await apiInstance.post<{ success: boolean; error?: string }>(
+  //       `/tickets/${release.id}/release-insights`,
+  //       {},
+  //     );
+  //     if (response.data?.success) toast.success('Release insights generated.');
+  //     else toast.error(response.data?.error ?? 'Analysis failed');
+  //   } catch (error) {
+  //     toast.error(getApiErrorMessage(error, 'Analysis failed'));
+  //   } finally {
+  //     setAnalyzing(false);
+  //   }
+  // };
 
-  const headerAction = (insights || running || analysisCanvasId || notesCanvasId) && (
-    <Button
-      variant='ghost'
-      size='sm'
-      onClick={() => void analyze()}
-      disabled={running}
-      className='h-7 px-2 font-medium text-muted-foreground'
-      data-track-category={TRACK_CATEGORY}
-      data-track-name='ReleaseAnalyzeClicked'
-    >
-      <RotateCw className={cn('size-3.5', running && 'animate-spin')} />
-      {running ? 'Analyzing…' : insights ? 'Re-analyze' : 'Analyze release'}
-    </Button>
-  );
+  // const headerAction = (insights || running || analysisCanvasId || notesCanvasId) && (
+  //   <Button
+  //     variant='ghost'
+  //     size='sm'
+  //     onClick={() => void analyze()}
+  //     disabled={running}
+  //     className='h-7 px-2 font-medium text-muted-foreground'
+  //     data-track-category={TRACK_CATEGORY}
+  //     data-track-name='ReleaseAnalyzeClicked'
+  //   >
+  //     <RotateCw className={cn('size-3.5', running && 'animate-spin')} />
+  //     {running ? 'Analyzing…' : insights ? 'Re-analyze' : 'Analyze release'}
+  //   </Button>
+  // );
 
   return (
-    <Section title='Release notes' meta='AI-generated' action={headerAction}>
+    <Section title='Release notes' /* meta='AI-generated' action={headerAction} */>
       {running && (
         <div className='flex flex-col gap-3 rounded-[14px] border border-border bg-background px-6 py-[22px]'>
           <span className='text-[13px] text-muted-foreground'>
@@ -404,7 +438,7 @@ function ReleaseNotes({
           migrationCount={migrationCount}
         />
       )}
-      {!running && !insights && !analysisCanvasId && !notesCanvasId && (
+      {/* {!running && !insights && !analysisCanvasId && !notesCanvasId && (
         <div className='flex flex-wrap items-center gap-4 rounded-[14px] border border-border bg-background px-[22px] py-5'>
           <span className='flex size-[38px] shrink-0 items-center justify-center rounded-[10px] border border-border bg-muted text-muted-foreground'>
             <Sparkles size={17} />
@@ -424,46 +458,81 @@ function ReleaseNotes({
             Analyze release
           </Button>
         </div>
+      )} */}
+      {!running && !insights && !analysisCanvasId && !notesCanvasId && attachments.length === 0 && (
+        <div className='flex items-center gap-2.5 rounded-[10px] border border-border bg-background px-4 py-3.5 text-[13.5px] text-muted-foreground'>
+          <FileText size={15} className='shrink-0' />
+          No release notes for this release yet.
+        </div>
       )}
-      {notesCanvasId && (
-        <button
-          type='button'
-          onClick={() => onOpenCanvas(notesCanvasId)}
-          className='flex w-full max-w-[420px] items-center gap-3 self-start rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm'
-          data-track-category={TRACK_CATEGORY}
-          data-track-name='ReleaseNotesCanvasOpened'
-        >
-          <span className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-status-success text-white'>
-            <FileText size={18} />
-          </span>
-          <span className='flex min-w-0 flex-col gap-1'>
-            <span className='truncate text-sm font-semibold text-foreground'>
-              📝 Release Notes: {release.xyneId}
-            </span>
-            <span className='text-[13px] text-muted-foreground'>Click to open canvas</span>
-          </span>
-        </button>
+      {(notesCanvasId || analysisCanvasId || attachments.length > 0) && (
+        <div className='flex flex-wrap gap-3'>
+          {notesCanvasId && (
+            <button
+              type='button'
+              onClick={() => onOpenCanvas(notesCanvasId)}
+              className={RELEASE_NOTE_CARD_CLASS}
+              data-track-category={TRACK_CATEGORY}
+              data-track-name='ReleaseNotesCanvasOpened'
+            >
+              <span className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-status-success text-white'>
+                <FileText size={18} />
+              </span>
+              <span className='flex min-w-0 flex-col gap-1'>
+                <span className='truncate text-sm font-semibold text-foreground'>
+                  📝 Release Notes: {release.xyneId}
+                </span>
+                <span className='text-[13px] text-muted-foreground'>Click to open canvas</span>
+              </span>
+            </button>
+          )}
+          {attachments.map(attachment => (
+            <button
+              key={attachment.id}
+              type='button'
+              onClick={() => openAttachment(attachment.id)}
+              className={RELEASE_NOTE_CARD_CLASS}
+              title={attachment.originalFilename}
+              data-track-category={TRACK_CATEGORY}
+              data-track-name='ReleaseNotesAttachmentOpened'
+            >
+              <span className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-status-new text-white'>
+                {attachment.mimetype === 'text/html' ? (
+                  <FileCode size={18} />
+                ) : (
+                  <FileText size={18} />
+                )}
+              </span>
+              <span className='flex min-w-0 flex-col gap-1'>
+                <span className='truncate text-sm font-semibold text-foreground'>
+                  {attachment.originalFilename}
+                </span>
+                <span className='text-[13px] text-muted-foreground'>Click to open file</span>
+              </span>
+            </button>
+          ))}
+          {analysisCanvasId && (
+            <button
+              type='button'
+              onClick={() => onOpenCanvas(analysisCanvasId)}
+              className={RELEASE_NOTE_CARD_CLASS}
+              data-track-category={TRACK_CATEGORY}
+              data-track-name='ReleaseCanvasOpened'
+            >
+              <span className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-status-success text-white'>
+                <FileText size={18} />
+              </span>
+              <span className='flex min-w-0 flex-col gap-1'>
+                <span className='truncate text-sm font-semibold text-foreground'>
+                  📦 Release Analysis: {repoName ?? 'Release'} - {release.xyneId}
+                </span>
+                <span className='text-[13px] text-muted-foreground'>Click to open canvas</span>
+              </span>
+            </button>
+          )}
+        </div>
       )}
-      {analysisCanvasId && (
-        <button
-          type='button'
-          onClick={() => onOpenCanvas(analysisCanvasId)}
-          className='flex w-full max-w-[420px] items-center gap-3 self-start rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm'
-          data-track-category={TRACK_CATEGORY}
-          data-track-name='ReleaseCanvasOpened'
-        >
-          <span className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-status-success text-white'>
-            <FileText size={18} />
-          </span>
-          <span className='flex min-w-0 flex-col gap-1'>
-            <span className='truncate text-sm font-semibold text-foreground'>
-              📦 Release Analysis: {repoName ?? 'Release'} - {release.xyneId}
-            </span>
-            <span className='text-[13px] text-muted-foreground'>Click to open canvas</span>
-          </span>
-        </button>
-      )}
-      <ConfirmDialog />
+      {/* <ConfirmDialog /> */}
     </Section>
   );
 }
