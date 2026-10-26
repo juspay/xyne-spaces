@@ -62,7 +62,7 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
     setIsLoading(true);
     try {
       const response = await apiInstance.get<{ requests: WorkspaceJoinRequest[] }>(
-        `/community/join-requests?orgId=${encodeURIComponent(orgId)}&status=${WorkspaceJoinRequestStatus.PENDING}`,
+        `/join-requests?orgId=${encodeURIComponent(orgId)}&status=${WorkspaceJoinRequestStatus.PENDING}`,
       );
       setRequests(response.data.requests || []);
     } catch (error) {
@@ -91,7 +91,7 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
     setReviewingRequestId(request.id);
     try {
       await apiInstance.post(
-        `/community/${request.workspaceId}/join-requests/${request.id}/review`,
+        `/join-requests/${request.workspaceId}/${request.id}/review`,
         {
           action,
           reviewNote: reviewNote || undefined,

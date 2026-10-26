@@ -1,8 +1,8 @@
 import { transaction } from '../base';
 import type { Request } from 'express';
 import { getEncryptionProvider } from '@/services/encryption';
-import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
-import { Status, WorkspaceType, WorkspaceJoinPolicy, ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
+import { createWorkspaceDefaults } from '@/utils/workspaceDefaults';
+import { Status, WorkspaceType, ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { PrismaClient } from '@prisma/client';
 
 
@@ -24,7 +24,6 @@ export function provisionOrgTx(prisma: PrismaClient, orgId: string, orgName: str
         createdBy: invitedBy,
         status: Status.ACTIVE,
         workspaceType: WorkspaceType.ENTERPRISE,
-        joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
       },
     });
 
@@ -56,7 +55,7 @@ export function provisionOrgTx(prisma: PrismaClient, orgId: string, orgName: str
     });
 
     // Seed general channel + default project + board/stages
-    await createCommunityWorkspaceDefaults({
+    await createWorkspaceDefaults({
       db: tx,
       workspaceId: workspace.id,
       workspaceName: workspaceName.trim(),

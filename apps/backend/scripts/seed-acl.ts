@@ -13,7 +13,6 @@
 import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
 import {
-  WorkspaceJoinPolicy,
   WorkspaceType,
   AccessType,
   AuthProvider,
@@ -226,7 +225,6 @@ async function main() {
             orgId: defaultOrg.orgId,
             createdBy: DEFAULT_WORKSPACE.createdBy,
             workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');
@@ -371,7 +369,6 @@ async function main() {
             orgId: defaultOrg.orgId,
             createdBy: DEFAULT_WORKSPACE.createdBy,
             workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');

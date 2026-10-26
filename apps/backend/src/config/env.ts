@@ -62,11 +62,6 @@ const envSchema = Joi.object({
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default('Xyne Spaces'),
-  COMMUNITY_JOIN_APPROVED_EMAIL_MESSAGE: Joi.string()
-    .allow('')
-    .default(
-      'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
-    ),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
@@ -169,7 +164,6 @@ const envSchema = Joi.object({
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
   AI_PROVISIONING_QUEUE_BACKOFF_MS: Joi.number().integer().min(0).default(5000),
   AI_PROVISIONING_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).default(30000),
-  COMMUNITY_WORKSPACE_USER_BUDGET: Joi.number().integer().min(0).allow(null).default(null),
   ENTERPRISE_WORKSPACE_USER_BUDGET: Joi.number().integer().min(0).allow(null).default(null),
   LITELLM_MANAGEMENT_BASE_URL: Joi.string().uri().allow('').default(''),
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
@@ -916,8 +910,6 @@ export const config = {
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
     requestTimeoutMs: envVars.AI_PROVISIONING_REQUEST_TIMEOUT_MS as number,
-    communityWorkspaceUserBudget:
-      (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
     enterpriseWorkspaceUserBudget:
       (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
     litellmManagementBaseUrl:
@@ -1278,9 +1270,6 @@ export const config = {
     refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,
     fromEmail: envVars.EMAIL_FROM as string,
     fromName: envVars.EMAIL_FROM_NAME as string,
-  },
-  communityJoinApprovedEmail: {
-    message: envVars.COMMUNITY_JOIN_APPROVED_EMAIL_MESSAGE as string,
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,

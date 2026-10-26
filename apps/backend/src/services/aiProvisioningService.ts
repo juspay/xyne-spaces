@@ -24,7 +24,7 @@ class AIProvisioningService {
     return this.ensureStatusAndEnqueue(AIProvisioningSubjectType.USER, spacesOrgMemberId);
   }
 
-  async upgradeCommunityToEnterpriseBudget(orgMemberId: string): Promise<void> {
+  async resyncUserBudget(orgMemberId: string): Promise<void> {
     const memberRow = await this.prisma.orgMember.findUnique({
       where: { memberId: orgMemberId },
       select: { memberId: true },

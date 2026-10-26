@@ -7,14 +7,14 @@ import { userSchema } from '@/vespa/src/types';
  * Prisma middleware that indexes every newly-created user into Vespa.
  *
  * User rows are created Prisma-direct across many paths (OAuth signup, invitation accept,
- * workspace/community provisioning, the public controller, bots) — none via Zero. Hooking
+ * workspace provisioning, the public controller, bots) — none via Zero. Hooking
  * the shared client covers all of them uniformly, instead of wiring N call sites.
  *
  * Enqueues a durable `update` job with `create: true` — a partial upsert that creates a
  * missing doc WITHOUT wiping the personalization weights a full `feed` would replace.
  *
  * Fire-and-forget, NOT deferred. `$use` runs mid-operation and can't observe an enclosing
- * $transaction's COMMIT (e.g. community-workspace creation), so the job may be picked up
+ * $transaction's COMMIT (e.g. workspace creation), so the job may be picked up
  * before the row is committed. Correctness rides on the WORKER, not on timing: it re-reads
  * the user (`db.user.findUnique`); if the row isn't there yet it throws and the Bull queue
  * RETRIES (attempts: 3, exponential backoff) until the row commits. A rolled-back create just
