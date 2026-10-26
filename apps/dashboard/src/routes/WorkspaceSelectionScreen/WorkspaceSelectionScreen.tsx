@@ -2,11 +2,11 @@ import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
-import { ArrowRight, Building2, Loader2, LogOut, Plus, Users, X } from 'lucide-react';
+import { ArrowRight, Building2, Loader2, LogOut, Users } from 'lucide-react';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import type { Workspace } from '../../machines/authMachine';
-import { WorkspaceType } from '@xyne/shared';
+// import { WorkspaceType } from '@xyne/shared';
 
 interface WorkspaceWithMeta extends Workspace {
   isApprovedRequest?: boolean;
@@ -56,10 +56,10 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
   const [error, setError] = useState<string>('');
   const [switchingToId, setSwitchingToId] = useState<string | null>(null);
 
-  const [isCreating, setIsCreating] = useState(false);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState('');
-  const [createError, setCreateError] = useState('');
+  // const [isCreating, setIsCreating] = useState(false);
+  // const [showCreateForm, setShowCreateForm] = useState(false);
+  // const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  // const [createError, setCreateError] = useState('');
 
   const routeState = location.state as WorkspaceSelectionState | null;
 
@@ -125,31 +125,31 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     }
   };
 
-  const handleCreateWorkspace = async (e: React.FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (!newWorkspaceName.trim()) return;
+  // const handleCreateWorkspace = async (e: React.FormEvent): Promise<void> => {
+    // e.preventDefault();
+    // if (!newWorkspaceName.trim()) return;
 
-    setIsCreating(true);
-    setCreateError('');
-    try {
-      const response = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
-        '/auth/create-workspace-pending',
-        { workspaceName: newWorkspaceName.trim(), workspaceType: WorkspaceType.ENTERPRISE },
-      );
-      const newWorkspaceId = response.data.user.workspaceId;
-      localStorage.setItem('user_id', response.data.user.id);
-      window.location.href = `/${newWorkspaceId}`;
-    } catch (err) {
-      if (err instanceof AxiosError) {
-        const msg = (err.response?.data as { message?: string } | undefined)?.message;
-        setCreateError(msg ?? 'Failed to create workspace.');
-      } else {
-        setCreateError('Failed to create workspace.');
-      }
-    } finally {
-      setIsCreating(false);
-    }
-  };
+    // setIsCreating(true);
+    // setCreateError('');
+    // try {
+      // const response = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
+        // '/auth/create-workspace-pending',
+        // { workspaceName: newWorkspaceName.trim(), workspaceType: WorkspaceType.ENTERPRISE },
+      // );
+      // const newWorkspaceId = response.data.user.workspaceId;
+      // localStorage.setItem('user_id', response.data.user.id);
+      // window.location.href = `/${newWorkspaceId}`;
+    // } catch (err) {
+      // if (err instanceof AxiosError) {
+        // const msg = (err.response?.data as { message?: string } | undefined)?.message;
+        // setCreateError(msg ?? 'Failed to create workspace.');
+      // } else {
+        // setCreateError('Failed to create workspace.');
+      // }
+    // } finally {
+      // setIsCreating(false);
+    // }
+  // };
 
   const handleTryDifferentAccount = (): void => {
     Cookies.remove('user_data');
@@ -292,6 +292,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
             )}
 
             {/* Create workspace section */}
+            {/*
             <div className='mt-8 pt-6 border-t border-border/60'>
               {showCreateForm ? (
                 <form
@@ -374,6 +375,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                 </button>
               )}
             </div>
+            */}
 
             {/* Footer */}
             <div className='mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left'>

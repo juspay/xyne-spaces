@@ -1,7 +1,7 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
-import { AxiosError } from 'axios';
+// import { AxiosError } from 'axios';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import { useOAuthProviders } from '../../hooks/useOAuthProviders';
@@ -63,9 +63,9 @@ const AuthScreen = (): ReactElement | null => {
   const [isRequestingEnterpriseJoin, setIsRequestingEnterpriseJoin] = useState(false);
   const [enterpriseJoinRequestMessage, setEnterpriseJoinRequestMessage] = useState('');
   const [enterpriseJoinRequestError, setEnterpriseJoinRequestError] = useState('');
-  const [newEnterpriseWorkspaceName, setNewEnterpriseWorkspaceName] = useState('');
-  const [isCreatingEnterpriseWorkspace, setIsCreatingEnterpriseWorkspace] = useState(false);
-  const [createEnterpriseWorkspaceError, setCreateEnterpriseWorkspaceError] = useState('');
+  // const [newEnterpriseWorkspaceName, setNewEnterpriseWorkspaceName] = useState('');
+  // const [isCreatingEnterpriseWorkspace, setIsCreatingEnterpriseWorkspace] = useState(false);
+  // const [createEnterpriseWorkspaceError, setCreateEnterpriseWorkspaceError] = useState('');
   const orgNameInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
   const isOrganizationNameTakenError =
@@ -204,31 +204,31 @@ const AuthScreen = (): ReactElement | null => {
     }
   };
 
-  const handleCreateEnterpriseWorkspace = async (): Promise<void> => {
-    if (!newEnterpriseWorkspaceName.trim()) return;
-    setIsCreatingEnterpriseWorkspace(true);
-    setCreateEnterpriseWorkspaceError('');
-    try {
-      const res = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
-        '/auth/create-workspace-pending',
-        {
-          workspaceName: newEnterpriseWorkspaceName.trim(),
-        },
-      );
-      const newWorkspaceId = res.data.user.workspaceId;
-      localStorage.setItem('user_id', res.data.user.id);
-      window.location.href = `/${newWorkspaceId}`;
-    } catch (err) {
-      if (err instanceof AxiosError) {
-        const msg = (err.response?.data as { message?: string } | undefined)?.message;
-        setCreateEnterpriseWorkspaceError(msg ?? 'Failed to create workspace.');
-      } else {
-        setCreateEnterpriseWorkspaceError('Failed to create workspace.');
-      }
-    } finally {
-      setIsCreatingEnterpriseWorkspace(false);
-    }
-  };
+  // const handleCreateEnterpriseWorkspace = async (): Promise<void> => {
+    // if (!newEnterpriseWorkspaceName.trim()) return;
+    // setIsCreatingEnterpriseWorkspace(true);
+    // setCreateEnterpriseWorkspaceError('');
+    // try {
+      // const res = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
+        // '/auth/create-workspace-pending',
+        // {
+          // workspaceName: newEnterpriseWorkspaceName.trim(),
+        // },
+      // );
+      // const newWorkspaceId = res.data.user.workspaceId;
+      // localStorage.setItem('user_id', res.data.user.id);
+      // window.location.href = `/${newWorkspaceId}`;
+    // } catch (err) {
+      // if (err instanceof AxiosError) {
+        // const msg = (err.response?.data as { message?: string } | undefined)?.message;
+        // setCreateEnterpriseWorkspaceError(msg ?? 'Failed to create workspace.');
+      // } else {
+        // setCreateEnterpriseWorkspaceError('Failed to create workspace.');
+      // }
+    // } finally {
+      // setIsCreatingEnterpriseWorkspace(false);
+    // }
+  // };
 
   const handleEmailSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
@@ -538,6 +538,7 @@ const AuthScreen = (): ReactElement | null => {
                     </div>
                   ) : null}
 
+                  {/*
                   <div className='border-t border-border pt-4'>
                     <p className='text-sm font-medium text-foreground mb-2'>
                       Or create a new workspace in{' '}
@@ -574,6 +575,7 @@ const AuthScreen = (): ReactElement | null => {
                       </button>
                     </div>
                   </div>
+                  */}
 
                   <button
                     type='button'
