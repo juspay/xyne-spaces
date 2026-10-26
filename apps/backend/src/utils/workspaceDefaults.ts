@@ -54,18 +54,10 @@ export async function createWorkspaceDefaults(
     },
   });
 
-  return { project, channel, workspace };
-}
-
-export async function createCommunityWorkspaceDefaults(
-  params: CreateWorkspaceDefaultsParams,
-): Promise<WorkspaceDefaults> {
-  const defaults = await createWorkspaceDefaults(params);
-
   const board = await params.db.board.create({
     data: {
       name: params.workspaceName,
-      projectId: defaults.project.id,
+      projectId: project.id,
       workspaceId: params.workspaceId,
       createdBy: params.createdBy,
     },
@@ -105,7 +97,7 @@ export async function createCommunityWorkspaceDefaults(
     ].map(stage => ({ ...stage, workspaceId: params.workspaceId })),
   });
 
-  return defaults;
+  return { project, channel, workspace };
 }
 
 async function generateUniqueProjectCode(

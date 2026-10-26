@@ -22,7 +22,6 @@ export type LoginMethod =
   | AuthProvider
   | 'TEST'
   | 'WORKSPACE_CREATED' // already signed in — a session for a workspace they just created
-  | 'WORKSPACE_JOINED' // already signed in — a session for a community workspace they just joined
   | 'AUTO_LOGIN' // reused an existing session to auto-log into a single workspace
   | 'SDK_SSO'; // a Spaces SDK / MCP / CLI sign-in approved through Xyne SSO
 

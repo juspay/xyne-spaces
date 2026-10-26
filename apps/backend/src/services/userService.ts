@@ -13,21 +13,16 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { grantPermissionsForRole, syncOrgResourceAdminAccess } from './permissionMatrix';
 import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
 import { OrgRole,
-  WorkspaceJoinPolicy,
-  WorkspaceType,
   AuthProvider,
   ProjectType,
   UserStatus,
   WorkspaceRole,
   ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
-import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
-import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
+import { createWorkspaceDefaults } from '@/utils/workspaceDefaults';
 import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
-import { redisService } from '@/services/redisService';
-import { getPasswordHash } from '@/services/orgMemberCredentialService';
 import { createId } from '@paralleldrive/cuid2';
 import { getEncryptionProvider } from '@/services/encryption';
 import { createOrganizationWithUserTx } from '@/bypassAcl/transactions/userService';
@@ -242,7 +237,7 @@ export class UserService {
 
       // NOTE: Vespa indexing for the user is handled uniformly by the setupUserVespaSync
       // Prisma middleware (fires on every user create/upsert), not here — so invitation,
-      // provisioning, community, controller and bot creates are all covered too.
+      // provisioning, controller and bot creates are all covered too.
 
       return user;
     } catch (error) {
@@ -811,23 +806,6 @@ export class UserService {
   }
 
   /**
-   * Check Redis for a verified email-password registration's passwordHash.
-   * Returns { passwordHash } if found, so it can be set on the OrgMember
-   * during org creation. Cleans up the Redis key after reading.
-   */
-  private async getVerifiedPasswordHash(email: string): Promise<{ passwordHash?: string }> {
-    try {
-      const raw = await redisService.get(`emailreg:verified:${email.toLowerCase().trim()}`);
-      if (!raw) return {};
-      const data = JSON.parse(raw) as { passwordHash?: string };
-      await redisService.del(`emailreg:verified:${email.toLowerCase().trim()}`);
-      return data.passwordHash ? { passwordHash: data.passwordHash } : {};
-    } catch {
-      return {};
-    }
-  }
-
-  /**
    * Create organization with default workspace and user
    * Called after temp token is verified
    */
@@ -881,10 +859,6 @@ export class UserService {
         throw new Error(`User ${userData.email} already belongs to an organization`);
       }
 
-      const existingPasswordHash = existingOrgMember ? await getPasswordHash(existingOrgMember.memberId) : null;
-
-      const verifiedPasswordHash = existingPasswordHash ? {} : await this.getVerifiedPasswordHash(userData.email);
-
       const orgMember = existingOrgMember
         ? await this.prisma.orgMember.update({
             where: { memberId: existingOrgMember.memberId },
@@ -892,7 +866,6 @@ export class UserService {
               orgId: organization.orgId,
               role: OrgRole.OWNER,
               leftAt: null,
-              ...verifiedPasswordHash,
             },
           })
         : await this.prisma.orgMember.create({
@@ -900,7 +873,6 @@ export class UserService {
               orgId: organization.orgId,
               email: userData.email,
               role: OrgRole.OWNER,
-              ...verifiedPasswordHash,
             },
           });
       if (orgMember.passwordHash) {
@@ -912,7 +884,7 @@ export class UserService {
       }
 
       if (existingOrgMember?.role === (OrgRole.COMMUNITY_MEMBER as any)) {
-        await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
+        await aiProvisioningService.resyncUserBudget(orgMember.memberId);
       }
 
       // Step 5: Create workspace user as OWNER
@@ -959,7 +931,7 @@ export class UserService {
       });
 
       // Step 8: Create default project with general channel and board/stages
-      const defaults = await createCommunityWorkspaceDefaults({
+      const defaults = await createWorkspaceDefaults({
         db: this.prisma,
         workspaceId: workspace.id,
         workspaceName,
@@ -1015,10 +987,6 @@ export class UserService {
       authProvider: AuthProvider;
     },
     workspaceName: string,
-    options?: {
-      workspaceType?: WorkspaceTypeValue;
-      joinPolicy?: WorkspaceJoinPolicyValue;
-    },
   ): Promise<{ organization: any; workspace: any; workspaceUser: User }> {
     // Find the user's org membership
     const orgMember = await this.prisma.orgMember.findFirst({
@@ -1032,24 +1000,13 @@ export class UserService {
     }
 
     const org = orgMember.organization;
-    const workspaceType = options?.workspaceType ?? WorkspaceType.ENTERPRISE;
-    const joinPolicy =
-      workspaceType === WorkspaceType.COMMUNITY
-        ? (options?.joinPolicy ?? WorkspaceJoinPolicy.OPEN)
-        : WorkspaceJoinPolicy.INVITE_ONLY;
-
-    if (workspaceType === WorkspaceType.COMMUNITY) {
-      if (orgMember.role !== OrgRole.OWNER && orgMember.role !== OrgRole.ADMIN) {
-        this.raiseWorkspaceCreateError('Only organization owners and admins can create community workspaces', 403);
-      }
-    }
 
     // Creating a workspace is inherently cross-tenant: the row being created/updated can
     // never satisfy "must belong to the caller's current workspace" (there is no current
     // workspace for something that doesn't exist yet). Bootstrap it as `system` — every
     // write below already carries its own workspaceId explicitly, so nothing relies on the
     // ambient-context stamper this bypasses. See WorkspacesACL.getMutateWhere / runAsSystem.
-    return createWorkspaceInOrgData(org, userData, workspaceName, workspaceType, joinPolicy, orgMember);
+    return createWorkspaceInOrgData(org, userData, workspaceName, orgMember);
   }
 
   /**
@@ -1057,12 +1014,6 @@ export class UserService {
    */
   async disconnect(): Promise<void> {
     await this.prisma.$disconnect();
-  }
-
-  private raiseWorkspaceCreateError(message: string, statusCode: number): never {
-    const error = new Error(message) as Error & { statusCode?: number };
-    error.statusCode = statusCode;
-    throw error;
   }
 }
 

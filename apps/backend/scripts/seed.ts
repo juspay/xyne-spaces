@@ -13,7 +13,6 @@
 import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
 import {
-  WorkspaceJoinPolicy,
   WorkspaceType,
   OrgLLMServiceAccountProvider,
   OrgLLMServiceAccountPurpose,
@@ -232,7 +231,6 @@ async function main() {
             orgId: defaultOrg.orgId,
             createdBy: 'system',
             workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');
