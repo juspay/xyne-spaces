@@ -25,7 +25,7 @@ interface GeneralChannelResult {
  * missing) and that `workspace.landingChannelId` points at it when unset.
  * Optionally joins the given user to it (idempotent).
  *
- * Shared by enterprise and community workspace flows so both create and join the
+ * Shared by the workspace creation and join flows so they create and join the
  * general channel through the same code path.
  */
 export async function ensureGeneralChannelForWorkspace(

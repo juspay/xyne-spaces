@@ -12,7 +12,6 @@ import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
-import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
 import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
 import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
@@ -2198,10 +2197,6 @@ export const router = createBrowserRouter(
         {
           path: '/invite',
           element: <AcceptInvitation />,
-        },
-        {
-          path: '/community',
-          element: <CommunityWorkspaceSelectionRoute />,
         },
         {
           path: '/auth',

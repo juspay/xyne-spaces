@@ -41,7 +41,7 @@ import conversationLabelRoutes from '@/routes/conversationLabels';
 import radarExecutionRoutes from '@/routes/radarExecution';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
-import communityRoutes from '@/routes/community';
+import joinRequestRoutes, { legacyJoinRequestRouter } from '@/routes/joinRequests';
 import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
@@ -64,7 +64,6 @@ import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
@@ -466,9 +465,9 @@ export class App {
     // Apply general rate limiter to all API routes from this point onward
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/v2/auth', authV2Routes);
-    this.app.use('/api/community', communityRoutes);
+    this.app.use('/api/join-requests', joinRequestRoutes);
+    this.app.use('/api/community', legacyJoinRequestRouter);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
     // Claw MCP route (user + app auth) — must be before /api/tickets

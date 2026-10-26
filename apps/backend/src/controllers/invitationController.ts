@@ -19,7 +19,7 @@ import {
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { ProjectType, WorkspaceRole, WorkspaceType, OrgRole } from '@xyne/shared';
+import { ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -116,26 +116,12 @@ export class InvitationController {
         return;
       }
 
-      // Non-admins can only send the invite role matching the workspace type —
-      // MEMBER in an enterprise workspace, COMMUNITY_MEMBER in a community
-      // workspace. Minting any other role (ADMIN, GUEST, cross-type) is admin-only.
-      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
-        const workspace = await DatabaseClient.getInstance().workspace.findUnique({
-          where: { id: workspaceId },
-          select: { workspaceType: true },
-        });
-        if (!workspace) {
-          res.status(404).json({ error: 'Workspace not found' });
-          return;
-        }
-        const allowedRole =
-          workspace.workspaceType === WorkspaceType.COMMUNITY
-            ? WorkspaceRole.COMMUNITY_MEMBER
-            : WorkspaceRole.MEMBER;
-        if (role !== allowedRole) {
-          res.status(403).json({ error: 'Only workspace admins can send this invitation type' });
-          return;
-        }
+      // Non-admin members can only send MEMBER invitations. Minting any other role
+      // (ADMIN, GUEST) is admin-only.
+      const isWorkspaceAdmin = inviterRole === 'ADMIN' || inviterRole === 'OWNER';
+      if (!isWorkspaceAdmin && (inviterRole !== WorkspaceRole.MEMBER || role !== WorkspaceRole.MEMBER)) {
+        res.status(403).json({ error: 'Only workspace admins can send this invitation type' });
+        return;
       }
 
       // Create the invitation (includes workspace data)
@@ -177,11 +163,7 @@ export class InvitationController {
       });
 
       let tempPassword: string | null = null;
-      if (
-        existingWorkspaceUsers === 0 &&
-        role !== 'GUEST' &&
-        role !== WorkspaceRole.COMMUNITY_MEMBER
-      ) {
+      if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
         tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
       }
 

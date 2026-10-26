@@ -8,8 +8,7 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
-import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
-import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
+import { WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 
 import '../types/express';
 import { config } from '@/config/env';
@@ -243,17 +242,6 @@ export class AuthV2Controller {
     }
 
     return 'web';
-  }
-
-  private getEnterpriseAwareWorkspaces<T extends { workspaceType?: string | null }>(
-    workspaces: T[],
-    enterpriseLogin?: boolean,
-  ): T[] {
-    if (!enterpriseLogin) {
-      return workspaces;
-    }
-
-    return workspaces.filter(workspace => workspace.workspaceType !== WorkspaceType.COMMUNITY);
   }
 
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
@@ -515,10 +503,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = this.getEnterpriseAwareWorkspaces(
-        await this.userService.getWorkspacesByEmail(googleUserData.email),
-        stateData.enterpriseLogin,
-      );
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 
       // Check for pending invitation from cookie (web) or OAuth state (electron/mobile)
@@ -537,8 +522,8 @@ export class AuthV2Controller {
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
         // Public email domains can never create enterprise workspaces — the only
-        // path forward for a workspace-less user without a pending community join
-        // or invitation — so fail fast on them regardless of the entry flow. The
+        // path forward for a workspace-less user without an invitation — so fail
+        // fast on them regardless of the entry flow. The
         // remaining domain-conflict assert stays gated on the explicit
         // enterprise intent.
         try {
@@ -945,10 +930,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = this.getEnterpriseAwareWorkspaces(
-        await this.userService.getWorkspacesByEmail(googleUserData.email),
-        stateData.enterpriseLogin,
-      );
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
@@ -1306,10 +1288,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = this.getEnterpriseAwareWorkspaces(
-        await this.userService.getWorkspacesByEmail(googleUserData.email),
-        enterpriseLogin,
-      );
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
@@ -2148,26 +2127,17 @@ export class AuthV2Controller {
           return;
         }
 
-        const { workspaceName, workspaceType, joinPolicy } = req.body as {
+        const { workspaceName, workspaceType } = req.body as {
           workspaceName?: string;
           workspaceType?: string;
-          joinPolicy?: string;
         };
 
         if (!workspaceName) {
           res.status(400).json({ error: 'Missing required fields', message: 'workspaceName is required' });
           return;
         }
-        if (
-          workspaceType &&
-          workspaceType !== WorkspaceType.ENTERPRISE &&
-          workspaceType !== WorkspaceType.COMMUNITY
-        ) {
-          res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE or COMMUNITY' });
-          return;
-        }
-        if (joinPolicy && !Object.values(WorkspaceJoinPolicy).includes(joinPolicy as WorkspaceJoinPolicyValue)) {
-          res.status(400).json({ error: 'Invalid join policy', message: 'joinPolicy must be INVITE_ONLY, OPEN, or REQUEST_TO_JOIN' });
+        if (workspaceType && workspaceType !== WorkspaceType.ENTERPRISE) {
+          res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE' });
           return;
         }
 
@@ -2228,10 +2198,6 @@ export class AuthV2Controller {
         const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
           { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },
           workspaceName,
-          {
-            workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
-            joinPolicy: joinPolicy as WorkspaceJoinPolicyValue | undefined,
-          },
         );
 
         await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
@@ -2345,25 +2311,16 @@ export class AuthV2Controller {
    */
   createWorkspaceAuth = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceName, workspaceType, joinPolicy } = req.body as {
+      const { workspaceName, workspaceType } = req.body as {
         workspaceName?: string;
         workspaceType?: string;
-        joinPolicy?: string;
       };
       if (!workspaceName) {
         res.status(400).json({ error: 'Missing required fields', message: 'workspaceName is required' });
         return;
       }
-      if (
-        workspaceType &&
-        workspaceType !== WorkspaceType.ENTERPRISE &&
-        workspaceType !== WorkspaceType.COMMUNITY
-      ) {
-        res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE or COMMUNITY' });
-        return;
-      }
-      if (joinPolicy && !Object.values(WorkspaceJoinPolicy).includes(joinPolicy as WorkspaceJoinPolicyValue)) {
-        res.status(400).json({ error: 'Invalid join policy', message: 'joinPolicy must be INVITE_ONLY, OPEN, or REQUEST_TO_JOIN' });
+      if (workspaceType && workspaceType !== WorkspaceType.ENTERPRISE) {
+        res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE' });
         return;
       }
 
@@ -2384,10 +2341,6 @@ export class AuthV2Controller {
       const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
         { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture, authProvider: fullUser.authProvider as AuthProvider },
         workspaceName,
-        {
-          workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
-          joinPolicy: joinPolicy as WorkspaceJoinPolicyValue | undefined,
-        },
       );
 
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
