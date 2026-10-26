@@ -80,10 +80,10 @@ export class AuthV2Controller {
   }
 
   constructor() {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const mobileClientId = process.env.GOOGLE_MOBILE_CLIENT_ID;
-    const mobileClientSecret = process.env.GOOGLE_MOBILE_CLIENT_SECRET;
+    const clientId = config.email.clientId;
+    const clientSecret = config.email.clientSecret;
+    const mobileClientId = config.email.mobileClientId;
+    const mobileClientSecret = config.email.mobileClientSecret;
 
     if (!clientId || !clientSecret) {
       throw new Error(
@@ -93,8 +93,8 @@ export class AuthV2Controller {
 
     this.googleClient = new OAuth2Client(clientId, clientSecret);
 
-    const clientIdNew = process.env.GOOGLE_CLIENT_ID_NEW;
-    const clientSecretNew = process.env.GOOGLE_CLIENT_SECRET_NEW;
+    const clientIdNew = config.email.clientIdNew;
+    const clientSecretNew = config.email.clientSecretNew;
     if (clientIdNew && clientSecretNew) {
       this.googleClientNew = new OAuth2Client(clientIdNew, clientSecretNew);
     }
@@ -263,7 +263,7 @@ export class AuthV2Controller {
       let validatedRedirectTo: string | undefined;
       const redirectToParam = req.query['redirect_to'] as string | undefined;
       if (redirectToParam) {
-        const allowedOrigins = (process.env.ALLOWED_REDIRECT_ORIGINS ?? '')
+        const allowedOrigins = config.allowedRedirectOrigins
           .split(',')
           .map((o) => o.trim())
           .filter(Boolean);
@@ -309,7 +309,7 @@ export class AuthV2Controller {
       });
 
       // sameSite=lax so the cookie survives Google's top-level callback redirect.
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       res.cookie('oauth_state', state, {
         httpOnly: true,
         secure: isProduction,
@@ -455,7 +455,7 @@ export class AuthV2Controller {
       logger.info(`${tag()} Verifying ID token`);
       const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy ? config.email.clientIdNew : config.email.clientId,
       });
 
       const payload = ticket.getPayload();
@@ -552,7 +552,7 @@ export class AuthV2Controller {
         }
       }
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const tokenKey = await this.storePendingOAuthTokens(
         refresh_token,
         access_token,
@@ -565,7 +565,7 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+      }, config.jwt.secret, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -764,7 +764,7 @@ export class AuthV2Controller {
         lastActivity: new Date(),
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
 
       const cookieMaxAge = config.jwt.expirationSeconds * 1000;
       const targetWorkspaceId = session.user.workspaceId;
@@ -885,7 +885,7 @@ export class AuthV2Controller {
       logger.info(`${tag()} Verifying ID token`);
       const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy ? config.email.clientIdNew : config.email.clientId,
       });
 
       const payload = ticket.getPayload();
@@ -972,7 +972,7 @@ export class AuthV2Controller {
         }
       }
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
 
       // If an invitation is pending: set google_access_token so the Electron renderer can later
       // call acceptInvitation + loginWorkspace, then return a hasInvitation signal. The renderer
@@ -992,7 +992,7 @@ export class AuthV2Controller {
           picture: googleUserData.picture,
           provider: AuthProvider.GOOGLE,
           tokenKey,
-        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+        }, config.jwt.secret, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'strict' as const,
@@ -1083,7 +1083,7 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+      }, config.jwt.secret, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -1245,7 +1245,7 @@ export class AuthV2Controller {
       const ticket = await this.mobileGoogleClient.verifyIdToken({
         idToken: id_token,
         // Accept both web and iOS client IDs
-        audience: [process.env.GOOGLE_MOBILE_CLIENT_ID!, process.env.GOOGLE_IOS_CLIENT_ID!].filter(
+        audience: [config.email.mobileClientId, config.email.iosClientId].filter(
           Boolean
         ),
       });
@@ -1320,7 +1320,7 @@ export class AuthV2Controller {
         }
       }
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction || isMobileNative, // Must be secure for sameSite: 'none'
@@ -1342,7 +1342,7 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), cookieOptions);
+      }, config.jwt.secret, { expiresIn: '10m' }), cookieOptions);
       logger.info(`${tag()} Stored pending auth data for workspace selection`);
 
       /**
@@ -1697,7 +1697,7 @@ export class AuthV2Controller {
         memberId: workspaceUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
@@ -1876,7 +1876,7 @@ export class AuthV2Controller {
         memberId: workspaceUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
@@ -2059,7 +2059,7 @@ export class AuthV2Controller {
         memberId: targetUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
 
       // Set workspace-specific cookies
@@ -2238,7 +2238,7 @@ export class AuthV2Controller {
           memberId: workspaceUser.orgMemberId,
         });
 
-        const isProduction = process.env.NODE_ENV === 'production';
+        const isProduction = config.env === 'production';
         const cookieOptions = {
           httpOnly: true,
           secure: isProduction,
@@ -2384,7 +2384,7 @@ export class AuthV2Controller {
         memberId: workspaceUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
 
       // Set workspace-specific cookies
@@ -2442,7 +2442,7 @@ export class AuthV2Controller {
     pendingTokenKey: string | undefined;
   } | null> {
     try {
-      const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
+      const decoded = jwt.verify(cookie, config.jwt.secret) as {
         googleId?: string;
         providerUserId?: string;
         email?: string;

@@ -84,22 +84,22 @@ class WorkerService {
       logger.info('Initializing Vespa queue (producer)...')
       await vespaQueue.initialize()
 
-      const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
-      const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
+      const vespaEnabled = appConfig.vespaWorkerEnabled
+      const vespaFileWorkerEnabled = appConfig.vespaFileWorkerEnabled
       // Disabled (LLM)
       // const activityClassificationEnabled =
-      //   process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+      //   appConfig.activityClassificationWorkerEnabled
       // const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
-      const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
+      const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       // Disabled (LLM)
-      // const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
-      const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      // const proactiveNudgeWorkerEnabled = appConfig.proactiveNudgeWorkerEnabled
+      const callValidationEnabled = appConfig.callValidationWorkerEnabled
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       // Disabled (LLM)
       // const messageClassificationEnabled = appConfig.messageClassificationEnabled
-      const enableNotificationProducer = process.env.ENABLE_NOTIFICATION_PRODUCER === 'true';
+      const enableNotificationProducer = appConfig.notificationProducerEnabled;
 
       if (vespaEnabled) {
         await vespaWorker.start()
@@ -372,7 +372,7 @@ class WorkerService {
       // }
 
 
-      const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
+      const dataSourceIngestionWorkerEnabled = appConfig.dataSourceIngestionWorkerEnabled;
       if (dataSourceIngestionWorkerEnabled) {
         logger.info('Starting data source ingestion worker...');
         await dataSourceIngestionWorker.start();
@@ -412,17 +412,17 @@ class WorkerService {
         clearInterval(this.automationTemplateCleanupTimer)
         this.automationTemplateCleanupTimer = null
       }
-      const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
-      const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
+      const vespaEnabled = appConfig.vespaWorkerEnabled
+      const vespaFileWorkerEnabled = appConfig.vespaFileWorkerEnabled
       // Disabled (LLM)
       // const activityClassificationEnabled =
-      //   process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+      //   appConfig.activityClassificationWorkerEnabled
       // const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
-      const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
+      const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       // Disabled (LLM)
-      // const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
-      const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      // const proactiveNudgeWorkerEnabled = appConfig.proactiveNudgeWorkerEnabled
+      const callValidationEnabled = appConfig.callValidationWorkerEnabled
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       // Disabled (LLM)
@@ -550,7 +550,7 @@ class WorkerService {
       //   await tagGenerationPipeline.close();
       // }
 
-      const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
+      const dataSourceIngestionWorkerEnabled = appConfig.dataSourceIngestionWorkerEnabled;
       if (dataSourceIngestionWorkerEnabled) {
         await dataSourceIngestionWorker.shutdown();
       }

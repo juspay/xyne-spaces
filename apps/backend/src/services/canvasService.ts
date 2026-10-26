@@ -36,7 +36,7 @@ export async function convertMarkdownToBlockNote(
  * unscoped form.
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://spaces.xyne.juspay.net';
+  const frontendUrl = config.frontendUrl || 'https://spaces.xyne.juspay.net';
   const path = workspaceId ? `/${workspaceId}/chat/canvas/${canvasId}` : `/chat/canvas/${canvasId}`;
   return `${frontendUrl}${path}`;
 }
@@ -51,7 +51,7 @@ export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
  * FRONTEND_URL is its own pass.
  */
 export function buildWorkspaceCanvasUrl(workspaceId: string, canvasId: string): string {
-  const frontendUrl = (config.frontendUrl ?? '').replace(/\/+$/, '');
+  const frontendUrl = (config.frontendUrl).replace(/\/+$/, '');
   return `${frontendUrl}/${workspaceId}/chat/canvas/${canvasId}`;
 }
 

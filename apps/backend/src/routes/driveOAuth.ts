@@ -11,6 +11,7 @@ import {
 } from '@/services/driveOAuthStateService';
 import { logger } from '@/utils/logger';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
+import { config } from '@/config/env';
 
 const router = express.Router();
 
@@ -26,8 +27,8 @@ function getGoogleRedirectUri(req: Request): string {
 }
 
 function createGoogleClient(req: Request): OAuth2Client {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = config.email.clientId;
+  const clientSecret = config.email.clientSecret;
   if (!clientId || !clientSecret) {
     throw new Error('Google OAuth is not configured');
   }

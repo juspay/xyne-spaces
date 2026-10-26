@@ -8,6 +8,7 @@ import {
 import { workspaceJoinRequestService } from '@/services/workspaceJoinRequestService';
 import { UserSessionService } from '@/services/userSessionService';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 export class WorkspaceJoinRequestController {
   private userSessionService = new UserSessionService();
@@ -145,7 +146,7 @@ export class WorkspaceJoinRequestController {
     const pendingAuthCookie = req.cookies?.google_access_token;
     if (pendingAuthCookie) {
       try {
-        const decoded = jwt.verify(pendingAuthCookie, process.env.JWT_SECRET!) as { email?: string };
+        const decoded = jwt.verify(pendingAuthCookie, config.jwt.secret) as { email?: string };
         return decoded.email || null;
       } catch (_error) {
         return null;

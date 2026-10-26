@@ -44,7 +44,7 @@ import { Prisma } from '@prisma/client';
 import { vespaQueue, vespaBackfillQueue } from '@/queues/vespaQueue';
 import { parseSlackTimestamp, findOrCreateUser, findOrCreateApp, type IngestConversationSlackInput, type IngestConversationSlackResult } from './ingestConversationSlack';
 
-const VESPA_BACKFILL_AGE_DAYS = Number(process.env.VESPA_BACKFILL_AGE_DAYS ?? 365);
+const VESPA_BACKFILL_AGE_DAYS = config.vespa.backfillAgeDays;
 
 /** Historical (migrated) timestamps go to the backfill queue, matching conversationService.pickVespaQueue. */
 function enqueueMessageVespa(messageId: string, workspaceId: string | undefined, createdAt: Date): void {

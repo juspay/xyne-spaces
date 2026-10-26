@@ -156,7 +156,7 @@ const readStagedPartBuffer = async (
 };
 
 const wrapperGlobalActiveKey =
-  process.env.DOCLING_WRAPPER_GLOBAL_ACTIVE_KEY || 'docling:async:global:active';
+  config.docling.wrapperGlobalActiveKey;
 
 // ── AsyncWorkQueue (prefetch queue for submitter) ────────────────────────────
 

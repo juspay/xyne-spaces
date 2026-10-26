@@ -1638,7 +1638,7 @@ export async function patchClawConversation(
  * the dashboard's spinner) forever, since the browser client sets no timeout.
  */
 const DEBUG_BUNDLE_TIMEOUT_MS = (() => {
-  const override = Number(process.env['CLAW_DEBUG_PROXY_TIMEOUT_MS']);
+  const override = Number(config.xyneClaw.debugProxyTimeoutMs);
   // A non-numeric override would make AbortSignal.timeout throw on every call,
   // so an unusable value falls back rather than breaking the endpoint.
   return Number.isFinite(override) && override > 0 ? override : 60_000;

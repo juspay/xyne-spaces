@@ -216,7 +216,7 @@ export class EmailAuthController {
       }
 
       // Cookie base (used below for both invitation-pending and normal flows)
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = {
         httpOnly: true,
         secure: isProduction,
@@ -240,7 +240,7 @@ export class EmailAuthController {
               refreshToken: null,
               accessToken: null,
             },
-            process.env.JWT_SECRET!,
+            config.jwt.secret,
             { expiresIn: '10m' },
           ),
           {
@@ -275,7 +275,7 @@ export class EmailAuthController {
             refreshToken: null,
             accessToken: null,
           },
-          process.env.JWT_SECRET!,
+          config.jwt.secret,
           { expiresIn: '10m' },
         ),
         {

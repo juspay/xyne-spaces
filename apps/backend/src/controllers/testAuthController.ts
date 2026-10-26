@@ -76,8 +76,8 @@ export class TestAuthController {
   }
 
   private buildFixedTestUser(): TestUserData {
-    const email = process.env.TEST_AUTH_EMAIL || 'test-user@xyne-test.local';
-    const name = process.env.TEST_AUTH_NAME || 'Test User';
+    const email = config.testAuth.email;
+    const name = config.testAuth.name;
 
     return {
       googleId: `test-fixed-${email.replace(/[^a-zA-Z0-9]/g, '-')}`,
@@ -91,7 +91,7 @@ export class TestAuthController {
     const requestId = `TEST_LOGIN_${Date.now()}`;
 
     try {
-      const enableDevAuth = process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
+      const enableDevAuth = config.enableDevAuth && config.env === 'development';
       if (!config.isTestEnv && !enableDevAuth) {
         logger.error(`[${requestId}] Test login attempted in non-test environment!`);
         res.status(403).json({
@@ -122,8 +122,8 @@ export class TestAuthController {
 
       let testUserData: TestUserData;
 
-      if (enableDevAuth && process.env.DEFAULT_ADMIN_EMAIL) {
-        const adminEmail = process.env.DEFAULT_ADMIN_EMAIL;
+      if (enableDevAuth && config.defaultAdminEmail) {
+        const adminEmail = config.defaultAdminEmail;
         const emailUser = adminEmail.split('@')[0];
         const name = emailUser
           .split(/[.\-_]/)
