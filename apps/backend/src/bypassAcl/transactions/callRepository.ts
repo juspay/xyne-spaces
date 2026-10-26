@@ -488,11 +488,28 @@ export function createCallWithParticipantsAndMessageTx(callId: string, roomName:
           throw new Error(`Conversation ${conversationId} does not belong to channel ${channelId}`);
         }
 
+        // A thread "take notes" recording may already hold conversation.callId,
+        // flagged with metadata.isHeadlessRecording. The call takes over the slot,
+        // so drop that flag — otherwise clients would read the live call as a
+        // recording and keep "Start call" enabled. The recording's own end path
+        // only clears callId while it still points at the recording.
+        const existingConversationMetadata =
+          existingConversation.metadata &&
+          typeof existingConversation.metadata === 'object' &&
+          !Array.isArray(existingConversation.metadata)
+            ? { ...(existingConversation.metadata as Record<string, unknown>) }
+            : null;
+        const hadRecordingFlag = existingConversationMetadata?.isHeadlessRecording !== undefined;
+        if (existingConversationMetadata) delete existingConversationMetadata.isHeadlessRecording;
+
         await tx.conversation.update({
           where: { conversationId },
           data: {
             callId: roomName,
             lastActivityAt: now,
+            ...(hadRecordingFlag && {
+              metadata: existingConversationMetadata as Prisma.InputJsonValue,
+            }),
           },
         });
       } else {

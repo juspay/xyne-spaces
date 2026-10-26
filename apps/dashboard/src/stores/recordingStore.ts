@@ -97,6 +97,9 @@ export interface RecordingState {
    * thread's anchor message. Cleared as soon as the recording actually starts. */
   pendingConversationId: string | null;
   pendingChannelId: string | null;
+  /** Thread the live recording is anchored to (null when started from the
+   * Recordings screen). Lets stop handlers keep the user in the thread. */
+  conversationId: string | null;
   pendingStop: boolean;
   /** Canvas created as part of starting a headless recording. */
   notesCanvasId: string | null;
@@ -131,6 +134,7 @@ const initialContext: RecordingState = {
   autoStartRequestedAt: null,
   pendingConversationId: null,
   pendingChannelId: null,
+  conversationId: null,
   pendingStop: false,
   notesCanvasId: null,
   notesCanvasViewAccessId: null,
@@ -243,6 +247,7 @@ export const recordingStore = createStore({
             notesCanvasId: session.notesCanvasId,
             startTime: session.startTime,
             defaultLayout,
+            conversationId: conversationId ?? null,
           });
 
           if (recordingStore.getSnapshot().context.pendingStop) {
@@ -285,6 +290,7 @@ export const recordingStore = createStore({
         notesCanvasId: string;
         startTime: number;
         defaultLayout?: RecordingLayout;
+        conversationId?: string | null;
       },
     ): RecordingState => {
       const { room, defaultLayout = 'transcript' } = event;
@@ -433,6 +439,7 @@ export const recordingStore = createStore({
         externalId: event.externalId,
         channelId: event.channelId,
         notesCanvasId: event.notesCanvasId,
+        conversationId: event.conversationId ?? null,
         startTime: event.startTime,
         pauseStartedAt: null,
         accumulatedPausedMs: 0,
@@ -543,6 +550,7 @@ export const recordingStore = createStore({
         autoStartRequestedAt: null,
         pendingConversationId: null,
         pendingChannelId: null,
+        conversationId: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,
@@ -614,6 +622,7 @@ export const recordingStore = createStore({
         autoStartRequestedAt: null,
         pendingConversationId: null,
         pendingChannelId: null,
+        conversationId: null,
         pendingStop: false,
         notesCanvasId: null,
         notesCanvasViewAccessId: null,

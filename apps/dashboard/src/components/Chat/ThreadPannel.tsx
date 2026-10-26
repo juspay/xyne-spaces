@@ -757,9 +757,15 @@ export const ThreadMessages = ({
     setIsContextMenuOpen(false);
   };
 
+  // conversation.callId is also set while a thread "Take notes" recording is
+  // live (flagged by metadata.isHeadlessRecording — see noteTakerCallRepository).
+  // A recording is not a call, so it must not block others from calling here.
+  const isHeadlessRecordingInThread =
+    (conversation?.metadata as { isHeadlessRecording?: boolean } | null | undefined)
+      ?.isHeadlessRecording === true;
   const hasActiveCallForConversation = useMemo(() => {
-    return !!conversation?.callId;
-  }, [conversation?.callId]);
+    return !!conversation?.callId && !isHeadlessRecordingInThread;
+  }, [conversation?.callId, isHeadlessRecordingInThread]);
 
   // Create thread info for XyneAI context
   const initialMessage = conversation?.messages?.[0] ?? null;
