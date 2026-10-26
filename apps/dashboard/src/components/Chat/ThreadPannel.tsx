@@ -2098,17 +2098,17 @@ export const ThreadMessages = ({
                   </h3>
                   {/* Disabled (LLM) */}
                   {
-                  // {/* Classifies the whole thread, so it belongs beside the title rather
-                  //     than against any one message. */}
-                  // {!simpleView && (
-                  //   <ThreadTags
-                  //     conversationId={derivedConversationId}
-                  //     threadType={conversation?.threadType}
-                  //     canEdit
-                  //     inspectedTag={inspectedTag}
-                  //     onInspect={setInspectedTag}
-                  //   />
-                  // )}
+                    // {/* Classifies the whole thread, so it belongs beside the title rather
+                    //     than against any one message. */}
+                    // {!simpleView && (
+                    //   <ThreadTags
+                    //     conversationId={derivedConversationId}
+                    //     threadType={conversation?.threadType}
+                    //     canEdit
+                    //     inspectedTag={inspectedTag}
+                    //     onInspect={setInspectedTag}
+                    //   />
+                    // )}
                   }
                   {!simpleView && focusedChannelBreadcrumb}
                 </div>

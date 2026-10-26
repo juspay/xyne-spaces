@@ -158,10 +158,10 @@ const mobileNavigationItems = [
   },
   // Disabled (LLM)
   // {
-    // path: '/chat/recap',
-    // label: 'Recap',
-    // description: 'AI summary of what you missed',
-    // icon: SparkleAi01,
+  // path: '/chat/recap',
+  // label: 'Recap',
+  // description: 'AI summary of what you missed',
+  // icon: SparkleAi01,
   // },
   {
     path: '/error-report',

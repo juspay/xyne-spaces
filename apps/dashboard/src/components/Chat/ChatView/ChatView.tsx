@@ -353,17 +353,17 @@ const ChatView = (): ReactElement => {
       onToggleFullscreen={toggleCanvasFullscreen}
       onClose={handleCloseCanvas}
     />
-  // Disabled (LLM)
-  // ) : isChannelSummaryActive ? (
-  //   <ChannelSummary
-  //     channelId={channelId ?? ''}
-  //     channelName={channel?.['name'] || 'channel'}
-  //     {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
-  //     dateFrom={channelSummaryParams.dateFrom}
-  //     dateTo={channelSummaryParams.dateTo}
-  //     onClose={handleCloseChannelSummary}
-  //   />
   ) : (
+    // Disabled (LLM)
+    // ) : isChannelSummaryActive ? (
+    //   <ChannelSummary
+    //     channelId={channelId ?? ''}
+    //     channelName={channel?.['name'] || 'channel'}
+    //     {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
+    //     dateFrom={channelSummaryParams.dateFrom}
+    //     dateTo={channelSummaryParams.dateTo}
+    //     onClose={handleCloseChannelSummary}
+    //   />
     <Outlet />
   );
 

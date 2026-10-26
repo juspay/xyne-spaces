@@ -72,10 +72,10 @@ export function AgentCard({
     // hasPendingRequestFromOther,
     // isRequestingUser,
   } = getAiControlState({
-      localParticipantId: agentControls?.localParticipantId ?? null,
-      aiController,
-      pendingControlRequest,
-    });
+    localParticipantId: agentControls?.localParticipantId ?? null,
+    aiController,
+    pendingControlRequest,
+  });
   // Disabled (LLM)
   // const isAiActiveForMe = isController || (isAIAssistantEnabled && !isControlledByOther);
   //

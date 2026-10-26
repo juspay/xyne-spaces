@@ -541,28 +541,28 @@ const Info = ({
         )}
         {/* Disabled (LLM) */}
         {
-        // {isDefaultChannel && (
-        //   <Tabs.Content value='ai-features' className='outline-none flex-1 min-h-0 overflow-y-auto'>
-        //     <div className='flex flex-col gap-3 p-4'>
-        //       <div className='flex flex-col gap-0.5'>
-        //         <div className='text-[15px] font-semibold text-foreground'>Call settings</div>
-        //         <p className='text-[13px] leading-[140%] text-muted-foreground'>
-        //           Configure how AI handles calls in this channel.
-        //         </p>
-        //         <p className='text-[12px] leading-[140%] text-muted-foreground'>
-        //           Only channel admins or the owner can edit these preferences.
-        //         </p>
-        //       </div>
-        //       <div className='rounded-[12px] border border-border bg-card'>
-        //         <CallSummaryConfig
-        //           channelId={channel.id}
-        //           currentPrompt={channel.callSummaryPrompt}
-        //           canManage={canManageAiPreferences}
-        //         />
-        //       </div>
-        //     </div>
-        //   </Tabs.Content>
-        // )}
+          // {isDefaultChannel && (
+          //   <Tabs.Content value='ai-features' className='outline-none flex-1 min-h-0 overflow-y-auto'>
+          //     <div className='flex flex-col gap-3 p-4'>
+          //       <div className='flex flex-col gap-0.5'>
+          //         <div className='text-[15px] font-semibold text-foreground'>Call settings</div>
+          //         <p className='text-[13px] leading-[140%] text-muted-foreground'>
+          //           Configure how AI handles calls in this channel.
+          //         </p>
+          //         <p className='text-[12px] leading-[140%] text-muted-foreground'>
+          //           Only channel admins or the owner can edit these preferences.
+          //         </p>
+          //       </div>
+          //       <div className='rounded-[12px] border border-border bg-card'>
+          //         <CallSummaryConfig
+          //           channelId={channel.id}
+          //           currentPrompt={channel.callSummaryPrompt}
+          //           canManage={canManageAiPreferences}
+          //         />
+          //       </div>
+          //     </div>
+          //   </Tabs.Content>
+          // )}
         }
         {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
           <Tabs.Content

@@ -524,27 +524,25 @@ const RecordingsV2Pill = ({
               <span key={index} className='h-6 w-14 animate-pulse rounded-lg bg-muted' />
             ))}
           </span>
-        ) : (
-          // Disabled (LLM)
-          // showGenerateLabels && (
-          //   <Button
-          //     type='button'
-          //     variant='outline'
-          //     size='sm'
-          //     loading={isGeneratingLabels}
-          //     onClick={event => void handleGenerateLabels(event)}
-          //     className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground'
-          //     data-track-category='RecordingsV2'
-          //     data-track-name='generate_recording_labels'
-          //   >
-          //     {!isGeneratingLabels && (
-          //       <Ai01 size={14} variant='Duo Solid' className='shrink-0 text-primary' />
-          //     )}
-          //     {isGeneratingLabels ? 'Generating labels…' : 'Generate labels'}
-          //   </Button>
-          // )
-          null
-        )}
+        ) : // Disabled (LLM)
+        // showGenerateLabels && (
+        //   <Button
+        //     type='button'
+        //     variant='outline'
+        //     size='sm'
+        //     loading={isGeneratingLabels}
+        //     onClick={event => void handleGenerateLabels(event)}
+        //     className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground'
+        //     data-track-category='RecordingsV2'
+        //     data-track-name='generate_recording_labels'
+        //   >
+        //     {!isGeneratingLabels && (
+        //       <Ai01 size={14} variant='Duo Solid' className='shrink-0 text-primary' />
+        //     )}
+        //     {isGeneratingLabels ? 'Generating labels…' : 'Generate labels'}
+        //   </Button>
+        // )
+        null}
       </span>
     </div>
   );

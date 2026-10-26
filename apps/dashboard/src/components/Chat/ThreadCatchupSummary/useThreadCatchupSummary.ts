@@ -132,21 +132,21 @@ export function useThreadCatchupSummary(
     // Disabled (LLM)
     // const recommendationStartedAt = Date.now();
     // fetchThreadRecommendation(conversationId)
-      // .then(({ recommended, enabled, summary }) => {
-        // setIsFeatureEnabled(enabled);
-        // setIsFirstVisitWithSummary(recommended);
-        // if (!recommended) return;
-        // setExpanded(true);
-        // if (summary?.content) {
-          // fetchStartedAtRef.current = recommendationStartedAt;
-          // contentSourceRef.current = 'recommended';
-        // }
-        // applyResult(summary);
-      // })
-      // .catch(() => {
-        // setIsFeatureEnabled(false);
-        // setIsFirstVisitWithSummary(false);
-      // });
+    // .then(({ recommended, enabled, summary }) => {
+    // setIsFeatureEnabled(enabled);
+    // setIsFirstVisitWithSummary(recommended);
+    // if (!recommended) return;
+    // setExpanded(true);
+    // if (summary?.content) {
+    // fetchStartedAtRef.current = recommendationStartedAt;
+    // contentSourceRef.current = 'recommended';
+    // }
+    // applyResult(summary);
+    // })
+    // .catch(() => {
+    // setIsFeatureEnabled(false);
+    // setIsFirstVisitWithSummary(false);
+    // });
   }, [isMessagesLoaded, storageKey, conversationId, applyResult, lastReadAt]);
 
   const refresh = useCallback(async () => {
