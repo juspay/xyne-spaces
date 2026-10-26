@@ -79,7 +79,7 @@ router.post('/create-org', authV2Controller.createOrg);
 
 router.get('/workspaces', authV2Middleware.authenticate, authV2Controller.getWorkspaces);
 router.post('/switch-workspace', authV2Middleware.authenticate, authV2Controller.switchWorkspace);
-router.post('/create-workspace-pending', authV2Controller.createWorkspaceWithPendingAuth);
+// router.post('/create-workspace-pending', authV2Controller.createWorkspaceWithPendingAuth);
 router.post('/create-workspace', authV2Middleware.authenticate, canCreateWorkspace, authV2Controller.createWorkspaceAuth);
 
 export default router;
