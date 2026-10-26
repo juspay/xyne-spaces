@@ -90,6 +90,7 @@ import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
 import { EmojiClickData } from 'emoji-picker-react';
 import { InlineEmoji } from '../EditorToolbar/InlineEmoji';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { useFrequentEmojiScope } from '../../../hooks/useFrequentEmojis';
 import { LinkSyncPlugin } from '../TipTapExtensions/LinkSyncPlugin';
 import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
 import type { Canvas } from '../../Canvas';
@@ -647,6 +648,13 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       customEmojisRef.current = customEmojis;
     }, [customEmojis]);
 
+    // Scope for the frequent-emoji tracker; reactions and the colon flow share one store.
+    const frequentEmojiScope = useFrequentEmojiScope();
+    const frequentEmojiScopeRef = React.useRef(frequentEmojiScope);
+    useEffect(() => {
+      frequentEmojiScopeRef.current = frequentEmojiScope;
+    }, [frequentEmojiScope]);
+
     const editor = useEditor({
       extensions: [
         StarterKit.configure({
@@ -711,6 +719,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
+          getFrequentEmojiScope: () => frequentEmojiScopeRef.current,
         }),
         TextEmoticonExtension,
         CodeBlockLowlight.extend({
