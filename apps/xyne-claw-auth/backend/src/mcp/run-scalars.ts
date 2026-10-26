@@ -22,9 +22,6 @@ export interface RunScalars {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
-  workflowId?: string;
-  executionId?: string;
-  focusedStepId?: string;
 }
 
 function key(sessionId: string): string {

@@ -19,7 +19,6 @@ import {
   QuestionMarkCircle,
   BuildingApartmentTwo,
   LightningThunderElectricOn,
-  GitBranch,
   LayoutGridTwoVertical,
   type PikaIconProps,
   // Disabled (LLM)
@@ -292,13 +291,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: LightningThunderElectricOn,
     popout: true,
   },
-  {
-    path: '/workflows',
-    label: 'Workflows',
-    description: 'Workflows, their runs and variables',
-    icon: GitBranch,
-    popout: true,
-  },
   // Administration (the /organisations module) holds Workspace Management,
   // Members (formerly User Management), User Groups, Roles and Organisations.
   {
@@ -468,7 +460,6 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [
 // the RESOURCES registry backing the Roles access grid (seed-acl.ts), so an
 // admin sees what they're hiding, not just a bare label.
 export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
-  '/ai': 'AI chat assistant panel',
   '/chat/dir': 'Channel-based team chat',
   '/chat/dm': 'Direct messages between users',
   '/chat/activity': 'Mentions and notification activity feed',

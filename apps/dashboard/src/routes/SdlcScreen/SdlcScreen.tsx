@@ -53,7 +53,6 @@ import {
   // Sparkles,
   SquareArrowOutUpRight,
   Upload,
-  Workflow,
   X,
   Zap,
 } from 'lucide-react';
@@ -140,7 +139,6 @@ import {
   wikiLandingPage,
 } from './SdlcWikiSection';
 import { useSdlcWikiData } from './useSdlcWikiData';
-import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcReleases } from './SdlcReleases/SdlcReleases';
 import { SdlcReleaseBreadcrumb } from './SdlcReleases/SdlcReleaseDetail';
 import { SdlcTicketThread, useTicketThreadAccess } from './SdlcTicketThread';
@@ -254,12 +252,6 @@ import {
   type SdlcSourceLink,
   type SdlcTrackItem,
 } from './sdlcItems';
-import {
-  type HubWorkflow,
-  type HubWorkflowPhase,
-  useHubWorkflow,
-  useHubWorkflowFinishedToast,
-} from './hubWorkflowRunPolicy';
 
 type Section =
   | 'overview'
@@ -270,7 +262,6 @@ type Section =
   | 'calls'
   | 'releases'
   | 'artifacts'
-  | 'workflows'
   | 'agents'
   | 'environments';
 
@@ -286,7 +277,6 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'tickets', label: 'Issues', icon: CircleDot },
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'releases', label: 'Releases', icon: Rocket },
-  { id: 'workflows', label: 'Workflows', icon: Workflow },
   // Disabled (Claw)
   // { id: 'agents', label: 'Agents', icon: Bot },
   // { id: 'environments', label: 'Environments', icon: Server },
@@ -382,26 +372,18 @@ export default function SdlcScreen(): ReactElement {
     workspaceId,
     channelId,
     section: routeSection,
-    '*': workflowsSplat,
   } = useParams<{
     workspaceId?: string;
     channelId?: string;
     section?: string;
-    '*'?: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuthContextValues();
   // A window of its own has no hub sidebar, and keeps the explorer beside the page.
   const isDocumentWindow = isSdlcWindow();
-  // The workflows route is a splat, which outranks `:section` and names its param
-  // `*`, so on /sdlc/:channelId/workflows there is no `section` param to read.
   const section: Section = (
-    routeSection && SECTION_IDS.has(routeSection)
-      ? routeSection
-      : workflowsSplat !== undefined
-        ? 'workflows'
-        : 'overview'
+    routeSection && SECTION_IDS.has(routeSection) ? routeSection : 'overview'
   ) as Section;
   const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const openReleaseId = section === 'releases' ? routeSearchParams.get('release') : null;
@@ -977,7 +959,6 @@ export default function SdlcScreen(): ReactElement {
     showArchived: showArchivedWiki,
     setShowArchived: setShowArchivedWiki,
     selectedPage: selectedWikiPage,
-    workflow: wikiState,
   } = useSdlcWikiData({
     channelId: channelId ?? null,
     enabled: section === 'wiki',
@@ -1351,17 +1332,6 @@ export default function SdlcScreen(): ReactElement {
     return null;
   }, [activeFolderDiscussion, panelCanvasOwner, section, selectedTrack]);
   const relatedCanvas = canvases.find(canvas => canvas.id === relatedSourceId);
-  // Hub Knowledge's workflow, which only Overview and Hub Knowledge show.
-  const knowledgeWorkflowShown = section === 'overview' || section === 'knowledge';
-  const [hubWorkflowLink] = useCachedQuery(
-    queries.getSdlcHubWorkflow({ channelId: channelId || '' }),
-    { enabled: Boolean(channelId) && knowledgeWorkflowShown },
-  );
-  const hubWorkflowId = knowledgeWorkflowShown ? (hubWorkflowLink?.workflow?.id ?? null) : null;
-  const state = useHubWorkflow(hubWorkflowId);
-  useHubWorkflowFinishedToast('Skills', state);
-  useHubWorkflowFinishedToast('Deep research', wikiState);
-
   // Disabled (Claw)
   // const readyCount = knowledgeDocs.filter(
   //   canvas => canvas.sdlcArtifact?.artifactStatus === 'ACTIVE',
@@ -2251,82 +2221,29 @@ export default function SdlcScreen(): ReactElement {
   //   });
   // }, [askSdlcAssistant]);
 
-  /** A workflow's status and its run button, for the caller to lay out. */
-  const workflowParts = (
-    label: string,
-    workflow: HubWorkflow,
-    startLabel = 'Start',
-    /** Outline where the page has its own primary action beside it. */
-    startVariant: 'default' | 'outline' = 'default',
-    cancelLabel = 'Cancel',
-    buttonClassName?: string,
-  ): { status: ReactElement; button: ReactElement } => {
-    const running = workflow.phase === 'RUNNING';
-    const busyKey = `hub-workflow:${label}`;
-    const { runId } = workflow;
-    const status = (
-      <>
-        <WorkflowStatus workflow={workflow} />
-        {runId && (
-          // The run page has the steps, the logs and the reason a run failed.
-          <button
-            type='button'
-            onClick={() => navigateWithinSdlc(`/sdlc/${channelId}/workflows/runs/${runId}`)}
-            className='rounded text-xs font-medium text-foreground underline underline-offset-2 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-            data-track-category='SdlcHub'
-            data-track-name='HubWorkflowRunOpened'
-            data-track-metadata={JSON.stringify({ label })}
-          >
-            View run
-          </button>
-        )}
-      </>
-    );
-    const button = (
-      <>
-        {/* Hidden only: the workflow trigger API has no hub admin check yet. Move the rule there once workflow auth is decided. */}
-        {workflow.workflowId && isHubAdmin ? (
-          <Button
-            size='sm'
-            variant={running ? 'outline' : startVariant}
-            className={buttonClassName}
-            loading={busy === busyKey}
-            disabled={busy === busyKey}
-            onClick={() =>
-              void call(
-                busyKey,
-                running ? workflow.cancel : workflow.start,
-                running ? `${label} run cancelled` : `${label} run started`,
-              )
-            }
-            data-track-category='SdlcHub'
-            data-track-name={running ? 'HubWorkflowRunCancelled' : 'HubWorkflowRunStarted'}
-            data-track-metadata={JSON.stringify({ label })}
-          >
-            {running ? cancelLabel : startLabel}
-          </Button>
-        ) : null}
-      </>
-    );
-    return { status, button };
-  };
   // Disabled (Claw)
-  // const renderWorkflowControls = (...parts: Parameters<typeof workflowParts>): ReactElement => {
-  //   const { status, button } = workflowParts(...parts);
+  // const renderPageHeader = (input: {
+  //   icon: typeof Boxes;
+  //   title: string;
+  //   description: string;
+  //   actions?: ReactNode;
+  // }): ReactElement => {
+  //   const Icon = input.icon;
   //   return (
-  //     <div className='flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1'>
-  //       {status}
-  //       {button}
+  //     <div className='mb-6 flex items-center justify-between gap-6 border-b pb-5'>
+  //       <div className='flex min-w-0 flex-1 items-center gap-3'>
+  //         <div className='grid size-10 shrink-0 place-items-center rounded-xl border bg-background text-primary shadow-sm'>
+  //           <Icon size={19} />
+  //         </div>
+  //         <div className='min-w-0'>
+  //           <h2 className='text-xl font-semibold tracking-tight'>{input.title}</h2>
+  //           <p className='mt-0.5 text-sm text-muted-foreground'>{input.description}</p>
+  //         </div>
+  //       </div>
+  //       {input.actions}
   //     </div>
   //   );
   // };
-  const wikiEmptyRun = workflowParts(
-    'Deep research',
-    wikiState,
-    'Run deep research',
-    'default',
-    'Cancel run',
-  );
 
   useEffect(() => {
     if (sdlcChatTab !== 'ai') return;
@@ -4374,10 +4291,6 @@ export default function SdlcScreen(): ReactElement {
                     />
                   </div>
                 </div>
-              ) : section === 'workflows' ? (
-                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
-                  <SdlcWorkflowsSection />
-                </div>
               ) : section === 'releases' ? (
                 <SdlcReleases
                   projectId={channel.projectId ?? null}
@@ -4466,7 +4379,6 @@ export default function SdlcScreen(): ReactElement {
                                 {readyCount} document{readyCount === 1 ? '' : 's'} ready
                               </p>
                             </div>
-                            {renderWorkflowControls('Skills', state)}
                           </div>
                         </div>
                         <div className='mt-5 overflow-hidden rounded-xl border bg-background'>
@@ -4487,11 +4399,6 @@ export default function SdlcScreen(): ReactElement {
                           <SdlcWikiEmpty
                             canManage={isHubAdmin}
                             repositoryName={wikiScope.hub ? null : wikiScope.name}
-                            running={wikiState.phase === 'RUNNING'}
-                            runStatus={wikiEmptyRun.status}
-                            // Disabled (LLM)
-                            // runButton={wikiEmptyRun.button}
-                            runButton={null}
                             onCreatePage={() => openHubDocumentCreate('wiki')}
                           />
                         )
@@ -4503,13 +4410,6 @@ export default function SdlcScreen(): ReactElement {
                           allPages={wikiAllPages}
                           repoUrls={new Map(channelRepos.map(repo => [repo.id, repo.url]))}
                           canManage={isHubAdmin}
-                          // Disabled (LLM)
-                          // runControl={renderWorkflowControls(
-                          //   'Deep research',
-                          //   wikiState,
-                          //   wikiAllPages.length > 0 ? 'Update deep research' : 'Run deep research',
-                          // )}
-                          runControl={null}
                           onSelectScope={folderId => openWikiScope(folderId)}
                           onAddRepository={() => setHubDialog('manage')}
                           onOpenPage={page => openWikiPage(page.canvasId, page.scopeFolderId)}
@@ -5586,58 +5486,6 @@ function SectionHeader({
 //     </div>
 //   );
 // }
-
-const WORKFLOW_PHASE_LABEL: Record<HubWorkflowPhase, string> = {
-  NOT_CONFIGURED: 'Not set up',
-  NOT_STARTED: 'Not run yet',
-  RUNNING: 'Running',
-  READY: 'Completed',
-  FAILED: 'Failed',
-  CANCELLED: 'Cancelled',
-};
-
-/** The run's state as text on the page: a tooltip is out of reach of keyboard and touch. */
-function WorkflowStatus({
-  workflow,
-}: {
-  workflow: Pick<HubWorkflow, 'phase' | 'updatedAt'>;
-}): ReactElement {
-  const { phase, updatedAt } = workflow;
-  const Icon =
-    phase === 'RUNNING'
-      ? Loader2
-      : phase === 'READY'
-        ? Check
-        : phase === 'FAILED'
-          ? CircleAlert
-          : CircleDot;
-  const label =
-    typeof updatedAt === 'number'
-      ? `${WORKFLOW_PHASE_LABEL[phase]} · ${formatRelativeTime(updatedAt)}`
-      : WORKFLOW_PHASE_LABEL[phase];
-  return (
-    <span
-      role='status'
-      className='inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-normal text-muted-foreground'
-    >
-      <Icon
-        size={14}
-        aria-hidden
-        className={cn(
-          'shrink-0',
-          phase === 'RUNNING'
-            ? 'animate-spin text-amber-600'
-            : phase === 'READY'
-              ? 'text-emerald-600'
-              : phase === 'FAILED'
-                ? 'text-destructive'
-                : 'text-muted-foreground',
-        )}
-      />
-      <span className={cn(phase === 'FAILED' && 'font-medium text-destructive')}>{label}</span>
-    </span>
-  );
-}
 
 function EmptyCard({ text }: { text: string }): ReactElement {
   return (

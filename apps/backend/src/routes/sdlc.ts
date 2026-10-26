@@ -18,12 +18,6 @@ import {
 } from '@xyne/shared';
 import { authorize } from '@/middleware/authorize';
 import { AppError } from '@/middleware/errorHandler';
-import { logger } from '@/utils/logger';
-import {
-  backfillHubWorkflows,
-  resetHubWorkflows,
-  seedHubWorkflow,
-} from '@/sdlc/seedHubWorkflow';
 import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
@@ -64,11 +58,6 @@ function actorFromRequest(req: Request): SdlcActor {
   return { userId, workspaceId };
 }
 
-const hubWorkflowScopeSchema = z.object({
-  channelId: z.string().min(1).optional(),
-  dryRun: z.boolean().default(true),
-});
-
 function route(
   handler: (req: Request, res: Response) => Promise<void>
 ): (req: Request, res: Response, next: NextFunction) => void {
@@ -99,36 +88,8 @@ router.post(
   '/channels',
   route(async (req, res) => {
     const input = createSdlcChannelSchema.parse(req.body);
-    const actor = actorFromRequest(req);
-    const channel = await sdlcHub.createChannel(actor, input);
-    try {
-      await seedHubWorkflow(actor, channel.id);
-    } catch (error) {
-      logger.error(`[SDLC] failed to seed workflow for hub ${channel.id}`, error);
-    }
+    const channel = await sdlcHub.createChannel(actorFromRequest(req), input);
     res.status(201).json({ success: true, channel });
-  })
-);
-
-router.post(
-  '/admin/backfill-workflows',
-  authorize('SDLC', AccessType.ADMIN),
-  route(async (req, res) => {
-    res.status(200).json({
-      success: true,
-      ...(await backfillHubWorkflows(actorFromRequest(req), hubWorkflowScopeSchema.parse(req.body ?? {}))),
-    });
-  })
-);
-
-router.post(
-  '/admin/reset-workflows',
-  authorize('SDLC', AccessType.ADMIN),
-  route(async (req, res) => {
-    res.status(200).json({
-      success: true,
-      ...(await resetHubWorkflows(actorFromRequest(req), hubWorkflowScopeSchema.parse(req.body ?? {}))),
-    });
   })
 );
 

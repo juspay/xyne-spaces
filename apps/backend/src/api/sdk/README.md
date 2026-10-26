@@ -314,8 +314,8 @@ Grafana, …), relayed through Spaces by `clawConnectorsService`:
   provider); past that it is `429 rate_limited`.
 - App calls get their own MCP session in claw-auth, never one an agent run
   opened, so an agent's pinned credential can't serve a viewer's call.
-- Claw's own plumbing (`xyne-spaces`, `xyne-dashboard`, `xyne-workflows`,
-  `xyne-spaces-app-tools`, `heisenberg`, `research-agent-mcp`) is never listed
+- Claw's own plumbing (`xyne-spaces`, `xyne-dashboard`, `xyne-spaces-app-tools`,
+  `heisenberg`, `research-agent-mcp`) is never listed
   and reads as `404`.
 - `:type` is the connector's `McpServer.type`, `/^[a-z0-9][a-z0-9_-]{0,63}$/`.
   A tool the connector does not advertise is a `400`.
