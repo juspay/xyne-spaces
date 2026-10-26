@@ -188,7 +188,6 @@ import { RoleManagementScreen } from './RoleManagementScreen';
 // Disabled (LLM)
 // import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
-import { WorkflowScreen } from './WorkflowScreen';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import {
   GeneralTab,
@@ -501,11 +500,6 @@ const AppRoot = (): ReactElement => {
   // const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   // const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
   // const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
-  // const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
-  // const xyneAIWorkflowDismissed = useSelector(
-  // xyneAIActor,
-  // state => state.context.workflowDismissed,
-  // );
   // const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   // const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   // const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
@@ -620,8 +614,6 @@ const AppRoot = (): ReactElement => {
     // kbFolderId={xyneAIKbFolderId ?? ''}
     // kbFolderName={xyneAIKbFolderName ?? ''}
     // kbOpenNonce={xyneAIKbOpenNonce}
-    // workflowInfo={xyneAIWorkflowInfo}
-    // workflowDismissed={xyneAIWorkflowDismissed}
     // researchContext={xyneAIResearchContext}
     // initialQuery={xyneAIInitialQuery ?? undefined}
     // autoSendNonce={xyneAIAutoSendNonce}
@@ -843,8 +835,6 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
-                                      workflowInfo={xyneAIWorkflowInfo}
-                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1009,8 +999,6 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
-                            workflowInfo={xyneAIWorkflowInfo}
-                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1050,8 +1038,6 @@ const AppRoot = (): ReactElement => {
                               kbCollectionId={xyneAIKbCollectionId ?? ''}
                               kbChannelId={xyneAIKbChannelId ?? ''}
                               kbDocId={xyneAIKbDocId ?? ''}
-                              workflowInfo={xyneAIWorkflowInfo}
-                              workflowDismissed={xyneAIWorkflowDismissed}
                               kbDocName={xyneAIKbDocName ?? ''}
                               kbFolderId={xyneAIKbFolderId ?? ''}
                               kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1494,16 +1480,6 @@ export const router = createBrowserRouter([
               {
                 path: 'search-results',
                 element: <SearchResults />,
-              },
-              {
-                // Splat: @xyne/workflow-ui owns every screen below /workflows and
-                // routes between them itself, handing the sub-path back via onNavigate.
-                path: 'workflows/*',
-                element: (
-                  <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
-                    <WorkflowScreen />
-                  </ResourceProtectedRoute>
-                ),
               },
               {
                 path: 'ticket-reports',

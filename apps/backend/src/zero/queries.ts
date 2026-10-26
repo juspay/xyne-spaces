@@ -39,8 +39,6 @@ import {
   SDLC_TRACK_FLAT_RELATION,
   SDLC_FOLDER_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
-  SDLC_WORKFLOW_RELATION,
-  SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_RELEASE_CONFIG_RELATION,
   EmailType,
@@ -5594,28 +5592,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           )
       );
     },
-  ),
-  getSdlcHubWorkflow: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) =>
-      zql.sdlc_entity_links
-        .where('channelId', channelId)
-        .where('sourceType', 'CHANNEL')
-        .where('targetType', 'WORKFLOW')
-        .where('relationType', SDLC_WORKFLOW_RELATION)
-        .related('workflow')
-        .one(),
-  ),
-  getSdlcWikiWorkflow: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) =>
-      zql.sdlc_entity_links
-        .where('channelId', channelId)
-        .where('sourceType', 'CHANNEL')
-        .where('targetType', 'WORKFLOW')
-        .where('relationType', SDLC_WIKI_WORKFLOW_RELATION)
-        .related('workflow')
-        .one(),
   ),
   /** The hub's release configs: one REPOSITORY -> main release BOARD edge per repository. */
   getSdlcHubReleaseConfigs: defineQuery(

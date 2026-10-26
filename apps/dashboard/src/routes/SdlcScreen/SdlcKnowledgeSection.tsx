@@ -164,8 +164,6 @@ export function SdlcKnowledgeSection(props: {
   onCreateWithAi: (draft: HubKnowledgeAiDraft) => void;
   /** The page header, with the page-wide Add menu placed in it. */
   renderHeader: (actions: ReactNode) => ReactNode;
-  /** Status and start button of the workflow that generates Knowledge Files. */
-  generateControl: ReactNode;
 }): ReactElement {
   const { channelId, isHubAdmin } = props;
   const queryClient = useQueryClient();
@@ -652,13 +650,7 @@ export function SdlcKnowledgeSection(props: {
 
   return (
     <>
-      {props.renderHeader(
-        // The run's status and button are one group, with a wider gap before Add.
-        <div className='flex shrink-0 flex-wrap items-center justify-end gap-x-5 gap-y-2'>
-          {props.generateControl}
-          {addMenu}
-        </div>,
-      )}
+      {props.renderHeader(addMenu)}
       <div className='flex flex-col gap-5'>
         <div className='flex flex-wrap items-center gap-3'>
           <div className='relative min-w-48 flex-1'>

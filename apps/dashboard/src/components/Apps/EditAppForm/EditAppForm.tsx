@@ -1,9 +1,7 @@
 import { type ReactElement, useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../../ui/Button/Button';
-import { AppResourceSection } from './AppResourceSection';
 import { AppFetchSection } from '../AppFetchSection/AppFetchSection';
-import { ATTACHABLE_RESOURCES } from './attachableResources';
 import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
@@ -25,7 +23,6 @@ import {
   Info,
   Command,
   Shield,
-  Boxes,
   Link2,
   DownloadCloud,
 } from 'lucide-react';
@@ -868,14 +865,7 @@ function WebhookNameInput({
 
 // ─── Sectioned navigation ─────────────────────────────────────────────────────
 
-type EditAppSection =
-  | 'basic'
-  | 'commands'
-  | 'shortcuts'
-  | 'permissions'
-  | 'resources'
-  | 'incoming'
-  | 'fetch';
+type EditAppSection = 'basic' | 'commands' | 'shortcuts' | 'permissions' | 'incoming' | 'fetch';
 
 interface EditAppNavItem {
   id: EditAppSection;
@@ -1276,15 +1266,6 @@ export const EditAppForm = ({
     { id: 'shortcuts', label: 'Shortcuts', icon: <Zap className='size-4' /> },
     { id: 'permissions', label: 'Permissions', icon: <Shield className='size-4' /> },
     // Attachments are per-install, like incoming webhooks — meaningless on the template.
-    ...(isInstallMode
-      ? [
-          {
-            id: 'resources' as const,
-            label: 'Workflow access',
-            icon: <Boxes className='size-4' />,
-          },
-        ]
-      : []),
     ...(showIncomingSection
       ? [
           {
@@ -2000,22 +1981,6 @@ export const EditAppForm = ({
                   ))}
                 </div>
               )}
-            </div>
-          )}
-
-          {activeSection === 'resources' && installedAppId && (
-            <div className='flex flex-col gap-6'>
-              {ATTACHABLE_RESOURCES.map(resource => (
-                <AppResourceSection
-                  key={resource.resourceType}
-                  installedAppId={installedAppId}
-                  resourceType={resource.resourceType}
-                  noun={resource.noun}
-                  requiredPermission={resource.requiredPermission}
-                  loadOptions={resource.loadOptions}
-                  readOnly={!canEditInstallSettings}
-                />
-              ))}
             </div>
           )}
 

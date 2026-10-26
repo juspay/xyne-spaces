@@ -1,6 +1,6 @@
 import { aiSendButtonTrackingMetadata } from '../../../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../../../utils/logger';
-import React, { type ReactElement } from 'react';
+import { type ReactElement } from 'react';
 import {
   useState,
   useRef,
@@ -10,7 +10,7 @@ import {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import { Automation, ChatDefault, File02Text, FileText, Globe } from '@xyne/icons';
+import { ChatDefault, File02Text, FileText, Globe } from '@xyne/icons';
 import { Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import { commandsForSurface } from '@xyne/shared/commands';
@@ -21,12 +21,7 @@ import type { AccessibleClawAgent } from '../../../../services/clawAgentListServ
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { rememberNoAgentChoice } from '../../../../hooks/useSelectedAgent';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
-import type {
-  ThreadInfo,
-  CanvasInfo,
-  SelectionInfo,
-  WorkflowInfo,
-} from '../../../../machines/xyneAIMachine';
+import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
@@ -106,8 +101,6 @@ export interface XyneAIInputBoxProps {
   channelId?: string | null;
   threadInfo?: ThreadInfo | null | undefined;
   canvasInfo?: CanvasInfo | null | undefined;
-  workflowInfo?: WorkflowInfo | null | undefined;
-  onRemoveWorkflowInfo?: ((e: React.MouseEvent) => void) | undefined;
   selectionInfos?: SelectionInfo[];
   inputValue: string;
   onInputChange: (value: string) => void;
@@ -208,9 +201,9 @@ export interface Attachment {
 
 /**
  * The Ask AI sidebar's composer: the shared {@link Composer} (the same one the
- * AI screen uses) plus what only the sidebar has — the thread, canvas, browser
- * and workflow it was opened from, the Knowledge Base collection it was opened
- * on, and the per-agent KB drill-down.
+ * AI screen uses) plus what only the sidebar has — the thread, canvas and browser
+ * it was opened from, the Knowledge Base collection it was opened on, and the
+ * per-agent KB drill-down.
  */
 export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxProps>(
   (
@@ -218,8 +211,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       channelId,
       threadInfo,
       canvasInfo,
-      workflowInfo,
-      onRemoveWorkflowInfo,
       selectionInfos = EMPTY_SELECTION_INFOS,
       inputValue,
       onInputChange,
@@ -881,19 +872,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           onRemove: () => removeCanvasInfo(),
         });
       }
-      if (workflowInfo) {
-        items.push({
-          key: 'workflow-info',
-          icon: <Automation className='size-4' />,
-          label: `${workflowInfo.title || 'This workflow'}${workflowInfo.executionId ? ' · run' : ''}`,
-          ...(onRemoveWorkflowInfo
-            ? {
-                onRemove: (): void =>
-                  onRemoveWorkflowInfo({ stopPropagation: () => undefined } as React.MouseEvent),
-              }
-            : {}),
-        });
-      }
       activeSelectionInfos.forEach((selection, index) => {
         items.push({
           key: `selection-${selection.canvasId}-${index}`,
@@ -942,7 +920,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     }, [
       activeThreadInfo,
       activeCanvasInfo,
-      workflowInfo,
       activeSelectionInfos,
       browserContext,
       currentSelections,

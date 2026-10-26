@@ -48,9 +48,6 @@ import joinRequestRoutes, { legacyJoinRequestRouter } from '@/routes/joinRequest
 import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
-// Disabled (Claw)
-// import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
-import { workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -170,7 +167,6 @@ import { tagRoutes } from '@/tags';
 import { automationRoutes, initializeAutomations } from '@/automations';
 // Disabled (Claw)
 // import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
-// import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 // import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 // import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 // import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -362,7 +358,6 @@ export class App {
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
     this.app.use('/api/livekit', livekitWebhookRoutes);
-    this.app.use('/api/workflows-v2', workflowsPublicRouter);
 
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
@@ -508,9 +503,6 @@ export class App {
       aclMiddleware.checkAccess,
       ticketReportRoutes
     );
-    // Disabled (Claw)
-    // this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
-    this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
     // Disabled (LLM)
     // this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
     // this.app.use(
@@ -682,14 +674,6 @@ export class App {
     //   '/api/internal/email/autodraft-callback/:conversationId/:channelId',
     //   validateS2SKey,
     //   handleAutoDraftCallback,
-    // );
-    // // Claw's completion callback for a parked RUN_AGENT step. The session — not
-    // // the node path — identifies which attempt reported back; the handler
-    // // resolves the gate from it.
-    // this.app.post(
-    //   '/api/internal/workflows-v2/claw-callback/:executionId',
-    //   validateS2SKey,
-    //   handleWorkflowClawCallback,
     // );
     // this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     // this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
@@ -1183,9 +1167,6 @@ export class App {
     // Backfill producer (backfill + migration) → isolated queues, drained by dedicated backfill worker pods
     await vespaBackfillQueue.initialize();
 
-    const { initWorkflows } = await import('@/workflowsV2/runtime');
-    await initWorkflows();
-
     // Sync bots for all existing workspaces
     const dbClient = DatabaseClient.getInstance();
     const workspaces = await dbClient.workspace.findMany({ select: { id: true } });
@@ -1311,9 +1292,6 @@ export class App {
       // Close tag generation pipeline queue
       // Disabled (LLM)
       // await tagGenerationPipeline.close();
-
-      const { shutdownWorkflows } = await import('@/workflowsV2/runtime');
-      await shutdownWorkflows();
 
       // Shutdown notification service
       await notificationService.shutdown();

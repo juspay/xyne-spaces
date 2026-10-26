@@ -89,7 +89,6 @@ async function subagentInstanceFor(
 export const AMBIENT_USER_CREDENTIAL_SERVER_TYPES = new Set([
   "xyne-spaces",
   "xyne-dashboard",
-  "xyne-workflows",
 ]);
 
 /**
@@ -237,13 +236,6 @@ export async function loadEffectiveCredentials(
     const live = await liveSpacesCredentials(userId, workspaceHint);
     if (live) return live;
     log.info(`[creds-loader] xyne-dashboard userId=${userId} → no live Spaces session`);
-    return null;
-  }
-
-  if (serverType === "xyne-workflows") {
-    const live = await liveSpacesCredentials(userId, workspaceHint);
-    if (live) return live;
-    log.info(`[creds-loader] xyne-workflows userId=${userId} → no live Spaces session`);
     return null;
   }
 

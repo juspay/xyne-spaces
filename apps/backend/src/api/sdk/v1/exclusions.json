@@ -157,12 +157,6 @@
       "note": "Every Wiki and Hub Knowledge placement edge in an SDLC hub; the tree is built from these."
     },
     {
-      "name": "getSdlcHubWorkflow",
-      "kind": "query",
-      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
-      "note": "The workflow linked to an SDLC hub."
-    },
-    {
       "name": "getSdlcItemComments",
       "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
@@ -178,12 +172,6 @@
       "kind": "query",
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
       "note": "The SDLC items a page names by id: its open folder, its tabs, its panel's subject."
-    },
-    {
-      "name": "getSdlcWikiWorkflow",
-      "kind": "query",
-      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight.",
-      "note": "The wiki workflow linked to an SDLC hub."
     },
     {
       "name": "kanbanTicketsPage",

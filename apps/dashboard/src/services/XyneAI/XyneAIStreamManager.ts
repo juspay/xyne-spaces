@@ -44,7 +44,6 @@ import type { ToolOutput as GeniusToolOutput } from '../../types/toolOutput';
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { UserActivity } from '../../hooks/useUserActivity';
-import type { WorkflowContext } from '../../machines/xyneAIMachine';
 import {
   xyneAIStreamStorage,
   type StreamRecord,
@@ -119,7 +118,6 @@ export interface StreamRequest {
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined;
   canvasId?: string | null | undefined;
-  workflowContext?: WorkflowContext | null | undefined;
   webSearchEnabled: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
@@ -1284,7 +1282,6 @@ class XyneAIStreamManager {
               : { type: request.researchContext.type, name: request.researchContext.name }
             : null,
           ...(request.canvasId && { canvasId: request.canvasId }),
-          ...(request.workflowContext && { workflowContext: request.workflowContext }),
           ...(request.attachmentIds &&
             request.attachmentIds.length > 0 && { messageAttachmentIds: request.attachmentIds }),
           ...(request.attachments.length > 0 && {

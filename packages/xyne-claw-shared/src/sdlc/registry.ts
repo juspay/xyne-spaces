@@ -1,4 +1,3 @@
-import { WORKFLOW_MCP_TOOL_NAMES, WORKFLOW_MCP_WRITE_TOOL_NAMES } from "../tools/workflow-tool-names.js";
 
 export type SdlcToolTransport = "direct" | "custom" | "subagent";
 export type SdlcMutationLevel = "read" | "write";
@@ -125,9 +124,6 @@ export function sdlcToolPermissions(
       toolPermissions[`xyne-spaces__${tool.name}`] = gated ? write : "allow";
     }
   }
-  for (const name of WORKFLOW_MCP_WRITE_TOOL_NAMES) {
-    toolPermissions[`xyne-workflows__${name}`] = write;
-  }
   return toolPermissions;
 }
 
@@ -140,7 +136,7 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   if (retired.length > 0) {
     throw new Error(`Retired SDLC tools remain exported: ${retired.join(", ")}`);
   }
-  const direct = [...uniqueToolNames, ...WORKFLOW_MCP_TOOL_NAMES];
+  const direct = uniqueToolNames;
   const missing = SDLC_DIRECT_TOOL_NAMES.filter((name) => !direct.includes(name));
   if (missing.length > 0) {
     throw new Error(`SDLC MCP tools missing from Xyne Spaces server: ${missing.join(", ")}`);

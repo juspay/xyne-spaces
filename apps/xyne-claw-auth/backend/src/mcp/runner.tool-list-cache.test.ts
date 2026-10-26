@@ -170,7 +170,7 @@ describe("listToolsForUser shared tool-list cache", () => {
 
   it("shares built-in servers with fixed tool lists across users", async () => {
     for (const name of ["u1", "u2", "u3"]) {
-      await listToolsForUser(user(name), "xyne-workflows", "Workflows", { token: name, workspaceId: name });
+      await listToolsForUser(user(name), "xyne-dashboard", "Dashboard", { token: name, workspaceId: name });
       await listToolsForUser(user(name), "google", "Google", { token: name });
     }
     expect(state.listCalls).toBe(2);

@@ -87,25 +87,6 @@ export interface AskAIInitialContextSelections {
   calls?: Array<{ id: string; title: string; channelId?: string; conversationId?: string }>;
 }
 
-export interface WorkflowContext {
-  workflowId?: string | null;
-  executionId?: string | null;
-  stepId?: string | null;
-}
-
-export interface WorkflowInfo extends WorkflowContext {
-  title?: string | null;
-}
-
-export const toWorkflowContext = (info: WorkflowInfo | null): WorkflowContext | null =>
-  info
-    ? {
-        ...(info.workflowId ? { workflowId: info.workflowId } : {}),
-        ...(info.executionId ? { executionId: info.executionId } : {}),
-        ...(info.stepId ? { stepId: info.stepId } : {}),
-      }
-    : null;
-
 export interface XyneAIResearchContext {
   type: 'product' | 'repository';
   id: string;
@@ -149,8 +130,6 @@ export interface XyneAIContext {
   // mutually exclusive with it (see the OPEN handler below).
   kbFolderId: string | null;
   kbFolderName: string | null;
-  workflowInfo: WorkflowInfo | null;
-  workflowDismissed: boolean;
   // Bumped on every OPEN dispatched with a kbCollectionId. Lets the input box
   // re-attach the KB collection chip when the user clicks the Ask AI button
   // again from /knowledge-base after manually removing the chip.
@@ -187,7 +166,6 @@ export type XyneAIEvent =
       kbDocName?: string | null;
       kbFolderId?: string | null;
       kbFolderName?: string | null;
-      workflowInfo?: WorkflowInfo | null;
       initialContextSelections?: AskAIInitialContextSelections | null;
       researchContext?: XyneAIResearchContext | null;
       initialQuery?: string | null;
@@ -200,9 +178,6 @@ export type XyneAIEvent =
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
   | { type: 'CLEAR_KB_CONTEXT' }
   | { type: 'SET_KB_CONTEXT'; kbCollectionId: string | null; kbChannelId?: string | null }
-  | { type: 'SET_WORKFLOW_CONTEXT'; workflowInfo: WorkflowInfo | null }
-  /** The user closed the workflow pill. Sticks until the subject changes. */
-  | { type: 'DISMISS_WORKFLOW_CONTEXT' }
   | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
   | { type: 'SET_CHANNEL'; channelId: string }
   | { type: 'SET_TICKET_CONTEXT'; channelId: string; threadInfo: ThreadInfo }
@@ -578,8 +553,6 @@ export const xyneAIMachine = setup({
           kbDocName: event.kbDocName ?? null,
           kbFolderId: event.kbFolderId ?? null,
           kbFolderName: event.kbFolderName ?? null,
-          workflowInfo: event.workflowInfo ?? null,
-          workflowDismissed: event.workflowInfo ? false : context.workflowDismissed,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,
           autoSendNonce: event.initialQuery?.trim()
@@ -664,8 +637,6 @@ export const xyneAIMachine = setup({
           kbFolderId: event.kbFolderId !== undefined ? event.kbFolderId : context.kbFolderId,
           kbFolderName:
             event.kbFolderName !== undefined ? event.kbFolderName : context.kbFolderName,
-          workflowInfo: event.workflowInfo ?? null,
-          workflowDismissed: event.workflowInfo ? false : context.workflowDismissed,
           researchContext: event.researchContext ?? null,
           initialQuery: event.initialQuery?.trim() || null,
           autoSendNonce: event.initialQuery?.trim()
@@ -698,19 +669,6 @@ export const xyneAIMachine = setup({
       };
       void saveContextToIndexedDB(newContext);
       return newContext;
-    }),
-    dismissWorkflowContext: assign(() => ({ workflowDismissed: true })),
-    setWorkflowContext: assign(({ context, event }) => {
-      if (event.type !== 'SET_WORKFLOW_CONTEXT') return {};
-      const next = event.workflowInfo;
-      const prev = context.workflowInfo;
-      const subjectChanged =
-        (next?.workflowId ?? null) !== (prev?.workflowId ?? null) ||
-        (next?.executionId ?? null) !== (prev?.executionId ?? null);
-      return {
-        workflowInfo: next,
-        workflowDismissed: subjectChanged ? false : context.workflowDismissed,
-      };
     }),
     setKbContext: assign(({ event }) => {
       if (event.type === 'SET_KB_CONTEXT') {
@@ -895,8 +853,6 @@ export const xyneAIMachine = setup({
     kbDocName: null,
     kbFolderId: null,
     kbFolderName: null,
-    workflowInfo: null,
-    workflowDismissed: false,
     kbOpenNonce: 0,
     researchContext: null,
     initialQuery: null,
@@ -926,12 +882,6 @@ export const xyneAIMachine = setup({
         SET_KB_CONTEXT: {
           actions: 'setKbContext',
         },
-        SET_WORKFLOW_CONTEXT: {
-          actions: 'setWorkflowContext',
-        },
-        DISMISS_WORKFLOW_CONTEXT: {
-          actions: 'dismissWorkflowContext',
-        },
       },
     },
     open: {
@@ -950,12 +900,6 @@ export const xyneAIMachine = setup({
         },
         SET_KB_CONTEXT: {
           actions: 'setKbContext',
-        },
-        SET_WORKFLOW_CONTEXT: {
-          actions: 'setWorkflowContext',
-        },
-        DISMISS_WORKFLOW_CONTEXT: {
-          actions: 'dismissWorkflowContext',
         },
         SET_CONTEXT: {
           actions: 'setContext',

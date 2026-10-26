@@ -123,13 +123,6 @@ const XyneAIRequestSchemaV2 = z.object({
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvasId: z.string().optional(),
   canvas_id: z.string().optional(),
-  workflowContext: z
-    .object({
-      workflowId: z.string().min(1).nullish(),
-      executionId: z.string().min(1).nullish(),
-      stepId: z.string().min(1).nullish(),
-    })
-    .optional(),
   // Legacy aliases for canvasId (pre-XYNE-17290). Merged into canvasId below.
   canvasViewAccessId: z.string().optional(),
   canvas_view_access_id: z.string().optional(),
@@ -296,7 +289,6 @@ export class XyneAIControllerV2 {
       canvas_id,
       canvasViewAccessId,
       canvas_view_access_id,
-      workflowContext,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
       webSearchEnabled: webSearchEnabledCC,
@@ -557,7 +549,6 @@ export class XyneAIControllerV2 {
           ticketIds: effectiveTicketIds,
           callIds: effectiveCallIds,
           ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
-          ...(workflowContext && { workflowContext }),
           attachedContext: effectiveAttachedContext ?? [],
           attachments,
           messageAttachmentIds,

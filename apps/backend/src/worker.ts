@@ -49,8 +49,6 @@ import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 // import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 // import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
-import { workflowsWorker } from '@/workers/workflowsWorker';
-import { conversationalFlowWorker } from '@/workers/conversationalFlowWorker';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 config()
@@ -96,7 +94,6 @@ class WorkerService {
       // const proactiveNudgeWorkerEnabled = appConfig.proactiveNudgeWorkerEnabled
       const callValidationEnabled = appConfig.callValidationWorkerEnabled
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
-      const workflowsEnabled = appConfig.workflows.workerEnabled
       // Disabled (LLM)
       // const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableNotificationProducer = appConfig.notificationProducerEnabled;
@@ -174,15 +171,6 @@ class WorkerService {
         socialMediaSyncWorker.start();
       }
 
-      if (workflowsEnabled) {
-        logger.info('Starting workflows worker...');
-        await workflowsWorker.start();
-      }
-
-      if (appConfig.workflows.conversationalFlow.workerEnabled) {
-        logger.info('Starting conversations worker...');
-        await conversationalFlowWorker.start();
-      }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
       // off — so with it off nothing is produced either, and no backlog builds up.
@@ -424,7 +412,6 @@ class WorkerService {
       // const proactiveNudgeWorkerEnabled = appConfig.proactiveNudgeWorkerEnabled
       const callValidationEnabled = appConfig.callValidationWorkerEnabled
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
-      const workflowsEnabled = appConfig.workflows.workerEnabled
       // Disabled (LLM)
       // const messageClassificationEnabled = appConfig.messageClassificationEnabled
 
@@ -476,16 +463,6 @@ class WorkerService {
       // if (appConfig.decisionEval.enabled) {
       //   await decisionEvaluationWorker.shutdown();
       // }
-
-      if (appConfig.workflows.conversationalFlow.workerEnabled) {
-        await conversationalFlowWorker.stop()
-      }
-
-      if (workflowsEnabled) {
-        await workflowsWorker.stop()
-        const { shutdownWorkflows } = await import('@/workflowsV2/runtime')
-        await shutdownWorkflows()
-      }
 
       await heicRenditionQueue.shutdown();
 

@@ -9,7 +9,6 @@ import type {
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/components/ContextPickerPanel';
 import type { UserActivity } from '../hooks/useUserActivity';
-import type { WorkflowContext } from '../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import { buildXyneAIStreamThreadId } from '../utils/xyneAIStreamThreadId';
 import { globalClickTracker } from '../services/Analytics/globalClickTracker';
@@ -83,7 +82,6 @@ interface UseXyneAIStreamParams {
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
   canvasId?: string | null;
-  workflowContext?: WorkflowContext | null;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
@@ -162,7 +160,6 @@ export const useXyneAIStream = ({
   threadConversationId,
   attachmentIds,
   canvasId,
-  workflowContext,
   setMessages,
   setConversationId,
   setCurrentTraceId,
@@ -531,7 +528,6 @@ export const useXyneAIStream = ({
             callCount: eCallIds?.length ?? 0,
             hasSelectionContext: !!selectionContexts?.length,
             hasResearchContext: !!eResearchContext,
-            hasWorkflowContext: !!workflowContext,
             queryLength: query.length,
             isRegenerate: !!isRegenerate,
             isEdit: !!isEditUserMessage,
@@ -560,7 +556,6 @@ export const useXyneAIStream = ({
           threadConversationId,
           attachmentIds,
           canvasId,
-          ...(workflowContext ? { workflowContext } : {}),
           webSearchEnabled: eWebSearchEnabled,
           deepResearchEnabled: eDeepResearchEnabled,
           createCanvasEnabled: eCreateCanvasEnabled,
@@ -607,7 +602,6 @@ export const useXyneAIStream = ({
       threadConversationId,
       attachmentIds,
       canvasId,
-      workflowContext,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
