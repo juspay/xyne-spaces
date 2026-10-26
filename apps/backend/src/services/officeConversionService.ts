@@ -9,6 +9,7 @@ import pLimit from "p-limit"
 import { logger } from "@/utils/logger"
 import { storageService } from "@/services/storage"
 import { isPreconditionFailed } from "@xyne/storage"
+import { config } from '@/config/env';
 
 /**
  * Converts an office document (pptx, docx, xlsx, ...) to PDF via LibreOffice's
@@ -25,7 +26,7 @@ import { isPreconditionFailed } from "@xyne/storage"
  * or fail outright.
  */
 
-const SOFFICE_BINARY = process.env.SOFFICE_PATH || "soffice"
+const SOFFICE_BINARY = config.soffice.path
 const CONVERSION_TIMEOUT_MS = 60_000
 
 // Each soffice invocation is a real process with a non-trivial memory
@@ -34,7 +35,7 @@ const CONVERSION_TIMEOUT_MS = 60_000
 // request and risk OOM-ing the pod. Bounds how many run at once per pod —
 // excess requests queue behind this limiter rather than all spawning
 // immediately.
-const SOFFICE_MAX_CONCURRENCY = Number(process.env.SOFFICE_MAX_CONCURRENCY) || 3
+const SOFFICE_MAX_CONCURRENCY = config.soffice.maxConcurrency
 const conversionLimit = pLimit(SOFFICE_MAX_CONCURRENCY)
 
 // Cached in GCS (the same bucket every other upload in this app already

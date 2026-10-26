@@ -14,6 +14,7 @@ import {
   validateSpecSections,
 } from '@/utils/specValidation';
 import { sanitizeProjectCode, isValidProjectCode, VCSProviderType } from '@xyne/shared';
+import { config as appConfig } from '@/config/env';
 
 // PR validation constants (shared by the Bitbucket and GitHub webhook paths)
 const PR_VALIDATION_CONFIG = {
@@ -538,7 +539,7 @@ export class PullRequestValidationService {
         BITBUCKET_BUILD_STATE[state],
         buildStatus.KEY,
         buildStatus.NAME,
-        process.env.FRONTEND_URL || '',
+        appConfig.frontendUrl,
         description,
       );
     } catch (error) {

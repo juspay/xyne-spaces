@@ -14,6 +14,7 @@ import {
   clearCollectionImportActive,
   maybeNotifyCollectionIngestionCompleteByCollection,
 } from '@/services/collectionIngestionNotifier';
+import { config } from '@/config/env';
 
 /**
  * Background worker for Google Drive imports. The API request only lists the folder
@@ -84,11 +85,11 @@ function getQueue(): Bull.Queue<DriveImportJobData> {
   if (!queue) {
     queue = new Bull<DriveImportJobData>(QUEUE_NAME, {
       redis: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        host: config.redis.host,
+        port: config.redis.port,
         maxRetriesPerRequest: 3,
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && { tls: { rejectUnauthorized: false } }),
+        ...(config.redis.password && { password: config.redis.password }),
+        ...(config.redis.tls && { tls: { rejectUnauthorized: false } }),
       },
     });
   }

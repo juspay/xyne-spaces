@@ -501,7 +501,7 @@ export class App {
 
     // Test-only routes - only register when NODE_ENV=test
     // Test auth routes - used for CI automation testing and sandbox environments
-    const enableDevAuth = process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
+    const enableDevAuth = config.enableDevAuth && config.env === 'development';
     if (config.isTestEnv || enableDevAuth) {
       logger.info('Registering test routes (/api/test/*)');
       this.app.use('/api/test', testAuthRoutes);
@@ -588,7 +588,7 @@ export class App {
     // Disabled (Claw)
     // const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
     //   const supplied = req.headers['x-s2s-key'];
-    //   const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
+    //   const accepted = [config.internalS2sKey, config.xyneClaw.s2sKey].filter(Boolean);
     //   if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
     //     res.status(401).json({ error: 'Invalid or missing S2S key' });
     //     return;
@@ -948,7 +948,7 @@ export class App {
     initializeOpenTelemetry();
 
     // Phase 2 Optimization: Parallelize initialization in TEST environment only
-    const isTestEnv = config.isTestEnv || process.env.NODE_ENV === 'test';
+    const isTestEnv = config.isTestEnv;
 
     if (isTestEnv) {
       logger.info('[TEST MODE] Starting parallel initialization of core services...');

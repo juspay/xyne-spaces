@@ -56,9 +56,9 @@ export class MicrosoftAuthController {
   }
 
   constructor() {
-    const clientId = process.env.MICROSOFT_CLIENT_ID;
-    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-    const tenantId = process.env.MICROSOFT_TENANT_ID || undefined;
+    const clientId = config.microsoft.clientId;
+    const clientSecret = config.microsoft.clientSecret;
+    const tenantId = config.microsoft.tenantId || undefined;
 
     if (!clientId || !clientSecret) {
       logger.info(`MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET environment variables not set`);
@@ -180,7 +180,7 @@ export class MicrosoftAuthController {
         let validatedRedirectTo: string | undefined;
         const redirectToParam = req.query['redirect_to'] as string | undefined;
         if (redirectToParam) {
-          const allowedOrigins = (process.env.ALLOWED_REDIRECT_ORIGINS ?? '')
+          const allowedOrigins = config.allowedRedirectOrigins
             .split(',')
             .map((origin) => origin.trim())
             .filter(Boolean);
@@ -216,7 +216,7 @@ export class MicrosoftAuthController {
         // The callback echoes this state back via the HttpOnly cookie. sameSite=lax lets the
         // cookie ride Microsoft's top-level callback redirect. Mirrors the Google flow; only
         // the web callback verifies it.
-        const isProduction = process.env.NODE_ENV === 'production';
+        const isProduction = config.env === 'production';
         res.cookie('oauth_state', state, {
           httpOnly: true,
           secure: isProduction,
@@ -479,7 +479,7 @@ export class MicrosoftAuthController {
         logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 
         const refreshToken = token.refresh_token as string | undefined;
-        const isProduction = process.env.NODE_ENV === 'production';
+        const isProduction = config.env === 'production';
 
         // Keep Microsoft provider tokens in Redis; the cookie contains identity
         // plus only the short-lived Redis lookup key.
@@ -496,7 +496,7 @@ export class MicrosoftAuthController {
             signMicrosoftInvitationPendingAuthToken(
               microsoftUserData,
               tokenKey,
-              process.env.JWT_SECRET!,
+              config.jwt.secret,
             ),
             {
               httpOnly: true,
@@ -574,7 +574,7 @@ export class MicrosoftAuthController {
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
             tokenKey,
-          }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+          }, config.jwt.secret, { expiresIn: '10m' }), {
             httpOnly: true,
             secure: isProduction,
             sameSite: 'lax' as const,
@@ -653,7 +653,7 @@ export class MicrosoftAuthController {
           picture: microsoftUserData.picture,
           provider: AuthProvider.MICROSOFT,
           tokenKey,
-        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+        }, config.jwt.secret, { expiresIn: '10m' }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
         });
@@ -918,7 +918,7 @@ export class MicrosoftAuthController {
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
 
       // If user has no workspaces and is not invited (not in org_members), redirect to no-access.
       // Still set google_access_token so that AuthScreen's isCreatingOrg + pendingInvitationId
@@ -975,7 +975,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+        }, config.jwt.secret, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -1020,7 +1020,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+        }, config.jwt.secret, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -1152,7 +1152,7 @@ export class MicrosoftAuthController {
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+        }, config.jwt.secret, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -1189,7 +1189,7 @@ export class MicrosoftAuthController {
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+      }, config.jwt.secret, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'lax' as const,
@@ -1368,7 +1368,7 @@ export class MicrosoftAuthController {
       const workspaces = await this.userService.getWorkspacesByEmail(email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s)`);
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions: {
         httpOnly: boolean;
         secure: boolean;
@@ -1401,7 +1401,7 @@ export class MicrosoftAuthController {
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+      }, config.jwt.secret, { expiresIn: '10m' }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });

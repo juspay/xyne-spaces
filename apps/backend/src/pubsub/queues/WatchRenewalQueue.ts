@@ -13,6 +13,7 @@ import Bull from 'bull';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { pubSubWatchService } from '../index';
+import { config as appConfig } from '@/config/env';
 
 const TAG = '[WatchRenewalQueue]';
 
@@ -30,17 +31,17 @@ type RenewalJobData = { providerType: string };
 // Renewal schedules per provider (cron expressions)
 const RENEWAL_CONFIGS: Record<string, RenewalConfig> = {
   gmail: {
-    cron: process.env.GMAIL_WATCH_RENEWAL_CRON || '0 3 * * *',
+    cron: appConfig.cron.gmailWatchRenewal,
     defaultCron: '0 3 * * *',
     withinMs: 24 * 60 * 60 * 1000, // Renew daily (idempotent)
   },
   'google-calendar': {
-    cron: process.env.CALENDAR_RENEWAL_CRON || '0 2 * * *',
+    cron: appConfig.cron.calendarRenewal,
     defaultCron: '0 2 * * *',
     withinMs: 2 * 24 * 60 * 60 * 1000, // Renew within 2 days
   },
   'microsoft-calendar': {
-    cron: process.env.CALENDAR_RENEWAL_CRON || '0 2 * * *',
+    cron: appConfig.cron.calendarRenewal,
     defaultCron: '0 2 * * *',
     withinMs: 2 * 24 * 60 * 60 * 1000, // Renew within 2 days
   },

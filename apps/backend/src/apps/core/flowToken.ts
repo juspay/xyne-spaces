@@ -1,5 +1,6 @@
 
 import crypto from 'node:crypto';
+import { config } from '@/config/env';
 
 /**
  * Distinguishes a flow token from the session tokens that share `JWT_SECRET`.
@@ -15,7 +16,7 @@ const VERSION = 1;
 /** Read at call time, never at module load: a boot-generated secret would
  *  invalidate every open card on deploy and break outright across pods. */
 function secret(): string {
-  const value = process.env['JWT_SECRET'];
+  const value = config.jwt.secret;
   if (!value) throw new Error('JWT_SECRET environment variable is required');
   return value;
 }

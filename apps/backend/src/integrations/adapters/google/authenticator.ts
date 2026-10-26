@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import { OAuth2Client } from 'google-auth-library';
 import { GoogleCredentials } from './types';
 import { SHARED_GOOGLE_WEBHOOK_PATH } from '@/services/googleService';
+import { config } from '@/config/env';
 
 const TAG = '[GoogleAuthenticator]';
 const FAIL: AuthResult = { authenticated: false };
@@ -61,7 +62,7 @@ export class GoogleAuthenticator extends BaseAuthenticator {
     // now arrives at the same URL, regardless of which source it's for. The
     // sourceName arg is the body-resolved DB name (e.g. "google-nikunj-gupta")
     // and must NOT be interpolated here, or the audience will mismatch the JWT.
-    const expectedAudience = `${process.env.BACKEND_URL || 'http://localhost:3000'}${SHARED_GOOGLE_WEBHOOK_PATH}`;
+    const expectedAudience = `${config.backendUrl || 'http://localhost:3000'}${SHARED_GOOGLE_WEBHOOK_PATH}`;
 
     try {
       const ticket = await this.oauth2Client.verifyIdToken({ idToken: bearer, audience: expectedAudience });

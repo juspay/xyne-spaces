@@ -17,6 +17,7 @@ import { buildInitialMessageMd,
   NotificationDeliveryMethod,
   NotificationType, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
+import { config as appConfig } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -2882,7 +2883,7 @@ class NotificationService {
     senderId: string,
     data: NotificationData,
   ): Promise<void> {
-    if (process.env.LOTUS_OWN_MESSAGE_PREFETCH_ENABLED !== 'true') return;
+    if (!appConfig.lotusOwnMessagePrefetchEnabled) return;
     try {
       const sessions = await fcmPushService.getActiveSessionsWithTokens(senderId);
       const mobileSessions = sessions.filter(

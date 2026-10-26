@@ -13,6 +13,7 @@ import { google } from 'googleapis';
 import { repositories } from '@/database/repositories';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 export const DRIVE_SOURCE_TYPE = 'google-drive';
 
@@ -112,8 +113,8 @@ export async function getDriveAccessToken(userId: string): Promise<string | null
   if (!credentials.refreshToken) return null;
 
   const client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
+    config.email.clientId,
+    config.email.clientSecret,
   );
   // Set ONLY the refresh token. If we also pass the stored access token, google-auth-
   // library's getAccessToken() sees a present access_token and — because we never store

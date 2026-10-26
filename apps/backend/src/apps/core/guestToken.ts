@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { OrgRole, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { loadGuestTokenRows } from '@/bypassAcl/appGuestServices';
 import type { AuthenticatedUser } from '@/types/express';
+import { config } from '@/config/env';
 
 /**
  * The Spaces token an app gets for one of its guests. Its own audience keeps it off every route but
@@ -28,7 +29,7 @@ export class GuestTokenError extends Error {
 
 /** Read at call time, never at module load. */
 function secret(): string {
-  const value = process.env['JWT_SECRET'];
+  const value = config.jwt.secret;
   if (!value) throw new Error('JWT_SECRET environment variable is required');
   return value;
 }

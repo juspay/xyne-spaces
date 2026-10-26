@@ -72,9 +72,9 @@ const syncConnectQueryFlag = (): void => {
 };
 
 // Create database connection pool
-const isDev = process.env['NODE_ENV'] === 'development';
+const isDev = config.env === 'development';
 const pool = new Pool({
-  connectionString: process.env['ZERO_UPSTREAM_DB'] as string,
+  connectionString: config.zero.upstreamDb,
   ...((!isDev && !config.isTestEnv) && { ssl: { rejectUnauthorized: false } }),
 });
 
@@ -112,7 +112,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
   }
 
   try {
-    const secret = process.env['JWT_SECRET'];
+    const secret = config.jwt.secret;
     if (!secret) {
       throw new Error('JWT_SECRET environment variable is required');
     }
