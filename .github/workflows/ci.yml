@@ -19,8 +19,8 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Backend: depends on @xyne/shared and agentic-framework, which are workspace
-  # packages consumed from their built dist/ — so they are compiled first.
+  # Backend: depends on @xyne/shared, a workspace package consumed from its
+  # built dist/ — so it is compiled first.
   # ---------------------------------------------------------------------------
   backend:
     name: Backend typecheck + build
@@ -71,9 +71,6 @@ jobs:
           pnpm install ${{ env.PNPM_FLAGS }}
           ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
           --filter xyne-spaces-backend...
-
-      - name: Build workspace libraries
-        run: pnpm --filter agentic-framework run build
 
       - name: Prisma generate (app + common schemas)
         run: |
@@ -139,11 +136,10 @@ jobs:
           ${{ vars.USE_SELF_HOSTED_CI == 'true' && '--network-concurrency 64' || '' }}
           --filter xyne-spaces-dashboard...
 
-      # No "Build workspace libraries" step needed here (unlike backend):
+      # No "Build workspace libraries" step needed here:
       # @xyne/shared AND @xyne/icons both have their own `prepare: pnpm run
       # build` hooks, so pnpm already builds both automatically during
-      # `Install dependencies` above. Backend still needs the step because
-      # agentic-framework has no prepare script of its own.
+      # `Install dependencies` above.
 
       # errors-only (warnings ignored).
       - name: Lint (errors only)
@@ -259,43 +255,6 @@ jobs:
           if echo "$RESPONSE" | grep -q '"success":false'; then
             echo "::error::Report push rejected"; exit 1
           fi
-
-  # Framework lint — self-contained (no workspace deps).
-  framework-lint:
-    name: Framework lint
-    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        if: vars.USE_SELF_HOSTED_CI != 'true'
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      # npm mirror via Artifact Registry pull-through cache — see the same
-      # steps/comment on the backend job above.
-      - name: Authenticate to GCP (npm mirror)
-        id: gcp-auth
-        if: vars.USE_SELF_HOSTED_CI == 'true'
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.NPM_MIRROR_SA_KEY }}
-          token_format: access_token
-
-      - name: Configure pnpm for Artifact Registry npm mirror
-        if: vars.USE_SELF_HOSTED_CI == 'true'
-        run: |
-          pnpm config set registry "https://asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/"
-          echo "//asia-south1-npm.pkg.dev/xyne-infra-external/npm-mirror/:_authToken=${{ steps.gcp-auth.outputs.access_token }}" >> .npmrc
-
-      - name: Install dependencies
-        run: pnpm install ${{ env.PNPM_FLAGS }} --filter agentic-framework...
-
-      - name: Lint
-        run: pnpm --filter agentic-framework run lint
 
   # ---------------------------------------------------------------------------
   # xyne-claw stack: kata-sdk -> xyne-claw-shared -> xyne-claw (typecheck only;

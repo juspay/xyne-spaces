@@ -31,13 +31,12 @@ WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
 COPY packages/storage/package.json          packages/storage/
-COPY packages/framework/package.json        packages/framework/
 COPY packages/cache/package.json            packages/cache/
 COPY packages/secrets-vault/package.json    packages/secrets-vault/
 COPY apps/backend/package.json              apps/backend/
 COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 
-# Only backend and its workspace dependencies; `...` pulls in shared + framework.
+# Only backend and its workspace dependencies; `...` pulls in shared.
 # --ignore-scripts: only the manifests are present at this layer, so the
 # `prepare` hooks on @xyne/shared and @xyne/icons (which run tsc) would fail
 # with no sources or tsconfig.json. The explicit build steps after the source
@@ -46,13 +45,12 @@ RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-s
 
 COPY packages/shared        packages/shared
 COPY packages/storage       packages/storage
-COPY packages/framework     packages/framework
 COPY packages/cache         packages/cache
 COPY packages/secrets-vault packages/secrets-vault
 COPY apps/backend           apps/backend
 
 # backend consumes these from their built dist/
-RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework --filter @xyne/cache --filter @xyne/secrets-vault run build
+RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/cache --filter @xyne/secrets-vault run build
 
 # /app is where the entrypoint and the sandbox volume mounts expect the backend
 WORKDIR /repo/apps/backend
@@ -69,7 +67,7 @@ RUN pnpm run db:common:generate
 EXPOSE 3001
 
 # Create entrypoint script
-# shared/framework are pre-built on host before containers start (see sandbox.sh cmd_create)
+# shared is pre-built on host before containers start (see sandbox.sh cmd_create)
 # We just need to push prisma schema and start the dev server
 RUN cat > /entrypoint.sh << 'ENTRY'
 #!/bin/sh
@@ -80,7 +78,6 @@ echo "[sandbox] Starting backend dev server..."
 cd /repo/apps/backend && exec pnpm exec tsx watch \
   --ignore ../../packages/shared/node_modules \
   --ignore ../../packages/storage/node_modules \
-  --ignore ../../packages/framework/node_modules \
   src/index.ts
 ENTRY
 RUN chmod +x /entrypoint.sh

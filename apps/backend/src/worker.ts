@@ -25,8 +25,6 @@ import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { initializeBotRegistry } from '@/bots/registry';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
-import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
 import { dataSourceIngestionWorker } from '@/workers/dataSourceIngestionWorker';
 import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
@@ -186,17 +184,6 @@ class WorkerService {
       if (appConfig.decisionEval.enabled) {
         logger.info('Starting decision evaluation worker...');
         await decisionEvaluationWorker.start();
-      }
-
-      if (appConfig.enableConversationIngestionQueue) {
-        logger.info('Initializing conversation ingest queue...');
-        const { conversationIngestQueue } = await import('@/queues/conversationIngestQueue');
-        await conversationIngestQueue.initialize();
-      }
-
-      if (appConfig.enableConversationIngestionWorker) {
-        logger.info('Starting conversation ingestion worker...');
-        await conversationIngestionWorker.start();
       }
 
       logger.info('Initializing scheduled message queue...');
@@ -364,12 +351,6 @@ class WorkerService {
         });
       }
 
-      const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
-      if (documentIngestionWorkerEnabled) {
-        logger.info('Starting document ingestion worker...');
-        await documentIngestionWorker.start();
-      }
-
       const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
       if (dataSourceIngestionWorkerEnabled) {
         logger.info('Starting data source ingestion worker...');
@@ -480,10 +461,6 @@ class WorkerService {
 
       await heicRenditionQueue.shutdown();
 
-      if (appConfig.enableConversationIngestionWorker) {
-        await conversationIngestionWorker.shutdown();
-      }
-
       if (appConfig.enableScheduledMessageWorker) {
         await scheduledMessageWorker.shutdown();
       }
@@ -537,11 +514,6 @@ class WorkerService {
 
       if (appConfig.enableTagGenerationPipeline) {
         await tagGenerationPipeline.close();
-      }
-
-      const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
-      if (documentIngestionWorkerEnabled) {
-        await documentIngestionWorker.shutdown();
       }
 
       const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
