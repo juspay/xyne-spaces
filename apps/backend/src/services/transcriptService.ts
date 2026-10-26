@@ -3,9 +3,9 @@ import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
-import { Agent } from '@framework';
+// import { Agent } from '@framework'; // framework removed
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
+import { MessageType, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
@@ -34,7 +34,7 @@ import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { mapWithConcurrency } from '@/utils/concurrency';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+// import { orgLLMCredentialService } from '@/services/orgLLMCredentialService'; // framework removed
 import { processCallWithSummaryTx } from '@/bypassAcl/transactions/transcriptService';
 import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
 
@@ -316,99 +316,101 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private async createAgent(callId?: string, modelType?: SummaryModelType, workspaceId?: string): Promise<Agent | null> {
-    try {
-      const userId = await this.getCreatedByUserIdForCall(callId);
-      // `workspaceId` is for callers with no Xyne call to resolve the org from (desk call recordings).
-      const credential = workspaceId
-        ? await orgLLMCredentialService.getCredentialByWorkspaceId(
-            workspaceId,
-            OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
-          )
-        : await orgLLMCredentialService.getCredentialByUserId(
-            userId,
-            OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
-          );
-
-      // Prefer the org-provisioned credential; fall back to the env-configured
-      // CALL_LITELLM_API_KEY/LITELLM_BASE_URL (config.llm) when no org credential
-      // exists yet (e.g. local/dev where AI provisioning never ran).
-      const apiKey = credential?.apiKey || config.llm.callLitellmApiKey;
-      const baseUrl = credential?.baseUrl || config.llm.litellmBaseUrl;
-      // Model tier selection: when the fast/thinking env models are configured
-      // they drive which model runs (that's the whole point of the per-user
-      // preference); otherwise fall back to the org credential's model, then the
-      // generic call model. `callRecordingFastLitellmModel`/`callRecordingThinkingLitellmModel`
-      // themselves fall back to CALL_LITELLM_MODEL (see config/env.ts).
-      const tierModel =
-        modelType === 'thinking'
-          ? config.llm.callRecordingThinkingLitellmModel
-          : config.llm.callRecordingFastLitellmModel;
-      const defaultModel =
-        tierModel || credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
-
-      if (!apiKey || !baseUrl) {
-        logger.warn('Org LiteLLM credentials not configured and no CALL_LITELLM_API_KEY/LITELLM_BASE_URL env fallback set. AI features will be disabled.', {
-          userId,
-        });
-        return null;
+  private async createAgent(_callId?: string, _modelType?: SummaryModelType, _workspaceId?: string): Promise<null> {
+    // LLM framework removed; original kept below.
+    return null;
+    //     try {
+    //       const userId = await this.getCreatedByUserIdForCall(callId);
+    //       // `workspaceId` is for callers with no Xyne call to resolve the org from (desk call recordings).
+    //       const credential = workspaceId
+    //         ? await orgLLMCredentialService.getCredentialByWorkspaceId(
+    //             workspaceId,
+    //             OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+    //           )
+    //         : await orgLLMCredentialService.getCredentialByUserId(
+    //             userId,
+    //             OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+    //           );
+    //
+    //       // Prefer the org-provisioned credential; fall back to the env-configured
+    //       // CALL_LITELLM_API_KEY/LITELLM_BASE_URL (config.llm) when no org credential
+    //       // exists yet (e.g. local/dev where AI provisioning never ran).
+    //       const apiKey = credential?.apiKey || config.llm.callLitellmApiKey;
+    //       const baseUrl = credential?.baseUrl || config.llm.litellmBaseUrl;
+    //       // Model tier selection: when the fast/thinking env models are configured
+    //       // they drive which model runs (that's the whole point of the per-user
+    //       // preference); otherwise fall back to the org credential's model, then the
+    //       // generic call model. `callRecordingFastLitellmModel`/`callRecordingThinkingLitellmModel`
+    //       // themselves fall back to CALL_LITELLM_MODEL (see config/env.ts).
+    //       const tierModel =
+    //         modelType === 'thinking'
+    //           ? config.llm.callRecordingThinkingLitellmModel
+    //           : config.llm.callRecordingFastLitellmModel;
+    //       const defaultModel =
+    //         tierModel || credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
+    //
+    //       if (!apiKey || !baseUrl) {
+    //         logger.warn('Org LiteLLM credentials not configured and no CALL_LITELLM_API_KEY/LITELLM_BASE_URL env fallback set. AI features will be disabled.', {
+    //           userId,
+    //         });
+    //         return null;
+    //       }
+    //
+    //       if (!credential) {
+    //         logger.info('Using env-configured LiteLLM credentials (CALL_LITELLM_API_KEY/LITELLM_BASE_URL) — no org-provisioned credential found.', {
+    //           userId,
+    //         });
+    //       }
+    //
+    //       const agentConfig = {
+    //         model: {
+    //           provider: {
+    //             type: 'litellm' as const,
+    //             config: {
+    //               apiKey,
+    //               baseUrl,
+    //               timeout: 300000,
+    //             },
+    //           },
+    //           defaultModel,
+    //         },
+    //         tools: {
+    //           enabled: [],
+    //           config: {},
+    //           execution: { timeout: 300000 },
+    //         },
+    //         execution: {
+    //           maxTurns: 1,
+    //           mode: 'single' as const,
+    //           timeouts: { llm: 300000 },
+    //           limits: {},
+    //           errorHandling: {
+    //             maxRetries: 3,
+    //             retryDelay: 120000,
+    //             maxDelay: 960000,
+    //           },
+    //         },
+    //         events: {
+    //           logging: 'warn' as const,
+    //         },
+    //       };
+    //
+    //       return Agent.create(agentConfig);
+    //     } catch (error) {
+    //       logger.error('Failed to create AI agent:', error);
+    //       return null;
+    //     }
       }
 
-      if (!credential) {
-        logger.info('Using env-configured LiteLLM credentials (CALL_LITELLM_API_KEY/LITELLM_BASE_URL) — no org-provisioned credential found.', {
-          userId,
-        });
-      }
-
-      const agentConfig = {
-        model: {
-          provider: {
-            type: 'litellm' as const,
-            config: {
-              apiKey,
-              baseUrl,
-              timeout: 300000,
-            },
-          },
-          defaultModel,
-        },
-        tools: {
-          enabled: [],
-          config: {},
-          execution: { timeout: 300000 },
-        },
-        execution: {
-          maxTurns: 1,
-          mode: 'single' as const,
-          timeouts: { llm: 300000 },
-          limits: {},
-          errorHandling: {
-            maxRetries: 3,
-            retryDelay: 120000,
-            maxDelay: 960000,
-          },
-        },
-        events: {
-          logging: 'warn' as const,
-        },
-      };
-
-      return Agent.create(agentConfig);
-    } catch (error) {
-      logger.error('Failed to create AI agent:', error);
-      return null;
-    }
-  }
-
-  private async getCreatedByUserIdForCall(callId: string | null | undefined): Promise<string | null> {
-    if (!callId) {
-      return null;
-    }
-
-    const call = await repositories.calls.findByExternalId(callId);
-    return call?.createdByUserId ?? null;
-  }
-
+    // private async getCreatedByUserIdForCall(callId: string | null | undefined): Promise<string | null> {
+  //     if (!callId) {
+  //       return null;
+  //     }
+  //
+  //     const call = await repositories.calls.findByExternalId(callId);
+  //     return call?.createdByUserId ?? null;
+  //   }
+  
   /**
    * Main entry point - attach transcript to existing call message when call ends
    * @param callId - The external call ID
