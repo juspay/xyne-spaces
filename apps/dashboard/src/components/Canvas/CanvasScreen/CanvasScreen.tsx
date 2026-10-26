@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+// Disabled (Claw)
+// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -91,7 +92,8 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import { logger, Event } from '../../../utils/logger';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { getCanvasCallId, isRecordingCanvas } from '../canvasFilters';
@@ -178,7 +180,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   isFullscreen = false,
   onToggleFullscreen,
   onClose,
-  showAskAiAction = true,
+  // Disabled (Claw)
+  // showAskAiAction = true,
   showViewOnly = false,
   pinnedOutline = false,
   notFoundNoun,
@@ -187,7 +190,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   onBack,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
-  const askAIAvailable = useAskAIAvailable();
+  // Disabled (Claw)
+  // const askAIAvailable = useAskAIAvailable();
   const canvasId = propCanvasId || paramsCanvasId;
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
@@ -1149,24 +1153,25 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       })
     : null;
 
-  // Handle Ask AI - Open XyneAI with canvas context using canvas id
-  const handleAskAI = (): void => {
-    const canvasIdForAI = selectedCanvas?.id;
-    if (!canvasIdForAI) return;
+  // Disabled (Claw)
+  // // Handle Ask AI - Open XyneAI with canvas context using canvas id
+  // const handleAskAI = (): void => {
+  //   const canvasIdForAI = selectedCanvas?.id;
+  //   if (!canvasIdForAI) return;
 
-    // Create canvas info for context
-    const canvasInfo: CanvasInfo = {
-      canvasId: canvasIdForAI,
-      title: currentTitle,
-    };
+  //   // Create canvas info for context
+  //   const canvasInfo: CanvasInfo = {
+  //     canvasId: canvasIdForAI,
+  //     title: currentTitle,
+  //   };
 
-    // Open XyneAI with canvas context
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'canvas_screen',
-      canvasInfo,
-    });
-  };
+  //   // Open XyneAI with canvas context
+  //   xyneAIActor.send({
+  //     type: 'OPEN',
+  //     trackSource: 'canvas_screen',
+  //     canvasInfo,
+  //   });
+  // };
 
   const canvasIsRecording = selectedCanvas ? isRecordingCanvas(selectedCanvas) : false;
   const canvasCallId = selectedCanvas ? getCanvasCallId(selectedCanvas) : null;
@@ -1465,6 +1470,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
+                          {/* Disabled (Claw) */}
+                          {/*
                           {showAskAiAction && askAIAvailable && (
                             <button
                               type='button'
@@ -1484,6 +1491,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               />
                             </button>
                           )}
+                          */}
 
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

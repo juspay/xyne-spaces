@@ -12,8 +12,11 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runGitHubWebhook } from '@/bypassAcl/webhookIngestServices';
-import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
-import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
+// Disabled (Claw)
+// import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
+import { type PrCardStatus } from '@/services/prCardStatusForwarder';
+// Disabled (LLM)
+// import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
 
 /**
  * GitHub webhook event types for pull requests
@@ -191,17 +194,18 @@ export class GitHubWebhookService {
         // Radar asks about this PR ("review/merge #42") are settled by the merge
         // whether or not its title names a ticket, so this also fires before the
         // gate. Fire-and-forget: it may call the LLM, and GitHub waits on us.
-        resolveRadarOnPrMerge({
-          workspaceId: context.workspace,
-          provider: 'GitHub',
-          prUrl: context.prUrl,
-          prNumber: context.prId,
-          prTitle: pr.title,
-          repoFullName: payload.repository.full_name,
-          baseBranch: context.destinationBranch,
-          mergedBy: payload.sender?.login ?? context.prAuthor ?? 'unknown',
-          mergedAt: pr.merged_at ? new Date(pr.merged_at) : new Date(),
-        }).catch(err => logger.error('[GitHub-Webhook] radar PR-merge pass failed:', err));
+        // Disabled (LLM)
+        // resolveRadarOnPrMerge({
+        //   workspaceId: context.workspace,
+        //   provider: 'GitHub',
+        //   prUrl: context.prUrl,
+        //   prNumber: context.prId,
+        //   prTitle: pr.title,
+        //   repoFullName: payload.repository.full_name,
+        //   baseBranch: context.destinationBranch,
+        //   mergedBy: payload.sender?.login ?? context.prAuthor ?? 'unknown',
+        //   mergedAt: pr.merged_at ? new Date(pr.merged_at) : new Date(),
+        // }).catch(err => logger.error('[GitHub-Webhook] radar PR-merge pass failed:', err));
       }
 
       // Keep the PR card an agent posted for this PR in step with it. Not gated on
@@ -209,17 +213,18 @@ export class GitHubWebhookService {
       // to the ticket sync, so a PR whose title fails validation still updates.
       const cardStatus = this.prCardStatusFor(action, pr);
       if (cardStatus) {
-        forwardPrCardStatus(
-          {
-            provider: 'github',
-            status: cardStatus,
-            prUrl: context.prUrl,
-            number: context.prId,
-            repo: `${context.projectName}/${context.repoName}`,
-            title: pr.title,
-          },
-          '[GitHub-Webhook]',
-        );
+        // Disabled (Claw)
+        // forwardPrCardStatus(
+        //   {
+        //     provider: 'github',
+        //     status: cardStatus,
+        //     prUrl: context.prUrl,
+        //     number: context.prId,
+        //     repo: `${context.projectName}/${context.repoName}`,
+        //     title: pr.title,
+        //   },
+        //   '[GitHub-Webhook]',
+        // );
       }
 
       // Validate PR title (same validation as Bitbucket)

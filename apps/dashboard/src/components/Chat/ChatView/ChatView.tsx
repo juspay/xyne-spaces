@@ -14,7 +14,9 @@ import {
 } from 'react-router-dom';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
 import CanvasScreen from '../../Canvas/CanvasScreen';
-import { ChannelSummary, ThreadSummary } from '../Summary';
+// Disabled (LLM)
+// import { ChannelSummary, ThreadSummary } from '../Summary';
+import { ThreadSummary } from '../Summary';
 import { ThreadMessages } from '../ThreadPannel';
 import { useZero } from '../../../hooks/useZero';
 import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
@@ -176,20 +178,21 @@ const ChatView = (): ReactElement => {
   // Check for thread summary mode - when active, thread shows in left panel, summary in right
   const isThreadSummaryActive = location.hash.startsWith('#thread-summary');
 
-  // Parse date params from hash (format: #channel-summary?dateFrom=...&dateTo=...)
-  const channelSummaryParams = ((): {
-    dateFrom: string | undefined;
-    dateTo: string | undefined;
-  } => {
-    if (!isChannelSummaryActive) return { dateFrom: undefined, dateTo: undefined };
-    const hashParts = location.hash.split('?');
-    if (hashParts.length < 2) return { dateFrom: undefined, dateTo: undefined };
-    const params = new URLSearchParams(hashParts[1]);
-    return {
-      dateFrom: params.get('dateFrom') || undefined,
-      dateTo: params.get('dateTo') || undefined,
-    };
-  })();
+  // Disabled (LLM)
+  // // Parse date params from hash (format: #channel-summary?dateFrom=...&dateTo=...)
+  // const channelSummaryParams = ((): {
+  //   dateFrom: string | undefined;
+  //   dateTo: string | undefined;
+  // } => {
+  //   if (!isChannelSummaryActive) return { dateFrom: undefined, dateTo: undefined };
+  //   const hashParts = location.hash.split('?');
+  //   if (hashParts.length < 2) return { dateFrom: undefined, dateTo: undefined };
+  //   const params = new URLSearchParams(hashParts[1]);
+  //   return {
+  //     dateFrom: params.get('dateFrom') || undefined,
+  //     dateTo: params.get('dateTo') || undefined,
+  //   };
+  // })();
 
   const externalChatCallId = searchParams.get('external-call-chat');
   const isExternalChatActive = !!externalChatCallId;
@@ -212,7 +215,8 @@ const ChatView = (): ReactElement => {
     isThreadActive ||
     isCanvasActive ||
     isProfileActive ||
-    isChannelSummaryActive ||
+    // Disabled (LLM)
+    // isChannelSummaryActive ||
     isGroupPanelOpen ||
     isExternalChatActive;
 
@@ -307,10 +311,11 @@ const ChatView = (): ReactElement => {
     );
   }
 
-  // Handler to close channel summary
-  const handleCloseChannelSummary = (): void => {
-    void navigate(`${baseRoute}/${channelId}`);
-  };
+  // Disabled (LLM)
+  // // Handler to close channel summary
+  // const handleCloseChannelSummary = (): void => {
+  //   void navigate(`${baseRoute}/${channelId}`);
+  // };
 
   // Handler to close thread summary - removes hash and goes back to normal view
   const handleCloseThreadSummary = (): void => {
@@ -348,15 +353,16 @@ const ChatView = (): ReactElement => {
       onToggleFullscreen={toggleCanvasFullscreen}
       onClose={handleCloseCanvas}
     />
-  ) : isChannelSummaryActive ? (
-    <ChannelSummary
-      channelId={channelId ?? ''}
-      channelName={channel?.['name'] || 'channel'}
-      {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
-      dateFrom={channelSummaryParams.dateFrom}
-      dateTo={channelSummaryParams.dateTo}
-      onClose={handleCloseChannelSummary}
-    />
+  // Disabled (LLM)
+  // ) : isChannelSummaryActive ? (
+  //   <ChannelSummary
+  //     channelId={channelId ?? ''}
+  //     channelName={channel?.['name'] || 'channel'}
+  //     {...(channel?.scopeType && { scopeType: channel.scopeType as string })}
+  //     dateFrom={channelSummaryParams.dateFrom}
+  //     dateTo={channelSummaryParams.dateTo}
+  //     onClose={handleCloseChannelSummary}
+  //   />
   ) : (
     <Outlet />
   );

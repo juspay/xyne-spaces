@@ -1,29 +1,38 @@
 import { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { TicketController } from '../controllers/ticketController';
-import { ReleaseNotesController } from '../controllers/releaseNotesController';
-import { ReleaseInsightsController } from '../controllers/releaseInsightsController';
+// Disabled (LLM)
+// import { ReleaseNotesController } from '../controllers/releaseNotesController';
+// import { ReleaseInsightsController } from '../controllers/releaseInsightsController';
 import { AnalyticsController } from '../controllers/analyticsController';
 import { KanbanTicketController } from '../controllers/kanbanTicketController';
 import { uploadMultiple } from '../middleware/upload';
-import { validate } from '../middleware/validation';
-import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
-import { ticketBoardSuggestionSchema, ticketFieldSuggestionsSchema } from '../validators/ticketBoardValidator';
+// Disabled (LLM)
+// import { validate } from '../middleware/validation';
+// Disabled (LLM)
+// import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
+// import { ticketBoardSuggestionSchema, ticketFieldSuggestionsSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
-import { DeskThreadCanvasController } from '@/controllers/deskThreadCanvasController';
-import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
+// Disabled (Claw)
+// import { DeskThreadCanvasController } from '@/controllers/deskThreadCanvasController';
+// Disabled (LLM)
+// import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
+import { authorize } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 import { FlowRunExportController } from '@/controllers/flowRunExportController';
 
 const router = Router();
 const ticketController = new TicketController();
-const releaseNotesController = new ReleaseNotesController();
+// Disabled (LLM)
+// const releaseNotesController = new ReleaseNotesController();
 const analyticsController = new AnalyticsController();
 const kanbanTicketController = new KanbanTicketController();
 const releaseReportController = new ReleaseReportController();
-const releaseInsightsController = new ReleaseInsightsController();
+// Disabled (LLM)
+// const releaseInsightsController = new ReleaseInsightsController();
 const flowRunExportController = new FlowRunExportController();
-const deskThreadCanvasController = new DeskThreadCanvasController();
+// Disabled (Claw)
+// const deskThreadCanvasController = new DeskThreadCanvasController();
 
 // Note: Authentication and ACL middleware are applied at the app level
 
@@ -58,10 +67,11 @@ router.patch('/:ticketId', ticketController.updateTicket);
 
 // Workflow metrics for tickets dashboard
 router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext, analyticsController.getWorkflowMetrics);
-router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);
-router.post('/:ticketId/duplicates/recheck', ticketController.recheckTicketDuplicates);
-router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
-router.post('/suggest-fields', validate(ticketFieldSuggestionsSchema), ticketController.suggestFields);
+// Disabled (LLM)
+// router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);
+// router.post('/:ticketId/duplicates/recheck', ticketController.recheckTicketDuplicates);
+// router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
+// router.post('/suggest-fields', validate(ticketFieldSuggestionsSchema), ticketController.suggestFields);
 
 // Active tags for the ticket's latest reply, grouped by category with configured color
 router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
@@ -70,15 +80,17 @@ router.post('/:ticketId/attachments/from-conversation', ticketController.addAtta
 
 // Ozonetel call recording → transcript attachment (manual trigger from the call thread)
 router.post('/:ticketId/emails/:emailId/transcribe', ticketController.transcribeCallRecording);
-router.post('/:ticketId/emails/:emailId/summarize', ticketController.summarizeCallTranscript);
+// Disabled (LLM)
+// router.post('/:ticketId/emails/:emailId/summarize', ticketController.summarizeCallTranscript);
 
-router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
-// Gated like the other release-manager AI actions (suggest/analyze), not plain TICKETS WRITE.
-router.post(
-  '/:ticketId/release-insights',
-  authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE),
-  releaseInsightsController.generate,
-);
+// Disabled (LLM)
+// router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
+// // Gated like the other release-manager AI actions (suggest/analyze), not plain TICKETS WRITE.
+// router.post(
+//   '/:ticketId/release-insights',
+//   authorizePrivilegedOrResource('RELEASE-MANAGER', AccessType.WRITE),
+//   releaseInsightsController.generate,
+// );
 router.post(
   '/:ticketId/release-report/publish',
   authorize('TICKETS', AccessType.WRITE),
@@ -89,6 +101,7 @@ router.post('/:ticketId/merge', ticketController.mergeTicket);
 router.post('/:ticketId/unmerge', ticketController.unmergeTicket);
 
 // Desk: synthesize the ticket's chat/email thread into a canvas
-router.post('/:ticketId/canvas', deskThreadCanvasController.createCanvasFromThread);
+// Disabled (Claw)
+// router.post('/:ticketId/canvas', deskThreadCanvasController.createCanvasFromThread);
 
 export default router;

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { findLatestMessageId, type ThreadCatchupMessages } from './ThreadCatchupSummary.utils';
 import {
-  fetchThreadRecommendation,
+  // Disabled (LLM)
+  // fetchThreadRecommendation,
   fetchThreadSummary,
   type ThreadSummaryResponse,
 } from './threadSummaryApi';
@@ -128,23 +129,24 @@ export function useThreadCatchupSummary(
       setContentAsOfMessageId(cached.asOfMessageId);
     }
 
-    const recommendationStartedAt = Date.now();
-    fetchThreadRecommendation(conversationId)
-      .then(({ recommended, enabled, summary }) => {
-        setIsFeatureEnabled(enabled);
-        setIsFirstVisitWithSummary(recommended);
-        if (!recommended) return;
-        setExpanded(true);
-        if (summary?.content) {
-          fetchStartedAtRef.current = recommendationStartedAt;
-          contentSourceRef.current = 'recommended';
-        }
-        applyResult(summary);
-      })
-      .catch(() => {
-        setIsFeatureEnabled(false);
-        setIsFirstVisitWithSummary(false);
-      });
+    // Disabled (LLM)
+    // const recommendationStartedAt = Date.now();
+    // fetchThreadRecommendation(conversationId)
+      // .then(({ recommended, enabled, summary }) => {
+        // setIsFeatureEnabled(enabled);
+        // setIsFirstVisitWithSummary(recommended);
+        // if (!recommended) return;
+        // setExpanded(true);
+        // if (summary?.content) {
+          // fetchStartedAtRef.current = recommendationStartedAt;
+          // contentSourceRef.current = 'recommended';
+        // }
+        // applyResult(summary);
+      // })
+      // .catch(() => {
+        // setIsFeatureEnabled(false);
+        // setIsFirstVisitWithSummary(false);
+      // });
   }, [isMessagesLoaded, storageKey, conversationId, applyResult, lastReadAt]);
 
   const refresh = useCallback(async () => {

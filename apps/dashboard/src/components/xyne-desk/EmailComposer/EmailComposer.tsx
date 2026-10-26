@@ -2899,7 +2899,9 @@ export const EmailComposer = ({
             />
             {/* AI subject suggestion — disabled until the body has content
                 since the model needs the email text to ground the subject. */}
-            {features.showAI && (
+            {/* Disabled (LLM) */}
+            {/* {features.showAI && ( */}
+            {features.showAI && false && (
               <Tooltip
                 content={
                   hasEmailBody ? 'Suggest subject from email body' : 'Write some email body first'
@@ -3269,7 +3271,9 @@ export const EmailComposer = ({
                   <Eraser size={14} />
                 </button>
               </Tooltip>
-              {features.showAI && (
+              {/* Disabled (LLM) */}
+              {/* {features.showAI && ( */}
+              {features.showAI && false && (
                 <AIRefineDropdown
                   onQuickRewrite={action => {
                     const source = aiDraft.isDraftActive

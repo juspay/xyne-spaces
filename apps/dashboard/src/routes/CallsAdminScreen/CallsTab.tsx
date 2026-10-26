@@ -395,7 +395,10 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align='end'>
-                    {call.allowedActions.map(action => (
+                    {call.allowedActions
+                      // Disabled (LLM)
+                      .filter(action => action !== 'regenerateSummary')
+                      .map(action => (
                       <DropdownMenuItem
                         key={action}
                         onSelect={() => onSelectAction(action, call)}

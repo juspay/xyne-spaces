@@ -1,9 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { QueryVisualizationType, type DashboardToolCall } from '@xyne/shared';
+import {
+  QueryVisualizationType,
+  // Disabled (Claw)
+  // type DashboardToolCall,
+} from '@xyne/shared';
 import { AlertTriangle, Database, Loader2 } from 'lucide-react';
 import { ReactElement, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
+// Disabled (Claw)
+// import { v4 as uuidv4 } from 'uuid';
 import { ComponentDataError } from '../../services/DynamicDashboard/componentDataService';
 import { fetchDataSourceSchema } from '../../services/DynamicDashboard/dataSourceSchemaService';
 import { listDataSources } from '../../services/DynamicDashboard/dataSourcesService';
@@ -15,7 +20,12 @@ import {
 } from '../../services/DynamicDashboard/dashboardCrudService';
 import { dashboardKeys } from '../../hooks/useDashboards';
 import { dataSourceKeys } from '../../hooks/useDataSources';
-import { ComponentTile, type ComponentTileData, getRendererForType } from './ComponentGrid';
+import {
+  ComponentTile,
+  type ComponentTileData,
+  // Disabled (Claw)
+  // getRendererForType,
+} from './ComponentGrid';
 import {
   ALL_TYPES,
   type FilterRow,
@@ -29,12 +39,14 @@ import { isColumnCompatibleWithOp, isUnaryOp } from './componentEditor/validatio
 import {
   defaultSizeFor,
   filterRowToColumnFilter,
-  flattenWhereToFilters,
+  // Disabled (Claw)
+  // flattenWhereToFilters,
   nextOpenPosition,
 } from './componentEditor/queryPlanUtils';
 import { ChartTypeSelect } from './componentEditor/ChartTypeSelect';
 import { VisualBuilder } from './componentEditor/VisualBuilder';
-import { AiSidePanel } from './componentEditor/AiSidePanel';
+// Disabled (Claw)
+// import { AiSidePanel } from './componentEditor/AiSidePanel';
 import { ComponentEditorHeader } from './componentEditor/ComponentEditorHeader';
 import { ResetDraftsConfirmOverlay } from './componentEditor/ResetDraftsConfirmOverlay';
 import {
@@ -764,87 +776,88 @@ export const ComponentEditorModal = ({
     invalidPlanMessage,
   ]);
 
-  const populateFromToolCall = useCallback(
-    (call: DashboardToolCall) => {
-      if (call.tool !== 'add_component') return;
-      const args = call.args;
-      if (!getRendererForType(args.visualType)) {
-        toast.error(`Unsupported visual type "${args.visualType}"`, {
-          description: 'Ask the AI for a different chart type.',
-        });
-        return;
-      }
-      setVisualType(args.visualType);
-      setTitle(args.title);
-      setTimeColumn(args.componentConfig?.timeColumn ?? '');
-      const plan = args.queryPlan;
-      setDataSourceId(plan.dataSourceId);
-      setTableName(plan.model);
-      setSelectCols((plan.select ?? []).map(s => (typeof s === 'string' ? s : s.column)));
-      setJoins(
-        (plan.joins ?? []).map(
-          (j): JoinRow => ({
-            id: uuidv4(),
-            model: j.model,
-            type: j.type ?? 'inner',
-            on: { from: j.on.from, to: j.on.to },
-            ...(j.alias !== undefined ? { alias: j.alias } : {}),
-          }),
-        ),
-      );
-      setGroupBy(
-        (plan.groupBy ?? []).map((g): GroupByRow => {
-          if (typeof g === 'string') return { id: uuidv4(), column: g };
-          return {
-            id: uuidv4(),
-            column: g.column,
-            ...(g.alias !== undefined ? { alias: g.alias } : {}),
-            ...(g.bucket !== undefined ? { bucket: g.bucket } : {}),
-          };
-        }),
-      );
-      stashedDerivedMeasuresRef.current = stashDerivedMeasures(plan.measures);
-      setMeasures(
-        (plan.measures ?? []).flatMap((m): MeasureRow[] =>
-          'expr' in m
-            ? []
-            : [
-                {
-                  id: uuidv4(),
-                  column: m.column,
-                  op: m.op,
-                  ...(m.alias !== undefined ? { alias: m.alias } : {}),
-                  ...(m.filter !== undefined ? { filter: m.filter } : {}),
-                },
-              ],
-        ),
-      );
-      setOrderBy(
-        (plan.orderBy ?? []).map(o => ({
-          id: uuidv4(),
-          column: o.column,
-          dir: o.dir,
-        })),
-      );
-      setTake(plan.take ? String(plan.take) : '');
-      setFilters(flattenWhereToFilters(plan.where));
-      typeSnapshotsDispatch({ type: 'reset', visualType: args.visualType });
-    },
-    [
-      setVisualType,
-      setTitle,
-      setTimeColumn,
-      setDataSourceId,
-      setTableName,
-      setSelectCols,
-      setJoins,
-      setGroupBy,
-      setMeasures,
-      setOrderBy,
-      setTake,
-      setFilters,
-    ],
-  );
+  // Disabled (Claw)
+  // const populateFromToolCall = useCallback(
+  //   (call: DashboardToolCall) => {
+  //     if (call.tool !== 'add_component') return;
+  //     const args = call.args;
+  //     if (!getRendererForType(args.visualType)) {
+  //       toast.error(`Unsupported visual type "${args.visualType}"`, {
+  //         description: 'Ask the AI for a different chart type.',
+  //       });
+  //       return;
+  //     }
+  //     setVisualType(args.visualType);
+  //     setTitle(args.title);
+  //     setTimeColumn(args.componentConfig?.timeColumn ?? '');
+  //     const plan = args.queryPlan;
+  //     setDataSourceId(plan.dataSourceId);
+  //     setTableName(plan.model);
+  //     setSelectCols((plan.select ?? []).map(s => (typeof s === 'string' ? s : s.column)));
+  //     setJoins(
+  //       (plan.joins ?? []).map(
+  //         (j): JoinRow => ({
+  //           id: uuidv4(),
+  //           model: j.model,
+  //           type: j.type ?? 'inner',
+  //           on: { from: j.on.from, to: j.on.to },
+  //           ...(j.alias !== undefined ? { alias: j.alias } : {}),
+  //         }),
+  //       ),
+  //     );
+  //     setGroupBy(
+  //       (plan.groupBy ?? []).map((g): GroupByRow => {
+  //         if (typeof g === 'string') return { id: uuidv4(), column: g };
+  //         return {
+  //           id: uuidv4(),
+  //           column: g.column,
+  //           ...(g.alias !== undefined ? { alias: g.alias } : {}),
+  //           ...(g.bucket !== undefined ? { bucket: g.bucket } : {}),
+  //         };
+  //       }),
+  //     );
+  //     stashedDerivedMeasuresRef.current = stashDerivedMeasures(plan.measures);
+  //     setMeasures(
+  //       (plan.measures ?? []).flatMap((m): MeasureRow[] =>
+  //         'expr' in m
+  //           ? []
+  //           : [
+  //               {
+  //                 id: uuidv4(),
+  //                 column: m.column,
+  //                 op: m.op,
+  //                 ...(m.alias !== undefined ? { alias: m.alias } : {}),
+  //                 ...(m.filter !== undefined ? { filter: m.filter } : {}),
+  //               },
+  //             ],
+  //       ),
+  //     );
+  //     setOrderBy(
+  //       (plan.orderBy ?? []).map(o => ({
+  //         id: uuidv4(),
+  //         column: o.column,
+  //         dir: o.dir,
+  //       })),
+  //     );
+  //     setTake(plan.take ? String(plan.take) : '');
+  //     setFilters(flattenWhereToFilters(plan.where));
+  //     typeSnapshotsDispatch({ type: 'reset', visualType: args.visualType });
+  //   },
+  //   [
+  //     setVisualType,
+  //     setTitle,
+  //     setTimeColumn,
+  //     setDataSourceId,
+  //     setTableName,
+  //     setSelectCols,
+  //     setJoins,
+  //     setGroupBy,
+  //     setMeasures,
+  //     setOrderBy,
+  //     setTake,
+  //     setFilters,
+  //   ],
+  // );
 
   const formattedPreviewError = useMemo((): string | null => {
     if (!previewError) return null;
@@ -998,6 +1011,8 @@ export const ComponentEditorModal = ({
         </div>
       </div>
 
+      {/* Disabled (Claw) */}
+      {/*
       <aside className='w-[360px] shrink-0 bg-white rounded-2xl shadow-md overflow-hidden flex flex-col'>
         <AiSidePanel
           dashboardId={dashboardId}
@@ -1015,6 +1030,7 @@ export const ComponentEditorModal = ({
           onToolCall={populateFromToolCall}
         />
       </aside>
+      */}
 
       {pendingFieldChange && (
         <ResetDraftsConfirmOverlay

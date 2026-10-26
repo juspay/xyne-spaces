@@ -54,14 +54,17 @@ import { useUser } from '../../../hooks/useUsers';
 import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { isOneToOneDMChannel, isDMChannel, keyBetween } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-import { xyneAIActor } from '../../../machines/xyneAIMachine';
-import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+// Disabled (Claw)
+// import { xyneAIActor } from '../../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useNavigate } from 'react-router-dom';
 import { usePageCoverage } from '../../../hooks/usePageCoverage';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { XyneAIStar } from '../../icons/xyne-ai';
+// Disabled (Claw)
+// import { XyneAIStar } from '../../icons/xyne-ai';
 import { invokeShortcut } from '../../../shortcuts';
 import { CalendarEvent, Globe, PencilEdit, PlusDefault } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
@@ -214,7 +217,8 @@ const ConversationHeader = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
-  const askAIAvailable = useAskAIAvailable();
+  // Disabled (Claw)
+  // const askAIAvailable = useAskAIAvailable();
   const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
   // Null in a ticket/document channel or a desk: those show the built-in tabs
   // with no ×, no + and no dragging. Channels, DMs and group DMs are editable.
@@ -314,21 +318,22 @@ const ConversationHeader = ({
   // Get target user ID for 1:1 DM calls
   const targetUserId = getTargetUserIdForCall(channel?.scopeType, channel?.name, context.userID);
 
-  // AI Onboarding: show tooltip after "Done exploring" is clicked
-  const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
-  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Disabled (Claw)
+  // // AI Onboarding: show tooltip after "Done exploring" is clicked
+  // const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
+  // const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    const handler = (): void => {
-      setShowOnboardingTooltip(true);
-      tooltipTimerRef.current = setTimeout(() => setShowOnboardingTooltip(false), 4000);
-    };
-    window.addEventListener('ai-onboarding-complete', handler);
-    return () => {
-      window.removeEventListener('ai-onboarding-complete', handler);
-      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-    };
-  }, []);
+  // useEffect(() => {
+  //   const handler = (): void => {
+  //     setShowOnboardingTooltip(true);
+  //     tooltipTimerRef.current = setTimeout(() => setShowOnboardingTooltip(false), 4000);
+  //   };
+  //   window.addEventListener('ai-onboarding-complete', handler);
+  //   return () => {
+  //     window.removeEventListener('ai-onboarding-complete', handler);
+  //     if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+  //   };
+  // }, []);
 
   const handleStarToggle = (): void => {
     void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: Date.now() }));
@@ -574,6 +579,8 @@ const ConversationHeader = ({
                   <CalendarEvent size={16} />
                 </Button>
               </Tooltip>
+              {/* Disabled (Claw) */}
+              {/*
               {askAIAvailable && (
                 <Tooltip
                   content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
@@ -599,6 +606,7 @@ const ConversationHeader = ({
                   </Button>
                 </Tooltip>
               )}
+              */}
               {!isCompact && (
                 <ShortcutTooltip label='Search in this channel' shortcut='global.findInChannel'>
                   <Button

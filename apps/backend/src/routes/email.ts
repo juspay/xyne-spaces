@@ -85,27 +85,30 @@ router.get(
 );
 
 // List Claw agents added to this channel (for the auto-draft agent picker)
-router.get(
-  '/:channelId/claw-agents',
-  authMiddleware.authenticate,
-  emailController.listClawAgents,
-);
+// Disabled (Claw)
+// router.get(
+//   '/:channelId/claw-agents',
+//   authMiddleware.authenticate,
+//   emailController.listClawAgents,
+// );
 
 // Full auto-draft conversation (read-through to claw; not stored). Replayed in
 // Ask AI for anyone on the channel — the run itself belongs to the desk persona.
-router.get(
-  '/:conversationId/autodraft-transcript',
-  authMiddleware.authenticate,
-  emailController.getAutoDraftTranscript,
-);
+// Disabled (Claw)
+// router.get(
+//   '/:conversationId/autodraft-transcript',
+//   authMiddleware.authenticate,
+//   emailController.getAutoDraftTranscript,
+// );
 
 // Fork the auto-draft session into a private thread for this user. Called only
 // when they choose to continue — reading creates nothing.
-router.post(
-  '/:conversationId/autodraft-continue',
-  authMiddleware.authenticate,
-  emailController.continueAutoDraft,
-);
+// Disabled (Claw)
+// router.post(
+//   '/:conversationId/autodraft-continue',
+//   authMiddleware.authenticate,
+//   emailController.continueAutoDraft,
+// );
 
 
 export default router;

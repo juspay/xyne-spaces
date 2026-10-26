@@ -1,6 +1,9 @@
 import { ReactElement } from 'react';
-import { Trash2, X, Loader2 } from 'lucide-react';
-import { Tooltip } from '../../../components/ui/Tooltip';
+// Disabled (Claw)
+// import { Trash2, X, Loader2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
+// Disabled (Claw)
+// import { Tooltip } from '../../../components/ui/Tooltip';
 
 interface RecordingsBulkActionBarProps {
   selectedCount: number;
@@ -19,34 +22,37 @@ interface RecordingsBulkActionBarProps {
  */
 export function RecordingsBulkActionBar({
   selectedCount,
-  isPreparingAskAI,
-  askAIDisabledReason,
+  // Disabled (Claw)
+  // isPreparingAskAI,
+  // askAIDisabledReason,
   onClear,
-  onAskAI,
+  // Disabled (Claw)
+  // onAskAI,
   onDelete,
 }: RecordingsBulkActionBarProps): ReactElement {
-  const askAIButton = (
-    <button
-      onClick={onAskAI}
-      disabled={isPreparingAskAI || !!askAIDisabledReason}
-      className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-      data-track-category='RecordingsScreen'
-      data-track-name='ask_ai_selected'
-    >
-      {isPreparingAskAI ? (
-        <Loader2 className='w-4 h-4 animate-spin' />
-      ) : (
-        <img
-          src='/svgs/icons/ai-bot-gradient-star.svg'
-          width={16}
-          height={16}
-          alt=''
-          aria-hidden='true'
-        />
-      )}
-      Ask AI
-    </button>
-  );
+  // Disabled (Claw)
+  // const askAIButton = (
+  //   <button
+  //     onClick={onAskAI}
+  //     disabled={isPreparingAskAI || !!askAIDisabledReason}
+  //     className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+  //     data-track-category='RecordingsScreen'
+  //     data-track-name='ask_ai_selected'
+  //   >
+  //     {isPreparingAskAI ? (
+  //       <Loader2 className='w-4 h-4 animate-spin' />
+  //     ) : (
+  //       <img
+  //         src='/svgs/icons/ai-bot-gradient-star.svg'
+  //         width={16}
+  //         height={16}
+  //         alt=''
+  //         aria-hidden='true'
+  //       />
+  //     )}
+  //     Ask AI
+  //   </button>
+  // );
 
   return (
     <div className='sticky top-0 z-30 mb-4 flex items-center justify-between gap-3 rounded-lg border border-border dark:border-gray-700 bg-background dark:bg-gray-800 px-4 py-2.5 shadow-sm'>
@@ -68,6 +74,8 @@ export function RecordingsBulkActionBar({
         {/* A disabled <button> emits no pointer events, so the tooltip trigger is
             a wrapping <span>. Uses the app Tooltip (delayDuration 0) for an instant
             hint instead of the slow native `title`. */}
+        {/* Disabled (Claw) */}
+        {/*
         {askAIDisabledReason ? (
           <Tooltip content={askAIDisabledReason} side='top'>
             <span className='inline-flex'>{askAIButton}</span>
@@ -75,6 +83,7 @@ export function RecordingsBulkActionBar({
         ) : (
           askAIButton
         )}
+        */}
         <button
           onClick={onDelete}
           className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-destructive hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'

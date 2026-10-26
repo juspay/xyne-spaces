@@ -1,6 +1,8 @@
-import { STREAM_PRESS_ROW } from '../Streams/Streams.types';
+// Disabled (Claw)
+// import { STREAM_PRESS_ROW } from '../Streams/Streams.types';
 import { ReactElement, useCallback, useMemo, useState } from 'react';
-import { SparkleAi } from '../../../icons/SparkleAi';
+// Disabled (Claw)
+// import { SparkleAi } from '../../../icons/SparkleAi';
 import { toast } from 'sonner';
 import GlobalCommandMenu from '../../../GlobalCommandMenu/GlobalCommandMenu';
 import { TabType } from '../../../Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -38,49 +40,50 @@ const COLUMN_TABS: TabType[] = [
   TabType.USERS,
 ];
 
-/**
- * Ask AI, pinned to the bottom.
- *
- * Every other row in this panel is something that already exists and is being
- * located. Ask AI is the one thing here that does not exist yet — you are not
- * finding a conversation, you are starting one — so it does not belong in a list
- * of search results, and putting it above the search box made the first thing
- * you saw an answer to a question nobody had asked.
- *
- * A footer is where cmd+K puts its verbs, and it is the one strip of the panel
- * that never scrolls away: the results move under it while it stays put.
- *
- * Never marked "added". Several Ask AI columns is a normal way to work — one
- * question parked while you start another — which `allowsDuplicates` is the
- * canonical statement of.
- */
-const AskAiFooter = ({ onPick }: { onPick: (source: ColumnSource) => void }): ReactElement => (
-  <>
-    {/* Inset to 16px, so the rule starts and ends where the result rows above it
-        do — everything else in this card is on that column, and a full-bleed line
-        was the only thing breaking it. The conventional reading of an edge-to-edge
-        rule is "a separate region below", which this footer genuinely is; it loses
-        to alignment here, and if the region needs saying again it should be said
-        with a background rather than a wider line. */}
-    <div className='mx-4 h-px shrink-0 bg-border' />
-    <div className='shrink-0 p-1.5'>
-      <button
-        type='button'
-        onClick={() => onPick({ kind: 'agent' })}
-        className={cn(
-          STREAM_PRESS_ROW,
-          'flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] hover:bg-accent hover:text-accent-foreground',
-        )}
-        data-track-category='Streams'
-        data-track-name='AddSurfaceColumn'
-      >
-        <SparkleAi className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-        <span className='min-w-0 flex-1 truncate'>Ask AI</span>
-        <span className='shrink-0 text-[11px] text-muted-foreground'>new chat</span>
-      </button>
-    </div>
-  </>
-);
+// Disabled (Claw)
+// /**
+//  * Ask AI, pinned to the bottom.
+//  *
+//  * Every other row in this panel is something that already exists and is being
+//  * located. Ask AI is the one thing here that does not exist yet — you are not
+//  * finding a conversation, you are starting one — so it does not belong in a list
+//  * of search results, and putting it above the search box made the first thing
+//  * you saw an answer to a question nobody had asked.
+//  *
+//  * A footer is where cmd+K puts its verbs, and it is the one strip of the panel
+//  * that never scrolls away: the results move under it while it stays put.
+//  *
+//  * Never marked "added". Several Ask AI columns is a normal way to work — one
+//  * question parked while you start another — which `allowsDuplicates` is the
+//  * canonical statement of.
+//  */
+// const AskAiFooter = ({ onPick }: { onPick: (source: ColumnSource) => void }): ReactElement => (
+//   <>
+//     {/* Inset to 16px, so the rule starts and ends where the result rows above it
+//         do — everything else in this card is on that column, and a full-bleed line
+//         was the only thing breaking it. The conventional reading of an edge-to-edge
+//         rule is "a separate region below", which this footer genuinely is; it loses
+//         to alignment here, and if the region needs saying again it should be said
+//         with a background rather than a wider line. */}
+//     <div className='mx-4 h-px shrink-0 bg-border' />
+//     <div className='shrink-0 p-1.5'>
+//       <button
+//         type='button'
+//         onClick={() => onPick({ kind: 'agent' })}
+//         className={cn(
+//           STREAM_PRESS_ROW,
+//           'flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[13px] hover:bg-accent hover:text-accent-foreground',
+//         )}
+//         data-track-category='Streams'
+//         data-track-name='AddSurfaceColumn'
+//       >
+//         <SparkleAi className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+//         <span className='min-w-0 flex-1 truncate'>Ask AI</span>
+//         <span className='shrink-0 text-[11px] text-muted-foreground'>new chat</span>
+//       </button>
+//     </div>
+//   </>
+// );
 
 export interface AddColumnPaletteProps {
   /** Fixed pixel width. Ignored when `fill` is set. */
@@ -273,7 +276,10 @@ const AddColumnPalette = ({
         )}
       </div>
 
+      {/* Disabled (Claw) */}
+      {/*
       <AskAiFooter onPick={onPick} />
+      */}
     </div>
   );
 };

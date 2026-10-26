@@ -2,7 +2,8 @@ import { Fragment, ReactElement, useEffect, useId, useMemo, useRef, useState } f
 import { Link, useLocation, type Location } from 'react-router-dom';
 import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
-import { XyneAIQuickMenu } from './XyneAIQuickMenu';
+// Disabled (Claw)
+// import { XyneAIQuickMenu } from './XyneAIQuickMenu';
 import { ChatQuickMenu } from './ChatQuickMenu';
 import { RailQuickNavEntry } from './RailQuickNav';
 import { ShortcutHint } from '../ui/ShortcutHint';
@@ -21,7 +22,8 @@ import {
   MicMicrophone,
   ThreeDotsMenuHorizontal,
   BookmarkDefault,
-  SparkleAi01,
+  // Disabled (LLM)
+  // SparkleAi01,
   GridDashboard01,
   QuestionMarkCircle,
   InformationCircle,
@@ -50,7 +52,9 @@ import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { AppIcon } from '../AppIcon/AppIcon';
-import { toolbarItemsStore, useAppSnapshots, appIdOf, appItemId } from '../../hooks/barItems';
+// Disabled (Claw)
+// import { toolbarItemsStore, useAppSnapshots, appIdOf, appItemId } from '../../hooks/barItems';
+import { toolbarItemsStore, appIdOf, appItemId } from '../../hooks/barItems';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../hooks/useAiLaunchPreference';
 import {
   preventNativeDrag,
@@ -152,12 +156,13 @@ const mobileNavigationItems = [
     description: 'Threads you follow and their replies',
     icon: ChatDefault,
   },
-  {
-    path: '/chat/recap',
-    label: 'Recap',
-    description: 'AI summary of what you missed',
-    icon: SparkleAi01,
-  },
+  // Disabled (LLM)
+  // {
+    // path: '/chat/recap',
+    // label: 'Recap',
+    // description: 'AI summary of what you missed',
+    // icon: SparkleAi01,
+  // },
   {
     path: '/error-report',
     label: 'Report Issue',
@@ -179,7 +184,8 @@ type QuickMenuProps = {
 };
 
 const quickMenuFor = (path: string): ((props: QuickMenuProps) => ReactElement) | null => {
-  if (path === '/ai') return XyneAIQuickMenu;
+  // Disabled (Claw)
+  // if (path === '/ai') return XyneAIQuickMenu;
   if (path === '/chat/dir') return ChatQuickMenu;
   return null;
 };
@@ -257,7 +263,8 @@ const AppSidebar = (): ReactElement => {
   const canInvitePeople = !!user && user.role !== 'GUEST';
   const visibleNavigationItems = useVisibleNavigationItems();
   const toolbarIds = toolbarItemsStore.useItems();
-  const appSnapshots = useAppSnapshots();
+  // Disabled (Claw)
+  // const appSnapshots = useAppSnapshots();
   const missedCallCount = useMissedCallCount();
   const hasUnreadRecordingSummaries = useHasUnreadRecordingSummaries();
   const hasOngoingCall = useRailActiveCalls().length > 0;
@@ -393,17 +400,20 @@ const AppSidebar = (): ReactElement => {
     for (const id of toolbarIds) {
       const appId = appIdOf(id);
       if (appId) {
-        const snapshot = appSnapshots.get(appId);
-        if (snapshot) {
-          entries.push({ kind: 'app', appId, title: snapshot.title, icon: snapshot.icon });
-        }
+        // Disabled (Claw)
+        // const snapshot = appSnapshots.get(appId);
+        // if (snapshot) {
+        //   entries.push({ kind: 'app', appId, title: snapshot.title, icon: snapshot.icon });
+        // }
         continue;
       }
       const item = byPath.get(id);
       if (item) entries.push({ kind: 'nav', item });
     }
     return entries;
-  }, [visibleNavigationItems, toolbarIds, appSnapshots]);
+    // Disabled (Claw)
+    // }, [visibleNavigationItems, toolbarIds, appSnapshots]);
+  }, [visibleNavigationItems, toolbarIds]);
   // Everything permitted but not in the rail lives under "More". Apps are
   // never there: an app is either in the rail or not on the sidebar at all.
   const moreItems = useMemo(

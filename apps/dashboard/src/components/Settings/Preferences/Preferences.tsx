@@ -7,7 +7,8 @@ import {
   Mic,
   MessageSquare,
   Globe,
-  Zap,
+  // Disabled (Claw)
+  // Zap,
   Code2,
   Copy,
   CheckCircle2,
@@ -71,7 +72,8 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
-import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
+// Disabled (LLM)
+// import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -86,7 +88,8 @@ import {
   inboxItemsStore,
   messageActionsStore,
   useChannelTabsStore,
-  useEnsureAppSnapshots,
+  // Disabled (Claw)
+  // useEnsureAppSnapshots,
   type BarItemsStore,
 } from '../../../hooks/barItems';
 import { isChannelTabsCustomizable } from '../../Chat/ConversationPannel/ConversationPannel.utils';
@@ -131,7 +134,8 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'browser', label: 'Browser', icon: <Globe className='size-4' />, desktopOnly: true },
-  { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
+  // Disabled (Claw)
+  // { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
   {
     id: 'toolbar',
     label: 'Toolbar',
@@ -757,6 +761,8 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       />
     </div>
 
+    {/* Disabled (LLM) */}
+    {/*
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>
         <p className='text-sm font-medium text-foreground'>LLM summary generation model</p>
@@ -789,9 +795,12 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onChange={state.setDefaultSummaryTemplateId}
       />
     </div>
+    */}
   </div>
 );
 
+// Disabled (LLM)
+/*
 const AUTO_SUMMARY_TEMPLATE_OPTION = { id: null, label: 'Pick automatically' } as const;
 const DEFAULT_SUMMARY_TEMPLATE_OPTION = { id: 'default', label: 'Default summary' } as const;
 
@@ -854,6 +863,7 @@ const DefaultSummaryTemplateSelect: FC<{
     </div>
   );
 };
+*/
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
@@ -903,7 +913,8 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.setAllowThreadBroadcastMentions}
       />
     </div>
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+    {/* Disabled (LLM) */}
+    {/* <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
       <div>
         <p className='text-sm font-medium text-foreground'>Show thread tags</p>
         <p className='text-xs text-muted-foreground mt-0.5'>
@@ -916,7 +927,7 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         checked={state.showThreadTags}
         onCheckedChange={state.setShowThreadTags}
       />
-    </div>
+    </div> */}
     {linkOpenPrefIsRelevant() && (
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
@@ -1225,27 +1236,28 @@ const PasswordSection: FC = () => {
 };
 
 // ─── Developer ──────────────────────────────────────────────────────────────
-/** Kept on this device (userPreferencesMachine) and off while it is tried. */
-const ScreenActionsToggle: FC = () => {
-  const enabled = useUserPreference('screenActionsEnabled');
-  return (
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-      <div>
-        <p className='text-sm font-medium text-foreground'>Screen actions</p>
-        <p className='text-xs text-muted-foreground mt-0.5'>
-          With Auto selected in Xyne AI, opens pages and presses buttons for what you type or say,
-          like &ldquo;open general&rdquo; or &ldquo;create a ticket&rdquo;, and only points at
-          anything that changes data. Off while it is new.
-        </p>
-      </div>
-      <Switch
-        id='screen-actions-enabled'
-        checked={enabled}
-        onCheckedChange={value => setUserPreference('screenActionsEnabled', value)}
-      />
-    </div>
-  );
-};
+// Disabled (Claw)
+// /** Kept on this device (userPreferencesMachine) and off while it is tried. */
+// const ScreenActionsToggle: FC = () => {
+//   const enabled = useUserPreference('screenActionsEnabled');
+//   return (
+//     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+//       <div>
+//         <p className='text-sm font-medium text-foreground'>Screen actions</p>
+//         <p className='text-xs text-muted-foreground mt-0.5'>
+//           With Auto selected in Xyne AI, opens pages and presses buttons for what you type or say,
+//           like &ldquo;open general&rdquo; or &ldquo;create a ticket&rdquo;, and only points at
+//           anything that changes data. Off while it is new.
+//         </p>
+//       </div>
+//       <Switch
+//         id='screen-actions-enabled'
+//         checked={enabled}
+//         onCheckedChange={value => setUserPreference('screenActionsEnabled', value)}
+//       />
+//     </div>
+//   );
+// };
 
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   return (
@@ -1279,7 +1291,8 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        <ScreenActionsToggle />
+        {/* Disabled (Claw) */}
+        {/* <ScreenActionsToggle /> */}
 
         {detectReactNativeWebView() && (
           <Button
@@ -1520,7 +1533,8 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   const store = useChannelTabsStore(selected?.id ?? 'unknown', publishedIds);
   const publish = useChannelAppPublishing(selected?.id ?? 'unknown', selected, publishedIds);
   const publishedSet = useMemo(() => new Set(publishedIds), [publishedIds]);
-  useEnsureAppSnapshots(publishedIds);
+  // Disabled (Claw)
+  // useEnsureAppSnapshots(publishedIds);
 
   if (!selected) {
     return (

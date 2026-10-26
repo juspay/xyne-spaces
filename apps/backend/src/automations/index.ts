@@ -34,14 +34,16 @@ import { updateTagsStep } from './steps/update-tags.step';
 import { applyConversationLabelStep } from './steps/apply-conversation-label.step';
 import { assignTicketToGroupStep } from './steps/assign-ticket-to-group.step';
 import { triggerWebhookStep } from './steps/trigger-webhook.step';
-import { runAgentStep } from './steps/run-agent.step';
+// Disabled (Claw)
+// import { runAgentStep } from './steps/run-agent.step';
 import { createEmailDraftStep } from './steps/create-email-draft.step';
 import { replyOnMessageStep } from './steps/reply-on-message.step';
 import { promoteMessageToTicketStep } from './steps/promote-message-to-ticket.step';
 import { updateFormFieldsStep } from './steps/update-form-fields.step';
 import { sendCsatRequestStep } from './steps/send-csat-request.step';
 import { makeCallStep } from './steps/make-call.step';
-import { askJevStep } from './steps/ask-jev.step';
+// Disabled (LLM)
+// import { askJevStep } from './steps/ask-jev.step';
 import { sendReviewReplyStep } from './steps/send-review-reply.step';
 import { resolveConversationStep } from './steps/resolve-conversation.step';
 
@@ -86,14 +88,16 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(applyConversationLabelStep);
   stepRegistry.register(assignTicketToGroupStep);
   stepRegistry.register(triggerWebhookStep);
-  stepRegistry.register(runAgentStep);
+  // Disabled (Claw)
+  // stepRegistry.register(runAgentStep);
   stepRegistry.register(createEmailDraftStep);
   stepRegistry.register(replyOnMessageStep);
   stepRegistry.register(promoteMessageToTicketStep);
   stepRegistry.register(updateFormFieldsStep);
   stepRegistry.register(sendCsatRequestStep);
   stepRegistry.register(makeCallStep);
-  stepRegistry.register(askJevStep);
+  // Disabled (LLM)
+  // stepRegistry.register(askJevStep);
   stepRegistry.register(sendReviewReplyStep);
   stepRegistry.register(resolveConversationStep);
 
