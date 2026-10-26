@@ -1,4 +1,4 @@
-import { z } from 'zod';
+// import { z } from 'zod'; // framework removed
 import { Activity } from '@prisma/client';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -11,14 +11,14 @@ import {
   type ActivityClassificationPromptResult,
 } from '@/services/activity/activityClassificationLangfusePrompts';
 import { config as envConfig } from '@/config/env';
-import { LLMClient, createUserMessage } from 'agentic-framework';
-import type { LLMClientConfig } from 'agentic-framework';
-import { OrgLLMServiceAccountPurpose, ActivityClassification } from '@xyne/shared';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+// import { LLMClient, createUserMessage } from 'agentic-framework'; // framework removed
+// import type { LLMClientConfig } from 'agentic-framework';
+import { ActivityClassification } from '@xyne/shared';
+// import { orgLLMCredentialService } from '@/services/orgLLMCredentialService'; // framework removed
 
-const ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS = 3;
-const ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS = 1000;
-const ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS = 30000;
+// const ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS = 3; // framework removed
+// const ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS = 1000;
+// const ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS = 30000;
 
 export const ACTIVITY_CLASSIFICATION_MODEL =
   envConfig.activityClassification?.model ?? 'glm-latest';
@@ -32,12 +32,13 @@ const ACTIVITY_CLASSIFICATION_CONTEXT_LIMIT = 0;
 const ACTIVITY_CLASSIFICATION_THREAD_LIMIT = 10;
 const GROUP_MEMBER_LIMIT = 10;
 
-const ActivityClassificationOutputSchema = z.object({
-  classification: z.enum(['ACTIONABLE', 'FYI', 'SKIP']),
-  confidence: z.coerce.number().min(0).max(1).optional(),
-});
+// LLM framework removed; original kept below.
+// const ActivityClassificationOutputSchema = z.object({
+//   classification: z.enum(['ACTIONABLE', 'FYI', 'SKIP']),
+//   confidence: z.coerce.number().min(0).max(1).optional(),
+// });
 
-type ActivityClassificationOutput = z.infer<typeof ActivityClassificationOutputSchema>;
+// type ActivityClassificationOutput = z.infer<typeof ActivityClassificationOutputSchema>; // framework removed
 
 type GroupMemberSummary = {
   memberCount: number;
@@ -170,39 +171,41 @@ export class ActivityClassificationService {
   // private readonly model = 'glm-46-fp8';
   private readonly model = ACTIVITY_CLASSIFICATION_MODEL;
 
-  private async getLLMClient(workspaceId: string | null | undefined): Promise<LLMClient | null> {
-    const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
-      workspaceId,
-      OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
-    );
-
-    if (!credential) {
-      return null;
-    }
-
-    const llmConfig: LLMClientConfig = {
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: envConfig.llm?.requestTimeoutMs,
-          customHeaders: {
-            'x-litellm-disable-logging': 'true',
-          },
-        },
-      },
-      defaultModel: credential.defaultModel ?? this.model,
-      temperature: 0.2,
-      retry: {
-        maxAttempts: ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS,
-        baseDelay: ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS,
-        maxDelay: ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS,
-        exponentialBackoff: true,
-      },
-    };
-    return new LLMClient(llmConfig);
-  }
+  private async getLLMClient(_workspaceId: string | null | undefined): Promise<null> {
+    // LLM framework removed; original kept below.
+    return null;
+    //     const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
+    //       workspaceId,
+    //       OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
+    //     );
+    //
+    //     if (!credential) {
+    //       return null;
+    //     }
+    //
+    //     const llmConfig: LLMClientConfig = {
+    //       provider: {
+    //         type: 'litellm',
+    //         config: {
+    //           apiKey: credential.apiKey,
+    //           baseUrl: credential.baseUrl,
+    //           timeout: envConfig.llm?.requestTimeoutMs,
+    //           customHeaders: {
+    //             'x-litellm-disable-logging': 'true',
+    //           },
+    //         },
+    //       },
+    //       defaultModel: credential.defaultModel ?? this.model,
+    //       temperature: 0.2,
+    //       retry: {
+    //         maxAttempts: ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS,
+    //         baseDelay: ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS,
+    //         maxDelay: ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS,
+    //         exponentialBackoff: true,
+    //       },
+    //     };
+    //     return new LLMClient(llmConfig);
+      }
 
   async classifyActivity(activityId: string): Promise<{
     status: 'classified' | 'pending' | 'error' | 'skipped';
@@ -302,43 +305,46 @@ export class ActivityClassificationService {
         activityId,
         model: this.model,
       });
-      const llmResponse = await llmClient.generate({
-        messages: [createUserMessage(prompt)],
-        model: this.model,
-      });
-      const responseContent = llmResponse.content;
-
-      const parsed = this.parseLLMResponse(responseContent);
-      if (!parsed) {
-        logger.error('[ActivityClassification] Failed to parse LLM response', {
-          activityId,
-          response: responseContent,
-        });
-        await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
-        return { status: 'error', usedLLM: true, reason: 'parse_failed' };
-      }
-
-      const mappedClassification = this.mapClassification(
-        parsed.classification,
-        activity.actorAction
-      );
-
-      const confidence = parsed.confidence ?? null;
-
-      logger.info('[ActivityClassification] Classification parsed', {
-        activityId,
-        classification: mappedClassification,
-        confidence,
-        rawClassification: parsed.classification,
-      });
-      await this.updateClassification(activity.id, mappedClassification, confidence);
-      return {
-        status: 'classified',
-        classification: mappedClassification,
-        confidence,
-        usedLLM: true,
-      };
-    } catch (error) {
+      // LLM framework removed; original kept below.
+      logger.warn('[ActivityClassification] LLM client is not configured, leaving as PENDING', { activityId, promptChars: prompt.length });
+      return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
+      //       const llmResponse = await llmClient.generate({
+      //         messages: [createUserMessage(prompt)],
+      //         model: this.model,
+      //       });
+      //       const responseContent = llmResponse.content;
+      //
+      //       const parsed = this.parseLLMResponse(responseContent);
+      //       if (!parsed) {
+      //         logger.error('[ActivityClassification] Failed to parse LLM response', {
+      //           activityId,
+      //           response: responseContent,
+      //         });
+      //         await this.updateClassification(activity.id, ActivityClassification.ERROR, null);
+      //         return { status: 'error', usedLLM: true, reason: 'parse_failed' };
+      //       }
+      //
+      //       const mappedClassification = this.mapClassification(
+      //         parsed.classification,
+      //         activity.actorAction
+      //       );
+      //
+      //       const confidence = parsed.confidence ?? null;
+      //
+      //       logger.info('[ActivityClassification] Classification parsed', {
+      //         activityId,
+      //         classification: mappedClassification,
+      //         confidence,
+      //         rawClassification: parsed.classification,
+      //       });
+      //       await this.updateClassification(activity.id, mappedClassification, confidence);
+      //       return {
+      //         status: 'classified',
+      //         classification: mappedClassification,
+      //         confidence,
+      //         usedLLM: true,
+      //       };
+          } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
       logger.error('[ActivityClassification] LLM classification failed', {
         activityId,
@@ -436,42 +442,45 @@ export class ActivityClassificationService {
         messageId,
         model: this.model,
       });
-      const llmResponse = await llmClient.generate({
-        messages: [createUserMessage(prompt)],
-        model: this.model,
-      });
-      const responseContent = llmResponse.content;
-
-      const parsed = this.parseLLMResponse(responseContent);
-      if (!parsed) {
-        logger.error('[ActivityClassification] Failed to parse audience LLM response', {
-          messageId,
-          response: responseContent,
-        });
-        await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
-        return { status: 'error', usedLLM: true, reason: 'parse_failed' };
-      }
-
-      const mappedClassification = this.mapClassification(
-        parsed.classification,
-        inputPayload.actorAction
-      );
-
-      const confidence = parsed.confidence ?? null;
-
-      logger.info('[ActivityClassification] Audience classification parsed', {
-        messageId,
-        classification: mappedClassification,
-        confidence,
-      });
-      await this.updateClassificationAudience(activityIds, mappedClassification, confidence);
-      return {
-        status: 'classified',
-        classification: mappedClassification,
-        confidence,
-        usedLLM: true,
-      };
-    } catch (error) {
+      // LLM framework removed; original kept below.
+      logger.warn('[ActivityClassification] LLM client is not configured, leaving as PENDING', { messageId, promptChars: prompt.length });
+      return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
+      //       const llmResponse = await llmClient.generate({
+      //         messages: [createUserMessage(prompt)],
+      //         model: this.model,
+      //       });
+      //       const responseContent = llmResponse.content;
+      //
+      //       const parsed = this.parseLLMResponse(responseContent);
+      //       if (!parsed) {
+      //         logger.error('[ActivityClassification] Failed to parse audience LLM response', {
+      //           messageId,
+      //           response: responseContent,
+      //         });
+      //         await this.updateClassificationAudience(activityIds, ActivityClassification.ERROR, null);
+      //         return { status: 'error', usedLLM: true, reason: 'parse_failed' };
+      //       }
+      //
+      //       const mappedClassification = this.mapClassification(
+      //         parsed.classification,
+      //         inputPayload.actorAction
+      //       );
+      //
+      //       const confidence = parsed.confidence ?? null;
+      //
+      //       logger.info('[ActivityClassification] Audience classification parsed', {
+      //         messageId,
+      //         classification: mappedClassification,
+      //         confidence,
+      //       });
+      //       await this.updateClassificationAudience(activityIds, mappedClassification, confidence);
+      //       return {
+      //         status: 'classified',
+      //         classification: mappedClassification,
+      //         confidence,
+      //         usedLLM: true,
+      //       };
+          } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
       logger.error('[ActivityClassification] Audience LLM classification failed', {
         messageId,
@@ -1133,80 +1142,82 @@ export class ActivityClassificationService {
     return links.size;
   }
 
-  private parseLLMResponse(content?: string | null): ActivityClassificationOutput | null {
-    logger.debug('[ActivityClassification] Parsing LLM response');
-    if (!content) return null;
-
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    try {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const normalized =
-        typeof parsed?.classification === 'string'
-          ? { ...parsed, classification: parsed.classification.toUpperCase() }
-          : parsed;
-
-      let normalizedConfidence = normalized?.confidence;
-      if (normalizedConfidence === null) {
-        normalizedConfidence = undefined;
-      }
-      if (typeof normalizedConfidence === 'string') {
-        const parsedValue = Number(normalizedConfidence);
-        if (!Number.isNaN(parsedValue)) {
-          normalizedConfidence = parsedValue;
-        }
-      }
-      if (typeof normalizedConfidence === 'number' && normalizedConfidence > 1) {
-        normalizedConfidence = normalizedConfidence / 100;
-      }
-
-      const result = ActivityClassificationOutputSchema.safeParse({
-        ...normalized,
-        confidence: normalizedConfidence,
-      });
-
-      if (!result.success) {
-        logger.warn('[ActivityClassification] LLM response validation failed', {
-          issues: result.error.issues,
-        });
-        return null;
-      }
-
-      return result.data;
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
-      logger.error('[ActivityClassification] Failed to parse LLM response', {
-        errorMessage: err.message,
-        errorStack: err.stack,
-      });
-      return null;
-    }
-  }
-
-  private mapClassification(
-    classification: ActivityClassificationOutput['classification'],
-    actorAction: string
-  ): ActivityClassification {
-    if (classification === 'SKIP' && actorAction !== 'direct_message') {
-      logger.warn('[ActivityClassification] SKIP returned for non-direct message, coercing to FYI', {
-        actorAction,
-      });
-      return ActivityClassification.FYI;
-    }
-
-    switch (classification) {
-      case 'ACTIONABLE':
-        return ActivityClassification.ACTIONABLE;
-      case 'FYI':
-        return ActivityClassification.FYI;
-      case 'SKIP':
-        return ActivityClassification.SKIP;
-      default:
-        return ActivityClassification.FYI;
-    }
-  }
-
+  // LLM framework removed; original kept below.
+  //   private parseLLMResponse(content?: string | null): ActivityClassificationOutput | null {
+  //     logger.debug('[ActivityClassification] Parsing LLM response');
+  //     if (!content) return null;
+  //
+  //     const jsonMatch = content.match(/\{[\s\S]*\}/);
+  //     if (!jsonMatch) return null;
+  //
+  //     try {
+  //       const parsed = JSON.parse(jsonMatch[0]);
+  //       const normalized =
+  //         typeof parsed?.classification === 'string'
+  //           ? { ...parsed, classification: parsed.classification.toUpperCase() }
+  //           : parsed;
+  //
+  //       let normalizedConfidence = normalized?.confidence;
+  //       if (normalizedConfidence === null) {
+  //         normalizedConfidence = undefined;
+  //       }
+  //       if (typeof normalizedConfidence === 'string') {
+  //         const parsedValue = Number(normalizedConfidence);
+  //         if (!Number.isNaN(parsedValue)) {
+  //           normalizedConfidence = parsedValue;
+  //         }
+  //       }
+  //       if (typeof normalizedConfidence === 'number' && normalizedConfidence > 1) {
+  //         normalizedConfidence = normalizedConfidence / 100;
+  //       }
+  //
+  //       const result = ActivityClassificationOutputSchema.safeParse({
+  //         ...normalized,
+  //         confidence: normalizedConfidence,
+  //       });
+  //
+  //       if (!result.success) {
+  //         logger.warn('[ActivityClassification] LLM response validation failed', {
+  //           issues: result.error.issues,
+  //         });
+  //         return null;
+  //       }
+  //
+  //       return result.data;
+  //     } catch (error) {
+  //       const err = error instanceof Error ? error : new Error(String(error ?? 'unknown error'));
+  //       logger.error('[ActivityClassification] Failed to parse LLM response', {
+  //         errorMessage: err.message,
+  //         errorStack: err.stack,
+  //       });
+  //       return null;
+  //     }
+  //   }
+  
+  // LLM framework removed; original kept below.
+  //   private mapClassification(
+  //     classification: ActivityClassificationOutput['classification'],
+  //     actorAction: string
+  //   ): ActivityClassification {
+  //     if (classification === 'SKIP' && actorAction !== 'direct_message') {
+  //       logger.warn('[ActivityClassification] SKIP returned for non-direct message, coercing to FYI', {
+  //         actorAction,
+  //       });
+  //       return ActivityClassification.FYI;
+  //     }
+  //
+  //     switch (classification) {
+  //       case 'ACTIONABLE':
+  //         return ActivityClassification.ACTIONABLE;
+  //       case 'FYI':
+  //         return ActivityClassification.FYI;
+  //       case 'SKIP':
+  //         return ActivityClassification.SKIP;
+  //       default:
+  //         return ActivityClassification.FYI;
+  //     }
+  //   }
+  
   private async updateClassification(
     activityId: string,
     classification: ActivityClassification,
