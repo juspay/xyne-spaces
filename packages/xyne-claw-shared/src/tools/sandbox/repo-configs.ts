@@ -135,6 +135,81 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     ],
     ports: { backend: 3001, dashboard: 5173 },
   },
+
+  lotus: {
+    slug: "sandbox-lotus-setup",
+    name: "LotusPay Doctor Sandbox Setup",
+    description:
+      "Bring up the LotusPay Doctor stack (LP project) in a sandbox " +
+      "(lotus-workspace-template, cloning from lotus-golden-snap-v1). " +
+      "The snapshot bakes 3 repos: pluto (LP, master, nix flake), torana " +
+      "(LP, master, Ruby on Rails on Ruby 2.7.4 via nixpkgs-23.11), " +
+      "ashfall (LP, develop, Node frontend). Bundled gems land at " +
+      "$BUNDLE_PATH (/workspace/.bundle/gems); ashfall node_modules + " +
+      "pluto nix-store closure + rails deps are all warmed on the PVC. " +
+      "No services auto-start; agent runs `rails s` (torana → :3000), " +
+      "`npm run dev` (ashfall → :3001 / :5173 Vite), or `nix run ./#<x>` " +
+      "(pluto) on demand.",
+    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/lp/torana.git",
+    defaultBranch: "master",
+    cloneDepth: 1,
+    workDir: "/workspace/torana",
+    template: "lotus-workspace-template",
+    sessionTimeoutMs: 2 * 60 * 60 * 1000,
+    idleTimeoutMs: 60 * 60 * 1000,
+    readyTimeoutMs: 10 * 60 * 1000,
+    auxRepos: [
+      { name: "pluto",   url: "ssh://git@ssh.bitbucket.juspay.net/lp/pluto.git",   defaultBranch: "master",  workDir: "/workspace/pluto" },
+      { name: "ashfall", url: "ssh://git@ssh.bitbucket.juspay.net/lp/ashfall.git", defaultBranch: "develop", workDir: "/workspace/ashfall" },
+    ],
+    steps: [],
+    ports: {
+      torana: 3000,
+      ashfall: 3001,
+      ashfallVite: 5173,
+      pluto: 8080,
+    },
+  },
+
+  lamf: {
+    slug: "sandbox-lamf-setup",
+    name: "LAMF Sandbox Setup",
+    description:
+      "Bring up the LAMF (AX) stack in a sandbox " +
+      "(lamf-workspace-template, cloning from lamf-golden-snap-v1). " +
+      "The snapshot bakes 3 AX repos: lamf-dashboard (npm), clms-corp " +
+      "(npm), clms-retail (yarn + ReScript, `yarn re:build` finished at " +
+      "bake time producing ~1906 .cmj files). node_modules for all 3 " +
+      "are warmed on the PVC. No services auto-start; agent runs the " +
+      "sandbox dev commands on demand:\n" +
+      "  - cd lamf-dashboard && npm run dev:sandbox\n" +
+      "  - cd clms-corp      && npm run dev:sandbox\n" +
+      "  - cd clms-retail    && yarn start:sandbox\n" +
+      "(npm install / yarn install / yarn re:build are already baked; " +
+      "re-run only if package.json or .res files change.)",
+    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/ax/lamf-dashboard.git",
+    defaultBranch: "master",
+    cloneDepth: 1,
+    workDir: "/workspace/lamf-dashboard",
+    template: "lamf-workspace-template",
+    sessionTimeoutMs: 2 * 60 * 60 * 1000,
+    idleTimeoutMs: 60 * 60 * 1000,
+    readyTimeoutMs: 10 * 60 * 1000,
+    // Default branches confirmed from the builder Job clone: lamf-dashboard
+    // is master, clms-corp is main, clms-retail is master. Override per-claim
+    // via auxBranches if needed.
+    auxRepos: [
+      { name: "clms-corp",   url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-corp.git",   defaultBranch: "main",   workDir: "/workspace/clms-corp" },
+      { name: "clms-retail", url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-retail.git", defaultBranch: "master", workDir: "/workspace/clms-retail" },
+    ],
+    steps: [],
+    ports: {
+      lamfDashboard: 3000,
+      clmsAlt: 3001,
+      vite: 5173,
+      rescript: 8080,
+    },
+  },
 };
  
 // ───────────────────────────────────────────────────────────────────────────
