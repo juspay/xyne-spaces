@@ -55,19 +55,19 @@ const PageLinks = ({ pages }: { pages: Page[] }): ReactElement => {
 // Disabled (Claw)
 // /** Split out so the admin and daily-brief lookups behind the AI pages only run when Xyne AI is listed. */
 // const AIPageLinks = ({ item }: { item: NavigationItem }): ReactElement => {
-  // const aiPages = useVisibleAINavItems();
-  // return (
-    // <PageLinks
-      // pages={[
-        // item,
-        // ...aiPages.map(page => ({
-          // path: page.to,
-          // label: page.label,
-          // description: within(page.description, item.label),
-        // })),
-      // ]}
-    // />
-  // );
+// const aiPages = useVisibleAINavItems();
+// return (
+// <PageLinks
+// pages={[
+// item,
+// ...aiPages.map(page => ({
+// path: page.to,
+// label: page.label,
+// description: within(page.description, item.label),
+// })),
+// ]}
+// />
+// );
 // };
 
 /** A site map landmark: a second way to reach any page (WCAG 2.4.5), hidden from sight and the tab order. */

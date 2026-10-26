@@ -56,11 +56,11 @@ const AudioWaveIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactEle
 
 // Disabled (LLM)
 // const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
-  // createElement(Radar, props);
+// createElement(Radar, props);
 
 // Disabled (Claw)
 // const StoreNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
-  // createElement(Store, props);
+// createElement(Store, props);
 
 export type ChatNavKey =
   | 'new-message'
@@ -141,22 +141,22 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
   },
   // Disabled (LLM)
   // {
-    // key: 'recap',
-    // label: 'Recap',
-    // to: '/chat/dir/recap',
-    // icon: ListAiGenerated,
-    // trackName: 'OPEN_RECAP',
-    // description: 'AI summary of what you missed',
+  // key: 'recap',
+  // label: 'Recap',
+  // to: '/chat/dir/recap',
+  // icon: ListAiGenerated,
+  // trackName: 'OPEN_RECAP',
+  // description: 'AI summary of what you missed',
   // },
   // Disabled (LLM)
   // {
-    // key: 'radar',
-    // label: 'Radar',
-    // to: '/chat/dir/radar',
-    // icon: RadarNavIcon,
-    // trackName: 'OPEN_RADAR',
-    // description: 'Items that need your attention',
-    // requiresRadar: true,
+  // key: 'radar',
+  // label: 'Radar',
+  // to: '/chat/dir/radar',
+  // icon: RadarNavIcon,
+  // trackName: 'OPEN_RADAR',
+  // description: 'Items that need your attention',
+  // requiresRadar: true,
   // },
 ];
 
@@ -196,12 +196,12 @@ export interface NavigationItem {
 // // strokeWidth/...) are dropped: this glyph has no stroke/variant concept and
 // // renders identically regardless of active state, unlike every other item.
 // const XyneAINavIcon: PikaIcon = ({ size, color }) =>
-  // createElement(XyneAISidebarIcon, {
-    // // exactOptionalPropertyTypes rejects an explicit `undefined` for an
-    // // optional prop — omit the key entirely instead of assigning it.
-    // ...(typeof size === 'number' ? { size } : {}),
-    // ...(color !== undefined ? { color } : {}),
-  // });
+// createElement(XyneAISidebarIcon, {
+// // exactOptionalPropertyTypes rejects an explicit `undefined` for an
+// // optional prop — omit the key entirely instead of assigning it.
+// ...(typeof size === 'number' ? { size } : {}),
+// ...(color !== undefined ? { color } : {}),
+// });
 
 // Items are listed toolbar-first: the default toolbar paths come first in the
 // order they should appear in the rail, followed by everything that lives in
@@ -209,11 +209,11 @@ export interface NavigationItem {
 export const NAVIGATION_ITEMS: NavigationItem[] = [
   // Disabled (Claw)
   // {
-    // path: '/ai',
-    // label: 'Xyne AI',
-    // description: 'Also called Ask AI: AI chats, agents and knowledge',
-    // icon: XyneAINavIcon,
-    // popout: true,
+  // path: '/ai',
+  // label: 'Xyne AI',
+  // description: 'Also called Ask AI: AI chats, agents and knowledge',
+  // icon: XyneAINavIcon,
+  // popout: true,
   // },
   {
     path: '/chat/dir',
@@ -238,11 +238,11 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   },
   // Disabled (Claw)
   // {
-    // path: '/apps-marketplace',
-    // label: 'Apps Marketplace',
-    // description: 'Apps built on Xyne data, and creating your own',
-    // icon: StoreNavIcon,
-    // popout: true,
+  // path: '/apps-marketplace',
+  // label: 'Apps Marketplace',
+  // description: 'Apps built on Xyne data, and creating your own',
+  // icon: StoreNavIcon,
+  // popout: true,
   // },
   {
     path: '/streams',
@@ -318,12 +318,12 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   },
   // Disabled (LLM)
   // {
-    // path: '/tag-review',
-    // label: 'Tag Review',
-    // description: 'Proposed thread tags awaiting review',
-    // icon: Tag,
-    // iconSize: 18,
-    // popout: true,
+  // path: '/tag-review',
+  // label: 'Tag Review',
+  // description: 'Proposed thread tags awaiting review',
+  // icon: Tag,
+  // iconSize: 18,
+  // popout: true,
   // },
   {
     path: '/analytics',
@@ -399,11 +399,11 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   },
   // Disabled (LLM)
   // {
-    // path: '/team-intelligence',
-    // label: 'Team Intelligence',
-    // description: 'Also called Founder Brief: team goals and blockers',
-    // icon: Atom,
-    // popout: true,
+  // path: '/team-intelligence',
+  // label: 'Team Intelligence',
+  // description: 'Also called Founder Brief: team goals and blockers',
+  // icon: Atom,
+  // popout: true,
   // },
   {
     path: '/secrets',

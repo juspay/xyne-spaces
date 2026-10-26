@@ -203,8 +203,7 @@ export function StepCard({
                   variableSources={variableSources}
                   readOnly={readOnly}
                 />
-              ) :
-              // Disabled (Claw)
+              ) : // Disabled (Claw)
               // step.type === 'RUN_AGENT' ? (
               //   <RunAgentStepForm
               //     value={step.config}

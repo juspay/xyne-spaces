@@ -399,20 +399,20 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
                       // Disabled (LLM)
                       .filter(action => action !== 'regenerateSummary')
                       .map(action => (
-                      <DropdownMenuItem
-                        key={action}
-                        onSelect={() => onSelectAction(action, call)}
-                        data-track-category={CALLS_ADMIN_TRACK}
-                        data-track-name={`Calls admin: ${ACTION_LABELS[action]}`}
-                        className={cn(
-                          action !== 'changeOwner' &&
-                            CONFIRM_COPY[action].danger &&
-                            'text-destructive focus:text-destructive',
-                        )}
-                      >
-                        {ACTION_LABELS[action]}
-                      </DropdownMenuItem>
-                    ))}
+                        <DropdownMenuItem
+                          key={action}
+                          onSelect={() => onSelectAction(action, call)}
+                          data-track-category={CALLS_ADMIN_TRACK}
+                          data-track-name={`Calls admin: ${ACTION_LABELS[action]}`}
+                          className={cn(
+                            action !== 'changeOwner' &&
+                              CONFIRM_COPY[action].danger &&
+                              'text-destructive focus:text-destructive',
+                          )}
+                        >
+                          {ACTION_LABELS[action]}
+                        </DropdownMenuItem>
+                      ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}

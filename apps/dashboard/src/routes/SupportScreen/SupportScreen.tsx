@@ -6724,40 +6724,40 @@ export const SupportTicketDetail = ({
                 )}
               {/* Disabled (LLM) */}
               {
-              // {emails.length > 0 && (
-              //   <Tooltip content='Summarize thread' side='left'>
-              //     <button
-              //       type='button'
-              //       aria-label='Summarize thread'
-              //       onClick={() => {
-              //         if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
-              //           setShowEmailSummary(true);
-              //           void fetchEmailSummary();
-              //         } else {
-              //           setShowEmailSummary(prev => !prev);
-              //         }
-              //       }}
-              //       className='absolute right-6 z-10 flex size-11 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105 active:scale-95'
-              //       style={{
-              //         bottom: composerOverlayHeight + 12,
-              //         background: 'linear-gradient(135deg, #F87171, #FFB3B3)',
-              //       }}
-              //       data-track-category='Support'
-              //       data-track-name='SummarizeEmailThread'
-              //     >
-              //       {emailSummaryState === 'loading' && (
-              //         <span className='absolute inset-0 rounded-full bg-[#F87171] opacity-40 animate-ping' />
-              //       )}
-              //       <Sparkles
-              //         size={20}
-              //         className={cn(
-              //           'relative',
-              //           emailSummaryState !== 'loading' && 'animate-pulse [animation-duration:3s]',
-              //         )}
-              //       />
-              //     </button>
-              //   </Tooltip>
-              // )}
+                // {emails.length > 0 && (
+                //   <Tooltip content='Summarize thread' side='left'>
+                //     <button
+                //       type='button'
+                //       aria-label='Summarize thread'
+                //       onClick={() => {
+                //         if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                //           setShowEmailSummary(true);
+                //           void fetchEmailSummary();
+                //         } else {
+                //           setShowEmailSummary(prev => !prev);
+                //         }
+                //       }}
+                //       className='absolute right-6 z-10 flex size-11 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105 active:scale-95'
+                //       style={{
+                //         bottom: composerOverlayHeight + 12,
+                //         background: 'linear-gradient(135deg, #F87171, #FFB3B3)',
+                //       }}
+                //       data-track-category='Support'
+                //       data-track-name='SummarizeEmailThread'
+                //     >
+                //       {emailSummaryState === 'loading' && (
+                //         <span className='absolute inset-0 rounded-full bg-[#F87171] opacity-40 animate-ping' />
+                //       )}
+                //       <Sparkles
+                //         size={20}
+                //         className={cn(
+                //           'relative',
+                //           emailSummaryState !== 'loading' && 'animate-pulse [animation-duration:3s]',
+                //         )}
+                //       />
+                //     </button>
+                //   </Tooltip>
+                // )}
               }
               {(emails.length > 0 || !!conversationId) && (
                 <Tooltip content='Add to canvas' side='left'>

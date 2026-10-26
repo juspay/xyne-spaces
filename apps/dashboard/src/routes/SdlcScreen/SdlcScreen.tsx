@@ -123,11 +123,11 @@ import {
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { TicketNounContext, type TicketNoun } from '../../contexts/TicketNounContext';
-import {
-  // Disabled (Claw)
-  // buildSdlcArtifactCreationPrompt,
-  // buildSdlcWikiPageCreationPrompt,
-} from './artifactCreationPrompt';
+// Disabled (Claw)
+// import {
+//   buildSdlcArtifactCreationPrompt,
+//   buildSdlcWikiPageCreationPrompt,
+// } from './artifactCreationPrompt';
 import {
   SdlcWikiEmpty,
   SdlcWikiExplorer,
@@ -4325,23 +4325,22 @@ export default function SdlcScreen(): ReactElement {
                   onOpenCanvas={openReleaseCanvas}
                   onConnectRepository={() => setHubDialog('manage')}
                 />
-              ) :
-              // Disabled (Claw)
-              // section === 'agents' ? (
-              //   <div className='min-h-0 flex-1 overflow-auto bg-background'>
-              //     <LibraryV2 channelId={channelId} />
-              //   </div>
-              // ) : section === 'environments' ? (
-              //   <div className='min-h-0 flex-1 overflow-hidden bg-background'>
-              //     <EnvironmentsView
-              //       key={channelId}
-              //       channelId={channelId}
-              //       hubRepoIds={channelRepos.map(repo => repo.id)}
-              //       onAddRepository={() => setHubDialog('manage')}
-              //     />
-              //   </div>
-              // ) : (
-              (
+              ) : (
+                // Disabled (Claw)
+                // section === 'agents' ? (
+                //   <div className='min-h-0 flex-1 overflow-auto bg-background'>
+                //     <LibraryV2 channelId={channelId} />
+                //   </div>
+                // ) : section === 'environments' ? (
+                //   <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                //     <EnvironmentsView
+                //       key={channelId}
+                //       channelId={channelId}
+                //       hubRepoIds={channelRepos.map(repo => repo.id)}
+                //       onAddRepository={() => setHubDialog('manage')}
+                //     />
+                //   </div>
+                // ) : (
                 <>
                   {onTrackPage && selectedTrack && (
                     // Under the name, its tabs: one per kind of thing it holds, as a

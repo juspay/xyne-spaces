@@ -338,9 +338,9 @@ export default function RecordingDetailV2Screen({
   } = useRecordingDefaultSummaryTemplate();
   // Shown next to the template selector once a template has been switched to often.
   const [
+    ,
     // Disabled (LLM)
     // defaultTemplateOffer,
-    ,
     setDefaultTemplateOffer,
   ] = useState<{
     templateId: string;
@@ -363,18 +363,18 @@ export default function RecordingDetailV2Screen({
     !storedSummaryTemplate;
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
   const [
+    ,
     // Disabled (LLM)
     // pendingSummaryTemplateId,
-    ,
     setPendingSummaryTemplateId,
   ] = useState<string | null>(null);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [awaitingSummary, setAwaitingSummary] = useState(false);
   // Summary Generation panel states
   const [
+    ,
     // Disabled (LLM)
     // summaryRunNonce,
-    ,
     setSummaryRunNonce,
   ] = useState(0);
   const [summaryFailed, setSummaryFailed] = useState(false);
@@ -1585,7 +1585,7 @@ export default function RecordingDetailV2Screen({
                   <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
                   Mark this moment
                 </Button>
-              // Disabled (LLM)
+              ) : // Disabled (LLM)
               // ) : canEdit && hasDetailedSummary ? (
               //   <DropdownMenu>
               //     <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
@@ -1657,7 +1657,7 @@ export default function RecordingDetailV2Screen({
               //       </DropdownMenuItem>
               //     </DropdownMenuContent>
               //   </DropdownMenu>
-              ) : null}
+              null}
             </div>
           </motion.div>
 
@@ -1872,22 +1872,20 @@ export default function RecordingDetailV2Screen({
                   )}
                   */}
                 </>
-              ) : (
-                // Disabled (LLM)
-                // <SummaryGenerationPanel
-                //   isAwaiting={showSummaryShimmer}
-                //   canGenerate={hasTranscript}
-                //   onGenerate={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
-                //   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
-                //   hasFailed={summaryFailedEffective}
-                //   generationRunId={summaryRunNonce}
-                //   initialProgress={getSummaryProgress(recordingId)}
-                //   initialStageIndex={getSummaryStage(recordingId)}
-                //   onProgressPause={handleSummaryProgressPause}
-                //   onReadTranscript={hasTranscript ? openTranscriptPanel : undefined}
-                // />
-                null
-              )}
+              ) : // Disabled (LLM)
+              // <SummaryGenerationPanel
+              //   isAwaiting={showSummaryShimmer}
+              //   canGenerate={hasTranscript}
+              //   onGenerate={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
+              //   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
+              //   hasFailed={summaryFailedEffective}
+              //   generationRunId={summaryRunNonce}
+              //   initialProgress={getSummaryProgress(recordingId)}
+              //   initialStageIndex={getSummaryStage(recordingId)}
+              //   onProgressPause={handleSummaryProgressPause}
+              //   onReadTranscript={hasTranscript ? openTranscriptPanel : undefined}
+              // />
+              null}
               {/* Shown to everyone with the recording. Each doc lives in the
                   exporting user's own Drive, so the list attributes the ones you
                   did not export — "ask them for access" is all Xyne can offer
