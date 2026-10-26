@@ -223,9 +223,6 @@ importers:
       '@napi-rs/canvas':
         specifier: ^0.1.88
         version: 0.1.100
-      '@opencode-ai/sdk':
-        specifier: ^1.1.42
-        version: 1.18.9
       '@openfeature/server-sdk':
         specifier: ^1.20.1
         version: 1.23.0(@openfeature/core@1.12.0)
@@ -5828,9 +5825,6 @@ packages:
 
   '@open-draft/deferred-promise@2.2.0':
     resolution: {integrity: sha512-CecwLWx3rhxVQF6V4bAgPS5t+So2sTbPgAzafKkVizyi7tlwpcFpdFqq+wqF2OwNBmqFuu6tOyouTuxgpMfzmA==}
-
-  '@opencode-ai/sdk@1.18.9':
-    resolution: {integrity: sha512-oDJSmsmiGW+3lNLmZYj3EpUkpiT3ITZBKffH3mrmu2KMJXlkxQ/Nvv7jqPffSM7o8lCdBZS/aCE+2GkA3/92gQ==}
 
   '@openfeature/core@1.12.0':
     resolution: {integrity: sha512-7PCPzyd1OC19begz30+CRknFB0ChtyaZUhk7YWrk+Bov1fpVw0HYkTXtoxxsvPfDZB9P9WsT7uixN+Z8f9+bcA==}
@@ -25109,10 +25103,6 @@ snapshots:
       '@octokit/openapi-types': 24.2.0
 
   '@open-draft/deferred-promise@2.2.0': {}
-
-  '@opencode-ai/sdk@1.18.9':
-    dependencies:
-      cross-spawn: 7.0.6
 
   '@openfeature/core@1.12.0': {}
 

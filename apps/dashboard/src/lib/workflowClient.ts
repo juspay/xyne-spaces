@@ -4,8 +4,8 @@ import { API_BASE_URL } from '../config';
 /**
  * HTTP client for the workflows surface, mounted at `/api/workflows-v2`.
  *
- * `-v2` because `/api/workflows` is the in-house engine's mount; this is the
- * `@xyne/workflow-sdk` one.
+ * `-v2` is historical: `/api/workflows` was the retired in-house engine's mount;
+ * this is the `@xyne/workflow-sdk` one.
  *
  * Auth is the session cookie, the same as every other dashboard API call
  * (`apiClient` sets `withCredentials: true`; the backend reads the token from the
