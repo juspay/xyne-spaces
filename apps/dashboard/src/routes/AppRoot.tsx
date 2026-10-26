@@ -42,13 +42,7 @@ import SecretsScreen from './SecretsScreen/SecretsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
-import SdlcScreen from './SdlcScreen/SdlcScreen';
-import SdlcWindow from './SdlcScreen/SdlcWindow';
-import { APP_BASE_PATH, isSdlcSurface } from '../config';
-import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
-import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
-import { SdlcFrameProvider } from './SdlcScreen/SdlcFrameContext';
-import { useSdlcFrameBridge } from './SdlcScreen/useSdlcFrameBridge';
+import { SdlcWindowHost } from './SdlcScreen/SdlcWindow';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -133,7 +127,7 @@ import { useRecordingVersion } from '../hooks/useRecordingVersion';
 // Disabled (Claw)
 // import { useWorkspacePageTools } from '../components/AIScreen/Workspace';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
-import { isElectronApp } from '../utils/electronApp';
+import { isElectronApp, isSdlcWindow } from '../utils/electronApp';
 import { confirmInterrupt, isInterruptible } from '../components/InterruptGuard/InterruptGuard';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
@@ -522,19 +516,13 @@ const AppRoot = (): ReactElement => {
   // );
   const isCalendarOpen = useSelector(xyneCalendarActor, state => state.matches('open'));
   const { isMobile } = usePlatform();
-  // No-op outside the SDLC bundle's framed instance.
-  useSdlcFrameBridge();
 
-  // The SDLC bundle wants the same chromeless layout as the browser panel.
-  const isInPanelWebview = useIsInPanelWebview() || isSdlcSurface;
+  // A window an SDLC item opened in wants the same chromeless layout as the browser panel.
+  const isInPanelWebview = useIsInPanelWebview() || isSdlcWindow();
 
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
-  // On an SDLC or Workflows route the iframe lane renders its own Ask AI panel, so
-  // the host must not also render one (that would double it).
-  const isSdlcRoute =
-    /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -596,19 +584,13 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
-  // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
-  // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen &&
-    !isMobile &&
-    !isOnAIChatExperiencePage &&
-    !isOnStreamsPage &&
-    !isSdlcRoute;
+    isXyneAIDrawerOpen && !isMobile && !isOnAIChatExperiencePage && !isOnStreamsPage;
 
-  const showCalendarPanel = isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel;
-  // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
-  // branch), so this is what decides whether that in-frame panel is showing.
-  const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
+  const showCalendarPanel = isCalendarOpen && !isMobile && !showXyneAIPanel;
+  // An SDLC window has no right panels, so its Ask AI sits beside the route content
+  // (see the isInPanelWebview branch).
+  const showWindowXyneAI = isSdlcWindow() && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const renderPanels: SidebarPanelDescriptor[] = [
@@ -790,71 +772,65 @@ const AppRoot = (): ReactElement => {
                 <SlashCommandArtifactSideEffectProvider>
                   {!isInPanelWebview && <SlashCommandArtifactBanner />}
                   <EditProvider>
-                    {/* Above the layout branches, so leaving /sdlc hides the frame
-                      rather than destroying it. */}
-                    <SdlcFrameProvider>
-                      {!isSdlcSurface && <SdlcFrameHost />}
-                      {shouldShowMobileHeader && externalId && (
-                        <MobileCallHeader
-                          participants={participants}
-                          activeCalls={activeCalls}
-                          externalId={externalId}
-                          isMicEnabled={isMicEnabled}
-                          onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
-                          onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
-                          onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
-                        />
-                      )}
-                      {isInPanelWebview ? (
-                        // Inside the browser-panel webview / SDLC lane: only the route
-                        // content, no GlobalTopBar / AppSidebar / right panels /
-                        // ChatDirectory. The Ask AI panel joins it as a sibling.
-                        //
-                        // The group is rendered whether or not Ask AI is open, and only
-                        // the assistant's own Panel is conditional. Swapping between two
-                        // different layouts moved <Outlet /> to another position in the
-                        // tree, so React unmounted the whole route and built it again —
-                        // opening Ask AI rebuilt the canvas editor and its Y-Sweet
-                        // connection, and the reader lost their place in the document.
-                        <div className='flex h-screen flex-col'>
-                          <ResizableGroup
-                            orientation='horizontal'
-                            className='flex-1 no-scrollbar overflow-auto'
-                            autoSaveId='sdlc-frame-xyneai'
-                            // The assistant's Panel is conditional, so the group
-                            // has to say which panels it is rendering — without
-                            // it the saved two-panel layout is restored over one
-                            // panel, and the split comes back wrong after Ask AI
-                            // has been closed and opened again.
-                            panelIds={
-                              showSdlcFrameXyneAI
-                                ? ['sdlc-frame-content', 'sdlc-frame-xyneai']
-                                : ['sdlc-frame-content']
-                            }
-                          >
-                            {/* defaultSize is read once, on mount: with the
+                    {shouldShowMobileHeader && externalId && (
+                      <MobileCallHeader
+                        participants={participants}
+                        activeCalls={activeCalls}
+                        externalId={externalId}
+                        isMicEnabled={isMicEnabled}
+                        onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
+                        onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
+                        onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+                      />
+                    )}
+                    {isInPanelWebview ? (
+                      // Inside the browser-panel webview / an SDLC window: only the route
+                      // content, no GlobalTopBar / AppSidebar / right panels /
+                      // ChatDirectory. The Ask AI panel joins it as a sibling.
+                      //
+                      // The group is rendered whether or not Ask AI is open, and only
+                      // the assistant's own Panel is conditional. Swapping between two
+                      // different layouts moved <Outlet /> to another position in the
+                      // tree, so React unmounted the whole route and built it again —
+                      // opening Ask AI rebuilt the canvas editor and its Y-Sweet
+                      // connection, and the reader lost their place in the document.
+                      <div className='flex h-screen flex-col'>
+                        <ResizableGroup
+                          orientation='horizontal'
+                          className='flex-1 no-scrollbar overflow-auto'
+                          autoSaveId='chromeless-xyneai'
+                          // The assistant's Panel is conditional, so the group
+                          // has to say which panels it is rendering — without
+                          // it the saved two-panel layout is restored over one
+                          // panel, and the split comes back wrong after Ask AI
+                          // has been closed and opened again.
+                          panelIds={
+                            showWindowXyneAI
+                              ? ['chromeless-content', 'chromeless-xyneai']
+                              : ['chromeless-content']
+                          }
+                        >
+                          {/* defaultSize is read once, on mount: with the
                                 group now always rendered it must describe the
                                 whole width, and the split comes from the saved
                                 layout the ids above select. */}
-                            <Panel id='sdlc-frame-content' defaultSize='100%'>
-                              <main className='h-full flex-1 no-scrollbar overflow-auto'>
-                                <EditWarningModal />
-                                <Outlet />
-                              </main>
-                            </Panel>
-                            {/* Disabled (Claw) */}
-                            {/* {showSdlcFrameXyneAI && (
+                          <Panel id='chromeless-content' defaultSize='100%'>
+                            <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                              <EditWarningModal />
+                              <Outlet />
+                            </main>
+                          </Panel>
+                          {/* Disabled (Claw) */}
+                          {/* {showWindowXyneAI && (
                               <>
                                 <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
                                   <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
                                 </Separator>
                                 <Panel
-                                  id='sdlc-frame-xyneai'
+                                id='chromeless-xyneai'
                                   defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
                                   maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                                  minSize={
-                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
-                                  }
+                                minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
                                 >
                                   <XyneAISidebarZIndexShell>
                                     <XyneAISidebar
@@ -883,146 +859,145 @@ const AppRoot = (): ReactElement => {
                                 </Panel>
                               </>
                             )} */}
-                          </ResizableGroup>
-                        </div>
-                      ) : isOnboarding ? (
-                        // Onboarding screen - full width without sidebar
-                        <main
-                          className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                        >
-                          <EditWarningModal />
-                          <Outlet />
-                        </main>
-                      ) : (
-                        <AppSidebarHost
-                          panels={renderPanels}
-                          mainPanelRef={browserPanelLeftRef}
-                          forceRender={
-                            webviewState === 'closed' ||
-                            webviewState === 'idle' ||
-                            browserPanelState === 'open'
-                          }
-                          fallback={
-                            <div className='flex flex-col h-screen'>
-                              <ResizableGroup
-                                orientation='horizontal'
-                                className='flex-1 overflow-hidden'
-                                autoSaveId='app-root'
-                              >
-                                <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
-                                  <div
-                                    className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                                  >
-                                    <AppSidebar />
-                                    <main
-                                      className='flex-1 no-scrollbar overflow-auto'
-                                      // Cmd+K grows into this box as it expands to full page.
-                                      data-cmdk-full-page
-                                    >
-                                      <EditWarningModal />
-                                      <FullPageKeepAliveOutlet />
-                                    </main>
-                                    <SiteMap />
-                                  </div>
-                                </Panel>
-                                <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                  <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                                </Separator>
-                                <Panel
-                                  id='app-root-webview'
-                                  panelRef={rightPanelRef}
-                                  defaultSize='50%'
-                                >
-                                  <WebView />
-                                </Panel>
-                              </ResizableGroup>
-                            </div>
-                          }
-                        >
-                          <div
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          >
-                            <AppSidebar />
-                            <main
-                              className='flex-1 no-scrollbar overflow-auto'
-                              // Cmd+K grows into this box when it expands to full-page search.
-                              data-cmdk-full-page
+                        </ResizableGroup>
+                      </div>
+                    ) : isOnboarding ? (
+                      // Onboarding screen - full width without sidebar
+                      <main
+                        className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                      >
+                        <EditWarningModal />
+                        <Outlet />
+                      </main>
+                    ) : (
+                      <AppSidebarHost
+                        panels={renderPanels}
+                        mainPanelRef={browserPanelLeftRef}
+                        forceRender={
+                          webviewState === 'closed' ||
+                          webviewState === 'idle' ||
+                          browserPanelState === 'open'
+                        }
+                        fallback={
+                          <div className='flex flex-col h-screen'>
+                            <ResizableGroup
+                              orientation='horizontal'
+                              className='flex-1 overflow-hidden'
+                              autoSaveId='app-root'
                             >
-                              <EditWarningModal />
-                              <FullPageKeepAliveOutlet />
-                            </main>
-                            <SiteMap />
+                              <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
+                                <div
+                                  className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                                >
+                                  <AppSidebar />
+                                  <main
+                                    className='flex-1 no-scrollbar overflow-auto'
+                                    // Cmd+K grows into this box as it expands to full page.
+                                    data-cmdk-full-page
+                                  >
+                                    <EditWarningModal />
+                                    <FullPageKeepAliveOutlet />
+                                  </main>
+                                  <SiteMap />
+                                </div>
+                              </Panel>
+                              <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                              </Separator>
+                              <Panel
+                                id='app-root-webview'
+                                panelRef={rightPanelRef}
+                                defaultSize='50%'
+                              >
+                                <WebView />
+                              </Panel>
+                            </ResizableGroup>
                           </div>
-                        </AppSidebarHost>
-                      )}
-                      {/* Global overlays and IPC handlers — skipped in the panel
+                        }
+                      >
+                        <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
+                          <AppSidebar />
+                          <main
+                            className='flex-1 no-scrollbar overflow-auto'
+                            // Cmd+K grows into this box when it expands to full-page search.
+                            data-cmdk-full-page
+                          >
+                            <EditWarningModal />
+                            <FullPageKeepAliveOutlet />
+                          </main>
+                          <SiteMap />
+                        </div>
+                      </AppSidebarHost>
+                    )}
+                    {/* Global overlays and IPC handlers — skipped in the panel
                     webview (we don't want nested CMDK, nested browser panel,
                     duplicated call UIs, etc. inside the embedded view).
                     AttachmentGalleryModal stays because it's triggered by
                     attachments inside the conversation itself. */}
-                      {!isInPanelWebview && (
-                        <>
-                          <IncomingCallModal />
-                          {import.meta.env.DEV &&
-                            new URLSearchParams(window.location.search).has('devIncomingCall') && (
-                              <IncomingCallDevHarness />
-                            )}
-                          <GlobalCallOverlay />
-                          {recordingVersion === 'v2' ? (
-                            <NoteTakerOverlayHost />
-                          ) : (
-                            <RecordingOverlay />
+                    {!isInPanelWebview && (
+                      <>
+                        <IncomingCallModal />
+                        {import.meta.env.DEV &&
+                          new URLSearchParams(window.location.search).has('devIncomingCall') && (
+                            <IncomingCallDevHarness />
                           )}
-                          <RecordingCameraBubble />
-                          <ScreenPickerHost />
-                          <GlobalUploadProgress />
-                          <NotificationHandler />
-                          <EphemeralFlowHost />
-                          <ElectronBadgeSync />
-                          {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
-                          <SosAlertBanner />
-                          <CallFromRecentsHandler />
-                          <CloudAgentFloatingHost />
-                          <BrowserPanelHandler />
-                          {/* The browser's pages: here, where they never move, so
+                        <GlobalCallOverlay />
+                        {recordingVersion === 'v2' ? (
+                          <NoteTakerOverlayHost />
+                        ) : (
+                          <RecordingOverlay />
+                        )}
+                        <RecordingCameraBubble />
+                        <ScreenPickerHost />
+                        <GlobalUploadProgress />
+                        <NotificationHandler />
+                        <EphemeralFlowHost />
+                        <ElectronBadgeSync />
+                        {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
+                        <SosAlertBanner />
+                        <CallFromRecentsHandler />
+                        <CloudAgentFloatingHost />
+                        <BrowserPanelHandler />
+                        {/* The browser's pages: here, where they never move, so
                               docking or undocking the browser doesn't reload them. */}
-                          <BrowserPageLayer />
-                          <GlobalCommandMenu
-                            // Disabled (Claw)
-                            // aiOverview
-                            ticketScreenScope
-                            fullPageSearch
-                          />
-                          <ShortcutsHelpModal
-                            isOpen={isShortcutsModalOpen}
-                            onClose={() => setIsShortcutsModalOpen(false)}
-                          />
-                        </>
-                      )}
-                      <AttachmentGalleryModal />
-                      <ThreadCitationModal />
-                      <TranscriptCitationModal />
-                      <AttachmentCitationPreview />
-                      <ErrorReportModal
-                        isOpen={isErrorReportOpen}
-                        onClose={() => setIsErrorReportOpen(false)}
-                        pendingRecording={pendingRecording}
-                        pendingRecordingFilePath={pendingRecordingFilePath}
-                        onSourceSelected={(source: ScreenSource, withMic: boolean) =>
-                          void startRecording(source, withMic)
-                        }
-                        onSubmitSuccess={() => {
-                          setPendingRecording(null);
-                          setPendingRecordingFilePath(null);
-                        }}
-                        onDiscard={() => {
-                          setPendingRecording(null);
-                          setPendingRecordingFilePath(null);
-                        }}
-                      />
+                        <BrowserPageLayer />
+                        <GlobalCommandMenu
+                          // Disabled (Claw)
+                          // aiOverview
+                          ticketScreenScope
+                          fullPageSearch
+                        />
+                        <ShortcutsHelpModal
+                          isOpen={isShortcutsModalOpen}
+                          onClose={() => setIsShortcutsModalOpen(false)}
+                        />
+                      </>
+                    )}
+                    {isSdlcWindow() && <SdlcWindowHost />}
+                    <AttachmentGalleryModal />
+                    <ThreadCitationModal />
+                    <TranscriptCitationModal />
+                    <AttachmentCitationPreview />
+                    <ErrorReportModal
+                      isOpen={isErrorReportOpen}
+                      onClose={() => setIsErrorReportOpen(false)}
+                      pendingRecording={pendingRecording}
+                      pendingRecordingFilePath={pendingRecordingFilePath}
+                      onSourceSelected={(source: ScreenSource, withMic: boolean) =>
+                        void startRecording(source, withMic)
+                      }
+                      onSubmitSuccess={() => {
+                        setPendingRecording(null);
+                        setPendingRecordingFilePath(null);
+                      }}
+                      onDiscard={() => {
+                        setPendingRecording(null);
+                        setPendingRecordingFilePath(null);
+                      }}
+                    />
 
-                      {/* Disabled (Claw) */}
-                      {/* {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
+                    {/* Disabled (Claw) */}
+                    {/* {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
                         <div className='hidden' aria-hidden='true'>
                           <XyneAISidebar
                             channelId={xyneAIChannelId}
@@ -1049,9 +1024,9 @@ const AppRoot = (): ReactElement => {
                           />
                         </div>
                       )} */}
-                      {/* XyneAI Mobile Drawer */}
-                      {/* Disabled (Claw) */}
-                      {/* {isMobile &&
+                    {/* XyneAI Mobile Drawer */}
+                    {/* Disabled (Claw) */}
+                    {/* {isMobile &&
                         !isInPanelWebview &&
                         !isOnAIChatExperiencePage &&
                         !isOnStreamsPage && (
@@ -1089,7 +1064,6 @@ const AppRoot = (): ReactElement => {
                             />
                           </Drawer>
                         )} */}
-                    </SdlcFrameProvider>
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
               </AIOnboardingProvider>
@@ -1101,1183 +1075,1109 @@ const AppRoot = (): ReactElement => {
   );
 };
 
-/** Real screen in the SDLC bundle; the framed placeholder in the main one. */
-const SdlcRouteElement = (): ReactElement =>
-  isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
-
-/** A ticket page, but still inside the hub's frame so its history stays in one router. */
-const SdlcTicketRouteElement = (): ReactElement =>
-  isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
-
-/** Real screen in the lane bundle; the framed placeholder in the main one, as for SDLC. */
-const WorkflowsRouteElement = (): ReactElement =>
-  isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
-
-export const router = createBrowserRouter(
-  [
-    // Disabled (Claw)
-    // {
-    // element: <ProtectedRoute />,
-    // errorElement: <RouterErrorFallback />,
-    // children: [
-    // {
-    // path: '/newWindow/claw',
-    // element: <ClawOverlay />,
-    // },
-    // ],
-    // },
-    {
-      element: <SplashScreen />,
-      errorElement: <RouterErrorFallback />,
-      children: [
-        {
-          path: '/',
-          element: <ProtectedRoute />,
-          children: [
-            {
-              index: true,
-              element: <WorkspaceRedirect />,
-            },
-            {
-              path: ':workspaceId',
-              element: <AppRoot />,
-              children: [
-                {
-                  index: true,
-                  element: <HomeScreen />,
-                },
-                // Disabled (Claw)
-                // {
-                // // A saved artifact app on its own, opened from the toolbar.
-                // // Outside the /ai subtree on purpose: a workspace that has
-                // // disabled Xyne AI from the rail can still keep apps there.
-                // path: 'app/:appId',
-                // element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
-                // },
-                {
-                  // Standalone migration/insights URLs from before these were
-                  // folded into /migrations or removed; bookmarks still land here.
-                  path: 'slack-migration',
-                  element: <Navigate to='../migrations/slack' replace />,
-                },
-                {
-                  path: 'jira-migration',
-                  element: <Navigate to='../migrations/jira' replace />,
-                },
-                {
-                  path: 'migration/whatsapp',
-                  element: <Navigate to='../migrations/whatsapp' replace />,
-                },
-                {
-                  path: 'product-insights',
-                  element: <Navigate to='..' replace />,
-                },
-                // Disabled (Claw)
-                // {
-                // path: 'ai',
-                // element: (
-                // <ToolbarProtectedRoute path='/ai'>
-                // <Outlet />
-                // </ToolbarProtectedRoute>
-                // ),
-                // children: [
-                // { index: true, element: <Navigate to='chat/new' replace /> },
-                // // ONE route, with `new` as an ordinary value of :sessionId.
-                // //
-                // // Declaring `chat/new` separately looks harmless but makes two
-                // // DISTINCT routes out of the same component, so moving between
-                // // them unmounts and remounts AIScreen — wiping activeSessionId,
-                // // chatKey and showChatView. The remount re-seeds from
-                // // sessionStorage, which can still hold the previous thread, so
-                // // the URL effect navigates back to it and remounts again: the
-                // // screen visibly bounces between routes on every thread switch.
-                // // With a single route, changing the param re-renders in place.
-                // { path: 'chat/:sessionId', element: <AIScreen /> },
-                // { path: 'daily-brief', element: <AIDailyBriefScreen /> },
-                // { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
-                // { path: 'library', element: <AILibraryScreen /> },
-                // {
-                // path: 'environments',
-                // element: (
-                // <RequireClawAdmin orSdlcAdmin>
-                // <AIEnvironmentsScreen />
-                // </RequireClawAdmin>
-                // ),
-                // },
-                // { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
-                // { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
-                // {
-                // path: 'admin',
-                // element: (
-                // <RequireClawAdmin>
-                // <AIAdminScreen />
-                // </RequireClawAdmin>
-                // ),
-                // },
-                // { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
-                // { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
-                // { path: 'library/skill/create', element: <AISkillCreateScreen /> },
-                // { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
-                // { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
-                // { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
-                // { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
-                // { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
-                // { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
-                // { path: 'library/developers/:tool', element: <AIDeveloperToolDetailScreen /> },
-                // { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
-                // {
-                // path: 'knowledge',
-                // element: <AIKnowledgeScreen />,
-                // children: [
-                // { index: true, element: <KnowledgeBaseV2Screen /> },
-                // {
-                // // Mirrors /knowledge-base's own file-viewer route so
-                // // opening a file from here stays under /ai/knowledge
-                // // instead of hopping to the standalone KB screen.
-                // path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
-                // element: <FileViewerLayout />,
-                // },
-                // ],
-                // },
-                // {
-                // path: 'organization',
-                // element: (
-                // <RequireOrgManager>
-                // <AIOrganizationScreen />
-                // </RequireOrgManager>
-                // ),
-                // },
-                // { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
-                // {
-                // element: <AISectionLayout />,
-                // children: [
-                // { path: 'metrics', element: <ClawMetricsScreen /> },
-                // { path: 'settings', element: <ClawSettingsScreen /> },
-                // ],
-                // },
-                // ],
-                // },
-                {
-                  path: 'onboarding',
-                  element: <QuestionnaireScreen />,
-                },
-                {
-                  // Dev-only surface for the on-device intent classifier. Bypasses the
-                  // public-channel eligibility gate, so it is intentionally not linked
-                  // from product UI. See docs/ON_DEVICE_INTENT.md
-                  path: 'intent-playground',
-                  element: <IntentPlaygroundScreen />,
-                },
-                {
-                  path: 'rca',
-                  element: <RCAListScreen />,
-                },
-                {
-                  path: 'rca/:rcaId',
-                  element: <RCADetailScreen />,
-                },
-                {
-                  path: 'streams',
-                  element: <StreamsScreen />,
-                },
-                {
-                  path: 'chat',
-                  element: <ChatScreen />,
-                  children: [
-                    // Directory routes (nested under dir)
-                    {
-                      path: 'dir',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/dir'>
-                          <Outlet />
-                        </ToolbarProtectedRoute>
-                      ),
-                      children: [
-                        {
-                          index: true,
-                          element: <ChatRedirect />,
-                        },
-                        // Canvas from directory (must come before :channelId)
-                        {
-                          path: 'canvas',
-                          element: <CanvasScreen />,
-                        },
-                        {
-                          path: 'canvas/:canvasId',
-                          element: <CanvasScreen />,
-                        },
-                        // Threads (must come before :channelId)
-                        {
-                          path: 'threads',
-                          element: <UserThreads />,
-                          children: [
-                            { index: true, element: null },
-                            {
-                              path: ':channelId/:conversationId',
-                              element: <ThreadMessages />,
-                            },
-                          ],
-                        },
-                        // Unreads inbox (must come before :channelId)
-                        {
-                          path: 'unreads',
-                          element: <UnreadsInbox />,
-                        },
-                        // Disabled (LLM)
-                        // // Recap (must come before :channelId)
-                        // {
-                        // path: 'recap',
-                        // children: [
-                        // {
-                        // index: true,
-                        // element: <RecapPanel />,
-                        // },
-                        // {
-                        // path: ':channelId',
-                        // element: <RecapPanel />,
-                        // children: [
-                        // {
-                        // path: ':conversationId',
-                        // element: <ThreadMessages />,
-                        // },
-                        // ],
-                        // },
-                        // ],
-                        // },
-                        // Disabled (LLM)
-                        // // Radar (must come before :channelId). The route stays
-                        // // registered because the router is built at module scope;
-                        // // the CAC rollout gate lives inside RadarPanel itself.
-                        // {
-                        // path: 'radar',
-                        // children: [
-                        // {
-                        // index: true,
-                        // element: <RadarPanel />,
-                        // },
-                        // {
-                        // path: ':channelId',
-                        // element: <RadarPanel />,
-                        // children: [
-                        // {
-                        // path: ':conversationId',
-                        // element: <ThreadMessages />,
-                        // },
-                        // ],
-                        // },
-                        // ],
-                        // },
-                        // My Tickets (must come before :channelId)
-                        {
-                          path: 'my-tickets',
-                          element: <MyTicketsScreen />,
-                        },
-                        // Disabled (Claw)
-                        // // An artifact app added to the Inbox menubar, shown in
-                        // // the chat panel with the directory still alongside.
-                        // {
-                        // path: 'app/:appId',
-                        // element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
-                        // },
-                        // Channel routes (must come after specific routes)
-                        {
-                          path: ':channelId',
-                          element: <ChatView />,
-                          children: [
-                            {
-                              index: true,
-                              element: (
-                                <div className='flex items-center justify-center h-full text-muted-foreground'>
-                                  Select a conversation to view messages
-                                </div>
-                              ),
-                            },
-                            {
-                              path: 'group/:groupId',
-                              element: <UserGroupSidePanel />,
-                            },
-                            {
-                              path: ':conversationId',
-                              element: <ThreadMessages />,
-                            },
-                            {
-                              path: ':conversationId/profile/:userId',
-                              element: <ProfileSidebar />,
-                            },
-                            {
-                              path: ':conversationId/:ticketId',
-                              element: <ThreadMessages />,
-                            },
-                            {
-                              path: 'profile/:userId',
-                              element: <ProfileSidebar />,
-                            },
-                            {
-                              path: 'tickets/:ticketId',
-                              element: <TicketView />,
-                            },
-                            {
-                              path: 'canvas',
-                              element: <CanvasScreen />,
-                            },
-                            {
-                              path: 'canvas/:canvasId',
-                              element: <CanvasScreen />,
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                    // DM routes (full screen with DM list sidebar)
-                    {
-                      path: 'dm',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/dm'>
-                          <DmsPage />
-                        </ToolbarProtectedRoute>
-                      ),
-                      children: [
-                        { index: true, element: null },
-                        { path: 'compose', element: <KeyedComposeDmPanel /> },
-                        ...sharedChatRoutes,
-                      ],
-                    },
-                    // Bookmarks (full screen with bookmarks list sidebar)
-                    {
-                      path: 'bookmarks',
-                      element: <BookmarksPanel />,
-                      children: [{ index: true, element: null }, ...sharedChatRoutes],
-                    },
-                    // Drafts & Sent combined page
-                    {
-                      path: 'drafts-sent',
-                      element: <DraftsAndSentPage />,
-                      children: [{ index: true, element: null }, ...sharedChatRoutes],
-                    },
-                    // Redirect old drafts route to new combined page
-                    {
-                      path: 'drafts',
-                      element: <Navigate to='../drafts-sent?tab=drafts' replace />,
-                      children: [{ index: true, element: null }, ...sharedChatRoutes],
-                    },
-                    // Redirect old sent route to new combined page
-                    {
-                      path: 'sent',
-                      element: <Navigate to='../drafts-sent?tab=sent' replace />,
-                      children: [{ index: true, element: null }, ...sharedChatRoutes],
-                    },
-                    // Redirect old scheduled route to new combined page
-                    {
-                      path: 'scheduled',
-                      element: <Navigate to='../drafts-sent?tab=scheduled' replace />,
-                      children: [{ index: true, element: null }, ...sharedChatRoutes],
-                    },
-                    // Canvas (full screen with 2-panel layout on desktop)
-                    {
-                      path: 'canvas',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/canvas'>
-                          <CanvasPanel />
-                        </ToolbarProtectedRoute>
-                      ),
-                      children: [
-                        {
-                          index: true,
-                          element: null,
-                        },
-                        {
-                          path: ':canvasId',
-                          element: <CanvasScreen />,
-                        },
-                      ],
-                    },
-                    // Activity (full screen with activity list sidebar)
-                    {
-                      path: 'activity',
-                      element: (
-                        <ToolbarProtectedRoute path='/chat/activity'>
-                          <ActivityListView />
-                        </ToolbarProtectedRoute>
-                      ),
-                      children: [
-                        { index: true, element: null },
-                        // Desk/Support tickets opened from the Activity list render
-                        // here so the list stays mounted (instead of redirecting to
-                        // the full /support inbox). Static `ticket` segment is matched
-                        // ahead of the shared `:channelId` route.
-                        { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
-                        { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
-                        // Recordings opened from the Activity list render here for the
-                        // same reason — the list stays mounted on the left instead of
-                        // the page navigating away to the standalone /recordings/:id.
-                        {
-                          path: 'recording/:recordingId',
-                          element: <RecordingDetailRoute embedded />,
-                        },
-                        { path: 'calendar', element: <ActivityCalendarWeekView /> },
-                        ...sharedChatRoutes,
-                      ],
-                    },
-                    // Search (full screen)
-                    {
-                      path: 'search',
-                      element: <Search />,
-                    },
-                    // Catch-all redirect for old routes: /chat/:channelId/* -> /chat/dir/:channelId/*
-                    {
-                      path: '*',
-                      element: <DirectoryRedirect />,
-                    },
-                  ],
-                },
-                {
-                  path: 'search-results',
-                  element: <SearchResults />,
-                },
-                {
-                  // Splat: @xyne/workflow-ui owns every screen below /workflows and
-                  // routes between them itself, handing the sub-path back via onNavigate.
-                  path: 'workflows/*',
-                  element: (
-                    <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
-                      <WorkflowsRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'ticket-reports',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
-                      <TicketReportsScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'agents',
-                  element: (
-                    <ResourceProtectedRoute resourceName='AGENTS'>
-                      <AgentsScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'knowledge-base',
-                  element: (
-                    <ToolbarProtectedRoute path='/knowledge-base'>
-                      <KnowledgeBaseV2Layout />
-                    </ToolbarProtectedRoute>
-                  ),
-                  children: [
-                    {
-                      index: true,
-                      element: <KnowledgeBaseV2Screen />,
-                    },
-                    {
-                      // The file viewer still reads projectId / channelId /
-                      // collectionId / folderId from the URL.
-                      path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
-                      element: <FileViewerLayout />,
-                    },
-                    // Back-compat shims: pre-port URLs (path-only nesting) get
-                    // redirected to the new ?cl=&parent= layout so browser
-                    // history entries don't 404 after the route change.
-                    { path: ':projectId', element: <LegacyKbRedirect /> },
-                    { path: ':projectId/:channelId', element: <LegacyKbRedirect /> },
-                    {
-                      path: ':projectId/:channelId/:collectionId',
-                      element: <LegacyKbRedirect />,
-                    },
-                    {
-                      path: ':projectId/:channelId/:collectionId/:folderId',
-                      element: <LegacyKbRedirect />,
-                    },
-                  ],
-                },
-                {
-                  // The Context screen was removed; old links land on the workspace home.
-                  path: 'memory',
-                  element: <Navigate to='..' replace />,
-                },
-                {
-                  path: 'analytics',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ANALYTICS'>
-                      <AnalyticsScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'secrets',
-                  element: (
-                    <ResourceProtectedRoute resourceName='SECRETS'>
-                      <SecretsScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'projects',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKETS' minAccess='READ'>
-                      <ProjectsScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                  children: [
-                    {
-                      index: true,
-                      element: <MyTicketsScreen />,
-                    },
-                    {
-                      path: 'views',
-                      element: <Navigate to='/projects' replace />,
-                    },
-                    {
-                      path: 'views/new',
-                      element: <ProjectViewBuilder />,
-                    },
-                    {
-                      path: 'views/:viewId',
-                      element: <ProjectViewBuilder />,
-                    },
-                    {
-                      path: ':projectId',
-                      element: <KanbanBoardScreen />,
-                    },
-                    {
-                      path: ':projectId/:boardId',
-                      element: <KanbanBoardScreen />,
-                    },
-                    {
-                      path: ':projectId/:boardId/:ticketId',
-                      element: <TicketView />,
-                    },
-                  ],
-                },
-                {
-                  path: 'sdlc',
-                  element: (
-                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
-                      <SdlcRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'sdlc/:channelId',
-                  element: (
-                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
-                      <SdlcRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'sdlc/:channelId/:section',
-                  element: (
-                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
-                      <SdlcRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'sdlc/:channelId/workflows/*',
-                  element: (
-                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
-                      <SdlcRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'sdlc/:channelId/tickets/:ticketId',
-                  element: (
-                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
-                      <SdlcTicketRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                // Disabled (LLM)
-                // {
-                // path: 'team-intelligence',
-                // element: (
-                // <ResourceProtectedRoute resourceName='TEAM-INTELLIGENCE-DASHBOARD'>
-                // <TeamIntelligenceScreen />
-                // </ResourceProtectedRoute>
-                // ),
-                // children: [
-                // {
-                // index: true,
-                // element: <TeamIntelligenceOrgScreen />,
-                // },
-                // {
-                // path: 'team/:teamId',
-                // element: <TeamIntelligenceTeamScreen />,
-                // },
-                // {
-                // path: 'member/:memberEmail',
-                // element: <TeamIntelligenceMemberScreen />,
-                // },
-                // ],
-                // },
-                {
-                  path: 'user-groups',
-                  element: <LegacyOrganisationsRedirect section='user-groups' />,
-                },
-                {
-                  path: 'listProjects',
-                  element: (
-                    <ResourceProtectedRoute resourceName='LISTPROJECTS'>
-                      <ProjectsListView />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'releaseManager',
-                  element: (
-                    <ToolbarProtectedRoute path='/releaseManager'>
-                      <ReleaseManagerView />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'listProjects/:projectId',
-                  element: <ProjectDetailScreen />,
-                },
-                {
-                  path: 'listProjects/:projectId/releases/:releaseTicketId',
-                  element: <ReleaseDetailScreen />,
-                },
-                {
-                  path: 'calls',
-                  element: (
-                    <ToolbarProtectedRoute path='/calls'>
-                      <CallsRoute />
-                    </ToolbarProtectedRoute>
-                  ),
-                  children: [
-                    {
-                      path: ':callId/detail',
-                      element: <CallDetailScreen />,
-                    },
-                  ],
-                },
-                {
-                  // Deliberately not ResourceProtectedRoute: non-SCRIBE users manage their own calls here.
-                  path: 'calls/admin',
-                  element: (
-                    <ToolbarProtectedRoute path='/calls'>
-                      <CallsAdminScreen />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'calls/:callId/:callType',
-                  element: <CallPage />,
-                },
-                {
-                  path: 'call/:callId',
-                  element: <CallRouteHandler />,
-                },
-                {
-                  path: 'recordings',
-                  element: (
-                    <ToolbarProtectedRoute path='/recordings'>
-                      <RecordingsRoute />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'recordings/:recordingId',
-                  element: <RecordingDetailRoute />,
-                },
-                {
-                  path: 'user-groups/:userGroupId/assignment-config',
-                  element: <LegacyOrganisationsRedirect section='user-groups' />,
-                },
-                {
-                  path: 'analytics-dashboard',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ANALYTICS'>
-                      <DashboardCreation />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'analytics-dashboard/:dashboardId',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ANALYTICS'>
-                      <QueryDashboardScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'dashboards',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ANALYTICS'>
-                      <DynamicDashboardPanel />
-                    </ResourceProtectedRoute>
-                  ),
-                  children: [
-                    { index: true, element: null },
-                    {
-                      path: ':dashboardId',
-                      element: <DynamicDashboardScreen />,
-                    },
-                  ],
-                },
-                {
-                  path: 'support',
-                  element: (
-                    <ResourceProtectedRoute resourceName='SUPPORT' minAccess='READ'>
-                      <SupportListRestore>
-                        <SaveRoute
-                          keyword='support'
-                          stripSearchParams={['settings', 'openSettings']}
-                          preserveSearchParams={[
-                            'emailConnected',
-                            'emailError',
-                            'channelEmailMailboxConnected',
-                            'deskIntegrations',
-                            'workspaceMailboxConnected',
-                            'email',
-                            'provider',
-                          ]}
-                          redirectOnlyAt={/^\/[^/]+\/support\/?$/}
-                        >
-                          <SupportScreen />
-                        </SaveRoute>
-                      </SupportListRestore>
-                    </ResourceProtectedRoute>
-                  ),
-                  children: [
-                    {
-                      path: ':channelId',
-                      element: <Outlet />,
-                      children: [
-                        {
-                          path: ':ticketId',
-                          element: <Outlet />,
-                          children: [{ path: ':canvasId', element: <Outlet /> }],
-                        },
-                      ],
-                    },
-                  ],
-                },
-                {
-                  path: 'browser',
-                  element: (
-                    <ToolbarProtectedRoute path='/browser'>
-                      <BrowserTabsScreen />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'workspace-management',
-                  element: <LegacyOrganisationsRedirect section={legacyWorkspaceTab} />,
-                },
-                {
-                  // One sidebar module for workspace settings, members, user
-                  // groups, roles and organisations — see OrganisationsModule.
-                  path: 'organisations',
-                  element: <OrganisationsModuleScreen />,
-                  children: [
-                    { index: true, element: <OrganisationsIndexRedirect /> },
-                    {
-                      path: 'general',
-                      element: (
-                        <OrganisationsSectionGuard section='general'>
-                          <OrganisationsPage>
-                            <GeneralTab isActive />
-                          </OrganisationsPage>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'members',
-                      element: (
-                        <OrganisationsSectionGuard section='members'>
-                          <OrganisationsPage wide>
-                            <MembersTab />
-                          </OrganisationsPage>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'invitations',
-                      element: (
-                        <OrganisationsSectionGuard section='invitations'>
-                          <OrganisationsPage>
-                            <InvitationsTab isActive />
-                          </OrganisationsPage>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'guests',
-                      element: (
-                        <OrganisationsSectionGuard section='guests'>
-                          <OrganisationsPage>
-                            <GuestUsersTab isActive />
-                          </OrganisationsPage>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'repository-credentials',
-                      element: (
-                        <OrganisationsSectionGuard section='repository-credentials'>
-                          <OrganisationsPage>
-                            <RepositoryCredentialsTab isActive />
-                          </OrganisationsPage>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'toolbar',
-                      element: (
-                        <OrganisationsSectionGuard section='toolbar'>
-                          <OrganisationsPage>
-                            <ToolbarTab isActive />
-                          </OrganisationsPage>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'user-groups',
-                      element: (
-                        <OrganisationsSectionGuard section='user-groups'>
-                          <UserGroupsScreen />
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'user-groups/:userGroupId/assignment-config',
-                      // The inner guard also checks a creator owns *this* group.
-                      element: (
-                        <OrganisationsSectionGuard section='user-groups'>
-                          <ResourceProtectedRoute
-                            resourceName='USER-GROUPS'
-                            minAccess='WRITE'
-                            allowUserGroupCreator
-                          >
-                            <AssignmentConfigWrapper />
-                          </ResourceProtectedRoute>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'roles',
-                      element: (
-                        <OrganisationsSectionGuard section='roles'>
-                          <RoleManagementScreen />
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                    {
-                      path: 'all',
-                      element: (
-                        <OrganisationsSectionGuard section='all'>
-                          <OrganisationsScreen />
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
-                  ],
-                },
-                {
-                  path: 'forms',
-                  element: (
-                    <ResourceProtectedRoute resourceName='FORMS'>
-                      <FormScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'scheduled-messages',
-                  element: (
-                    <ToolbarProtectedRoute path='/scheduled-messages'>
-                      <ScheduledMessageScreen />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'automations',
-                  element: (
-                    <ToolbarProtectedRoute path='/automations'>
-                      <AutomationsScreen />
-                    </ToolbarProtectedRoute>
-                  ),
-                  children: [
-                    { index: true, element: <AutomationsListScreen /> },
-                    { path: 'approvals', element: <AutomationApprovalsScreen /> },
-                    { path: 'new', element: <AutomationBuilderScreen /> },
-                    { path: ':id', element: <AutomationBuilderScreen /> },
-                    { path: ':id/runs', element: <AutomationRunsScreen /> },
-                    { path: ':id/runs/:runId', element: <AutomationRunDetailScreen /> },
-                  ],
-                },
-                {
-                  path: 'apps',
-                  element: (
-                    <ToolbarProtectedRoute path='/apps'>
-                      <AppsScreen />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
-                // Disabled (Claw)
-                // {
-                // path: 'apps-marketplace',
-                // element: (
-                // <ToolbarProtectedRoute path='/apps-marketplace'>
-                // <AppsMarketplaceScreen />
-                // </ToolbarProtectedRoute>
-                // ),
-                // },
-                {
-                  path: 'resource-access',
-                  element: <LegacyOrganisationsRedirect section='members' />,
-                },
-                {
-                  path: 'roles',
-                  element: <LegacyOrganisationsRedirect section='roles' />,
-                },
-                // Disabled (LLM)
-                // {
-                // path: 'tag-review',
-                // element: (
-                // <ResourceProtectedRoute resourceName='WORKSPACE'>
-                // <TagReviewView />
-                // </ResourceProtectedRoute>
-                // ),
-                // },
-                {
-                  path: 'migration/confluence',
-                  element: (
-                    <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
-                      <ConfluenceMigrationScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  // No toolbar guard on the hub itself: Jira/WhatsApp are gated by
-                  // TICKET-MIGRATION, Slack by its own toolbar path, and the index
-                  // redirect 404s when neither is reachable.
-                  path: 'migrations',
-                  element: <MigrationsScreen />,
-                  children: [
-                    { index: true, element: <MigrationsIndexRedirect /> },
-                    {
-                      path: 'jira',
-                      element: (
-                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                          <JiraMigrationScreen />
-                        </ResourceProtectedRoute>
-                      ),
-                    },
-                    {
-                      path: 'whatsapp',
-                      element: (
-                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                          <WhatsAppBulkMigrationScreen />
-                        </ResourceProtectedRoute>
-                      ),
-                    },
-                    {
-                      path: 'slack',
-                      element: (
-                        <ToolbarProtectedRoute path='/migrations/slack'>
-                          <SlackMigration />
-                        </ToolbarProtectedRoute>
-                      ),
-                    },
-                  ],
-                },
-                {
-                  path: 'guide',
-                  element: (
-                    <ToolbarProtectedRoute path='/guide'>
-                      <UserGuideScreen />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
-              ],
-            },
-          ],
-        },
-
-        {
-          path: '/call/:callId',
-          element: (
-            <EncryptionBootstrapProvider>
-              <ZeroProvider>
-                <CallRouteHandler />
-              </ZeroProvider>
-            </EncryptionBootstrapProvider>
-          ),
-        },
-        {
-          path: '/redirected',
-          element: (
-            <EncryptionBootstrapProvider>
-              <ZeroProvider>
-                <CanvasRedirectPage />
-              </ZeroProvider>
-            </EncryptionBootstrapProvider>
-          ),
-        },
-        {
-          path: '/calls/:callId/:callType',
-          element: (
-            <EncryptionBootstrapProvider>
-              <ZeroProvider>
-                <CallPage />
-              </ZeroProvider>
-            </EncryptionBootstrapProvider>
-          ),
-        },
-        {
-          path: '/newWindow/chat/dir',
-          element: (
-            <EncryptionBootstrapProvider>
-              <ZeroProvider>
-                <ZeroFallbackProvider>
-                  <InitialStateLoader>
-                    <EditProvider>
-                      <div className='h-full bg-background'>
+export const router = createBrowserRouter([
+  // Disabled (Claw)
+  // {
+  // element: <ProtectedRoute />,
+  // errorElement: <RouterErrorFallback />,
+  // children: [
+  // {
+  // path: '/newWindow/claw',
+  // element: <ClawOverlay />,
+  // },
+  // ],
+  // },
+  {
+    element: <SplashScreen />,
+    errorElement: <RouterErrorFallback />,
+    children: [
+      {
+        path: '/',
+        element: <ProtectedRoute />,
+        children: [
+          {
+            index: true,
+            element: <WorkspaceRedirect />,
+          },
+          {
+            path: ':workspaceId',
+            element: <AppRoot />,
+            children: [
+              {
+                index: true,
+                element: <HomeScreen />,
+              },
+              // Disabled (Claw)
+              // {
+              // // A saved artifact app on its own, opened from the toolbar.
+              // // Outside the /ai subtree on purpose: a workspace that has
+              // // disabled Xyne AI from the rail can still keep apps there.
+              // path: 'app/:appId',
+              // element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
+              // },
+              {
+                // Standalone migration/insights URLs from before these were
+                // folded into /migrations or removed; bookmarks still land here.
+                path: 'slack-migration',
+                element: <Navigate to='../migrations/slack' replace />,
+              },
+              {
+                path: 'jira-migration',
+                element: <Navigate to='../migrations/jira' replace />,
+              },
+              {
+                path: 'migration/whatsapp',
+                element: <Navigate to='../migrations/whatsapp' replace />,
+              },
+              {
+                path: 'product-insights',
+                element: <Navigate to='..' replace />,
+              },
+              // Disabled (Claw)
+              // {
+              // path: 'ai',
+              // element: (
+              // <ToolbarProtectedRoute path='/ai'>
+              // <Outlet />
+              // </ToolbarProtectedRoute>
+              // ),
+              // children: [
+              // { index: true, element: <Navigate to='chat/new' replace /> },
+              // // ONE route, with `new` as an ordinary value of :sessionId.
+              // //
+              // // Declaring `chat/new` separately looks harmless but makes two
+              // // DISTINCT routes out of the same component, so moving between
+              // // them unmounts and remounts AIScreen — wiping activeSessionId,
+              // // chatKey and showChatView. The remount re-seeds from
+              // // sessionStorage, which can still hold the previous thread, so
+              // // the URL effect navigates back to it and remounts again: the
+              // // screen visibly bounces between routes on every thread switch.
+              // // With a single route, changing the param re-renders in place.
+              // { path: 'chat/:sessionId', element: <AIScreen /> },
+              // { path: 'daily-brief', element: <AIDailyBriefScreen /> },
+              // { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
+              // { path: 'library', element: <AILibraryScreen /> },
+              // {
+              // path: 'environments',
+              // element: (
+              // <RequireClawAdmin orSdlcAdmin>
+              // <AIEnvironmentsScreen />
+              // </RequireClawAdmin>
+              // ),
+              // },
+              // { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
+              // { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
+              // {
+              // path: 'admin',
+              // element: (
+              // <RequireClawAdmin>
+              // <AIAdminScreen />
+              // </RequireClawAdmin>
+              // ),
+              // },
+              // { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+              // { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
+              // { path: 'library/skill/create', element: <AISkillCreateScreen /> },
+              // { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
+              // { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
+              // { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
+              // { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
+              // { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
+              // { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+              // { path: 'library/developers/:tool', element: <AIDeveloperToolDetailScreen /> },
+              // { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
+              // {
+              // path: 'knowledge',
+              // element: <AIKnowledgeScreen />,
+              // children: [
+              // { index: true, element: <KnowledgeBaseV2Screen /> },
+              // {
+              // // Mirrors /knowledge-base's own file-viewer route so
+              // // opening a file from here stays under /ai/knowledge
+              // // instead of hopping to the standalone KB screen.
+              // path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+              // element: <FileViewerLayout />,
+              // },
+              // ],
+              // },
+              // {
+              // path: 'organization',
+              // element: (
+              // <RequireOrgManager>
+              // <AIOrganizationScreen />
+              // </RequireOrgManager>
+              // ),
+              // },
+              // { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
+              // {
+              // element: <AISectionLayout />,
+              // children: [
+              // { path: 'metrics', element: <ClawMetricsScreen /> },
+              // { path: 'settings', element: <ClawSettingsScreen /> },
+              // ],
+              // },
+              // ],
+              // },
+              {
+                path: 'onboarding',
+                element: <QuestionnaireScreen />,
+              },
+              {
+                // Dev-only surface for the on-device intent classifier. Bypasses the
+                // public-channel eligibility gate, so it is intentionally not linked
+                // from product UI. See docs/ON_DEVICE_INTENT.md
+                path: 'intent-playground',
+                element: <IntentPlaygroundScreen />,
+              },
+              {
+                path: 'rca',
+                element: <RCAListScreen />,
+              },
+              {
+                path: 'rca/:rcaId',
+                element: <RCADetailScreen />,
+              },
+              {
+                path: 'streams',
+                element: <StreamsScreen />,
+              },
+              {
+                path: 'chat',
+                element: <ChatScreen />,
+                children: [
+                  // Directory routes (nested under dir)
+                  {
+                    path: 'dir',
+                    element: (
+                      <ToolbarProtectedRoute path='/chat/dir'>
                         <Outlet />
-                      </div>
-                      <AttachmentGalleryModal />
-                      <AttachmentCitationPreview />
-                      <ThreadCitationModal />
-                      <TranscriptCitationModal />
-                    </EditProvider>
-                  </InitialStateLoader>
-                </ZeroFallbackProvider>
-              </ZeroProvider>
-            </EncryptionBootstrapProvider>
-          ),
-          children: [
-            {
-              path: ':channelId',
-              element: <ChatView />,
-            },
-            {
-              path: ':channelId/:conversationId',
-              element: <ThreadMessages />,
-            },
-            {
-              path: ':channelId/:conversationId/:ticketId',
-              element: <ThreadMessages />,
-            },
-          ],
-        },
-        {
-          path: '/newWindow/sdlc/:workspaceId/:channelId/:section',
-          element: (
-            <EncryptionBootstrapProvider>
-              <ZeroProvider>
-                <ZeroFallbackProvider>
-                  <InitialStateLoader>
-                    <div className='h-full bg-background'>
-                      <SdlcWindow />
-                    </div>
-                    {/* roomActor is a module singleton, so this window needs its own. */}
-                    <GlobalCallOverlay autoJoinOnAccept={false} />
-                  </InitialStateLoader>
-                </ZeroFallbackProvider>
-              </ZeroProvider>
-            </EncryptionBootstrapProvider>
-          ),
-        },
-        {
-          path: '/newWindow/chat/canvas',
-          element: (
-            <EncryptionBootstrapProvider>
-              <ZeroProvider>
-                <ZeroFallbackProvider>
-                  <InitialStateLoader>
-                    <EditProvider>
-                      <div className='h-full bg-background'>
+                      </ToolbarProtectedRoute>
+                    ),
+                    children: [
+                      {
+                        index: true,
+                        element: <ChatRedirect />,
+                      },
+                      // Canvas from directory (must come before :channelId)
+                      {
+                        path: 'canvas',
+                        element: <CanvasScreen />,
+                      },
+                      {
+                        path: 'canvas/:canvasId',
+                        element: <CanvasScreen />,
+                      },
+                      // Threads (must come before :channelId)
+                      {
+                        path: 'threads',
+                        element: <UserThreads />,
+                        children: [
+                          { index: true, element: null },
+                          {
+                            path: ':channelId/:conversationId',
+                            element: <ThreadMessages />,
+                          },
+                        ],
+                      },
+                      // Unreads inbox (must come before :channelId)
+                      {
+                        path: 'unreads',
+                        element: <UnreadsInbox />,
+                      },
+                      // Disabled (LLM)
+                      // // Recap (must come before :channelId)
+                      // {
+                      // path: 'recap',
+                      // children: [
+                      // {
+                      // index: true,
+                      // element: <RecapPanel />,
+                      // },
+                      // {
+                      // path: ':channelId',
+                      // element: <RecapPanel />,
+                      // children: [
+                      // {
+                      // path: ':conversationId',
+                      // element: <ThreadMessages />,
+                      // },
+                      // ],
+                      // },
+                      // ],
+                      // },
+                      // Disabled (LLM)
+                      // // Radar (must come before :channelId). The route stays
+                      // // registered because the router is built at module scope;
+                      // // the CAC rollout gate lives inside RadarPanel itself.
+                      // {
+                      // path: 'radar',
+                      // children: [
+                      // {
+                      // index: true,
+                      // element: <RadarPanel />,
+                      // },
+                      // {
+                      // path: ':channelId',
+                      // element: <RadarPanel />,
+                      // children: [
+                      // {
+                      // path: ':conversationId',
+                      // element: <ThreadMessages />,
+                      // },
+                      // ],
+                      // },
+                      // ],
+                      // },
+                      // My Tickets (must come before :channelId)
+                      {
+                        path: 'my-tickets',
+                        element: <MyTicketsScreen />,
+                      },
+                      // Disabled (Claw)
+                      // // An artifact app added to the Inbox menubar, shown in
+                      // // the chat panel with the directory still alongside.
+                      // {
+                      // path: 'app/:appId',
+                      // element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
+                      // },
+                      // Channel routes (must come after specific routes)
+                      {
+                        path: ':channelId',
+                        element: <ChatView />,
+                        children: [
+                          {
+                            index: true,
+                            element: (
+                              <div className='flex items-center justify-center h-full text-muted-foreground'>
+                                Select a conversation to view messages
+                              </div>
+                            ),
+                          },
+                          {
+                            path: 'group/:groupId',
+                            element: <UserGroupSidePanel />,
+                          },
+                          {
+                            path: ':conversationId',
+                            element: <ThreadMessages />,
+                          },
+                          {
+                            path: ':conversationId/profile/:userId',
+                            element: <ProfileSidebar />,
+                          },
+                          {
+                            path: ':conversationId/:ticketId',
+                            element: <ThreadMessages />,
+                          },
+                          {
+                            path: 'profile/:userId',
+                            element: <ProfileSidebar />,
+                          },
+                          {
+                            path: 'tickets/:ticketId',
+                            element: <TicketView />,
+                          },
+                          {
+                            path: 'canvas',
+                            element: <CanvasScreen />,
+                          },
+                          {
+                            path: 'canvas/:canvasId',
+                            element: <CanvasScreen />,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  // DM routes (full screen with DM list sidebar)
+                  {
+                    path: 'dm',
+                    element: (
+                      <ToolbarProtectedRoute path='/chat/dm'>
+                        <DmsPage />
+                      </ToolbarProtectedRoute>
+                    ),
+                    children: [
+                      { index: true, element: null },
+                      { path: 'compose', element: <KeyedComposeDmPanel /> },
+                      ...sharedChatRoutes,
+                    ],
+                  },
+                  // Bookmarks (full screen with bookmarks list sidebar)
+                  {
+                    path: 'bookmarks',
+                    element: <BookmarksPanel />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Drafts & Sent combined page
+                  {
+                    path: 'drafts-sent',
+                    element: <DraftsAndSentPage />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Redirect old drafts route to new combined page
+                  {
+                    path: 'drafts',
+                    element: <Navigate to='../drafts-sent?tab=drafts' replace />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Redirect old sent route to new combined page
+                  {
+                    path: 'sent',
+                    element: <Navigate to='../drafts-sent?tab=sent' replace />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Redirect old scheduled route to new combined page
+                  {
+                    path: 'scheduled',
+                    element: <Navigate to='../drafts-sent?tab=scheduled' replace />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Canvas (full screen with 2-panel layout on desktop)
+                  {
+                    path: 'canvas',
+                    element: (
+                      <ToolbarProtectedRoute path='/chat/canvas'>
                         <CanvasPanel />
-                      </div>
-                      <AttachmentGalleryModal />
-                      <AttachmentCitationPreview />
-                      <ThreadCitationModal />
-                      <TranscriptCitationModal />
-                    </EditProvider>
-                  </InitialStateLoader>
-                </ZeroFallbackProvider>
-              </ZeroProvider>
-            </EncryptionBootstrapProvider>
-          ),
-          children: [
-            {
-              index: true,
-              element: null,
-            },
-            {
-              path: ':canvasId',
-              element: <CanvasScreen />,
-            },
-          ],
-        },
-        {
-          path: '/newWindow/create-ticket',
-          element: (
+                      </ToolbarProtectedRoute>
+                    ),
+                    children: [
+                      {
+                        index: true,
+                        element: null,
+                      },
+                      {
+                        path: ':canvasId',
+                        element: <CanvasScreen />,
+                      },
+                    ],
+                  },
+                  // Activity (full screen with activity list sidebar)
+                  {
+                    path: 'activity',
+                    element: (
+                      <ToolbarProtectedRoute path='/chat/activity'>
+                        <ActivityListView />
+                      </ToolbarProtectedRoute>
+                    ),
+                    children: [
+                      { index: true, element: null },
+                      // Desk/Support tickets opened from the Activity list render
+                      // here so the list stays mounted (instead of redirecting to
+                      // the full /support inbox). Static `ticket` segment is matched
+                      // ahead of the shared `:channelId` route.
+                      { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
+                      { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
+                      // Recordings opened from the Activity list render here for the
+                      // same reason — the list stays mounted on the left instead of
+                      // the page navigating away to the standalone /recordings/:id.
+                      {
+                        path: 'recording/:recordingId',
+                        element: <RecordingDetailRoute embedded />,
+                      },
+                      { path: 'calendar', element: <ActivityCalendarWeekView /> },
+                      ...sharedChatRoutes,
+                    ],
+                  },
+                  // Search (full screen)
+                  {
+                    path: 'search',
+                    element: <Search />,
+                  },
+                  // Catch-all redirect for old routes: /chat/:channelId/* -> /chat/dir/:channelId/*
+                  {
+                    path: '*',
+                    element: <DirectoryRedirect />,
+                  },
+                ],
+              },
+              {
+                path: 'search-results',
+                element: <SearchResults />,
+              },
+              {
+                // Splat: @xyne/workflow-ui owns every screen below /workflows and
+                // routes between them itself, handing the sub-path back via onNavigate.
+                path: 'workflows/*',
+                element: (
+                  <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
+                    <WorkflowScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'ticket-reports',
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
+                    <TicketReportsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'agents',
+                element: (
+                  <ResourceProtectedRoute resourceName='AGENTS'>
+                    <AgentsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'knowledge-base',
+                element: (
+                  <ToolbarProtectedRoute path='/knowledge-base'>
+                    <KnowledgeBaseV2Layout />
+                  </ToolbarProtectedRoute>
+                ),
+                children: [
+                  {
+                    index: true,
+                    element: <KnowledgeBaseV2Screen />,
+                  },
+                  {
+                    // The file viewer still reads projectId / channelId /
+                    // collectionId / folderId from the URL.
+                    path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                    element: <FileViewerLayout />,
+                  },
+                  // Back-compat shims: pre-port URLs (path-only nesting) get
+                  // redirected to the new ?cl=&parent= layout so browser
+                  // history entries don't 404 after the route change.
+                  { path: ':projectId', element: <LegacyKbRedirect /> },
+                  { path: ':projectId/:channelId', element: <LegacyKbRedirect /> },
+                  {
+                    path: ':projectId/:channelId/:collectionId',
+                    element: <LegacyKbRedirect />,
+                  },
+                  {
+                    path: ':projectId/:channelId/:collectionId/:folderId',
+                    element: <LegacyKbRedirect />,
+                  },
+                ],
+              },
+              {
+                // The Context screen was removed; old links land on the workspace home.
+                path: 'memory',
+                element: <Navigate to='..' replace />,
+              },
+              {
+                path: 'analytics',
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <AnalyticsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'secrets',
+                element: (
+                  <ResourceProtectedRoute resourceName='SECRETS'>
+                    <SecretsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'projects',
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKETS' minAccess='READ'>
+                    <ProjectsScreen />
+                  </ResourceProtectedRoute>
+                ),
+                children: [
+                  {
+                    index: true,
+                    element: <MyTicketsScreen />,
+                  },
+                  {
+                    path: 'views',
+                    element: <Navigate to='/projects' replace />,
+                  },
+                  {
+                    path: 'views/new',
+                    element: <ProjectViewBuilder />,
+                  },
+                  {
+                    path: 'views/:viewId',
+                    element: <ProjectViewBuilder />,
+                  },
+                  {
+                    path: ':projectId',
+                    element: <KanbanBoardScreen />,
+                  },
+                  {
+                    path: ':projectId/:boardId',
+                    element: <KanbanBoardScreen />,
+                  },
+                  {
+                    path: ':projectId/:boardId/:ticketId',
+                    element: <TicketView />,
+                  },
+                ],
+              },
+              // Disabled (LLM)
+              // {
+              // path: 'team-intelligence',
+              // element: (
+              // <ResourceProtectedRoute resourceName='TEAM-INTELLIGENCE-DASHBOARD'>
+              // <TeamIntelligenceScreen />
+              // </ResourceProtectedRoute>
+              // ),
+              // children: [
+              // {
+              // index: true,
+              // element: <TeamIntelligenceOrgScreen />,
+              // },
+              // {
+              // path: 'team/:teamId',
+              // element: <TeamIntelligenceTeamScreen />,
+              // },
+              // {
+              // path: 'member/:memberEmail',
+              // element: <TeamIntelligenceMemberScreen />,
+              // },
+              // ],
+              // },
+              {
+                path: 'user-groups',
+                element: <LegacyOrganisationsRedirect section='user-groups' />,
+              },
+              {
+                path: 'listProjects',
+                element: (
+                  <ResourceProtectedRoute resourceName='LISTPROJECTS'>
+                    <ProjectsListView />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'releaseManager',
+                element: (
+                  <ToolbarProtectedRoute path='/releaseManager'>
+                    <ReleaseManagerView />
+                  </ToolbarProtectedRoute>
+                ),
+              },
+              {
+                path: 'listProjects/:projectId',
+                element: <ProjectDetailScreen />,
+              },
+              {
+                path: 'listProjects/:projectId/releases/:releaseTicketId',
+                element: <ReleaseDetailScreen />,
+              },
+              {
+                path: 'calls',
+                element: (
+                  <ToolbarProtectedRoute path='/calls'>
+                    <CallsRoute />
+                  </ToolbarProtectedRoute>
+                ),
+                children: [
+                  {
+                    path: ':callId/detail',
+                    element: <CallDetailScreen />,
+                  },
+                ],
+              },
+              {
+                // Deliberately not ResourceProtectedRoute: non-SCRIBE users manage their own calls here.
+                path: 'calls/admin',
+                element: (
+                  <ToolbarProtectedRoute path='/calls'>
+                    <CallsAdminScreen />
+                  </ToolbarProtectedRoute>
+                ),
+              },
+              {
+                path: 'calls/:callId/:callType',
+                element: <CallPage />,
+              },
+              {
+                path: 'call/:callId',
+                element: <CallRouteHandler />,
+              },
+              {
+                path: 'recordings',
+                element: (
+                  <ToolbarProtectedRoute path='/recordings'>
+                    <RecordingsRoute />
+                  </ToolbarProtectedRoute>
+                ),
+              },
+              {
+                path: 'recordings/:recordingId',
+                element: <RecordingDetailRoute />,
+              },
+              {
+                path: 'user-groups/:userGroupId/assignment-config',
+                element: <LegacyOrganisationsRedirect section='user-groups' />,
+              },
+              {
+                path: 'analytics-dashboard',
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <DashboardCreation />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'analytics-dashboard/:dashboardId',
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <QueryDashboardScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'dashboards',
+                element: (
+                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                    <DynamicDashboardPanel />
+                  </ResourceProtectedRoute>
+                ),
+                children: [
+                  { index: true, element: null },
+                  {
+                    path: ':dashboardId',
+                    element: <DynamicDashboardScreen />,
+                  },
+                ],
+              },
+              {
+                path: 'support',
+                element: (
+                  <ResourceProtectedRoute resourceName='SUPPORT' minAccess='READ'>
+                    <SupportListRestore>
+                      <SaveRoute
+                        keyword='support'
+                        stripSearchParams={['settings', 'openSettings']}
+                        preserveSearchParams={[
+                          'emailConnected',
+                          'emailError',
+                          'channelEmailMailboxConnected',
+                          'deskIntegrations',
+                          'workspaceMailboxConnected',
+                          'email',
+                          'provider',
+                        ]}
+                        redirectOnlyAt={/^\/[^/]+\/support\/?$/}
+                      >
+                        <SupportScreen />
+                      </SaveRoute>
+                    </SupportListRestore>
+                  </ResourceProtectedRoute>
+                ),
+                children: [
+                  {
+                    path: ':channelId',
+                    element: <Outlet />,
+                    children: [
+                      {
+                        path: ':ticketId',
+                        element: <Outlet />,
+                        children: [{ path: ':canvasId', element: <Outlet /> }],
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                path: 'browser',
+                element: (
+                  <ToolbarProtectedRoute path='/browser'>
+                    <BrowserTabsScreen />
+                  </ToolbarProtectedRoute>
+                ),
+              },
+              {
+                path: 'workspace-management',
+                element: <LegacyOrganisationsRedirect section={legacyWorkspaceTab} />,
+              },
+              {
+                // One sidebar module for workspace settings, members, user
+                // groups, roles and organisations — see OrganisationsModule.
+                path: 'organisations',
+                element: <OrganisationsModuleScreen />,
+                children: [
+                  { index: true, element: <OrganisationsIndexRedirect /> },
+                  {
+                    path: 'general',
+                    element: (
+                      <OrganisationsSectionGuard section='general'>
+                        <OrganisationsPage>
+                          <GeneralTab isActive />
+                        </OrganisationsPage>
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'members',
+                    element: (
+                      <OrganisationsSectionGuard section='members'>
+                        <OrganisationsPage wide>
+                          <MembersTab />
+                        </OrganisationsPage>
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'invitations',
+                    element: (
+                      <OrganisationsSectionGuard section='invitations'>
+                        <OrganisationsPage>
+                          <InvitationsTab isActive />
+                        </OrganisationsPage>
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'guests',
+                    element: (
+                      <OrganisationsSectionGuard section='guests'>
+                        <OrganisationsPage>
+                          <GuestUsersTab isActive />
+                        </OrganisationsPage>
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'repository-credentials',
+                    element: (
+                      <OrganisationsSectionGuard section='repository-credentials'>
+                        <OrganisationsPage>
+                          <RepositoryCredentialsTab isActive />
+                        </OrganisationsPage>
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'toolbar',
+                    element: (
+                      <OrganisationsSectionGuard section='toolbar'>
+                        <OrganisationsPage>
+                          <ToolbarTab isActive />
+                        </OrganisationsPage>
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'user-groups',
+                    element: (
+                      <OrganisationsSectionGuard section='user-groups'>
+                        <UserGroupsScreen />
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'user-groups/:userGroupId/assignment-config',
+                    // The inner guard also checks a creator owns *this* group.
+                    element: (
+                      <OrganisationsSectionGuard section='user-groups'>
+                        <ResourceProtectedRoute
+                          resourceName='USER-GROUPS'
+                          minAccess='WRITE'
+                          allowUserGroupCreator
+                        >
+                          <AssignmentConfigWrapper />
+                        </ResourceProtectedRoute>
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'roles',
+                    element: (
+                      <OrganisationsSectionGuard section='roles'>
+                        <RoleManagementScreen />
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                  {
+                    path: 'all',
+                    element: (
+                      <OrganisationsSectionGuard section='all'>
+                        <OrganisationsScreen />
+                      </OrganisationsSectionGuard>
+                    ),
+                  },
+                ],
+              },
+              {
+                path: 'forms',
+                element: (
+                  <ResourceProtectedRoute resourceName='FORMS'>
+                    <FormScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'scheduled-messages',
+                element: (
+                  <ToolbarProtectedRoute path='/scheduled-messages'>
+                    <ScheduledMessageScreen />
+                  </ToolbarProtectedRoute>
+                ),
+              },
+              {
+                path: 'automations',
+                element: (
+                  <ToolbarProtectedRoute path='/automations'>
+                    <AutomationsScreen />
+                  </ToolbarProtectedRoute>
+                ),
+                children: [
+                  { index: true, element: <AutomationsListScreen /> },
+                  { path: 'approvals', element: <AutomationApprovalsScreen /> },
+                  { path: 'new', element: <AutomationBuilderScreen /> },
+                  { path: ':id', element: <AutomationBuilderScreen /> },
+                  { path: ':id/runs', element: <AutomationRunsScreen /> },
+                  { path: ':id/runs/:runId', element: <AutomationRunDetailScreen /> },
+                ],
+              },
+              {
+                path: 'apps',
+                element: (
+                  <ToolbarProtectedRoute path='/apps'>
+                    <AppsScreen />
+                  </ToolbarProtectedRoute>
+                ),
+              },
+              // Disabled (Claw)
+              // {
+              // path: 'apps-marketplace',
+              // element: (
+              // <ToolbarProtectedRoute path='/apps-marketplace'>
+              // <AppsMarketplaceScreen />
+              // </ToolbarProtectedRoute>
+              // ),
+              // },
+              {
+                path: 'resource-access',
+                element: <LegacyOrganisationsRedirect section='members' />,
+              },
+              {
+                path: 'roles',
+                element: <LegacyOrganisationsRedirect section='roles' />,
+              },
+              // Disabled (LLM)
+              // {
+              // path: 'tag-review',
+              // element: (
+              // <ResourceProtectedRoute resourceName='WORKSPACE'>
+              // <TagReviewView />
+              // </ResourceProtectedRoute>
+              // ),
+              // },
+              {
+                path: 'migration/confluence',
+                element: (
+                  <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
+                    <ConfluenceMigrationScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                // No toolbar guard on the hub itself: Jira/WhatsApp are gated by
+                // TICKET-MIGRATION, Slack by its own toolbar path, and the index
+                // redirect 404s when neither is reachable.
+                path: 'migrations',
+                element: <MigrationsScreen />,
+                children: [
+                  { index: true, element: <MigrationsIndexRedirect /> },
+                  {
+                    path: 'jira',
+                    element: (
+                      <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                        <JiraMigrationScreen />
+                      </ResourceProtectedRoute>
+                    ),
+                  },
+                  {
+                    path: 'whatsapp',
+                    element: (
+                      <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                        <WhatsAppBulkMigrationScreen />
+                      </ResourceProtectedRoute>
+                    ),
+                  },
+                  {
+                    path: 'slack',
+                    element: (
+                      <ToolbarProtectedRoute path='/migrations/slack'>
+                        <SlackMigration />
+                      </ToolbarProtectedRoute>
+                    ),
+                  },
+                ],
+              },
+              {
+                path: 'guide',
+                element: (
+                  <ToolbarProtectedRoute path='/guide'>
+                    <UserGuideScreen />
+                  </ToolbarProtectedRoute>
+                ),
+              },
+            ],
+          },
+        ],
+      },
+
+      {
+        path: '/call/:callId',
+        element: (
+          <EncryptionBootstrapProvider>
+            <ZeroProvider>
+              <CallRouteHandler />
+            </ZeroProvider>
+          </EncryptionBootstrapProvider>
+        ),
+      },
+      {
+        path: '/redirected',
+        element: (
+          <EncryptionBootstrapProvider>
+            <ZeroProvider>
+              <CanvasRedirectPage />
+            </ZeroProvider>
+          </EncryptionBootstrapProvider>
+        ),
+      },
+      {
+        path: '/calls/:callId/:callType',
+        element: (
+          <EncryptionBootstrapProvider>
+            <ZeroProvider>
+              <CallPage />
+            </ZeroProvider>
+          </EncryptionBootstrapProvider>
+        ),
+      },
+      {
+        path: '/newWindow/chat/dir',
+        element: (
+          <EncryptionBootstrapProvider>
             <ZeroProvider>
               <ZeroFallbackProvider>
                 <InitialStateLoader>
                   <EditProvider>
                     <div className='h-full bg-background'>
-                      <CreateTicketWindow />
+                      <Outlet />
                     </div>
                     <AttachmentGalleryModal />
+                    <AttachmentCitationPreview />
+                    <ThreadCitationModal />
+                    <TranscriptCitationModal />
                   </EditProvider>
                 </InitialStateLoader>
               </ZeroFallbackProvider>
             </ZeroProvider>
-          ),
-        },
-        {
-          path: '/invite',
-          element: <AcceptInvitation />,
-        },
-        {
-          path: '/auth',
-          element: <AuthScreen />,
-        },
-        {
-          path: '/terms',
-          element: <TermsOfServiceScreen />,
-        },
-        {
-          path: '/privacy',
-          element: <PrivacyPolicyScreen />,
-        },
-        {
-          path: '/sdk-sso/authorize',
-          element: <SdkSsoAuthorizeScreen />,
-        },
-        {
-          path: '/workspaces',
-          element: <WorkspaceSelectionScreen />,
-        },
-        {
-          path: '/no-access',
-          element: <NoOrganizationAccessScreen />,
-        },
-        {
-          path: '/launch',
-          element: <LaunchScreen />,
-        },
-        {
-          path: '/system',
-          element: <SystemPalette />,
-        },
-      ],
-    },
-    // Last, so it only matches once every route above has failed to.
-    {
-      path: '*',
-      element: <NotFoundScreen />,
-      errorElement: <RouterErrorFallback />,
-    },
-  ],
-  // The lane serves under /sdlc-app; every route above is matched relative to it.
-  APP_BASE_PATH === '/' ? undefined : { basename: APP_BASE_PATH },
-);
+          </EncryptionBootstrapProvider>
+        ),
+        children: [
+          {
+            path: ':channelId',
+            element: <ChatView />,
+          },
+          {
+            path: ':channelId/:conversationId',
+            element: <ThreadMessages />,
+          },
+          {
+            path: ':channelId/:conversationId/:ticketId',
+            element: <ThreadMessages />,
+          },
+        ],
+      },
+      {
+        path: '/newWindow/chat/canvas',
+        element: (
+          <EncryptionBootstrapProvider>
+            <ZeroProvider>
+              <ZeroFallbackProvider>
+                <InitialStateLoader>
+                  <EditProvider>
+                    <div className='h-full bg-background'>
+                      <CanvasPanel />
+                    </div>
+                    <AttachmentGalleryModal />
+                    <AttachmentCitationPreview />
+                    <ThreadCitationModal />
+                    <TranscriptCitationModal />
+                  </EditProvider>
+                </InitialStateLoader>
+              </ZeroFallbackProvider>
+            </ZeroProvider>
+          </EncryptionBootstrapProvider>
+        ),
+        children: [
+          {
+            index: true,
+            element: null,
+          },
+          {
+            path: ':canvasId',
+            element: <CanvasScreen />,
+          },
+        ],
+      },
+      {
+        path: '/newWindow/create-ticket',
+        element: (
+          <ZeroProvider>
+            <ZeroFallbackProvider>
+              <InitialStateLoader>
+                <EditProvider>
+                  <div className='h-full bg-background'>
+                    <CreateTicketWindow />
+                  </div>
+                  <AttachmentGalleryModal />
+                </EditProvider>
+              </InitialStateLoader>
+            </ZeroFallbackProvider>
+          </ZeroProvider>
+        ),
+      },
+      {
+        path: '/invite',
+        element: <AcceptInvitation />,
+      },
+      {
+        path: '/auth',
+        element: <AuthScreen />,
+      },
+      {
+        path: '/terms',
+        element: <TermsOfServiceScreen />,
+      },
+      {
+        path: '/privacy',
+        element: <PrivacyPolicyScreen />,
+      },
+      {
+        path: '/sdk-sso/authorize',
+        element: <SdkSsoAuthorizeScreen />,
+      },
+      {
+        path: '/workspaces',
+        element: <WorkspaceSelectionScreen />,
+      },
+      {
+        path: '/no-access',
+        element: <NoOrganizationAccessScreen />,
+      },
+      {
+        path: '/launch',
+        element: <LaunchScreen />,
+      },
+      {
+        path: '/system',
+        element: <SystemPalette />,
+      },
+    ],
+  },
+  // Last, so it only matches once every route above has failed to.
+  {
+    path: '*',
+    element: <NotFoundScreen />,
+    errorElement: <RouterErrorFallback />,
+  },
+]);

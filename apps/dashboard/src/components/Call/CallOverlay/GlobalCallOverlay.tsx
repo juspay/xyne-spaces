@@ -15,7 +15,7 @@ import {
   isCallWindowSupported,
   waitForCallWindowPhase,
 } from '../../../utils/callWindow';
-import { isStandaloneWindow } from '../../../utils/electronApp';
+import { isSdlcWindow, isStandaloneWindow } from '../../../utils/electronApp';
 
 const CALL_WINDOW_ATTACH_TIMEOUT_MS = 60_000;
 
@@ -85,7 +85,7 @@ export function GlobalCallOverlay({
   // The main window (re)loaded while a call runs in the call window: pick it
   // back up, so the rest of the app knows there is a call.
   useEffect(() => {
-    if (!isCallWindowSupported() || isStandaloneWindow()) return undefined;
+    if (!isCallWindowSupported() || isStandaloneWindow() || isSdlcWindow()) return undefined;
     let cancelled = false;
     void (async (): Promise<void> => {
       let status = await getCallWindowStatus();

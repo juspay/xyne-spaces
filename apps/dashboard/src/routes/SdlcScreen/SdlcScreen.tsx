@@ -78,7 +78,6 @@ import {
   useUserPreference,
   userPreferencesSnapshot,
 } from '../../machines/userPreferencesMachine';
-import { isSdlcDocumentWindow } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
@@ -117,9 +116,12 @@ import {
 import CanvasScreen from '../../components/Canvas/CanvasScreen';
 import {
   isElectronApp,
+  isSdlcWindow,
   openStandaloneWindow,
   shouldOpenInNewWindow,
 } from '../../utils/electronApp';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
+import { registerSdlcBrowserOpener } from '../../components/AIScreen/Workspace/sdlcBrowserTarget';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { TicketNounContext, type TicketNoun } from '../../contexts/TicketNounContext';
@@ -171,7 +173,9 @@ import { useUser } from '../../hooks/useUsers';
 import { Popover } from '../../components/ui/Popover';
 import { fileKind } from './fileKind';
 import { FileTypeIcon } from './FileTypeIcon';
-import { getLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
+import { getLastSdlcLocation, sdlcHubIdOf, setLastSdlcLocation } from './lastSdlcLocation';
+import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
+import { browserTabSearch, dropEmbedPlacements } from './sdlcEmbeddedPages';
 import { SdlcFolderPage, SCRATCH_TAB_ID, withFolderEntry, type FolderTab } from './SdlcFolderPage';
 import { setSdlcCommentContext } from './sdlcCommentStore';
 // Disabled (Claw)
@@ -387,6 +391,8 @@ export default function SdlcScreen(): ReactElement {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuthContextValues();
+  // A window of its own has no hub sidebar, and keeps the explorer beside the page.
+  const isDocumentWindow = isSdlcWindow();
   // The workflows route is a splat, which outranks `:section` and names its param
   // `*`, so on /sdlc/:channelId/workflows there is no `section` param to read.
   const section: Section = (
@@ -697,8 +703,30 @@ export default function SdlcScreen(): ReactElement {
     if (!fallbackId) return;
     const storedPath = getLastSdlcLocation(workspaceId);
     const stored = channels.find(item => item.id === (storedPath ? sdlcHubIdOf(storedPath) : null));
-    void navigate(`/sdlc/${stored?.id ?? fallbackId}/overview`, { replace: true });
+    void navigate(stored && storedPath ? storedPath : `/sdlc/${fallbackId}/overview`, {
+      replace: true,
+    });
   }, [navigate, channelId, channels, workspaceId]);
+
+  // Where the hub was left, so a bare /sdlc — a reload, the sidebar's link — comes back to it.
+  useEffect(() => {
+    if (!workspaceId || !channelId || isDocumentWindow) return;
+    setLastSdlcLocation(workspaceId, `${location.pathname}${location.search}${location.hash}`);
+  }, [workspaceId, channelId, isDocumentWindow, location.pathname, location.search, location.hash]);
+
+  // Xyne AI asks for the hub's browser: the open folder's browsing tab.
+  const locationRef = useRef(location);
+  locationRef.current = location;
+  useEffect(
+    () =>
+      registerSdlcBrowserOpener(() => {
+        const here = locationRef.current;
+        const next = browserTabSearch(here.search);
+        if (next !== null) void navigate(`${here.pathname}${next}`);
+        return true;
+      }),
+    [navigate],
+  );
 
   const selectedDiscussionConversationId = routeSearchParams.get('conversation');
   const threadOnly = Boolean(
@@ -897,6 +925,12 @@ export default function SdlcScreen(): ReactElement {
   // an upload, a save — and must not act on the render it began in.
   const routeNow = useRef({ openFolderId, search: routeSearchParams.toString() });
   routeNow.current = { openFolderId, search: routeSearchParams.toString() };
+  // A folder's browsing pages are held over its page and nowhere else.
+  const folderPageOpen = Boolean(openFolderId);
+  useEffect(
+    () => (folderPageOpen ? (): void => dropEmbedPlacements() : undefined),
+    [folderPageOpen],
+  );
   const browseParam = routeSearchParams.get('browse');
   const browsingTabId =
     browseParam === '1'
@@ -2121,8 +2155,8 @@ export default function SdlcScreen(): ReactElement {
 
   const selectDiscussionConversation = useCallback(
     (conversationId: string | null, options?: { selectedTab?: 'details' }): void => {
-      // Leaving never steps history back: the frame shares it with the host app, so
-      // the previous entry can be a screen outside SDLC.
+      // Leaving never steps history back: the previous entry can be a screen outside
+      // SDLC.
       setDiscussionUrl({
         open: true,
         conversationId,
@@ -2136,9 +2170,6 @@ export default function SdlcScreen(): ReactElement {
   const openSdlcAssistant = useCallback(
     (threadInfo?: ThreadInfo): void => {
       if (!channel) return;
-      // Ask AI renders inside the SDLC lane itself (the framed bundle's own
-      // XyneAISidebar), so Ask AI changes ship with this lane and never need a
-      // parent redeploy.
       const assistantState = xyneAIActor.getSnapshot();
       const actorResearchContext = assistantState.context.researchContext;
       const startFreshChat = shouldStartFreshSdlcAssistant({
@@ -2719,7 +2750,6 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  const isDocumentWindow = isSdlcDocumentWindow();
   // A folder's page is open: its explorer takes the hub sidebar's place. A window of
   // its own has no sidebar, and keeps the explorer beside the page.
   // A Wiki takes the sidebar for its page tree, as a folder page does for its explorer.
@@ -4207,6 +4237,11 @@ export default function SdlcScreen(): ReactElement {
               </div>
             </header>
             <main className='flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background'>
+              {openFolder && channel && isElectronApp() && (
+                <UnmountWhenCovered>
+                  <SdlcEmbeddedWebview />
+                </UnmountWhenCovered>
+              )}
               {openFolder && channel ? (
                 <SdlcFolderPage
                   liveCallCounts={liveCallCounts}

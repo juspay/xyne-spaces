@@ -4,7 +4,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
-import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
+import { API_BASE_URL, isTestEnv } from '../config';
 import { logger, Event as LoggerEvent } from '../utils/logger';
 
 import { clearAllSessionKeys } from '../services/sessionKeyStore';
@@ -13,7 +13,7 @@ import { resetEncryption } from './encryptionMachine';
 import { stateMachineActor } from './stateMachine';
 import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
-import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
+import { dropAllDatabases } from '@rocicorp/zero';
 import { getPendingSdkSso, takePendingSdkSso } from '../utils/pendingSdkSso';
 import { markOrgCreator } from '../utils/onboardingOrgCreator';
 
@@ -1097,9 +1097,7 @@ export const authMachine = createMachine(
         }
         logger.pushlogs();
 
-        // Logout is the one place a cross-lane drop is right: both bundles are going
-        // away. The lane must not take out its host's store, so it only drops its own.
-        await (isSdlcSurface ? dropZeroDatabases() : dropAllZeroDatabases());
+        await dropAllDatabases();
         await indexedDBService.dropAllUserDatabases();
       }),
       processOAuthCallback: fromPromise(async () => {

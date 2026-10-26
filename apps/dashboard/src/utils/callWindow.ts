@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { CallType, SdlcCallLink } from '@xyne/shared';
 import type { CallUrlOverrides } from './callUrlOverrides';
 import type { JoinMediaOverrides } from '../machines/roomMachine';
-import { isElectronApp, isStandaloneWindow } from './electronApp';
+import { isElectronApp, isSdlcWindow, isStandaloneWindow } from './electronApp';
 import { isNativeCallSupported } from './reactNativeBridge';
 import { authActor } from '../machines/authMachine';
 
@@ -144,7 +144,11 @@ export const isCallWindowRoute = (): boolean =>
  * run their own overlay, and the call window hosts the call itself.
  */
 export const shouldUseCallWindow = (): boolean =>
-  isCallWindowSupported() && readEnabled() && !isStandaloneWindow() && !isNativeCallSupported();
+  isCallWindowSupported() &&
+  readEnabled() &&
+  !isStandaloneWindow() &&
+  !isSdlcWindow() &&
+  !isNativeCallSupported();
 
 // ─── Main-window side ───────────────────────────────────────────────────────
 

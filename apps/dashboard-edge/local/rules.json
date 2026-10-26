@@ -1,12 +1,6 @@
 {
   "rules": [
     {
-      "id": "sdlc",
-      "match": { "path_prefix": "/sdlc-app/" },
-      "bundle": "main-sdlc",
-      "strip_prefix": "/sdlc-app"
-    },
-    {
       "id": "playground-header",
       "match": { "header": { "name": "x-route-env", "exact": "playground" } },
       "bundle": "release-20260101",

@@ -31,10 +31,10 @@ test('production URLs stay unchanged even if the development proxy flag is set',
   assert.equal(result.ENABLE_REMOTE_LOGGING, true);
 });
 
-test('explicit lane overrides retain precedence over the development proxy', () => {
-  const result = config({ DEV: true, VITE_DEV_PROXY: 'true', VITE_API_BASE_OVERRIDE: '/sdlc-api', VITE_ZERO_PATH: '/sdlc-zero' });
-  assert.equal(result.API_BASE_URL, '/sdlc-api');
-  assert.equal(result.VITE_ZERO_SERVER, 'http://dev.example.test:5174/sdlc-zero');
+test('an explicit Zero path retains precedence over the development proxy', () => {
+  const result = config({ DEV: true, VITE_DEV_PROXY: 'true', VITE_ZERO_PATH: '/zero-cache' });
+  assert.equal(result.API_BASE_URL, '/api');
+  assert.equal(result.VITE_ZERO_SERVER, 'http://dev.example.test:5174/zero-cache');
 });
 
 test('localhost defaults remain available without the proxy flag', () => {

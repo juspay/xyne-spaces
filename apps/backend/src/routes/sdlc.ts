@@ -484,19 +484,20 @@ router.get(
   })
 );
 
-router.get(
-  '/channels/:channelId/nav-target',
-  route(async (req, res) => {
-    const ids = z
-      .object({
-        conversationId: z.string().min(1),
-        messageId: z.string().min(1).optional(),
-      })
-      .parse(req.query);
-    const target = await sdlcHub.navTarget(actorFromRequest(req), req.params.channelId, ids);
-    res.status(200).json({ success: true, target });
-  })
-);
+// Disabled (SDLC)
+// router.get(
+//   '/channels/:channelId/nav-target',
+//   route(async (req, res) => {
+//     const ids = z
+//       .object({
+//         conversationId: z.string().min(1),
+//         messageId: z.string().min(1).optional(),
+//       })
+//       .parse(req.query);
+//     const target = await sdlcHub.navTarget(actorFromRequest(req), req.params.channelId, ids);
+//     res.status(200).json({ success: true, target });
+//   })
+// );
 
 router.get(
   '/repositories/:repoId/context',

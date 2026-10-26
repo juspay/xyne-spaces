@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { browserTabSearch } from './useSdlcFrameBridge';
+import { browserTabSearch } from './sdlcEmbeddedPages';
 
 describe('switching the open folder to its browser tab', () => {
   it('keeps the folder and track and drops other tab params', () => {
