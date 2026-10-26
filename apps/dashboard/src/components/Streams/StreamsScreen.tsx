@@ -10,7 +10,8 @@ import {
   useState,
 } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useSelector } from '@xstate/react';
+// Disabled (LLM)
+// import { useSelector } from '@xstate/react';
 import { v4 as uuidv4 } from 'uuid';
 // The header's own icons come from the app's set, not lucide. Two icon families
 // on one bar is most of what made these buttons read as foreign next to a
@@ -20,7 +21,8 @@ import { PlusDefault } from '@xyne/icons';
 import { useZero } from '../../hooks/useZero';
 import { getDraft } from '../../hooks/useDraft';
 import { mutators } from '../../zero/mutators';
-import { xyneAIActor } from '../../machines/xyneAIMachine';
+// Disabled (LLM)
+// import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useScope, useShortcut } from '../../shortcuts';
 import StreamColumn from './components/StreamColumn/StreamColumn';
 import AddColumnPalette from './components/AddColumnPalette/AddColumnPalette';
@@ -1202,36 +1204,37 @@ const StreamsScreen = (): ReactElement => {
   //
   // Intercepting the actor rather than every trigger means this works for the
   // sidebar sparkle, a channel header's Ask AI, and anything added later.
-  const aiOpen = useSelector(xyneAIActor, state => state.matches('open'));
-  const aiChannelId = useSelector(xyneAIActor, state => state.context.channelId);
+  // Disabled (LLM)
+  // const aiOpen = useSelector(xyneAIActor, state => state.matches('open'));
+  // const aiChannelId = useSelector(xyneAIActor, state => state.context.channelId);
 
-  useEffect(() => {
-    if (!aiOpen) return;
-    xyneAIActor.send({ type: 'CLOSE' });
-    const source: ColumnSource = { kind: 'agent', ...(aiChannelId && { channelId: aiChannelId }) };
-    const key = sourceKey(source);
-    setLayout(current => {
-      const at = current.streams.findIndex(candidate => candidate.id === current.activeStreamId);
-      const target = current.streams[at];
-      if (!target) return current;
-      const streams = current.streams.slice();
-      // Already watching this one — focus it rather than stacking a duplicate.
-      const existing = target.columns.findIndex(column => sourceKey(column.source) === key);
-      if (existing >= 0) {
-        streams[at] = { ...target, focus: existing };
-        return { ...current, streams };
-      }
-      // Beside the column it was triggered from — an Ask AI about #incidents
-      // belongs next to #incidents, not at the far end of the stream.
-      const insertAt = Math.min(target.focus + 1, target.columns.length);
-      const columnsNext = target.columns.slice();
-      const created = makeColumn(source, widthForSource(source));
-      markOpening(created.id);
-      columnsNext.splice(insertAt, 0, created);
-      streams[at] = { ...target, columns: columnsNext, focus: insertAt };
-      return { ...current, streams };
-    });
-  }, [aiOpen, aiChannelId, widthForSource, markOpening]);
+  // useEffect(() => {
+  //   if (!aiOpen) return;
+  //   xyneAIActor.send({ type: 'CLOSE' });
+  //   const source: ColumnSource = { kind: 'agent', ...(aiChannelId && { channelId: aiChannelId }) };
+  //   const key = sourceKey(source);
+  //   setLayout(current => {
+  //     const at = current.streams.findIndex(candidate => candidate.id === current.activeStreamId);
+  //     const target = current.streams[at];
+  //     if (!target) return current;
+  //     const streams = current.streams.slice();
+  //     // Already watching this one — focus it rather than stacking a duplicate.
+  //     const existing = target.columns.findIndex(column => sourceKey(column.source) === key);
+  //     if (existing >= 0) {
+  //       streams[at] = { ...target, focus: existing };
+  //       return { ...current, streams };
+  //     }
+  //     // Beside the column it was triggered from — an Ask AI about #incidents
+  //     // belongs next to #incidents, not at the far end of the stream.
+  //     const insertAt = Math.min(target.focus + 1, target.columns.length);
+  //     const columnsNext = target.columns.slice();
+  //     const created = makeColumn(source, widthForSource(source));
+  //     markOpening(created.id);
+  //     columnsNext.splice(insertAt, 0, created);
+  //     streams[at] = { ...target, columns: columnsNext, focus: insertAt };
+  //     return { ...current, streams };
+  //   });
+  // }, [aiOpen, aiChannelId, widthForSource, markOpening]);
 
   // ------------------------------------------------------------- geometry
 

@@ -17,15 +17,21 @@ import { Plus } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import { SortableBarRow } from './SortableBarRow';
-import { AppPickerDialog, type BarBuiltIn } from '../../BarCustomize';
+import {
+  // Disabled (Claw)
+  // AppPickerDialog,
+  type BarBuiltIn,
+} from '../../BarCustomize';
 import type { AppPublishOptions } from '../../BarCustomize/useChannelAppPublishing';
 import {
   type BarItemsStore,
   useAppSnapshots,
-  setAppSnapshot,
-  appItemId,
+  // Disabled (Claw)
+  // setAppSnapshot,
+  // appItemId,
   appIdOf,
-  MAX_APPS_PER_BAR,
+  // Disabled (Claw)
+  // MAX_APPS_PER_BAR,
 } from '../../../hooks/barItems';
 
 interface BarCustomizerProps {
@@ -60,7 +66,8 @@ export const BarCustomizer = ({
   builtIns,
   trackCategory,
   headerSlot,
-  publish,
+  // Disabled (Claw)
+  // publish,
   resetLabel,
   publishedAppIds,
   maxShown,
@@ -68,7 +75,8 @@ export const BarCustomizer = ({
 }: BarCustomizerProps): ReactElement => {
   const ids = store.useItems();
   const snapshots = useAppSnapshots();
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Disabled (Claw)
+  // const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmingReset, setConfirmingReset] = useState(false);
 
   const builtInById = useMemo(() => new Map(builtIns.map(b => [b.id, b])), [builtIns]);
@@ -85,13 +93,15 @@ export const BarCustomizer = ({
     [ids, snapshots, builtInById],
   );
   const available = useMemo(() => builtIns.filter(b => !ids.includes(b.id)), [builtIns, ids]);
-  const addedAppIds = useMemo(
-    () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
-    [ids],
-  );
+  // Disabled (Claw)
+  // const addedAppIds = useMemo(
+  //   () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
+  //   [ids],
+  // );
   const full = maxShown !== undefined && shown.length >= maxShown;
-  const appsFull =
-    [...addedAppIds].filter(id => !publishedAppIds?.has(id)).length >= MAX_APPS_PER_BAR;
+  // Disabled (Claw)
+  // const appsFull =
+  //   [...addedAppIds].filter(id => !publishedAppIds?.has(id)).length >= MAX_APPS_PER_BAR;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -259,6 +269,8 @@ export const BarCustomizer = ({
         </section>
       )}
 
+      {/* Disabled (Claw) */}
+      {/*
       {apps && (
         <>
           <section className='space-y-2'>
@@ -300,6 +312,7 @@ export const BarCustomizer = ({
           />
         </>
       )}
+      */}
     </div>
   );
 };

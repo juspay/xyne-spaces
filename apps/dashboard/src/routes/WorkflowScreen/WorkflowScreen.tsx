@@ -1,13 +1,18 @@
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
+// Disabled (Claw)
+// import { type ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactElement, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { WorkflowApp, WorkflowUIProvider } from '@xyne/workflow-ui';
 import { toast } from 'sonner';
 import { workflowClient } from '../../lib/workflowClient';
 import { queryClient } from '../../services/clients/queryClient';
 import { xyneAIActor, type WorkflowInfo } from '../../machines/xyneAIMachine';
-import { Button } from '../../components/ui/Button';
-import Tooltip from '../../components/ui/Tooltip';
-import { XyneAIStar } from '../../components/icons/xyne-ai';
+// Disabled (Claw)
+// import { Button } from '../../components/ui/Button';
+// Disabled (Claw)
+// import Tooltip from '../../components/ui/Tooltip';
+// Disabled (Claw)
+// import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { useWorkflowRouting } from './useWorkflowRouting';
 
 const notify = (kind: 'success' | 'error', message: string): void => {
@@ -37,11 +42,12 @@ const nameFromMetadata = (metadata: string | null): string | null => {
 const WorkflowScreen = (): ReactElement => {
   const { path, search, navigate } = useWorkflowRouting();
   const scope = useMemo(() => scopeFromPath(path), [path]);
-  const askAiTooltip = scope.executionId
-    ? 'Ask AI about this run'
-    : scope.workflowId
-      ? 'Ask AI about this workflow'
-      : 'Ask AI';
+  // Disabled (Claw)
+  // const askAiTooltip = scope.executionId
+  //   ? 'Ask AI about this run'
+  //   : scope.workflowId
+  //     ? 'Ask AI about this workflow'
+  //     : 'Ask AI';
 
   const { data: workflowInfo = null } = useQuery<WorkflowInfo | null>({
     queryKey: ['askai-workflow-scope', scope.workflowId ?? null, scope.executionId ?? null],
@@ -89,26 +95,28 @@ const WorkflowScreen = (): ReactElement => {
     };
   }, []);
 
-  const openAskAi = useCallback((): void => {
-    xyneAIActor.send({ type: 'OPEN', trackSource: 'workflow', workflowInfo: currentScope });
-  }, [currentScope]);
+  // Disabled (Claw)
+  // const openAskAi = useCallback((): void => {
+  //   xyneAIActor.send({ type: 'OPEN', trackSource: 'workflow', workflowInfo: currentScope });
+  // }, [currentScope]);
 
-  const askAiButton = (
-    <Tooltip content={askAiTooltip} side='bottom'>
-      <Button
-        variant='ghost'
-        size='sm'
-        aria-label={askAiTooltip}
-        onClick={openAskAi}
-        className='h-8 w-8 rounded-lg p-0'
-        data-track-category='WORKFLOWS'
-        data-track-name='OPEN_XYNE_AI'
-        data-track-metadata={JSON.stringify(scope)}
-      >
-        <XyneAIStar />
-      </Button>
-    </Tooltip>
-  );
+  // Disabled (Claw)
+  // const askAiButton = (
+  //   <Tooltip content={askAiTooltip} side='bottom'>
+  //     <Button
+  //       variant='ghost'
+  //       size='sm'
+  //       aria-label={askAiTooltip}
+  //       onClick={openAskAi}
+  //       className='h-8 w-8 rounded-lg p-0'
+  //       data-track-category='WORKFLOWS'
+  //       data-track-name='OPEN_XYNE_AI'
+  //       data-track-metadata={JSON.stringify(scope)}
+  //     >
+  //       <XyneAIStar />
+  //     </Button>
+  //   </Tooltip>
+  // );
 
   return (
     <div className='h-full overflow-hidden rounded-2xl border border-border bg-background'>
@@ -119,7 +127,8 @@ const WorkflowScreen = (): ReactElement => {
           search={search}
           onNavigate={navigate}
           onToast={notify}
-          headerActions={askAiButton}
+          // Disabled (Claw)
+          // headerActions={askAiButton}
           onSelectStep={setSelectedStepId}
         />
       </WorkflowUIProvider>

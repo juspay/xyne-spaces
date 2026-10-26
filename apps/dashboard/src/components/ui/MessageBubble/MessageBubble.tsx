@@ -96,13 +96,16 @@ import { RecordingBubble } from './RecordingBubble';
 import { CallShareBubble } from './CallShareBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
-import { TicketSuggestions } from './TicketSuggestions';
+// Disabled (LLM)
+// import { TicketSuggestions } from './TicketSuggestions';
 import { AppActions } from './AppActions';
 import { parseMarkdownWithAppActions } from '../../../utils/markdownAppActions';
-import { PulseTickets } from './PulseTickets';
+// Disabled (LLM)
+// import { PulseTickets } from './PulseTickets';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
-import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
+// Disabled (LLM)
+// import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import MobileReactionDrawer from './MobileReactionDrawer';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import AddReactionDrawerMobile from '../../Chat/AddReactionDrawerMobile/AddReactionDrawerMobile';
@@ -678,8 +681,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
   }, [isMarkdownContent, hasSuggestedTickets, message.content]);
 
-  const ticketSuggestions = parsedMarkdown.ticketSuggestions;
-  const ticketsCreated = parsedMarkdown.ticketsCreated;
+  // Disabled (LLM)
+  // const ticketSuggestions = parsedMarkdown.ticketSuggestions;
+  // const ticketsCreated = parsedMarkdown.ticketsCreated;
 
   const { user } = useAuth();
 
@@ -705,21 +709,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return { ...parsed, appActions: visibleActions };
   }, [hasAppActions, message.content, user?.id]);
 
-  const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
+  // Disabled (LLM)
+  // const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
   const isChannelEmailMessage = metadata?.['messageSubtype'] === 'channel_email';
 
   const { isMobile } = usePlatform();
   const sender = useUser(message.senderId);
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
-  const actionableCount = useMemo(
-    () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
-    [message.nudgeCounts],
-  );
-  const countRowIds = useMemo(
-    () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
-    [message.nudgeCounts],
-  );
+  // Disabled (LLM)
+  // const actionableCount = useMemo(
+  //   () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
+  //   [message.nudgeCounts],
+  // );
+  // const countRowIds = useMemo(
+  //   () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
+  //   [message.nudgeCounts],
+  // );
 
   const handleUserClick = (userId: string): void => {
     if (onUserClick) {
@@ -1351,15 +1357,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   conversationId={message.conversationId}
                   showButton={true}
                 />
-              ) : isPulseActionablesMessage && metadata?.callId ? (
-                <PulseTickets
-                  content={message.content}
-                  callId={metadata?.callId}
-                  {...(channelId && { channelId })}
-                  conversationId={message.conversationId}
-                  messageId={message.messageId}
-                />
-              ) : isChannelEmailMessage ? (
+              ) : // Disabled (LLM)
+              // ) : isPulseActionablesMessage && metadata?.callId ? (
+              //   <PulseTickets
+              //     content={message.content}
+              //     callId={metadata?.callId}
+              //     {...(channelId && { channelId })}
+              //     conversationId={message.conversationId}
+              //     messageId={message.messageId}
+              //   />
+              isChannelEmailMessage ? (
                 <ChannelEmailCard
                   subject={typeof metadata?.['subject'] === 'string' ? metadata['subject'] : ''}
                   from={typeof metadata?.['from'] === 'string' ? metadata['from'] : ''}
@@ -1468,7 +1475,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         />
                       </div>
                     ))}
-                  {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
+                  {/* Disabled (LLM) */}
+                  {/* {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
                     <TicketSuggestions
                       suggestions={ticketSuggestions}
                       ticketsCreated={ticketsCreated}
@@ -1476,7 +1484,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       messageId={message.messageId}
                       conversationId={message.conversationId}
                     />
-                  )}
+                  )} */}
                   {(parsedAppActions.appActions.length > 0 ||
                     parsedAppActions.actioned.length > 0) && (
                     <AppActions
@@ -1742,7 +1750,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               )}
 
-              {!contentOnly && (
+              {/* Disabled (LLM) */}
+              {/* {!contentOnly && (
                 <SurfaceNudgeList
                   messageId={message.messageId}
                   actionableCount={actionableCount}
@@ -1753,7 +1762,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   messageType={message.msgType}
                   isDeleted={message.isDeleted}
                 />
-              )}
+              )} */}
               {!contentOnly && (
                 <ReactionView
                   reactionsMd={message.reactions_md}

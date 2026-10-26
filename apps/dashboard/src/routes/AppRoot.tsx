@@ -26,13 +26,14 @@ import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { BrowserPageLayer } from './BrowserTabsScreen/BrowserPageLayer';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
-// ClawSettingsScreen and ClawMetricsScreen are also mounted at /ai/settings and
-// /ai/metrics (via AISectionLayout below) — kept even though the standalone
-// /claw-agents module that used to own them is gone.
-import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
-import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
-import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
-import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
+// Disabled (Claw)
+// // ClawSettingsScreen and ClawMetricsScreen are also mounted at /ai/settings and
+// // /ai/metrics (via AISectionLayout below) — kept even though the standalone
+// // /claw-agents module that used to own them is gone.
+// import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
+// import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
+// import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
+// import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
@@ -62,11 +63,14 @@ import CanvasScreen from '../components/Canvas/CanvasScreen';
 import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
 import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
-import { ClawOverlay } from '../components/Claw/ClawOverlay';
-import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
+// Disabled (Claw)
+// import { ClawOverlay } from '../components/Claw/ClawOverlay';
+// import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
 import { SiteMap } from '../components/AppSidebar/SiteMap';
-import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
+// Disabled (Claw)
+// import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
+import { ReactElement, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
@@ -112,8 +116,9 @@ import ReleaseManagerView from './ProjectsScreen/ReleaseManagerView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
 import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
-import { RecapPanel } from '../components/RecapPanel';
-import { RadarPanel } from '../components/RadarPanel';
+// Disabled (LLM)
+// import { RecapPanel } from '../components/RecapPanel';
+// import { RadarPanel } from '../components/RadarPanel';
 import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
@@ -127,7 +132,8 @@ import { RecordingOverlay } from '../components/Recording/RecordingOverlay/Recor
 import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
 import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
-import { useWorkspacePageTools } from '../components/AIScreen/Workspace';
+// Disabled (Claw)
+// import { useWorkspacePageTools } from '../components/AIScreen/Workspace';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
 import { confirmInterrupt, isInterruptible } from '../components/InterruptGuard/InterruptGuard';
@@ -135,7 +141,8 @@ import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerO
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
-import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
+// Disabled (Claw)
+// import AppsMarketplaceScreen from './AppsMarketplaceScreen/AppsMarketplaceScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
 import { InstrumentationProvider } from '@xyne/shared/hooks';
@@ -154,16 +161,18 @@ import { useShortcutById } from '../shortcuts';
 import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
 import {
   AIOnboardingProvider,
-  useAIOnboarding,
-  isAIOnboardingCompleted,
-  isAIOnboardingPending,
-  clearAIOnboardingPending,
+  // Disabled (Claw)
+  // useAIOnboarding,
+  // isAIOnboardingCompleted,
+  // isAIOnboardingPending,
+  // clearAIOnboardingPending,
   isAIOnboardingActive,
 } from '../contexts/AIOnboardingContext';
 import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
-import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
-import { AssistantPanelTrigger } from '../components/AIOnboarding/AssistantPanelTrigger';
-import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
+// Disabled (Claw)
+// import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
+// import { AssistantPanelTrigger } from '../components/AIOnboarding/AssistantPanelTrigger';
+// import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import {
   XyneCalendarSidebar,
   XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE,
@@ -185,7 +194,8 @@ import { UserGroupDialog } from '../components/UserGroup/UserGroupDialog/UserGro
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { RoleManagementScreen } from './RoleManagementScreen';
-import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
+// Disabled (LLM)
+// import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { WorkflowScreen } from './WorkflowScreen';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
@@ -196,7 +206,8 @@ import {
   MembersTab,
   RepositoryCredentialsTab,
   ToolbarTab,
-  AgentActivityTab,
+  // Disabled (Claw)
+  // AgentActivityTab,
 } from './WorkspaceManagementScreen';
 import OrganisationsModuleScreen, {
   LegacyOrganisationsRedirect,
@@ -212,7 +223,8 @@ import SystemPalette from './SystemPalette/SystemPalette';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryDashboardScreen from '../components/AnalyticsDashboard/QueryDashboardScreen';
 import { DynamicDashboardPanel, DynamicDashboardScreen } from '../components/DynamicDashboard';
-import Drawer from '../components/ui/Drawer';
+// Disabled (Claw)
+// import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
@@ -227,40 +239,43 @@ import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModa
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMigrationScreen';
-import AIScreen from './AIScreen/AIScreen';
-import AILibraryScreen from './AIScreen/screens/AILibraryScreen';
-import AIEnvironmentsScreen from './AIScreen/screens/AIEnvironmentsScreen';
-import AISandboxProfileScreen from './AIScreen/screens/AISandboxProfileScreen';
-import AIAdminScreen from './AIScreen/screens/AIAdminScreen';
-import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
-import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
-import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
-import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
-import ArtifactAppScreen from './AIScreen/library/apps/ArtifactAppScreen';
-import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
-import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
-import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
-import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
-import AIDeveloperToolDetailScreen from './AIScreen/screens/AIDeveloperToolDetailScreen';
-import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
-import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
-import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
-import AIDigitalTwinScreen from './AIScreen/screens/AIDigitalTwinScreen';
-import AISectionLayout from './AIScreen/AISectionLayout';
+// Disabled (Claw)
+// import AIScreen from './AIScreen/AIScreen';
+// import AILibraryScreen from './AIScreen/screens/AILibraryScreen';
+// import AIEnvironmentsScreen from './AIScreen/screens/AIEnvironmentsScreen';
+// import AISandboxProfileScreen from './AIScreen/screens/AISandboxProfileScreen';
+// import AIAdminScreen from './AIScreen/screens/AIAdminScreen';
+// import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
+// import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
+// import AISkillCreateScreen from './AIScreen/screens/AISkillCreateScreen';
+// import AIAgentDetailScreen from './AIScreen/screens/AIAgentDetailScreen';
+// import ArtifactAppScreen from './AIScreen/library/apps/ArtifactAppScreen';
+// import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
+// import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
+// import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
+// import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
+// import AIDeveloperToolDetailScreen from './AIScreen/screens/AIDeveloperToolDetailScreen';
+// import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
+// import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
+// import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
+// import AIDigitalTwinScreen from './AIScreen/screens/AIDigitalTwinScreen';
+// import AISectionLayout from './AIScreen/AISectionLayout';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
-import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
+// Disabled (Claw)
+// import AIDailyBriefScreen from './AIScreen/AIDailyBriefScreen';
 import AutomationsScreen from './AutomationsScreen/AutomationsScreen';
 import AutomationsListScreen from './AutomationsScreen/AutomationsListScreen';
 import AutomationBuilderScreen from './AutomationsScreen/AutomationBuilderScreen';
 import AutomationRunsScreen from './AutomationsScreen/AutomationRunsScreen';
 import AutomationRunDetailScreen from './AutomationsScreen/AutomationRunDetailScreen';
 import AutomationApprovalsScreen from './AutomationsScreen/AutomationApprovalsScreen';
-import TeamIntelligenceScreen from './TeamIntelligenceScreen/TeamIntelligenceScreen.tsx';
-import TeamIntelligenceOrgScreen from './TeamIntelligenceScreen/TeamIntelligenceOrgScreen.tsx';
-import TeamIntelligenceTeamScreen from './TeamIntelligenceScreen/TeamIntelligenceTeamScreen.tsx';
-import TeamIntelligenceMemberScreen from './TeamIntelligenceScreen/TeamIntelligenceMemberScreen.tsx';
+// Disabled (LLM)
+// import TeamIntelligenceScreen from './TeamIntelligenceScreen/TeamIntelligenceScreen.tsx';
+// import TeamIntelligenceOrgScreen from './TeamIntelligenceScreen/TeamIntelligenceOrgScreen.tsx';
+// import TeamIntelligenceTeamScreen from './TeamIntelligenceScreen/TeamIntelligenceTeamScreen.tsx';
+// import TeamIntelligenceMemberScreen from './TeamIntelligenceScreen/TeamIntelligenceMemberScreen.tsx';
 
 /** Auth-aware call route: authenticated users join via CallPage, others see external lobby  */
 function CallRouteHandler(): ReactElement | null {
@@ -276,47 +291,49 @@ function CallRouteHandler(): ReactElement | null {
   return <Navigate to='/auth' replace />;
 }
 
-/** Auto-triggers AI onboarding after the existing 6-step onboarding completes, or resumes on refresh */
-const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null => {
-  const { startOnboarding } = useAIOnboarding();
+// Disabled (Claw)
+// /** Auto-triggers AI onboarding after the existing 6-step onboarding completes, or resumes on refresh */
+// const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null => {
+// const { startOnboarding } = useAIOnboarding();
 
-  useEffect(() => {
-    if (isOnboarding) return;
-    if (isAIOnboardingCompleted()) {
-      // Clean up stale active flag if onboarding was already completed
-      if (isAIOnboardingActive()) {
-        localStorage.removeItem('xyne-ai-onboarding-active');
-      }
-      return;
-    }
+// useEffect(() => {
+// if (isOnboarding) return;
+// if (isAIOnboardingCompleted()) {
+// // Clean up stale active flag if onboarding was already completed
+// if (isAIOnboardingActive()) {
+// localStorage.removeItem('xyne-ai-onboarding-active');
+// }
+// return;
+// }
 
-    // First-time trigger: pending flag set by OnboardingScreen on completion
-    if (isAIOnboardingPending()) {
-      clearAIOnboardingPending();
-      startOnboarding('auto', true);
-      return;
-    }
+// // First-time trigger: pending flag set by OnboardingScreen on completion
+// if (isAIOnboardingPending()) {
+// clearAIOnboardingPending();
+// startOnboarding('auto', true);
+// return;
+// }
 
-    // Resume after refresh: load existing conversation, don't start fresh
-    if (isAIOnboardingActive()) {
-      startOnboarding('auto', false);
-    }
-  }, [isOnboarding, startOnboarding]);
+// // Resume after refresh: load existing conversation, don't start fresh
+// if (isAIOnboardingActive()) {
+// startOnboarding('auto', false);
+// }
+// }, [isOnboarding, startOnboarding]);
 
-  return null;
-};
+// return null;
+// };
 
-/** Elevate Ask AI panel only during AI onboarding so it stacks above the overlay; otherwise leave z-index default (e.g. for @/# mention popovers). */
-const XyneAISidebarZIndexShell = ({ children }: { children: ReactNode }): ReactElement => {
-  const { state: aiOnboarding } = useAIOnboarding();
-  return (
-    <div className={aiOnboarding.isActive ? 'h-full relative z-[56]' : 'h-full relative'}>
-      {children}
-    </div>
-  );
-};
+// /** Elevate Ask AI panel only during AI onboarding so it stacks above the overlay; otherwise leave z-index default (e.g. for @/# mention popovers). */
+// const XyneAISidebarZIndexShell = ({ children }: { children: ReactNode }): ReactElement => {
+// const { state: aiOnboarding } = useAIOnboarding();
+// return (
+// <div className={aiOnboarding.isActive ? 'h-full relative z-[56]' : 'h-full relative'}>
+// {children}
+// </div>
+// );
+// };
 
-const XYNE_AI_PANEL_MIN_SIZE = 42;
+// Disabled (Claw)
+// const XYNE_AI_PANEL_MIN_SIZE = 42;
 const XYNE_AI_PANEL_DEFAULT_SIZE = 35;
 
 const WorkspaceRedirect = (): ReactElement => {
@@ -330,7 +347,8 @@ const WorkspaceRedirect = (): ReactElement => {
 };
 
 const AppRoot = (): ReactElement => {
-  useWorkspacePageTools();
+  // Disabled (Claw)
+  // useWorkspacePageTools();
   const { recordingVersion } = useRecordingVersion();
   // Create panel refs for WebView
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
@@ -354,9 +372,10 @@ const AppRoot = (): ReactElement => {
   const [pendingRecording, setPendingRecording] = useState<File | null>(null);
   const [pendingRecordingFilePath, setPendingRecordingFilePath] = useState<string | null>(null);
   const [isXyneDebuggerOpen, setIsXyneDebuggerOpen] = useState(false);
-  const [hasXyneAIStreaming, setHasXyneAIStreaming] = useState(() =>
-    xyneAIStreamManager.hasStreamingSidebarStreams(),
-  );
+  // Disabled (Claw)
+  // const [hasXyneAIStreaming, setHasXyneAIStreaming] = useState(() =>
+  // xyneAIStreamManager.hasStreamingSidebarStreams(),
+  // );
 
   const { startRecording } = useScreenRecorder((file: File, filePath: string) => {
     setPendingRecording(file);
@@ -410,13 +429,14 @@ const AppRoot = (): ReactElement => {
     () => void navigate('/chat/search?mode=dm', { replace: true }),
   );
 
-  useEffect(() => {
-    const syncStreaming = (): void => {
-      setHasXyneAIStreaming(xyneAIStreamManager.hasStreamingSidebarStreams());
-    };
-    syncStreaming();
-    return xyneAIStreamManager.subscribe(syncStreaming);
-  }, []);
+  // Disabled (Claw)
+  // useEffect(() => {
+  // const syncStreaming = (): void => {
+  // setHasXyneAIStreaming(xyneAIStreamManager.hasStreamingSidebarStreams());
+  // };
+  // syncStreaming();
+  // return xyneAIStreamManager.subscribe(syncStreaming);
+  // }, []);
 
   // "View" on a background Ask AI completion toast. The stream manager lives
   // outside the router, so it can't navigate itself — it calls back here.
@@ -477,33 +497,34 @@ const AppRoot = (): ReactElement => {
     browserPanelActor,
     state => state.context.browserPanelState,
   );
-  const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
-  const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
-  const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
-  const xyneAIInitialContextSelections = useSelector(
-    xyneAIActor,
-    state => state.context.initialContextSelections,
-  );
-  const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
-  const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
-  const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
-  const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
-  const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
-  const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
-  const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
-  const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
-  const xyneAIWorkflowDismissed = useSelector(
-    xyneAIActor,
-    state => state.context.workflowDismissed,
-  );
-  const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
-  const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
-  const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
-  const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
-  const xyneAIAutoSendWebSearch = useSelector(
-    xyneAIActor,
-    state => state.context.autoSendWebSearch,
-  );
+  // Disabled (Claw)
+  // const xyneAICanvasInfo = useSelector(xyneAIActor, state => state.context.canvasInfo);
+  // const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
+  // const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
+  // const xyneAIInitialContextSelections = useSelector(
+  // xyneAIActor,
+  // state => state.context.initialContextSelections,
+  // );
+  // const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
+  // const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
+  // const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
+  // const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
+  // const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
+  // const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
+  // const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
+  // const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
+  // const xyneAIWorkflowDismissed = useSelector(
+  // xyneAIActor,
+  // state => state.context.workflowDismissed,
+  // );
+  // const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
+  // const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
+  // const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
+  // const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
+  // const xyneAIAutoSendWebSearch = useSelector(
+  // xyneAIActor,
+  // state => state.context.autoSendWebSearch,
+  // );
   const isCalendarOpen = useSelector(xyneCalendarActor, state => state.matches('open'));
   const { isMobile } = usePlatform();
   // No-op outside the SDLC bundle's framed instance.
@@ -600,42 +621,43 @@ const AppRoot = (): ReactElement => {
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
 
   const renderPanels: SidebarPanelDescriptor[] = [
-    {
-      id: 'xyneai',
-      isActive: showXyneAIPanel,
-      size: {
-        default: XYNE_AI_PANEL_DEFAULT_SIZE,
-        min: isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25,
-        max: isXyneDebuggerOpen ? 55 : 50,
-      },
-      panelRef: xyneAIRightPanelRef,
-      content: (
-        <XyneAISidebarZIndexShell>
-          <XyneAISidebar
-            channelId={xyneAIChannelId}
-            threadInfo={xyneAIThreadInfo}
-            startFreshChat={xyneAIStartFreshChat}
-            canvasInfo={xyneAICanvasInfo}
-            initialContextSelections={xyneAIInitialContextSelections}
-            contextOpenNonce={xyneAIContextOpenNonce}
-            kbCollectionId={xyneAIKbCollectionId ?? ''}
-            kbChannelId={xyneAIKbChannelId ?? ''}
-            kbDocId={xyneAIKbDocId ?? ''}
-            kbDocName={xyneAIKbDocName ?? ''}
-            kbFolderId={xyneAIKbFolderId ?? ''}
-            kbFolderName={xyneAIKbFolderName ?? ''}
-            kbOpenNonce={xyneAIKbOpenNonce}
-            workflowInfo={xyneAIWorkflowInfo}
-            workflowDismissed={xyneAIWorkflowDismissed}
-            researchContext={xyneAIResearchContext}
-            initialQuery={xyneAIInitialQuery ?? undefined}
-            autoSendNonce={xyneAIAutoSendNonce}
-            autoSendWebSearch={xyneAIAutoSendWebSearch}
-            onDebuggerOpenChange={setIsXyneDebuggerOpen}
-          />
-        </XyneAISidebarZIndexShell>
-      ),
-    },
+    // Disabled (Claw)
+    // {
+    // id: 'xyneai',
+    // isActive: showXyneAIPanel,
+    // size: {
+    // default: XYNE_AI_PANEL_DEFAULT_SIZE,
+    // min: isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25,
+    // max: isXyneDebuggerOpen ? 55 : 50,
+    // },
+    // panelRef: xyneAIRightPanelRef,
+    // content: (
+    // <XyneAISidebarZIndexShell>
+    // <XyneAISidebar
+    // channelId={xyneAIChannelId}
+    // threadInfo={xyneAIThreadInfo}
+    // startFreshChat={xyneAIStartFreshChat}
+    // canvasInfo={xyneAICanvasInfo}
+    // initialContextSelections={xyneAIInitialContextSelections}
+    // contextOpenNonce={xyneAIContextOpenNonce}
+    // kbCollectionId={xyneAIKbCollectionId ?? ''}
+    // kbChannelId={xyneAIKbChannelId ?? ''}
+    // kbDocId={xyneAIKbDocId ?? ''}
+    // kbDocName={xyneAIKbDocName ?? ''}
+    // kbFolderId={xyneAIKbFolderId ?? ''}
+    // kbFolderName={xyneAIKbFolderName ?? ''}
+    // kbOpenNonce={xyneAIKbOpenNonce}
+    // workflowInfo={xyneAIWorkflowInfo}
+    // workflowDismissed={xyneAIWorkflowDismissed}
+    // researchContext={xyneAIResearchContext}
+    // initialQuery={xyneAIInitialQuery ?? undefined}
+    // autoSendNonce={xyneAIAutoSendNonce}
+    // autoSendWebSearch={xyneAIAutoSendWebSearch}
+    // onDebuggerOpenChange={setIsXyneDebuggerOpen}
+    // />
+    // </XyneAISidebarZIndexShell>
+    // ),
+    // },
     {
       id: 'calendar',
       isActive: showCalendarPanel,
@@ -770,9 +792,10 @@ const AppRoot = (): ReactElement => {
             <InitialStateLoader>
               <ShareRecordingHandler />
               <AIOnboardingProvider>
-                <AIOnboardingTrigger isOnboarding={isOnboarding} />
+                {/* Disabled (Claw) */}
+                {/* <AIOnboardingTrigger isOnboarding={isOnboarding} />
                 <AssistantPanelTrigger />
-                <AIOnboardingOverlay />
+                <AIOnboardingOverlay /> */}
                 <SlashCommandArtifactSideEffectProvider>
                   {!isInPanelWebview && <SlashCommandArtifactBanner />}
                   <EditProvider>
@@ -828,7 +851,8 @@ const AppRoot = (): ReactElement => {
                                 <Outlet />
                               </main>
                             </Panel>
-                            {showSdlcFrameXyneAI && (
+                            {/* Disabled (Claw) */}
+                            {/* {showSdlcFrameXyneAI && (
                               <>
                                 <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
                                   <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
@@ -867,7 +891,7 @@ const AppRoot = (): ReactElement => {
                                   </XyneAISidebarZIndexShell>
                                 </Panel>
                               </>
-                            )}
+                            )} */}
                           </ResizableGroup>
                         </div>
                       ) : isOnboarding ? (
@@ -972,7 +996,12 @@ const AppRoot = (): ReactElement => {
                           {/* The browser's pages: here, where they never move, so
                               docking or undocking the browser doesn't reload them. */}
                           <BrowserPageLayer />
-                          <GlobalCommandMenu aiOverview ticketScreenScope fullPageSearch />
+                          <GlobalCommandMenu
+                            // Disabled (Claw)
+                            // aiOverview
+                            ticketScreenScope
+                            fullPageSearch
+                          />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}
@@ -1002,7 +1031,8 @@ const AppRoot = (): ReactElement => {
                         }}
                       />
 
-                      {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
+                      {/* Disabled (Claw) */}
+                      {/* {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
                         <div className='hidden' aria-hidden='true'>
                           <XyneAISidebar
                             channelId={xyneAIChannelId}
@@ -1028,9 +1058,10 @@ const AppRoot = (): ReactElement => {
                             visible={false}
                           />
                         </div>
-                      )}
+                      )} */}
                       {/* XyneAI Mobile Drawer */}
-                      {isMobile &&
+                      {/* Disabled (Claw) */}
+                      {/* {isMobile &&
                         !isInPanelWebview &&
                         !isOnAIChatExperiencePage &&
                         !isOnStreamsPage && (
@@ -1067,7 +1098,7 @@ const AppRoot = (): ReactElement => {
                               onDebuggerOpenChange={setIsXyneDebuggerOpen}
                             />
                           </Drawer>
-                        )}
+                        )} */}
                     </SdlcFrameProvider>
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
@@ -1094,16 +1125,17 @@ const WorkflowsRouteElement = (): ReactElement =>
 
 export const router = createBrowserRouter(
   [
-    {
-      element: <ProtectedRoute />,
-      errorElement: <RouterErrorFallback />,
-      children: [
-        {
-          path: '/newWindow/claw',
-          element: <ClawOverlay />,
-        },
-      ],
-    },
+    // Disabled (Claw)
+    // {
+    // element: <ProtectedRoute />,
+    // errorElement: <RouterErrorFallback />,
+    // children: [
+    // {
+    // path: '/newWindow/claw',
+    // element: <ClawOverlay />,
+    // },
+    // ],
+    // },
     {
       element: <SplashScreen />,
       errorElement: <RouterErrorFallback />,
@@ -1124,13 +1156,14 @@ export const router = createBrowserRouter(
                   index: true,
                   element: <HomeScreen />,
                 },
-                {
-                  // A saved artifact app on its own, opened from the toolbar.
-                  // Outside the /ai subtree on purpose: a workspace that has
-                  // disabled Xyne AI from the rail can still keep apps there.
-                  path: 'app/:appId',
-                  element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
-                },
+                // Disabled (Claw)
+                // {
+                // // A saved artifact app on its own, opened from the toolbar.
+                // // Outside the /ai subtree on purpose: a workspace that has
+                // // disabled Xyne AI from the rail can still keep apps there.
+                // path: 'app/:appId',
+                // element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
+                // },
                 {
                   // Standalone migration/insights URLs from before these were
                   // folded into /migrations or removed; bookmarks still land here.
@@ -1149,90 +1182,91 @@ export const router = createBrowserRouter(
                   path: 'product-insights',
                   element: <Navigate to='..' replace />,
                 },
-                {
-                  path: 'ai',
-                  element: (
-                    <ToolbarProtectedRoute path='/ai'>
-                      <Outlet />
-                    </ToolbarProtectedRoute>
-                  ),
-                  children: [
-                    { index: true, element: <Navigate to='chat/new' replace /> },
-                    // ONE route, with `new` as an ordinary value of :sessionId.
-                    //
-                    // Declaring `chat/new` separately looks harmless but makes two
-                    // DISTINCT routes out of the same component, so moving between
-                    // them unmounts and remounts AIScreen — wiping activeSessionId,
-                    // chatKey and showChatView. The remount re-seeds from
-                    // sessionStorage, which can still hold the previous thread, so
-                    // the URL effect navigates back to it and remounts again: the
-                    // screen visibly bounces between routes on every thread switch.
-                    // With a single route, changing the param re-renders in place.
-                    { path: 'chat/:sessionId', element: <AIScreen /> },
-                    { path: 'daily-brief', element: <AIDailyBriefScreen /> },
-                    { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
-                    { path: 'library', element: <AILibraryScreen /> },
-                    {
-                      path: 'environments',
-                      element: (
-                        <RequireClawAdmin orSdlcAdmin>
-                          <AIEnvironmentsScreen />
-                        </RequireClawAdmin>
-                      ),
-                    },
-                    { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
-                    { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
-                    {
-                      path: 'admin',
-                      element: (
-                        <RequireClawAdmin>
-                          <AIAdminScreen />
-                        </RequireClawAdmin>
-                      ),
-                    },
-                    { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
-                    { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
-                    { path: 'library/skill/create', element: <AISkillCreateScreen /> },
-                    { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
-                    { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
-                    { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
-                    { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
-                    { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
-                    { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
-                    { path: 'library/developers/:tool', element: <AIDeveloperToolDetailScreen /> },
-                    { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
-                    {
-                      path: 'knowledge',
-                      element: <AIKnowledgeScreen />,
-                      children: [
-                        { index: true, element: <KnowledgeBaseV2Screen /> },
-                        {
-                          // Mirrors /knowledge-base's own file-viewer route so
-                          // opening a file from here stays under /ai/knowledge
-                          // instead of hopping to the standalone KB screen.
-                          path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
-                          element: <FileViewerLayout />,
-                        },
-                      ],
-                    },
-                    {
-                      path: 'organization',
-                      element: (
-                        <RequireOrgManager>
-                          <AIOrganizationScreen />
-                        </RequireOrgManager>
-                      ),
-                    },
-                    { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
-                    {
-                      element: <AISectionLayout />,
-                      children: [
-                        { path: 'metrics', element: <ClawMetricsScreen /> },
-                        { path: 'settings', element: <ClawSettingsScreen /> },
-                      ],
-                    },
-                  ],
-                },
+                // Disabled (Claw)
+                // {
+                // path: 'ai',
+                // element: (
+                // <ToolbarProtectedRoute path='/ai'>
+                // <Outlet />
+                // </ToolbarProtectedRoute>
+                // ),
+                // children: [
+                // { index: true, element: <Navigate to='chat/new' replace /> },
+                // // ONE route, with `new` as an ordinary value of :sessionId.
+                // //
+                // // Declaring `chat/new` separately looks harmless but makes two
+                // // DISTINCT routes out of the same component, so moving between
+                // // them unmounts and remounts AIScreen — wiping activeSessionId,
+                // // chatKey and showChatView. The remount re-seeds from
+                // // sessionStorage, which can still hold the previous thread, so
+                // // the URL effect navigates back to it and remounts again: the
+                // // screen visibly bounces between routes on every thread switch.
+                // // With a single route, changing the param re-renders in place.
+                // { path: 'chat/:sessionId', element: <AIScreen /> },
+                // { path: 'daily-brief', element: <AIDailyBriefScreen /> },
+                // { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
+                // { path: 'library', element: <AILibraryScreen /> },
+                // {
+                // path: 'environments',
+                // element: (
+                // <RequireClawAdmin orSdlcAdmin>
+                // <AIEnvironmentsScreen />
+                // </RequireClawAdmin>
+                // ),
+                // },
+                // { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
+                // { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
+                // {
+                // path: 'admin',
+                // element: (
+                // <RequireClawAdmin>
+                // <AIAdminScreen />
+                // </RequireClawAdmin>
+                // ),
+                // },
+                // { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                // { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
+                // { path: 'library/skill/create', element: <AISkillCreateScreen /> },
+                // { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
+                // { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
+                // { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
+                // { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
+                // { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
+                // { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+                // { path: 'library/developers/:tool', element: <AIDeveloperToolDetailScreen /> },
+                // { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
+                // {
+                // path: 'knowledge',
+                // element: <AIKnowledgeScreen />,
+                // children: [
+                // { index: true, element: <KnowledgeBaseV2Screen /> },
+                // {
+                // // Mirrors /knowledge-base's own file-viewer route so
+                // // opening a file from here stays under /ai/knowledge
+                // // instead of hopping to the standalone KB screen.
+                // path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                // element: <FileViewerLayout />,
+                // },
+                // ],
+                // },
+                // {
+                // path: 'organization',
+                // element: (
+                // <RequireOrgManager>
+                // <AIOrganizationScreen />
+                // </RequireOrgManager>
+                // ),
+                // },
+                // { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
+                // {
+                // element: <AISectionLayout />,
+                // children: [
+                // { path: 'metrics', element: <ClawMetricsScreen /> },
+                // { path: 'settings', element: <ClawSettingsScreen /> },
+                // ],
+                // },
+                // ],
+                // },
                 {
                   path: 'onboarding',
                   element: <QuestionnaireScreen />,
@@ -1299,59 +1333,62 @@ export const router = createBrowserRouter(
                           path: 'unreads',
                           element: <UnreadsInbox />,
                         },
-                        // Recap (must come before :channelId)
-                        {
-                          path: 'recap',
-                          children: [
-                            {
-                              index: true,
-                              element: <RecapPanel />,
-                            },
-                            {
-                              path: ':channelId',
-                              element: <RecapPanel />,
-                              children: [
-                                {
-                                  path: ':conversationId',
-                                  element: <ThreadMessages />,
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                        // Radar (must come before :channelId). The route stays
-                        // registered because the router is built at module scope;
-                        // the CAC rollout gate lives inside RadarPanel itself.
-                        {
-                          path: 'radar',
-                          children: [
-                            {
-                              index: true,
-                              element: <RadarPanel />,
-                            },
-                            {
-                              path: ':channelId',
-                              element: <RadarPanel />,
-                              children: [
-                                {
-                                  path: ':conversationId',
-                                  element: <ThreadMessages />,
-                                },
-                              ],
-                            },
-                          ],
-                        },
+                        // Disabled (LLM)
+                        // // Recap (must come before :channelId)
+                        // {
+                        // path: 'recap',
+                        // children: [
+                        // {
+                        // index: true,
+                        // element: <RecapPanel />,
+                        // },
+                        // {
+                        // path: ':channelId',
+                        // element: <RecapPanel />,
+                        // children: [
+                        // {
+                        // path: ':conversationId',
+                        // element: <ThreadMessages />,
+                        // },
+                        // ],
+                        // },
+                        // ],
+                        // },
+                        // Disabled (LLM)
+                        // // Radar (must come before :channelId). The route stays
+                        // // registered because the router is built at module scope;
+                        // // the CAC rollout gate lives inside RadarPanel itself.
+                        // {
+                        // path: 'radar',
+                        // children: [
+                        // {
+                        // index: true,
+                        // element: <RadarPanel />,
+                        // },
+                        // {
+                        // path: ':channelId',
+                        // element: <RadarPanel />,
+                        // children: [
+                        // {
+                        // path: ':conversationId',
+                        // element: <ThreadMessages />,
+                        // },
+                        // ],
+                        // },
+                        // ],
+                        // },
                         // My Tickets (must come before :channelId)
                         {
                           path: 'my-tickets',
                           element: <MyTicketsScreen />,
                         },
-                        // An artifact app added to the Inbox menubar, shown in
-                        // the chat panel with the directory still alongside.
-                        {
-                          path: 'app/:appId',
-                          element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
-                        },
+                        // Disabled (Claw)
+                        // // An artifact app added to the Inbox menubar, shown in
+                        // // the chat panel with the directory still alongside.
+                        // {
+                        // path: 'app/:appId',
+                        // element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
+                        // },
                         // Channel routes (must come after specific routes)
                         {
                           path: ':channelId',
@@ -1665,28 +1702,29 @@ export const router = createBrowserRouter(
                     </ResourceProtectedRoute>
                   ),
                 },
-                {
-                  path: 'team-intelligence',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TEAM-INTELLIGENCE-DASHBOARD'>
-                      <TeamIntelligenceScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                  children: [
-                    {
-                      index: true,
-                      element: <TeamIntelligenceOrgScreen />,
-                    },
-                    {
-                      path: 'team/:teamId',
-                      element: <TeamIntelligenceTeamScreen />,
-                    },
-                    {
-                      path: 'member/:memberEmail',
-                      element: <TeamIntelligenceMemberScreen />,
-                    },
-                  ],
-                },
+                // Disabled (LLM)
+                // {
+                // path: 'team-intelligence',
+                // element: (
+                // <ResourceProtectedRoute resourceName='TEAM-INTELLIGENCE-DASHBOARD'>
+                // <TeamIntelligenceScreen />
+                // </ResourceProtectedRoute>
+                // ),
+                // children: [
+                // {
+                // index: true,
+                // element: <TeamIntelligenceOrgScreen />,
+                // },
+                // {
+                // path: 'team/:teamId',
+                // element: <TeamIntelligenceTeamScreen />,
+                // },
+                // {
+                // path: 'member/:memberEmail',
+                // element: <TeamIntelligenceMemberScreen />,
+                // },
+                // ],
+                // },
                 {
                   path: 'user-groups',
                   element: <LegacyOrganisationsRedirect section='user-groups' />,
@@ -1910,16 +1948,17 @@ export const router = createBrowserRouter(
                         </OrganisationsSectionGuard>
                       ),
                     },
-                    {
-                      path: 'agent-activity',
-                      element: (
-                        <OrganisationsSectionGuard section='agent-activity'>
-                          <OrganisationsPage wide>
-                            <AgentActivityTab isActive />
-                          </OrganisationsPage>
-                        </OrganisationsSectionGuard>
-                      ),
-                    },
+                    // Disabled (Claw)
+                    // {
+                    // path: 'agent-activity',
+                    // element: (
+                    // <OrganisationsSectionGuard section='agent-activity'>
+                    // <OrganisationsPage wide>
+                    // <AgentActivityTab isActive />
+                    // </OrganisationsPage>
+                    // </OrganisationsSectionGuard>
+                    // ),
+                    // },
                     {
                       path: 'user-groups',
                       element: (
@@ -2001,14 +2040,15 @@ export const router = createBrowserRouter(
                     </ToolbarProtectedRoute>
                   ),
                 },
-                {
-                  path: 'apps-marketplace',
-                  element: (
-                    <ToolbarProtectedRoute path='/apps-marketplace'>
-                      <AppsMarketplaceScreen />
-                    </ToolbarProtectedRoute>
-                  ),
-                },
+                // Disabled (Claw)
+                // {
+                // path: 'apps-marketplace',
+                // element: (
+                // <ToolbarProtectedRoute path='/apps-marketplace'>
+                // <AppsMarketplaceScreen />
+                // </ToolbarProtectedRoute>
+                // ),
+                // },
                 {
                   path: 'resource-access',
                   element: <LegacyOrganisationsRedirect section='members' />,
@@ -2017,14 +2057,15 @@ export const router = createBrowserRouter(
                   path: 'roles',
                   element: <LegacyOrganisationsRedirect section='roles' />,
                 },
-                {
-                  path: 'tag-review',
-                  element: (
-                    <ResourceProtectedRoute resourceName='WORKSPACE'>
-                      <TagReviewView />
-                    </ResourceProtectedRoute>
-                  ),
-                },
+                // Disabled (LLM)
+                // {
+                // path: 'tag-review',
+                // element: (
+                // <ResourceProtectedRoute resourceName='WORKSPACE'>
+                // <TagReviewView />
+                // </ResourceProtectedRoute>
+                // ),
+                // },
                 {
                   path: 'migration/confluence',
                   element: (

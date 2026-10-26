@@ -5,10 +5,12 @@ import {
   CircleCheck,
   Copy,
   FileText,
-  RotateCw,
+  // Disabled (LLM)
+  // RotateCw,
   Sparkles,
 } from 'lucide-react';
-import { toast } from 'sonner';
+// Disabled (LLM)
+// import { toast } from 'sonner';
 import { Button } from '../../../components/ui/Button';
 import { getAvatarColorClassNames } from '../../../components/ui/Avatar/Avatar';
 import { Skeleton } from '../../../components/ui/Skeleton';
@@ -23,12 +25,15 @@ import {
   buildValuesByChangeId,
 } from '../../../components/Release/releaseChanges.utils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
+// Disabled (LLM)
+// import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { useCopyButton } from '../../../hooks/useCopyButton';
-import { useCanManageRelease } from '../../../hooks/usePermissions';
-import { apiInstance } from '../../../services/clients/apiClient';
+// Disabled (LLM)
+// import { useCanManageRelease } from '../../../hooks/usePermissions';
+// import { apiInstance } from '../../../services/clients/apiClient';
 import { queries } from '../../../zero/queries';
-import { getApiErrorMessage } from '../../../utils/apiError';
+// Disabled (LLM)
+// import { getApiErrorMessage } from '../../../utils/apiError';
 import { cn } from '../../../utils/classNames';
 import type { ReleaseChangeRow, SdlcReleaseChangesProps } from './SdlcReleases.types';
 import {
@@ -334,57 +339,67 @@ function ReleaseNotes({
   repoName: string | null;
   onOpenCanvas: (canvasId: string) => void;
 }): ReactElement {
-  const [analyzing, setAnalyzing] = useState(false);
-  const canManage = useCanManageRelease();
-  const { confirm, ConfirmDialog } = useConfirmDialog();
+  // Disabled (LLM)
+  // const [analyzing, setAnalyzing] = useState(false);
+  // const canManage = useCanManageRelease();
+  // const { confirm, ConfirmDialog } = useConfirmDialog();
 
   const insights = readReleaseInsights(release.metadata);
-  const running = analyzing || readIsGeneratingInsights(release.metadata);
+  // Disabled (LLM)
+  // const running = analyzing || readIsGeneratingInsights(release.metadata);
+  const running = readIsGeneratingInsights(release.metadata);
 
-  const analyze = async (): Promise<void> => {
-    if (
-      insights &&
-      !(await confirm({
-        title: 'Re-analyze this release?',
-        description:
-          'This replaces the current summary, stats and risk assessment with a freshly generated set.',
-        confirmLabel: 'Re-analyze',
-      }))
-    ) {
-      return;
-    }
-    setAnalyzing(true);
-    try {
-      const response = await apiInstance.post<{ success: boolean; error?: string }>(
-        `/tickets/${release.id}/release-insights`,
-        {},
-      );
-      if (response.data?.success) toast.success('Release insights generated.');
-      else toast.error(response.data?.error ?? 'Analysis failed');
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Analysis failed'));
-    } finally {
-      setAnalyzing(false);
-    }
-  };
+  // Disabled (LLM)
+  // const analyze = async (): Promise<void> => {
+  //   if (
+  //     insights &&
+  //     !(await confirm({
+  //       title: 'Re-analyze this release?',
+  //       description:
+  //         'This replaces the current summary, stats and risk assessment with a freshly generated set.',
+  //       confirmLabel: 'Re-analyze',
+  //     }))
+  //   ) {
+  //     return;
+  //   }
+  //   setAnalyzing(true);
+  //   try {
+  //     const response = await apiInstance.post<{ success: boolean; error?: string }>(
+  //       `/tickets/${release.id}/release-insights`,
+  //       {},
+  //     );
+  //     if (response.data?.success) toast.success('Release insights generated.');
+  //     else toast.error(response.data?.error ?? 'Analysis failed');
+  //   } catch (error) {
+  //     toast.error(getApiErrorMessage(error, 'Analysis failed'));
+  //   } finally {
+  //     setAnalyzing(false);
+  //   }
+  // };
 
-  const headerAction = canManage && (insights || running || analysisCanvasId) && (
-    <Button
-      variant='ghost'
-      size='sm'
-      onClick={() => void analyze()}
-      disabled={running}
-      className='h-7 px-2 font-medium text-muted-foreground'
-      data-track-category={TRACK_CATEGORY}
-      data-track-name='ReleaseAnalyzeClicked'
-    >
-      <RotateCw className={cn('size-3.5', running && 'animate-spin')} />
-      {running ? 'Analyzing…' : insights ? 'Re-analyze' : 'Analyze release'}
-    </Button>
-  );
+  // Disabled (LLM)
+  // const headerAction = canManage && (insights || running || analysisCanvasId) && (
+  //   <Button
+  //     variant='ghost'
+  //     size='sm'
+  //     onClick={() => void analyze()}
+  //     disabled={running}
+  //     className='h-7 px-2 font-medium text-muted-foreground'
+  //     data-track-category={TRACK_CATEGORY}
+  //     data-track-name='ReleaseAnalyzeClicked'
+  //   >
+  //     <RotateCw className={cn('size-3.5', running && 'animate-spin')} />
+  //     {running ? 'Analyzing…' : insights ? 'Re-analyze' : 'Analyze release'}
+  //   </Button>
+  // );
 
   return (
-    <Section title='Release notes' meta='AI-generated' action={headerAction}>
+    <Section
+      title='Release notes'
+      meta='AI-generated'
+      // Disabled (LLM)
+      // action={headerAction}
+    >
       {running && (
         <div className='flex flex-col gap-3 rounded-[14px] border border-border bg-background px-6 py-[22px]'>
           <span className='text-[13px] text-muted-foreground'>
@@ -413,7 +428,8 @@ function ReleaseNotes({
               Get a summary, the release mix, risk, and what to check before deploy.
             </span>
           </div>
-          {canManage && (
+          {/* Disabled (LLM) */}
+          {/* {canManage && (
             <Button
               onClick={() => void analyze()}
               className='h-[34px] px-3.5 text-[13.5px] font-semibold'
@@ -422,7 +438,7 @@ function ReleaseNotes({
             >
               Analyze release
             </Button>
-          )}
+          )} */}
         </div>
       )}
       {analysisCanvasId && (
@@ -444,7 +460,8 @@ function ReleaseNotes({
           </span>
         </button>
       )}
-      <ConfirmDialog />
+      {/* Disabled (LLM) */}
+      {/* <ConfirmDialog /> */}
     </Section>
   );
 }

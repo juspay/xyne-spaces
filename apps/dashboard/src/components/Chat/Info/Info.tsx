@@ -25,8 +25,10 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
 import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
-import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
-import { AgentProactivityConfig } from '../Proactivity/AgentProactivityConfig';
+// Disabled (LLM)
+// import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
+// Disabled (Claw)
+// import { AgentProactivityConfig } from '../Proactivity/AgentProactivityConfig';
 import NotificationsTab from '../AboutChannel/NotificationsTab';
 import ScheduledMessagesTab from '../AboutChannel/ScheduledMessagesTab';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
@@ -123,8 +125,9 @@ const Info = ({
   const isParticipant = participants.some(p => p.userId === context.userID);
   const isSelfDM = isDM && participants.length === 1 && participants[0]?.userId === context.userID;
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
-  const canManageAiPreferences =
-    currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
+  // Disabled (LLM)
+  // const canManageAiPreferences =
+  //   currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
   const canManageScheduledMessages =
     isDefaultChannel && currentUserParticipant?.role === ChannelRole.ADMIN;
   // Channel fields: channel admins and workspace admins edit, others read.
@@ -466,11 +469,14 @@ const Info = ({
               Settings
             </Tabs.Trigger>
           )}
+          {/* Disabled (LLM) */}
+          {/*
           {isDefaultChannel && (
             <Tabs.Trigger value='ai-features' className={tabTriggerClass('ai-features')}>
               AI Preference
             </Tabs.Trigger>
           )}
+          */}
           {canManageScheduledMessages && (
             <Tabs.Trigger
               value='scheduled-messages'
@@ -535,41 +541,47 @@ const Info = ({
             />
           </Tabs.Content>
         )}
-        {isDefaultChannel && (
-          <Tabs.Content value='ai-features' className='outline-none flex-1 min-h-0 overflow-y-auto'>
-            <div className='flex flex-col gap-3 p-4'>
-              <div className='flex flex-col gap-0.5'>
-                <div className='text-[15px] font-semibold text-foreground'>Call settings</div>
-                <p className='text-[13px] leading-[140%] text-muted-foreground'>
-                  Configure how AI handles calls in this channel.
-                </p>
-                <p className='text-[12px] leading-[140%] text-muted-foreground'>
-                  Only channel admins or the owner can edit these preferences.
-                </p>
-              </div>
-              <div className='rounded-[12px] border border-border bg-card'>
-                <CallSummaryConfig
-                  channelId={channel.id}
-                  currentPrompt={channel.callSummaryPrompt}
-                  canManage={canManageAiPreferences}
-                />
-              </div>
-              <div className='mt-3 flex flex-col gap-0.5'>
-                <div className='text-[15px] font-semibold text-foreground'>Agents</div>
-                <p className='text-[13px] leading-[140%] text-muted-foreground'>
-                  Let agents in this channel reply to questions on their own.
-                </p>
-              </div>
-              <div className='rounded-[12px] border border-border bg-card'>
-                <AgentProactivityConfig
-                  channelId={channel.id}
-                  mode={channel.agentProactivityMode}
-                  canManage={canManageAiPreferences}
-                />
-              </div>
-            </div>
-          </Tabs.Content>
-        )}
+        {/* Disabled (LLM) */}
+        {
+          // {isDefaultChannel && (
+          //   <Tabs.Content value='ai-features' className='outline-none flex-1 min-h-0 overflow-y-auto'>
+          //     <div className='flex flex-col gap-3 p-4'>
+          //       <div className='flex flex-col gap-0.5'>
+          //         <div className='text-[15px] font-semibold text-foreground'>Call settings</div>
+          //         <p className='text-[13px] leading-[140%] text-muted-foreground'>
+          //           Configure how AI handles calls in this channel.
+          //         </p>
+          //         <p className='text-[12px] leading-[140%] text-muted-foreground'>
+          //           Only channel admins or the owner can edit these preferences.
+          //         </p>
+          //       </div>
+          //       <div className='rounded-[12px] border border-border bg-card'>
+          //         <CallSummaryConfig
+          //           channelId={channel.id}
+          //           currentPrompt={channel.callSummaryPrompt}
+          //           canManage={canManageAiPreferences}
+          //         />
+          //       </div>
+          //       {/* Disabled (Claw) */}
+          //       {/*
+          //       <div className='mt-3 flex flex-col gap-0.5'>
+          //         <div className='text-[15px] font-semibold text-foreground'>Agents</div>
+          //         <p className='text-[13px] leading-[140%] text-muted-foreground'>
+          //           Let agents in this channel reply to questions on their own.
+          //         </p>
+          //       </div>
+          //       <div className='rounded-[12px] border border-border bg-card'>
+          //         <AgentProactivityConfig
+          //           channelId={channel.id}
+          //           mode={channel.agentProactivityMode}
+          //           canManage={canManageAiPreferences}
+          //         />
+          //       </div>
+          //       */}
+          //     </div>
+          //   </Tabs.Content>
+          // )}
+        }
         {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
           <Tabs.Content
             value='notifications'

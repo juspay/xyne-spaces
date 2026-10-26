@@ -1,12 +1,31 @@
-import { Fragment, useMemo, useRef, useState, type ReactElement } from 'react';
-import { DragableSixDots, Grid02, PlusDefault } from '@xyne/icons';
-import { Popover } from '../../ui/Popover/Popover';
-import { AppPickerDialog, type AppPublishOptions, type BarBuiltIn } from '../../BarCustomize';
 import {
-  appIdOf,
-  appItemId,
-  setAppSnapshot,
-  MAX_APPS_PER_BAR,
+  Fragment,
+  // Disabled (Claw)
+  // useMemo,
+  useRef,
+  // Disabled (Claw)
+  // useState,
+  type ReactElement,
+} from 'react';
+import {
+  DragableSixDots,
+  // Disabled (Claw)
+  // Grid02,
+  PlusDefault,
+} from '@xyne/icons';
+import { Popover } from '../../ui/Popover/Popover';
+import {
+  // Disabled (Claw)
+  // AppPickerDialog,
+  type AppPublishOptions,
+  type BarBuiltIn,
+} from '../../BarCustomize';
+import {
+  // Disabled (Claw)
+  // appIdOf,
+  // appItemId,
+  // setAppSnapshot,
+  // MAX_APPS_PER_BAR,
   type BarItemsStore,
 } from '../../../hooks/barItems';
 import { usePanelSlot, type ChannelTabDrag } from '../../../hooks/useChannelTabDrag';
@@ -31,16 +50,19 @@ const rowClass =
 export const ChannelTabsMenu = ({
   open,
   onOpenChange,
-  store,
+  // Disabled (Claw)
+  // store,
   hidden,
   drag,
   onAdd,
-  publish,
-  publishedAppIds,
+  // Disabled (Claw)
+  // publish,
+  // publishedAppIds,
   onCustomize,
 }: ChannelTabsMenuProps): ReactElement => {
-  const ids = store.useItems();
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Disabled (Claw)
+  // const ids = store.useItems();
+  // const [pickerOpen, setPickerOpen] = useState(false);
   const slot = usePanelSlot(drag.session);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const anchorRect = useRef<DOMRect | null>(null);
@@ -53,13 +75,14 @@ export const ChannelTabsMenu = ({
     },
   });
 
-  const addedAppIds = useMemo(
-    () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
-    [ids],
-  );
-  const appsFull =
-    [...addedAppIds].filter(id => !publishedAppIds.has(id)).length >= MAX_APPS_PER_BAR;
-  const pickerBlocked = appsFull && !publish && !publishedAppIds.size;
+  // Disabled (Claw)
+  // const addedAppIds = useMemo(
+  //   () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
+  //   [ids],
+  // );
+  // const appsFull =
+  //   [...addedAppIds].filter(id => !publishedAppIds.has(id)).length >= MAX_APPS_PER_BAR;
+  // const pickerBlocked = appsFull && !publish && !publishedAppIds.size;
 
   const slotRow = (
     <li
@@ -173,6 +196,8 @@ export const ChannelTabsMenu = ({
               )}
             </ul>
 
+            {/* Disabled (Claw) */}
+            {/*
             <div className='my-1 border-t border-border' />
 
             <button
@@ -193,6 +218,7 @@ export const ChannelTabsMenu = ({
               </span>
               Add app…
             </button>
+            */}
             {onCustomize && (
               <button
                 type='button'
@@ -212,6 +238,8 @@ export const ChannelTabsMenu = ({
         </Popover>
       </span>
 
+      {/* Disabled (Claw) */}
+      {/*
       <AppPickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
@@ -229,6 +257,7 @@ export const ChannelTabsMenu = ({
         trackCategory='CHANNELS'
         {...(publish ? { publish } : {})}
       />
+      */}
     </>
   );
 };

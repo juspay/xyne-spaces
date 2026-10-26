@@ -34,15 +34,18 @@ const query = Router()
   .post('/preview',          readDS,  ctrl.queryPreview)
   .get('/component/:id',     ctrl.queryGetComponentData);
 
-const ai = Router()
-  .post('/create',           ctrl.aiCreate)
-  .post('/cancel/:runId',    ctrl.aiCancel);
+// Disabled (Claw)
+// const ai = Router()
+//   .post('/create',           ctrl.aiCreate)
+//   .post('/cancel/:runId',    ctrl.aiCancel);
 
 // Mounted at /api/dashboard
 export const dashboardRouter = Router()
   .use('/datasource',  datasource)
   .use('/query',       query)
-  .use('/ai',          ai);
+  // Disabled (Claw)
+  // .use('/ai',          ai);
+  ;
 
 // Mounted at /api/dashboards. Specific paths (components/:queryId,
 // with-components) are registered before the '/:id' catch-alls.

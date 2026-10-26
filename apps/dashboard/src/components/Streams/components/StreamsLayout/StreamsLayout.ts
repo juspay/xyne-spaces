@@ -119,7 +119,8 @@ const isSource = (value: unknown): value is ColumnSource => {
     const mode = raw['viewMode'];
     return mode === 'my-tickets' || mode === 'board';
   }
-  if (kind === 'agent') return true;
+  // Disabled (LLM)
+  // if (kind === 'agent') return true;
   // Item columns. Each is validated on the id that identifies the item and on
   // nothing else — the optional context fields are conveniences, and a column
   // dropped because a `channelId` went missing would lose a ticket the user can

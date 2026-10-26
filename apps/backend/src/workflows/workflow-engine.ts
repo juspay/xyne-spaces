@@ -155,6 +155,8 @@ export class WorkflowEngineImpl<
   }
 
   async createAgenticCheckpoint(id: TEnum[keyof TEnum], name: string, config: AgenticCheckpointConfig, parentStepId?: string): Promise<AgenticCheckpointResult> {
+    // Disabled (LLM)
+    await Promise.reject(new Error(`Agentic step ${String(id)} is disabled`))
     // Get agent from database using db-storage and create agentConfig
     const agent = await this.storage.getAgentConfigFromDb(
       name,
@@ -689,6 +691,8 @@ export class WorkflowEngineImpl<
     output: Result
   ): Promise<void> {
     try {
+      // Disabled (LLM)
+      if (true as boolean) return
       const markdown = await generateMarkdownSummary(
         stepId,
         { input },

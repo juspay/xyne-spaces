@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
-import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+// Disabled (Claw)
+// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -36,7 +37,8 @@ import {
   type ConversationAnchorType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
-import { MessageTags } from '../../tags/MessageTags';
+// Disabled (LLM)
+// import { MessageTags } from '../../tags/MessageTags';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
@@ -46,8 +48,9 @@ import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUti
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
-import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../../tags/ThreadTags';
-import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
+// Disabled (LLM)
+// import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../../tags/ThreadTags';
+// import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { CallLayout } from '../CallLayout';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
@@ -80,7 +83,8 @@ import {
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
-import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import DOMPurify from 'dompurify';
 import { CallParticipantsSelectionModal } from '../../Call/CallParticipantsSelectionModal';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
@@ -164,7 +168,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
-  disableAskAI = false,
+  // Disabled (Claw)
+  // disableAskAI = false,
   searchItemView = false,
   onUserClick,
   spawnedTicketMessageIds,
@@ -172,13 +177,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isNextActivity = false,
   linkedConversationId,
   highlightMessageId,
-  inspectedTag = null,
+  // Disabled (LLM)
+  // inspectedTag = null,
   afterTextContent,
   showIntentSuggestion = false,
 }) => {
   const { user } = useAuthContext();
-  // Off inside hosts that embed chat for one purpose (the related-context popup).
-  const askAIAvailable = useAskAIAvailable();
+  // Disabled (Claw)
+  // // Off inside hosts that embed chat for one purpose (the related-context popup).
+  // const askAIAvailable = useAskAIAvailable();
   const { copyImage } = useClipboard();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
@@ -377,52 +384,53 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setIsSubTicketModalOpen(true);
   };
 
-  const handleAskAI = (): void => {
-    // Get conversation ID from message context
-    const conversationId = conversation?.conversationId || message.conversationId;
-    if (!conversationId) return;
+  // Disabled (Claw)
+  // const handleAskAI = (): void => {
+  //   // Get conversation ID from message context
+  //   const conversationId = conversation?.conversationId || message.conversationId;
+  //   if (!conversationId) return;
 
-    // Extract plain text from message content
-    let previewText = '';
-    const content = message.content;
+  //   // Extract plain text from message content
+  //   let previewText = '';
+  //   const content = message.content;
 
-    if (content && typeof content === 'string') {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(content, 'text/html');
-      const textContent = doc.body.textContent || '';
-      previewText = textContent.trim().substring(0, 100);
-    }
+  //   if (content && typeof content === 'string') {
+  //     const parser = new DOMParser();
+  //     const doc = parser.parseFromString(content, 'text/html');
+  //     const textContent = doc.body.textContent || '';
+  //     previewText = textContent.trim().substring(0, 100);
+  //   }
 
-    // Get attachment IDs from the message (if any)
-    const attachmentIds = message.attachments?.map((att: { id: string }) => att.id) || [];
+  //   // Get attachment IDs from the message (if any)
+  //   const attachmentIds = message.attachments?.map((att: { id: string }) => att.id) || [];
 
-    // If no text content but has attachments, show "Attachment"
-    if (!previewText && attachmentIds.length > 0) {
-      previewText =
-        attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
-    }
+  //   // If no text content but has attachments, show "Attachment"
+  //   if (!previewText && attachmentIds.length > 0) {
+  //     previewText =
+  //       attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
+  //   }
 
-    const threadInfo: ThreadInfo = {
-      conversationId,
-      channelId,
-      senderName: sender?.name || 'Unknown',
-      previewText,
-      ...(message.senderId && { senderId: message.senderId }),
-      ...(message.messageId && { messageId: message.messageId }),
-      isThreadMessage: context === 'thread',
-      ...(attachmentIds.length > 0 && { attachmentIds }),
-    };
+  //   const threadInfo: ThreadInfo = {
+  //     conversationId,
+  //     channelId,
+  //     senderName: sender?.name || 'Unknown',
+  //     previewText,
+  //     ...(message.senderId && { senderId: message.senderId }),
+  //     ...(message.messageId && { messageId: message.messageId }),
+  //     isThreadMessage: context === 'thread',
+  //     ...(attachmentIds.length > 0 && { attachmentIds }),
+  //   };
 
-    // Open XyneAI with thread context but always start a fresh chat
-    // This shows the thread header but doesn't load old conversation
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'message_bubble',
-      channelId,
-      threadInfo,
-      startFreshChat: true,
-    });
-  };
+  //   // Open XyneAI with thread context but always start a fresh chat
+  //   // This shows the thread header but doesn't load old conversation
+  //   xyneAIActor.send({
+  //     type: 'OPEN',
+  //     trackSource: 'message_bubble',
+  //     channelId,
+  //     threadInfo,
+  //     startFreshChat: true,
+  //   });
+  // };
 
   const handleEditInCanvas = (): void => {
     try {
@@ -1008,19 +1016,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // not confirmed it (in flight, or failed and awaiting retry/discard).
   const hasPendingCopy = usePendingByMessageId(message?.messageId ?? '') !== null;
 
-  const appliedThreadTypes = useMemo(
-    () => parseThreadTypes(conversation?.threadType),
-    [conversation?.threadType],
-  );
-  const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
-  const { showThreadTags } = useShowThreadTags();
-  // The thread types this message was cited as evidence for. Composed onto afterTextContent
-  // rather than the header slot: the header only renders for the first message in a group,
-  // and the second and third messages of a burst are exactly the ones you need to see marked.
-  const messageTags =
-    showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
-      <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
-    ) : null;
+  // Disabled (LLM)
+  // const appliedThreadTypes = useMemo(
+  //   () => parseThreadTypes(conversation?.threadType),
+  //   [conversation?.threadType],
+  // );
+  // const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
+  // const { showThreadTags } = useShowThreadTags();
+  // // The thread types this message was cited as evidence for. Composed onto afterTextContent
+  // // rather than the header slot: the header only renders for the first message in a group,
+  // // and the second and third messages of a burst are exactly the ones you need to see marked.
+  // const messageTags =
+  //   showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
+  //     <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
+  //   ) : null;
   const intentCallSuggestion = useIntentCallSuggestion(message.messageId);
   const intentCallCard =
     showIntentSuggestion &&
@@ -1035,10 +1044,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       />
     ) : null;
   const textTrailer =
-    afterTextContent !== undefined || messageTags || intentCallCard ? (
+    // Disabled (LLM)
+    // afterTextContent !== undefined || messageTags || intentCallCard ? (
+    afterTextContent !== undefined || intentCallCard ? (
       <>
         {afterTextContent}
-        {messageTags}
+        {/* Disabled (LLM) */}
+        {/* {messageTags} */}
         {intentCallCard}
       </>
     ) : undefined;
@@ -1080,24 +1092,25 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }),
       reactionsMd: message.reactions_md,
       onCopyLink,
-      // Channel rows only: inside a thread the panel header already carries this, and the
-      // tag is the thread's — one entry point per thread, not one per reply.
-      ...(showThreadTags &&
-        context === 'channel' &&
-        !isSystemMessage &&
-        !isMessageDeleted &&
-        conversation?.conversationId && {
-          threadTags: {
-            applied: appliedThreadTypes,
-            onToggle: (name: string) => {
-              void setThreadTypes(
-                appliedThreadTypes.includes(name)
-                  ? appliedThreadTypes.filter(value => value !== name)
-                  : [...appliedThreadTypes, name],
-              );
-            },
-          },
-        }),
+      // Disabled (LLM)
+      // // Channel rows only: inside a thread the panel header already carries this, and the
+      // // tag is the thread's — one entry point per thread, not one per reply.
+      // ...(showThreadTags &&
+      //   context === 'channel' &&
+      //   !isSystemMessage &&
+      //   !isMessageDeleted &&
+      //   conversation?.conversationId && {
+      //     threadTags: {
+      //       applied: appliedThreadTypes,
+      //       onToggle: (name: string) => {
+      //         void setThreadTypes(
+      //           appliedThreadTypes.includes(name)
+      //             ? appliedThreadTypes.filter(value => value !== name)
+      //             : [...appliedThreadTypes, name],
+      //         );
+      //       },
+      //     },
+      //   }),
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
       isChannelArchived: channel?.isArchived ?? false,
@@ -1153,11 +1166,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
           onPinMessage: handlePinMessage,
         }),
-      ...(!disableAskAI &&
-        askAIAvailable &&
-        ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
-        (!isSystemMessage || isCallMessage) &&
-        !isMessageDeleted && { onAskAI: handleAskAI }),
+      // Disabled (Claw)
+      // ...(!disableAskAI &&
+      //   askAIAvailable &&
+      //   ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
+      //   (!isSystemMessage || isCallMessage) &&
+      //   !isMessageDeleted && { onAskAI: handleAskAI }),
       ...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {}),
       ...(messageShortcuts.length > 0 &&
         !isSystemMessage &&
@@ -1393,17 +1407,18 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
             {...(textTrailer !== undefined && { afterTextContent: textTrailer })}
-            {...(context === 'channel' &&
-              !isSystemMessage &&
-              !isMessageDeleted && {
-                headerContent: (
-                  <ThreadTags
-                    conversationId={conversation?.conversationId}
-                    threadType={conversation?.threadType}
-                    canEdit
-                  />
-                ),
-              })}
+            // Disabled (LLM)
+            // {...(context === 'channel' &&
+            //   !isSystemMessage &&
+            //   !isMessageDeleted && {
+            //     headerContent: (
+            //       <ThreadTags
+            //         conversationId={conversation?.conversationId}
+            //         threadType={conversation?.threadType}
+            //         canEdit
+            //       />
+            //     ),
+            //   })}
             {...(conversation && { conversation: conversation })}
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,
@@ -1517,11 +1532,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
-              {...(!disableAskAI &&
-                askAIAvailable &&
-                ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
-                (!isSystemMessage || isCallMessage) &&
-                !isMessageDeleted && { onAskAI: handleAskAI })}
+              // Disabled (Claw)
+              // {...(!disableAskAI &&
+              //   askAIAvailable &&
+              //   ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
+              //   (!isSystemMessage || isCallMessage) &&
+              //   !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
               isChannelArchived={channel?.isArchived ?? false}
               {...(imageAttachments.length > 0 &&

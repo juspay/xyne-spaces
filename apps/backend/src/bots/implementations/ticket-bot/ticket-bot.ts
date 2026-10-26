@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { Bot, UnifiedBaseBot } from '@/bots/unified/index.js';
 import type { BotExecutionContext, InternalBotDefinition, BotEvent } from '@/bots/unified/types/index.js';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
+// Disabled (LLM)
+// import { config } from '@/config/env';
 import { createFlowJson, createSingleLineText, createMultiLineText, createFlexLayout, createTag, createSplitTag, createAvatarGroup } from '@/bots/json-ui';
 import type { Component } from '@/bots/json-ui/types';
 import type { FlowJson } from '@/bots/json-ui/types';
@@ -10,14 +11,20 @@ import { ConversationRepository } from '@/database/repositories/conversationRepo
 import { MessageRepository } from '@/database/repositories/messageRepository';
 import { Ticket, PrismaClient } from '@prisma/client';
 import { DatabaseClient, db } from '@/database/client';
-import { LLMClient, UserMessage, createUserMessage } from '@framework';
-import { workflowManager } from '@/workflows/services/workflowManager';
-import { workflowRerunService } from '@/workflows/services/workflowRerunService';
-import { workflowRegistry } from '@/workflows/registry/workflowRegistry';
-import { WorkflowType } from '@/workflows/types/workflow-enums';
-import { ConversationSummarizationService } from '@/services/conversationSummarizationService';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose, OrgRole, MessageType } from '@xyne/shared';
+// Disabled (LLM)
+// import { LLMClient, UserMessage, createUserMessage } from '@framework';
+// Disabled (LLM)
+// import { workflowManager } from '@/workflows/services/workflowManager';
+// import { workflowRerunService } from '@/workflows/services/workflowRerunService';
+// import { workflowRegistry } from '@/workflows/registry/workflowRegistry';
+// import { WorkflowType } from '@/workflows/types/workflow-enums';
+// Disabled (LLM)
+// import { ConversationSummarizationService } from '@/services/conversationSummarizationService';
+// Disabled (LLM)
+// import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+// Disabled (LLM)
+// import { OrgLLMServiceAccountPurpose, OrgRole, MessageType } from '@xyne/shared';
+import { OrgRole, MessageType } from '@xyne/shared';
 import type { CreateMessageInput } from '@/database/repositories/messageRepository';
 
 // Define types for the bot
@@ -96,10 +103,12 @@ export class TicketBot extends UnifiedBaseBot<TicketBotInput, TicketBotOutput> {
 
   // Model configuration
   private readonly MODEL = 'glm-latest';
-  private readonly COMPACTION_THRESHOLD = 0.95; // 95%
+  // Disabled (LLM)
+  // private readonly COMPACTION_THRESHOLD = 0.95; // 95%
 
   // Model limits (from framework)
-  private readonly MAX_OUTPUT_TOKENS = 4000; // Standard output limit
+  // Disabled (LLM)
+  // private readonly MAX_OUTPUT_TOKENS = 4000; // Standard output limit
 
   constructor() {
     super();
@@ -110,100 +119,103 @@ export class TicketBot extends UnifiedBaseBot<TicketBotInput, TicketBotOutput> {
     logger.info(`[TicketBot] Initialized (model: ${this.MODEL}, threshold: 95%)`);
   }
 
-  private async createLlmRuntime(context: BotExecutionContext): Promise<{
-    llmClient: LLMClient;
-    summarizationService: ConversationSummarizationService;
-    modelContextWindow: number;
-  }> {
-    const credential = context.userId
-      ? await orgLLMCredentialService.getCredentialByUserId(
-        context.userId,
-        OrgLLMServiceAccountPurpose.DEFAULT,
-      )
-      : await orgLLMCredentialService.getCredentialByChannelId(
-        context.channelId,
-        OrgLLMServiceAccountPurpose.DEFAULT,
-      );
+  // Disabled (LLM)
+  // private async createLlmRuntime(context: BotExecutionContext): Promise<{
+  //   llmClient: LLMClient;
+  //   summarizationService: ConversationSummarizationService;
+  //   modelContextWindow: number;
+  // }> {
+  //   const credential = context.userId
+  //     ? await orgLLMCredentialService.getCredentialByUserId(
+  //       context.userId,
+  //       OrgLLMServiceAccountPurpose.DEFAULT,
+  //     )
+  //     : await orgLLMCredentialService.getCredentialByChannelId(
+  //       context.channelId,
+  //       OrgLLMServiceAccountPurpose.DEFAULT,
+  //     );
 
-    if (!credential) {
-      throw new Error('No active DEFAULT LiteLLM service account credential for ticket bot execution');
-    }
+  //   if (!credential) {
+  //     throw new Error('No active DEFAULT LiteLLM service account credential for ticket bot execution');
+  //   }
 
-    const llmClient = new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: 120000, // 2 minutes for large summarization tasks
-        },
-      },
-      defaultModel: this.MODEL,
-    });
+  //   const llmClient = new LLMClient({
+  //     provider: {
+  //       type: 'litellm',
+  //       config: {
+  //         apiKey: credential.apiKey,
+  //         baseUrl: credential.baseUrl,
+  //         timeout: 120000, // 2 minutes for large summarization tasks
+  //       },
+  //     },
+  //     defaultModel: this.MODEL,
+  //   });
 
-    // Get model context window from framework
-    const modelContextWindow = llmClient.getContextWindow(this.MODEL);
+  //   // Get model context window from framework
+  //   const modelContextWindow = llmClient.getContextWindow(this.MODEL);
 
-    // Initialize summarization service
-    const summarizationService = new ConversationSummarizationService(llmClient, {
-      defaultChunkSize: 30000, // Reduced from 55500 to 30000 for faster processing
-      modelLimits: {
-        contextWindow: modelContextWindow,
-        maxOutputTokens: this.MAX_OUTPUT_TOKENS,
-        safetyMargin: 0.85
-      }
-    });
+  //   // Initialize summarization service
+  //   const summarizationService = new ConversationSummarizationService(llmClient, {
+  //     defaultChunkSize: 30000, // Reduced from 55500 to 30000 for faster processing
+  //     modelLimits: {
+  //       contextWindow: modelContextWindow,
+  //       maxOutputTokens: this.MAX_OUTPUT_TOKENS,
+  //       safetyMargin: 0.85
+  //     }
+  //   });
 
-    return { llmClient, summarizationService, modelContextWindow };
-  }
+  //   return { llmClient, summarizationService, modelContextWindow };
+  // }
 
-  /**
-   * Summarize bot messages (always summarizes when called)
-   */
-  private async _summarizeBotMessages(llmClient: LLMClient, botMessages: string[]): Promise<string> {
-    logger.info(`[TicketBot] Summarizing ${botMessages.length} bot messages`);
+// Disabled (LLM)
+//   /**
+//    * Summarize bot messages (always summarizes when called)
+//    */
+//   private async _summarizeBotMessages(llmClient: LLMClient, botMessages: string[]): Promise<string> {
+//     logger.info(`[TicketBot] Summarizing ${botMessages.length} bot messages`);
     
-    if (!botMessages || botMessages.length === 0) {
-      logger.info('[TicketBot] No bot messages to summarize.');
-      return '';
-    }
+//     if (!botMessages || botMessages.length === 0) {
+//       logger.info('[TicketBot] No bot messages to summarize.');
+//       return '';
+//     }
 
-    const formattedMessages = botMessages.join('\n\n');
+//     const formattedMessages = botMessages.join('\n\n');
 
-    const prompt = `Please summarize the following bot responses from a conversation. Focus on highlighting:
-- Key actions taken by the bot
-- Important results or outputs
-- Any errors or issues encountered
-- Relevant information for understanding what the bot did
+//     const prompt = `Please summarize the following bot responses from a conversation. Focus on highlighting:
+// - Key actions taken by the bot
+// - Important results or outputs
+// - Any errors or issues encountered
+// - Relevant information for understanding what the bot did
 
-Bot messages:
-${formattedMessages}
+// Bot messages:
+// ${formattedMessages}
 
-Provide a concise but informative summary:`;
+// Provide a concise but informative summary:`;
 
-    const llmMessages: UserMessage[] = [createUserMessage(prompt)];
+//     const llmMessages: UserMessage[] = [createUserMessage(prompt)];
 
-    try {
-      const response = await llmClient.generate({
-        model: config.workflow.defaultModelName,
-        messages: llmMessages,
-      });
+//     try {
+//       const response = await llmClient.generate({
+//         model: config.workflow.defaultModelName,
+//         messages: llmMessages,
+//       });
 
-      const summary = response.content || 'Could not summarize bot messages.';
-      logger.info(`[TicketBot] Received summary from LLM: ${summary.substring(0, 100)}...`);
-      return summary;
-    } catch (error) {
-      logger.error(`[TicketBot] Error summarizing bot messages:`, error);
-      return 'Error generating bot message summary.';
-    }
-  }
+//       const summary = response.content || 'Could not summarize bot messages.';
+//       logger.info(`[TicketBot] Received summary from LLM: ${summary.substring(0, 100)}...`);
+//       return summary;
+//     } catch (error) {
+//       logger.error(`[TicketBot] Error summarizing bot messages:`, error);
+//       return 'Error generating bot message summary.';
+//     }
+//   }
 
   protected async *executeInternal(
     input: TicketBotInput,
     context: BotExecutionContext
   ): AsyncGenerator<BotEvent> {
     try {
-      const { llmClient, summarizationService, modelContextWindow } = await this.createLlmRuntime(context);
+      // Disabled (LLM)
+      // const { llmClient, summarizationService, modelContextWindow } = await this.createLlmRuntime(context);
       logger.info(`[TicketBot] Execution started with executionId: ${context.executionId}`, { input, context });
       logger.info(`[TicketBot] Execution started with executionId: ${context.executionId}`);
       logger.info(`[TicketBot] Input product:`, input.product);
@@ -350,13 +362,14 @@ Provide a concise but informative summary:`;
               const userSection = userMessages.join('\n');
               
               let botSection = '';
-              if (botMessages.length > 0) {
-                logger.info(`[TicketBot] Summarizing ${botMessages.length} bot messages...`);
-                const botSummary = await this._summarizeBotMessages(llmClient, botMessages);
-                if (botSummary) {
-                  botSection = `\n\n--- Bot Output Summary ---\n${botSummary}`;
-                }
-              }
+              // Disabled (LLM)
+              // if (botMessages.length > 0) {
+              //   logger.info(`[TicketBot] Summarizing ${botMessages.length} bot messages...`);
+              //   const botSummary = await this._summarizeBotMessages(llmClient, botMessages);
+              //   if (botSummary) {
+              //     botSection = `\n\n--- Bot Output Summary ---\n${botSummary}`;
+              //   }
+              // }
 
               description = userSection + botSection || input.description || 'No conversation content found.';
               logger.info(`[TicketBot] Combined description length: ${description.length} characters`);
@@ -383,57 +396,58 @@ Provide a concise but informative summary:`;
         logger.info('[TicketBot] No conversationId found. Using input description.');
       }
 
-      // Check if description exceeds token threshold and summarize if needed
-      if (description && description.length > 0) {
-        logger.info(`[TicketBot] Checking description token count...`);
+      // Disabled (LLM)
+      // // Check if description exceeds token threshold and summarize if needed
+      // if (description && description.length > 0) {
+      //   logger.info(`[TicketBot] Checking description token count...`);
         
-        try {
-          // Count tokens in the final description
-          const descriptionTokens = await llmClient.countTokens(
-            [createUserMessage(description)],
-            [], // No tools
-            this.MAX_OUTPUT_TOKENS
-          );
+      //   try {
+      //     // Count tokens in the final description
+      //     const descriptionTokens = await llmClient.countTokens(
+      //       [createUserMessage(description)],
+      //       [], // No tools
+      //       this.MAX_OUTPUT_TOKENS
+      //     );
           
-          const threshold = Math.floor((modelContextWindow - this.MAX_OUTPUT_TOKENS) * this.COMPACTION_THRESHOLD);
+      //     const threshold = Math.floor((modelContextWindow - this.MAX_OUTPUT_TOKENS) * this.COMPACTION_THRESHOLD);
           
-          logger.info(
-            `[TicketBot] Description tokens: ${descriptionTokens}/${modelContextWindow} ` +
-            `(${(descriptionTokens / modelContextWindow * 100).toFixed(1)}% of context, ` +
-            `${(descriptionTokens / threshold * 100).toFixed(1)}% of threshold)` +
-            ` [using framework token counter]`
-          );
+      //     logger.info(
+      //       `[TicketBot] Description tokens: ${descriptionTokens}/${modelContextWindow} ` +
+      //       `(${(descriptionTokens / modelContextWindow * 100).toFixed(1)}% of context, ` +
+      //       `${(descriptionTokens / threshold * 100).toFixed(1)}% of threshold)` +
+      //       ` [using framework token counter]`
+      //     );
 
-          if (descriptionTokens >= threshold) {
-            logger.info(`[TicketBot] Description exceeds threshold! Summarizing...`);
+      //     if (descriptionTokens >= threshold) {
+      //       logger.info(`[TicketBot] Description exceeds threshold! Summarizing...`);
             
-            try {
-              const result = await summarizationService.summarize({
-                messages: [description],
-                context: { type: 'general' },
-                chunkingConfig: {
-                  enabled: true,
-                  chunkSize: 30000
-                }
-              });
+      //       try {
+      //         const result = await summarizationService.summarize({
+      //           messages: [description],
+      //           context: { type: 'general' },
+      //           chunkingConfig: {
+      //             enabled: true,
+      //             chunkSize: 30000
+      //           }
+      //         });
 
-              logger.info(
-                `[TicketBot] Description summarized: ${description.length} chars → ${result.summary.length} chars ` +
-                `(used ${result.tokensUsed.total} tokens for summarization)`
-              );
+      //         logger.info(
+      //           `[TicketBot] Description summarized: ${description.length} chars → ${result.summary.length} chars ` +
+      //           `(used ${result.tokensUsed.total} tokens for summarization)`
+      //         );
 
-              description = result.summary;
-              logger.info(`[TicketBot] Using summarized description`);
-            } catch (summarizeError) {
-              logger.error(`[TicketBot] ⚠️ Description summarization failed, using original:`, summarizeError);
-            }
-          } else {
-            logger.info(`[TicketBot] ✅ Description within limits, using as is`);
-          }
-        } catch (tokenCountError) {
-          logger.error(`[TicketBot] ⚠️ Token counting failed, using description as is:`, tokenCountError);
-        }
-      }
+      //         description = result.summary;
+      //         logger.info(`[TicketBot] Using summarized description`);
+      //       } catch (summarizeError) {
+      //         logger.error(`[TicketBot] ⚠️ Description summarization failed, using original:`, summarizeError);
+      //       }
+      //     } else {
+      //       logger.info(`[TicketBot] ✅ Description within limits, using as is`);
+      //     }
+      //   } catch (tokenCountError) {
+      //     logger.error(`[TicketBot] ⚠️ Token counting failed, using description as is:`, tokenCountError);
+      //   }
+      // }
 
       // Get the initial message of the conversation to update it later
       logger.info(`[TicketBot] Finding conversation: ${context.conversationId}`);
@@ -451,7 +465,8 @@ Provide a concise but informative summary:`;
       });
 
       let ticket;
-      let isUpdate = false;
+      // Disabled (LLM)
+      // let isUpdate = false;
 
       if (existingTicket) {
         logger.info(`[TicketBot] Found existing ticket ${existingTicket.xyneId} for conversation ${context.conversationId}`);
@@ -474,7 +489,8 @@ Provide a concise but informative summary:`;
         // TODO: Update ticket using Zero mutators when ticket-bot is refactored
         // For now, just reuse the existing ticket without updating
         ticket = existingTicket;
-        isUpdate = true;
+        // Disabled (LLM)
+        // isUpdate = true;
 
         logger.info(`Ticket reused for workflow: ${ticket.xyneId}`);
         logger.info(`[TicketBot] Reusing existing ticket: ${ticket.xyneId}`);
@@ -597,66 +613,67 @@ Provide a concise but informative summary:`;
       }
 
       logger.info(`[TicketBot] Bot message posted and broadcasted successfully`);
+      // Disabled (LLM)
 
-      // Trigger workflow execution asynchronously
-      setImmediate(async () => {
-        try {
-          logger.info(`[TicketBot] Starting workflow execution for ticket ${ticket.id}`);
+      // // Trigger workflow execution asynchronously
+      // setImmediate(async () => {
+      //   try {
+      //     logger.info(`[TicketBot] Starting workflow execution for ticket ${ticket.id}`);
 
-          // Convert TicketCategory to WorkflowType
-          const workflowType = input.workflowType as string as WorkflowType;
+      //     // Convert TicketCategory to WorkflowType
+      //     const workflowType = input.workflowType as string as WorkflowType;
 
-          // Use schema-based context building (replaces manual context building)
-          const workflowDef = workflowRegistry.get(workflowType);
-          if (!workflowDef) {
-            throw new Error(`Workflow definition not found for type ${workflowType}`);
-          }
+      //     // Use schema-based context building (replaces manual context building)
+      //     const workflowDef = workflowRegistry.get(workflowType);
+      //     if (!workflowDef) {
+      //       throw new Error(`Workflow definition not found for type ${workflowType}`);
+      //     }
 
-          if (!workflowDef.inputSchema || !workflowDef.contextMapper) {
-            throw new Error(`Workflow ${workflowType} is missing inputSchema or contextMapper`);
-          }
+      //     if (!workflowDef.inputSchema || !workflowDef.contextMapper) {
+      //       throw new Error(`Workflow ${workflowType} is missing inputSchema or contextMapper`);
+      //     }
 
-          // Build unified input payload for schema validation
-          const inputPayload = {
-            ticketId: ticket.id,
-            bugId: ticket.id,
-            description: description || '',
-            severity: 'medium' as 'low' | 'medium' | 'high' | 'critical', // Default severity
-            reportedBy: context.userId,
-          };
+      //     // Build unified input payload for schema validation
+      //     const inputPayload = {
+      //       ticketId: ticket.id,
+      //       bugId: ticket.id,
+      //       description: description || '',
+      //       severity: 'medium' as 'low' | 'medium' | 'high' | 'critical', // Default severity
+      //       reportedBy: context.userId,
+      //     };
 
-          // Validate input and build context using schema-based approach
-          const validatedInput = workflowDef.inputSchema.parse(inputPayload);
-          const workflowContext = workflowDef.contextMapper(validatedInput);
+      //     // Validate input and build context using schema-based approach
+      //     const validatedInput = workflowDef.inputSchema.parse(inputPayload);
+      //     const workflowContext = workflowDef.contextMapper(validatedInput);
 
-          if (isUpdate) {
-            // For updates, use workflow rerun service
-            const rerunResult = await workflowRerunService.rerunFromStart({
-              ticketId: ticket.id,
-              updatedContext: workflowContext
-            });
+      //     if (isUpdate) {
+      //       // For updates, use workflow rerun service
+      //       const rerunResult = await workflowRerunService.rerunFromStart({
+      //         ticketId: ticket.id,
+      //         updatedContext: workflowContext
+      //       });
 
-            logger.info(`[TicketBot] Created rerun execution ${rerunResult.rerunExecutionId} for ticket ${ticket.id}`);
-          } else {
-            // For new tickets, use original workflow start logic
-            const workflowRequest = {
-              ticketId: ticket.id,
-              workflowType,
-              context: workflowContext,
-              xyneId: ticket.xyneId, 
-              conversationId: context.conversationId,
-              createdBy: ticket.createdBy,
-            };
+      //       logger.info(`[TicketBot] Created rerun execution ${rerunResult.rerunExecutionId} for ticket ${ticket.id}`);
+      //     } else {
+      //       // For new tickets, use original workflow start logic
+      //       const workflowRequest = {
+      //         ticketId: ticket.id,
+      //         workflowType,
+      //         context: workflowContext,
+      //         xyneId: ticket.xyneId, 
+      //         conversationId: context.conversationId,
+      //         createdBy: ticket.createdBy,
+      //       };
 
-            logger.info(`[TicketBot] Triggering workflow with context:`, workflowRequest);
-            await workflowManager.startWorkflow(workflowRequest);
-            logger.info(`[TicketBot] Workflow started successfully for ticket ${ticket.id}`);
-          }
-        } catch (workflowError) {
-          logger.error(`[TicketBot] Failed to start workflow for ticket ${ticket.id}:`, workflowError);
-          logger.error('Failed to start workflow from ticket-bot:', workflowError);
-        }
-      });
+      //       logger.info(`[TicketBot] Triggering workflow with context:`, workflowRequest);
+      //       await workflowManager.startWorkflow(workflowRequest);
+      //       logger.info(`[TicketBot] Workflow started successfully for ticket ${ticket.id}`);
+      //     }
+      //   } catch (workflowError) {
+      //     logger.error(`[TicketBot] Failed to start workflow for ticket ${ticket.id}:`, workflowError);
+      //     logger.error('Failed to start workflow from ticket-bot:', workflowError);
+      //   }
+      // });
 
       yield this.createDoneEvent({
         fullContent: `Ticket ${ticket.xyneId} processed successfully`,

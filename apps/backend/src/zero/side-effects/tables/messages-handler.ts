@@ -62,7 +62,8 @@ import { matchKeywordsForUsers } from '@/utils/keywordMatchUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { prefetchFilterData, type PrefetchedFilterData } from '@/services/notificationFilterService';
-import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, hasPendingRecommendations } from '@/services/threadSummaryService';
+// Disabled (LLM)
+// import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, hasPendingRecommendations } from '@/services/threadSummaryService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import {
   appMentionPayload,
@@ -831,22 +832,24 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // Queue Vespa indexing for message attachments
     await this.queueVespaIndexingForAttachments(messageId);
 
-    if (message.msgType === 'USER') {
-      this.keepThreadSummaryWarm(conversationId, channelId).catch(error => {
-        logger.error('[MessagesSideEffect] Failed to keep thread summary warm:', {
-          conversationId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    }
+    // Disabled (LLM)
+    // if (message.msgType === 'USER') {
+    //   this.keepThreadSummaryWarm(conversationId, channelId).catch(error => {
+    //     logger.error('[MessagesSideEffect] Failed to keep thread summary warm:', {
+    //       conversationId,
+    //       error: error instanceof Error ? error.message : String(error),
+    //     });
+    //   });
+    // }
   }
 
-  private async keepThreadSummaryWarm(conversationId: string, channelId: string): Promise<void> {
-    if (!isThreadSummaryEnabledForChannel(channelId)) return;
-    if (!(await hasPendingRecommendations(conversationId))) return;
+  // Disabled (LLM)
+  // private async keepThreadSummaryWarm(conversationId: string, channelId: string): Promise<void> {
+  //   if (!isThreadSummaryEnabledForChannel(channelId)) return;
+  //   if (!(await hasPendingRecommendations(conversationId))) return;
 
-    await getOrGenerateThreadSummary(conversationId);
-  }
+  //   await getOrGenerateThreadSummary(conversationId);
+  // }
 
   /**
    * Resolve link preview for a message: tries internal app link first,

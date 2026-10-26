@@ -73,67 +73,68 @@ export class WorkerScheduler {
 
         // Initialize Recap Generation Queue
         if (config.recapScheduler.enabled) {
-            this.recapGenerationQueue = new Bull('recap-generation', {
-                redis: { ...redisService.getRedisConfig(), lazyConnect: false },
-                defaultJobOptions: {
-                    removeOnComplete: true,
-                    removeOnFail: false,
-                    attempts: 3,
-                    backoff: {
-                        type: 'exponential',
-                        delay: 5000,
-                    },
-                },
-                settings: {
-                    stalledInterval: 30 * 60 * 1000, // 30 minutes - extended for long-running recap jobs
-                    maxStalledCount: 1,
-                },
-            });
-
-            this.recapGenerationQueue.process(async (job) => {
-                logger.info(`[WORKER_SCHEDULER] Processing recap generation job ${job.id}...`);
-                try {
-                    await recapWorker.processGenerationJob(job);
-                    logger.info(`[WORKER_SCHEDULER] Recap generation job ${job.id} completed successfully`);
-                } catch (error) {
-                    logger.error(`[WORKER_SCHEDULER] Recap generation job ${job.id} failed:`, error);
-                    throw error;
-                }
-            });
-
-            // Remove existing repeatable job to allow CRON updates
-            try {
-                await this.recapGenerationQueue.removeRepeatableByKey('recap-generation-repeatable');
-                logger.info('[WORKER_SCHEDULER] Removed existing recap generation repeatable job');
-            } catch (error) {
-                // Ignore error if job doesn't exist
-                logger.debug('[WORKER_SCHEDULER] No existing recap generation repeatable job to remove');
-            }
-
-            // Schedule daily recap generation
-            const recapCron = config.recapScheduler.generationCron;
-            logger.info(`[WORKER_SCHEDULER] Scheduling recap generation with cron: "${recapCron}"`);
-            
-            try {
-                await this.recapGenerationQueue.add(
-                    {},
-                    {
-                        repeat: { cron: recapCron },
-                        jobId: 'recap-generation-repeatable',
-                        attempts: 3,
-                        backoff: {
-                            type: 'exponential',
-                            delay: 5000,
-                        },
-                        removeOnComplete: true,
-                    }
-                );
-                logger.info(`[WORKER_SCHEDULER] Recap generation scheduled via Bull (${recapCron})`);
-            } catch (cronError) {
-                logger.error(`[WORKER_SCHEDULER] Failed to schedule recap generation with cron "${recapCron}":`, cronError);
-                logger.warn(`[WORKER_SCHEDULER] Recap generation will not be automatically scheduled. Manual triggers will still work.`);
-                // Continue without crashing the entire worker
-            }
+            // Disabled (LLM)
+            // this.recapGenerationQueue = new Bull('recap-generation', {
+            //     redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+            //     defaultJobOptions: {
+            //         removeOnComplete: true,
+            //         removeOnFail: false,
+            //         attempts: 3,
+            //         backoff: {
+            //             type: 'exponential',
+            //             delay: 5000,
+            //         },
+            //     },
+            //     settings: {
+            //         stalledInterval: 30 * 60 * 1000, // 30 minutes - extended for long-running recap jobs
+            //         maxStalledCount: 1,
+            //     },
+            // });
+            //
+            // this.recapGenerationQueue.process(async (job) => {
+            //     logger.info(`[WORKER_SCHEDULER] Processing recap generation job ${job.id}...`);
+            //     try {
+            //         await recapWorker.processGenerationJob(job);
+            //         logger.info(`[WORKER_SCHEDULER] Recap generation job ${job.id} completed successfully`);
+            //     } catch (error) {
+            //         logger.error(`[WORKER_SCHEDULER] Recap generation job ${job.id} failed:`, error);
+            //         throw error;
+            //     }
+            // });
+            //
+            // // Remove existing repeatable job to allow CRON updates
+            // try {
+            //     await this.recapGenerationQueue.removeRepeatableByKey('recap-generation-repeatable');
+            //     logger.info('[WORKER_SCHEDULER] Removed existing recap generation repeatable job');
+            // } catch (error) {
+            //     // Ignore error if job doesn't exist
+            //     logger.debug('[WORKER_SCHEDULER] No existing recap generation repeatable job to remove');
+            // }
+            //
+            // // Schedule daily recap generation
+            // const recapCron = config.recapScheduler.generationCron;
+            // logger.info(`[WORKER_SCHEDULER] Scheduling recap generation with cron: "${recapCron}"`);
+            //
+            // try {
+            //     await this.recapGenerationQueue.add(
+            //         {},
+            //         {
+            //             repeat: { cron: recapCron },
+            //             jobId: 'recap-generation-repeatable',
+            //             attempts: 3,
+            //             backoff: {
+            //                 type: 'exponential',
+            //                 delay: 5000,
+            //             },
+            //             removeOnComplete: true,
+            //         }
+            //     );
+            //     logger.info(`[WORKER_SCHEDULER] Recap generation scheduled via Bull (${recapCron})`);
+            // } catch (cronError) {
+            //     logger.error(`[WORKER_SCHEDULER] Failed to schedule recap generation with cron "${recapCron}":`, cronError);
+            //     logger.warn(`[WORKER_SCHEDULER] Recap generation will not be automatically scheduled. Manual triggers will still work.`);
+            //     // Continue without crashing the entire worker
+            // }
 
             // Initialize Recap Cleanup Queue
             this.recapCleanupQueue = new Bull('recap-cleanup', {
@@ -206,68 +207,69 @@ export class WorkerScheduler {
 
         // Initialize Desk Report Generation Queue
         if (config.deskReportScheduler.enabled) {
-            this.deskReportGenerationQueue = new Bull('desk-report-generation', {
-                redis: { ...redisService.getRedisConfig(), lazyConnect: false },
-                defaultJobOptions: {
-                    removeOnComplete: true,
-                    removeOnFail: false,
-                    attempts: 3,
-                    backoff: {
-                        type: 'exponential',
-                        delay: 5000,
-                    },
-                },
-                settings: {
-                    stalledInterval: 30 * 60 * 1000, // 30 minutes - dispatch loop over many desks
-                    maxStalledCount: 1,
-                },
-            });
-
-            this.deskReportGenerationQueue.process(async (job) => {
-                logger.info(`[WORKER_SCHEDULER] Processing desk report generation job ${job.id}...`);
-                try {
-                    await deskReportWorker.processGenerationJob(job);
-                    logger.info(`[WORKER_SCHEDULER] Desk report generation job ${job.id} completed successfully`);
-                } catch (error) {
-                    logger.error(`[WORKER_SCHEDULER] Desk report generation job ${job.id} failed:`, error);
-                    throw error;
-                }
-            });
-
-            // Remove existing repeatable job(s) to allow CRON updates
-            try {
-                const existingRepeatable = await this.deskReportGenerationQueue.getRepeatableJobs();
-                for (const job of existingRepeatable) {
-                    if (job.id !== 'desk-report-generation-repeatable') continue;
-                    await this.deskReportGenerationQueue.removeRepeatableByKey(job.key);
-                    logger.info(`[WORKER_SCHEDULER] Removed existing desk report generation repeatable job (cron: ${job.cron})`);
-                }
-            } catch (error) {
-                logger.debug('[WORKER_SCHEDULER] No existing desk report generation repeatable job to remove', error);
-            }
-
-            const deskReportCron = config.deskReportScheduler.generationCron;
-            logger.info(`[WORKER_SCHEDULER] Scheduling desk report generation with cron: "${deskReportCron}"`);
-
-            try {
-                await this.deskReportGenerationQueue.add(
-                    {},
-                    {
-                        repeat: { cron: deskReportCron },
-                        jobId: 'desk-report-generation-repeatable',
-                        attempts: 3,
-                        backoff: {
-                            type: 'exponential',
-                            delay: 5000,
-                        },
-                        removeOnComplete: true,
-                    }
-                );
-                logger.info(`[WORKER_SCHEDULER] Desk report generation scheduled via Bull (${deskReportCron})`);
-            } catch (cronError) {
-                logger.error(`[WORKER_SCHEDULER] Failed to schedule desk report generation with cron "${deskReportCron}":`, cronError);
-                logger.warn(`[WORKER_SCHEDULER] Desk report generation will not be automatically scheduled. Manual triggers will still work.`);
-            }
+            // Disabled (LLM)
+            // this.deskReportGenerationQueue = new Bull('desk-report-generation', {
+            //     redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+            //     defaultJobOptions: {
+            //         removeOnComplete: true,
+            //         removeOnFail: false,
+            //         attempts: 3,
+            //         backoff: {
+            //             type: 'exponential',
+            //             delay: 5000,
+            //         },
+            //     },
+            //     settings: {
+            //         stalledInterval: 30 * 60 * 1000, // 30 minutes - dispatch loop over many desks
+            //         maxStalledCount: 1,
+            //     },
+            // });
+            //
+            // this.deskReportGenerationQueue.process(async (job) => {
+            //     logger.info(`[WORKER_SCHEDULER] Processing desk report generation job ${job.id}...`);
+            //     try {
+            //         await deskReportWorker.processGenerationJob(job);
+            //         logger.info(`[WORKER_SCHEDULER] Desk report generation job ${job.id} completed successfully`);
+            //     } catch (error) {
+            //         logger.error(`[WORKER_SCHEDULER] Desk report generation job ${job.id} failed:`, error);
+            //         throw error;
+            //     }
+            // });
+            //
+            // // Remove existing repeatable job(s) to allow CRON updates
+            // try {
+            //     const existingRepeatable = await this.deskReportGenerationQueue.getRepeatableJobs();
+            //     for (const job of existingRepeatable) {
+            //         if (job.id !== 'desk-report-generation-repeatable') continue;
+            //         await this.deskReportGenerationQueue.removeRepeatableByKey(job.key);
+            //         logger.info(`[WORKER_SCHEDULER] Removed existing desk report generation repeatable job (cron: ${job.cron})`);
+            //     }
+            // } catch (error) {
+            //     logger.debug('[WORKER_SCHEDULER] No existing desk report generation repeatable job to remove', error);
+            // }
+            //
+            // const deskReportCron = config.deskReportScheduler.generationCron;
+            // logger.info(`[WORKER_SCHEDULER] Scheduling desk report generation with cron: "${deskReportCron}"`);
+            //
+            // try {
+            //     await this.deskReportGenerationQueue.add(
+            //         {},
+            //         {
+            //             repeat: { cron: deskReportCron },
+            //             jobId: 'desk-report-generation-repeatable',
+            //             attempts: 3,
+            //             backoff: {
+            //                 type: 'exponential',
+            //                 delay: 5000,
+            //             },
+            //             removeOnComplete: true,
+            //         }
+            //     );
+            //     logger.info(`[WORKER_SCHEDULER] Desk report generation scheduled via Bull (${deskReportCron})`);
+            // } catch (cronError) {
+            //     logger.error(`[WORKER_SCHEDULER] Failed to schedule desk report generation with cron "${deskReportCron}":`, cronError);
+            //     logger.warn(`[WORKER_SCHEDULER] Desk report generation will not be automatically scheduled. Manual triggers will still work.`);
+            // }
             // Initialize Desk Report Cleanup Queue
             this.deskReportCleanupQueue = new Bull('desk-report-cleanup', {
                 redis: { ...redisService.getRedisConfig(), lazyConnect: false },

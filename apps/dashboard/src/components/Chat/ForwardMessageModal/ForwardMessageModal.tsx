@@ -120,7 +120,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const zero = useZero();
   const [forwardMode, setForwardMode] = useState<ForwardMode>('message');
   const [addAgent, setAddAgent] = useState(true);
-  const [shareOperationId, setShareOperationId] = useState(() => uuidv4());
+  const [
+    shareOperationId,
+    // Disabled (Claw)
+    // setShareOperationId,
+  ] = useState(() => uuidv4());
   const channelAgentsQuery = useReactQuery({
     queryKey: ['channel-claw-agents', channelId],
     queryFn: () => fetchChannelClawAgents(channelId),
@@ -542,17 +546,18 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     setAddAgent(true);
   }, [selectedConversationChannel?.id]);
 
-  const handleForwardModeChange = (nextMode: ForwardMode): void => {
-    setForwardMode(nextMode);
-    setSelectedTargets([]);
-    form.reset();
-    inputBoxRef.current?.clearContent();
-    setAddAgent(true);
-    setShareOperationId(uuidv4());
-    setInputValue('');
-    setComboboxOpen(true);
-    setTimeout(() => comboboxInputRef.current?.focus(), 0);
-  };
+  // Disabled (Claw)
+  // const handleForwardModeChange = (nextMode: ForwardMode): void => {
+  //   setForwardMode(nextMode);
+  //   setSelectedTargets([]);
+  //   form.reset();
+  //   inputBoxRef.current?.clearContent();
+  //   setAddAgent(true);
+  //   setShareOperationId(uuidv4());
+  //   setInputValue('');
+  //   setComboboxOpen(true);
+  //   setTimeout(() => comboboxInputRef.current?.focus(), 0);
+  // };
 
   // Determine current selection mode based on selected targets
   const selectionMode: SelectionMode = useMemo(() => {
@@ -1014,6 +1019,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         </button>
       </div>
 
+      {/* Disabled (Claw) */}
+      {/*
       {showForwardModes && (
         <div
           className='grid grid-cols-2 gap-2 px-6 pt-4'
@@ -1044,6 +1051,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           </button>
         </div>
       )}
+      */}
 
       <div className='px-6 py-4 space-y-2'>
         {selectedTargets.length > 0 && (

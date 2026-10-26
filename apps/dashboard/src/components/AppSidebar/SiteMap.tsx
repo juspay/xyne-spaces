@@ -7,7 +7,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import { useVisibleOrganisationsGroups } from '../../routes/OrganisationsModule/organisationsSections';
 import { useDisabledToolbarPaths } from '../../hooks/useDisabledToolbarPaths';
-import { useVisibleAINavItems } from '../AIScreen/AISidebar';
+// Disabled (Claw)
+// import { useVisibleAINavItems } from '../AIScreen/AISidebar';
 
 interface Page {
   path: string;
@@ -51,22 +52,23 @@ const PageLinks = ({ pages }: { pages: Page[] }): ReactElement => {
   );
 };
 
-/** Split out so the admin and daily-brief lookups behind the AI pages only run when Xyne AI is listed. */
-const AIPageLinks = ({ item }: { item: NavigationItem }): ReactElement => {
-  const aiPages = useVisibleAINavItems();
-  return (
-    <PageLinks
-      pages={[
-        item,
-        ...aiPages.map(page => ({
-          path: page.to,
-          label: page.label,
-          description: within(page.description, item.label),
-        })),
-      ]}
-    />
-  );
-};
+// Disabled (Claw)
+// /** Split out so the admin and daily-brief lookups behind the AI pages only run when Xyne AI is listed. */
+// const AIPageLinks = ({ item }: { item: NavigationItem }): ReactElement => {
+// const aiPages = useVisibleAINavItems();
+// return (
+// <PageLinks
+// pages={[
+// item,
+// ...aiPages.map(page => ({
+// path: page.to,
+// label: page.label,
+// description: within(page.description, item.label),
+// })),
+// ]}
+// />
+// );
+// };
 
 /** A site map landmark: a second way to reach any page (WCAG 2.4.5), hidden from sight and the tab order. */
 export const SiteMap = (): ReactElement => {
@@ -103,13 +105,17 @@ export const SiteMap = (): ReactElement => {
   return (
     <nav aria-label='Site map' className='sr-only'>
       <ul>
-        {items.map(item =>
+        {/* Disabled (Claw) */}
+        {/* {items.map(item =>
           item.path === '/ai' ? (
             <AIPageLinks key={item.path} item={item} />
           ) : (
             <PageLinks key={item.path} pages={[item, ...childrenOf(item)]} />
           ),
-        )}
+        )} */}
+        {items.map(item => (
+          <PageLinks key={item.path} pages={[item, ...childrenOf(item)]} />
+        ))}
       </ul>
     </nav>
   );

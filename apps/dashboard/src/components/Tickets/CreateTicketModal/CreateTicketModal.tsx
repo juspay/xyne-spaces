@@ -20,7 +20,8 @@ import {
   LookupType,
   ReleaseTrackingMode,
   TicketPriority,
-  TicketReferenceRelation,
+  // Disabled (LLM)
+  // TicketReferenceRelation,
   TicketStatusV2,
   isFieldActive,
   orderFieldsWithBranchChildrenAfterParent,
@@ -51,7 +52,8 @@ import { useAuth } from '../../../hooks/useAuth';
 import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/EntityLinkContext';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
-import { useTicketFieldSuggestions } from '../../../hooks/useTicketFieldSuggestions';
+// Disabled (LLM)
+// import { useTicketFieldSuggestions } from '../../../hooks/useTicketFieldSuggestions';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
@@ -62,11 +64,12 @@ import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { loadRecentLabels, saveRecentLabels } from '../../../utils/recentLabels';
-import {
-  useDuplicateTicketCheck,
-  type DuplicateSuggestion,
-} from '../../../hooks/useDuplicateTicketCheck';
-import { DuplicateSuggestions } from './DuplicateSuggestions';
+// Disabled (LLM)
+// import {
+//   useDuplicateTicketCheck,
+//   type DuplicateSuggestion,
+// } from '../../../hooks/useDuplicateTicketCheck';
+// import { DuplicateSuggestions } from './DuplicateSuggestions';
 import { queries } from '../../../zero/queries';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -469,7 +472,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   );
 
   // Track if title has been auto-generated for this modal session
-  const [hasTitleBeenGenerated, setHasTitleBeenGenerated] = useState(false);
+  // Disabled (LLM)
+  // const [hasTitleBeenGenerated, setHasTitleBeenGenerated] = useState(false);
 
   const [newTags, setNewTags] = useState<string[]>([]);
 
@@ -478,7 +482,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     title: generatedTitle,
     ticketType: generatedTicketType,
     isGenerating: isTitleGenerating,
-    generateFromDescription,
+    // Disabled (LLM)
+    // generateFromDescription,
     cancelGeneration,
   } = useTitleGenerator({
     maxLength: 100,
@@ -802,47 +807,48 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [isOpen]);
 
-  const {
-    likely: likelyDuplicates,
-    similar: similarDuplicates,
-    checkId: duplicateCheckId,
-    duplicateCheck,
-    isCheckingDuplicate,
-    isDuplicateCheckInFlight,
-  } = useDuplicateTicketCheck({
-    title: formValues.title ?? '',
-    description: formValues.description ?? '',
-    projectId: selectedBoard?.projectId ?? '',
-    ...(formValues.boardId ? { boardId: formValues.boardId } : {}),
-    isOpen: isOpen && !isReleaseLine,
-  });
-  const duplicateProjectId = selectedBoard?.projectId ?? '';
-  const [duplicateChoice, setDuplicateChoice] = useState<{
-    suggestion: DuplicateSuggestion;
-    projectId: string;
-  } | null>(null);
-  const [duplicateNotSame, setDuplicateNotSame] = useState<ReadonlySet<string>>(() => new Set());
-  useEffect(() => {
-    if (!isOpen) {
-      setDuplicateChoice(null);
-      setDuplicateNotSame(new Set());
-    }
-  }, [isOpen]);
-  const duplicateSameAs =
-    duplicateChoice &&
-    duplicateChoice.projectId === duplicateProjectId &&
-    duplicateCheck?.candidates?.some(
-      candidate => candidate.id === duplicateChoice.suggestion.candidate.id,
-    )
-      ? duplicateChoice.suggestion
-      : null;
-  const duplicateDecisions =
-    duplicateSameAs || duplicateNotSame.size > 0
-      ? {
-          ...(duplicateSameAs ? { sameAs: duplicateSameAs.candidate.id } : {}),
-          ...(duplicateNotSame.size > 0 ? { notSame: [...duplicateNotSame] } : {}),
-        }
-      : undefined;
+  // Disabled (LLM)
+  // const {
+  //   likely: likelyDuplicates,
+  //   similar: similarDuplicates,
+  //   checkId: duplicateCheckId,
+  //   duplicateCheck,
+  //   isCheckingDuplicate,
+  //   isDuplicateCheckInFlight,
+  // } = useDuplicateTicketCheck({
+  //   title: formValues.title ?? '',
+  //   description: formValues.description ?? '',
+  //   projectId: selectedBoard?.projectId ?? '',
+  //   ...(formValues.boardId ? { boardId: formValues.boardId } : {}),
+  //   isOpen: isOpen && !isReleaseLine,
+  // });
+  // const duplicateProjectId = selectedBoard?.projectId ?? '';
+  // const [duplicateChoice, setDuplicateChoice] = useState<{
+  //   suggestion: DuplicateSuggestion;
+  //   projectId: string;
+  // } | null>(null);
+  // const [duplicateNotSame, setDuplicateNotSame] = useState<ReadonlySet<string>>(() => new Set());
+  // useEffect(() => {
+  //   if (!isOpen) {
+  //     setDuplicateChoice(null);
+  //     setDuplicateNotSame(new Set());
+  //   }
+  // }, [isOpen]);
+  // const duplicateSameAs =
+  //   duplicateChoice &&
+  //   duplicateChoice.projectId === duplicateProjectId &&
+  //   duplicateCheck?.candidates?.some(
+  //     candidate => candidate.id === duplicateChoice.suggestion.candidate.id,
+  //   )
+  //     ? duplicateChoice.suggestion
+  //     : null;
+  // const duplicateDecisions =
+  //   duplicateSameAs || duplicateNotSame.size > 0
+  //     ? {
+  //         ...(duplicateSameAs ? { sameAs: duplicateSameAs.candidate.id } : {}),
+  //         ...(duplicateNotSame.size > 0 ? { notSame: [...duplicateNotSame] } : {}),
+  //       }
+  //     : undefined;
 
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
@@ -985,7 +991,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     if (isOpen) {
       form.reset();
       setTicketKind(initialTicketKind);
-      setHasTitleBeenGenerated(false); // Reset flag when modal opens
+      // Disabled (LLM)
+      // setHasTitleBeenGenerated(false); // Reset flag when modal opens
       hasPopulatedDeployedCommitId.current = false;
       seedSnapshotRef.current = null;
       setShowDiscardConfirm(false);
@@ -1087,26 +1094,27 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [boards, form, markAutoApplied]);
 
-  // Auto-generate title when modal opens with a description but no title
-  useEffect(() => {
-    if (
-      isOpen &&
-      initialDescription &&
-      !initialTitle &&
-      !hasTitleBeenGenerated &&
-      !isTitleGenerating
-    ) {
-      // Generate title from description
-      setHasTitleBeenGenerated(true); // Set flag to prevent re-triggering
-      void generateFromDescription(initialDescription);
-    }
+  // Disabled (LLM)
+  // // Auto-generate title when modal opens with a description but no title
+  // useEffect(() => {
+  //   if (
+  //     isOpen &&
+  //     initialDescription &&
+  //     !initialTitle &&
+  //     !hasTitleBeenGenerated &&
+  //     !isTitleGenerating
+  //   ) {
+  //     // Generate title from description
+  //     setHasTitleBeenGenerated(true); // Set flag to prevent re-triggering
+  //     void generateFromDescription(initialDescription);
+  //   }
 
-    return () => {
-      if (isTitleGenerating) {
-        cancelGeneration();
-      }
-    };
-  }, [isOpen, initialDescription, initialTitle, hasTitleBeenGenerated, isTitleGenerating]);
+  //   return () => {
+  //     if (isTitleGenerating) {
+  //       cancelGeneration();
+  //     }
+  //   };
+  // }, [isOpen, initialDescription, initialTitle, hasTitleBeenGenerated, isTitleGenerating]);
 
   // Update form title and ticket type when generated values are ready
   useEffect(() => {
@@ -1663,9 +1671,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
 
         formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
-        if (duplicateDecisions) {
-          formDataPayload.append('duplicateDecisions', JSON.stringify(duplicateDecisions));
-        }
+        // Disabled (LLM)
+        // if (duplicateDecisions) {
+        //   formDataPayload.append('duplicateDecisions', JSON.stringify(duplicateDecisions));
+        // }
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
@@ -1700,7 +1709,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields (pruned of any now-inactive branch field's stale value)
           dynamicFields: submitDynamicFields,
-          ...(duplicateDecisions && { duplicateDecisions }),
+          // Disabled (LLM)
+          // ...(duplicateDecisions && { duplicateDecisions }),
         });
 
         createdTicketResponse = response.data;
@@ -1733,20 +1743,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         });
       }
 
-      if (createdTicketResponse?.id && duplicateSameAs) {
-        void surfaceMutationError(
-          zero.mutate(
-            mutators.ticketReference.create({
-              sourceTicketId: createdTicketResponse.id,
-              targetTicketId: duplicateSameAs.candidate.id,
-              relationType: TicketReferenceRelation.DUPLICATE_CONFIRMED,
-              timestamp: Date.now(),
-              referenceId: uuidv4(),
-            }),
-          ),
-          `Failed to link the duplicate ${noun.singular}`,
-        );
-      }
+      // Disabled (LLM)
+      // if (createdTicketResponse?.id && duplicateSameAs) {
+      //   void surfaceMutationError(
+      //     zero.mutate(
+      //       mutators.ticketReference.create({
+      //         sourceTicketId: createdTicketResponse.id,
+      //         targetTicketId: duplicateSameAs.candidate.id,
+      //         relationType: TicketReferenceRelation.DUPLICATE_CONFIRMED,
+      //         timestamp: Date.now(),
+      //         referenceId: uuidv4(),
+      //       }),
+      //     ),
+      //     `Failed to link the duplicate ${noun.singular}`,
+      //   );
+      // }
 
       // Don't auto-close if part of a sequence - let the parent handle it
       if (!ticketSequence || ticketSequence.current === ticketSequence.total) {
@@ -2092,7 +2103,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const boardTouchedRef = useRef(false);
   const ticketTypeTouchedRef = useRef(false);
   // The description box writes to the form only on submit, so suggestions read it here.
-  const [typedDescription, setTypedDescription] = useState<string | null>(null);
+  // Disabled (LLM)
+  // const [typedDescription, setTypedDescription] = useState<string | null>(null);
+  const [, setTypedDescription] = useState<string | null>(null);
   const typedDescriptionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (isOpen) {
@@ -2115,47 +2128,48 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     form.setFieldValue('boardId', boardId);
     markAutoApplied({ boardId });
   }, [ticketKind, boardOptions, form, markAutoApplied]);
-  const suggestionBoards = useMemo(
-    () =>
-      taskBoards.map(board => {
-        const description = board.description?.trim();
-        return { id: board.id, name: board.name, ...(description ? { description } : {}) };
-      }),
-    [taskBoards],
-  );
-  const fieldSuggestions = useTicketFieldSuggestions({
-    title: formValues.title ?? '',
-    description: typedDescription ?? formValues.description ?? '',
-    boards: suggestionBoards,
-    enabled: isOpen && ticketKind === 'task',
-  });
-  useEffect(() => {
-    const boardId = fieldSuggestions.board?.id;
-    // Only an empty board: switching one resets the type and custom fields.
-    if (!boardId || boardTouchedRef.current || form.getFieldValue('boardId')) return;
-    if (!suggestionBoards.some(board => board.id === boardId)) return;
-    form.setFieldValue('boardId', boardId);
-    markAutoApplied({ boardId });
-  }, [fieldSuggestions.board?.id, suggestionBoards, form, markAutoApplied]);
-  // Must run after the board effect, which resets the type.
-  useEffect(() => {
-    const type = fieldSuggestions.ticketType?.type;
-    if (!type || ticketTypeTouchedRef.current || generatedTicketType) return;
-    if (isFlowRootTicket || ticketKind === 'release' || isReleaseBoard(selectedBoard?.boardType))
-      return;
-    if (!ticketTypeOptions?.some(option => option.value === type)) return;
-    form.setFieldValue('ticketType', type);
-    markAutoApplied({ ticketType: type });
-  }, [
-    fieldSuggestions.ticketType?.type,
-    generatedTicketType,
-    isFlowRootTicket,
-    ticketKind,
-    selectedBoard,
-    ticketTypeOptions,
-    form,
-    markAutoApplied,
-  ]);
+  // Disabled (LLM)
+  // const suggestionBoards = useMemo(
+  //   () =>
+  //     taskBoards.map(board => {
+  //       const description = board.description?.trim();
+  //       return { id: board.id, name: board.name, ...(description ? { description } : {}) };
+  //     }),
+  //   [taskBoards],
+  // );
+  // const fieldSuggestions = useTicketFieldSuggestions({
+  //   title: formValues.title ?? '',
+  //   description: typedDescription ?? formValues.description ?? '',
+  //   boards: suggestionBoards,
+  //   enabled: isOpen && ticketKind === 'task',
+  // });
+  // useEffect(() => {
+  //   const boardId = fieldSuggestions.board?.id;
+  //   // Only an empty board: switching one resets the type and custom fields.
+  //   if (!boardId || boardTouchedRef.current || form.getFieldValue('boardId')) return;
+  //   if (!suggestionBoards.some(board => board.id === boardId)) return;
+  //   form.setFieldValue('boardId', boardId);
+  //   markAutoApplied({ boardId });
+  // }, [fieldSuggestions.board?.id, suggestionBoards, form, markAutoApplied]);
+  // // Must run after the board effect, which resets the type.
+  // useEffect(() => {
+  //   const type = fieldSuggestions.ticketType?.type;
+  //   if (!type || ticketTypeTouchedRef.current || generatedTicketType) return;
+  //   if (isFlowRootTicket || ticketKind === 'release' || isReleaseBoard(selectedBoard?.boardType))
+  //     return;
+  //   if (!ticketTypeOptions?.some(option => option.value === type)) return;
+  //   form.setFieldValue('ticketType', type);
+  //   markAutoApplied({ ticketType: type });
+  // }, [
+  //   fieldSuggestions.ticketType?.type,
+  //   generatedTicketType,
+  //   isFlowRootTicket,
+  //   ticketKind,
+  //   selectedBoard,
+  //   ticketTypeOptions,
+  //   form,
+  //   markAutoApplied,
+  // ]);
 
   // Get status options and memomize them
   const statusOptions = [
@@ -2598,7 +2612,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                             : '!border-b-transparent',
                         )}
                       />
-                      <div
+                      {/* Disabled (LLM) */}
+                      {/* <div
                         aria-hidden
                         className='xyne-duplicate-scan'
                         data-active={isDuplicateCheckInFlight ? 'true' : undefined}
@@ -2607,7 +2622,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                         <span className='shrink-0 text-[11px] leading-3 text-muted-foreground'>
                           Checking for duplicates
                         </span>
-                      </div>
+                      </div> */}
                     </div>
                   )}
                   <FieldError error={field.state.meta.errors[0]} />
@@ -2615,7 +2630,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               )}
             </form.Field>
 
-            <DuplicateSuggestions
+            {/* Disabled (LLM) */}
+            {/* <DuplicateSuggestions
               likely={likelyDuplicates.filter(
                 suggestion => suggestion.candidate.id !== parentTicketId,
               )}
@@ -2633,7 +2649,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               onNotSame={suggestion =>
                 setDuplicateNotSame(current => new Set([...current, suggestion.candidate.id]))
               }
-            />
+            /> */}
 
             {/* Description Field */}
             <form.Field

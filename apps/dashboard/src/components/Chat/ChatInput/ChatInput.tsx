@@ -323,7 +323,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       !activeArtifactCommand;
     const relatedDraftKey = conversationId ?? channelId;
     const relatedContext = useRelatedContext({
-      enabled: relatedEnabled,
+      // Disabled (LLM)
+      // enabled: relatedEnabled,
+      enabled: false && relatedEnabled,
       conversationId,
       draftKey: relatedDraftKey,
       debounceMs: relatedDebounceMs,
@@ -506,7 +508,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       withdraw: withdrawTitleOffer,
       noteSent: noteTitleSent,
     } = useDiscussionTitleOffer({
+      // Disabled (LLM)
+      // enabled:
+      //   offersTitle &&
+      //   !titleDraft.open &&
+      //   !activeArtifactCommand &&
+      //   channel?.scopeType !== ChannelScopeType.DM,
       enabled:
+        false &&
         offersTitle &&
         !titleDraft.open &&
         !activeArtifactCommand &&
