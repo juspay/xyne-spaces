@@ -115,10 +115,10 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
       },
       // Disabled (Claw)
       // {
-        // key: 'agent-activity',
-        // label: 'Agent activity',
-        // description: 'What agents decided when nobody tagged them',
-        // icon: AgentIcon,
+      // key: 'agent-activity',
+      // label: 'Agent activity',
+      // description: 'What agents decided when nobody tagged them',
+      // icon: AgentIcon,
       // },
     ],
   },

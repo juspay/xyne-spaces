@@ -573,19 +573,19 @@ const RecordingsV2Screen = (): ReactElement => {
               <div className='col-start-2 row-start-1 flex items-center gap-2 sm:row-start-3'>
                 {/* Disabled (LLM) */}
                 {
-                // {/* Icon-only below `sm`, where this row shares a line with the title. */}
-                // <Button
-                //   type='button'
-                //   variant='outline'
-                //   onClick={() => setTemplatesOpen(true)}
-                //   className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-3 font-semibold hover:bg-muted/70 sm:px-4'
-                //   aria-label='Summary templates'
-                //   data-track-category='RecordingsV2'
-                //   data-track-name='open_summary_templates'
-                // >
-                //   <GridDashboardBento strokeWidth={2} className='size-4' />
-                //   <span className='hidden sm:inline'>Templates</span>
-                // </Button>
+                  // {/* Icon-only below `sm`, where this row shares a line with the title. */}
+                  // <Button
+                  //   type='button'
+                  //   variant='outline'
+                  //   onClick={() => setTemplatesOpen(true)}
+                  //   className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-3 font-semibold hover:bg-muted/70 sm:px-4'
+                  //   aria-label='Summary templates'
+                  //   data-track-category='RecordingsV2'
+                  //   data-track-name='open_summary_templates'
+                  // >
+                  //   <GridDashboardBento strokeWidth={2} className='size-4' />
+                  //   <span className='hidden sm:inline'>Templates</span>
+                  // </Button>
                 }
                 {/* Disabled (Claw) */}
                 {/*
@@ -804,27 +804,27 @@ const RecordingsV2Screen = (): ReactElement => {
 
       {/* Disabled (LLM) */}
       {
-      // {isTemplatesOpen && currentUser && (
-      //   <Dialog
-      //     open
-      //     onOpenChange={open => !open && setTemplatesOpen(false)}
-      //     title='Summary Templates'
-      //     description='Create, edit, and share recording summary templates.'
-      //     className={SUMMARY_TEMPLATES_DIALOG_CLASS}
-      //     testId='recordings-v2-summary-templates-dialog'
-      //   >
-      //     {/* The list is held back while the linked template syncs. */}
-      //     <SummaryTemplatesModal
-      //       key={linkedTemplateId ?? 'browse'}
-      //       templates={templateLinkState === 'resolving' ? [] : summaryTemplates}
-      //       loading={summaryTemplatesLoading || templateLinkState === 'resolving'}
-      //       selectedTemplateId={templateLinkState === 'found' ? linkedTemplateId : null}
-      //       currentUserId={currentUser.id}
-      //       currentUserName={getUserDisplayName(currentUser)}
-      //       onClose={() => setTemplatesOpen(false)}
-      //     />
-      //   </Dialog>
-      // )}
+        // {isTemplatesOpen && currentUser && (
+        //   <Dialog
+        //     open
+        //     onOpenChange={open => !open && setTemplatesOpen(false)}
+        //     title='Summary Templates'
+        //     description='Create, edit, and share recording summary templates.'
+        //     className={SUMMARY_TEMPLATES_DIALOG_CLASS}
+        //     testId='recordings-v2-summary-templates-dialog'
+        //   >
+        //     {/* The list is held back while the linked template syncs. */}
+        //     <SummaryTemplatesModal
+        //       key={linkedTemplateId ?? 'browse'}
+        //       templates={templateLinkState === 'resolving' ? [] : summaryTemplates}
+        //       loading={summaryTemplatesLoading || templateLinkState === 'resolving'}
+        //       selectedTemplateId={templateLinkState === 'found' ? linkedTemplateId : null}
+        //       currentUserId={currentUser.id}
+        //       currentUserName={getUserDisplayName(currentUser)}
+        //       onClose={() => setTemplatesOpen(false)}
+        //     />
+        //   </Dialog>
+        // )}
       }
 
       <RecordingDeleteDialog

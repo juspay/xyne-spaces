@@ -125,11 +125,10 @@ import {
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
 import { TicketNounContext, type TicketNoun } from '../../contexts/TicketNounContext';
-import {
-  // Disabled (Claw)
-  // buildSdlcArtifactCreationPrompt,
-  // buildSdlcWikiPageCreationPrompt,
-} from './artifactCreationPrompt';
+import {} from // Disabled (Claw)
+// buildSdlcArtifactCreationPrompt,
+// buildSdlcWikiPageCreationPrompt,
+'./artifactCreationPrompt';
 import {
   SdlcWikiEmpty,
   SdlcWikiExplorer,
@@ -4358,96 +4357,95 @@ export default function SdlcScreen(): ReactElement {
                   onOpenCanvas={openReleaseCanvas}
                   onConnectRepository={() => setHubDialog('manage')}
                 />
-              ) :
-              // Disabled (Claw)
-              // section === 'agents' ? (
-              //   <div className='min-h-0 flex-1 overflow-auto bg-background'>
-              //     <LibraryV2 channelId={channelId} addAgentBlockedReason={addAgentBlockedReason} />
-              //   </div>
-              // ) :
-              // Disabled (Claw)
-              // section === 'knowledge' ? (
-              //   // Its own scroll, so the toolbar can stick; the hub pages' wide width and padding.
-              //   <div className='min-h-0 flex-1 overflow-y-auto bg-background [scrollbar-gutter:stable]'>
-              //     <div className='mx-auto flex min-h-full w-full max-w-6xl flex-col px-8 pb-8 pt-8'>
-              //       <SdlcKnowledgeSection
-              //         generateControl={renderWorkflowControls(
-              //           'Skills',
-              //           state,
-              //           // Says where it writes from. Docs written by hand are not a run.
-              //           state.runId ? 'Update from repositories' : 'Generate from repositories',
-              //           'outline',
-              //           'Cancel',
-              //           'h-10',
-              //         )}
-              //         channelName={channel.name}
-              //         channelId={channel.id}
-              //         isHubAdmin={isHubAdmin}
-              //         generating={state.phase === 'RUNNING'}
-              //         files={knowledgeDocs.map(canvas => ({
-              //           id: canvas.id,
-              //           title: canvas.title,
-              //           status:
-              //             canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
-              //               ? 'archived'
-              //               : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
-              //                 ? 'generating'
-              //                 : 'ready',
-              //         }))}
-              //         showArchived={showArchivedKnowledge}
-              //         onShowArchivedChange={setShowArchivedKnowledge}
-              //         filesLoaded={
-              //           knowledgeDocs.length > 0 ||
-              //           // No folder counts as none only once the hub itself has arrived in full.
-              //           (knowledgeFolderId ? knowledgeDetails : repoQueryDetails).type ===
-              //             'complete'
-              //         }
-              //         // A Knowledge File opens for reading, as a Wiki page does: Discussions
-              //         // opens from its button. Not through openCanvas, which carries the panel over.
-              //         onOpenFile={canvasId => {
-              //           setRelatedSourceId(null);
-              //           void navigate(
-              //             `/sdlc/${channel.id}/knowledge?${new URLSearchParams({ canvas: canvasId, discussion: '0' }).toString()}`,
-              //           );
-              //         }}
-              //         onArchiveFile={(canvasId, archived) =>
-              //           archiveArtifact(
-              //             canvasId,
-              //             archived,
-              //             knowledgeDocs.find(canvas => canvas.id === canvasId)?.title,
-              //           )
-              //         }
-              //         onNewFile={() => openHubDocumentCreate('knowledge')}
-              //         onCreateWithAi={draft => {
-              //           const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
-              //           const saveAs = {
-              //             file: `Save it as ${asFile}.`,
-              //             skill: 'Save it as a skill: call create-skill.',
-              //             auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
-              //           }[draft.kind];
-              //           askSdlcAssistant(
-              //             `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
-              //               `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
-              //             undefined,
-              //             true,
-              //           );
-              //         }}
-              //       />
-              //     </div>
-              //   </div>
-              // ) :
-              // Disabled (Claw)
-              // section === 'environments' ? (
-              //   <div className='min-h-0 flex-1 overflow-hidden bg-background'>
-              //     <EnvironmentsView
-              //       key={channelId}
-              //       channelId={channelId}
-              //       hubRepoIds={channelRepos.map(repo => repo.id)}
-              //       onAddRepository={isHubAdmin ? () => setHubDialog('manage') : undefined}
-              //     />
-              //   </div>
-              // ) : (
-              (
+              ) : (
+                // Disabled (Claw)
+                // section === 'agents' ? (
+                //   <div className='min-h-0 flex-1 overflow-auto bg-background'>
+                //     <LibraryV2 channelId={channelId} addAgentBlockedReason={addAgentBlockedReason} />
+                //   </div>
+                // ) :
+                // Disabled (Claw)
+                // section === 'knowledge' ? (
+                //   // Its own scroll, so the toolbar can stick; the hub pages' wide width and padding.
+                //   <div className='min-h-0 flex-1 overflow-y-auto bg-background [scrollbar-gutter:stable]'>
+                //     <div className='mx-auto flex min-h-full w-full max-w-6xl flex-col px-8 pb-8 pt-8'>
+                //       <SdlcKnowledgeSection
+                //         generateControl={renderWorkflowControls(
+                //           'Skills',
+                //           state,
+                //           // Says where it writes from. Docs written by hand are not a run.
+                //           state.runId ? 'Update from repositories' : 'Generate from repositories',
+                //           'outline',
+                //           'Cancel',
+                //           'h-10',
+                //         )}
+                //         channelName={channel.name}
+                //         channelId={channel.id}
+                //         isHubAdmin={isHubAdmin}
+                //         generating={state.phase === 'RUNNING'}
+                //         files={knowledgeDocs.map(canvas => ({
+                //           id: canvas.id,
+                //           title: canvas.title,
+                //           status:
+                //             canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED'
+                //               ? 'archived'
+                //               : canvas.sdlcArtifact?.artifactStatus === 'DRAFT'
+                //                 ? 'generating'
+                //                 : 'ready',
+                //         }))}
+                //         showArchived={showArchivedKnowledge}
+                //         onShowArchivedChange={setShowArchivedKnowledge}
+                //         filesLoaded={
+                //           knowledgeDocs.length > 0 ||
+                //           // No folder counts as none only once the hub itself has arrived in full.
+                //           (knowledgeFolderId ? knowledgeDetails : repoQueryDetails).type ===
+                //             'complete'
+                //         }
+                //         // A Knowledge File opens for reading, as a Wiki page does: Discussions
+                //         // opens from its button. Not through openCanvas, which carries the panel over.
+                //         onOpenFile={canvasId => {
+                //           setRelatedSourceId(null);
+                //           void navigate(
+                //             `/sdlc/${channel.id}/knowledge?${new URLSearchParams({ canvas: canvasId, discussion: '0' }).toString()}`,
+                //           );
+                //         }}
+                //         onArchiveFile={(canvasId, archived) =>
+                //           archiveArtifact(
+                //             canvasId,
+                //             archived,
+                //             knowledgeDocs.find(canvas => canvas.id === canvasId)?.title,
+                //           )
+                //         }
+                //         onNewFile={() => openHubDocumentCreate('knowledge')}
+                //         onCreateWithAi={draft => {
+                //           const asFile = `a Knowledge File through the spaces-sdlc-write-artifact create call with artifactTypeId ${JSON.stringify(knowledgeFolderId ?? '')}`;
+                //           const saveAs = {
+                //             file: `Save it as ${asFile}.`,
+                //             skill: 'Save it as a skill: call create-skill.',
+                //             auto: `Save it as ${asFile}, or as a skill through create-skill when it is a generic procedure.`,
+                //           }[draft.kind];
+                //           askSdlcAssistant(
+                //             `Add this to this hub's Hub Knowledge now. Do not ask me anything first, write the full content yourself.\n` +
+                //               `Name: ${draft.name}\nWhat it covers: ${draft.description}\n${saveAs}`,
+                //             undefined,
+                //             true,
+                //           );
+                //         }}
+                //       />
+                //     </div>
+                //   </div>
+                // ) :
+                // Disabled (Claw)
+                // section === 'environments' ? (
+                //   <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                //     <EnvironmentsView
+                //       key={channelId}
+                //       channelId={channelId}
+                //       hubRepoIds={channelRepos.map(repo => repo.id)}
+                //       onAddRepository={isHubAdmin ? () => setHubDialog('manage') : undefined}
+                //     />
+                //   </div>
+                // ) : (
                 <>
                   {onTrackPage && selectedTrack && (
                     // Under the name, its tabs: one per kind of thing it holds, as a

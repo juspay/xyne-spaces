@@ -996,26 +996,26 @@ const initializeActor = async (): Promise<void> => {
       // Only include defined values in the send event
       // Disabled (Claw)
       // xyneAIActor.send({
-        // type: 'OPEN',
-        // trackSource: 'restored',
-        // ...(persistedContext.contextType !== undefined &&
-          // persistedContext.contextType !== null && {
-            // contextType: persistedContext.contextType,
-          // }),
-        // ...(persistedContext.contextId !== undefined &&
-          // persistedContext.contextId !== null && {
-            // contextId: persistedContext.contextId,
-          // }),
-        // ...(persistedContext.channelId !== undefined &&
-          // persistedContext.channelId !== null && {
-            // channelId: persistedContext.channelId,
-          // }),
-        // ...(persistedContext.threadInfo !== undefined && {
-          // threadInfo: persistedContext.threadInfo,
-        // }),
-        // ...(persistedContext.initialContextSelections !== undefined && {
-          // initialContextSelections: persistedContext.initialContextSelections,
-        // }),
+      // type: 'OPEN',
+      // trackSource: 'restored',
+      // ...(persistedContext.contextType !== undefined &&
+      // persistedContext.contextType !== null && {
+      // contextType: persistedContext.contextType,
+      // }),
+      // ...(persistedContext.contextId !== undefined &&
+      // persistedContext.contextId !== null && {
+      // contextId: persistedContext.contextId,
+      // }),
+      // ...(persistedContext.channelId !== undefined &&
+      // persistedContext.channelId !== null && {
+      // channelId: persistedContext.channelId,
+      // }),
+      // ...(persistedContext.threadInfo !== undefined && {
+      // threadInfo: persistedContext.threadInfo,
+      // }),
+      // ...(persistedContext.initialContextSelections !== undefined && {
+      // initialContextSelections: persistedContext.initialContextSelections,
+      // }),
       // });
     }
 

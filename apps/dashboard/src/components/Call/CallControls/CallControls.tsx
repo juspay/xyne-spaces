@@ -311,7 +311,7 @@ export function CallControls({
 
   // Disabled (LLM)
   // const { isController, isControlledByOther, hasPendingRequestFromOther, isRequestingUser } =
-    // getAiControlState({ localParticipantId, aiController, pendingControlRequest });
+  // getAiControlState({ localParticipantId, aiController, pendingControlRequest });
 
   // Use LiveKit's device selection hooks
   const {

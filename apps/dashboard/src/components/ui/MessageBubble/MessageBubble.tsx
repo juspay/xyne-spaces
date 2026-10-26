@@ -1357,7 +1357,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   conversationId={message.conversationId}
                   showButton={true}
                 />
-              // Disabled (LLM)
+              ) : // Disabled (LLM)
               // ) : isPulseActionablesMessage && metadata?.callId ? (
               //   <PulseTickets
               //     content={message.content}
@@ -1366,7 +1366,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               //     conversationId={message.conversationId}
               //     messageId={message.messageId}
               //   />
-              ) : isChannelEmailMessage ? (
+              isChannelEmailMessage ? (
                 <ChannelEmailCard
                   subject={typeof metadata?.['subject'] === 'string' ? metadata['subject'] : ''}
                   from={typeof metadata?.['from'] === 'string' ? metadata['from'] : ''}
