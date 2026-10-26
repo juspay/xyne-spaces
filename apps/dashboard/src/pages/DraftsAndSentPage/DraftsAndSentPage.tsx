@@ -2,7 +2,8 @@ import { type ReactElement, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import DraftsPanel from '../../components/Chat/DraftsPanel/DraftsPanel';
-import TwinDraftsPanel from '../../components/Chat/DraftsPanel/TwinDraftsPanel';
+// Disabled (Claw)
+// import TwinDraftsPanel from '../../components/Chat/DraftsPanel/TwinDraftsPanel';
 import SentPanel from '../../components/Chat/SentPanel/SentPanel';
 import DelayedMessagesPanel from '../../components/Chat/DelayedMessagesPanel/DelayedMessagesPanel';
 import { stateMachineActor } from '../../machines/stateMachine';
@@ -23,12 +24,14 @@ const DraftsAndSentPage = (): ReactElement => {
   );
 
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
-  const twinDraftsCount = useSelector(stateMachineActor, state => state.context.twinDrafts.length);
+  // Disabled (Claw)
+  // const twinDraftsCount = useSelector(stateMachineActor, state => state.context.twinDrafts.length);
   const pendingScheduledCount = usePendingDelayedMessagesCount();
 
   const tabOptions = [
     { value: 'drafts' as TabValue, label: 'Drafts', count: draftsCount },
-    { value: 'twin' as TabValue, label: 'Twin drafts', count: twinDraftsCount },
+    // Disabled (Claw)
+    // { value: 'twin' as TabValue, label: 'Twin drafts', count: twinDraftsCount },
     { value: 'scheduled' as TabValue, label: 'Scheduled', count: pendingScheduledCount },
     { value: 'sent' as TabValue, label: 'Sent' },
   ];
@@ -72,7 +75,8 @@ const DraftsAndSentPage = (): ReactElement => {
 
       <div data-testid='drafts-sent-content' className='flex-1 min-h-0 overflow-hidden'>
         {activeTab === 'drafts' && <DraftsPanel />}
-        {activeTab === 'twin' && <TwinDraftsPanel />}
+        {/* Disabled (Claw) */}
+        {/* {activeTab === 'twin' && <TwinDraftsPanel />} */}
         {activeTab === 'scheduled' && <DelayedMessagesPanel />}
         {activeTab === 'sent' && <SentPanel />}
       </div>

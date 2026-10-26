@@ -23,8 +23,10 @@ import {
   ClipboardCheck,
   Hash,
   Lock,
-  Tag as TagIcon,
-  ChevronRight,
+  // Disabled (LLM)
+  // Tag as TagIcon,
+  // Disabled (LLM)
+  // ChevronRight,
 } from 'lucide-react';
 import {
   ArrowLeft,
@@ -47,9 +49,10 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
+  // Disabled (LLM)
+  // DropdownMenuSub,
+  // DropdownMenuSubContent,
+  // DropdownMenuSubTrigger,
 } from '../ui/dropdown-menu';
 import { AddToStreamMenuItem } from '../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { ChatInput } from './ChatInput';
@@ -60,16 +63,21 @@ import { DragAndDropOverlay } from './DragAndDropOverlay';
 import { ConversationSubscription } from './ConversationSubscription';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { insertDateSeparatorsForThreadMessages } from '../../utils/chatUtils';
-import { htmlToPlainText } from '../../utils/sanitizer';
+// Disabled (Claw)
+// import { htmlToPlainText } from '../../utils/sanitizer';
 import { QueryResultType } from '@rocicorp/zero';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
 import JoinChannel from './JoinChannel/JoinChannel';
 import { BotBubble } from './BotBubble';
-import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
-import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
-import { useShowThreadTags } from '../../hooks/useShowThreadTags';
-import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
+// Disabled (LLM)
+// import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
+// Disabled (LLM)
+// import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
+// Disabled (LLM)
+// import { useShowThreadTags } from '../../hooks/useShowThreadTags';
+// Disabled (Claw)
+// import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
@@ -102,20 +110,27 @@ import { useReleaseForDevTicket } from '../../hooks/useReleaseForDevTicket';
 import { useZero } from '../../hooks/useZero';
 import { markWhenLeft, usePageCoverage } from '../../hooks/usePageCoverage';
 import { logger, Event } from '../../utils/logger';
-import { XyneAIStar } from '../icons/xyne-ai';
+// Disabled (Claw)
+// import { XyneAIStar } from '../icons/xyne-ai';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
-import { ThreadAssistDock, type TwinSourceInfo } from './TwinReplyDraft/ThreadAssistDock';
+// Disabled (Claw)
+// import { ThreadAssistDock, type TwinSourceInfo } from './TwinReplyDraft/ThreadAssistDock';
 import { useThreadAssist } from './TwinReplyDraft/useThreadAssist';
 import type {
   PostedTarget,
-  TwinReplyDraftView,
+  // Disabled (Claw)
+  // TwinReplyDraftView,
   TwinEditSession,
 } from './TwinReplyDraft/twinReplyDraftApi';
 import { getDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
-import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
+import type { ThreadInfo } from '../../machines/xyneAIMachine';
 import { setThreadLastRead } from '../../machines/stateMachine';
-import { useSelf, useUser } from '../../hooks/useUsers';
+// Disabled (Claw)
+// import { useSelf, useUser } from '../../hooks/useUsers';
+import { useSelf } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
@@ -183,7 +198,8 @@ export const ThreadMessages = ({
   showChannelLink = false,
   onChannelLinkClick,
   skipInputAutoFocus: propSkipInputAutoFocus = false,
-  onAskAI,
+  // Disabled (Claw)
+  // onAskAI,
   onUserClick,
   defaultTab,
   headerActionsContainer,
@@ -477,7 +493,8 @@ export const ThreadMessages = ({
     [navigate, baseRoute, derivedChannelId, derivedConversationId],
   );
 
-  const [reasoningDraft, setReasoningDraft] = useState<TwinReplyDraftView | undefined>(undefined);
+  // Disabled (Claw)
+  // const [reasoningDraft, setReasoningDraft] = useState<TwinReplyDraftView | undefined>(undefined);
 
   const [twinEditDraftId, setTwinEditDraftId] = useState<string | null>(null);
   const editingTwinDraft = useMemo(
@@ -516,78 +533,79 @@ export const ThreadMessages = ({
       }
     : undefined;
 
-  const messagesById = useMemo(() => {
-    const map = new Map<string, { content?: unknown }>();
-    for (const m of messages) map.set(m.messageId, m);
-    return map;
-  }, [messages]);
-
-  const resolveTwinSource = useCallback(
-    (draft: TwinReplyDraftView): TwinSourceInfo => {
-      const srcId = draft.sourceMessageId;
-      const srcMsg = srcId ? messagesById.get(srcId) : undefined;
-      const rawContent = srcMsg && typeof srcMsg.content === 'string' ? srcMsg.content : undefined;
-      let text: string | undefined;
-      if (rawContent && typeof DOMParser !== 'undefined') {
-        try {
-          text =
-            (
-              new DOMParser().parseFromString(rawContent, 'text/html').body.textContent || ''
-            ).trim() || undefined;
-        } catch {
-          text = undefined;
-        }
-      }
-      const onJump =
-        srcId && derivedConversationId
-          ? () => {
-              const el = document.getElementById(
-                `thread-message-${derivedConversationId}-${srcId}`,
-              );
-              if (!el) return;
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              el.animate(
-                [{ backgroundColor: 'rgba(99,102,241,0.14)' }, { backgroundColor: 'transparent' }],
-                { duration: 1400, easing: 'ease-out' },
-              );
-            }
-          : undefined;
-      return {
-        ...(draft.senderId ? { userId: draft.senderId } : {}),
-        ...(draft.senderName ? { name: draft.senderName } : {}),
-        ...(text ? { text } : {}),
-        ...(onJump ? { onJump } : {}),
-      };
-    },
-    [messagesById, derivedConversationId],
-  );
-
-  const renderTwinDock = (attached: boolean) =>
-    assist.available ? (
-      <ThreadAssistDock
-        key='twin-dock'
-        hasRecap={assist.hasRecap}
-        hasReply={assist.hasReply}
-        tab={assist.tab}
-        onTabChange={assist.setTab}
-        collapsed={assist.collapsed}
-        onToggleCollapse={assist.toggleCollapse}
-        recap={assist.recap}
-        reply={assist.reply}
-        onPosted={handleTwinPosted}
-        onReasoningOpenChange={(d: TwinReplyDraftView, open: boolean) =>
-          setReasoningDraft(open ? d : undefined)
-        }
-        reasoningOpen={!!reasoningDraft}
-        conversationId={derivedConversationId ?? ''}
-        resolveSource={resolveTwinSource}
-        attached={attached}
-        {...(attached && { onBeginEdit: (d: TwinReplyDraftView) => setTwinEditDraftId(d.id) })}
-        {...(attached && editingTwinDraft && { onEditBack: exitTwinEdit })}
-      />
-    ) : null;
-  const twinDock = renderTwinDock(true);
-  const twinDockCard = renderTwinDock(false);
+  // Disabled (Claw)
+  // const messagesById = useMemo(() => {
+  //   const map = new Map<string, { content?: unknown }>();
+  //   for (const m of messages) map.set(m.messageId, m);
+  //   return map;
+  // }, [messages]);
+  //
+  // const resolveTwinSource = useCallback(
+  //   (draft: TwinReplyDraftView): TwinSourceInfo => {
+  //     const srcId = draft.sourceMessageId;
+  //     const srcMsg = srcId ? messagesById.get(srcId) : undefined;
+  //     const rawContent = srcMsg && typeof srcMsg.content === 'string' ? srcMsg.content : undefined;
+  //     let text: string | undefined;
+  //     if (rawContent && typeof DOMParser !== 'undefined') {
+  //       try {
+  //         text =
+  //           (
+  //             new DOMParser().parseFromString(rawContent, 'text/html').body.textContent || ''
+  //           ).trim() || undefined;
+  //       } catch {
+  //         text = undefined;
+  //       }
+  //     }
+  //     const onJump =
+  //       srcId && derivedConversationId
+  //         ? () => {
+  //             const el = document.getElementById(
+  //               `thread-message-${derivedConversationId}-${srcId}`,
+  //             );
+  //             if (!el) return;
+  //             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  //             el.animate(
+  //               [{ backgroundColor: 'rgba(99,102,241,0.14)' }, { backgroundColor: 'transparent' }],
+  //               { duration: 1400, easing: 'ease-out' },
+  //             );
+  //           }
+  //         : undefined;
+  //     return {
+  //       ...(draft.senderId ? { userId: draft.senderId } : {}),
+  //       ...(draft.senderName ? { name: draft.senderName } : {}),
+  //       ...(text ? { text } : {}),
+  //       ...(onJump ? { onJump } : {}),
+  //     };
+  //   },
+  //   [messagesById, derivedConversationId],
+  // );
+  //
+  // const renderTwinDock = (attached: boolean) =>
+  //   assist.available ? (
+  //     <ThreadAssistDock
+  //       key='twin-dock'
+  //       hasRecap={assist.hasRecap}
+  //       hasReply={assist.hasReply}
+  //       tab={assist.tab}
+  //       onTabChange={assist.setTab}
+  //       collapsed={assist.collapsed}
+  //       onToggleCollapse={assist.toggleCollapse}
+  //       recap={assist.recap}
+  //       reply={assist.reply}
+  //       onPosted={handleTwinPosted}
+  //       onReasoningOpenChange={(d: TwinReplyDraftView, open: boolean) =>
+  //         setReasoningDraft(open ? d : undefined)
+  //       }
+  //       reasoningOpen={!!reasoningDraft}
+  //       conversationId={derivedConversationId ?? ''}
+  //       resolveSource={resolveTwinSource}
+  //       attached={attached}
+  //       {...(attached && { onBeginEdit: (d: TwinReplyDraftView) => setTwinEditDraftId(d.id) })}
+  //       {...(attached && editingTwinDraft && { onEditBack: exitTwinEdit })}
+  //     />
+  //   ) : null;
+  // const twinDock = renderTwinDock(true);
+  // const twinDockCard = renderTwinDock(false);
 
   // Check if the route is /threads (with optional workspace prefix)
   const isThreadsRoute = location.pathname.endsWith('/chat/dir/threads');
@@ -769,37 +787,41 @@ export const ThreadMessages = ({
     () => discussionTitleOf(initialMessageContent),
     [initialMessageContent],
   );
-  const initialMessageSender = useUser(initialMessage?.senderId || '');
-  const setThreadTypes = useSetThreadTypes(derivedConversationId);
-  const { showThreadTags } = useShowThreadTags();
-  const askAIAvailable = useAskAIAvailable();
+  // Disabled (Claw)
+  // const initialMessageSender = useUser(initialMessage?.senderId || '');
+  // Disabled (LLM)
+  // const setThreadTypes = useSetThreadTypes(derivedConversationId);
+  // const { showThreadTags } = useShowThreadTags();
+  // Disabled (Claw)
+  // const askAIAvailable = useAskAIAvailable();
   // Which tag's evidence is on screen. Owned here because this component renders both the
   // chips and the message list; cleared on thread change so it never leaks across threads.
   const [inspectedTag, setInspectedTag] = useState<string | null>(null);
   useEffect(() => setInspectedTag(null), [derivedConversationId]);
 
-  const threadInfo: ThreadInfo | null = useMemo(() => {
-    if (!derivedConversationId || !initialMessage) return null;
+  // Disabled (Claw)
+  // const threadInfo: ThreadInfo | null = useMemo(() => {
+  //   if (!derivedConversationId || !initialMessage) return null;
 
-    const senderName: string = String(initialMessageSender?.name || 'Unknown');
-    const contentStr: string =
-      typeof initialMessage.content === 'string' ? initialMessage.content : '';
-    // Message content is stored as HTML — slicing it raw leaks tags (and can cut
-    // mid-tag) into the Ask AI context pill label.
-    const previewText: string = htmlToPlainText(contentStr).slice(0, 100);
+  //   const senderName: string = String(initialMessageSender?.name || 'Unknown');
+  //   const contentStr: string =
+  //     typeof initialMessage.content === 'string' ? initialMessage.content : '';
+  //   // Message content is stored as HTML — slicing it raw leaks tags (and can cut
+  //   // mid-tag) into the Ask AI context pill label.
+  //   const previewText: string = htmlToPlainText(contentStr).slice(0, 100);
 
-    return {
-      conversationId: derivedConversationId,
-      ...(derivedChannelId && { channelId: derivedChannelId }),
-      senderName,
-      previewText,
-      ...(initialMessage.senderId && { senderId: initialMessage.senderId }),
-      ...(initialMessage.messageId && { messageId: initialMessage.messageId }),
-      // Opened from the thread panel header — the context is the thread itself,
-      // so the pill should navigate back into it.
-      isThreadMessage: true,
-    };
-  }, [derivedConversationId, derivedChannelId, initialMessage, initialMessageSender]);
+  //   return {
+  //     conversationId: derivedConversationId,
+  //     ...(derivedChannelId && { channelId: derivedChannelId }),
+  //     senderName,
+  //     previewText,
+  //     ...(initialMessage.senderId && { senderId: initialMessage.senderId }),
+  //     ...(initialMessage.messageId && { messageId: initialMessage.messageId }),
+  //     // Opened from the thread panel header — the context is the thread itself,
+  //     // so the pill should navigate back into it.
+  //     isThreadMessage: true,
+  //   };
+  // }, [derivedConversationId, derivedChannelId, initialMessage, initialMessageSender]);
 
   // Check if any message has a ticketId in metadata
   const hasTicketInMessages = useMemo(() => {
@@ -1269,13 +1291,16 @@ export const ThreadMessages = ({
                   placeholder='Reply to this thread...'
                   hasTicket={hasTicketInMessages}
                   threadParticipantIds={threadParticipantIds}
-                  dockSlot={twinDock}
+                  // Disabled (Claw)
+                  // dockSlot={twinDock}
                   twinEdit={twinEditSession}
                 />
               </div>
-            ) : previewCardMode && assist.hasReply ? (
-              <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
             ) : (
+              // Disabled (Claw)
+              // previewCardMode && assist.hasReply ? (
+              //   <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
+              // ) : (
               <JoinChannel
                 channelId={derivedChannelId}
                 {...(channel?.name && { channelTitle: channel.name })}
@@ -1321,6 +1346,8 @@ export const ThreadMessages = ({
       {!isDmReadOnly && (
         <>
           {/* Ask AI */}
+          {/* Disabled (Claw) */}
+          {/*
           {!isStandaloneWindow() && askAIAvailable && (
             <Tooltip content='Ask AI Conversation'>
               <Button
@@ -1347,6 +1374,7 @@ export const ThreadMessages = ({
               </Button>
             </Tooltip>
           )}
+          */}
 
           {/* Initiate Call Button */}
           {derivedConversationId && !channel?.isArchived && (
@@ -1441,7 +1469,8 @@ export const ThreadMessages = ({
                   />
                 </DropdownMenuItem>
               )}
-              {showThreadTags && !channel?.isArchived && (
+              {/* Disabled (LLM) */}
+              {/* {showThreadTags && !channel?.isArchived && (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger
                     className='gap-2'
@@ -1466,7 +1495,7 @@ export const ThreadMessages = ({
                     />
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-              )}
+              )} */}
               {!isMobile && !channel?.isArchived && (
                 <DropdownMenuItem
                   className='gap-2'
@@ -1608,6 +1637,8 @@ export const ThreadMessages = ({
             </div>
             <div className={cn('flex gap-x-2 shrink-0', deskView && 'hidden')}>
               {/* Ask AI */}
+              {/* Disabled (Claw) */}
+              {/*
               {!isStandaloneWindow() && askAIAvailable && (
                 <Tooltip content='Ask AI Conversation'>
                   <Button
@@ -1634,6 +1665,7 @@ export const ThreadMessages = ({
                   </Button>
                 </Tooltip>
               )}
+              */}
               {/* Initiate Call Button */}
               {derivedConversationId && (
                 <ThreadCallButton
@@ -1710,7 +1742,8 @@ export const ThreadMessages = ({
                       }}
                     />
                   )}
-                  {showThreadTags && !channel?.isArchived && (
+                  {/* Disabled (LLM) */}
+                  {/* {showThreadTags && !channel?.isArchived && (
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger
                         className='gap-2'
@@ -1735,7 +1768,7 @@ export const ThreadMessages = ({
                         />
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
-                  )}
+                  )} */}
                   {!isMobile && !channel?.isArchived && (
                     <DropdownMenuItem
                       className='gap-2'
@@ -1929,13 +1962,16 @@ export const ThreadMessages = ({
                         allowSendToChannel={!deskView}
                         hasTicket={hasTicketInMessages}
                         threadParticipantIds={threadParticipantIds}
-                        dockSlot={twinDock}
+                        // Disabled (Claw)
+                        // dockSlot={twinDock}
                         twinEdit={twinEditSession}
                       />
                     </div>
-                  ) : previewCardMode && assist.hasReply ? (
-                    <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                   ) : (
+                    // Disabled (Claw)
+                    // previewCardMode && assist.hasReply ? (
+                    //   <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
+                    // ) : (
                     <JoinChannel
                       channelId={derivedChannelId}
                       {...(channel?.name && { channelTitle: channel.name })}
@@ -2060,17 +2096,20 @@ export const ThreadMessages = ({
                         ? ticket.title
                         : discussionTitle || 'Thread message'}
                   </h3>
-                  {/* Classifies the whole thread, so it belongs beside the title rather
-                      than against any one message. */}
-                  {!simpleView && (
-                    <ThreadTags
-                      conversationId={derivedConversationId}
-                      threadType={conversation?.threadType}
-                      canEdit
-                      inspectedTag={inspectedTag}
-                      onInspect={setInspectedTag}
-                    />
-                  )}
+                  {/* Disabled (LLM) */}
+                  {
+                  // {/* Classifies the whole thread, so it belongs beside the title rather
+                  //     than against any one message. */}
+                  // {!simpleView && (
+                  //   <ThreadTags
+                  //     conversationId={derivedConversationId}
+                  //     threadType={conversation?.threadType}
+                  //     canEdit
+                  //     inspectedTag={inspectedTag}
+                  //     onInspect={setInspectedTag}
+                  //   />
+                  // )}
+                  }
                   {!simpleView && focusedChannelBreadcrumb}
                 </div>
 
@@ -2125,13 +2164,16 @@ export const ThreadMessages = ({
                       allowSendToChannel={!deskView}
                       hasTicket={hasTicketInMessages}
                       threadParticipantIds={threadParticipantIds}
-                      dockSlot={twinDock}
+                      // Disabled (Claw)
+                      // dockSlot={twinDock}
                       twinEdit={twinEditSession}
                     />
                   </div>
-                ) : previewCardMode && assist.hasReply ? (
-                  <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                 ) : (
+                  // Disabled (Claw)
+                  // previewCardMode && assist.hasReply ? (
+                  //   <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
+                  // ) : (
                   <JoinChannel
                     channelId={derivedChannelId}
                     {...(channel?.name && { channelTitle: channel.name })}

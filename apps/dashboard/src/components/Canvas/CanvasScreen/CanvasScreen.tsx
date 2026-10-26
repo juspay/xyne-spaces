@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+// Disabled (Claw)
+// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -35,7 +36,8 @@ import {
   AudioLines,
   ArrowLeft,
   Archive,
-  CheckCircle,
+  // Disabled (LLM)
+  // CheckCircle,
   GitCompare,
   Loader2,
   MessageSquare,
@@ -69,7 +71,8 @@ import { formatDate, formatRelativeTime, formatTimeAmPm } from '../../../utils/d
 import type {
   Canvas,
   CanvasParticipant,
-  KnowledgeCanvasMetadata,
+  // Disabled (LLM)
+  // KnowledgeCanvasMetadata,
   CanvasEditorRef,
   CollaborativeCanvasEditorRef,
 } from '../Canvas.types';
@@ -87,14 +90,16 @@ import {
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
-import { approveKnowledgeCanvas } from '../../../services/Knowledge/knowledgeService';
+// Disabled (LLM)
+// import { approveKnowledgeCanvas } from '../../../services/Knowledge/knowledgeService';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import { logger, Event } from '../../../utils/logger';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { getCanvasCallId, isRecordingCanvas } from '../canvasFilters';
@@ -181,7 +186,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   isFullscreen = false,
   onToggleFullscreen,
   onClose,
-  showAskAiAction = true,
+  // Disabled (Claw)
+  // showAskAiAction = true,
   showViewOnly = false,
   pinnedOutline = false,
   notFoundNoun,
@@ -190,7 +196,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   onBack,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
-  const askAIAvailable = useAskAIAvailable();
+  // Disabled (Claw)
+  // const askAIAvailable = useAskAIAvailable();
   const canvasId = propCanvasId || paramsCanvasId;
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
@@ -254,8 +261,9 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [showSendConfirmation, setShowSendConfirmation] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
-  const [isApproved, setIsApproved] = useState(false);
+  // Disabled (LLM)
+  // const [isApproving, setIsApproving] = useState(false);
+  // const [isApproved, setIsApproved] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState('white');
   const [collaborators, setCollaborators] = useState<CollaboratorInfo[]>([]);
   const {
@@ -487,12 +495,13 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       currentCanvasIdRef.current = canvas.id;
 
       // Check if this is a knowledge canvas and set approval state
-      const metadata = canvas.metadata as KnowledgeCanvasMetadata | undefined;
-      if (metadata?.source === 'workflow_knowledge') {
-        setIsApproved(!!metadata.approvedAt);
-      } else {
-        setIsApproved(false);
-      }
+      // Disabled (LLM)
+      // const metadata = canvas.metadata as KnowledgeCanvasMetadata | undefined;
+      // if (metadata?.source === 'workflow_knowledge') {
+      //   setIsApproved(!!metadata.approvedAt);
+      // } else {
+      //   setIsApproved(false);
+      // }
       setSelectedTheme('white');
       if (
         !isFirstAccessLevelComputeRef.current &&
@@ -1071,9 +1080,10 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   }, [handleBack, saveCanvasExitSnapshot]);
 
   // Check if this is a knowledge canvas
-  const isKnowledgeCanvas =
-    selectedCanvas?.metadata &&
-    (selectedCanvas.metadata as KnowledgeCanvasMetadata).source === 'workflow_knowledge';
+  // Disabled (LLM)
+  // const isKnowledgeCanvas =
+  //   selectedCanvas?.metadata &&
+  //   (selectedCanvas.metadata as KnowledgeCanvasMetadata).source === 'workflow_knowledge';
   const isCallDetailedSummaryCanvas =
     selectedCanvas?.metadata &&
     typeof selectedCanvas.metadata === 'object' &&
@@ -1081,34 +1091,35 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     selectedCanvas.metadata.source === 'call_detailed_summary';
 
   // Handle knowledge approval
-  const handleApproveKnowledge = async (): Promise<void> => {
-    if (!selectedCanvas?.id || isApproving || isApproved) return;
-
-    setIsApproving(true);
-    try {
-      const result = await approveKnowledgeCanvas(selectedCanvas.id);
-
-      if (result.success) {
-        setIsApproved(true);
-        toast.success(result.alreadyApproved ? 'Already Approved' : 'Success', {
-          description: result.alreadyApproved
-            ? 'This knowledge has already been approved to the knowledge base.'
-            : 'Knowledge has been approved and added to the knowledge base.',
-        });
-      } else {
-        toast.error('Error', {
-          description: 'Failed to approve knowledge. Please try again.',
-        });
-      }
-    } catch {
-      toast.error('Error', {
-        description: 'Failed to approve knowledge. Please try again.',
-      });
-    } finally {
-      setIsApproving(false);
-    }
-  };
-
+  // Disabled (LLM)
+  // const handleApproveKnowledge = async (): Promise<void> => {
+  //   if (!selectedCanvas?.id || isApproving || isApproved) return;
+  //
+  //   setIsApproving(true);
+  //   try {
+  //     const result = await approveKnowledgeCanvas(selectedCanvas.id);
+  //
+  //     if (result.success) {
+  //       setIsApproved(true);
+  //       toast.success(result.alreadyApproved ? 'Already Approved' : 'Success', {
+  //         description: result.alreadyApproved
+  //           ? 'This knowledge has already been approved to the knowledge base.'
+  //           : 'Knowledge has been approved and added to the knowledge base.',
+  //       });
+  //     } else {
+  //       toast.error('Error', {
+  //         description: 'Failed to approve knowledge. Please try again.',
+  //       });
+  //     }
+  //   } catch {
+  //     toast.error('Error', {
+  //       description: 'Failed to approve knowledge. Please try again.',
+  //     });
+  //   } finally {
+  //     setIsApproving(false);
+  //   }
+  // };
+  //
   const handleFileUpload = useCallback(
     async (file: File) => {
       if (!selectedCanvas?.id) {
@@ -1194,24 +1205,25 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
       })
     : null;
 
-  // Handle Ask AI - Open XyneAI with canvas context using canvas id
-  const handleAskAI = (): void => {
-    const canvasIdForAI = selectedCanvas?.id;
-    if (!canvasIdForAI) return;
+  // Disabled (Claw)
+  // // Handle Ask AI - Open XyneAI with canvas context using canvas id
+  // const handleAskAI = (): void => {
+  //   const canvasIdForAI = selectedCanvas?.id;
+  //   if (!canvasIdForAI) return;
 
-    // Create canvas info for context
-    const canvasInfo: CanvasInfo = {
-      canvasId: canvasIdForAI,
-      title: currentTitle,
-    };
+  //   // Create canvas info for context
+  //   const canvasInfo: CanvasInfo = {
+  //     canvasId: canvasIdForAI,
+  //     title: currentTitle,
+  //   };
 
-    // Open XyneAI with canvas context
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'canvas_screen',
-      canvasInfo,
-    });
-  };
+  //   // Open XyneAI with canvas context
+  //   xyneAIActor.send({
+  //     type: 'OPEN',
+  //     trackSource: 'canvas_screen',
+  //     canvasInfo,
+  //   });
+  // };
 
   const canvasIsRecording = selectedCanvas ? isRecordingCanvas(selectedCanvas) : false;
   const canvasCallId = selectedCanvas ? getCanvasCallId(selectedCanvas) : null;
@@ -1405,7 +1417,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       </span>
                     )}
                     {/* Approve to Knowledge Base Button (Only for Knowledge Canvases) */}
-                    {isKnowledgeCanvas && selectedCanvas?.id && (
+                    {/* Disabled (LLM) */}
+                    {/* {isKnowledgeCanvas && selectedCanvas?.id && (
                       <div>
                         {isApproved ? (
                           <Button variant='secondary' size='sm' disabled>
@@ -1431,7 +1444,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           </Button>
                         )}
                       </div>
-                    )}
+                    )} */}
 
                     {selectedCanvas?.id && (
                       <>
@@ -1539,6 +1552,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
+                          {/* Disabled (Claw) */}
+                          {/*
                           {showAskAiAction && askAIAvailable && (
                             <button
                               type='button'
@@ -1558,6 +1573,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               />
                             </button>
                           )}
+                          */}
 
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>

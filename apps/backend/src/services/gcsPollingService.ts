@@ -24,11 +24,13 @@ import { processGcsFile } from '@/bypassAcl/webhookIngestServices';
 import { config } from '@/config/env';
 import { getStorageService, type StorageService } from './storage';
 import { redisService } from './redisService';
-import { workflowManager } from '@/workflows/services/workflowManager';
+// Disabled (LLM)
+// import { workflowManager } from '@/workflows/services/workflowManager';
 import { TicketController } from '@/controllers/ticketController';
 import { conversationService } from './conversationService';
-import { NetworkDocumentContext } from '@/workflows/types/workflow-enums';
-import { WorkflowType, WorkflowPriority } from '@/workflows/types/workflow-enums';
+// Disabled (LLM)
+// import { NetworkDocumentContext } from '@/workflows/types/workflow-enums';
+// import { WorkflowType, WorkflowPriority } from '@/workflows/types/workflow-enums';
 import * as path from 'path';
 
 interface GcsFileMetadata {
@@ -54,7 +56,8 @@ export class GcsPollingService {
   // Configuration - IDs looked up by name
   private projectId: string = '';
   private boardId: string = '';
-  private userGroupId: string = '';
+  // Disabled (LLM)
+  // private userGroupId: string = '';
   private channelId: string = '';
   private systemUserId: string = '';
   private workspaceId: string = '';
@@ -132,7 +135,8 @@ export class GcsPollingService {
 
     this.projectId = project.id;
     this.boardId = board.id;
-    this.userGroupId = userGroup.id;
+    // Disabled (LLM)
+    // this.userGroupId = userGroup.id;
     this.channelId = channel.id;
     this.systemUserId = systemUser.id;
     this.workspaceId = channel.workspaceId;
@@ -341,36 +345,37 @@ export class GcsPollingService {
         return;
       }
 
-      // Start workflow with completed path
-      const context: NetworkDocumentContext = {
-        ticketId: ticket.id,
-        fileId: completedPath,
-        fileName,
-        localPath: '',
-        network: network as 'VISA' | 'MASTERCARD',
-        metadata: {
-          gcsBucket: this.bucketName,
-          gcsPath: completedPath,
-          fileSize: file.size,
-          userGroupId: this.userGroupId,
-          systemUserId: this.systemUserId,
-          projectId: this.projectId,
-          boardId: this.boardId,
-          channelId: this.channelId,
-        },
-      };
+      // Disabled (LLM)
+      // // Start workflow with completed path
+      // const context: NetworkDocumentContext = {
+      //   ticketId: ticket.id,
+      //   fileId: completedPath,
+      //   fileName,
+      //   localPath: '',
+      //   network: network as 'VISA' | 'MASTERCARD',
+      //   metadata: {
+      //     gcsBucket: this.bucketName,
+      //     gcsPath: completedPath,
+      //     fileSize: file.size,
+      //     userGroupId: this.userGroupId,
+      //     systemUserId: this.systemUserId,
+      //     projectId: this.projectId,
+      //     boardId: this.boardId,
+      //     channelId: this.channelId,
+      //   },
+      // };
 
-      logger.info(`[GCS_POLLING] Starting workflow for ${fileName}`);
+      // logger.info(`[GCS_POLLING] Starting workflow for ${fileName}`);
       
-      const workflowResult = await workflowManager.startWorkflow({
-        ticketId: ticket.id,
-        workflowType: WorkflowType.NETWORK_DOCUMENT_PROCESSING,
-        context,
-        priority: WorkflowPriority.MEDIUM,
-        metadata: {},
-      });
+      // const workflowResult = await workflowManager.startWorkflow({
+      //   ticketId: ticket.id,
+      //   workflowType: WorkflowType.NETWORK_DOCUMENT_PROCESSING,
+      //   context,
+      //   priority: WorkflowPriority.MEDIUM,
+      //   metadata: {},
+      // });
       
-      logger.info(`[GCS_POLLING] Workflow started: ${workflowResult.workflowId}, execution: ${workflowResult.executionId}`);
+      // logger.info(`[GCS_POLLING] Workflow started: ${workflowResult.workflowId}, execution: ${workflowResult.executionId}`);
       logger.info(`[GCS_POLLING] Processed: ${fileName}`);
     } catch (error) {
       logger.error(`[GCS_POLLING] Error processing ${gcsPath}:`, error);

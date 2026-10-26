@@ -1,9 +1,11 @@
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
-import { logger } from '@/utils/logger';
+// Disabled (LLM)
+// import { logger } from '@/utils/logger';
 import { activityService } from '@/services/activity/activityService';
-import { radarReactionResolver } from '@/services/radar/radarReactionResolver';
+// Disabled (LLM)
+// import { radarReactionResolver } from '@/services/radar/radarReactionResolver';
 
 export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
   private async getReactionContext(reactionId: string) {
@@ -59,11 +61,12 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
     // self-reactions and never reads the emoji, and Radar needs both. Failures
     // are swallowed — execution tracking must not cost someone their
     // notification.
-    try {
-      await radarReactionResolver.onReaction(reactionId);
-    } catch (error) {
-      logger.error('[REACTIONS] Radar reaction resolve failed', { reactionId, error });
-    }
+    // Disabled (LLM)
+    // try {
+    //   await radarReactionResolver.onReaction(reactionId);
+    // } catch (error) {
+    //   logger.error('[REACTIONS] Radar reaction resolve failed', { reactionId, error });
+    // }
 
     const context = await this.getReactionContext(reactionId);
 

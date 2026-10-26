@@ -9,7 +9,9 @@ import {
   UserShield,
   UserThree,
 } from '@xyne/icons';
-import { Bot, Mail, UserCheck } from 'lucide-react';
+// Disabled (Claw)
+// import { Bot, Mail, UserCheck } from 'lucide-react';
+import { Mail, UserCheck } from 'lucide-react';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useUserGroups } from '../../hooks/useUserGroup';
@@ -46,9 +48,10 @@ const MailIcon: PikaIcon = ({ size, className }) => (
 const GuestIcon: PikaIcon = ({ size, className }) => (
   <UserCheck size={typeof size === 'number' ? size : 16} className={className} />
 );
-const AgentIcon: PikaIcon = ({ size, className }) => (
-  <Bot size={typeof size === 'number' ? size : 16} className={className} />
-);
+// Disabled (Claw)
+// const AgentIcon: PikaIcon = ({ size, className }) => (
+//   <Bot size={typeof size === 'number' ? size : 16} className={className} />
+// );
 
 // Sidebar order. Workspace holds the workspace settings (formerly Workspace
 // Management + User Management) as tabs; the others are single pages.
@@ -110,12 +113,13 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
         description: 'Pages shown in the sidebar',
         icon: LayoutGridTwoVertical,
       },
-      {
-        key: 'agent-activity',
-        label: 'Agent activity',
-        description: 'What agents decided when nobody tagged them',
-        icon: AgentIcon,
-      },
+      // Disabled (Claw)
+      // {
+        // key: 'agent-activity',
+        // label: 'Agent activity',
+        // description: 'What agents decided when nobody tagged them',
+        // icon: AgentIcon,
+      // },
     ],
   },
   {

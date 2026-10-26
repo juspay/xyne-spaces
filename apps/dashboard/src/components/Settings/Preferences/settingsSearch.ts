@@ -127,16 +127,17 @@ export const SETTINGS_INDEX: SettingsSearchEntry[] = [
     label: 'Use new recording experience',
     keywords: ['beta', 'v2'],
   },
-  {
-    section: 'recordings',
-    label: 'LLM summary generation model',
-    keywords: ['ai model', 'meeting summary', 'gpt', 'claude'],
-  },
-  {
-    section: 'recordings',
-    label: 'Default summary template',
-    keywords: ['meeting notes', 'summary format'],
-  },
+  // Disabled (LLM)
+  // {
+  //   section: 'recordings',
+  //   label: 'LLM summary generation model',
+  //   keywords: ['ai model', 'meeting summary', 'gpt', 'claude'],
+  // },
+  // {
+  //   section: 'recordings',
+  //   label: 'Default summary template',
+  //   keywords: ['meeting notes', 'summary format'],
+  // },
 
   // Messaging
   {
@@ -156,11 +157,12 @@ export const SETTINGS_INDEX: SettingsSearchEntry[] = [
     label: 'Allow @channel/@here in thread replies',
     keywords: ['mentions'],
   },
-  {
-    section: 'messaging',
-    label: 'Show thread tags',
-    keywords: ['labels'],
-  },
+  // Disabled (LLM)
+  // {
+  //   section: 'messaging',
+  //   label: 'Show thread tags',
+  //   keywords: ['labels'],
+  // },
   {
     section: 'messaging',
     label: 'Open links in external browser',
@@ -249,7 +251,8 @@ export const SETTINGS_INDEX: SettingsSearchEntry[] = [
   // Developer
   { section: 'developer', label: 'Show send indicators', keywords: ['debug'] },
   { section: 'developer', label: 'Streams', keywords: ['deck', 'beta'] },
-  { section: 'developer', label: 'Screen actions', keywords: ['auto', 'automation'] },
+  // Disabled (Claw)
+  // { section: 'developer', label: 'Screen actions', keywords: ['auto', 'automation'] },
   { section: 'developer', label: 'Intent suggestions', keywords: ['ai', 'model'] },
   {
     section: 'developer',

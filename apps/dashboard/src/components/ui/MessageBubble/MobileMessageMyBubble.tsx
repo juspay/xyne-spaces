@@ -19,7 +19,8 @@ import { ChannelScopeType } from '@xyne/shared';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { PostedInLink } from './PostedInLink';
 import { hasMessageContent } from '../../../utils/chatUtils';
-import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
+// Disabled (LLM)
+// import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
@@ -71,7 +72,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   channelId,
   conversation,
   context,
-  contentOnly,
+  // Disabled (LLM)
+  // contentOnly,
   threadInfo,
   channelScopeType,
   isFirstInThread = false,
@@ -96,14 +98,15 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isActiveCall = useIsCallActive(metadata?.callId);
   const { isMobile } = usePlatform();
-  const actionableCount = useMemo(
-    () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
-    [message.nudgeCounts],
-  );
-  const countRowIds = useMemo(
-    () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
-    [message.nudgeCounts],
-  );
+  // Disabled (LLM)
+  // const actionableCount = useMemo(
+  //   () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
+  //   [message.nudgeCounts],
+  // );
+  // const countRowIds = useMemo(
+  //   () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
+  //   [message.nudgeCounts],
+  // );
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -381,7 +384,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
             </div>
           )}
 
-          {!contentOnly && (
+          {/* Disabled (LLM) */}
+          {/* {!contentOnly && (
             <SurfaceNudgeList
               messageId={message.messageId}
               actionableCount={actionableCount}
@@ -393,7 +397,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               isDeleted={message.isDeleted}
               className='mt-2 w-full'
             />
-          )}
+          )} */}
 
           {/* Reaction View - Outside Bubble */}
           <div className='mt-1 self-end'>

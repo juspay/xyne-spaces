@@ -1,8 +1,16 @@
-import { useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactElement } from 'react';
+import {
+  useEffect,
+  useState,
+  type KeyboardEvent,
+  // Disabled (LLM)
+  // type MouseEvent,
+  type ReactElement,
+} from 'react';
 import type { User } from '@xyne/shared/machines';
 import { TagMethod } from '@xyne/shared';
 import {
-  Ai01,
+  // Disabled (LLM)
+  // Ai01,
   ChevronRight,
   CopyDefault,
   DeleteDustbin02,
@@ -189,12 +197,13 @@ const RecordingsV2Pill = ({
   const visibleTags = normalizeRecordingTags(tags);
   const visibleSuggestedTags = isOwner ? normalizeRecordingTags(suggestedTags) : [];
 
-  // Backfill for pre-Scribe recordings only — a channel anchor is what marks them.
-  const showGenerateLabels =
-    Boolean(recording.channelId) &&
-    isOwner &&
-    recording.labels.length === 0 &&
-    Boolean(recording.transcript?.trim());
+  // Disabled (LLM)
+  // // Backfill for pre-Scribe recordings only — a channel anchor is what marks them.
+  // const showGenerateLabels =
+  //   Boolean(recording.channelId) &&
+  //   isOwner &&
+  //   recording.labels.length === 0 &&
+  //   Boolean(recording.transcript?.trim());
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Populated on menu open — `hasRecording` isn't in the synced list data (it's
@@ -294,22 +303,23 @@ const RecordingsV2Pill = ({
     }
   };
 
-  const [isGeneratingLabels, setIsGeneratingLabels] = useState(false);
-
-  const handleGenerateLabels = async (event: MouseEvent): Promise<void> => {
-    event.stopPropagation();
-    if (isGeneratingLabels) return;
-    setIsGeneratingLabels(true);
-    try {
-      const labelIds = await recordingService.generateLabels(recording.externalId);
-      patchOatsRecordingLabels(recording.id, [...new Set([...recording.labels, ...labelIds])]);
-    } catch (err) {
-      logRecordingError('RecordingsV2Pill.generateLabels', err);
-      toast.error('Failed to generate labels');
-    } finally {
-      setIsGeneratingLabels(false);
-    }
-  };
+  // Disabled (LLM)
+  // const [isGeneratingLabels, setIsGeneratingLabels] = useState(false);
+  //
+  // const handleGenerateLabels = async (event: MouseEvent): Promise<void> => {
+  //   event.stopPropagation();
+  //   if (isGeneratingLabels) return;
+  //   setIsGeneratingLabels(true);
+  //   try {
+  //     const labelIds = await recordingService.generateLabels(recording.externalId);
+  //     patchOatsRecordingLabels(recording.id, [...new Set([...recording.labels, ...labelIds])]);
+  //   } catch (err) {
+  //     logRecordingError('RecordingsV2Pill.generateLabels', err);
+  //     toast.error('Failed to generate labels');
+  //   } finally {
+  //     setIsGeneratingLabels(false);
+  //   }
+  // };
 
   // This list's suggestions are always on-demand generated, so a failed
   // confirm reverts straight back to AUTOMATED
@@ -515,23 +525,25 @@ const RecordingsV2Pill = ({
             ))}
           </span>
         ) : (
-          showGenerateLabels && (
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              loading={isGeneratingLabels}
-              onClick={event => void handleGenerateLabels(event)}
-              className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground'
-              data-track-category='RecordingsV2'
-              data-track-name='generate_recording_labels'
-            >
-              {!isGeneratingLabels && (
-                <Ai01 size={14} variant='Duo Solid' className='shrink-0 text-primary' />
-              )}
-              {isGeneratingLabels ? 'Generating labels…' : 'Generate labels'}
-            </Button>
-          )
+          // Disabled (LLM)
+          // showGenerateLabels && (
+          //   <Button
+          //     type='button'
+          //     variant='outline'
+          //     size='sm'
+          //     loading={isGeneratingLabels}
+          //     onClick={event => void handleGenerateLabels(event)}
+          //     className='h-7 w-fit gap-1.5 rounded-lg border-dashed px-2.5 text-xs font-normal text-muted-foreground hover:text-foreground'
+          //     data-track-category='RecordingsV2'
+          //     data-track-name='generate_recording_labels'
+          //   >
+          //     {!isGeneratingLabels && (
+          //       <Ai01 size={14} variant='Duo Solid' className='shrink-0 text-primary' />
+          //     )}
+          //     {isGeneratingLabels ? 'Generating labels…' : 'Generate labels'}
+          //   </Button>
+          // )
+          null
         )}
       </span>
     </div>

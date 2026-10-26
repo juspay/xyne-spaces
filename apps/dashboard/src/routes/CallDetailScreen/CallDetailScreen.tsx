@@ -1,15 +1,28 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useSelector } from '@xstate/react';
+// Disabled (Claw)
+// import { useSelector } from '@xstate/react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
-import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
-import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
+import {
+  ChevronLeft,
+  ChevronRight,
+  // Disabled (LLM)
+  // ChevronDown,
+  Loader2,
+  FileText,
+} from 'lucide-react';
+import {
+  ORIGINAL_TRANSCRIPT_LANGUAGE,
+  // Disabled (LLM)
+  // SUPPORTED_TRANSCRIPT_LANGUAGES,
+} from '@xyne/shared';
 import {
   SidebarRightClose,
   SidebarRightOpen,
-  Hashtag,
-  EnvelopeDefault,
-  File02Text,
+  // Disabled (LLM)
+  // Hashtag,
+  // EnvelopeDefault,
+  // File02Text,
 } from '@xyne/icons';
 import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
@@ -41,12 +54,13 @@ import { callService } from '../../services/Call/callService';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { CallShareModal } from './CallShareModal';
 import { Button } from '../../components/ui/Button/Button';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '../../components/ui/dropdown-menu';
+// Disabled (LLM)
+// import {
+//   DropdownMenu,
+//   DropdownMenuTrigger,
+//   DropdownMenuContent,
+//   DropdownMenuItem,
+// } from '../../components/ui/dropdown-menu';
 import { PostRecordingToEmailModal } from '../RecordingDetailV2Screen/components/PostRecordingToEmailModal';
 import { GoogleDocPreviewModal } from '../RecordingDetailV2Screen/components/GoogleDocPreviewModal';
 import { useCallGoogleDocExport } from './useCallGoogleDocExport';
@@ -59,9 +73,10 @@ import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 
-/** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
-const POST_BUTTON_CLASS =
-  'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
+// Disabled (LLM)
+// /** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
+// const POST_BUTTON_CLASS =
+//   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
 let _userClosedAIForCallId: string | null = null;
 
@@ -108,7 +123,8 @@ export default function CallDetailScreen(): ReactElement {
 
   const { user } = useAuth();
 
-  const isAIOpen = useSelector(xyneAIActor, state => !state.matches('closed'));
+  // Disabled (Claw)
+  // const isAIOpen = useSelector(xyneAIActor, state => !state.matches('closed'));
   const allChannels = useAllChannels();
   const visibleChannels = useAllVisibleChannels();
   // Both lists run to hundreds of channels, and this screen re-renders on every
@@ -252,9 +268,11 @@ export default function CallDetailScreen(): ReactElement {
 
   // Transcript side panel
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
-  const [selectedTranscriptLanguage, setSelectedTranscriptLanguage] = useState(
-    ORIGINAL_TRANSCRIPT_LANGUAGE,
-  );
+  const [
+    selectedTranscriptLanguage,
+    // Disabled (LLM)
+    // setSelectedTranscriptLanguage,
+  ] = useState(ORIGINAL_TRANSCRIPT_LANGUAGE);
   const [citationNonce, setCitationNonce] = useState(0);
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
   const hasTranscript = Boolean(call?.transcript);
@@ -268,11 +286,13 @@ export default function CallDetailScreen(): ReactElement {
   useEffect(() => {
     const lang = new URLSearchParams(location.search).get('lang');
     if (!lang) return;
-    const isValid =
-      lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
-      SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
+    // Disabled (LLM)
+    // const isValid =
+    //   lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
+    //   SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
     setShowTranscriptPanel(true);
-    setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
+    // Disabled (LLM)
+    // setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
   }, [location.search]);
 
   // Route canvas citations (detailed-summary pills carry callId = externalId) into this
@@ -357,22 +377,23 @@ export default function CallDetailScreen(): ReactElement {
 
   const aiOpenedRef = useRef(false);
 
-  // Single source of truth for opening the AI sidebar — used by both the mount
-  // effect and the "Ask AI" button so the payload isn't duplicated.
-  const openAI = useCallback((): void => {
-    if (!call) return;
-    _userClosedAIForCallId = null;
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'call_detail_auto',
-      ...(call.channelId ? { channelId: call.channelId } : {}),
-      threadInfo: callConversationId
-        ? { conversationId: callConversationId, previewText: call.title ?? 'Call' }
-        : null,
-      startFreshChat: true,
-    });
-    aiOpenedRef.current = true;
-  }, [call, callConversationId]);
+  // Disabled (Claw)
+  // // Single source of truth for opening the AI sidebar — used by both the mount
+  // // effect and the "Ask AI" button so the payload isn't duplicated.
+  // const openAI = useCallback((): void => {
+  //   if (!call) return;
+  //   _userClosedAIForCallId = null;
+  //   xyneAIActor.send({
+  //     type: 'OPEN',
+  //     trackSource: 'call_detail_auto',
+  //     ...(call.channelId ? { channelId: call.channelId } : {}),
+  //     threadInfo: callConversationId
+  //       ? { conversationId: callConversationId, previewText: call.title ?? 'Call' }
+  //       : null,
+  //     startFreshChat: true,
+  //   });
+  //   aiOpenedRef.current = true;
+  // }, [call, callConversationId]);
 
   const callId = call?.id;
 
@@ -563,6 +584,8 @@ export default function CallDetailScreen(): ReactElement {
                 </span>
               </Tooltip>
               <div className='flex-1' />
+              {/* Disabled (Claw) */}
+              {/*
               {!isAIOpen && !isMobile && (
                 <Tooltip content='Ask AI' delayDuration={300}>
                   <button
@@ -580,6 +603,7 @@ export default function CallDetailScreen(): ReactElement {
                   </button>
                 </Tooltip>
               )}
+              */}
             </div>
 
             {/* Title */}
@@ -713,6 +737,8 @@ export default function CallDetailScreen(): ReactElement {
                   <ChevronRight className='size-3.5' />
                 </button>
               )}
+              {/* Disabled (LLM) */}
+              {/*
               {isCallAudience && hasDetailedSummaryTab && (
                 <DropdownMenu>
                   <div className='inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
@@ -791,6 +817,7 @@ export default function CallDetailScreen(): ReactElement {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+              */}
               {hasTranscript && (
                 <Tooltip
                   content={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
@@ -937,7 +964,8 @@ export default function CallDetailScreen(): ReactElement {
             openNonce={citationNonce}
             title={title}
             selectedLanguage={selectedTranscriptLanguage}
-            onLanguageChange={setSelectedTranscriptLanguage}
+            // Disabled (LLM)
+            // onLanguageChange={setSelectedTranscriptLanguage}
             isTranslating={transcript.isTranslating}
             onClose={(): void => {
               setShowTranscriptPanel(false);

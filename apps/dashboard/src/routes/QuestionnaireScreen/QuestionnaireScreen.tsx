@@ -112,7 +112,8 @@ const QuestionnaireScreen = (): ReactElement | null => {
     'name',
     ...(hasCompanyStep ? (['company'] as StepKey[]) : []),
     ...(contactsState.status === 'ready' ? (['invite'] as StepKey[]) : []),
-    ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
+    // Disabled (Claw)
+    // ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
   ];
   const clampedStep = Math.min(currentStep, steps.length - 1);
   const step: StepKey = steps[clampedStep] ?? 'name';

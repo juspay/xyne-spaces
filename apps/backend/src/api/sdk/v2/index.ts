@@ -16,9 +16,10 @@
  */
 
 import type { Router } from 'express';
-import { createClawProxyRouter } from '../claw/proxy';
-import { createClawRunStreamRouter } from '../claw/run-stream';
-import { createClawRunsRouter } from '../claw/runs';
+// Disabled (Claw)
+// import { createClawProxyRouter } from '../claw/proxy';
+// import { createClawRunStreamRouter } from '../claw/run-stream';
+// import { createClawRunsRouter } from '../claw/runs';
 import { createSdkVersionRouter, resolveV1Operation } from '../v1';
 import type { V1Target } from '../v1/types';
 
@@ -39,6 +40,7 @@ export function createSdkV2Router(): Router {
     // The typed run stream before the proxy: `/claw/runs/*` and `/claw/api/*`
     // do not overlap today, and this keeps it that way if a mount ever does.
     // `createClawRunsRouter` shadows the shared direct route of the same path.
-    routers: [createClawRunsRouter(), createClawRunStreamRouter(), createClawProxyRouter()],
+    // Disabled (Claw)
+    // routers: [createClawRunsRouter(), createClawRunStreamRouter(), createClawProxyRouter()],
   });
 }
