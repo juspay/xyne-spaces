@@ -19,7 +19,6 @@ WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
 COPY packages/storage/package.json          packages/storage/
-COPY packages/framework/package.json        packages/framework/
 COPY packages/cache/package.json            packages/cache/
 COPY packages/secrets-vault/package.json    packages/secrets-vault/
 COPY apps/backend/package.json              apps/backend/
@@ -38,14 +37,13 @@ RUN npm install -g @xyne/xyne-cli@latest || echo "xyne-cli installation failed, 
 
 COPY packages/shared        packages/shared
 COPY packages/storage       packages/storage
-COPY packages/framework     packages/framework
 COPY packages/cache         packages/cache
 COPY packages/secrets-vault packages/secrets-vault
 COPY apps/backend           apps/backend
 COPY scripts                scripts
 
 # backend consumes both from their built dist/
-RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework --filter @xyne/cache --filter @xyne/secrets-vault run build
+RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/cache --filter @xyne/secrets-vault run build
 
 # Cache-busting argument to ensure db:generate always runs
 ARG CACHEBUST=1

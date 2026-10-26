@@ -1,6 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
-import { logger } from '@framework';
+import { logger } from '@/utils/logger';
 
 export const prisma = DatabaseClient.getInstance();
 import { Application } from '@prisma/client';

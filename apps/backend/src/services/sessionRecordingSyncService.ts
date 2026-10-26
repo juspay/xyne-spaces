@@ -4,7 +4,6 @@ import { redisService } from '@/services/redisService';
 import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
-import { conversationIngestQueue } from '@/queues/conversationIngestQueue';;
 import { SESSION_RECORDING_KEYS_SET, parseSessionRecordingKey } from '@/utils/sessionRecordingKeys';
 
 interface SessionBatch {
@@ -146,14 +145,6 @@ class SessionRecordingSyncService {
       gcsUri,
       mergedRecording.messages.length
     );
-
-      conversationIngestQueue.addJob({
-        gcsUri,
-        source: 'xyne-cli',
-        sourceId: `${sessionId}`,
-      }).catch((queueErr) => {
-        logger.error(`[SESSION-RECORDING-SYNC] Failed to enqueue ingest job for session ${sessionId}:`, queueErr);
-      });
 
     logger.info(`[SESSION-RECORDING-SYNC] Synced ${batches.length} batches for ${redisKey} to GCS: ${gcsPath}`, {
       messageCount: messages.length,

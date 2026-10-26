@@ -190,8 +190,6 @@ import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
-import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
-import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
@@ -1229,14 +1227,8 @@ export class App {
     botCatalog.markInitialized();
     logger.info(`Unified bot framework initialized with ${botCatalog.count} bot(s)`);
 
-    logger.info('Initializing conversation ingest queue (producer)...');
-    await conversationIngestQueue.initialize();
-
     logger.info('Initializing team intelligence queue (producer)...');
     await teamIntelligenceQueue.initialize();
-
-    logger.info('Initializing document ingest queue (producer)...');
-    await documentIngestQueue.initialize();
 
     logger.info('Initializing data source ingest queue (producer)...');
     const { dataSourceIngestQueue } = await import('@/queues/dataSourceIngestQueue');

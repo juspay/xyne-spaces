@@ -93,7 +93,6 @@ pnpm --filter xyne-spaces-backend   run build
 pnpm --filter xyne-spaces-dashboard run lint:errors-only
 pnpm --filter xyne-spaces-dashboard run typecheck
 pnpm --filter xyne-spaces-dashboard run build
-pnpm --filter agentic-framework     run lint
 ```
 
 Tests:
@@ -131,7 +130,6 @@ git commit -m "feat: PROJ-88: add ETA reminders to stage transitions"
 | anything | gitleaks secret scan on staged changes |
 | `apps/backend/**` | backend typecheck + build |
 | `apps/dashboard/**` | dashboard lint + validate |
-| `packages/framework/**` | framework lint |
 | `tools/xyne-automation/**` | automation validate |
 | nothing above | a basic dashboard lint |
 | anything | service change analysis + schema-migration validation |

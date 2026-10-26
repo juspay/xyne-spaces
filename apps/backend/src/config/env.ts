@@ -103,8 +103,6 @@ const envSchema = Joi.object({
   FAKE_GCS_HOST: Joi.string().allow('').default('localhost:4443'),
   TRANSCRIPTION_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
-  ENABLE_CONVERSATION_INGESTION_QUEUE: Joi.boolean().default(false),
-  ENABLE_CONVERSATION_INGESTION_WORKER: Joi.boolean().default(false),
   ENABLE_EXTERNAL_SOURCE_REGISTRATION: Joi.boolean().default(true),
   ENABLE_SCHEDULED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
@@ -415,22 +413,12 @@ const envSchema = Joi.object({
   JENKINS_JOB_PATH: Joi.string().default(''),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
-  // OpenCode Configuration
-  OPENCODE_ENABLED: Joi.boolean().default(false),
-  OPENCODE_SPAWN_SERVER: Joi.boolean().default(false),
-  OPENCODE_BASE_URL: Joi.string().uri().default('http://localhost:4096'),
-  OPENCODE_TIMEOUT_MS: Joi.number().default(600000),
-  OPENCODE_AUTO_COMPACT: Joi.boolean().default(false),
-  OPENCODE_MODEL: Joi.string().allow('').default(''),
   QUESTION_TIMEOUT_MINUTES: Joi.number().default(2),
   // Default model ID for config sync service
   DEFAULT_MODEL_ID: Joi.string().default(''),
   DEFAULT_MODEL_NAME: Joi.string().default(''),
   // Default workspace ID for integrations that need it
   DEFAULT_WORKSPACE_ID: Joi.string().allow('').default(''),
-  // oh-my-opencode Plugin Configuration
-  OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
-  OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default('latest'),
   // Xyne AI Extended (web search, mem0, deep research, etc.)
   XYNE_AI_EXTENDED_URL: Joi.string().uri().allow('').default(''),
   // Otel Configuration
@@ -838,8 +826,6 @@ export const config = {
     fakeGcsHost: envVars.FAKE_GCS_HOST,
     transcriptionBucketName: envVars.TRANSCRIPTION_BUCKET_NAME,
   },
-  enableConversationIngestionQueue: envVars.ENABLE_CONVERSATION_INGESTION_QUEUE,
-  enableConversationIngestionWorker: envVars.ENABLE_CONVERSATION_INGESTION_WORKER,
   enableExternalSourceRegistration: envVars.ENABLE_EXTERNAL_SOURCE_REGISTRATION,
   enableScheduledMessageWorker: envVars.ENABLE_SCHEDULED_MESSAGE_WORKER,
   enableStageEtaDeadlineWorker: envVars.ENABLE_STAGE_ETA_DEADLINE_WORKER,
@@ -1131,17 +1117,6 @@ export const config = {
     username: envVars.JENKINS_USERNAME,
     apiToken: envVars.JENKINS_API_TOKEN,
     webhookSecret: envVars.JENKINS_WEBHOOK_SECRET,
-  },
-  openCode: {
-    enabled: envVars.OPENCODE_ENABLED,
-    spawnServer: envVars.OPENCODE_SPAWN_SERVER,
-    baseUrl: envVars.OPENCODE_BASE_URL,
-    timeoutMs: envVars.OPENCODE_TIMEOUT_MS,
-    autoCompact: envVars.OPENCODE_AUTO_COMPACT,
-    model: envVars.OPENCODE_MODEL,
-    // oh-my-opencode plugin settings
-    pluginEnabled: envVars.OPENCODE_PLUGIN_ENABLED,
-    pluginVersion: envVars.OPENCODE_PLUGIN_VERSION,
   },
   ticketDescriptionClean: {
     model: envVars.TICKET_DESC_CLEAN_MODEL,

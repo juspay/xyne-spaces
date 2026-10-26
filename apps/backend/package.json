@@ -99,7 +99,6 @@
     "@xyne/vespa-ts": "1.6.0",
     "@xyne/workflow-sdk": "3.2.59",
     "@y-sweet/sdk": "^0.9.1",
-    "agentic-framework": "workspace:*",
     "archiver": "^7.0.1",
     "axios": "1.18.1",
     "blocknote-layout-server-utils": "4.2.0",
