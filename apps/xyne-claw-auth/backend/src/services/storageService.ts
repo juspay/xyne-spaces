@@ -39,13 +39,20 @@ function buildService(): StorageService {
 
 class GCSService {
   private static instance: GCSService | null = null;
-  private storage: StorageService;
+  private client: StorageService | null = null;
   readonly bucketName: string;
 
   private constructor() {
     this.bucketName =
       CONFIG.storageProvider === "s3" ? CONFIG.s3BucketName : CONFIG.gcsBucketName;
-    this.storage = buildService();
+  }
+
+  private get storage(): StorageService {
+    if (!this.bucketName) {
+      throw new Error(`${CONFIG.storageProvider === "s3" ? "S3_BUCKET_NAME" : "GCS_BUCKET_NAME"} is not configured`);
+    }
+    this.client ??= buildService();
+    return this.client;
   }
 
   static getInstance(): GCSService {
@@ -59,8 +66,8 @@ class GCSService {
 
   createReadStream(gcsPath: string, opts?: { start?: number; end?: number }): Readable {
     const out = new PassThrough();
-    this.storage
-      .createReadStream(gcsPath, opts)
+    Promise.resolve()
+      .then(() => this.storage.createReadStream(gcsPath, opts))
       .then((stream) => {
         stream.on("error", (err: Error) => out.destroy(err));
         stream.pipe(out);

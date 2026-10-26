@@ -76,7 +76,7 @@ export class GcsPollingService {
     const channelName = process.env.NETWORK_DOCUMENT_CHANNEL_NAME;
     const systemUserEmail = process.env.NETWORK_DOCUMENT_SYSTEM_USER_EMAIL;
 
-    if (!this.bucketName || !projectName || !boardName || !userGroupName || !channelName || !systemUserEmail) {
+    if (!projectName || !boardName || !userGroupName || !channelName || !systemUserEmail) {
       throw new Error('Missing NETWORK_DOCUMENT env configuration');
     }
 
@@ -157,6 +157,11 @@ export class GcsPollingService {
   public async start(): Promise<void> {
     if (this.intervalId) {
       logger.info('[GCS_POLLING] Polling service already running');
+      return;
+    }
+
+    if (!this.bucketName) {
+      logger.error('[GCS_POLLING] NETWORK_DOCUMENTS_GCS_BUCKET is not configured; polling not started');
       return;
     }
 
