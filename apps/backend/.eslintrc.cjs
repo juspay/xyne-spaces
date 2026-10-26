@@ -64,7 +64,6 @@ module.exports = {
         },
       ],
     }],
-    'local-rules/no-duplicate-workflow-steps': 'error',
     'local-rules/no-rocicorp-define-query': 'error',
     'local-rules/require-is-deleted-filter': 'error',
   },

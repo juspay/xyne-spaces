@@ -244,9 +244,6 @@ GCS_CANVAS_BUCKET_NAME: {{ . | quote }}
 {{- with $b.recordings }}
 GCS_SESSION_RECORDING_BUCKET_NAME: {{ . | quote }}
 {{- end }}
-{{- with $b.workflows }}
-GCS_WORKFLOW_STEPS_BUCKET_NAME: {{ . | quote }}
-{{- end }}
 {{- with $b.transcription }}
 TRANSCRIPTION_BUCKET_NAME: {{ . | quote }}
 {{- end }}

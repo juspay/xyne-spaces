@@ -63,8 +63,6 @@ router.post('/:ticketId/duplicates/recheck', ticketController.recheckTicketDupli
 router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
 router.post('/suggest-fields', validate(ticketFieldSuggestionsSchema), ticketController.suggestFields);
 
-router.get('/:ticketId/pending-human-intervention', ticketController.getPendingHumanIntervention);
-
 // Active tags for the ticket's latest reply, grouped by category with configured color
 router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
 

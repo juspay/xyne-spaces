@@ -29,7 +29,6 @@ Request → Routes → Controllers → Services → Repositories → Database
 | `validators/` | Joi request validation schemas |
 | `queues/` | BullMQ job queue definitions |
 | `workers/` | Background job processors |
-| `workflows/` | Multi-step workflow engine |
 | `agents/` | AI agents (xyne-ai, summariser, etc.) |
 | `bots/` | Bot implementations with unified interface |
 | `integrations/` | External platform adapters (Zoho, Slack, Jira) |
@@ -83,9 +82,6 @@ BullMQ job queue definitions with Redis. Each queue handles a specific type of b
 
 ### Workers (`src/workers/`)
 Process jobs from queues. Workers run in a separate process (`worker.ts`) and handle async tasks like indexing, cleanup, and sync operations.
-
-### Workflows (`src/workflows/`)
-Multi-step workflow engine for complex processes (bug workflows, feature implementation, onboarding). Contains workflow definitions, execution engines, step registry, and persistence layer.
 
 ### Agents (`src/agents/`)
 AI agents for automated tasks. Includes `xyne-ai/` (main AI), `summariser/`, `ticket-duplicate/` (detection), `ticket-cleaning-and-themes/`, and `activity-classification/`.

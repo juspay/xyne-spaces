@@ -61,7 +61,6 @@ infra:
       docs: ""
       canvas: ""
       recordings: ""
-      workflows: ""
       transcription: ""
       bundles: ""
       claw: ""

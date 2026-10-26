@@ -6,11 +6,11 @@ const EXCLUDED_CALL_GENERATED_SOURCES = new Set([
   'genius_canvas_long_response',
   'jira_migration_report',
   'release_notes',
-  'workflow_knowledge',
   'commit_analysis',
   'genius_investigation',
   // Retired generators — kept so their existing legacy canvases stay filtered.
   'xyne_auto_rca',
+  'workflow_knowledge',
 ]);
 
 const RECORDING_GENERATED_SOURCES = new Set(['call_notes', 'call_detailed_summary']);
@@ -52,7 +52,7 @@ export function getCanvasCallId(canvas: Canvas): string | null {
     return null;
   }
 
-  const callId = (metadata as Record<string, unknown>)['callId'];
+  const callId = metadata['callId'];
   return typeof callId === 'string' && callId ? callId : null;
 }
 
@@ -62,7 +62,7 @@ export function isRecordingCanvas(canvas: Canvas): boolean {
     metadata &&
     typeof metadata === 'object' &&
     !Array.isArray(metadata) &&
-    (metadata as Record<string, unknown>)['isRecording'] === true,
+    metadata['isRecording'] === true,
   );
 }
 

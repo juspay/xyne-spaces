@@ -8,7 +8,7 @@ A modular, extensible agentic AI framework built in TypeScript for building inte
 - **LLM Integration**: Support for multiple language models via LiteLLM (OpenAI, Anthropic, Google, etc.)
 - **Tool System**: Extensible tool framework for agent capabilities with runtime validation
 - **MCP Support**: Model Context Protocol integration for seamless tool communication
-- **Agent Framework**: Complete agent management and execution system with workflow support
+- **Agent Framework**: Complete agent management and execution system
 
 ## Installation
 
@@ -67,8 +67,7 @@ src/
 ├── mcp/        # Model Context Protocol client/server implementation
 ├── tools/      # Tool definitions and execution framework
 ├── types/      # TypeScript type definitions and interfaces
-├── utils/      # Shared utility functions and helpers
-└── workflows/  # Workflow execution engine and orchestration
+└── utils/      # Shared utility functions and helpers
 ```
 
 ## License

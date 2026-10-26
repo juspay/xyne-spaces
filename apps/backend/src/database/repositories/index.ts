@@ -17,9 +17,6 @@ export {
   type WorkflowExecutionWithState,
 } from './workflowExecutionStateUtils';
 export { TicketRepository } from './ticketRepository';
-export { WorkflowStepRepository } from './workflowSteps';
-export { AgentStepRepository } from './agentSteps';
-export { ExternalStepResponseRepository } from './externalStepResponses';
 export { UserGroupRepository } from './userGroups';
 export { UserRepository } from './users';
 export { ResourceRepository } from './resources';
@@ -85,9 +82,6 @@ import {
   WorkflowExecutionRepository
 } from './workflows';
 import { TicketRepository } from './ticketRepository';
-import { WorkflowStepRepository } from './workflowSteps';
-import { AgentStepRepository } from './agentSteps';
-import { ExternalStepResponseRepository } from './externalStepResponses';
 import { UserGroupRepository } from './userGroups';
 import { UserRepository } from './users';
 import { ResourceRepository } from './resources';
@@ -149,9 +143,6 @@ export class RepositoryContainer {
   public tickets: TicketRepository;
   public workflows: WorkflowRepository;
   public workflowExecutions: WorkflowExecutionRepository;
-  public workflowSteps: WorkflowStepRepository;
-  public agentSteps: AgentStepRepository;
-  public externalStepResponses: ExternalStepResponseRepository;
   public userGroups: UserGroupRepository;
   
   public users: UserRepository;
@@ -209,9 +200,6 @@ export class RepositoryContainer {
     this.tickets = new TicketRepository();
     this.workflows = new WorkflowRepository();
     this.workflowExecutions = new WorkflowExecutionRepository();
-    this.workflowSteps = new WorkflowStepRepository();
-    this.agentSteps = new AgentStepRepository();
-    this.externalStepResponses = new ExternalStepResponseRepository();
     this.userGroups = new UserGroupRepository();
     this.users = new UserRepository();
     this.resources = new ResourceRepository();

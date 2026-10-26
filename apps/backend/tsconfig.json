@@ -44,13 +44,7 @@
       "@/utils/*": ["utils/*"],
       "@/validators/*": ["validators/*"],
       "@/zero/*": ["zero/*"]
-    },
-    "plugins": [
-      {
-        "transform": "./src/workflows/transformer/external-step-transformer.cjs",
-        "type": "program"
-      }
-    ]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "src/test/**/*"]

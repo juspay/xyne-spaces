@@ -131,7 +131,6 @@ interface ChatBubbleProps {
   isTicketThread?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
-  workflowNumber?: number | undefined;
   disableAskAI?: boolean;
   searchItemView?: boolean;
   onUserClick?: (userId: string) => void;
@@ -163,7 +162,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isTicketThread = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
-  workflowNumber,
   disableAskAI = false,
   searchItemView = false,
   onUserClick,
@@ -1391,7 +1389,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             searchItemView={searchItemView}
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
-            workflowNumber={workflowNumber}
             {...(textTrailer !== undefined && { afterTextContent: textTrailer })}
             {...(context === 'channel' &&
               !isSystemMessage &&
