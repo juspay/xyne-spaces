@@ -4433,7 +4433,7 @@ const spacesCreateTicket: ToolDef = {
               targetId: data.id,
               relationType: "TICKET",
             }),
-          }, sdlcSpacesAuth());
+          });
         } catch (linkError) {
           return err(
             `Ticket ${data.xyneId} was created, but its artifact link failed: ${errMsg(linkError)}. Do not create a duplicate ticket.`,
@@ -5545,24 +5545,6 @@ const SDLC_CANVAS_ID = {
   description: "Canvas id of the artifact, from spaces-sdlc-list-artifacts or an artifact URL.",
 } as const;
 
-// SDLC claw routes (/api/sdlc/claw/*) can be pointed at a dedicated SDLC backend
-// via SDLC_BACKEND_URL, mirroring the iframe's VITE_SDLC_BACKEND_URL. Unset -> the
-// call falls through to the default Spaces backend. token/session/workspace are
-// re-supplied from env because passing an auth object otherwise blanks them.
-function sdlcSpacesAuth(): SpacesAuthContext | undefined {
-  const baseUrl = process.env["SDLC_BACKEND_URL"];
-  if (!baseUrl) return undefined;
-  const token = process.env["XYNE_SPACES_TOKEN"];
-  const sessionId = process.env["XYNE_SPACES_SESSION_ID"];
-  const workspaceId = process.env["XYNE_SPACES_WORKSPACE_ID"];
-  return {
-    baseUrl,
-    ...(token !== undefined && { token }),
-    ...(sessionId !== undefined && { sessionId }),
-    ...(workspaceId !== undefined && { workspaceId }),
-  };
-}
-
 function pick(args: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   return Object.fromEntries(keys.filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
 }
@@ -5574,7 +5556,7 @@ async function sdlcClawCall(label: string, path: string, body: Record<string, un
       method: "POST",
       headers: { "x-xyne-acting-user-id": ctx.userId },
       body: JSON.stringify(body),
-    }, sdlcSpacesAuth());
+    });
     return ok(JSON.stringify(data));
   } catch (e) {
     return err(`${label} error: ${errMsg(e)}`);
@@ -5843,7 +5825,7 @@ async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCon
         ...pick(args, ["channelId", "trackId", "trackFolderId", "title", "markdown", "repoIds", "relatedCanvasIds"]),
         folderId: args["artifactTypeId"],
       }),
-    }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
+    })) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
     const artifact = data.artifact;
     const citations: Citation[] = [];
     pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));

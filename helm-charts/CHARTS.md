@@ -88,8 +88,7 @@ Set all three public URLs. Add the bucket variables for your provider (see
 [README.md](README.md#2-prepare-dependencies)); `S3_ENDPOINT` and `AWS_REGION` for S3,
 `GCS_PROJECT_ID` for GCS, `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER` for Azure Blob
 (`AZURE_STORAGE_ENDPOINT`, `AZURE_STORAGE_CONNECTION_STRING` and `AZURE_STORAGE_SAS_TOKEN` are
-the optional overrides). `SESSION_EXPIRY_DAYS` (180) and `API_PATH_PREFIX` (empty; an extra
-prefix the API also answers on) are the other switches you are likely to touch.
+the optional overrides). `SESSION_EXPIRY_DAYS` (180) is the other switch you are likely to touch.
 
 **Scaling and disruption.** 2 replicas, HPA 2-6 on 70 % CPU / 80 % memory (scale up by 4 pods or
 100 % every 15 s, scale down 5 % every 120 s), PDB `minAvailable: 1`, `RollingUpdate` with

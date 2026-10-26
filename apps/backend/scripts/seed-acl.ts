@@ -55,7 +55,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
   { name: 'XYNE-APPS', description: 'Admin access to Xyne Apps management (webhooks, bot configuration, signing secrets)'},
   { name: 'ROLES', description: 'Role creation and management UI' },
-  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
+  { name: 'SDLC', description: 'SDLC surface access (/sdlc, /api/sdlc/*)' },
   {
     name: 'AUTOMATIONS',
     description:

@@ -5,7 +5,7 @@ const targets = vi.hoisted(() => ({
   /** The workspace's tabs: each its page, and where it was opened. */
   tabs: new Map<string, { url: string; view: unknown }>(),
   sdlc: null as unknown,
-  framePosts: 0,
+  browserRequests: 0,
   /** Who hears the workspace's pages and the SDLC browser change. */
   listeners: new Set<() => void>(),
   changed(): void {
@@ -42,7 +42,7 @@ vi.mock('./sdlcBrowserTarget', () => ({
     return () => targets.listeners.delete(listener);
   },
   requestSdlcBrowser: () => {
-    targets.framePosts += 1;
+    targets.browserRequests += 1;
     return true;
   },
 }));
@@ -59,7 +59,7 @@ describe('surface page calls', () => {
     targets.workspace = null;
     targets.tabs.clear();
     targets.sdlc = null;
-    targets.framePosts = 0;
+    targets.browserRequests = 0;
     targets.listeners.clear();
     targets.executed.length = 0;
   });
@@ -88,7 +88,7 @@ describe('surface page calls', () => {
     expect(targets.executed).toEqual([{ tool: 'page-read', target: 'workspace' }]);
   });
 
-  it('opens a URL in the SDLC browser, asking the lane to show it first', async () => {
+  it('opens a URL in the SDLC browser, asking the SDLC screen to show it first', async () => {
     const wv = webview();
     setTimeout(() => {
       targets.sdlc = wv;
@@ -99,7 +99,7 @@ describe('surface page calls', () => {
       xyneSurface: 'sdlc',
       xyneRunId: 'run-open',
     });
-    expect(targets.framePosts).toBe(1);
+    expect(targets.browserRequests).toBe(1);
     expect(wv.loadURL).toHaveBeenCalledWith('https://docs.google.com/');
     expect(result.ok).toBe(true);
   });

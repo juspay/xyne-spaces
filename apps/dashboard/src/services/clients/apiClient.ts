@@ -93,11 +93,7 @@ apiConfig.interceptors.request.use(
 
       // X-Workspace-Id for multi-workspace. Main routes are /:workspaceId/...; standalone
       // /newWindow/* windows carry it as a query param (then fall back to lastActiveWorkspaceId).
-      // The lane serves under the /sdlc-app basename, whose segment would otherwise
-      // read as the workspace id. APP_BASE_PATH is '' in the main bundle.
-      const path = window.location.pathname;
-      const appPath = path.startsWith(APP_BASE_PATH) ? path.slice(APP_BASE_PATH.length) : path;
-      const firstPathSegment = appPath.match(/^\/([^/]+)/)?.[1];
+      const firstPathSegment = window.location.pathname.match(/^\/([^/]+)/)?.[1];
       let workspaceId: string | undefined = firstPathSegment;
       if (firstPathSegment === 'newWindow') {
         const search = new URLSearchParams(window.location.search);

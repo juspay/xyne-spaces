@@ -72,18 +72,15 @@ clean-dashboard:
 	docker rmi $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
-# Export the built dashboard bundles (dist + releases/dashboard.zip) for
-# upload to the dashboard edge's bucket: the normal bundle to
-# $(DASHBOARD_BUNDLE_OUT) and the SDLC-mode bundle (build:sdlc, base
-# /sdlc-app/) to $(DASHBOARD_BUNDLE_OUT)-sdlc. Same build args as
-# push-dashboard so the builder stage is served from cache.
+# Export the built dashboard bundle (dist + releases/dashboard.zip) to
+# $(DASHBOARD_BUNDLE_OUT) for upload to the dashboard edge's bucket. Same build
+# args as push-dashboard so the builder stage is served from cache.
 DASHBOARD_BUNDLE_OUT ?= out/dashboard-bundle
 export-dashboard-bundle:
-	$(info Exporting dashboard bundles to $(DASHBOARD_BUNDLE_OUT) and $(DASHBOARD_BUNDLE_OUT)-sdlc / git-head: $(SOURCE_COMMIT))
-	rm -rf $(DASHBOARD_BUNDLE_OUT) $(DASHBOARD_BUNDLE_OUT)-sdlc
+	$(info Exporting dashboard bundle to $(DASHBOARD_BUNDLE_OUT) / git-head: $(SOURCE_COMMIT))
+	rm -rf $(DASHBOARD_BUNDLE_OUT)
 	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" .
-	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT)-sdlc --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "BUILD_SCRIPT=build:sdlc" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" .
-	$(info Exported: $(DASHBOARD_BUNDLE_OUT) and $(DASHBOARD_BUNDLE_OUT)-sdlc)
+	$(info Exported: $(DASHBOARD_BUNDLE_OUT))
 
 # Dashboard edge targets (nginx + Node app serving bundles from object storage; apps/dashboard-edge)
 build-dashboard-edge:

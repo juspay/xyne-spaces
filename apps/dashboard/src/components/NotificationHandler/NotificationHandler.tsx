@@ -32,8 +32,7 @@ import { globalClickTracker } from '../../services/Analytics/globalClickTracker'
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 import { prefixWorkspacePath } from '../../lib/workspacePath';
-import { isSdlcResourceKind } from '../../routes/SdlcScreen/sdlcFrameMessages';
-import { refreshSdlcResource } from '../../routes/SdlcScreen/sdlcResourceChanged';
+import { isSdlcResourceKind, refreshSdlcResource } from '../../routes/SdlcScreen/sdlcResourceChanged';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event

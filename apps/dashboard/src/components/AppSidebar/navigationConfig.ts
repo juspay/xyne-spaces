@@ -19,7 +19,6 @@ import {
   QuestionMarkCircle,
   BuildingApartmentTwo,
   LightningThunderElectricOn,
-  Atom,
   GitBranch,
   LayoutGridTwoVertical,
   type PikaIconProps,
@@ -273,13 +272,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   {
-    path: '/sdlc',
-    label: 'SDLC',
-    description: 'Development hubs: tracks, wikis and repositories',
-    icon: Atom,
-    popout: true,
-  },
-  {
     path: '/support',
     label: 'Support',
     description: 'Also called the Desk or Xyne Desk',
@@ -465,7 +457,6 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/calls',
   '/recordings',
   '/projects',
-  '/sdlc',
   '/support',
   '/chat/activity',
   // Disabled (Claw)

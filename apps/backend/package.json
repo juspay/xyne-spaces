@@ -20,7 +20,6 @@
     "start:api": "NODE_ENV=production tsx --enable-source-maps dist/index.js",
     "start:worker": "NODE_ENV=production tsx --enable-source-maps dist/worker.js",
     "dev": "dotenv -e .env.local -- sh -c 'NODE_ENV=development CHOKIDAR_USEPOLLING=true tsx watch --exclude \"**/node_modules/**\" --exclude \"**/dist/**\" --exclude \"**/.git/**\" src/index.ts'",
-    "dev:sdlc": "dotenv -e .env.sdlc -e .env.local -- sh -c 'NODE_ENV=development CHOKIDAR_USEPOLLING=true tsx watch --exclude \"**/node_modules/**\" --exclude \"**/dist/**\" --exclude \"**/.git/**\" src/index.ts'",
     "dev:api": "NODE_ENV=development tsx watch --exclude \"**/node_modules/**\" --exclude \"**/dist/**\" --exclude \"**/.git/**\" src/index.ts",
     "dev:worker": "dotenv -e .env.local -- sh -c 'NODE_ENV=development tsx watch --exclude \"**/node_modules/**\" --exclude \"**/dist/**\" --exclude \"**/.git/**\" src/worker.ts'",
     "dev:test": "dotenv -e .env.local -- sh -c 'NODE_ENV=test tsx src/index.ts'",

@@ -6,7 +6,6 @@
   "scripts": {
     "predev": "node scripts/fetch-model.mjs",
     "dev": "vite",
-    "dev:sdlc": "vite --mode sdlc",
     "dev:test": "vite --mode test",
     "claw:test": "VITE_SANDBOX_TEST_MODE=true vite --mode test",
     "dev:prod": "vite --mode prod-local",
@@ -15,7 +14,6 @@
     "eval:intents": "node scripts/eval-intents.mjs",
     "prebuild": "node scripts/fetch-model.mjs",
     "build": "tsc --noEmit && vite build",
-    "build:sdlc": "tsc --noEmit && vite build --mode sdlc",
     "preview": "vite preview",
     "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content",
     "lint:errors-only": "eslint . --quiet --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content && pnpm run lint:css",

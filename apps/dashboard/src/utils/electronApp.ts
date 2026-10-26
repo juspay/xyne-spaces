@@ -70,6 +70,13 @@ export const isElectronStandaloneWindow = (): boolean => {
   return isElectronApp() && isStandaloneWindow();
 };
 
+/** The name SdlcWindow gives its window, which keeps it across the hub's own routes. */
+export const SDLC_WINDOW_NAME = 'xyne-sdlc-window';
+
+/** A window an SDLC item opened in: the hub's own routes, without the app's chrome. */
+export const isSdlcWindow = (): boolean =>
+  typeof window !== 'undefined' && window.name === SDLC_WINDOW_NAME;
+
 const STANDALONE_SUPPORTED_ROUTES = ['/chat/'];
 
 export const isStandaloneSupportedPath = (path: string): boolean => {

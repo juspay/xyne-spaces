@@ -1,11 +1,5 @@
 import { useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
-import {
-  SDLC_FRAME_MESSAGE,
-  parseSdlcFrameMessage,
-  type SdlcDownloadRequest,
-} from '../../routes/SdlcScreen/sdlcFrameMessages';
-import { canHostEmbedPages } from '../../routes/SdlcScreen/useSdlcFrameBridge';
 
 /** A file one of the in-app browsers downloads, as the desktop app reports it. */
 export interface BrowserDownload {
@@ -49,56 +43,14 @@ function readDownload(value: unknown): BrowserDownload | null {
   };
 }
 
-/** Whether this window reaches the desktop app's downloads itself. */
-const fromDesktop = (): boolean => typeof window.electronAPI?.browserDownloadAction === 'function';
-
-/** A folder's frame, which can't reach the desktop app: its window keeps the list. */
-const viaWindow = (): boolean => !fromDesktop() && canHostEmbedPages();
-
-function askWindow(request: SdlcDownloadRequest, id?: string): void {
-  window.parent.postMessage(
-    { type: SDLC_FRAME_MESSAGE.downloadsRequest, request, ...(id && { id }) },
-    window.location.origin,
-  );
-}
-
-let listeningToWindow = false;
-
-/** In a folder's frame: the window's list, as it sends it, asked for once to start. */
-function listenToWindow(): void {
-  if (listeningToWindow || !viaWindow()) return;
-  listeningToWindow = true;
-  window.addEventListener('message', event => {
-    if (event.origin !== window.location.origin || event.source !== window.parent) return;
-    const message = parseSdlcFrameMessage(event.data);
-    if (message?.type !== SDLC_FRAME_MESSAGE.downloads) return;
-    downloads = message.downloads;
-    changed();
-  });
-  askWindow('sync');
-}
-
 export function actOnDownload(id: string, action: DownloadAction): void {
-  if (viaWindow()) {
-    askWindow(action, id);
-    return;
-  }
   void window.electronAPI?.browserDownloadAction?.(id, action).catch(() => undefined);
 }
 
 /** Takes finished downloads off the list; the files stay where they are. */
 export function clearFinishedDownloads(): void {
-  if (viaWindow()) {
-    askWindow('clear');
-    return;
-  }
   downloads = downloads.filter(download => download.state === 'progressing');
   changed();
-}
-
-/** The downloads now, newest first: for a window passing them on to a folder's frame. */
-export function currentDownloads(): readonly BrowserDownload[] {
-  return downloads;
 }
 
 /**
@@ -136,8 +88,7 @@ export function subscribeToDownloads(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** The downloads, newest first — the window's own, or in a folder's frame its window's. */
+/** The window's downloads, newest first. */
 export function useBrowserDownloads(): readonly BrowserDownload[] {
-  listenToWindow();
   return useSyncExternalStore(subscribeToDownloads, () => downloads);
 }
