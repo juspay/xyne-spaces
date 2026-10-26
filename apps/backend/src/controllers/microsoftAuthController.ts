@@ -13,7 +13,7 @@ import { config } from '@/config/env';
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
-import { WorkspaceType, AuthProvider } from '@xyne/shared';
+import { AuthProvider } from '@xyne/shared';
 import {
   OrganizationDomainConflictError,
   PublicEmailDomainError,
@@ -100,17 +100,6 @@ export class MicrosoftAuthController {
     this.msJwks = createRemoteJWKSet(
       new URL(`https://login.microsoftonline.com/${jwksTenant}/discovery/v2.0/keys`)
     );
-  }
-
-  private getEnterpriseAwareWorkspaces<T extends { workspaceType?: string | null }>(
-    workspaces: T[],
-    enterpriseLogin?: boolean,
-  ): T[] {
-    if (!enterpriseLogin) {
-      return workspaces;
-    }
-
-    return workspaces.filter(workspace => workspace.workspaceType !== WorkspaceType.COMMUNITY);
   }
 
   private getRedirectUrl(req: Request, params: Record<string, string>): string {
@@ -486,10 +475,7 @@ export class MicrosoftAuthController {
         }
 
         logger.info(`${tag()} Microsoft auth success for: ${microsoftUserData.email}`);
-        const workspaces = this.getEnterpriseAwareWorkspaces(
-          await this.userService.getWorkspacesByEmail(microsoftUserData.email),
-          peekedState?.enterpriseLogin,
-        );
+        const workspaces = await this.userService.getWorkspacesByEmail(microsoftUserData.email);
         logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 
         const refreshToken = token.refresh_token as string | undefined;
@@ -928,10 +914,7 @@ export class MicrosoftAuthController {
       }
 
       logger.info(`${tag()} Microsoft auth success for: ${email}`);
-      const workspaces = this.getEnterpriseAwareWorkspaces(
-        await this.userService.getWorkspacesByEmail(email),
-        stateData.enterpriseLogin,
-      );
+      const workspaces = await this.userService.getWorkspacesByEmail(email);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 

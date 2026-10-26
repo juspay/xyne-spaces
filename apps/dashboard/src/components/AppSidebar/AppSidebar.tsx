@@ -30,7 +30,6 @@ import {
   UserPlus,
   DragableSixDots,
 } from '@xyne/icons';
-import { WorkspaceType } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -50,7 +49,6 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
-import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 import { AppIcon } from '../AppIcon/AppIcon';
 import { toolbarItemsStore, useAppSnapshots, appIdOf, appItemId } from '../../hooks/barItems';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../hooks/useAiLaunchPreference';
@@ -254,7 +252,6 @@ const AppSidebar = (): ReactElement => {
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
   const currentUser = useSelf();
-  const isCommunityWorkspace = useIsCommunityWorkspace();
   // Everyone except guests can invite — enterprise invites to non-org members
   // land in the admin approval queue.
   const canInvitePeople = !!user && user.role !== 'GUEST';
@@ -1010,7 +1007,6 @@ const AppSidebar = (): ReactElement => {
           onOpenChange={handleInviteDialogOpenChange}
           workspaceId={workspaceId}
           initialView={inviteDialogInitialView}
-          workspaceType={isCommunityWorkspace ? WorkspaceType.COMMUNITY : undefined}
         />
 
         {/* Status Update Modal */}

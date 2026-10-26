@@ -5,7 +5,7 @@ import { repositories } from '@/database/repositories/index';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
-import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
+import { createWorkspaceDefaults } from '@/utils/workspaceDefaults';
 import { getEncryptionProvider } from '@/services/encryption';
 import {
   AuthProvider,
@@ -17,8 +17,6 @@ import {
   WorkspaceJoinRequestStatus,
   WorkspaceType,
   UserPresenceStatus,
-  type WorkspaceType as WorkspaceTypeValue,
-  type WorkspaceJoinPolicy as WorkspaceJoinPolicyValue,
 } from '@xyne/shared';
 import { asSystem, asService } from './base';
 
@@ -50,8 +48,6 @@ export function createWorkspaceInOrgData(
     authProvider: AuthProvider;
   },
   workspaceName: string,
-  workspaceType: WorkspaceTypeValue,
-  joinPolicy: WorkspaceJoinPolicyValue,
   orgMember: { memberId: string },
 ) {
   return asSystem(
@@ -68,8 +64,7 @@ export function createWorkspaceInOrgData(
               name: workspaceName,
               createdBy: userData.providerUserId, // Temporary: will update after user creation
               status: Status.ACTIVE,
-              workspaceType,
-              joinPolicy,
+              workspaceType: WorkspaceType.ENTERPRISE,
             },
           });
           await getEncryptionProvider().provisionEntity({
@@ -137,7 +132,7 @@ export function createWorkspaceInOrgData(
         }
       });
 
-      const defaults = await createCommunityWorkspaceDefaults({
+      const defaults = await createWorkspaceDefaults({
         db,
         workspaceId: workspace.id,
         workspaceName,
