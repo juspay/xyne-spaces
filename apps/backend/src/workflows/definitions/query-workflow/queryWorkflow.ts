@@ -110,13 +110,13 @@ const getMerchantToken = async (merchantId: string): Promise<{ success: boolean;
   logger.info(`🔑 Getting merchant token for: ${merchantId}`);
 
   try {
-    const merchantTokenUrl = process.env.DASHBOARD_MERCHANT_TOKEN_URL;
-    if (!merchantTokenUrl) {
-      throw new Error('DASHBOARD_MERCHANT_TOKEN_URL is not configured');
+    const dashboardUrl = process.env.DASHBOARD_API_URL;
+    if (!dashboardUrl) {
+      throw new Error('DASHBOARD_API_URL is not configured');
     }
     const authHeader = process.env.DASHBOARD_AUTH_TOKEN || '';
 
-    const response = await fetch(merchantTokenUrl.replace('{merchantId}', encodeURIComponent(merchantId)), {
+    const response = await fetch(`${dashboardUrl}/ec/s1/admin/switch/merchant/${merchantId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
