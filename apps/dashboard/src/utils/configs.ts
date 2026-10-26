@@ -14,13 +14,6 @@ export interface Website {
 }
 export const WEBSITES: Website[] = [
   {
-    id: 'mimir',
-    name: 'MIMIR',
-    url: 'https://lightbox.sso.internal.svc.k8s.apoc.mum.juspay.net/',
-    iconImage: '/images/autorca.png',
-    useDynamicUrl: true, // Will extract order_id and merchant_id from selected text
-  },
-  {
     id: 'google',
     name: 'Google',
     url: 'https://www.google.com',

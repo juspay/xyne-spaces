@@ -89,8 +89,7 @@ export const AGENT = {
 
 // Session archive / attachment storage.
 export const GCS = {
-  // Keep the default in sync with claw-auth config (CONFIG.gcsBucketName).
-  bucketName: process.env["GCS_BUCKET_NAME"] ?? "xyne-claw-chat-attachments",
+  bucketName: process.env["GCS_BUCKET_NAME"] ?? "",
   // Local dev points at the fake-gcs-server from docker-compose.dev.yml instead
   // of real GCS — same env var and dev-only gate as claw-auth's gcsService, so
   // both services talk to the same emulator. Without it, ensureFreshSession

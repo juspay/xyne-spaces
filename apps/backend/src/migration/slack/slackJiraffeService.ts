@@ -138,8 +138,11 @@ async function fetchTicketsFromBitbot(
   slackChannelId: string,
   syncDate?: string
 ): Promise<BitbotTicket[]> {
-  const baseUrl = 'https://bitbot.internal.svc.k8s.office.mum.juspay.net';
-  const url = new URL(`${baseUrl}/api/internal/migration/tickets`);
+  const baseUrl = process.env.BITBOT_BASE_URL;
+  if (!baseUrl) {
+    throw new Error('BITBOT_BASE_URL is not configured');
+  }
+  const url = new URL(`${baseUrl.replace(/\/+$/, '')}/api/internal/migration/tickets`);
   url.searchParams.set('slackChannelId', slackChannelId);
   if (syncDate) {
     url.searchParams.set('date', syncDate);

@@ -538,7 +538,7 @@ BullMQ workers in front of `xyne-claw`. Everything it serves lives under `/claw`
 | `REDIS_HOST`, `REDIS_PORT` | `redis`, `"6379"` | BullMQ, SSE pub/sub, cron locks |
 | `DEFAULT_AGENT_SLUG` | `digital-twin` | |
 | `CLAW_ADMIN_EMAILS` | `""` | comma-separated admin users |
-| `STORAGE_PROVIDER`, `S3_BUCKET_NAME`, `GCS_PROJECT_ID`, `GCS_BUCKET_NAME` | `s3`, `xyne-claw-chat-attachments`, `""`, `xyne-claw-chat-attachments` | chat attachments; with `azure` use `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER` |
+| `STORAGE_PROVIDER`, `S3_BUCKET_NAME`, `GCS_PROJECT_ID`, `GCS_BUCKET_NAME` | `s3`, `""`, `""`, `""` | chat attachments (set the bucket for your provider); with `azure` use `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER` |
 | `RUN_RECOVERY_MAX_RETRIES`, `RUN_RECOVERY_TIMEOUT_MS`, `RUN_RECOVERY_BACKOFF_MS` | `"3"`, `"900000"`, `"30000"` | run recovery |
 | `ENABLE_OTEL_METRICS`, `OTEL_SERVICE_NAME` | `"false"`, `xyne-claw-auth` | |
 

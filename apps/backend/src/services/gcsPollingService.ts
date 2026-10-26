@@ -61,7 +61,7 @@ export class GcsPollingService {
   private isInitialized: boolean = false;
 
   private constructor() {
-    this.bucketName = process.env.NETWORK_DOCUMENTS_GCS_BUCKET || 'xyne-documents';
+    this.bucketName = process.env.NETWORK_DOCUMENTS_GCS_BUCKET || '';
     this.storageService = getStorageService(this.bucketName);
     this.ticketController = new TicketController();
     this.systemUserId = ''; // Will be set in initializeConfiguration
@@ -76,7 +76,7 @@ export class GcsPollingService {
     const channelName = process.env.NETWORK_DOCUMENT_CHANNEL_NAME;
     const systemUserEmail = process.env.NETWORK_DOCUMENT_SYSTEM_USER_EMAIL;
 
-    if (!projectName || !boardName || !userGroupName || !channelName || !systemUserEmail) {
+    if (!this.bucketName || !projectName || !boardName || !userGroupName || !channelName || !systemUserEmail) {
       throw new Error('Missing NETWORK_DOCUMENT env configuration');
     }
 

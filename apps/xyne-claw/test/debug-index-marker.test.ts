@@ -12,6 +12,7 @@ vi.mock("@xyne/storage", async (orig) => ({
   }),
 }));
 
+process.env["GCS_BUCKET_NAME"] = "test-bucket";
 const { gcsPutDebugIndex } = await import("../src/storage.js");
 
 describe("debug index marker", () => {

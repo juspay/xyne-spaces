@@ -514,7 +514,7 @@ export function McpGatewayRegistryPageV3({ isAdmin = false }: { isAdmin?: boolea
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <TextField label="Service name" placeholder="pragati" value={serviceName} onChange={(e) => setServiceName(e.target.value)} disabled={editing} hint={editing ? "Locked while editing" : undefined} />
           <TextField label="Backend ID" placeholder="pragati-primary-backend" value={backendId} onChange={(e) => setBackendId(e.target.value)} disabled={editing} hint={editing ? "Locked while editing" : undefined} />
-          <TextField label="Backend URL" placeholder="https://pragati.internal.staging.mum.juspay.net" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} />
+          <TextField label="Backend URL" placeholder="https://mcp-backend.example.com" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} />
           <TextField label="Token endpoint URL" hint="Relative path, must start with /" placeholder="/api/mcp/v2/token" value={tokenEndpointUrl} onChange={(e) => setTokenEndpointUrl(e.target.value)} />
           <TextField label="Auth header name" hint="Header the gateway forwards the service token in" placeholder="Authorization" value={xAuthHeaderName} onChange={(e) => setXAuthHeaderName(e.target.value)} />
         </div>
