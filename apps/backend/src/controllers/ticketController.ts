@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { Ticket } from '@prisma/client';
-import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository, emitTicketCreated } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -96,8 +96,6 @@ const AddAttachmentsFromConversationBodySchema = z.object({
 });
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { unifiedBotUserService } from '@/bots/unified';
-import { workflowManager } from '@/workflows/services/workflowManager';
-import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ticketService } from '@/services/ticketService';
 import { emailService } from '@/services/emailService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
@@ -1181,28 +1179,6 @@ export class TicketController {
 
       res.status(201).json(response);
 
-      // Check if this is a support channel by fetching the channel type
-      const channel = await this.channelRepository.findById(ticket.channelId);
-      if (channel && channel.type === ChannelType.SUPPORT) {
-        // Trigger IT_SUPPORT_WORKFLOW for support channels
-        await workflowManager.startWorkflow({
-          ticketId: ticket.id,
-          workflowType: WorkflowType.IT_SUPPORT_WORKFLOW,
-          context: {
-            title: ticket.title,
-            description: ticket.description,
-            ticketId: ticket.id,
-            queryText: description,
-            channelId: channel.id,
-            userId,
-            userName: req.user?.name,
-            conversationId: ticket.conversationId,
-            xyneId: ticket.xyneId,
-          },
-          createdBy: userId,
-        })
-      }
-
       // Trigger commit analysis for commit-range release tickets only.
       const releaseTicket = isReleaseTicket(ticket.ticketType as BaseTicketType);
       const releaseBoardConfig = releaseTicket
@@ -1855,110 +1831,6 @@ export class TicketController {
       res.status(500).json({ error: 'Failed to generate summary' });
     }
   };
-
-  getPendingHumanIntervention = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { ticketId } = req.params;
-
-      if (!ticketId) {
-        res.status(400).json({ error: 'ticketId is required' });
-        return;
-      }
-      const pendingStep = await this.findPendingUserApprovalStep(ticketId);
-
-      if (!pendingStep) {
-        res.status(200).json({
-          requiresIntervention: false,
-          step: null
-        });
-        return;
-      }
-
-      let stepTitle = 'Human Intervention Required';
-      let responseSchema = null;
-
-      if (pendingStep.data) {
-        try {
-          const stepData = JSON.parse(pendingStep.data);
-          stepTitle = stepData?.externalMetadata?.title || stepTitle;
-          responseSchema = stepData?.externalMetadata?.response_schema || null;
-        } catch (e) {
-          // Ignore parse errors
-        }
-      }
-
-      res.status(200).json({
-        requiresIntervention: true,
-        step: {
-          id: pendingStep.id,
-          stepName: pendingStep.stepName,
-          title: stepTitle,
-          responseSchema,
-          workflowExecutionId: pendingStep.workflowExecutionId,
-          createdAt: pendingStep.createdAt
-        }
-      });
-    } catch (error) {
-      logger.error('Error checking pending human intervention:', error);
-      res.status(500).json({ error: 'Failed to check pending human intervention' });
-    }
-  };
-
-  private async findPendingUserApprovalStep(ticketId: string) {
-    const workflows = await prisma.workflow.findMany({
-      where: { ticketId },
-      select: { id: true }
-    });
-
-    if (workflows.length === 0) {
-      return null;
-    }
-
-    const workflowIds = workflows.map(w => w.id);
-
-    const executions = await prisma.workflowExecution.findMany({
-      where: { workflowId: { in: workflowIds } },
-      select: { id: true }
-    });
-
-    if (executions.length === 0) {
-      return null;
-    }
-
-    const executionIds = executions.map(e => e.id);
-
-    // Step 3: Find input steps with stepSubType 'user_approval'
-    const inputSteps = await prisma.workflowStep.findMany({
-      where: {
-        workflowExecutionId: { in: executionIds },
-        stepExecutorType: 'external',
-        stepSubType: 'user_approval',
-        type: 'input'
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    if (inputSteps.length === 0) {
-      return null;
-    }
-
-    for (const inputStep of inputSteps) {
-      // Any approver's response counts as answered, so it runs above the caller's own scope.
-      const externalStepResponse = await withWorkspaceScope(() =>
-        prisma.externalStepResponse.findUnique({
-          where: {
-            workflowStepId: inputStep.id
-          }
-        }),
-      );
-
-      if (!externalStepResponse) {
-        return inputStep;
-      }
-    }
-
-    return null;
-  }
 
   suggestBoard = async (req: Request, res: Response): Promise<void> => {
     try {

@@ -43,7 +43,6 @@ const envSchema = Joi.object({
   COMMON_DATABASE_POOL_SIZE: Joi.number().default(2),
   COMMON_DATABASE_POOL_TIMEOUT_SECONDS: Joi.number().default(10),
   ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
-  WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
   API_KEYS_ENABLED: Joi.boolean().default(false),
   API_KEYS_CONFIG: Joi.string().default('{}'),
   // Digital Twin: the email of the Digital Twin app's bot user (unique per
@@ -103,10 +102,7 @@ const envSchema = Joi.object({
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
   FAKE_GCS_HOST: Joi.string().allow('').default('localhost:4443'),
   TRANSCRIPTION_BUCKET_NAME: Joi.string().allow('').default(''),
-  GCS_WORKFLOW_STEPS_BUCKET_NAME: Joi.string().default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
-  GCS_WORKFLOW_VR_BUCKET_NAME: Joi.string().default(''),
-  ENABLE_WORKFLOW_STEP_GCS_SYNC: Joi.boolean().default(false),
   ENABLE_CONVERSATION_INGESTION_QUEUE: Joi.boolean().default(false),
   ENABLE_CONVERSATION_INGESTION_WORKER: Joi.boolean().default(false),
   ENABLE_EXTERNAL_SOURCE_REGISTRATION: Joi.boolean().default(true),
@@ -419,8 +415,6 @@ const envSchema = Joi.object({
   OPENCODE_AUTO_COMPACT: Joi.boolean().default(false),
   OPENCODE_MODEL: Joi.string().allow('').default(''),
   QUESTION_TIMEOUT_MINUTES: Joi.number().default(2),
-  // Default workflow executor when not specified
-  DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default('xyne-code'),
   // Default model ID for config sync service
   DEFAULT_MODEL_ID: Joi.string().default(''),
   DEFAULT_MODEL_NAME: Joi.string().default(''),
@@ -431,7 +425,6 @@ const envSchema = Joi.object({
   OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default('latest'),
   // Xyne AI Extended (web search, mem0, deep research, etc.)
   XYNE_AI_EXTENDED_URL: Joi.string().uri().allow('').default(''),
-  ENABLE_WORKFLOW_RECOVERY: Joi.boolean().default(true),
   // Otel Configuration
   ENABLE_OTEL_METRICS: Joi.boolean().default(true),
   OTEL_BASE_URL: Joi.string().default('http://localhost:4318'),
@@ -764,8 +757,6 @@ export const config = {
     ticketSequenceEnabled: envVars.ENABLE_COMMON_DB_TICKET_SEQUENCE,
   },
   workflow: {
-    lockDurationMs: envVars.WORKFLOW_LOCK_DURATION_MS,
-    defaultExecutor: envVars.DEFAULT_WORKFLOW_EXECUTOR,
     defaultModelId: envVars.DEFAULT_MODEL_ID,
     defaultModelName: envVars.DEFAULT_MODEL_NAME,
   },
@@ -834,14 +825,11 @@ export const config = {
     bundleBucketName: envVars.GCS_BUNDLE_BUCKET_NAME,
     canvasBucketName: envVars.GCS_CANVAS_BUCKET_NAME,
     docsBucketName: envVars.GCS_DOCS_BUCKET_NAME,
-    workflowStepsBucketName: envVars.GCS_WORKFLOW_STEPS_BUCKET_NAME,
     sessionRecordingBucketName: envVars.GCS_SESSION_RECORDING_BUCKET_NAME,
-    workflowVRBucketName: envVars.GCS_WORKFLOW_VR_BUCKET_NAME,
     maxFileSizeMB: envVars.GCS_MAX_FILE_SIZE_MB,
     fakeGcsHost: envVars.FAKE_GCS_HOST,
     transcriptionBucketName: envVars.TRANSCRIPTION_BUCKET_NAME,
   },
-  enableWorkflowStepGcsSync: envVars.ENABLE_WORKFLOW_STEP_GCS_SYNC,
   enableConversationIngestionQueue: envVars.ENABLE_CONVERSATION_INGESTION_QUEUE,
   enableConversationIngestionWorker: envVars.ENABLE_CONVERSATION_INGESTION_WORKER,
   enableExternalSourceRegistration: envVars.ENABLE_EXTERNAL_SOURCE_REGISTRATION,
@@ -1142,7 +1130,6 @@ export const config = {
     pluginEnabled: envVars.OPENCODE_PLUGIN_ENABLED,
     pluginVersion: envVars.OPENCODE_PLUGIN_VERSION,
   },
-  workflowRecoveryEnabled: envVars.ENABLE_WORKFLOW_RECOVERY,
   ticketDescriptionClean: {
     model: envVars.TICKET_DESC_CLEAN_MODEL,
     maxRetries: envVars.TICKET_DESC_CLEAN_MAX_RETRIES,

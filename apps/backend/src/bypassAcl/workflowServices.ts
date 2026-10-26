@@ -1,9 +1,8 @@
-import type { PrismaClient } from '@prisma/client';
 import type { WorkflowRecord, FolderRecord, ExecutionRecord } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import { WORKFLOWS_SCOPE, WORKFLOWS_TYPE } from '@/workflowsV2/constants';
 import { toWorkflowRecord, toFolderRecord, toExecutionRecord } from '@/workflowsV2/utils';
-import { asSystem, rawQuery } from './base';
+import { asSystem } from './base';
 
 /**
  * Relocated from workflowsV2/authorizer.ts's executionWorkspaces. Execution records carry no
@@ -174,20 +173,5 @@ export function workspaceForWorkflow(workflowId: string): Promise<string | null>
       if (!row) return null;
       return toExecutionRecord(row, row.workflow?.metadata ?? null, row.workflowExecutionState);
     },
-  );
-}
-
-/**
- * Relocated from database/repositories/workflows' claimNextPendingExecution. The claim uses
- * `FOR UPDATE SKIP LOCKED` so that competing worker pods cannot claim the same execution;
- * the statement text is built by buildClaimQuery and passed through unchanged.
- */
-export async function claimNextPendingExecutionRow(client: PrismaClient, query: string): Promise<Array<{ id: string }>> {
-  return rawQuery(
-    ['WorkflowExecution'],
-    'workflow scheduler: FOR UPDATE SKIP LOCKED claim query, built by buildClaimQuery',
-    () => client.$queryRawUnsafe<Array<{ id: string }>>(
-      query
-    ),
   );
 }

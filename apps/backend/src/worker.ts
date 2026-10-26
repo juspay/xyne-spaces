@@ -5,9 +5,6 @@ import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/
 import { DatabaseClient } from '@/database/client'
 import { CommonDatabaseClient } from '@/database/commonClient'
 import { describeRejection, logger } from '@/utils/logger'
-import { pollingService } from './workflows/services/polling-service'
-import { eventPollingService } from './workflows/services/event-polling-service'
-import { registerAllWorkflows } from '@/workflows'
 import { vespaWorker } from './workers/vespaWorker'
 import { vespaFileWorker } from './workers/vespaFileWorker'
 import {
@@ -18,7 +15,6 @@ import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
-import { gcsPollingService } from './services/gcsPollingService'
 import { notificationWorker } from '@/notification-service/consumers/notificationWorker'
 import { notificationService, notificationService as realTimeNotificationService } from '@/notification-service'
 import { redisService } from '@/services/redisService'
@@ -28,7 +24,6 @@ import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel'
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { initializeBotRegistry } from '@/bots/registry';
-import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
@@ -50,7 +45,6 @@ import { autoDraftWorker } from '@/workers/autoDraftWorker';
 import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
 import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
 import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
-import { recoveryService } from './workflows/services/recovery-service'
 import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
@@ -83,9 +77,6 @@ class WorkerService {
         commonDatabase: isCommonDatabaseConnected ? 'connected' : 'unavailable',
       })
 
-      // Register workflow definitions
-      logger.info('Registering workflow definitions in worker...')
-      registerAllWorkflows()
       initializeBotRegistry()
 
       logger.info('Initializing Vespa queue (producer)...')
@@ -93,7 +84,6 @@ class WorkerService {
 
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
-      const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
       const activityClassificationEnabled =
         process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
       const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
@@ -104,14 +94,6 @@ class WorkerService {
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
-          // Only schedule recovery if not disabled (recovery should run in separate pod)
-    const enableRecovery = appConfig.workflowRecoveryEnabled
-    const workflowType = process.env.WORKFLOW_TYPE
-    if (enableRecovery) {
-      await recoveryService.start()
-    } else {
-      logger.info('Recovery worker is disabled ')
-    }
       const enableNotificationProducer = process.env.ENABLE_NOTIFICATION_PRODUCER === 'true';
 
       if (vespaEnabled) {
@@ -153,21 +135,6 @@ class WorkerService {
         )
         startRuntimeConfigPolling()
         void startDoclingSchedulerRole(appConfig.doclingScheduler.role)
-      }
-
-      if(workflowType){
-        logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only starting workers compatible with this workflow type.`)
-        await Promise.all([
-          pollingService.start(),
-          eventPollingService.start(),
-        ])
-      }
-      else{
-        logger.info('WORKFLOW_TYPE is not set. workflow polling and event polling workers will not be started.')
-      }
-
-      if (gcsPollingEnabled) {
-        await gcsPollingService.start()
       }
 
       if (activityClassificationEnabled) {
@@ -219,11 +186,6 @@ class WorkerService {
       if (appConfig.decisionEval.enabled) {
         logger.info('Starting decision evaluation worker...');
         await decisionEvaluationWorker.start();
-      }
-
-      if (appConfig.enableWorkflowStepGcsSync) {
-        logger.info('Initializing workflow step GCS sync queue...');
-        await workflowStepGcsSyncQueue.initialize();
       }
 
       if (appConfig.enableConversationIngestionQueue) {
@@ -450,7 +412,6 @@ class WorkerService {
       }
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
-      const gcsPollingEnabled = process.env.ENABLE_GCS_POLLING_WORKER === 'true'
       const activityClassificationEnabled =
         process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
       const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
@@ -461,11 +422,6 @@ class WorkerService {
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
       const messageClassificationEnabled = appConfig.messageClassificationEnabled
-      const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
-      const workflowType = process.env.WORKFLOW_TYPE
-      if (enableRecovery) {
-        await recoveryService.stop()
-      }
 
       if (vespaEnabled) {
         await vespaWorker.shutdown()
@@ -484,18 +440,6 @@ class WorkerService {
       if (appConfig.enableDriveImportWorker) {
         await closeDriveImportQueue()
       }
-      if(workflowType){
-        logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only stopping workers compatible with this workflow type.`)
-        await Promise.all([
-          pollingService.stop(),
-          eventPollingService.stop(),
-        ])
-      }
-
-      if (gcsPollingEnabled) {
-        await gcsPollingService.stop()
-      }
-
       if (activityClassificationEnabled) {
         await activityClassificationWorkerService.stop()
       }
@@ -532,11 +476,6 @@ class WorkerService {
         await workflowsWorker.stop()
         const { shutdownWorkflows } = await import('@/workflowsV2/runtime')
         await shutdownWorkflows()
-      }
-
-      if (appConfig.enableWorkflowStepGcsSync) {
-        logger.info('Closing workflow step GCS sync queue...');
-        await workflowStepGcsSyncQueue.close();
       }
 
       await heicRenditionQueue.shutdown();

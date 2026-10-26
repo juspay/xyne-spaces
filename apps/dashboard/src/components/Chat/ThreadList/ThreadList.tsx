@@ -20,7 +20,6 @@ import { useThreadListInitialScroll } from './useThreadListInitialScroll';
 import type { ThreadListItemWithSeparator } from '../../../utils/chatUtils';
 import { DatePill } from '../DatePill';
 import { MessageType, ChannelScopeType } from '@xyne/shared';
-import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useMessageEdit, withEditSurface } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
@@ -39,7 +38,6 @@ type ThreadListProps = {
   messagesWithSeparators?: ThreadListItemWithSeparator[] | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   conversation?: ConversationWithTicket | undefined;
-  workflowNumberMap?: Map<string, number>;
   disableAskAI?: boolean;
   enableCollapsing?: boolean;
   enableJumpFab?: boolean;
@@ -83,7 +81,6 @@ const ThreadList = ({
   messagesWithSeparators,
   channelScopeType,
   conversation,
-  workflowNumberMap,
   disableAskAI,
   enableCollapsing = false,
   enableJumpFab = true,
@@ -642,14 +639,6 @@ const ThreadList = ({
               const threadMessage = item.data;
               const messageIndex = messageIndexById.get(threadMessage.messageId) ?? -1;
               const previousMessage = threadMessages[messageIndex - 1];
-              const previousMessageMetadata = previousMessage?.metadata as MessageMetadata | null;
-              const isPreviousMessageAWorkflowMessage =
-                (previousMessage?.msgType === MessageType.SYSTEM &&
-                  previousMessageMetadata?.workflowId &&
-                  previousMessageMetadata?.ticketId) ||
-                (previousMessage?.msgType === MessageType.BOT &&
-                  previousMessageMetadata?.xyneId &&
-                  previousMessageMetadata?.ticketId);
               const prevMsgMetadataasRecord = previousMessage?.metadata as Record<
                 string,
                 unknown
@@ -679,7 +668,6 @@ const ThreadList = ({
                 messageIndex < 2 ||
                 !threadMessage ||
                 threadMessages[messageIndex - 1]?.senderId !== threadMessage.senderId ||
-                !!isPreviousMessageAWorkflowMessage ||
                 isPreviousMessageAnActivity ||
                 isPreviousMessageSystem(messageIndex, threadMessages) ||
                 (!!threadMessages[messageIndex - 1] &&
@@ -703,7 +691,6 @@ const ThreadList = ({
                       isTicketThread={isTicketThread}
                       channelScopeType={channelScopeType}
                       allThreadAttachments={allThreadAttachments}
-                      workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
                       isPrevActivity={isPrevRenderedItemAnActivity}
                       isNextActivity={isNextRenderedItemAnActivity}
                       {...(disableAskAI !== undefined && { disableAskAI })}
@@ -812,7 +799,6 @@ const ThreadList = ({
                     isTicketThread={isTicketThread}
                     channelScopeType={channelScopeType}
                     allThreadAttachments={allThreadAttachments}
-                    workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
                     {...(disableAskAI !== undefined && { disableAskAI })}
                     {...(conversation && { conversation })}
                     highlightMessageId={matchedMessageId ?? null}

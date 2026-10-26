@@ -36,7 +36,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'USERS', description: 'User management endpoints (/api/users/*)' },
   { name: 'USER-MANAGEMENT', description: 'User and user-group administration endpoints (/api/user-management/*)' },
   { name: 'USER-GROUPS', description: 'User Groups dashboard access and group visibility management' },
-  { name: 'WORKFLOWS', description: 'Workflow management endpoints (/api/workflows/*)' },
+  { name: 'WORKFLOWS', description: 'Workflows surface (/api/workflows-v2/*)' },
   { name: 'AGENTS', description: 'Agent management endpoints (/api/agents/*)' },
   { name: 'TOOLS', description: 'Tool management endpoints (/api/tools/*)' },
   { name: 'MODELS', description: 'Model management endpoints (/api/models/*)' },

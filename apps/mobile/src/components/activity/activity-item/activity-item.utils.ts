@@ -282,8 +282,6 @@ const getActivityActionText = (activity: ActivityWithRelated, currentUserId?: st
       return ' assigned you as PR reviewer';
     case 'ticket_qa_assigned':
       return ' assigned you QA';
-    case 'workflow_question':
-      return ' asked a question';
     default:
       return '';
   }

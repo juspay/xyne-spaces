@@ -19,7 +19,6 @@ export interface ScheduledCallPillSnapshot {
 export interface MessageMetadata {
   ticketId?: string;
   xyneId?: string;
-  workflowId?: string;
   workflowName?: string;
   workflowType?: string;
   executionTime?: string;
@@ -43,14 +42,6 @@ export interface MessageMetadata {
   recordingType?: string;
   prdCanvasUrl?: string;
   detailedSummaryCanvasUrl?: string;
-  completedSteps?: Array<{
-    stepName: string;
-    status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
-  }>;
-  pendingSteps?: Array<{
-    stepName: string;
-    status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
-  }>;
   rerunStartTime?: string;
   executorType?: string;
   useQuestioningMode?: boolean;

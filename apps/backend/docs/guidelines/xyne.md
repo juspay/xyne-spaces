@@ -39,7 +39,6 @@ npm run lint
 | [SERVICES.md](SERVICES.md) | All services catalog with descriptions |
 | [JOBS.md](JOBS.md) | Queues, workers, background processing |
 | [AUTH.md](AUTH.md) | Authentication, authorization, middleware |
-| [WORKFLOWS.md](WORKFLOWS.md) | Workflow engine, stages, automation |
 | [INTEGRATIONS.md](INTEGRATIONS.md) | External integrations overview |
 | [integrations/](integrations/) | Individual integration docs (Slack, Zoho, Bitbucket, Jenkins, JAF) |
 | [zero/](zero/) | Zero sync framework (overview, queries, mutators, schema) |

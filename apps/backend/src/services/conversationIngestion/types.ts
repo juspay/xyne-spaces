@@ -1,4 +1,4 @@
-export type ConversationSource = 'workflowSteps' | 'xyne-cli' | 'claude';
+export type ConversationSource = 'xyne-cli' | 'claude';
 
 export interface MemoryIngestionContext {
   sessionId: string;

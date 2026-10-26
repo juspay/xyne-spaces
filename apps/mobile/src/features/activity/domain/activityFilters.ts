@@ -93,7 +93,6 @@ export const getActivityTypes = (tab: ActivityTab): string[] => {
         'ticket_pr_declined',
         'ticket_pr_reviewer_assigned',
         'ticket_qa_assigned',
-        'workflow_question',
       ];
     default:
       return [];

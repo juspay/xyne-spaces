@@ -45,8 +45,6 @@ import communityRoutes from '@/routes/community';
 import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
-import { registerAllWorkflows } from '@/workflows';
-import workflowRoutes from '@/routes/workflows';
 import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
@@ -488,12 +486,6 @@ export class App {
       authMiddleware.authenticate,
       aclMiddleware.checkAccess,
       ticketReportRoutes
-    );
-    this.app.use(
-      '/api/workflows',
-      authMiddleware.authenticate,
-      aclMiddleware.checkAccess,
-      workflowRoutes
     );
     this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
     this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
@@ -1049,12 +1041,8 @@ export class App {
     logger.info('Initializing bookmark reminder service...');
     await bookmarkReminderService.initialize();
 
-    // Ensure default model and tools exist before synchronizing config
+    // Ensure default model and tools exist
     await configSyncService.ensureDefaultModelAndTools();
-
-    // Synchronize config.json with database before starting other services
-    logger.info('Synchronizing configuration with database...');
-    await configSyncService.syncConfigWithDatabase();
 
     // Initialize and start model sync queue (Bull-based scheduling)
     // Only run when LiteLLM is configured; otherwise there is nothing to sync
@@ -1123,10 +1111,6 @@ export class App {
     } else {
       logger.info('Skipping external-source bot registration (ENABLE_EXTERNAL_SOURCE_REGISTRATION=false)');
     }
-
-    // Register workflow definitions
-    logger.info('Registering workflow definitions...');
-    registerAllWorkflows();
 
     // Initialize bot framework
     logger.info('Initializing bot framework...');

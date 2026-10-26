@@ -80,9 +80,8 @@ import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
 import { RunOriginChip } from './RunOriginChip';
 import { PhoneDefault } from '@xyne/icons';
-import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
-import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
+import { PendingIcon } from '../../../assets/icons/PendingIcon';
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
@@ -542,7 +541,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelScopeType,
   isFirstInThread = false,
   allThreadAttachments,
-  workflowNumber,
   showLinkPreview: shouldRenderLinkPreview = true,
   callLinkCardShown,
   searchItemView = false,
@@ -563,7 +561,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showLinkPreview, setShowLinkPreview] = useState(true);
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
-  const isBotMessage = message.msgType === MessageType.BOT;
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
   const previewResult = parsePreviewMd(message.link_preview_md);
@@ -616,13 +613,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     color: 'hsl(var(--muted-foreground))',
     opacity: 0.5,
   };
-  const isWorkflowMessage =
-    (isSystemMessage && metadata?.workflowId && metadata?.ticketId && !metadata?.messageSubtype) ||
-    (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isTicketCardMessage =
-    !!conversation?.ticket_md &&
-    conversation?.initialMessageId === message.messageId &&
-    !isWorkflowMessage;
+    !!conversation?.ticket_md && conversation?.initialMessageId === message.messageId;
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isCallMessage = metadata?.isCallMessage === true;
   // Read-only scheduled-call card. Kept off isCallMessage on purpose: that flag opts a
@@ -845,7 +837,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         threadInfo={threadInfo}
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
-        workflowNumber={workflowNumber}
         {...(recordingShare && {
           recordingShare,
         })}
@@ -934,19 +925,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* ================== LEFT AVATAR ================== */}
         {!contentOnly && (
           <div
-            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage && !isHeadlessRecordingAnchor ? 'pt-[4px]' : ''}`}
+            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isHeadlessRecordingAnchor ? 'pt-[4px]' : ''}`}
           >
             {message.isDeleted ? (
               <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted'>
                 <Trash2 className='w-4 h-4 text-muted-foreground' />
               </div>
-            ) : isWorkflowMessage ? (
-              <img
-                src={workflowBotAvatar}
-                alt='No files shared in this channel yet.'
-                width={32}
-                height={32}
-              />
             ) : showAvatar && isCallMessage && !isForwardedMessage ? (
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted-foreground/10'}`}
@@ -1138,7 +1122,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           )}
 
-          {showAvatar && !isWorkflowMessage && (
+          {showAvatar && (
             <div className='w-full flex items-baseline gap-2 min-h-4 '>
               {isCallMessage && !isForwardedMessage ? (
                 <h3
@@ -1641,7 +1625,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
                                 disableLinks={disableLinks}
-                                message={isWorkflowMessage ? 'Workflow created' : message.content}
+                                message={message.content}
                                 showEdited={message.edited}
                                 isSystemMessage={isSystemMessage}
                                 messageId={message.messageId}
@@ -1677,7 +1661,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               )}
 
-              {conversation && conversation.ticket_md && !isWorkflowMessage && (
+              {conversation && conversation.ticket_md && (
                 <BotBubble
                   context={context}
                   messageId={message.messageId}

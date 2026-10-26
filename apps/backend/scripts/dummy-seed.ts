@@ -1109,30 +1109,6 @@ async function main() {
       });
       console.log(`    ✅ Created 6 workflow steps`);
 
-      // Create Workflow Knowledge
-      console.log('  Creating Workflow Knowledge...');
-      await tx.workflowKnowledge.createMany({
-        data: [
-          {
-            workflowExecutionId: exec1.id,
-            checkpointId: generateId(),
-            learningType: 'pattern',
-            title: 'Async Execution Pattern',
-            content: 'Use promises and async/await for sequential workflow execution',
-            filePaths: ['workflow-engine.ts']
-          },
-          {
-            workflowExecutionId: exec2.id,
-            checkpointId: generateId(),
-            learningType: 'bug-fix',
-            title: 'Token Refresh Logic',
-            content: 'Always validate token before refreshing and handle edge cases',
-            filePaths: ['auth-service.ts', 'token-manager.ts']
-          }
-        ]
-      });
-      console.log(`    ✅ Created 2 workflow knowledge records`);
-
       // ============================================
       // PHASE 5: Forms & Other Entities
       // ============================================

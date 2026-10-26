@@ -47,7 +47,6 @@ export interface MobileMessageMyBubbleProps {
     | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
-  workflowNumber?: number | undefined;
   recordingShare?: ResolvedRecordingShareMessage | null;
   onClick?: ((e: React.MouseEvent<HTMLDivElement>) => void) | undefined;
 }
@@ -83,16 +82,10 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   const attachments = message.attachments || [];
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
-  const isBotMessage = message.msgType === MessageType.BOT;
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
-  const isWorkflowMessage =
-    (isSystemMessage && metadata?.workflowId && metadata?.ticketId) ||
-    (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isTicketCardMessage =
-    !!conversation?.ticket_md &&
-    conversation?.initialMessageId === message.messageId &&
-    !isWorkflowMessage;
+    !!conversation?.ticket_md && conversation?.initialMessageId === message.messageId;
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isActiveCall = useIsCallActive(metadata?.callId);
   const { isMobile } = usePlatform();
@@ -329,7 +322,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                   style={isSystemMessage ? systemMessageStyles : undefined}
                 >
                   <ExpandableMessage
-                    message={isWorkflowMessage ? 'Workflow created' : message.content}
+                    message={message.content}
                     showEdited={message.edited}
                     maxHeight={500}
                     messageId={message.messageId}
@@ -370,7 +363,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
             </div>
           )}
 
-          {conversation && conversation.ticket_md && !isWorkflowMessage && (
+          {conversation && conversation.ticket_md && (
             <div className='w-full'>
               <BotBubble
                 context={context}

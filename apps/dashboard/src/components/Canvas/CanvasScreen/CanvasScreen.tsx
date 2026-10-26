@@ -35,7 +35,6 @@ import {
   AudioLines,
   ArrowLeft,
   Archive,
-  CheckCircle,
   GitCompare,
   Loader2,
   MessageSquare,
@@ -69,7 +68,6 @@ import { formatDate, formatRelativeTime, formatTimeAmPm } from '../../../utils/d
 import type {
   Canvas,
   CanvasParticipant,
-  KnowledgeCanvasMetadata,
   CanvasEditorRef,
   CollaborativeCanvasEditorRef,
 } from '../Canvas.types';
@@ -87,7 +85,6 @@ import {
 import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
-import { approveKnowledgeCanvas } from '../../../services/Knowledge/knowledgeService';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -254,8 +251,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [showSendConfirmation, setShowSendConfirmation] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [isApproving, setIsApproving] = useState(false);
-  const [isApproved, setIsApproved] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState('white');
   const [collaborators, setCollaborators] = useState<CollaboratorInfo[]>([]);
   const {
@@ -486,13 +481,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
       currentCanvasIdRef.current = canvas.id;
 
-      // Check if this is a knowledge canvas and set approval state
-      const metadata = canvas.metadata as KnowledgeCanvasMetadata | undefined;
-      if (metadata?.source === 'workflow_knowledge') {
-        setIsApproved(!!metadata.approvedAt);
-      } else {
-        setIsApproved(false);
-      }
       setSelectedTheme('white');
       if (
         !isFirstAccessLevelComputeRef.current &&
@@ -1070,44 +1058,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     handleBack();
   }, [handleBack, saveCanvasExitSnapshot]);
 
-  // Check if this is a knowledge canvas
-  const isKnowledgeCanvas =
-    selectedCanvas?.metadata &&
-    (selectedCanvas.metadata as KnowledgeCanvasMetadata).source === 'workflow_knowledge';
   const isCallDetailedSummaryCanvas =
     selectedCanvas?.metadata &&
     typeof selectedCanvas.metadata === 'object' &&
     !Array.isArray(selectedCanvas.metadata) &&
     selectedCanvas.metadata.source === 'call_detailed_summary';
-
-  // Handle knowledge approval
-  const handleApproveKnowledge = async (): Promise<void> => {
-    if (!selectedCanvas?.id || isApproving || isApproved) return;
-
-    setIsApproving(true);
-    try {
-      const result = await approveKnowledgeCanvas(selectedCanvas.id);
-
-      if (result.success) {
-        setIsApproved(true);
-        toast.success(result.alreadyApproved ? 'Already Approved' : 'Success', {
-          description: result.alreadyApproved
-            ? 'This knowledge has already been approved to the knowledge base.'
-            : 'Knowledge has been approved and added to the knowledge base.',
-        });
-      } else {
-        toast.error('Error', {
-          description: 'Failed to approve knowledge. Please try again.',
-        });
-      }
-    } catch {
-      toast.error('Error', {
-        description: 'Failed to approve knowledge. Please try again.',
-      });
-    } finally {
-      setIsApproving(false);
-    }
-  };
 
   const handleFileUpload = useCallback(
     async (file: File) => {
@@ -1404,35 +1359,6 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                         View only
                       </span>
                     )}
-                    {/* Approve to Knowledge Base Button (Only for Knowledge Canvases) */}
-                    {isKnowledgeCanvas && selectedCanvas?.id && (
-                      <div>
-                        {isApproved ? (
-                          <Button variant='secondary' size='sm' disabled>
-                            <CheckCircle size={16} className='text-green-600' />
-                            Approved
-                          </Button>
-                        ) : (
-                          <Button
-                            variant='default'
-                            size='sm'
-                            onClick={() => void handleApproveKnowledge()}
-                            disabled={isApproving}
-                            data-track-category='CANVAS'
-                            data-track-name='APPROVE_KNOWLEDGE'
-                            data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
-                          >
-                            {isApproving ? (
-                              <Loader2 size={16} className='animate-spin' />
-                            ) : (
-                              <CheckCircle size={16} />
-                            )}
-                            {isApproving ? 'Approving...' : 'Approve to Knowledge Base'}
-                          </Button>
-                        )}
-                      </div>
-                    )}
-
                     {selectedCanvas?.id && (
                       <>
                         {/* Avatar stack — opens the canvas details popover */}
