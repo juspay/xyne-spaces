@@ -13,7 +13,8 @@ import { fetchSlackUserInfo } from '../../integrations/adapters/slack-webhook-ti
 import { UserRepository } from '../../database/repositories/users';
 import { conversationService } from '../../services/conversationService';
 import { findOrCreateUser, ingestConversationSlack } from '../scripts/ingestConversationSlack';
-import { generateTitle } from '../../services/agents/title-generator';
+// Disabled (LLM)
+// import { generateTitle } from '../../services/agents/title-generator';
 import {
   fetchThreadReplies,
   transformReply,
@@ -397,28 +398,30 @@ async function ingestTicket(
 
   // Generate title: try AI first, fallback to task_type and JIRA ID
   const fallbackTitle = `${ticket.task_type}: ${ticket.jira_issue_id}`;
-  let titleText: string;
-
-  if (ticket.task_description?.trim()) {
-    try {
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Title generation timeout after 15 seconds')), 15000);
-      });
-      const titleResult = await Promise.race([
-        generateTitle({ description: ticket.task_description }, { userId, channelId }),
-        timeoutPromise,
-      ]);
-      titleText = titleResult.title;
-    } catch (error) {
-      logger.warn('[Migration] Failed to generate title, using fallback', {
-        ticketId: ticket.id,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-      titleText = fallbackTitle;
-    }
-  } else {
-    titleText = fallbackTitle;
-  }
+  // Disabled (LLM)
+  // let titleText: string;
+  //
+  // if (ticket.task_description?.trim()) {
+  //   try {
+  //     const timeoutPromise = new Promise<never>((_, reject) => {
+  //       setTimeout(() => reject(new Error('Title generation timeout after 15 seconds')), 15000);
+  //     });
+  //     const titleResult = await Promise.race([
+  //       generateTitle({ description: ticket.task_description }, { userId, channelId }),
+  //       timeoutPromise,
+  //     ]);
+  //     titleText = titleResult.title;
+  //   } catch (error) {
+  //     logger.warn('[Migration] Failed to generate title, using fallback', {
+  //       ticketId: ticket.id,
+  //       error: error instanceof Error ? error.message : 'Unknown error',
+  //     });
+  //     titleText = fallbackTitle;
+  //   }
+  // } else {
+  //   titleText = fallbackTitle;
+  // }
+  const titleText = fallbackTitle;
 
   // Create conversation
   const conversation = await conversationService.createConversationWithMessage({

@@ -12,7 +12,8 @@ import {
   BarChart4,
   AlertCircle,
   Check,
-  Sparkles,
+  // Disabled (LLM)
+  // Sparkles,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -33,14 +34,16 @@ import { Popover } from '../../ui/Popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import {
-  AICategorySubmenu,
+  // Disabled (LLM)
+  // AICategorySubmenu,
   DynamicFieldSubmenu,
   PrioritySubmenu,
   StagesSubmenu,
   UserSubmenu,
   UserGroupSubmenu,
 } from '../../Tickets/TicketFilters/Submenus';
-import { classificationApi } from '../../../api/classificationApi';
+// Disabled (LLM)
+// import { classificationApi } from '../../../api/classificationApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
 import { DeskMetricsDateRangePicker, matchPreset } from './DeskMetricsDateRangePicker';
 import {
@@ -1491,7 +1494,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   // Prevents mutually-exclusive tags (e.g. sentiment) from disappearing when
   // selecting one tag filters the cohort and the API stops returning the others.
   const [stableTagsInCategory, setStableTagsInCategory] = useState<string[]>([]);
-  const [availableAiCategories, setAvailableAiCategories] = useState<string[]>([]);
+  // Disabled (LLM)
+  // const [availableAiCategories, setAvailableAiCategories] = useState<string[]>([]);
 
   useEffect(() => {
     setCustomFieldPopoverOpen(false);
@@ -1499,25 +1503,26 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     if (!isMultiDesk && activeTab === 'desks') setActiveTab('overview');
   }, [activeTab, isMultiDesk, setActiveTab]);
 
-  useEffect(() => {
-    if (!open || !channelId || isMultiDesk) {
-      setAvailableAiCategories([]);
-      return;
-    }
-    let cancelled = false;
-    setAvailableAiCategories([]);
-    classificationApi
-      .getAiCategories(channelId)
-      .then(categories => {
-        if (!cancelled) setAvailableAiCategories(categories);
-      })
-      .catch(() => {
-        if (!cancelled) setAvailableAiCategories([]);
-      });
-    return (): void => {
-      cancelled = true;
-    };
-  }, [open, channelId, isMultiDesk]);
+  // Disabled (LLM)
+  // useEffect(() => {
+  //   if (!open || !channelId || isMultiDesk) {
+  //     setAvailableAiCategories([]);
+  //     return;
+  //   }
+  //   let cancelled = false;
+  //   setAvailableAiCategories([]);
+  //   classificationApi
+  //     .getAiCategories(channelId)
+  //     .then(categories => {
+  //       if (!cancelled) setAvailableAiCategories(categories);
+  //     })
+  //     .catch(() => {
+  //       if (!cancelled) setAvailableAiCategories([]);
+  //     });
+  //   return (): void => {
+  //     cancelled = true;
+  //   };
+  // }, [open, channelId, isMultiDesk]);
 
   const customFieldDefinitionByName = useMemo(() => {
     const definitions = new Map<string, ResolvedDisplayFormField>();
@@ -2616,6 +2621,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               </PopoverPrimitive.Portal>
                             </PopoverPrimitive.Root>
                           )}
+                        {/* Disabled (LLM) */}
+                        {/*
                         {!isMultiDesk &&
                           (!filterSearch || 'ai category'.includes(filterSearch.toLowerCase())) && (
                             <PopoverPrimitive.Root
@@ -2672,6 +2679,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                               </PopoverPrimitive.Portal>
                             </PopoverPrimitive.Root>
                           )}
+                        */}
                         {!isMultiDesk &&
                           availableCustomFields
                             .filter(

@@ -13,8 +13,10 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runBitbucketWebhook } from '@/bypassAcl/webhookIngestServices';
-import { forwardPrCardStatus } from '@/services/prCardStatusForwarder';
-import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
+// Disabled (Claw)
+// import { forwardPrCardStatus } from '@/services/prCardStatusForwarder';
+// Disabled (LLM)
+// import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -123,19 +125,20 @@ export class BitbucketWebhookService {
         // gate. Fire-and-forget, like the GitHub hook. The raw self link, not
         // context.prUrl: that is rebuilt by string replace and can carry a
         // trailing "/overview" segment into the middle of the URL.
-        const pr = context.pr;
-        resolveRadarOnPrMerge({
-          workspaceId: context.workspace,
-          provider: 'Bitbucket',
-          prUrl: pr.links?.self?.[0]?.href ?? context.prUrl,
-          storedPrUrl: context.prUrl,
-          prNumber: context.prId,
-          prTitle: pr.title,
-          repoFullName: `${context.projectName}/${pr.toRef.repository.slug}`,
-          baseBranch: context.destinationBranch,
-          mergedBy: payload.actor?.displayName ?? payload.actor?.name ?? context.prAuthor ?? 'unknown',
-          mergedAt: pr.closedDate ? new Date(pr.closedDate) : new Date(),
-        }).catch(err => logger.error('[Bitbucket-Webhook] radar PR-merge pass failed:', err));
+        // Disabled (LLM)
+        // const pr = context.pr;
+        // resolveRadarOnPrMerge({
+        //   workspaceId: context.workspace,
+        //   provider: 'Bitbucket',
+        //   prUrl: pr.links?.self?.[0]?.href ?? context.prUrl,
+        //   storedPrUrl: context.prUrl,
+        //   prNumber: context.prId,
+        //   prTitle: pr.title,
+        //   repoFullName: `${context.projectName}/${pr.toRef.repository.slug}`,
+        //   baseBranch: context.destinationBranch,
+        //   mergedBy: payload.actor?.displayName ?? payload.actor?.name ?? context.prAuthor ?? 'unknown',
+        //   mergedAt: pr.closedDate ? new Date(pr.closedDate) : new Date(),
+        // }).catch(err => logger.error('[Bitbucket-Webhook] radar PR-merge pass failed:', err));
       }
 
         // PR doesn't exist or wasn't created by workflow - run full validation
@@ -381,7 +384,8 @@ export class BitbucketWebhookService {
 
     // Also post a fresh PR status card into the originating Spaces thread (if an
     // agent opened this PR). Fully decoupled from the ticket sync below.
-    this.forwardPrCardStatus(context, 'merged');
+    // Disabled (Claw)
+    // this.forwardPrCardStatus(context, 'merged');
 
     const result = await this.prMetricsRepository.markMergedPr({
       prId: context.prId,
@@ -485,7 +489,8 @@ export class BitbucketWebhookService {
 
     // Also post a fresh PR status card into the originating Spaces thread (if an
     // agent opened this PR). Fully decoupled from the ticket sync below.
-    this.forwardPrCardStatus(context, 'declined');
+    // Disabled (Claw)
+    // this.forwardPrCardStatus(context, 'declined');
 
     const result = await this.prMetricsRepository.markDeclinedPr({
       prId: context.prId,
@@ -554,7 +559,8 @@ export class BitbucketWebhookService {
 
     // Also post a fresh PR status card into the originating Spaces thread (if an
     // agent opened this PR). Fully decoupled from the ticket sync below.
-    this.forwardPrCardStatus(context, 'deleted');
+    // Disabled (Claw)
+    // this.forwardPrCardStatus(context, 'deleted');
 
     const trackedPr = await this.prMetricsRepository.findPrByIdAndUrl(
       context.prId,
@@ -624,23 +630,24 @@ export class BitbucketWebhookService {
     logger.info(`[Bitbucket-Webhook] ✅ Marked PR as DELETED in database: ${context.prUrl}`);
   }
 
-  /** Move the agent's PR card for this PR (if any) to `status` — see forwardPrCardStatus. */
-  private forwardPrCardStatus(
-    context: PREventContext,
-    status: 'merged' | 'declined' | 'deleted',
-  ): void {
-    forwardPrCardStatus(
-      {
-        provider: 'bitbucket',
-        status,
-        prUrl: context.prUrl,
-        number: context.prId,
-        repo: `${context.projectName}/${context.repoName}`,
-        title: context.pr.title,
-      },
-      '[Bitbucket-Webhook]',
-    );
-  }
+  // Disabled (Claw)
+  // /** Move the agent's PR card for this PR (if any) to `status` — see forwardPrCardStatus. */
+  // private forwardPrCardStatus(
+  //   context: PREventContext,
+  //   status: 'merged' | 'declined' | 'deleted',
+  // ): void {
+  //   forwardPrCardStatus(
+  //     {
+  //       provider: 'bitbucket',
+  //       status,
+  //       prUrl: context.prUrl,
+  //       number: context.prId,
+  //       repo: `${context.projectName}/${context.repoName}`,
+  //       title: context.pr.title,
+  //     },
+  //     '[Bitbucket-Webhook]',
+  //   );
+  // }
 }
 
 // Singleton instance

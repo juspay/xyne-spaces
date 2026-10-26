@@ -25,7 +25,8 @@ import { useRankedActivePeople } from '../../../../hooks/useRankedPeopleSearch';
 import { useAffinityCallback } from '../../../../hooks/useAffinityCallback';
 import { useVisibleNavigationItems } from '../../../../hooks/useVisibleNavigationItems';
 import type { NavigationItem } from '../../../AppSidebar/navigationConfig';
-import { xyneAIActor } from '../../../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { sendRecordingEvent, getRecordingStatus } from '../../../../hooks/useRecordingStore';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import { getDMNames, isOneToOneDMChannel } from '../ChatDirectory.utils';
@@ -472,7 +473,8 @@ export function useSlashCommands({
   const runActionCommand = useCallback(
     (kind: SearchCommandKind): void => {
       const handlers: Partial<Record<SearchCommandKind, () => void>> = {
-        askai: () => xyneAIActor.send({ type: 'OPEN', trackSource: 'slash_command' }),
+        // Disabled (Claw)
+        // askai: () => xyneAIActor.send({ type: 'OPEN', trackSource: 'slash_command' }),
         // Start a recording in place — no navigation. The global RecordingOverlay pill surfaces it
         // wherever the user is. Any state other than idle/error means a recording is live or
         // transitioning (recording/paused/starting/stopping) — show a conflict dialog instead of

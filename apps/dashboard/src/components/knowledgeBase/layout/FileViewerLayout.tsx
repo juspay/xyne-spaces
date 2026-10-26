@@ -2,7 +2,8 @@ import React, { useEffect } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { FileViewerPanel } from '../viewer/FileViewerPanel';
 import { resolveKbBasePath } from '../../knowledgeBaseV2/utils/kbRoutePaths';
-import { xyneAIActor } from '../../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import {
   useProjectCollections,
   setProjectId,
@@ -111,25 +112,26 @@ export const FileViewerLayout: React.FC = () => {
     void navigate(getBackNavigationPath());
   };
 
-  const handleOpenChat = (docId: string, docName: string): void => {
-    const kbContext = {
-      projectId: projectId || 'default',
-      collectionId: collectionId || undefined,
-      parentDocId: resolvedFolderId || undefined,
-      docId,
-    };
-    sessionStorage.setItem('kb_xyne_ai_context', JSON.stringify(kbContext));
+  // Disabled (Claw)
+  // const handleOpenChat = (docId: string, docName: string): void => {
+  //   const kbContext = {
+  //     projectId: projectId || 'default',
+  //     collectionId: collectionId || undefined,
+  //     parentDocId: resolvedFolderId || undefined,
+  //     docId,
+  //   };
+  //   sessionStorage.setItem('kb_xyne_ai_context', JSON.stringify(kbContext));
 
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'file_viewer',
-      startFreshChat: true,
-      kbCollectionId: collectionId ?? null,
-      kbChannelId: channelId ?? null,
-      kbDocId: docId,
-      kbDocName: docName,
-    });
-  };
+  //   xyneAIActor.send({
+  //     type: 'OPEN',
+  //     trackSource: 'file_viewer',
+  //     startFreshChat: true,
+  //     kbCollectionId: collectionId ?? null,
+  //     kbChannelId: channelId ?? null,
+  //     kbDocId: docId,
+  //     kbDocName: docName,
+  //   });
+  // };
 
   return (
     <div className='flex h-full overflow-hidden'>
@@ -138,7 +140,8 @@ export const FileViewerLayout: React.FC = () => {
         fileId={fileId}
         {...(initialPage !== undefined ? { initialPage } : {})}
         {...(initialChunkIndex !== undefined ? { initialChunkIndex } : {})}
-        onOpenChat={handleOpenChat}
+        // Disabled (Claw)
+        // onOpenChat={handleOpenChat}
       />
     </div>
   );

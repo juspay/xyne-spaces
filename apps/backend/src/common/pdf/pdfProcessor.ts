@@ -461,7 +461,9 @@ export class PdfProcessor {
     const disableFallbacks = config.pdf.disableFallbacks
 
     // Step 1: OCR (LightOnOCR sync → Docling)
-    if (useOCR) {
+    // Disabled (LLM)
+    // if (useOCR) {
+    if (useOCR && (false as boolean)) {
       try {
         if (config.pdf.lightOnOcr.enabled) {
           logger.info(`[PdfProcessor] Trying LightOnOCR (sync) for ${fileName}`)

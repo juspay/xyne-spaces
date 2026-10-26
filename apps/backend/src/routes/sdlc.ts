@@ -13,7 +13,8 @@ import {
   sdlcHubPinSchema,
   sdlcVcsProviderSchema,
   updateSdlcVcsCredentialSchema,
-  type SandboxProfileConfig,
+  // Disabled (Claw)
+  // type SandboxProfileConfig,
 } from '@xyne/shared';
 import { authorize } from '@/middleware/authorize';
 import { AppError } from '@/middleware/errorHandler';
@@ -27,21 +28,24 @@ import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
 import { listEnvironments } from '@/sdlc/sdlcEnvironment';
-import { listHubAgents, markHubAgentPending } from '@/sdlc/sdlcHubAgents';
+// Disabled (Claw)
+// import { listHubAgents, markHubAgentPending } from '@/sdlc/sdlcHubAgents';
 import {
-  linkHubSkill,
+  // Disabled (Claw)
+  // linkHubSkill,
   listHubKnowledgeLinks,
   setHubPin,
   unlinkHubSkill,
 } from '@/sdlc/hubKnowledge';
-import {
-  createSandboxProfile,
-  listSandboxProfiles,
-  resetSandboxProfile,
-  setSandboxProfileEnabled,
-  updateSandboxProfile,
-} from '@/sdlc/sdlcSandboxProfiles';
-import { listClawSandboxTemplates } from '@/services/clawSandboxProfilesService';
+// Disabled (Claw)
+// import {
+//   createSandboxProfile,
+//   listSandboxProfiles,
+//   resetSandboxProfile,
+//   setSandboxProfileEnabled,
+//   updateSandboxProfile,
+// } from '@/sdlc/sdlcSandboxProfiles';
+// import { listClawSandboxTemplates } from '@/services/clawSandboxProfilesService';
 import { requireSdlcProjectAccess } from '@/sdlc/sdlcProjectAccess';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
@@ -164,22 +168,23 @@ router.post(
   })
 );
 
-router.get(
-  '/channels/:channelId/agents',
-  route(async (req, res) => {
-    const agents = await listHubAgents(prisma, actorFromRequest(req), req.params.channelId);
-    res.status(200).json({ success: true, ...agents });
-  })
-);
-
-router.post(
-  '/channels/:channelId/agents/pending',
-  route(async (req, res) => {
-    const { agentId } = z.object({ agentId: z.string().min(1) }).parse(req.body);
-    await markHubAgentPending(prisma, actorFromRequest(req), req.params.channelId, agentId);
-    res.status(204).send();
-  })
-);
+// Disabled (Claw)
+// router.get(
+//   '/channels/:channelId/agents',
+//   route(async (req, res) => {
+//     const agents = await listHubAgents(prisma, actorFromRequest(req), req.params.channelId);
+//     res.status(200).json({ success: true, ...agents });
+//   })
+// );
+//
+// router.post(
+//   '/channels/:channelId/agents/pending',
+//   route(async (req, res) => {
+//     const { agentId } = z.object({ agentId: z.string().min(1) }).parse(req.body);
+//     await markHubAgentPending(prisma, actorFromRequest(req), req.params.channelId, agentId);
+//     res.status(204).send();
+//   })
+// );
 
 router.get(
   '/channels/:channelId/knowledge',
@@ -189,14 +194,15 @@ router.get(
   })
 );
 
-router.post(
-  '/channels/:channelId/knowledge/skills',
-  route(async (req, res) => {
-    const { skillId } = z.object({ skillId: z.string().min(1).max(64) }).parse(req.body);
-    await linkHubSkill(actorFromRequest(req), req.params.channelId, skillId);
-    res.status(204).send();
-  })
-);
+// Disabled (Claw)
+// router.post(
+//   '/channels/:channelId/knowledge/skills',
+//   route(async (req, res) => {
+//     const { skillId } = z.object({ skillId: z.string().min(1).max(64) }).parse(req.body);
+//     await linkHubSkill(actorFromRequest(req), req.params.channelId, skillId);
+//     res.status(204).send();
+//   })
+// );
 
 router.delete(
   '/channels/:channelId/knowledge/skills/:skillId',
@@ -223,62 +229,63 @@ router.get(
   })
 );
 
-// claw-auth validates the config itself and its first error comes back as a 400.
-const sandboxProfileConfigSchema = z.custom<SandboxProfileConfig>(
-  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
-  'config must be an object'
-);
-
-router.get(
-  '/sandbox-profiles',
-  route(async (req, res) => {
-    res.status(200).json({ success: true, ...(await listSandboxProfiles(prisma, actorFromRequest(req))) });
-  })
-);
-
-router.get(
-  '/sandbox-profiles/templates',
-  route(async (_req, res) => {
-    res.status(200).json({ success: true, templates: await listClawSandboxTemplates() });
-  })
-);
-
-router.post(
-  '/sandbox-profiles',
-  route(async (req, res) => {
-    const body = z
-      .object({ repoId: z.string().min(1), key: z.string().min(1), config: sandboxProfileConfigSchema })
-      .parse(req.body);
-    await createSandboxProfile(prisma, actorFromRequest(req), body);
-    res.status(201).json({ success: true });
-  })
-);
-
-router.put(
-  '/sandbox-profiles/:key',
-  route(async (req, res) => {
-    const { config } = z.object({ config: sandboxProfileConfigSchema }).parse(req.body);
-    await updateSandboxProfile(prisma, actorFromRequest(req), req.params.key, config);
-    res.status(200).json({ success: true });
-  })
-);
-
-router.post(
-  '/sandbox-profiles/:key/reset',
-  route(async (req, res) => {
-    await resetSandboxProfile(prisma, actorFromRequest(req), req.params.key);
-    res.status(204).send();
-  })
-);
-
-router.post(
-  '/sandbox-profiles/:key/enabled',
-  route(async (req, res) => {
-    const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
-    await setSandboxProfileEnabled(prisma, actorFromRequest(req), req.params.key, enabled);
-    res.status(204).send();
-  })
-);
+// Disabled (Claw)
+// // claw-auth validates the config itself and its first error comes back as a 400.
+// const sandboxProfileConfigSchema = z.custom<SandboxProfileConfig>(
+//   (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+//   'config must be an object'
+// );
+//
+// router.get(
+//   '/sandbox-profiles',
+//   route(async (req, res) => {
+//     res.status(200).json({ success: true, ...(await listSandboxProfiles(prisma, actorFromRequest(req))) });
+//   })
+// );
+//
+// router.get(
+//   '/sandbox-profiles/templates',
+//   route(async (_req, res) => {
+//     res.status(200).json({ success: true, templates: await listClawSandboxTemplates() });
+//   })
+// );
+//
+// router.post(
+//   '/sandbox-profiles',
+//   route(async (req, res) => {
+//     const body = z
+//       .object({ repoId: z.string().min(1), key: z.string().min(1), config: sandboxProfileConfigSchema })
+//       .parse(req.body);
+//     await createSandboxProfile(prisma, actorFromRequest(req), body);
+//     res.status(201).json({ success: true });
+//   })
+// );
+//
+// router.put(
+//   '/sandbox-profiles/:key',
+//   route(async (req, res) => {
+//     const { config } = z.object({ config: sandboxProfileConfigSchema }).parse(req.body);
+//     await updateSandboxProfile(prisma, actorFromRequest(req), req.params.key, config);
+//     res.status(200).json({ success: true });
+//   })
+// );
+//
+// router.post(
+//   '/sandbox-profiles/:key/reset',
+//   route(async (req, res) => {
+//     await resetSandboxProfile(prisma, actorFromRequest(req), req.params.key);
+//     res.status(204).send();
+//   })
+// );
+//
+// router.post(
+//   '/sandbox-profiles/:key/enabled',
+//   route(async (req, res) => {
+//     const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
+//     await setSandboxProfileEnabled(prisma, actorFromRequest(req), req.params.key, enabled);
+//     res.status(204).send();
+//   })
+// );
 
 router.delete(
   '/channels/:channelId/repositories/:repoId',

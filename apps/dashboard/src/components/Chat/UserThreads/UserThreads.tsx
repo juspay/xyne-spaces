@@ -24,7 +24,8 @@ import {
   ThreadListSort,
 } from '../../../services/Chat/conversationService';
 import { useUnreadThreadConversationIds } from '../../../hooks/useUnreadThreadsCount';
-import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
+// Disabled (Claw)
+// import { TwinDraftIndicator } from '../TwinReplyDraft/TwinDraftIndicator';
 
 const PAGE_SIZE = 10;
 const THREAD_LIST_SORT_STORAGE_PREFIX = 'xyne:user-threads-sort';
@@ -101,7 +102,8 @@ const ThreadRow = memo(
             >
               {displayName}
             </button>
-            <TwinDraftIndicator conversationId={conversationId} />
+            {/* Disabled (Claw) */}
+            {/* <TwinDraftIndicator conversationId={conversationId} /> */}
           </div>
         </div>
         <div className='border border-border rounded-xl overflow-hidden bg-card shadow-sm'>

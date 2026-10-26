@@ -12,7 +12,8 @@ import {
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
 import type { AutomationConfig } from '../types/automation-config';
 import { AutomationRunStatus } from '../types/status';
-import { clawClient } from '../services/claw-client';
+// Disabled (Claw)
+// import { clawClient } from '../services/claw-client';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -766,21 +767,22 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
   }
 });
 
-router.get('/claw/agents', async (_req: Request, res: Response) => {
-  try {
-    const agents = await clawClient.listAgents();
-    res.json({ success: true, data: agents, timestamp: new Date().toISOString() });
-  } catch (err) {
-    logger.error('[automations] /claw/agents failed:', err);
-    res
-      .status(502)
-      .json({
-        success: false,
-        error: 'Failed to fetch claw agents',
-        detail: err instanceof Error ? err.message : String(err),
-      });
-  }
-});
+// Disabled (Claw)
+// router.get('/claw/agents', async (_req: Request, res: Response) => {
+//   try {
+//     const agents = await clawClient.listAgents();
+//     res.json({ success: true, data: agents, timestamp: new Date().toISOString() });
+//   } catch (err) {
+//     logger.error('[automations] /claw/agents failed:', err);
+//     res
+//       .status(502)
+//       .json({
+//         success: false,
+//         error: 'Failed to fetch claw agents',
+//         detail: err instanceof Error ? err.message : String(err),
+//       });
+//   }
+// });
 
 const RUN_STATUS_FILTER_VALUES: ReadonlySet<string> = new Set(
   Object.values(AutomationRunStatus),

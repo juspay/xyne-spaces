@@ -78,15 +78,16 @@ const OnboardingScreen: React.FC = () => {
           } as const,
         ]
       : []),
-    ...(localHarnesses.length > 0
-      ? [
-          {
-            key: 'localHarness',
-            title: 'Run agents on your own machine',
-            animation: 'fadeUp',
-          } as const,
-        ]
-      : []),
+    // Disabled (Claw)
+    // ...(localHarnesses.length > 0
+    //   ? [
+    //       {
+    //         key: 'localHarness',
+    //         title: 'Run agents on your own machine',
+    //         animation: 'fadeUp',
+    //       } as const,
+    //     ]
+    //   : []),
     {
       key: 'profile',
       title: 'Your profile is ready for action!',

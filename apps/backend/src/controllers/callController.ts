@@ -2088,27 +2088,31 @@ export class CallController {
         return;
       }
 
-      // Non-null: whitelist check above already returned otherwise.
-      const languageCode = supportedLanguage!.code;
+      // Disabled (LLM)
+      res.status(400).json({ success: false, error: 'Unsupported language' });
+      return;
+      // Disabled (LLM)
+      // // Non-null: whitelist check above already returned otherwise.
+      // const languageCode = supportedLanguage!.code;
 
-      const cached = await transcriptService.getTranslatedTranscript(callId, languageCode);
-      if (cached !== null) {
-        res.status(200).json({ success: true, status: 'ready', text: cached });
-        return;
-      }
+      // const cached = await transcriptService.getTranslatedTranscript(callId, languageCode);
+      // if (cached !== null) {
+      //   res.status(200).json({ success: true, status: 'ready', text: cached });
+      //   return;
+      // }
 
-      const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.externalId}/detail`;
-      const actionUrl = `${basePath}?${new URLSearchParams({ lang: languageCode })}`;
-      transcriptService.translateTranscriptInBackground(
-        call.externalId,
-        languageCode,
-        transcript,
-        supportedLanguage!.label,
-        userId,
-        actionUrl,
-      );
+      // const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.externalId}/detail`;
+      // const actionUrl = `${basePath}?${new URLSearchParams({ lang: languageCode })}`;
+      // transcriptService.translateTranscriptInBackground(
+      //   call.externalId,
+      //   languageCode,
+      //   transcript,
+      //   supportedLanguage!.label,
+      //   userId,
+      //   actionUrl,
+      // );
 
-      res.status(202).json({ success: true, status: 'pending' });
+      // res.status(202).json({ success: true, status: 'pending' });
     } catch (error) {
       logger.error(`[${callId}] Failed to translate transcript`, error);
       res.status(500).json({ success: false, error: 'Failed to translate transcript' });

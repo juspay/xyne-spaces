@@ -1,18 +1,21 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Popover } from '../ui/Popover/Popover';
-import { AppPickerDialog } from './AppPickerDialog';
+// Disabled (Claw)
+// import { AppPickerDialog } from './AppPickerDialog';
 import { ToggleGlyph } from './ToggleGlyph';
 import type { BarBuiltIn } from './useBarBuiltIns';
 import {
   type BarItemsStore,
-  setAppSnapshot,
-  appItemId,
-  appIdOf,
-  MAX_APPS_PER_BAR,
+  // Disabled (Claw)
+  // setAppSnapshot,
+  // appItemId,
+  // appIdOf,
+  // MAX_APPS_PER_BAR,
 } from '../../hooks/barItems';
 import { cn } from '../../utils/classNames';
-import type { AppPublishOptions } from './useChannelAppPublishing';
+// Disabled (Claw)
+// import type { AppPublishOptions } from './useChannelAppPublishing';
 
 interface BarAddMenuProps {
   store: BarItemsStore;
@@ -22,8 +25,9 @@ interface BarAddMenuProps {
   trigger?: ReactNode;
   side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
-  /** Channel admins only: lets the app picker publish apps to the channel. */
-  publish?: AppPublishOptions;
+  // Disabled (Claw)
+  // /** Channel admins only: lets the app picker publish apps to the channel. */
+  // publish?: AppPublishOptions;
   /** Published apps; they don't count toward the bar's own app limit. */
   publishedAppIds?: ReadonlySet<string>;
 }
@@ -46,21 +50,24 @@ export const BarAddMenu = ({
   trigger,
   side = 'bottom',
   align = 'start',
-  publish,
-  publishedAppIds,
+  // Disabled (Claw)
+  // publish,
+  // publishedAppIds,
 }: BarAddMenuProps): ReactElement => {
   const ids = store.useItems();
   const [open, setOpen] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Disabled (Claw)
+  // const [pickerOpen, setPickerOpen] = useState(false);
 
   const shown = useMemo(() => new Set(ids), [ids]);
-  const addedAppIds = useMemo(
-    () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
-    [ids],
-  );
-  const appsFull =
-    [...addedAppIds].filter(id => !publishedAppIds?.has(id)).length >= MAX_APPS_PER_BAR;
-  const pickerBlocked = appsFull && !publish && !publishedAppIds?.size;
+  // Disabled (Claw)
+  // const addedAppIds = useMemo(
+  //   () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
+  //   [ids],
+  // );
+  // const appsFull =
+  //   [...addedAppIds].filter(id => !publishedAppIds?.has(id)).length >= MAX_APPS_PER_BAR;
+  // const pickerBlocked = appsFull && !publish && !publishedAppIds?.size;
 
   return (
     <>
@@ -120,6 +127,8 @@ export const BarAddMenu = ({
               );
             })
           )}
+          {/* Disabled (Claw) */}
+          {/*
           <div className='my-1 border-t border-border' />
           <button
             type='button'
@@ -141,9 +150,12 @@ export const BarAddMenu = ({
             </span>
             Add app…
           </button>
+          */}
         </div>
       </Popover>
 
+      {/* Disabled (Claw) */}
+      {/*
       <AppPickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
@@ -161,6 +173,7 @@ export const BarAddMenu = ({
         trackCategory={trackCategory}
         {...(publish ? { publish } : {})}
       />
+      */}
     </>
   );
 };

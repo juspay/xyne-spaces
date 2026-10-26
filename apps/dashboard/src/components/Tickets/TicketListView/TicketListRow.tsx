@@ -1,6 +1,12 @@
 import { Fragment, MouseEvent, ReactElement, ReactNode, useMemo } from 'react';
-import { Wand2 } from 'lucide-react';
-import { SparkleAi02 as Sparkles, PencilEdit as Pencil, Spinner as Loader2 } from '@xyne/icons';
+// Disabled (Claw)
+// import { Wand2 } from 'lucide-react';
+import {
+  SparkleAi02 as Sparkles,
+  PencilEdit as Pencil,
+  // Disabled (Claw)
+  // Spinner as Loader2,
+} from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
 import { findEmailAddress, parseFirstEmailAddress } from '../../../utils/emailAddress';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
@@ -222,6 +228,8 @@ export const TicketListRow = ({
                 {ticket.title}
               </span>
             </TruncatedTooltip>
+            {/* Disabled (LLM) */}
+            {/*
             {ticket.aiCategory && (
               <span
                 className='inline-flex h-[18px] shrink-0 items-center justify-center whitespace-nowrap rounded-sm bg-blue-100 px-2 text-[10px] font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
@@ -230,6 +238,7 @@ export const TicketListRow = ({
                 {ticket.aiCategory}
               </span>
             )}
+            */}
           </div>
         );
       case 'emails':
@@ -268,6 +277,8 @@ export const TicketListRow = ({
                 </span>
               </Tooltip>
             )}
+            {/* Disabled (Claw) */}
+            {/*
             {draftKind === 'auto' && (
               <Tooltip delayDuration={500} content='AI-generated draft suggestion'>
                 <span
@@ -290,6 +301,7 @@ export const TicketListRow = ({
                 </span>
               </Tooltip>
             )}
+            */}
           </div>
         );
       case 'sender':

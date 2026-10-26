@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+// Disabled (Claw)
+// import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { cn } from '../../utils/classNames';
 import {
   AlertCircle,
@@ -63,9 +65,12 @@ import { resolveKbBasePath } from './utils/kbRoutePaths';
 import { NameDialogV2 } from '../../components/knowledgeBaseV2/components/NameDialogV2';
 import { toast } from 'sonner';
 import { useGlobalCollections } from './hooks/useGlobalCollections';
-import { xyneAIActor } from '../../machines/xyneAIMachine';
-import { XyneAIStar } from '../../components/icons/xyne-ai';
-import Tooltip from '../../components/ui/Tooltip';
+// Disabled (Claw)
+// import { xyneAIActor } from '../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { XyneAIStar } from '../../components/icons/xyne-ai';
+// Disabled (Claw)
+// import Tooltip from '../../components/ui/Tooltip';
 
 const KB_COLUMNS: ReadonlyArray<ColumnDef> = [
   { key: 'size', header: 'Size', width: '120px' },
@@ -172,7 +177,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // file viewer route it navigates to lives at the same prefix as whichever
   // of the two it's currently mounted under.
   const browseBasePath = useMemo(() => resolveKbBasePath(location.pathname), [location.pathname]);
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  // Disabled (Claw)
+  // const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const spCollectionId = searchParams.get(SP_COLLECTION);
@@ -967,82 +973,84 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     }
   };
 
-  // ── Ask AI ──────────────────────────────────────────────────────────
-  // Rendered at every level, including the root Knowledge listing (isAtRoot,
-  // no collectionId) — the tooltip has dedicated copy for that case. At root
-  // there's nothing to scope to, so just open a fresh, unscoped chat instead
-  // of silently no-oping. The channelId comes from the global collections
-  // cache because V2 doesn't carry it in the URL.
-  //
-  // Inside a sub-folder (spParentId set), attach BOTH chips — the folder
-  // (for scope) and its collection (for context) — same "harmless overlap"
-  // the composer's own picker already allows when you select a collection
-  // and one of its folders together. At the collection root there's no
-  // folder to add, so just the collection chip shows, as before.
-  const handleOpenAI = useCallback((): void => {
-    if (!collectionId) {
-      xyneAIActor.send({ type: 'OPEN', trackSource: 'knowledge_base', startFreshChat: true });
-      return;
-    }
-    const owning = globalCollections.byId(collectionId);
-    const currentFolder = spParentId ? nodes[spParentId] : undefined;
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'knowledge_base',
-      startFreshChat: true,
-      kbCollectionId: collectionId,
-      kbChannelId: owning?.scopeId ?? null,
-      ...(currentFolder && { kbFolderId: currentFolder.id, kbFolderName: currentFolder.name }),
-    });
-  }, [collectionId, globalCollections, spParentId, nodes]);
+  // Disabled (Claw)
+  // // ── Ask AI ──────────────────────────────────────────────────────────
+  // // Rendered at every level, including the root Knowledge listing (isAtRoot,
+  // // no collectionId) — the tooltip has dedicated copy for that case. At root
+  // // there's nothing to scope to, so just open a fresh, unscoped chat instead
+  // // of silently no-oping. The channelId comes from the global collections
+  // // cache because V2 doesn't carry it in the URL.
+  // //
+  // // Inside a sub-folder (spParentId set), attach BOTH chips — the folder
+  // // (for scope) and its collection (for context) — same "harmless overlap"
+  // // the composer's own picker already allows when you select a collection
+  // // and one of its folders together. At the collection root there's no
+  // // folder to add, so just the collection chip shows, as before.
+  // const handleOpenAI = useCallback((): void => {
+  //   if (!collectionId) {
+  //     xyneAIActor.send({ type: 'OPEN', trackSource: 'knowledge_base', startFreshChat: true });
+  //     return;
+  //   }
+  //   const owning = globalCollections.byId(collectionId);
+  //   const currentFolder = spParentId ? nodes[spParentId] : undefined;
+  //   xyneAIActor.send({
+  //     type: 'OPEN',
+  //     trackSource: 'knowledge_base',
+  //     startFreshChat: true,
+  //     kbCollectionId: collectionId,
+  //     kbChannelId: owning?.scopeId ?? null,
+  //     ...(currentFolder && { kbFolderId: currentFolder.id, kbFolderName: currentFolder.name }),
+  //   });
+  // }, [collectionId, globalCollections, spParentId, nodes]);
 
-  // Per-row Ask AI (hover action on every folder/file, next to Share). A
-  // file gets precise scoping via kbDocId/kbDocName — the machine already
-  // supports asking about one specific document (same path FileViewerLayout
-  // uses from inside the viewer). A folder row attaches BOTH itself
-  // (kbFolderId) and its collection (kbCollectionId) when it's a genuine
-  // sub-folder inside an open collection — same "harmless overlap" as
-  // handleOpenAI; at root, `entry` IS a root collection (isAtRoot only
-  // lists root collections), so it scopes as just a collection instead.
-  const onAskAIAboutEntry = useCallback(
-    (entry: CollectionChild): void => {
-      if (entry.type === 'FILE') {
-        const owning = collectionId ? globalCollections.byId(collectionId) : null;
-        xyneAIActor.send({
-          type: 'OPEN',
-          trackSource: 'knowledge_base',
-          startFreshChat: true,
-          kbCollectionId: collectionId ?? null,
-          kbChannelId: owning?.scopeId ?? null,
-          kbDocId: entry.id,
-          kbDocName: entry.name,
-        });
-        return;
-      }
-      if (isAtRoot) {
-        const owning = globalCollections.byId(entry.id);
-        xyneAIActor.send({
-          type: 'OPEN',
-          trackSource: 'knowledge_base',
-          startFreshChat: true,
-          kbCollectionId: entry.id,
-          kbChannelId: owning?.scopeId ?? null,
-        });
-        return;
-      }
-      const owning = collectionId ? globalCollections.byId(collectionId) : null;
-      xyneAIActor.send({
-        type: 'OPEN',
-        trackSource: 'knowledge_base',
-        startFreshChat: true,
-        kbCollectionId: collectionId ?? null,
-        kbChannelId: owning?.scopeId ?? null,
-        kbFolderId: entry.id,
-        kbFolderName: entry.name,
-      });
-    },
-    [collectionId, globalCollections, isAtRoot],
-  );
+  // Disabled (Claw)
+  // // Per-row Ask AI (hover action on every folder/file, next to Share). A
+  // // file gets precise scoping via kbDocId/kbDocName — the machine already
+  // // supports asking about one specific document (same path FileViewerLayout
+  // // uses from inside the viewer). A folder row attaches BOTH itself
+  // // (kbFolderId) and its collection (kbCollectionId) when it's a genuine
+  // // sub-folder inside an open collection — same "harmless overlap" as
+  // // handleOpenAI; at root, `entry` IS a root collection (isAtRoot only
+  // // lists root collections), so it scopes as just a collection instead.
+  // const onAskAIAboutEntry = useCallback(
+  //   (entry: CollectionChild): void => {
+  //     if (entry.type === 'FILE') {
+  //       const owning = collectionId ? globalCollections.byId(collectionId) : null;
+  //       xyneAIActor.send({
+  //         type: 'OPEN',
+  //         trackSource: 'knowledge_base',
+  //         startFreshChat: true,
+  //         kbCollectionId: collectionId ?? null,
+  //         kbChannelId: owning?.scopeId ?? null,
+  //         kbDocId: entry.id,
+  //         kbDocName: entry.name,
+  //       });
+  //       return;
+  //     }
+  //     if (isAtRoot) {
+  //       const owning = globalCollections.byId(entry.id);
+  //       xyneAIActor.send({
+  //         type: 'OPEN',
+  //         trackSource: 'knowledge_base',
+  //         startFreshChat: true,
+  //         kbCollectionId: entry.id,
+  //         kbChannelId: owning?.scopeId ?? null,
+  //       });
+  //       return;
+  //     }
+  //     const owning = collectionId ? globalCollections.byId(collectionId) : null;
+  //     xyneAIActor.send({
+  //       type: 'OPEN',
+  //       trackSource: 'knowledge_base',
+  //       startFreshChat: true,
+  //       kbCollectionId: collectionId ?? null,
+  //       kbChannelId: owning?.scopeId ?? null,
+  //       kbFolderId: entry.id,
+  //       kbFolderName: entry.name,
+  //     });
+  //   },
+  //   [collectionId, globalCollections, isAtRoot],
+  // );
 
   // ── Header label ─────────────────────────────────────────────────────
   const rootLabel = isAtRoot
@@ -1053,6 +1061,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   const header = (
     <div className='flex flex-wrap items-center justify-end gap-2 border-b border-border ai-page-bg px-5 py-2.5'>
+      {/* Disabled (Claw) */}
+      {/*
       <Tooltip
         content={isAtRoot ? 'Ask AI' : `Ask AI about this ${spParentId ? 'folder' : 'collection'}`}
         side='bottom'
@@ -1068,6 +1078,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           <XyneAIStar size={22} />
         </button>
       </Tooltip>
+      */}
       {isAtRoot ? (
         // Collections are channel-scoped, so creation must go through the
         // CreateCollectionModal (it owns the channel picker + name step).
@@ -1159,6 +1170,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
 
   const breadcrumbRow = (
     <div className='flex min-w-0 items-center gap-2 px-5 py-2.5'>
+      {/* Disabled (Claw) */}
+      {/*
       <button
         type='button'
         aria-label={
@@ -1180,6 +1193,26 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       >
         <ArrowLeft className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
       </button>
+      */}
+      {!isAtRoot && (
+        <button
+          type='button'
+          aria-label={isAtCollectionRoot ? 'Back to collections' : 'Up one level'}
+          onClick={() => {
+            if (collectionId && !spParentId) {
+              goToCollections();
+            } else {
+              goUp();
+            }
+          }}
+          className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+          title={isAtCollectionRoot ? 'Back to collections' : 'Up'}
+          data-track-category='knowledge-base'
+          data-track-name='navigate-up'
+        >
+          <ArrowLeft className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+        </button>
+      )}
 
       {isAtRoot ? (
         <span className='text-[13px] font-medium text-foreground'>Knowledge</span>
@@ -1199,24 +1232,25 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     </div>
   );
 
-  // A second, labeled Ask AI entry point sitting inline with the folder/file
-  // count, directly above the list — mirrors Drive's "Ask Gemini" pill,
-  // which sits in the same spot relative to its file table. The header's
-  // circular icon is the primary action; this is a secondary, more
-  // discoverable prompt right where you're about to look for it while
-  // browsing.
-  const askAiPill = (
-    <button
-      type='button'
-      onClick={handleOpenAI}
-      data-track-category='knowledge-base'
-      data-track-name='kb-open-ai-chat-pill'
-      className='inline-flex h-8 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-[12.5px] font-medium text-foreground transition hover:bg-primary/15'
-    >
-      <XyneAIStar size={14} />
-      Ask AI
-    </button>
-  );
+  // Disabled (Claw)
+  // // A second, labeled Ask AI entry point sitting inline with the folder/file
+  // // count, directly above the list — mirrors Drive's "Ask Gemini" pill,
+  // // which sits in the same spot relative to its file table. The header's
+  // // circular icon is the primary action; this is a secondary, more
+  // // discoverable prompt right where you're about to look for it while
+  // // browsing.
+  // const askAiPill = (
+  //   <button
+  //     type='button'
+  //     onClick={handleOpenAI}
+  //     data-track-category='knowledge-base'
+  //     data-track-name='kb-open-ai-chat-pill'
+  //     className='inline-flex h-8 items-center gap-1.5 rounded-full bg-primary/10 px-3 text-[12.5px] font-medium text-foreground transition hover:bg-primary/15'
+  //   >
+  //     <XyneAIStar size={14} />
+  //     Ask AI
+  //   </button>
+  // );
 
   const mainContent = (
     <main ref={mainRef} className='relative flex-1 overflow-auto px-5 py-5'>
@@ -1227,7 +1261,10 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       ) : null}
       <div className='mx-auto w-full max-w-7xl'>
         <div className='mb-3 flex items-center gap-3'>
+          {/* Disabled (Claw) */}
+          {/*
           {askAiPill}
+          */}
           <p className='text-[12px] text-muted-foreground'>
             {loading
               ? 'Loading...'
@@ -1411,7 +1448,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             onRenameCancel={onRenameCancel}
             scrollParentRef={mainRef}
             onOpenStatus={onOpenStatus}
-            onAskAI={onAskAIAboutEntry}
+            // Disabled (Claw)
+            // onAskAI={onAskAIAboutEntry}
             onShare={onShare}
             {...(isAtRoot ? { folderCaption: locationOf } : {})}
           />
@@ -1433,7 +1471,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             onRenameCancel={onRenameCancel}
             scrollParentRef={mainRef}
             onOpenStatus={onOpenStatus}
-            onAskAI={onAskAIAboutEntry}
+            // Disabled (Claw)
+            // onAskAI={onAskAIAboutEntry}
             onShare={onShare}
             {...(isAtRoot
               ? {

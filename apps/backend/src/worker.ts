@@ -1,7 +1,8 @@
 import { config } from 'dotenv'
 import { config as appConfig } from '@/config/env'
-import { startDoclingSchedulerRole } from '@/services/ingestion/docling/workers/scheduler'
-import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/config'
+// Disabled (LLM)
+// import { startDoclingSchedulerRole } from '@/services/ingestion/docling/workers/scheduler'
+// import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/config'
 import { DatabaseClient } from '@/database/client'
 import { CommonDatabaseClient } from '@/database/commonClient'
 import { describeRejection, logger } from '@/utils/logger'
@@ -11,10 +12,11 @@ import {
   startDriveImportWorker,
   closeDriveImportQueue,
 } from '@/services/driveImport/driveImportWorker'
-import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
-import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
-import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
-import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
+// Disabled (LLM)
+// import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
+// import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
+// import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
+// import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
 import { notificationWorker } from '@/notification-service/consumers/notificationWorker'
 import { notificationService, notificationService as realTimeNotificationService } from '@/notification-service'
 import { redisService } from '@/services/redisService'
@@ -34,17 +36,18 @@ import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
-import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
-import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
-import { decisionEvaluationWorker } from '@/workers/decisionEvaluationWorker';
+// Disabled (LLM)
+// import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
+// import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+// import { decisionEvaluationWorker } from '@/workers/decisionEvaluationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
-import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
-import { proactiveEpisodeWorker } from '@/workers/proactiveEpisodeWorker';
-import { autoDraftWorker } from '@/workers/autoDraftWorker';
-import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
-import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
-import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
-import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
+// Disabled (LLM)
+// import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
+// import { autoDraftWorker } from '@/workers/autoDraftWorker';
+// import { entityExtractionWorker } from '@/workers/entityExtractionWorker';
+// import { tagGenerationPipeline, registerDeskEmailTags, DESK_EMAIL_SOURCE_TYPE, enqueueTagVespaRefeed } from '@/tags';
+// import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
+// import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
 import { workflowsWorker } from '@/workers/workflowsWorker';
 import { conversationalFlowWorker } from '@/workers/conversationalFlowWorker';
@@ -84,16 +87,19 @@ class WorkerService {
 
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
-      const activityClassificationEnabled =
-        process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
-      const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
+      // Disabled (LLM)
+      // const activityClassificationEnabled =
+      //   process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+      // const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
-      const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
+      // Disabled (LLM)
+      // const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
-      const messageClassificationEnabled = appConfig.messageClassificationEnabled
+      // Disabled (LLM)
+      // const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableNotificationProducer = process.env.ENABLE_NOTIFICATION_PRODUCER === 'true';
 
       if (vespaEnabled) {
@@ -129,29 +135,33 @@ class WorkerService {
       }
 
       // Async OCR (Docling/LightOn) scheduler roles — fire-and-forget loops.
-      if (appConfig.doclingScheduler.enabled && appConfig.doclingScheduler.role) {
-        logger.info(
-          `Starting Docling async OCR scheduler role: ${appConfig.doclingScheduler.role}`,
-        )
-        startRuntimeConfigPolling()
-        void startDoclingSchedulerRole(appConfig.doclingScheduler.role)
-      }
+      // Disabled (LLM)
+      // if (appConfig.doclingScheduler.enabled && appConfig.doclingScheduler.role) {
+      //   logger.info(
+      //     `Starting Docling async OCR scheduler role: ${appConfig.doclingScheduler.role}`,
+      //   )
+      //   startRuntimeConfigPolling()
+      //   void startDoclingSchedulerRole(appConfig.doclingScheduler.role)
+      // }
 
-      if (activityClassificationEnabled) {
-        logger.info('Starting activity classification worker service...')
-        await activityClassificationWorkerService.start()
-      }
+      // Disabled (LLM)
+      // if (activityClassificationEnabled) {
+      //   logger.info('Starting activity classification worker service...')
+      //   await activityClassificationWorkerService.start()
+      // }
 
-      if (ticketCleanupEnabled) {
-        logger.info('Starting ticket cleanup worker service...')
-        await ticketCleanupWorkerService.start()
-      }
+      // Disabled (LLM)
+      // if (ticketCleanupEnabled) {
+      //   logger.info('Starting ticket cleanup worker service...')
+      //   await ticketCleanupWorkerService.start()
+      // }
 
 
-      if (proactiveNudgeWorkerEnabled) {
-        logger.info('Starting proactive nudge worker service...')
-        await proactiveNudgeWorker.start()
-      }
+      // Disabled (LLM)
+      // if (proactiveNudgeWorkerEnabled) {
+      //   logger.info('Starting proactive nudge worker service...')
+      //   await proactiveNudgeWorker.start()
+      // }
 
       if (callValidationEnabled) {
         logger.info('Starting call validation worker service...');
@@ -177,16 +187,18 @@ class WorkerService {
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
       // off — so with it off nothing is produced either, and no backlog builds up.
-      if (messageClassificationEnabled) {
-        logger.info('Starting message classification worker service...')
-        await messageClassificationQueue.initialize()
-        messageClassificationQueue.startProcessing()
-      }
+      // Disabled (LLM)
+      // if (messageClassificationEnabled) {
+      //   logger.info('Starting message classification worker service...')
+      //   await messageClassificationQueue.initialize()
+      //   messageClassificationQueue.startProcessing()
+      // }
       // Runs the comparisons decisions queue with the other engines.
-      if (appConfig.decisionEval.enabled) {
-        logger.info('Starting decision evaluation worker...');
-        await decisionEvaluationWorker.start();
-      }
+      // Disabled (LLM)
+      // if (appConfig.decisionEval.enabled) {
+      //   logger.info('Starting decision evaluation worker...');
+      //   await decisionEvaluationWorker.start();
+      // }
 
       logger.info('Initializing scheduled message queue...');
       const { scheduledMessageQueue } = await import('@/queues/scheduledMessageQueue');
@@ -305,70 +317,69 @@ class WorkerService {
         logger.info('Calendar sync worker is disabled (ENABLE_CALENDAR_SYNC_WORKER=false)');
       }
 
-      if (appConfig.enableTeamIntelligenceWorker) {
-        logger.info('Starting team intelligence worker...');
-        await teamIntelligenceWorker.start();
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableTeamIntelligenceWorker) {
+      //   logger.info('Starting team intelligence worker...');
+      //   await teamIntelligenceWorker.start();
+      // }
 
-      if (appConfig.enableEmailClassificationWorker) {
-        logger.info('Starting email classification worker...');
-        await emailClassificationWorker.start();
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableEmailClassificationWorker) {
+      //   logger.info('Starting email classification worker...');
+      //   await emailClassificationWorker.start();
+      // }
 
-      if (appConfig.radar.enabled) {
-        logger.info('Starting radar execution worker...');
-        // Guarded, unlike its neighbours: an unguarded throw reaches the outer
-        // catch, which exits the process — taking unrelated workers down with
-        // a dark-launched feature none of them depend on.
-        try {
-          await radarExecutionWorker.start();
-        } catch (error) {
-          logger.error(
-            '[RADAR-EXECUTION-WORKER] Failed to start; continuing without it',
-            error,
-          );
-        }
-      }
+      // Disabled (LLM)
+      // if (appConfig.radar.enabled) {
+      //   logger.info('Starting radar execution worker...');
+      //   // Guarded, unlike its neighbours: an unguarded throw reaches the outer
+      //   // catch, which exits the process — taking unrelated workers down with
+      //   // a dark-launched feature none of them depend on.
+      //   try {
+      //     await radarExecutionWorker.start();
+      //   } catch (error) {
+      //     logger.error(
+      //       '[RADAR-EXECUTION-WORKER] Failed to start; continuing without it',
+      //       error,
+      //     );
+      //   }
+      // }
 
-      if (appConfig.enableProactivityWorker) {
-        logger.info('Starting proactive episode worker...');
-        try {
-          await proactiveEpisodeWorker.start();
-        } catch (error) {
-          logger.error('[PROACTIVE-EPISODE-WORKER] Failed to start; continuing without it', error);
-        }
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableAiProvisioningWorker) {
+      //   logger.info('Starting AI provisioning worker...');
+      //   await aiProvisioningWorker.start();
+      // }
 
-      if (appConfig.enableAiProvisioningWorker) {
-        logger.info('Starting AI provisioning worker...');
-        await aiProvisioningWorker.start();
-      }
+      // Disabled (LLM)
+      // logger.info('Starting auto draft worker...');
+      // await autoDraftWorker.start();
 
-      logger.info('Starting auto draft worker...');
-      await autoDraftWorker.start();
+      // Disabled (LLM)
+      // if (appConfig.entityExtraction.enabled) {
+      //   logger.info('Starting entity extraction worker...');
+      //   await entityExtractionWorker.start();
+      // } else {
+      //   logger.info('Entity extraction is disabled; skipping worker startup');
+      // }
 
-      if (appConfig.entityExtraction.enabled) {
-        logger.info('Starting entity extraction worker...');
-        await entityExtractionWorker.start();
-      } else {
-        logger.info('Entity extraction is disabled; skipping worker startup');
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableTagGenerationPipeline) {
+      //   logger.info('Initializing tag generation pipeline...');
+      //   registerDeskEmailTags(tagGenerationPipeline);
+      //   await tagGenerationPipeline.initialize();
+      //
+      //   tagGenerationPipeline.onCompleted(DESK_EMAIL_SOURCE_TYPE, (result) => {
+      //     void enqueueTagVespaRefeed(DESK_EMAIL_SOURCE_TYPE, result.sourceId);
+      //     logger.info(`Tag generation completed for sourceId=${result.sourceId}, emitting tagGenerated event...`);
+      //     void emitTagGenerated({
+      //       sourceId: result.sourceId,
+      //       sourceType: result.sourceType,
+      //       tags: result.tags.map(t => ({ category: t.tagCategory, tag: t.tag, reason: t.reason ?? null })),
+      //     });
+      //   });
+      // }
 
-      if (appConfig.enableTagGenerationPipeline) {
-        logger.info('Initializing tag generation pipeline...');
-        registerDeskEmailTags(tagGenerationPipeline);
-        await tagGenerationPipeline.initialize();
-
-        tagGenerationPipeline.onCompleted(DESK_EMAIL_SOURCE_TYPE, (result) => {
-          void enqueueTagVespaRefeed(DESK_EMAIL_SOURCE_TYPE, result.sourceId);
-          logger.info(`Tag generation completed for sourceId=${result.sourceId}, emitting tagGenerated event...`);
-          void emitTagGenerated({
-            sourceId: result.sourceId,
-            sourceType: result.sourceType,
-            tags: result.tags.map(t => ({ category: t.tagCategory, tag: t.tag, reason: t.reason ?? null })),
-          });
-        });
-      }
 
       const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
       if (dataSourceIngestionWorkerEnabled) {
@@ -412,16 +423,19 @@ class WorkerService {
       }
       const vespaEnabled = process.env.ENABLE_VESPA_WORKER === 'true'
       const vespaFileWorkerEnabled = process.env.ENABLE_VESPA_FILE_WORKER === 'true'
-      const activityClassificationEnabled =
-        process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
-      const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
+      // Disabled (LLM)
+      // const activityClassificationEnabled =
+      //   process.env.ENABLE_ACTIVITY_CLASSIFICATION_WORKER === 'true'
+      // const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
       const notificationWorkerEnabled = process.env.ENABLE_NOTIFICATION_WORKER === 'true'
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
-      const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
+      // Disabled (LLM)
+      // const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
       const workflowsEnabled = appConfig.workflows.workerEnabled
-      const messageClassificationEnabled = appConfig.messageClassificationEnabled
+      // Disabled (LLM)
+      // const messageClassificationEnabled = appConfig.messageClassificationEnabled
 
       if (vespaEnabled) {
         await vespaWorker.shutdown()
@@ -440,16 +454,18 @@ class WorkerService {
       if (appConfig.enableDriveImportWorker) {
         await closeDriveImportQueue()
       }
-      if (activityClassificationEnabled) {
-        await activityClassificationWorkerService.stop()
-      }
-      if (ticketCleanupEnabled) {
-        await ticketCleanupWorkerService.stop()
-      }
+      // Disabled (LLM)
+      // if (activityClassificationEnabled) {
+      //   await activityClassificationWorkerService.stop()
+      // }
+      // if (ticketCleanupEnabled) {
+      //   await ticketCleanupWorkerService.stop()
+      // }
 
-      if (proactiveNudgeWorkerEnabled) {
-        await proactiveNudgeWorker.shutdown()
-      }
+      // Disabled (LLM)
+      // if (proactiveNudgeWorkerEnabled) {
+      //   await proactiveNudgeWorker.shutdown()
+      // }
 
       if (callValidationEnabled) {
         await callValidationWorker.stop();
@@ -461,12 +477,14 @@ class WorkerService {
           await emailClassificationQueue.close();
         }
       }
-      if (messageClassificationEnabled) {
-        await messageClassificationQueue.shutdown()
-      }
-      if (appConfig.decisionEval.enabled) {
-        await decisionEvaluationWorker.shutdown();
-      }
+      // Disabled (LLM)
+      // if (messageClassificationEnabled) {
+      //   await messageClassificationQueue.shutdown()
+      // }
+      // Disabled (LLM)
+      // if (appConfig.decisionEval.enabled) {
+      //   await decisionEvaluationWorker.shutdown();
+      // }
 
       if (appConfig.workflows.conversationalFlow.workerEnabled) {
         await conversationalFlowWorker.stop()
@@ -503,26 +521,29 @@ class WorkerService {
         await callCalendarPushQueue.close();
       }
 
-      if (appConfig.enableTeamIntelligenceWorker) {
-        await teamIntelligenceWorker.shutdown();
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableTeamIntelligenceWorker) {
+      //   await teamIntelligenceWorker.shutdown();
+      // }
 
-      if (appConfig.enableEmailClassificationWorker) {
-        await emailClassificationWorker.shutdown();
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableEmailClassificationWorker) {
+      //   await emailClassificationWorker.shutdown();
+      // }
 
       if (appConfig.enableCallTranscriptionWorker) {
         await callTranscriptionQueue.close();
       }
 
-      await proactiveEpisodeWorker.shutdown();
-      if (appConfig.radar.enabled) {
-        await radarExecutionWorker.shutdown();
-      }
+      // Disabled (LLM)
+      // if (appConfig.radar.enabled) {
+      //   await radarExecutionWorker.shutdown();
+      // }
 
-      if (appConfig.enableAiProvisioningWorker) {
-        await aiProvisioningWorker.shutdown();
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableAiProvisioningWorker) {
+      //   await aiProvisioningWorker.shutdown();
+      // }
 
       if (appConfig.enableAutomationWorker) {
         const { deskLabelBackfillWorker } = await import(
@@ -531,11 +552,13 @@ class WorkerService {
         await deskLabelBackfillWorker.shutdown();
       }
 
-      await autoDraftWorker.shutdown();
+      // Disabled (LLM)
+      // await autoDraftWorker.shutdown();
 
-      if (appConfig.enableTagGenerationPipeline) {
-        await tagGenerationPipeline.close();
-      }
+      // Disabled (LLM)
+      // if (appConfig.enableTagGenerationPipeline) {
+      //   await tagGenerationPipeline.close();
+      // }
 
       const dataSourceIngestionWorkerEnabled = process.env.ENABLE_DATA_SOURCE_INGESTION_WORKER === 'true';
       if (dataSourceIngestionWorkerEnabled) {

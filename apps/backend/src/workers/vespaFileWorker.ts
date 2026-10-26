@@ -9,7 +9,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, computeCanvasPermissions, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { superpositionClient } from '@/services/superpositionClient';
-import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
+// Disabled (LLM)
+// import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
 import { config } from '@/config/env';
 import { SubApp } from '@/vespa/src/types';
 import { maybeNotifyCollectionIngestionComplete } from '@/services/collectionIngestionNotifier';
@@ -220,22 +221,23 @@ export class VespaFileWorker {
 			// scheduler (if enabled). When routed, the scheduler owns processing —
 			// skip synchronous parsing. The name-only feed never parses content, so
 			// it must not be routed to the scheduler.
-			if (
-				jobType === 'feed' &&
-				schema === fileSchema &&
-				!job.data.nameOnly &&
-				(app === SubApp.COLLECTIONS ||
-					app === SubApp.CHAT_ATTACHMENT ||
-					app === SubApp.TICKET_ATTACHMENT)
-			) {
-				const routed = await routePdfToScheduler(docId, app);
-				if (routed) {
-					logger.info(
-						`[VESPA_FILE_WORKER] Routed ${docId} (${app}) to async OCR scheduler; skipping sync processing`,
-					);
-					return;
-				}
-			}
+			// Disabled (LLM)
+			// if (
+			// 	jobType === 'feed' &&
+			// 	schema === fileSchema &&
+			// 	!job.data.nameOnly &&
+			// 	(app === SubApp.COLLECTIONS ||
+			// 		app === SubApp.CHAT_ATTACHMENT ||
+			// 		app === SubApp.TICKET_ATTACHMENT)
+			// ) {
+			// 	const routed = await routePdfToScheduler(docId, app);
+			// 	if (routed) {
+			// 		logger.info(
+			// 			`[VESPA_FILE_WORKER] Routed ${docId} (${app}) to async OCR scheduler; skipping sync processing`,
+			// 		);
+			// 		return;
+			// 	}
+			// }
 
 			// Check if file indexing is enabled
 			if (jobType === 'feed' && schema === fileSchema) {

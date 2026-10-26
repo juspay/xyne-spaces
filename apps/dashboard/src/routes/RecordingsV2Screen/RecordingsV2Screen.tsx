@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
-import { GridDashboardBento, Spinner } from '@xyne/icons';
+import {
+  // Disabled (LLM)
+  // GridDashboardBento,
+  Spinner,
+} from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import axios from 'axios';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
-import { XyneAIStar } from '../../components/icons/xyne-ai';
+// Disabled (Claw)
+// import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import {
@@ -19,10 +24,11 @@ import { recordingService } from '../../services/Recording/recordingService';
 import { logRecordingError } from '../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
-import {
-  SummaryTemplatesModal,
-  SUMMARY_TEMPLATES_DIALOG_CLASS,
-} from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
+// Disabled (LLM)
+// import {
+//   SummaryTemplatesModal,
+//   SUMMARY_TEMPLATES_DIALOG_CLASS,
+// } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useLeaveRecording } from '../../hooks/useLeaveRecording';
 import { useUnreadRecordingSummaryCallIds } from '../../hooks/useHasUnreadRecordingSummaries';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
@@ -32,7 +38,8 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { useSelf, useUsers } from '../../hooks/useUsers';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { cn } from '../../utils/classNames';
-import { getUserDisplayName } from '../../utils/userDisplayName';
+// Disabled (LLM)
+// import { getUserDisplayName } from '../../utils/userDisplayName';
 import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptyStateIllustration';
 import { RecordingDateFilter } from './components/RecordingDateFilter';
 import RecordingControlsOverlay from './components/RecordingControlsOverlay';
@@ -239,7 +246,8 @@ const RecordingsV2Screen = (): ReactElement => {
   const linkedTemplateId = isTemplatesOpen ? searchParams.get(SUMMARY_TEMPLATE_ID_PARAM) : null;
   const {
     templates: summaryTemplates,
-    isLoading: summaryTemplatesLoading,
+    // Disabled (LLM)
+    // isLoading: summaryTemplatesLoading,
     isComplete: summaryTemplatesComplete,
   } = useSummaryTemplates(isTemplatesOpen);
   const templateLinkState = useMemo(
@@ -252,21 +260,22 @@ const RecordingsV2Screen = (): ReactElement => {
     [linkedTemplateId, summaryTemplates, summaryTemplatesComplete],
   );
 
-  const setTemplatesOpen = useCallback(
-    (open: boolean): void => {
-      setSearchParams(
-        prev => {
-          const next = new URLSearchParams(prev);
-          if (open) next.set(SUMMARY_TEMPLATES_PARAM, '1');
-          else next.delete(SUMMARY_TEMPLATES_PARAM);
-          next.delete(SUMMARY_TEMPLATE_ID_PARAM);
-          return next;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
+  // Disabled (LLM)
+  // const setTemplatesOpen = useCallback(
+  //   (open: boolean): void => {
+  //     setSearchParams(
+  //       prev => {
+  //         const next = new URLSearchParams(prev);
+  //         if (open) next.set(SUMMARY_TEMPLATES_PARAM, '1');
+  //         else next.delete(SUMMARY_TEMPLATES_PARAM);
+  //         next.delete(SUMMARY_TEMPLATE_ID_PARAM);
+  //         return next;
+  //       },
+  //       { replace: true },
+  //     );
+  //   },
+  //   [setSearchParams],
+  // );
 
   // The linked template is gone or no longer shared: say so and show the list.
   useEffect(() => {
@@ -375,9 +384,10 @@ const RecordingsV2Screen = (): ReactElement => {
     }
   }, [deleteRecording]);
 
-  const handleOpenAskAI = useCallback((): void => {
-    setShowAskAIContextModal(true);
-  }, []);
+  // Disabled (Claw)
+  // const handleOpenAskAI = useCallback((): void => {
+  //   setShowAskAIContextModal(true);
+  // }, []);
 
   const handleConfirmAskAIContext = useCallback((selected: OatsRecordingEntry[]): void => {
     // Attach each recording's documents alongside the recording itself, the same
@@ -561,19 +571,24 @@ const RecordingsV2Screen = (): ReactElement => {
               </div>
 
               <div className='col-start-2 row-start-1 flex items-center gap-2 sm:row-start-3'>
-                {/* Icon-only below `sm`, where this row shares a line with the title. */}
-                <Button
-                  type='button'
-                  variant='outline'
-                  onClick={() => setTemplatesOpen(true)}
-                  className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-3 font-semibold hover:bg-muted/70 sm:px-4'
-                  aria-label='Summary templates'
-                  data-track-category='RecordingsV2'
-                  data-track-name='open_summary_templates'
-                >
-                  <GridDashboardBento strokeWidth={2} className='size-4' />
-                  <span className='hidden sm:inline'>Templates</span>
-                </Button>
+                {/* Disabled (LLM) */}
+                {
+                // {/* Icon-only below `sm`, where this row shares a line with the title. */}
+                // <Button
+                //   type='button'
+                //   variant='outline'
+                //   onClick={() => setTemplatesOpen(true)}
+                //   className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-3 font-semibold hover:bg-muted/70 sm:px-4'
+                //   aria-label='Summary templates'
+                //   data-track-category='RecordingsV2'
+                //   data-track-name='open_summary_templates'
+                // >
+                //   <GridDashboardBento strokeWidth={2} className='size-4' />
+                //   <span className='hidden sm:inline'>Templates</span>
+                // </Button>
+                }
+                {/* Disabled (Claw) */}
+                {/*
                 <Button
                   type='button'
                   variant='outline'
@@ -585,6 +600,7 @@ const RecordingsV2Screen = (): ReactElement => {
                   <XyneAIStar size={15} />
                   Ask AI
                 </Button>
+                */}
               </div>
             </div>
           </header>
@@ -786,27 +802,30 @@ const RecordingsV2Screen = (): ReactElement => {
         </Dialog>
       )}
 
-      {isTemplatesOpen && currentUser && (
-        <Dialog
-          open
-          onOpenChange={open => !open && setTemplatesOpen(false)}
-          title='Summary Templates'
-          description='Create, edit, and share recording summary templates.'
-          className={SUMMARY_TEMPLATES_DIALOG_CLASS}
-          testId='recordings-v2-summary-templates-dialog'
-        >
-          {/* The list is held back while the linked template syncs. */}
-          <SummaryTemplatesModal
-            key={linkedTemplateId ?? 'browse'}
-            templates={templateLinkState === 'resolving' ? [] : summaryTemplates}
-            loading={summaryTemplatesLoading || templateLinkState === 'resolving'}
-            selectedTemplateId={templateLinkState === 'found' ? linkedTemplateId : null}
-            currentUserId={currentUser.id}
-            currentUserName={getUserDisplayName(currentUser)}
-            onClose={() => setTemplatesOpen(false)}
-          />
-        </Dialog>
-      )}
+      {/* Disabled (LLM) */}
+      {
+      // {isTemplatesOpen && currentUser && (
+      //   <Dialog
+      //     open
+      //     onOpenChange={open => !open && setTemplatesOpen(false)}
+      //     title='Summary Templates'
+      //     description='Create, edit, and share recording summary templates.'
+      //     className={SUMMARY_TEMPLATES_DIALOG_CLASS}
+      //     testId='recordings-v2-summary-templates-dialog'
+      //   >
+      //     {/* The list is held back while the linked template syncs. */}
+      //     <SummaryTemplatesModal
+      //       key={linkedTemplateId ?? 'browse'}
+      //       templates={templateLinkState === 'resolving' ? [] : summaryTemplates}
+      //       loading={summaryTemplatesLoading || templateLinkState === 'resolving'}
+      //       selectedTemplateId={templateLinkState === 'found' ? linkedTemplateId : null}
+      //       currentUserId={currentUser.id}
+      //       currentUserName={getUserDisplayName(currentUser)}
+      //       onClose={() => setTemplatesOpen(false)}
+      //     />
+      //   </Dialog>
+      // )}
+      }
 
       <RecordingDeleteDialog
         recording={deleteRecording}

@@ -3,10 +3,12 @@ import { Bot, Info, MoreVertical } from 'lucide-react';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
 import {
-  getAiButtonDisabled,
-  getAiButtonTitle,
+  // Disabled (LLM)
+  // getAiButtonDisabled,
+  // getAiButtonTitle,
   getAiControlState,
-  handleAiButtonClick,
+  // Disabled (LLM)
+  // handleAiButtonClick,
 } from '../../../utils/callControls';
 import { SlashedBot } from '../CallPrivacyIndicator/CallPrivacyIndicator';
 import { deriveTranscriptionDisplayStatus } from '../../../utils/livekitAgent';
@@ -39,7 +41,8 @@ interface AgentCardProps {
  * and the host's stop/resume switch that otherwise hides in the privacy popover.
  */
 export function AgentCard({
-  callId,
+  // Disabled (LLM)
+  // callId,
   isHost,
   hostName,
   agentControls,
@@ -54,41 +57,49 @@ export function AgentCard({
     roomActor,
     state => state.context.transcriptionAgentLeft,
   );
-  const isAIAssistantEnabled = useSelector(roomActor, state => state.context.isAIAssistantEnabled);
+  // Disabled (LLM)
+  // const isAIAssistantEnabled = useSelector(roomActor, state => state.context.isAIAssistantEnabled);
   const aiController = useSelector(roomActor, state => state.context.aiController);
   const pendingControlRequest = useSelector(
     roomActor,
     state => state.context.pendingControlRequest,
   );
 
-  const { isController, isControlledByOther, hasPendingRequestFromOther, isRequestingUser } =
-    getAiControlState({
+  const {
+    isController,
+    // Disabled (LLM)
+    // isControlledByOther,
+    // hasPendingRequestFromOther,
+    // isRequestingUser,
+  } = getAiControlState({
       localParticipantId: agentControls?.localParticipantId ?? null,
       aiController,
       pendingControlRequest,
     });
-  const isAiActiveForMe = isController || (isAIAssistantEnabled && !isControlledByOther);
-
-  const aiTitle = getAiButtonTitle({
-    hasPendingRequestFromOther,
-    isRequestingUser,
-    isControlledByOther,
-    isAIAssistantEnabled,
-    pendingControlRequest,
-    aiController,
-  });
-  const isAiDisabled = getAiButtonDisabled({
-    hasPendingRequestFromOther,
-    isRequestingUser,
-    requestedAiController: agentControls?.requestedAiController ?? false,
-  });
+  // Disabled (LLM)
+  // const isAiActiveForMe = isController || (isAIAssistantEnabled && !isControlledByOther);
+  //
+  // const aiTitle = getAiButtonTitle({
+  //   hasPendingRequestFromOther,
+  //   isRequestingUser,
+  //   isControlledByOther,
+  //   isAIAssistantEnabled,
+  //   pendingControlRequest,
+  //   aiController,
+  // });
+  // const isAiDisabled = getAiButtonDisabled({
+  //   hasPendingRequestFromOther,
+  //   isRequestingUser,
+  //   requestedAiController: agentControls?.requestedAiController ?? false,
+  // });
 
   // transcribing = agent live; connecting = meant to be on but the agent isn't here yet
   // (self-heals); off = host turned it off.
   const status = deriveTranscriptionDisplayStatus({ isTranscriptionEnabled, agentPresent });
 
-  // Talk-back needs the live agent, so it's only offered while actually transcribing.
-  const showTalkBack = !!agentControls && status === 'transcribing';
+  // Disabled (LLM)
+  // // Talk-back needs the live agent, so it's only offered while actually transcribing.
+  // const showTalkBack = !!agentControls && status === 'transcribing';
 
   const statusLabel = isPending
     ? isTranscriptionEnabled
@@ -104,13 +115,14 @@ export function AgentCard({
           : 'Connecting…'
         : 'Not transcribing';
 
-  const talkBackClick = (): void =>
-    handleAiButtonClick({
-      hasPendingRequestFromOther,
-      isControlledByOther,
-      onRequestControl: agentControls?.onRequestControl,
-      onToggleAIAssistant: () => roomActor.send({ type: 'TOGGLE_AI_ASSISTANT' }),
-    });
+  // Disabled (LLM)
+  // const talkBackClick = (): void =>
+  //   handleAiButtonClick({
+  //     hasPendingRequestFromOther,
+  //     isControlledByOther,
+  //     onRequestControl: agentControls?.onRequestControl,
+  //     onToggleAIAssistant: () => roomActor.send({ type: 'TOGGLE_AI_ASSISTANT' }),
+  //   });
 
   // One compact row, styled like the participant rows below it: logo + status,
   // a talk-back icon button, and (host) a ⋮ menu to stop/resume transcription.
@@ -145,6 +157,8 @@ export function AgentCard({
       </div>
 
       <div className='flex flex-shrink-0 items-center gap-1'>
+        {/* Disabled (LLM) */}
+        {/*
         {showTalkBack && (
           <Tooltip content={aiTitle} side='bottom'>
             <span className='inline-flex'>
@@ -176,6 +190,7 @@ export function AgentCard({
             </span>
           </Tooltip>
         )}
+        */}
 
         {isHost ? (
           <DropdownMenu modal={false}>
