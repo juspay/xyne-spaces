@@ -575,4 +575,6 @@ class WorkerService {
 }
 
 const worker = new WorkerService()
-worker.start()
+// Disabled (all workers)
+// worker.start()
+if ((false as boolean)) void worker.start()

@@ -67,7 +67,8 @@ import socialMediaRoutes from './integrations/routes/social-media.js';
 import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
-import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
+// Disabled (all workers)
+// import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
@@ -210,7 +211,8 @@ import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { boardConfigCopyQueue } from '@/queues/boardConfigCopyQueue';
-import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
+// Disabled (all workers)
+// import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
@@ -985,7 +987,8 @@ export class App {
         (async () => {
           logger.info('Initializing board config copy queue...');
           await boardConfigCopyQueue.initialize();
-          boardConfigCopyWorker.start();
+          // Disabled (all workers)
+          // boardConfigCopyWorker.start();
         })(),
         (async () => {
           logger.info('Initializing assignment reactivation queue...');
@@ -1041,7 +1044,8 @@ export class App {
 
       logger.info('Initializing board config copy queue...');
       await boardConfigCopyQueue.initialize();
-      boardConfigCopyWorker.start();
+      // Disabled (all workers)
+      // boardConfigCopyWorker.start();
 
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
@@ -1250,10 +1254,11 @@ export class App {
     // }
 
     // Nightly automated Slack migration cron (runs only on migration pod)
-    if (config.autoSyncSlackChannel.enabled) {
-      logger.info('[APP] Starting Slack migration nightly worker...');
-      await slackMigrationWorker.start();
-    }
+    // Disabled (all workers)
+    // if (config.autoSyncSlackChannel.enabled) {
+    //   logger.info('[APP] Starting Slack migration nightly worker...');
+    //   await slackMigrationWorker.start();
+    // }
 
     this.httpServer.listen(config.port, config.host, () => {
       logger.info(`Server is running on ${config.host}:${config.port} in ${config.env} mode`);
@@ -1340,8 +1345,9 @@ export class App {
       await CommonDatabaseClient.disconnect();
       await redisService.disconnect();
 
-      // Stop Slack migration nightly worker if running
-      await slackMigrationWorker.stop();
+      // Disabled (all workers)
+      // // Stop Slack migration nightly worker if running
+      // await slackMigrationWorker.stop();
 
       // Close HTTP server
       this.httpServer.close(() => {
