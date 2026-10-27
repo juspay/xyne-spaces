@@ -18,6 +18,8 @@ import {
   copyToClipboard,
   downloadDiagramAsPng,
   isValidMermaidSyntax,
+  stripPartialClosingFence,
+  MERMAID_STALE_BUILD_ERROR,
 } from './MermaidBlock.utils';
 
 function useIsDarkTheme(): boolean {
@@ -86,10 +88,16 @@ const MermaidBlockComponent = ({
   const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastRenderedChartRef = useRef<string>('');
   const hasValidSyntaxRef = useRef<boolean>(false);
+  // Monotonic id of the latest scheduled render. Renders are async and not
+  // serialized, so an older (partial, failing) render can settle after a newer
+  // one; only the latest render may update state.
+  const renderSeqRef = useRef<number>(0);
 
   useEffect(() => {
+    const renderChart = stripPartialClosingFence(chart);
+
     // Update valid syntax ref
-    hasValidSyntaxRef.current = isValidMermaidSyntax(chart);
+    hasValidSyntaxRef.current = isValidMermaidSyntax(renderChart);
 
     // Clear previous timeout
     if (renderTimeoutRef.current) {
@@ -98,17 +106,24 @@ const MermaidBlockComponent = ({
 
     // Debounce rendering to prevent flickering during streaming
     renderTimeoutRef.current = setTimeout(() => {
+      const seq = ++renderSeqRef.current;
+      const isLatest = (): boolean => seq === renderSeqRef.current;
       void renderMermaidDiagram({
-        chart,
+        chart: renderChart,
         messageId,
         isDark,
         lastRenderedChart: lastRenderedChartRef.current,
         onSuccess: (renderedSvg, renderedChart) => {
+          if (!isLatest()) return;
           setSvg(renderedSvg);
           lastRenderedChartRef.current = `${isDark ? 'dark' : 'light'}:${renderedChart}`;
         },
-        onError: setError,
-        onLoading: setIsRendering,
+        onError: message => {
+          if (isLatest()) setError(message);
+        },
+        onLoading: loading => {
+          if (isLatest()) setIsRendering(loading);
+        },
       });
     }, 400);
 
@@ -141,6 +156,17 @@ const MermaidBlockComponent = ({
     return (
       <div className='p-4 bg-red-50 border border-red-200 rounded-lg'>
         <p className='text-sm text-red-600'>{error}</p>
+        {error === MERMAID_STALE_BUILD_ERROR && (
+          <button
+            type='button'
+            onClick={() => window.location.reload()}
+            className='mt-2 rounded-md border border-red-200 bg-background px-2 py-1 text-xs text-red-600 hover:bg-red-100'
+            data-track-category='Mermaid'
+            data-track-name='RELOAD_STALE_BUILD'
+          >
+            Reload
+          </button>
+        )}
         <details className='mt-2'>
           <summary className='text-xs text-red-500 cursor-pointer'>Show diagram code</summary>
           <pre className='mt-2 text-xs text-foreground overflow-x-auto'>{chart}</pre>
