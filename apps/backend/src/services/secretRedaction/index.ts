@@ -13,8 +13,6 @@ import { RE2JS } from 're2js';
 import { GLOBAL_ALLOWLISTS, RULES } from './rules.generated';
 import type { AllowlistSpec, RedactionResult, SecretFinding, SecretRuleSpec } from './types';
 
-export type { RedactionResult, SecretFinding } from './types';
-
 interface CompiledAllowlist {
   regexes: RE2JS[];
   regexTarget: 'secret' | 'match' | 'line';
