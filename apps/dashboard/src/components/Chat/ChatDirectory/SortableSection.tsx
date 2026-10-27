@@ -97,12 +97,12 @@ const SortableSection = ({
     >
       {/* The header itself is the drag handle: a click toggles the section, a
           drag (>5px, per the PointerSensor constraint) reorders it. */}
-      <div className='group relative flex items-center justify-between gap-2'>
+      <div className='group relative flex items-center justify-between gap-2 px-3'>
         <Accordion.Trigger asChild>
           <button
             {...attributes}
             {...listeners}
-            className='group/trigger flex items-center justify-start gap-2 flex-1 min-w-0 h-7 text-sidebar-foreground text-xs font-semibold px-3 cursor-grab active:cursor-grabbing'
+            className='group/trigger flex items-center justify-start gap-2 flex-1 min-w-0 h-7 text-sidebar-foreground text-xs font-medium cursor-grab active:cursor-grabbing'
           >
             <span className='size-4 flex items-center justify-center shrink-0'>
               <span className='group-hover:hidden'>
@@ -118,7 +118,7 @@ const SortableSection = ({
           </button>
         </Accordion.Trigger>
         {sectionUnreadCount > 0 && (
-          <Badge className='order-last mr-0.5 hidden group-data-[state=closed]/item:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
+          <Badge className='order-last hidden group-data-[state=closed]/item:inline-flex font-mono h-[18px] shrink-0 bg-sidebar-primary border border-sidebar-accent-ring px-1.5 text-sidebar-primary-foreground'>
             {sectionUnreadCount > 9 ? '9+' : sectionUnreadCount}
           </Badge>
         )}
@@ -126,7 +126,7 @@ const SortableSection = ({
           <DropdownMenuTrigger asChild>
             <button
               className={cn(
-                'flex items-center justify-center p-1 mr-0.5 rounded-md hover:bg-sidebar-accent shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground transition-opacity ease-in-out duration-300',
+                'flex items-center justify-center p-1 rounded-md hover:bg-sidebar-accent shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground transition-opacity ease-in-out duration-300',
                 menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
               )}
               aria-label={`${section.name} section options`}
