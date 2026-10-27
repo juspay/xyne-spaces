@@ -3,6 +3,7 @@ import { Agent } from 'undici';
 import pLimit from 'p-limit';
 import { consoleLogger, getErrorMessage } from '../utils';
 import { cleanDocumentFields } from '../../../utils/vespaTextValidation';
+import { redactDocumentSecrets } from '../../../services/secretRedaction';
 import type { InsertDocument, VespaSchema } from '../types';
 
 type VespaConfigValues = {
@@ -159,10 +160,19 @@ class VespaClient {
     }
   }
 
+  // Secrets are replaced with [REDACTED:<rule-id>] so they never reach the index or its embeddings.
+  private redactSecrets(fields: Record<string, any>, docId: string, schema?: string): void {
+    const ruleIds = redactDocumentSecrets(schema, fields);
+    if (ruleIds.length) {
+      this.logger.info(`Redacted ${ruleIds.length} secret(s) in ${schema}/${docId}: ${[...new Set(ruleIds)].join(', ')}`);
+    }
+  }
+
   async insert(document: InsertDocument, options: VespaConfigValues): Promise<void> {
     try {
       // Clean document fields to remove Unicode replacement characters before insertion
       const cleanedDocument = cleanDocumentFields(document);
+      this.redactSecrets(cleanedDocument, document.docId, options.schema);
 
       const url = `${this.feedEndpoint}/document/v1/${options.namespace}/${options.schema}/docid/${document.docId}`;
       const response = await this.fetchWithRetry(url, {
@@ -236,6 +246,7 @@ class VespaClient {
     try {
       // Clean updated fields to remove Unicode replacement characters
       const cleanedFields = cleanDocumentFields(updatedFields);
+      this.redactSecrets(cleanedFields, docId, schema);
 
       const updateObject = Object.entries(cleanedFields).reduce(
         (prev, [key, value]) => {
