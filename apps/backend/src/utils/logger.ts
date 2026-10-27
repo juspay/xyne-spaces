@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import fluentLogger from 'fluent-logger';
 import type { Socket } from 'net';
 import { config } from '@/config/env';
+import { isSensitiveKey, redactSensitiveFields, REDACTED_VALUE } from '@/utils/redact';
 
 export interface LogContext {
   requestId?: string;
@@ -132,6 +133,20 @@ const normalizeErrors = winston.format((info) => {
   return info;
 });
 
+// Mask credential-named metadata keys (secret, token, clientState, ...) at any
+// depth, so a call site that logs `req.params` or a provider payload cannot
+// leak a credential. Top-level keys are rewritten in place to keep Winston's
+// symbol-keyed fields intact.
+const redactSensitiveMeta = winston.format((info) => {
+  const infoRecord = info as Record<string, unknown>;
+  for (const key of Object.keys(infoRecord)) {
+    const value = infoRecord[key];
+    if (value === undefined || value === null || value === '') continue;
+    infoRecord[key] = isSensitiveKey(key) ? REDACTED_VALUE : redactSensitiveFields(value);
+  }
+  return info;
+});
+
 // msgpack has no cycle detection and throws on BigInt; break cycles and stringify BigInt first.
 function decycle(value: unknown, ancestors: unknown[]): unknown {
   if (typeof value === 'bigint') return value.toString();
@@ -170,6 +185,7 @@ const sharedFormat = winston.format.combine(
   winston.format.timestamp(),
   winston.format.errors({ stack: true }),
   normalizeErrors(),
+  redactSensitiveMeta(),
   injectContext()
 );
 

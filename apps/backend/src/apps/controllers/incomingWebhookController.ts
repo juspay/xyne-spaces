@@ -84,6 +84,17 @@ export type WebhookContext = {
   body: unknown;
 };
 
+/**
+ * Reads a single id-like field from an untrusted request body for logging.
+ * Returns it only when it is a string, so arbitrary payload data never reaches
+ * the logs through this path.
+ */
+function pickLoggableId(body: unknown, field: string): string | undefined {
+  if (typeof body !== 'object' || body === null || !(field in body)) return undefined;
+  const value: unknown = Reflect.get(body, field);
+  return typeof value === 'string' ? value : undefined;
+}
+
 class IncomingWebhookController {
   buildIncomingWebhookUrl = (
     workspaceId: string | undefined,
@@ -110,6 +121,12 @@ class IncomingWebhookController {
 
     return `/api/apps/webhooks/${safeWorkspaceId}/${installedAppId}/${secret}`;
   };
+
+  // Identifiers from an incoming-webhook URL that are safe to log. The
+  // `:secret` segment is the webhook's only credential and must never be logged.
+  private safeIncomingParams(req: Request): { workspaceId?: string; appId?: string } {
+    return { workspaceId: req.params.workspaceId, appId: req.params.appId };
+  }
 
   private async parseBody(
     req: Request,
@@ -154,7 +171,7 @@ class IncomingWebhookController {
     const paramsResult = IncomingWebhookParamsSchema.safeParse(req.params);
     if (!paramsResult.success) {
       logger.warn('[Incoming-Webhook] Invalid incoming webhook params', {
-        params: req.params,
+        ...this.safeIncomingParams(req),
         issues: paramsResult.error.issues,
         expectedType,
       });
@@ -246,14 +263,17 @@ class IncomingWebhookController {
         res.status(400).send('invalid_payload');
         return;
       }
-      logger.info('[INCOMING-WEBHOOK] BODY', {
-        body: context.body,
+      logger.info('[Incoming-Webhook] Received Slack-format webhook', {
+        workspaceId: context.workspaceId,
+        appId: context.appId,
+        webhookId: context.webhook.id,
+        bodyBytes: Number(req.headers['content-length']) || undefined,
       });
 
       await processSlackIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling incoming webhook', {
-        params: req.params,
+        ...this.safeIncomingParams(req),
         error,
       });
       res.status(500).send('rollup_error');
@@ -271,7 +291,7 @@ class IncomingWebhookController {
       await processSentinelIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling SentinelOne webhook', {
-        params: req.params,
+        ...this.safeIncomingParams(req),
         error,
       });
       res.status(500).send('rollup_error');
@@ -302,7 +322,7 @@ class IncomingWebhookController {
       await processAmazonSnsIncoming(context, res, envelope);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Amazon SNS webhook', {
-        params: req.params,
+        ...this.safeIncomingParams(req),
         error,
       });
       res.status(500).send('rollup_error');
@@ -333,7 +353,7 @@ class IncomingWebhookController {
       await processPingdomIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Pingdom webhook', {
-        params: req.params,
+        ...this.safeIncomingParams(req),
         error,
       });
       res.status(500).send('rollup_error');
@@ -365,7 +385,7 @@ class IncomingWebhookController {
       await processGcpIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling GCP Monitoring webhook', {
-        params: req.params,
+        ...this.safeIncomingParams(req),
         error,
       });
       res.status(500).send('rollup_error');
@@ -445,7 +465,9 @@ class IncomingWebhookController {
       const userId = req.user?.id;
       if (!userId) {
         logger.warn('[Incoming-Webhook] Missing authenticated user for create webhook', {
-          body: req.body,
+          installedAppId,
+          channelId,
+          type,
         });
         res.status(401).json({ error: 'Unauthorized' });
         return;
@@ -557,7 +579,7 @@ class IncomingWebhookController {
     } catch (error) {
       logger.error('[Incoming-Webhook] Error creating webhook', {
         userId: req.user?.id,
-        body: req.body,
+        installedAppId: pickLoggableId(req.body, 'installedAppId'),
         error,
       });
       res.status(500).json({ error: 'Internal server error' });
@@ -569,7 +591,7 @@ class IncomingWebhookController {
       const paramsResult = InstalledAppParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
         logger.warn('[Incoming-Webhook] Invalid list webhooks params', {
-          params: req.params,
+          installedAppId: req.params.installedAppId,
           issues: paramsResult.error.issues,
         });
         res.status(400).json({ error: 'Validation error', details: paramsResult.error.issues });
@@ -670,7 +692,7 @@ class IncomingWebhookController {
       const paramsResult = WebhookParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
         logger.warn('[Incoming-Webhook] Invalid update webhook params', {
-          params: req.params,
+          webhookId: req.params.webhookId,
           userId: req.user?.id,
           issues: paramsResult.error.issues,
         });
@@ -722,7 +744,6 @@ class IncomingWebhookController {
       logger.error('[Incoming-Webhook] Error updating webhook', {
         webhookId: req.params.webhookId,
         userId: req.user?.id,
-        body: req.body,
         error,
       });
       res.status(500).json({ error: 'Internal server error' });
@@ -734,7 +755,7 @@ class IncomingWebhookController {
       const paramsResult = WebhookParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
         logger.warn('[Incoming-Webhook] Invalid revoke webhook params', {
-          params: req.params,
+          webhookId: req.params.webhookId,
           userId: req.user?.id,
           issues: paramsResult.error.issues,
         });
