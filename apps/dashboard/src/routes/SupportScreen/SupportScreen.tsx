@@ -97,6 +97,12 @@ import {
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
 import Tooltip, { TruncatedTooltip } from '../../components/ui/Tooltip';
+import {
+  resolveTicketSource,
+  TicketSourceIcon,
+  TicketSourceWatermark,
+  type EmailProvider,
+} from '../../components/xyne-desk/TicketSourceBanner/TicketSourceBanner';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { useTicketKeysetWindow } from '../../hooks/useTicketKeysetWindow';
@@ -106,6 +112,7 @@ import { ChannelsDeskSourceChannel, ChannelsDeskSourceThread } from './ChannelsD
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
+import { listAvailableSlackChannels } from '../../services/clients/slackDeskApi';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
 import { FetchSourcePicker } from '../../components/Chat/EmailRefetch/FetchSourcePicker';
@@ -5918,6 +5925,35 @@ export const SupportTicketDetail = ({
 
   // Get channel info and user status
   const channel = useChannel(channelId);
+  const ticketInstalledAppId = (
+    ticket?.metadata as { deskSource?: { installedAppId?: string } } | null
+  )?.deskSource?.installedAppId;
+  const { data: channelFetchSources } = useChannelFetchSources(
+    channelId,
+    channel?.type === ChannelType.EMAIL ||
+      channel?.type === ChannelType.APP ||
+      !!ticketInstalledAppId,
+  );
+  const emailSource = channelFetchSources?.find(
+    (src): src is typeof src & { sourceType: EmailProvider } =>
+      src.isActive && src.sourceType !== 'app-desk',
+  );
+  const appSources = (channelFetchSources ?? []).filter(
+    src => src.isActive && src.sourceType === 'app-desk',
+  );
+  const appSourceName = (
+    appSources.find(src => src.installedAppId === ticketInstalledAppId) ??
+    (appSources.length === 1 ? appSources[0] : undefined)
+  )?.displayName;
+  const ticketSlackChannelId = (ticket?.metadata as { slackChannelId?: string } | null)
+    ?.slackChannelId;
+  const { data: slackChannels } = useQuery({
+    queryKey: ['slack-desk-channels'],
+    queryFn: listAvailableSlackChannels,
+    enabled: !!ticketSlackChannelId,
+    retry: false,
+  });
+  const slackChannelName = slackChannels?.find(c => c.id === ticketSlackChannelId)?.name;
 
   const openTicketId = ticket?.id;
   const channelType = channel?.type;
@@ -6012,6 +6048,7 @@ export const SupportTicketDetail = ({
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
   useRecheckTicketDuplicates(ticket && !ticket.isArchived ? ticket.id : null);
   const [showAddToCanvasDialog, setShowAddToCanvasDialog] = useState(false);
+  const [showSourceDialog, setShowSourceDialog] = useState(false);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -6019,6 +6056,17 @@ export const SupportTicketDetail = ({
       </div>
     );
   }
+
+  const ticketSource = ticket
+    ? resolveTicketSource(channel?.type, ticket.metadata, {
+        ...(emailSource && {
+          emailProvider: emailSource.sourceType,
+          emailAddress: emailSource.displayName,
+        }),
+        ...(slackChannelName && { slackChannelName: `#${slackChannelName}` }),
+        ...(appSourceName && { appName: appSourceName }),
+      })
+    : null;
 
   return (
     <div className='h-full flex flex-col overflow-hidden'>
@@ -6035,7 +6083,8 @@ export const SupportTicketDetail = ({
           maxSize={isRightPanelOpen ? '70%' : '100%'}
         >
           <div className='h-full flex flex-col overflow-hidden relative'>
-            <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
+            <div className='overflow-hidden w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
+              {ticketSource && <TicketSourceWatermark source={ticketSource} />}
               <div className='flex flex-wrap items-center gap-2 min-w-0 overflow-hidden'>
                 {/* Hidden in the search-results pane (showAdjacentNav=false): it hosts the ticket
                     with its own close header and has no ticket list to return to. */}
@@ -6191,6 +6240,19 @@ export const SupportTicketDetail = ({
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end' className={labelPickerOpen ? 'w-64' : 'w-56'}>
+                      {ticketSource && (
+                        <>
+                          <DropdownMenuItem
+                            onSelect={() => setShowSourceDialog(true)}
+                            data-track-category='Support'
+                            data-track-name='SeeTicketSource'
+                          >
+                            <TicketSourceIcon source={ticketSource} />
+                            See source
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
                       {conversationId && channelId && (
                         <>
                           {!labelPickerOpen ? (
@@ -6989,6 +7051,29 @@ export const SupportTicketDetail = ({
                       void navigate(`${supportBase}/${ticket.channelId}/canvases/${canvasId}`);
                     }}
                   />
+                )}
+                {ticketSource && (
+                  <Dialog
+                    open={showSourceDialog}
+                    onOpenChange={setShowSourceDialog}
+                    title='Ticket source'
+                    className='max-w-sm'
+                  >
+                    <div className='p-6 flex flex-col gap-4'>
+                      <div className='flex items-center gap-3'>
+                        <span className='scale-150 origin-left mr-2'>
+                          <TicketSourceIcon source={ticketSource} />
+                        </span>
+                        <h3 className='text-lg font-semibold'>Received via {ticketSource.label}</h3>
+                      </div>
+                      <dl className='grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm'>
+                        <dt className='text-muted-foreground'>Source</dt>
+                        <dd className='break-all'>{ticketSource.name ?? '—'}</dd>
+                        <dt className='text-muted-foreground'>Desk</dt>
+                        <dd className='break-all'>{channel?.name ?? '—'}</dd>
+                      </dl>
+                    </div>
+                  </Dialog>
                 )}
                 {showArchiveConfirmDialog && (
                   <Dialog
