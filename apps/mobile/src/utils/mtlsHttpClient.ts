@@ -22,6 +22,7 @@ import { API_ORIGIN, isMtlsFeatureEnabled } from '../config';
 import { buildApiCookieHeader, mergeCookieHeader } from './apiCookieHeader';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from './logger';
+import { getDeviceId } from './deviceId';
 import { getActiveWorkspaceId } from './activeWorkspace';
 import { decodeBase64Bytes, decodeBase64Utf8 } from './base64Utf8';
 
@@ -256,8 +257,25 @@ export interface MtlsFetchOptions {
 /** Matches the native URLSession request timeout. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
+/**
+ * Supplies the Authorization bearer token attached to outgoing requests.
+ * Registered by the auth layer (authToken.ts) rather than imported, because the
+ * auth layer itself sends requests through this transport.
+ */
+type TransportAuthTokenProvider = () => Promise<string | null>;
+let transportAuthTokenProvider: TransportAuthTokenProvider | null = null;
+
+export function setTransportAuthTokenProvider(provider: TransportAuthTokenProvider): void {
+  transportAuthTokenProvider = provider;
+}
+
+// Auth endpoints mint or revoke the credential itself; resolving a token for
+// them would recurse into the refresh flow. They stay cookie-authenticated.
+const AUTH_TRANSPORT_EXEMPT_URL = /\/auth\//;
+
 export async function prepareHeadersForTransport(
   headers: Record<string, string> | undefined,
+  url?: string,
 ): Promise<Record<string, string>> {
   const nextHeaders: Record<string, string> = { ...(headers ?? {}) };
   const appVersion =
@@ -279,15 +297,47 @@ export async function prepareHeadersForTransport(
     nextHeaders['x-zero-client-group-id'] = zeroClientGroupId;
   }
 
-  const clientSessionId = logger.getClientSessionId();
-  if (clientSessionId) {
-    nextHeaders['x-client-session-id'] = clientSessionId;
+  // The logger loads this id late (after the first frame), so read it directly
+  // when the logger has not yet: startup requests must carry it too.
+  let deviceId = logger.getClientSessionId();
+  if (!deviceId) {
+    try {
+      deviceId = await getDeviceId();
+    } catch {
+      // Storage unavailable: send the request without the header.
+    }
+  }
+  if (deviceId) {
+    nextHeaders['x-device-id'] = deviceId;
   }
 
   const workspaceId = getActiveWorkspaceId();
   if (workspaceId) {
     nextHeaders['x-workspace-id'] = workspaceId;
   }
+
+  // Every backend request carries the access token; callers that already set
+  // Authorization (explicit token flows) keep their value.
+  if (
+    !nextHeaders['Authorization'] &&
+    transportAuthTokenProvider &&
+    !(url && AUTH_TRANSPORT_EXEMPT_URL.test(url))
+  ) {
+    try {
+      const bearerToken = await transportAuthTokenProvider();
+      if (bearerToken) {
+        nextHeaders['Authorization'] = `Bearer ${bearerToken}`;
+      }
+    } catch {
+      // Token resolution must never block the request; cookies still ride.
+    }
+  }
+
+  // TEMP(XYNE-65880): verify x-device-id on every request. Remove before release.
+  // eslint-disable-next-line no-console
+  console.log(
+    `[hdr-check] x-device-id=${nextHeaders['x-device-id'] ?? 'MISSING'} req=${nextHeaders['x-request-id']}`,
+  );
 
   // iOS sends cookies from the native HTTPCookieStorage attached to the shared
   // URLSession, so reading the JS cookie jar here was a bridge round trip on the
@@ -495,7 +545,7 @@ export async function mtlsDownloadToFile(
     throw new Error('Download destination is not allowed');
   }
 
-  const headers = await prepareHeadersForTransport(options?.headers);
+  const headers = await prepareHeadersForTransport(options?.headers, url);
 
   if (shouldUseNativeFileDownload(url) && CertificateModule?.downloadMtlsFile) {
     const nativePath = fileUriToNativePath(destinationPath);
@@ -539,7 +589,7 @@ export async function mtlsFetch(url: string, options?: MtlsFetchOptions): Promis
     throw new Error('[mTLS] Refusing request to unapproved destination');
   }
 
-  const headers = await prepareHeadersForTransport(options?.headers);
+  const headers = await prepareHeadersForTransport(options?.headers, url);
 
   // Check if body is FormData
   const bodyIsFormData = isFormData(options?.body);
