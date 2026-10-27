@@ -8,6 +8,7 @@ export const OutputFieldTypeSchema = z.enum([
   'object',
   'array',
   'secret',
+  'any',
 ]);
 export type OutputFieldType = z.infer<typeof OutputFieldTypeSchema>;
 
@@ -23,10 +24,15 @@ export function assertMatchesSchema(
   declared: Record<string, unknown>,
   path = '',
 ): void {
-  for (const [key, expected] of Object.entries(declared)) {
+  for (const [rawKey, expected] of Object.entries(declared)) {
+    // A trailing `?` marks the key optional: missing or null passes.
+    const optional = rawKey.endsWith('?');
+    const key = optional ? rawKey.slice(0, -1) : rawKey;
     const here = path ? `${path}.${key}` : key;
-    if (!(key in actual)) throw new Error(`required key "${here}" missing`);
     const v = actual[key];
+    if (optional && (v === undefined || v === null)) continue;
+    if (!(key in actual)) throw new Error(`required key "${here}" missing`);
+    if (expected === 'any') continue;
     const actualType = Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v;
     if (typeof expected === 'string') {
       const wanted = expected === 'secret' ? 'string' : expected;

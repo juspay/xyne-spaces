@@ -33,6 +33,8 @@ function declaredLeafToZod(type: string): z.ZodTypeAny {
       return z.array(z.unknown());
     case 'object':
       return z.record(z.unknown());
+    case 'any':
+      return z.unknown();
     case 'secret':
     case 'string':
     default:
@@ -129,6 +131,8 @@ function walkSchemaPath(schema: z.ZodTypeAny, segments: string[]): z.ZodTypeAny 
       const walked = walkSchemaPath(inner, [segment]);
       if (!walked) return null;
       current = walked;
+    } else if (current instanceof z.ZodUnknown || current instanceof z.ZodAny) {
+      continue;
     } else {
       return null;
     }
