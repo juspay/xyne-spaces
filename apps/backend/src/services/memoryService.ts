@@ -14,11 +14,33 @@ import {
   VespaSearchHit,
   VespaSchema,
 } from '@/vespa/src/types';
-import { User } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import removeMarkdown from 'remove-markdown';
 
 const MEMORY_SCHEMA = memorySchema;
+
+/**
+ * Who a memory search runs for: a request user's id, or an internal caller that has already
+ * resolved the workspace server-side. There is no unscoped search.
+ */
+export type MemoryCaller = string | { workspaceId: string };
+
+/**
+ * Resolve the workspace of a memory document owner (stored as the owner's email or id).
+ */
+export async function resolveMemoryWorkspaceId(owner: string): Promise<string> {
+  const prisma = DatabaseClient.getInstance();
+  const user = owner
+    ? await prisma.user.findFirst({
+        where: { OR: [{ email: owner }, { id: owner }] },
+        select: { workspaceId: true },
+      })
+    : null;
+  if (!user?.workspaceId) {
+    throw new Error('Cannot determine workspace for memory document owner');
+  }
+  return user.workspaceId;
+}
 
 /**
  * Strip markdown syntax to produce clean plain text
@@ -60,7 +82,7 @@ export function chunkContent(content: string): string[] {
 async function buildMemoryYql(params: {
   query?: string;
   scope: MemoryScope;
-  userId: string;
+  caller: MemoryCaller;
   limit: number;
   offset: number;
   docType?: VespaDocType;
@@ -74,7 +96,7 @@ async function buildMemoryYql(params: {
   reviewStatus?: string;
   docId?: string;
 }): Promise<string> {
-  const { query, scope, userId, limit, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, docId } = params;
+  const { query, scope, caller, limit, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus, docId } = params;
 
   const conditions: string[] = [];
 
@@ -90,20 +112,35 @@ async function buildMemoryYql(params: {
   // Any narrowing this clause needs to apply belongs here, alongside the scope filter, and
   // is bound through VespaQueryParams rather than interpolated — see YqlBuilder.
 
-  // get the email of that user
-  const prisma = DatabaseClient.getInstance();
-  const user: User | null = await prisma.user.findUnique({
-    where: { id: userId },
-  });
+  // Every search is confined to one workspace, whatever the scope: without this, a doc
+  // written by any workspace is returned to (and can poison) every other one. Fail closed
+  // if the workspace cannot be resolved.
+  let workspaceId: string | undefined;
+  let email: string | undefined;
+  if (typeof caller === 'string') {
+    const prisma = DatabaseClient.getInstance();
+    const user = caller
+      ? await prisma.user.findUnique({
+          where: { id: caller },
+          select: { email: true, workspaceId: true },
+        })
+      : null;
+    workspaceId = user?.workspaceId;
+    email = user?.email;
+  } else {
+    workspaceId = caller.workspaceId;
+  }
+  if (!workspaceId) {
+    throw new Error('Cannot determine workspace for memory search caller');
+  }
+  conditions.push(`workspaceId contains "${escapeYqlString(workspaceId)}"`);
 
-  // Scope filter: 'my' restricts to user's own documents
+  // Scope filter: 'my' further restricts to the user's own documents
   if (scope === 'my') {
-    conditions.push(`userId contains "${escapeYqlString(user?.email)}"`);
-  } else if (user?.workspaceId) {
-    // 'all' means "shared within the caller's workspace", never across tenants. Without
-    // this, a doc written by any workspace is returned to (and can poison) every other one.
-    // Internal callers pass no userId and stay unscoped.
-    conditions.push(`workspaceId contains "${escapeYqlString(user.workspaceId)}"`);
+    if (!email) {
+      throw new Error("Memory scope 'my' requires a user");
+    }
+    conditions.push(`userId contains "${escapeYqlString(email)}"`);
   }
 
   // DocType filter
@@ -245,14 +282,14 @@ async function attachPullRequestsToDocuments(
 
 export async function searchMemory(
   request: MemorySearchRequest,
-  userId: string,
+  caller: MemoryCaller,
 ): Promise<MemorySearchResult> {
   const { query, scope, limit = 20, offset = 0, docType, tags, repoUrl, commitId, sessionId, filePointers, ticketId, parentRef, reviewStatus , includeQuery = true, includeSummary = true, docId} = request;
 
   const yql = await buildMemoryYql({
     query,
     scope,
-    userId,
+    caller,
     limit,
     offset,
     docType,
@@ -336,6 +373,7 @@ export async function getMemoryById(
       docId: fields.docId,
       docType: fields.docType,
       userId: fields.userId,
+      workspaceId: fields.workspaceId,
       sessionId: fields.sessionId,
       repoUrl: fields.repoUrl,
       commitId: fields.commitId,
@@ -362,18 +400,14 @@ export async function getMemoryById(
 /**
  * Insert a memory document into Vespa
  */
-export async function insertMemory(doc: VespaMemoryDocument): Promise<void> {
-  // Always derive the tenant server-side from the owner (doc.userId is the owner's email or
-  // id); never trust a caller-supplied workspaceId/orgId.
-  const prisma = DatabaseClient.getInstance();
-  const owner = await prisma.user.findFirst({
-    where: { OR: [{ email: doc.userId }, { id: doc.userId }] },
-    select: { workspaceId: true },
-  });
-  if (!owner?.workspaceId) {
-    throw new Error('Cannot determine workspace for memory document owner');
-  }
-  doc.workspaceId = owner.workspaceId;
+export async function insertMemory(
+  doc: VespaMemoryDocument,
+  workspaceId?: string,
+): Promise<void> {
+  // The tenant is always server-derived: either resolved by the caller from the request /
+  // ingestion source, or from the owner (doc.userId is the owner's email or id). Never trust
+  // a caller-supplied workspaceId/orgId on the document itself.
+  doc.workspaceId = workspaceId || (await resolveMemoryWorkspaceId(doc.userId));
   delete doc.orgId;
 
   await vespaClient.insert(doc as any, {
