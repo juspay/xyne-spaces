@@ -1,6 +1,11 @@
 import { ReactElement } from 'react';
 import { Link } from 'react-router-dom';
-import { LegalDocumentScreen, type LegalSection } from '../../components/Legal/LegalDocumentScreen';
+import {
+  LegalDocumentScreen,
+  LegalEmailLink,
+  type LegalSection,
+} from '../../components/Legal/LegalDocumentScreen';
+import { LEGAL_CONTACT_EMAIL } from '../../config';
 
 const TERMS_SECTIONS: LegalSection[] = [
   {
@@ -301,14 +306,12 @@ const TERMS_SECTIONS: LegalSection[] = [
         lead: 'Notices.',
         text: (
           <>
-            Notices to Juspay must be sent to{' '}
-            <a
-              href='mailto:legal@juspay.in'
-              className='font-medium underline underline-offset-4 transition-colors hover:text-primary'
-            >
-              legal@juspay.in
-            </a>
-            . Juspay may give notice through the Software, its website, or the repository.
+            {LEGAL_CONTACT_EMAIL ? (
+              <>
+                Notices to Juspay must be sent to <LegalEmailLink email={LEGAL_CONTACT_EMAIL} />.{' '}
+              </>
+            ) : null}
+            Juspay may give notice through the Software, its website, or the repository.
           </>
         ),
       },

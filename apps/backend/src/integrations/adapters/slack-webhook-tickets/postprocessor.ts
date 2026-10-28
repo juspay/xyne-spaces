@@ -8,6 +8,7 @@ import { ConversationRepository } from '../../../database/repositories/conversat
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
 import { logger } from '../../../utils/logger';
 import { decrypt } from '../../../services/encryptionService';
+import { config } from '../../../config/env';
 
 export class SlackPostprocessor extends BasePostprocessor {
   private conversationRepo = new ConversationRepository();
@@ -65,7 +66,7 @@ export class SlackPostprocessor extends BasePostprocessor {
         return;
       }
 
-      const xyneLink = `https://spaces.xyne.juspay.net/chat/${xyneChannelId}/${context.conversationId}`;
+      const xyneLink = `${config.frontendUrl}/chat/${xyneChannelId}/${context.conversationId}`;
 
       const response = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',

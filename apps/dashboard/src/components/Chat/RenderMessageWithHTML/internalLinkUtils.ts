@@ -30,14 +30,17 @@ export type AnchorTargetProps = Pick<
   'target' | 'rel'
 >;
 
+// Hosts of this deployment's own app and call origins, so links to them route in-app
+// rather than opening externally: VITE_INTERNAL_XYNE_HOSTS, comma-separated (e.g.
+// "example.org,app.example.org,call.example.com"). The page's own
+// origin is always internal, so an unset value still routes same-origin links.
+const CONFIGURED_INTERNAL_HOSTS = ((import.meta.env['VITE_INTERNAL_XYNE_HOSTS'] as string) || '')
+  .split(',')
+  .map(host => host.trim().toLowerCase())
+  .filter(Boolean);
+
 const INTERNAL_XYNE_HOSTS = new Set([
-  'spaces.xyne.juspay.net',
-  'app.spaces.xyne.juspay.net',
-  'spaces.sandbox.xyne.juspay.net',
-  'app.spaces.sandbox.xyne.juspay.net',
-  'call.xyne.juspay.net',
-  'call.sandbox.xyne.juspay.net',
-  'xyne-spaces.web.app',
+  ...CONFIGURED_INTERNAL_HOSTS,
   'localhost',
   '127.0.0.1',
 ]);

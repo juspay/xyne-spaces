@@ -28,8 +28,38 @@ const EXTENSION_SOURCE_FILES = [
 ];
 
 const LEGACY_APP_GROUP = 'group.net.juspay.xynespaces.share';
-// API base hardcoded in NotificationService.swift; swapped for the variant's backend at prebuild.
-const LEGACY_API_BASE_URL = 'https://app.spaces.xyne.juspay.net/api';
+
+/**
+ * Backend and telemetry base URLs for the extension. They reach NotificationService.swift
+ * through build settings expanded in plugins/notification-service/Info.plist
+ * (LotusApiBaseUrl / LotusTelemetryBaseUrl), from the same sources JS uses, so the
+ * extension can never point at a different server than the app.
+ */
+function resolveExtensionUrls(config, v) {
+  const apiBaseUrl = String(config.extra?.lotusApiBaseUrl || v.defaultApiBaseUrl || '')
+    .trim()
+    .replace(/\/$/, '');
+  if (!apiBaseUrl) {
+    throw new Error(
+      `[${PLUGIN_NAME}] API_BASE_URL is not set for APP_VARIANT=${v.key} (see .env.example).`,
+    );
+  }
+  const telemetryBaseUrl = String(
+    config.extra?.lotusGrafanaLogsEndpoint ||
+      config.extra?.lotusPublicDeepLinkOrigin ||
+      v.defaultPublicDeepLinkOrigin ||
+      '',
+  )
+    .trim()
+    .replace(/\/$/, '');
+  if (!telemetryBaseUrl) {
+    throw new Error(
+      `[${PLUGIN_NAME}] PUBLIC_DEEP_LINK_ORIGIN (or LOTUS_GRAFANA_LOGS_ENDPOINT) is not set for ` +
+        `APP_VARIANT=${v.key}; delivery telemetry needs a first-party base URL (see .env.example).`,
+    );
+  }
+  return { apiBaseUrl, telemetryBaseUrl };
+}
 
 function iosNotificationServiceBundleId(v) {
   return `${v.iosBundleIdentifier}.NotificationService`;
@@ -84,18 +114,14 @@ function patchPodfileForNotificationService(podfileContent) {
   return `${cleaned.trimEnd()}\n\n${extensionBlock}`;
 }
 
-function patchNotificationServiceSources(dir, appGroup, apiBaseUrl) {
+function patchNotificationServiceSources(dir, appGroup) {
   for (const file of EXTENSION_SOURCE_FILES) {
     if (!file.endsWith('.swift') && !file.endsWith('.plist')) continue;
 
     const target = path.join(dir, file);
     const contents = readFileIfExists(target);
     if (contents === null) continue;
-    const updated = contents
-      .split(LEGACY_APP_GROUP)
-      .join(appGroup)
-      .split(LEGACY_API_BASE_URL)
-      .join(apiBaseUrl);
+    const updated = contents.split(LEGACY_APP_GROUP).join(appGroup);
     if (updated !== contents) {
       fs.writeFileSync(target, updated, 'utf8');
     }
@@ -459,7 +485,7 @@ const withNotificationServiceFiles = config => {
         );
       }
 
-      patchNotificationServiceSources(targetDir, appGroup, v.defaultApiBaseUrl);
+      patchNotificationServiceSources(targetDir, appGroup);
       writeNotificationServiceEntitlements(platformProjectRoot, appGroup, v.iosBundleIdentifier);
 
       const podfilePath = path.join(platformProjectRoot, 'Podfile');
@@ -603,6 +629,8 @@ const withNotificationServiceXcode = config => {
     const configList = xcConfigLists[targetConfigListUuid];
     const buildConfigUuids = (configList && configList.buildConfigurations) || [];
 
+    const extensionUrls = resolveExtensionUrls(config, v);
+
     for (const { value: configUuid } of buildConfigUuids) {
       const buildConfig = xcBuildConfigs[configUuid];
       if (!buildConfig) continue;
@@ -628,6 +656,8 @@ const withNotificationServiceXcode = config => {
       s.MARKETING_VERSION = bundleVersions.marketingVersion;
       s.CURRENT_PROJECT_VERSION = bundleVersions.currentProjectVersion;
       s.LOTUS_REMOTE_LOGGING_ENABLED = resolveRemoteLoggingSetting(config, v.key, buildConfig.name);
+      s.LOTUS_API_BASE_URL = `"${extensionUrls.apiBaseUrl}"`;
+      s.LOTUS_TELEMETRY_BASE_URL = `"${extensionUrls.telemetryBaseUrl}"`;
     }
 
     return config;

@@ -29,6 +29,24 @@ interface RecordingPillState {
 // that origin must NOT inherit this bridge. We therefore gate exposure on a
 // strict first-party origin allowlist. An untrusted frame simply never gets
 // `window.electronAPI`, so it cannot reach any privileged IPC channel.
+//
+// The deployment's first-party hosts (FIRST_PARTY_HOSTS in app/config.ts) come
+// over sync IPC: this preload is sandboxed and cannot require that module. The
+// matching mirrors isFirstPartyHostname() there.
+function firstPartyHosts(): string[] {
+  try {
+    const hosts: unknown = ipcRenderer.sendSync('get-first-party-hosts');
+    return Array.isArray(hosts) ? hosts.filter((host): host is string => typeof host === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function isFirstPartyHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return firstPartyHosts().some((entry) =>
+    entry.startsWith('.') ? host === entry.slice(1) || host.endsWith(entry) : host === entry,
+  );
+}
 function isTrustedOrigin(): boolean {
   try {
     const { protocol, hostname } = window.location;
@@ -36,8 +54,8 @@ function isTrustedOrigin(): boolean {
     if (protocol.startsWith('xyne-spaces')) return true;
     // Bundled local HTML: loading/error pages, meeting popup, recording pill, recorder
     if (protocol === 'file:') return true;
-    // First-party Xyne web app + auth origins (prod + sandbox live under *.xyne.juspay.net)
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) {
+    // First-party Xyne web app + auth origins of this deployment
+    if (protocol === 'https:' && isFirstPartyHostname(hostname)) {
       return true;
     }
     // Local development

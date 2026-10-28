@@ -7,7 +7,6 @@ receivers:
           allowed_origins:
             - "http://localhost:5173"
             - "http://localhost:3000"
-            - "https://spaces.xyne.juspay.net"
           allowed_headers:
             - "Content-Type"
             - "User-Agent"

@@ -8,6 +8,7 @@ const {
 const fs = require('fs');
 const { readFileIfExists } = require('../utils/fs.cjs');
 const path = require('path');
+const { getPrebuildVariant, getVariant } = require('../../config/variants.cjs');
 
 /**
  * Copy certificate module files to iOS project
@@ -202,21 +203,20 @@ const withLocalhostATSExceptions = config => {
       },
     };
 
-    const fallbackApiBaseUrls = {
-      dev: 'http://localhost:3001/api',
-      sandbox: 'https://app.spaces.sandbox.xyne.juspay.net/api',
-      prod: 'https://app.spaces.xyne.juspay.net/api',
-    };
-    const fallbackDashboardOrigins = {
-      dev: 'http://localhost:5173',
-      sandbox: 'https://app.spaces.sandbox.xyne.juspay.net',
-      prod: 'https://app.spaces.xyne.juspay.net',
-    };
+    const variantKey = config.extra?.appVariant || getPrebuildVariant().key;
+    // Only `dev` has a built-in (local) fallback; every other variant must set API_BASE_URL in
+    // .env.<variant> (see .env.example) because the native mTLS allowlist pins this origin.
     const rawApiBaseUrl = String(
       config.extra?.lotusApiBaseUrl ||
-        fallbackApiBaseUrls[config.extra?.appVariant] ||
-        fallbackApiBaseUrls.prod,
+        getVariant(variantKey)?.defaultApiBaseUrl ||
+        (variantKey === 'dev' ? 'http://localhost:3001/api' : ''),
     ).trim();
+    if (!rawApiBaseUrl) {
+      throw new Error(
+        `[with-certificate-module-ios] API_BASE_URL is not set for APP_VARIANT=${variantKey}; ` +
+          'the native mTLS transport allowlist needs the backend origin (see .env.example).',
+      );
+    }
     delete config.modResults.LotusApiOrigin;
     try {
       const parsed = new URL(rawApiBaseUrl);
@@ -229,10 +229,10 @@ const withLocalhostATSExceptions = config => {
     }
 
     delete config.modResults.LotusDashboardOrigin;
+    // The dashboard is served from the API origin unless DASHBOARD_URL says otherwise.
     const rawDashboardOrigin = String(
       config.extra?.lotusDashboardOrigin ||
-        fallbackDashboardOrigins[config.extra?.appVariant] ||
-        fallbackDashboardOrigins.prod,
+        (variantKey === 'dev' ? 'http://localhost:5173' : config.modResults.LotusApiOrigin || ''),
     ).trim();
     try {
       const parsed = new URL(rawDashboardOrigin);

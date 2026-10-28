@@ -8,7 +8,7 @@ import {
   type NativeEventSubscription,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { APP_VARIANT, LOGGER_CONFIG } from '@/src/config';
+import { APP_VARIANT, LOGGER_CONFIG, PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
 import DeviceInfo from 'react-native-device-info';
 import {
   documentDirectory,
@@ -127,7 +127,12 @@ class LoggerService {
   private readonly remoteLoggingEnabled = LOGGER_CONFIG.remoteLoggingEnabled;
   private readonly includeEmailInRemoteRecords =
     this.remoteLoggingEnabled &&
-    canIncludeEmailInRemoteLogs(LOGGER_CONFIG.eventsEndpoint, APP_VARIANT, __DEV__);
+    canIncludeEmailInRemoteLogs(
+      LOGGER_CONFIG.eventsEndpoint,
+      APP_VARIANT,
+      __DEV__,
+      PUBLIC_DEEP_LINK_ORIGIN,
+    );
   private isEnabled: boolean = true;
   private minLevel: LogLevel = __DEV__ ? LogLevel.DEBUG : LogLevel.INFO;
   private isInitialized: boolean = false;

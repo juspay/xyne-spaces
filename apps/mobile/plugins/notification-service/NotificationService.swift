@@ -167,7 +167,15 @@ private enum Constants {
     static let notificationSoundKey = "xyne-global:notificationSoundId"
     static let settingsStorageKey = "settings:v1"
 
-    static let apiBaseURL = "https://app.spaces.xyne.juspay.net/api"
+    /// Backend and telemetry base URLs, injected through build settings into the extension's
+    /// Info.plist (see plugins/withNotificationServiceIOS.cjs). Empty when the build is misconfigured.
+    static let apiBaseURL = infoPlistURL("LotusApiBaseUrl")
+    static let telemetryBaseURL = infoPlistURL("LotusTelemetryBaseUrl")
+
+    private static func infoPlistURL(_ key: String) -> String {
+        let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String ?? ""
+        return raw.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+    }
     static let identityTag = "ClientIdentity"
 
     static let ignoredNotificationTypes: Set<String> = [
@@ -1428,8 +1436,10 @@ final class NotificationService: UNNotificationServiceExtension, AVAudioPlayerDe
     }
 
     private func shouldUseMtlsDownload(for url: URL) -> Bool {
-        let host = url.host?.lowercased() ?? ""
-        return host.contains("spaces.xyne") || host.contains("juspay.net")
+        guard let apiHost = URL(string: Constants.apiBaseURL)?.host?.lowercased(), !apiHost.isEmpty else {
+            return false
+        }
+        return url.host?.lowercased() == apiHost
     }
 
     private func resolveSenderPictureURL(from request: UNNotificationRequest) -> URL? {
@@ -1656,19 +1666,17 @@ final class NotificationService: UNNotificationServiceExtension, AVAudioPlayerDe
         return String(collapsed[..<end]) + "…"
     }
 
-    private func godelBaseURL() -> String {
-        let bundleId = Bundle.main.bundleIdentifier ?? ""
-        return bundleId.contains("sandbox")
-            ? "https://spaces.sandbox.xyne.juspay.net"
-            : "https://spaces.xyne.juspay.net"
+    private func godelBaseURL() -> String? {
+        let base = Constants.telemetryBaseURL
+        return base.isEmpty ? nil : base
     }
 
     private func godelEventsURL() -> URL? {
-        URL(string: "\(godelBaseURL())/godel/events")
+        godelBaseURL().flatMap { URL(string: "\($0)/godel/events") }
     }
 
     private func godelMetricsURL() -> URL? {
-        URL(string: "\(godelBaseURL())/godel/v1/metrics")
+        godelBaseURL().flatMap { URL(string: "\($0)/godel/v1/metrics") }
     }
 
     private func buildNotificationDeliveryLogRecords(

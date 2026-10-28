@@ -79,7 +79,7 @@ export const CONFIG = {
   // key that lives on the platform proxy can leave the credential's baseUrl
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
-  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
+  litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "").replace(/\/+$/, ""),
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
@@ -138,14 +138,13 @@ export const CONFIG = {
   // Public user-facing Spaces URL — used for citation links + ticket deep links
   // (anything a human will click). PUBLIC_SPACES_URL is the canonical env;
   // older deployments may still set SPACES_APP_URL / VITE_XYNE_BACKEND_URL /
-  // SPACES_BACKEND_URL, so those remain in the fallback chain. Default is the
-  // production public domain — dev environments set one of the existing envs
-  // to point at localhost as usual.
+  // SPACES_BACKEND_URL, so those remain in the fallback chain. No in-repo
+  // default — every deployment sets one of these envs (dev points at localhost).
   spacesAppUrl: process.env["PUBLIC_SPACES_URL"]
     ?? process.env["SPACES_APP_URL"]
     ?? process.env["VITE_XYNE_BACKEND_URL"]
     ?? process.env["SPACES_BACKEND_URL"]
-    ?? "https://app.spaces.xyne.juspay.net",
+    ?? "",
   defaultAgentSlug: process.env["DEFAULT_AGENT_SLUG"] ?? "assistant",
   minCronIntervalMinutes: Number(process.env["MIN_CRON_INTERVAL_MINUTES"] ?? 30),
   // Daily Brief fan-out throttle. `concurrency` is the HARD cap on parallel brief

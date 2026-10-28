@@ -1,6 +1,6 @@
 import log from 'electron-log/main';
 import { session, BrowserWindow, app, webContents } from 'electron';
-import { config } from '../app/config';
+import { config, FIRST_PARTY_HOSTS, isFirstPartyHostname } from '../app/config';
 import { clearAllCookies } from './cookies';
 import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -186,7 +186,7 @@ function isFirstPartyUrl(rawUrl: string | undefined): boolean {
     const { protocol, hostname } = new URL(rawUrl);
     if (protocol.startsWith('xyne-spaces')) return true;              // bundled UI custom scheme
     if (protocol === 'file:') return true;                            // bundled local HTML
-    if (protocol === 'https:' && (hostname === 'xyne.juspay.net' || hostname.endsWith('.xyne.juspay.net'))) return true;
+    if (protocol === 'https:' && isFirstPartyHostname(hostname)) return true;
     if ((protocol === 'http:' || protocol === 'https:') && (hostname === 'localhost' || hostname === '127.0.0.1')) return true;
     return false;
   } catch {
@@ -268,9 +268,17 @@ function setupMediaPermissionGuard(): void {
   });
 }
 
+// CSP source list for the first-party hosts: a ".example.com" entry becomes the
+// wildcard "*.example.com" plus the bare domain.
+function firstPartyCspSources(scheme: string): string {
+  return FIRST_PARTY_HOSTS.flatMap((host) =>
+    host.startsWith('.') ? [`${scheme}://*${host}`, `${scheme}://${host.slice(1)}`] : [`${scheme}://${host}`],
+  ).join(' ');
+}
+
 function installFrontendCsp(): void {
-  const xyneHosts = 'https://*.xyne.juspay.net';
-  const xyneWs = 'wss://*.xyne.juspay.net';
+  const xyneHosts = firstPartyCspSources('https');
+  const xyneWs = firstPartyCspSources('wss');
   const googleApis = 'https://apis.google.com https://accounts.google.com';
   const googleFontsCss = 'https://fonts.googleapis.com';
   const googleFontsFiles = 'https://fonts.gstatic.com';

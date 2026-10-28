@@ -20,16 +20,15 @@ export const isLocalHarnessAvailable = (): boolean =>
 
 const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
-const ELECTRON_BACKEND_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
-  : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:3001';
-const ELECTRON_BACKEND_ZERO_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
-  : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:4848';
+// The bundled Electron UI has no serving host to derive its backend from, so the
+// hosted origins are deployment config: set VITE_ELECTRON_BACKEND_URL and
+// VITE_ELECTRON_ZERO_BACKEND_URL in each flavour's build. Unset, the bundle talks
+// to the local dev stack.
+const ELECTRON_BACKEND_URL =
+  import.meta.env['VITE_ELECTRON_BACKEND_URL'] || 'http://localhost:3001';
+const ELECTRON_BACKEND_ZERO_URL =
+  import.meta.env['VITE_ELECTRON_ZERO_BACKEND_URL'] ||
+  'http://localhost:4848';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 
@@ -42,11 +41,13 @@ export const API_BASE_URL = useDevProxy
     : `${protocol}://${hostname}${backendPort}/api`;
 
 const zeroServerPort = isLocalhost ? ':4848' : isTestEnv ? ':4848' : '';
-export const APPS_PUBLIC_BASE_URL = isLocalhost
-  ? 'http://localhost:3001/api/apps'
-  : isSandBox
-    ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
-    : 'https://spaces.xyne.juspay.net/api/apps';
+// Public base of app links. The public host is not always the serving host, so it is
+// deployment config: set VITE_APPS_PUBLIC_BASE_URL. Unset, links use the serving host.
+export const APPS_PUBLIC_BASE_URL =
+  import.meta.env['VITE_APPS_PUBLIC_BASE_URL'] ||
+  (isLocalhost
+    ? 'http://localhost:3001/api/apps'
+    : `${protocol}://${hostname}${backendPort}/api/apps`);
 
 // A same-origin path to the zero-cache, for a host that proxies it (the test stack's
 // /zero). Everything else derives from the serving host. VITE_ZERO_SERVER is
@@ -115,3 +116,10 @@ export const DEFAULT_WORKSPACE_ID: string =
 // set VITE_SLACK_APP_INSTALL_URL in .env.local — the UI hides the link when unset.
 export const SLACK_APP_INSTALL_URL: string =
   (import.meta.env['VITE_SLACK_APP_INSTALL_URL'] as string) || '';
+
+// Contact addresses shown on the legal pages (Privacy Policy, Terms of Service).
+// Deployment-specific, so env-only; the pages leave the contact line out when unset.
+export const LEGAL_CONTACT_EMAIL: string =
+  (import.meta.env['VITE_LEGAL_CONTACT_EMAIL'] as string) || '';
+export const PRIVACY_CONTACT_EMAIL: string =
+  (import.meta.env['VITE_PRIVACY_CONTACT_EMAIL'] as string) || '';

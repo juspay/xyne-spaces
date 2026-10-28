@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import type { ConfluenceUser } from './confluenceClient';
+import { config } from '@/config/env';
 
 const db = DatabaseClient.getInstance();
 
@@ -40,7 +41,9 @@ const normalizeEmailLocalPart = (value?: string | null): string =>
     .replace(/[^a-z0-9._-]/g, '');
 
 const inferEmailCandidatesFromName = (name?: string): string[] => {
-  if (!name) return [];
+  // Candidate emails are only meaningful on the org's own domain (ORG_EMAIL_DOMAIN).
+  const domain = config.orgEmailDomain;
+  if (!name || !domain) return [];
 
   const cleaned = name.replace(/_juspay$/i, '').replace(/[_-]+/g, ' ');
   const nameParts = cleaned
@@ -51,7 +54,7 @@ const inferEmailCandidatesFromName = (name?: string): string[] => {
   const candidates = new Set<string>();
   const rawLocalPart = normalizeEmailLocalPart(cleaned);
   if (rawLocalPart) {
-    candidates.add(`${rawLocalPart}@juspay.in`);
+    candidates.add(`${rawLocalPart}@${domain}`);
   }
 
   if (nameParts.length === 0) {
@@ -64,21 +67,21 @@ const inferEmailCandidatesFromName = (name?: string): string[] => {
   const firstInitial = first?.[0];
   const lastInitial = last?.[0];
 
-  candidates.add(`${nameParts.join('.')}@juspay.in`);
-  candidates.add(`${nameParts.join('')}@juspay.in`);
+  candidates.add(`${nameParts.join('.')}@${domain}`);
+  candidates.add(`${nameParts.join('')}@${domain}`);
 
   if (nameParts.length >= 2) {
-    candidates.add(`${first}.${last}@juspay.in`);
-    candidates.add(`${first}${last}@juspay.in`);
-    candidates.add(`${first}.${lastInitial}@juspay.in`);
-    candidates.add(`${first}${lastInitial}@juspay.in`);
-    candidates.add(`${firstInitial}.${last}@juspay.in`);
+    candidates.add(`${first}.${last}@${domain}`);
+    candidates.add(`${first}${last}@${domain}`);
+    candidates.add(`${first}.${lastInitial}@${domain}`);
+    candidates.add(`${first}${lastInitial}@${domain}`);
+    candidates.add(`${firstInitial}.${last}@${domain}`);
 
     if (second) {
-      candidates.add(`${first}.${second}@juspay.in`);
-      candidates.add(`${first}${second}@juspay.in`);
-      candidates.add(`${second}.${last}@juspay.in`);
-      candidates.add(`${second}${last}@juspay.in`);
+      candidates.add(`${first}.${second}@${domain}`);
+      candidates.add(`${first}${second}@${domain}`);
+      candidates.add(`${second}.${last}@${domain}`);
+      candidates.add(`${second}${last}@${domain}`);
     }
   }
 

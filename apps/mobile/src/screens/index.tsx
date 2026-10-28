@@ -24,6 +24,7 @@ import {
   type SingleQrEnrollmentStage,
 } from '../services/enrollmentTelemetry';
 import { useEnrollment } from '../contexts/EnrollmentContext';
+import { ENROLLMENT_ORIGINS, ENROLLMENT_PORTAL_URL } from '../config';
 import { useReportStartupReady } from '../observability/logging/hooks/startup/useReportStartupReady';
 import QRScanner from './QRScanner';
 import EnrollmentStatus from './EnrollmentStatus';
@@ -131,7 +132,7 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
     const startedAt = Date.now();
 
     try {
-      const enrollment = validateEnrollmentQrPayload(data);
+      const enrollment = validateEnrollmentQrPayload(data, { trustedOrigins: ENROLLMENT_ORIGINS });
 
       currentStage = 'csr_generation';
       const csr = singleQrCsrRef.current ?? (await UnifiedCertificateService.generateCSR());
@@ -143,6 +144,7 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
         enrollment.token,
         csr.csr,
         csr.deviceInfo,
+        { trustedOrigins: ENROLLMENT_ORIGINS },
       );
 
       currentStage = 'certificate_storage';
@@ -274,7 +276,8 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
                 1
               </Text>
               <Text style={{ flex: 1, fontSize: 16, color: stepText, lineHeight: 24 }}>
-                On your VPN-connected laptop, open https://auth.spaces.xyne.juspay.net in a browser
+                On your VPN-connected laptop, open{' '}
+                {ENROLLMENT_PORTAL_URL ?? 'the Xyne Spaces device enrollment portal'} in a browser
                 and sign in with your work account
               </Text>
             </View>

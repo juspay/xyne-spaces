@@ -9,7 +9,7 @@ import {
   type MessageDeepLinkPayload,
 } from '@/src/utils/messageDeepLinkCore';
 
-const TRUSTED_ORIGINS = new Set(['https://spaces.xyne.juspay.net']);
+const TRUSTED_ORIGINS = new Set(['https://example.org']);
 
 describe('message deep-link contract', (): void => {
   it('round-trips the complete exact-message tuple', (): void => {
@@ -22,7 +22,7 @@ describe('message deep-link contract', (): void => {
       scopeType: 'DM',
     });
     const parsed = parseMessageDeepLinkCore(
-      `https://spaces.xyne.juspay.net/${relative}`,
+      `https://example.org/${relative}`,
       TRUSTED_ORIGINS,
     );
 
@@ -50,7 +50,7 @@ describe('message deep-link contract', (): void => {
 
   it('accepts a workspace-scoped message link and preserves the exact-message tuple', (): void => {
     const parsed = parseMessageDeepLinkCore(
-      'https://spaces.xyne.juspay.net/00000000-0000-4000-8000-000000000001' +
+      'https://example.org/00000000-0000-4000-8000-000000000001' +
         '/chat/dir/cmshc9yum2p3ewsrh5rzihf6w/b454579d-9134-4ea7-846e-79da94c32041' +
         '#origin=b454579d-9134-4ea7-846e-79da94c32041&messageId=cmt05zbah060q14kxan5oydxc',
       TRUSTED_ORIGINS,
@@ -79,7 +79,7 @@ describe('message deep-link contract', (): void => {
       'workspace segment should lead the path',
     );
     const parsed = parseMessageDeepLinkCore(
-      `https://spaces.xyne.juspay.net/${relative}`,
+      `https://example.org/${relative}`,
       TRUSTED_ORIGINS,
     );
     assert.deepEqual(parsed, payload);
@@ -90,7 +90,7 @@ describe('message deep-link contract', (): void => {
     // the segment they share (`cmove…`) is the workspace and the uuid above it is the
     // organization. Getting this backwards would ask the switch to enter an org id.
     const scoped = parseMessageDeepLinkCore(
-      'https://spaces.xyne.juspay.net/00000000-0000-4000-8000-000000000001' +
+      'https://example.org/00000000-0000-4000-8000-000000000001' +
         '/cmove4qwc00rwd8fujw25xgnf/chat/dir/cmqb57emo02xmh4qh14wrqs5y' +
         '#origin=282a528a-ffa0-430d-8b3b-8b2004cfe648',
       TRUSTED_ORIGINS,
@@ -103,7 +103,7 @@ describe('message deep-link contract', (): void => {
     });
 
     const workspaceOnly = parseMessageDeepLinkCore(
-      'https://spaces.xyne.juspay.net/cmove4qwc00rwd8fujw25xgnf' +
+      'https://example.org/cmove4qwc00rwd8fujw25xgnf' +
         '/chat/dir/cmqb57emo02xmh4qh14wrqs5y' +
         '#origin=282a528a-ffa0-430d-8b3b-8b2004cfe648',
       TRUSTED_ORIGINS,
@@ -114,7 +114,7 @@ describe('message deep-link contract', (): void => {
 
   it('exposes scope segments in path order, workspace last', (): void => {
     const parsed = parseMessageDeepLinkCore(
-      'https://spaces.xyne.juspay.net/org-9/ws-1/chat/dir/channel-1',
+      'https://example.org/org-9/ws-1/chat/dir/channel-1',
       TRUSTED_ORIGINS,
     );
     assert.ok(parsed);
@@ -133,7 +133,7 @@ describe('message deep-link contract', (): void => {
     const relative = buildWorkspaceScopedMessagePath(payload);
     assert.equal(relative, 'org-1/ws-1/chat/dir/channel-1/thread-1');
     assert.deepEqual(
-      parseMessageDeepLinkCore(`https://spaces.xyne.juspay.net/${relative}`, TRUSTED_ORIGINS),
+      parseMessageDeepLinkCore(`https://example.org/${relative}`, TRUSTED_ORIGINS),
       payload,
     );
   });
@@ -152,7 +152,7 @@ describe('message deep-link contract', (): void => {
 
   it('rejects untrusted, partial, conflicting, and unsafe paths', (): void => {
     assert.equal(
-      parseMessageDeepLinkCore('http://spaces.xyne.juspay.net/chat/dir/channel-1', TRUSTED_ORIGINS),
+      parseMessageDeepLinkCore('http://example.org/chat/dir/channel-1', TRUSTED_ORIGINS),
       null,
     );
     assert.equal(
@@ -163,21 +163,21 @@ describe('message deep-link contract', (): void => {
       parseMessageDeepLinkCore(
         // One leading segment is the workspace, two are workspace + project; three or
         // more stay rejected.
-        'https://spaces.xyne.juspay.net/ws/project/extra/chat/dir/channel-1',
+        'https://example.org/ws/project/extra/chat/dir/channel-1',
         TRUSTED_ORIGINS,
       ),
       null,
     );
     assert.equal(
       parseMessageDeepLinkCore(
-        'https://spaces.xyne.juspay.net/chat/dir/channel-1?messageId=a#messageId=b',
+        'https://example.org/chat/dir/channel-1?messageId=a#messageId=b',
         TRUSTED_ORIGINS,
       ),
       null,
     );
     assert.equal(
       parseMessageDeepLinkCore(
-        'https://spaces.xyne.juspay.net/chat/dir/channel%2Fescape',
+        'https://example.org/chat/dir/channel%2Fescape',
         TRUSTED_ORIGINS,
       ),
       null,
@@ -185,7 +185,7 @@ describe('message deep-link contract', (): void => {
     // Ticket-detail URLs have a third post-chat/dir segment; they are not message links.
     assert.equal(
       parseMessageDeepLinkCore(
-        'https://spaces.xyne.juspay.net/00000000-0000-4000-8000-000000000001' +
+        'https://example.org/00000000-0000-4000-8000-000000000001' +
           '/chat/dir/cmmw4b63v0q6z575f2x8teulu/cms91mfbf058nx4zkjfe419tg/cms91mfbs058qx4zk9mimdz5h' +
           '?selectedTab=details',
         TRUSTED_ORIGINS,
