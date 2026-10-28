@@ -10,7 +10,7 @@ import { formatDuration, getStatusText } from '@/src/components/call-log/callHis
 import type { CallDisplayData } from '@/src/types/calls';
 import type { DisplaySearchResult, SearchContext } from '@/src/types/search';
 import type { CallChannelLike, CallUserLike } from '@/src/utils/callDisplayData';
-import { PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
+import { ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS, PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
 import { canonicalizePublicDeepLink } from '@/src/utils/publicDeepLink';
 
 export type CallSearchResultItem = {
@@ -202,7 +202,11 @@ export function mapVespaCallResultToCallDisplayData(
     title: strippedTitle,
     transcript: context?.hasTranscript ? 'available' : null,
     roomLink: context?.roomLink
-      ? canonicalizePublicDeepLink(context.roomLink, PUBLIC_DEEP_LINK_ORIGIN)
+      ? canonicalizePublicDeepLink(
+          context.roomLink,
+          PUBLIC_DEEP_LINK_ORIGIN,
+          ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS,
+        )
       : null,
     recurringSeriesId: context?.recurringSeriesId || null,
     participants: participants.map(({ sourceIndex: _sourceIndex, ...participant }) => participant),

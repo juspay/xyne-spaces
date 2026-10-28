@@ -103,7 +103,7 @@ export interface EnterpriseJoinTarget {
 
 /** Extra context the backend attaches when a user lands with no workspace of their own. */
 export interface OrgCreationBlockers {
-  /** "An organization already exists for juspay.in: Juspay. Ask an organization admin to invite you instead." */
+  /** e.g. "An organization already exists for example.com: Example. Ask an admin to invite you." */
   domainConflictError?: string;
   /** Set instead of `domainConflictError` when the address is a personal/public domain. */
   publicEmailDomainError?: string;

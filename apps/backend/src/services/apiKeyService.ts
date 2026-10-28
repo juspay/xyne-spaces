@@ -62,7 +62,11 @@ export class ApiKeyService {
         
         // Use custom user details from headers if provided, otherwise use defaults
         const userName = userHeaders?.name || 'API User';
-        const userEmail = userHeaders?.email || 'api@xyne.juspay.in';
+        const userEmail = userHeaders?.email || config.apiKeyDefaultUserEmail;
+        if (!userEmail) {
+          logger.error('API key user email missing: pass an email header or set API_KEY_DEFAULT_USER_EMAIL');
+          return null;
+        }
         
         logger.info(`API key user: ${userName} (${userEmail})`);
         
@@ -325,8 +329,11 @@ export class ApiKeyService {
         ? new Date(Date.now() + request.expiresInDays * 24 * 60 * 60 * 1000)
         : null;
 
-      // Generate email for API key user
-      const apiKeyUserEmail = `${request.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}@api.xyne.juspay.in`;
+      // Generate email for API key user (synthetic identity on API_KEY_USER_EMAIL_DOMAIN)
+      if (!config.apiKeyUserEmailDomain) {
+        throw new Error('API_KEY_USER_EMAIL_DOMAIN is not configured; cannot create API key user');
+      }
+      const apiKeyUserEmail = `${request.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}@${config.apiKeyUserEmailDomain}`;
 
       // Fetch existing orgMember by email (should exist for workspace members)
       const orgMember = await this.db.orgMember.findFirst({

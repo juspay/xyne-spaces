@@ -67,7 +67,7 @@ import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib
 import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
 import { renderConnectorSuggestCard, renderProviderSuggestCard } from "../lib/connector-card-render.js";
 import { buildWriteApprovalCardFlow, formatActionDescription, mintWriteCardAction, readPendingWriteAction } from "../lib/write-card-render.js";
-import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
+import { unregisteredUserTemplate } from "../constants.js";
 import {
   registerRunRecovery,
   touchRunRecovery,
@@ -1045,7 +1045,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         {
           channelId: payload.channelId,
           conversationId: payload.conversationId,
-          markdownText: UNREGISTERED_USER_TEMPLATE,
+          markdownText: unregisteredUserTemplate(CONFIG.spacesAppUrl),
           metadata: { contentFormat: "markdown" },
         }
       ).catch((err) => {

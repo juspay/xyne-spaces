@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from "next";
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").replace(/\/+$/, "");
 
 export const SITE_MANIFEST = {
   name: "Xyne Space",
-  short_name: "spaces.xyne.juspay.net",
+  short_name: new URL(SITE_URL).hostname,
   description: "Xyne Space",
   start_url: "/",
   display: "standalone" as const,
@@ -20,7 +21,7 @@ export const SITE_MANIFEST = {
       type: "image/png",
     },
   ],
-  url: "https://spaces.xyne.juspay.net/changelog",
+  url: `${SITE_URL}/changelog`,
   author: {
     name: "Harsh Sharma",
     twitter: "@imharshin",

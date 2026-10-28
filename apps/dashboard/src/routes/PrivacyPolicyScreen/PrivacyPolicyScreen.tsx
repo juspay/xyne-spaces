@@ -1,5 +1,43 @@
-import { ReactElement } from 'react';
-import { LegalDocumentScreen, type LegalSection } from '../../components/Legal/LegalDocumentScreen';
+import { Fragment, ReactElement } from 'react';
+import {
+  LegalDocumentScreen,
+  LegalEmailLink,
+  type LegalSection,
+} from '../../components/Legal/LegalDocumentScreen';
+import { LEGAL_CONTACT_EMAIL, PRIVACY_CONTACT_EMAIL } from '../../config';
+
+// The privacy address first, the legal address as the CC. Deployment config; the
+// contact section and the grievance officer's email line are left out when neither is set.
+const CONTACT_EMAILS = [PRIVACY_CONTACT_EMAIL, LEGAL_CONTACT_EMAIL].filter(Boolean);
+
+const CONTACT_SECTIONS: LegalSection[] =
+  CONTACT_EMAILS.length === 0
+    ? []
+    : [
+        {
+          id: 'contact-us',
+          number: '13',
+          title: 'Contact Us',
+          blocks: [
+            {
+              kind: 'paragraph',
+              text: (
+                <>
+                  For any questions, requests, or grievances relating to this Privacy Policy or
+                  the processing of your Personal Data, you may contact us at{' '}
+                  {CONTACT_EMAILS.map((email, index) => (
+                    <Fragment key={email}>
+                      {index > 0 ? ' or ' : ''}
+                      <LegalEmailLink email={email} />
+                    </Fragment>
+                  ))}
+                  .
+                </>
+              ),
+            },
+          ],
+        },
+      ];
 
 const PRIVACY_SECTIONS: LegalSection[] = [
   {
@@ -188,36 +226,7 @@ const PRIVACY_SECTIONS: LegalSection[] = [
       },
     ],
   },
-  {
-    id: 'contact-us',
-    number: '13',
-    title: 'Contact Us',
-    blocks: [
-      {
-        kind: 'paragraph',
-        text: (
-          <>
-            For any questions, requests, or grievances relating to this Privacy Policy or the
-            processing of your Personal Data, you may contact us at{' '}
-            <a
-              href='mailto:privacy@juspay.in'
-              className='font-medium underline underline-offset-4 transition-colors hover:text-primary'
-            >
-              privacy@juspay.in
-            </a>{' '}
-            or{' '}
-            <a
-              href='mailto:legal@juspay.in'
-              className='font-medium underline underline-offset-4 transition-colors hover:text-primary'
-            >
-              legal@juspay.in
-            </a>
-            .
-          </>
-        ),
-      },
-    ],
-  },
+  ...CONTACT_SECTIONS,
 ];
 
 const PrivacyPolicyScreen = (): ReactElement => (
@@ -252,22 +261,17 @@ const PrivacyPolicyScreen = (): ReactElement => (
             Stallion Business Centre, #444, 18th Main Road, 6th Block, Koramangala, Bengaluru,
             Karnataka, India &ndash; 560095
           </p>
-          <p>
-            <span className='text-muted-foreground'>Email: </span>
-            <a
-              href='mailto:privacy@juspay.in'
-              className='font-medium underline underline-offset-4 transition-colors hover:text-primary'
-            >
-              privacy@juspay.in
-            </a>
-            <span>; CC: </span>
-            <a
-              href='mailto:legal@juspay.in'
-              className='font-medium underline underline-offset-4 transition-colors hover:text-primary'
-            >
-              legal@juspay.in
-            </a>
-          </p>
+          {CONTACT_EMAILS.length > 0 ? (
+            <p>
+              <span className='text-muted-foreground'>Email: </span>
+              {CONTACT_EMAILS.map((email, index) => (
+                <Fragment key={email}>
+                  {index > 0 ? <span>; CC: </span> : null}
+                  <LegalEmailLink email={email} />
+                </Fragment>
+              ))}
+            </p>
+          ) : null}
         </div>
       </div>
     }

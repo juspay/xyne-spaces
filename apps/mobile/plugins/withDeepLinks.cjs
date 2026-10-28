@@ -9,18 +9,31 @@ const APP_SCHEME = 'xyne-spaces';
 const LEGACY_APP_SCHEMES = ['lotus'];
 const OWNED_APP_SCHEMES = [APP_SCHEME, ...LEGACY_APP_SCHEMES];
 const ANDROID_MAIN_ACTIVITY = '.MainActivity';
-const APP_LINK_HOST = new URL(getConfiguredPublicDeepLinkOrigin()).host;
 const APP_PATH_PREFIXES = ['/call/', '/chat/dir/', '/recordings'];
-const LEGACY_APP_LINK_HOSTS = [
-  'localhost:5173',
-  'spaces.xyne.juspay.net',
-  'app.spaces.xyne.juspay.net',
-  'app.spaces.sandbox.xyne.juspay.net',
-  'xyne-spaces.web.app',
-  'xyne-spaces.web',
-  'spaces.sandbox.xyne.juspay.net',
-  APP_LINK_HOST,
-];
+
+/**
+ * Hosts whose HTTPS intent filters an earlier prebuild may have written, so an
+ * incremental prebuild drops them: the current public host plus the hosts of
+ * LEGACY_PUBLIC_DEEP_LINK_ORIGINS (comma-separated origins, optional — the same list
+ * the runtime rewrites to the public origin, see src/utils/publicDeepLink.ts).
+ * @param {string} appLinkHost
+ */
+function legacyAppLinkHosts(appLinkHost) {
+  const fromEnv = (process.env.LEGACY_PUBLIC_DEEP_LINK_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean)
+    .map(origin => {
+      try {
+        return new URL(origin).host;
+      } catch {
+        throw new Error(
+          `[${PLUGIN_NAME}] Invalid origin in LEGACY_PUBLIC_DEEP_LINK_ORIGINS: ${origin}`,
+        );
+      }
+    });
+  return ['localhost:5173', ...fromEnv, appLinkHost];
+}
 
 /**
  * android:pathPattern entries matching `pathPrefix` behind one or more leading
@@ -38,6 +51,9 @@ function leadingSegmentPathPatterns(pathPrefix) {
 function withAndroidDeepLinks(config) {
   return withAndroidManifest(config, config => {
     const isProductionVariant = isProductionLikeVariant(getPrebuildVariant().key);
+    // Throws when PUBLIC_DEEP_LINK_ORIGIN is unset: never bake a guessed app-link host.
+    const appLinkHost = new URL(getConfiguredPublicDeepLinkOrigin()).host;
+    const legacyHosts = legacyAppLinkHosts(appLinkHost);
     const mainActivity = config.modResults.manifest.application?.[0]?.activity?.find(
       activity => activity.$?.['android:name'] === ANDROID_MAIN_ACTIVITY,
     );
@@ -59,7 +75,7 @@ function withAndroidDeepLinks(config) {
         const host = data.$?.['android:host'];
         const port = data.$?.['android:port'];
         const hostWithPort = port ? `${host}:${port}` : host;
-        return typeof hostWithPort === 'string' && LEGACY_APP_LINK_HOSTS.includes(hostWithPort);
+        return typeof hostWithPort === 'string' && legacyHosts.includes(hostWithPort);
       });
       return !hasLegacyWebHost;
     });
@@ -86,7 +102,7 @@ function withAndroidDeepLinks(config) {
             {
               $: {
                 'android:scheme': 'https',
-                'android:host': APP_LINK_HOST,
+                'android:host': appLinkHost,
                 'android:pathPrefix': pathPrefix,
               },
             },
@@ -100,7 +116,7 @@ function withAndroidDeepLinks(config) {
             ...leadingSegmentPathPatterns(pathPrefix).map(pathPattern => ({
               $: {
                 'android:scheme': 'https',
-                'android:host': APP_LINK_HOST,
+                'android:host': appLinkHost,
                 'android:pathPattern': pathPattern,
               },
             })),

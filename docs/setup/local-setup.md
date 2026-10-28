@@ -226,6 +226,15 @@ right — no more six logs interleaved in one stream.
   (or the login you created).
 - Backend health: `curl http://localhost:3001/api/health`
 
+## Optional: observability MCP servers
+
+The root `.mcp.json` registers three HTTP MCP servers (`xyne-genius-rca`,
+`xyne-grafana-logs`, `xyne-victoria-metrics`) whose URLs are built from the
+`XYNE_MCP_BASE_URL` environment variable, which Claude Code expands when it
+reads the file. Export it as the base origin of your deployment's MCP gateway
+(e.g. `export XYNE_MCP_BASE_URL=https://grafana.example.com`) before starting
+your coding agent; leave it unset to skip those servers.
+
 ## Stopping
 
 - `q` in the TUI stops all dev processes.

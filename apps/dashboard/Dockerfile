@@ -52,11 +52,23 @@ ARG SOURCE_COMMIT
 ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 
 # Accept build argument for API URL
-ENV VITE_API_URL=https://spaces.xyne.juspay.net/api
+ARG VITE_API_URL=
+ENV VITE_API_URL=${VITE_API_URL}
+
+ARG VITE_INTERNAL_XYNE_HOSTS=
+ENV VITE_INTERNAL_XYNE_HOSTS=${VITE_INTERNAL_XYNE_HOSTS}
+ARG VITE_TRUSTED_ORIGINS=
+ENV VITE_TRUSTED_ORIGINS=${VITE_TRUSTED_ORIGINS}
+ARG VITE_APPS_PUBLIC_BASE_URL=
+ENV VITE_APPS_PUBLIC_BASE_URL=${VITE_APPS_PUBLIC_BASE_URL}
+ARG VITE_LEGAL_CONTACT_EMAIL=
+ENV VITE_LEGAL_CONTACT_EMAIL=${VITE_LEGAL_CONTACT_EMAIL}
+ARG VITE_PRIVACY_CONTACT_EMAIL=
+ENV VITE_PRIVACY_CONTACT_EMAIL=${VITE_PRIVACY_CONTACT_EMAIL}
 
 # VITE_ZERO_SERVER is deliberately NOT set here. config.ts reads it when present,
 # and baking an absolute URL made it win over the serving host — a bundle on
-# app.spaces.xyne.juspay.net opened wss://spaces.xyne.juspay.net/zero. Unset, the
+# app.example.org opened wss://example.org/zero. Unset, the
 # URL derives from whatever host serves the bundle. Local dev, sandbox and the
 # test compose file still set it themselves via their own .env files.
 

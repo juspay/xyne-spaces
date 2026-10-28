@@ -1,5 +1,5 @@
 import * as Linking from 'expo-linking';
-import { PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
+import { ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS, PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
 import type { useRouter } from 'expo-router';
 import {
   createChatOpenIntent,
@@ -25,7 +25,7 @@ const TRUSTED_ORIGIN_SET = new Set(
 
 export function parseMessageDeepLink(url: string): MessageDeepLinkPayload | null {
   return parseMessageDeepLinkCore(
-    canonicalizePublicDeepLink(url, PUBLIC_DEEP_LINK_ORIGIN),
+    canonicalizePublicDeepLink(url, PUBLIC_DEEP_LINK_ORIGIN, ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS),
     TRUSTED_ORIGIN_SET,
   );
 }

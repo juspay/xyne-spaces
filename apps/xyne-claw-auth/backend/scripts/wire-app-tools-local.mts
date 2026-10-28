@@ -46,7 +46,8 @@ async function main(): Promise<void> {
     const appToken = decrypt(parts[0], parts[1], parts[2], ENCRYPTION_KEY);
     console.log(`Decrypted default agent app token (len=${appToken.length})`);
 
-    const spacesUrl = process.env["XYNE_SPACES_URL"] ?? "https://spaces.xyne.juspay.net";
+    const spacesUrl = process.env["XYNE_SPACES_URL"] ?? "";
+    if (!spacesUrl) throw new Error("XYNE_SPACES_URL must be set (public Spaces URL the app tools connect to)");
     const credsPlain = JSON.stringify({ url: spacesUrl, app_token: appToken });
     const { ciphertext, iv, authTag } = encrypt(credsPlain, ENCRYPTION_KEY);
 

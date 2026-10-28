@@ -26,7 +26,7 @@ import {
   watchAppFocus,
 } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
-import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
+import { config, ENABLE_LOCAL_HARNESS, FIRST_PARTY_HOSTS, isFirstPartyHostname } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
@@ -232,6 +232,12 @@ export function setupIpcHandlers(): void {
     event.returnValue = preloadPath;
   });
 
+  // The sandboxed preload cannot require app/config, so it asks for the
+  // first-party host list over sync IPC before deciding whether to expose the bridge.
+  ipcMain.on('get-first-party-hosts', (event) => {
+    event.returnValue = FIRST_PARTY_HOSTS;
+  });
+
   // Focus the embedder. A <webview> guest holds focus in its own web contents,
   // and nothing in the renderer can take it back — window.focus() and blurring
   // the element both leave it where it is. Until focus returns, the first click
@@ -260,7 +266,7 @@ export function setupIpcHandlers(): void {
     } catch {
       throw new Error('Invalid sync URL');
     }
-    const isXyne = host === 'xyne.juspay.net' || host.endsWith('.xyne.juspay.net');
+    const isXyne = isFirstPartyHostname(host);
     const isLocal = host === 'localhost' || host === '127.0.0.1';
     if (!isXyne && !isLocal) {
       errorLogger.warn('[sync-cookies] Rejected non-Xyne origin');

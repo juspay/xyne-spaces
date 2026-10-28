@@ -22,7 +22,7 @@ const log = createLogger("failure-curator");
 
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://llm.example.com").replace(/\/$/, "");
 // Background job: prefer the low-priority automation key so curator bursts
 // can't queue interactive agent turns on the main key's parallel-slot pool.
 const LITELLM_API_KEY = process.env["LITELLM_AUTOMATION_API_KEY"]?.trim() || (process.env["LITELLM_API_KEY"] ?? "");

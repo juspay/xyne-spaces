@@ -126,7 +126,7 @@ describe("normalizeError", () => {
   });
 
   it.each([
-    ["GET https://api.example.com/v1/x?id=1 failed for ops@juspay.in run cmsrllazx000fibolqba260wt hash deadbeefcafe1234", "get <url> failed for <email> run <id> hash <id>"],
+    ["GET https://api.example.com/v1/x?id=1 failed for ops@example.com run cmsrllazx000fibolqba260wt hash deadbeefcafe1234", "get <url> failed for <email> run <id> hash <id>"],
     ["Validation failed: id 98d1e838-fb7d-4514-af4d-64295ca3869c", "validation failed: id <uuid>"],
     ["Can't find user 'bob'", "can't find user <str>"],
     ["", "(empty error)"],

@@ -1018,7 +1018,7 @@ const parseNode = (
   const tag = el.tagName.toLowerCase();
 
   // Inside code blocks / inline code, a mention span is almost always a false
-  // positive — e.g. `@Juspay` inside the email `guruprasad.bhosale@Juspay.in`
+  // positive — e.g. `@Example` inside the email `alice@Example.com`
   // in a SQL snippet. Render it as inert text instead of an interactive chip.
   if (insideCode && el.hasAttribute('data-mention')) {
     return (

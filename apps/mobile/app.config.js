@@ -1,5 +1,7 @@
 require('./config/loadLotusEnv.cjs').loadLotusEnv();
-const { getConfiguredPublicDeepLinkOrigin } = require('./config/publicDeepLinkOrigin.cjs');
+const {
+  getConfiguredPublicDeepLinkOriginOrEmpty,
+} = require('./config/publicDeepLinkOrigin.cjs');
 
 const {
   resolveVariantKey,
@@ -18,8 +20,11 @@ const {
 module.exports = ({ config }) => {
   const variantKey = resolveVariantKey(process.env.APP_VARIANT);
   const v = getVariant(variantKey);
-  const publicDeepLinkOrigin = getConfiguredPublicDeepLinkOrigin();
-  const publicDeepLinkDomain = `applinks:${new URL(publicDeepLinkOrigin).host}`;
+  // '' when PUBLIC_DEEP_LINK_ORIGIN is unset; `expo prebuild` then fails in withDeepLinks.cjs.
+  const publicDeepLinkOrigin = getConfiguredPublicDeepLinkOriginOrEmpty();
+  const publicDeepLinkDomain = publicDeepLinkOrigin
+    ? `applinks:${new URL(publicDeepLinkOrigin).host}`
+    : '';
   const isProductionVariant = isProductionLikeVariant(variantKey);
   const isCommunityVariant = variantKey === 'community';
 
@@ -59,7 +64,7 @@ module.exports = ({ config }) => {
       },
       // Only the production binary owns the public App/Universal Link domain. Development
       // and sandbox builds keep the custom scheme but must not claim production HTTPS links.
-      associatedDomains: isProductionVariant ? [publicDeepLinkDomain] : [],
+      associatedDomains: isProductionVariant && publicDeepLinkDomain ? [publicDeepLinkDomain] : [],
     },
     android: {
       // Kotlin namespace; the shipped applicationId per flavor is set in withAndroidProductFlavors.
@@ -86,7 +91,7 @@ module.exports = ({ config }) => {
       ],
       // Community invite links. `autoVerify` additionally requires /.well-known/assetlinks.json
       // to be served by the public deep-link host.
-      ...(isCommunityVariant
+      ...(isCommunityVariant && publicDeepLinkOrigin
         ? {
             intentFilters: [
               {
@@ -211,10 +216,13 @@ module.exports = ({ config }) => {
       lotusApiBaseUrl: (
         process.env.EXPO_PUBLIC_API_BASE_URL ||
         process.env.API_BASE_URL ||
+        v.defaultApiBaseUrl ||
         ''
       ).trim(),
       lotusDashboardOrigin: (process.env.EXPO_PUBLIC_DASHBOARD_ORIGIN || '').trim(),
       lotusPublicDeepLinkOrigin: publicDeepLinkOrigin,
+      // Comma-separated retired public origins whose deep links are rewritten to the public origin.
+      lotusLegacyPublicDeepLinkOrigins: (process.env.LEGACY_PUBLIC_DEEP_LINK_ORIGINS || '').trim(),
       lotusAppEnv: (process.env.EXPO_PUBLIC_APP_ENV || process.env.APP_ENV || '').trim(),
       lotusMtlsEnabled: (
         process.env.EXPO_PUBLIC_MTLS_ENABLED ||
@@ -255,6 +263,8 @@ module.exports = ({ config }) => {
         ''
       ).trim(),
       lotusZeroServerUrl: (process.env.EXPO_PUBLIC_ZERO_SERVER_URL || '').trim(),
+      // Comma-separated HTTPS origins allowed to issue device-enrollment QR codes.
+      lotusEnrollmentOrigins: (process.env.ENROLLMENT_ORIGINS || '').trim(),
       // Metrics configuration. The endpoint is a base URL; app code appends /godel/v1/metrics.
       lotusTelemetryMode: (process.env.LOTUS_TELEMETRY_MODE || '').trim(),
       lotusTelemetryEndpoint: (process.env.LOTUS_TELEMETRY_ENDPOINT || '').trim(),

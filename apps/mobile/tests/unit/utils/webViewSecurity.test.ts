@@ -13,24 +13,24 @@ import {
 } from '@/src/utils/webViewSecurity';
 
 describe('WebView security policies', (): void => {
-  const dashboardOrigin = 'https://app.spaces.xyne.juspay.net';
+  const dashboardOrigin = 'https://app.example.org';
 
   it('accepts only the exact dashboard origin, including its effective port', (): void => {
     assert.equal(isTrustedWebViewOrigin(`${dashboardOrigin}/workspace/1`, dashboardOrigin), true);
     assert.equal(
       isTrustedWebViewOrigin(
-        'https://app.spaces.xyne.juspay.net.evil.example/workspace/1',
+        'https://app.example.org.evil.example/workspace/1',
         dashboardOrigin,
       ),
       false,
     );
     assert.equal(
-      isTrustedWebViewOrigin('https://app.spaces.xyne.juspay.net:444/workspace/1', dashboardOrigin),
+      isTrustedWebViewOrigin('https://app.example.org:444/workspace/1', dashboardOrigin),
       false,
     );
     assert.equal(
       isTrustedWebViewOrigin(
-        'https://user:pass@app.spaces.xyne.juspay.net/workspace/1',
+        'https://user:pass@app.example.org/workspace/1',
         dashboardOrigin,
       ),
       false,

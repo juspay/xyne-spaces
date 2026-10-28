@@ -688,7 +688,7 @@ export class GoogleService {
     // Env classification from BACKEND_URL — keeps detection in sync with how
     // urlUtils.ts already distinguishes deployments, and avoids needing a new
     // dedicated env var:
-    //   spaces.sandbox.xyne.juspay.net → sandbox
+    //   sandbox.example.org → sandbox
     //   localhost / ngrok / trycloudflare / 127.0.0.1 → dev
     //   anything else (prod domain) → prod
     const backendUrl = (appConfig.backendUrl).toLowerCase();

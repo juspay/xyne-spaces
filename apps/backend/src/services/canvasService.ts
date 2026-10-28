@@ -36,7 +36,7 @@ export async function convertMarkdownToBlockNote(
  * unscoped form.
  */
 export function getCanvasUrl(canvasId: string, workspaceId?: string): string {
-  const frontendUrl = config.frontendUrl || 'https://spaces.xyne.juspay.net';
+  const frontendUrl = config.frontendUrl;
   const path = workspaceId ? `/${workspaceId}/chat/canvas/${canvasId}` : `/chat/canvas/${canvasId}`;
   return `${frontendUrl}${path}`;
 }

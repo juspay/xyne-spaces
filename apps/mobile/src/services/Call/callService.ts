@@ -1,7 +1,7 @@
 import { getAuthToken } from '../../contexts/AuthContext';
 import { CallType, MeetingStatus } from '@xyne/shared';
 import { apiGetText, apiPost, apiRequest } from '../apiClient';
-import { PUBLIC_DEEP_LINK_ORIGIN } from '../../config';
+import { ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS, PUBLIC_DEEP_LINK_ORIGIN } from '../../config';
 import { canonicalizePublicDeepLink } from '../../utils/publicDeepLink';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -166,7 +166,13 @@ function extractCredentials(
     livekitUrl: response.livekitUrl,
     externalId: response.externalId,
     ...(response.roomLink !== undefined
-      ? { roomLink: canonicalizePublicDeepLink(response.roomLink, PUBLIC_DEEP_LINK_ORIGIN) }
+      ? {
+          roomLink: canonicalizePublicDeepLink(
+            response.roomLink,
+            PUBLIC_DEEP_LINK_ORIGIN,
+            ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS,
+          ),
+        }
       : {}),
     ...(response.channelId !== undefined ? { channelId: response.channelId } : {}),
     ...(response.scopeType !== undefined ? { scopeType: response.scopeType } : {}),

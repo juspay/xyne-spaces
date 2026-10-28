@@ -46,7 +46,9 @@ export async function computeSttHintNames(): Promise<string[]> {
       where: {
         status: UserStatus.ACTIVE,
         userType: { not: UserType.BOT },
-        email: { endsWith: '@juspay.in', mode: 'insensitive' },
+        ...(config.orgEmailDomain
+          ? { email: { endsWith: `@${config.orgEmailDomain}`, mode: 'insensitive' as const } }
+          : {}),
       },
       select: { name: true },
       orderBy: { name: 'asc' },

@@ -139,7 +139,10 @@ async function fetchTicketsFromBitbot(
   slackChannelId: string,
   syncDate?: string
 ): Promise<BitbotTicket[]> {
-  const baseUrl = 'https://bitbot.internal.svc.k8s.office.mum.juspay.net';
+  const baseUrl = config.bitbot_base_url;
+  if (!baseUrl) {
+    throw new Error('BITBOT_BASE_URL is not configured; cannot fetch tickets from Bitbot');
+  }
   const url = new URL(`${baseUrl}/api/internal/migration/tickets`);
   url.searchParams.set('slackChannelId', slackChannelId);
   if (syncDate) {
@@ -334,8 +337,8 @@ async function ingestTicket(
 
   // Find assigned user if assigned_username exists
   let assignedToUserId: string | undefined;
-  if (ticket.assigned_username) {
-    const assignedUserEmail = `${ticket.assigned_username}@juspay.in`;
+  if (ticket.assigned_username && config.orgEmailDomain) {
+    const assignedUserEmail = `${ticket.assigned_username}@${config.orgEmailDomain}`;
     const resolvedWsId = workspaceId || config.defaultWorkspaceId;
     if (resolvedWsId) {
       const assignedUser = await userRepo.findByEmail(assignedUserEmail, resolvedWsId);
@@ -498,7 +501,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
     if (xyneChannel) {
       const channelName = xyneChannel.name;
-      xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+      xyneSpaceChannelLink = `<${config.frontendUrl}/chat/${input.xyneSpaceChannelId}|${channelName}>`;
       jiraffeBotToken = getBotConfigByWorkspaceId(xyneChannel.workspaceId).slackBotToken;
     }
   }
