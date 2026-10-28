@@ -80,7 +80,7 @@ const unescapePreviewValue = (value: string): string => {
  *
  * Format:
  * :::message_preview
- * url: https://spaces.xyne.juspay.net/chat/dir/ch123#origin=conv456
+ * url: https://example.org/chat/dir/ch123#origin=conv456
  * messageId: msg789
  * channelId: ch123
  * channelName: general
@@ -330,7 +330,7 @@ const CALL_PREVIEW_BLOCK_END = ':::';
  *
  * Format:
  * :::call_preview
- * url: https://spaces.xyne.juspay.net/call/abc123
+ * url: https://example.org/call/abc123
  * externalId: abc123
  * :::
  */

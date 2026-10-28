@@ -19,7 +19,7 @@ skip to step 3 to sign in. The steps below are for using it anywhere else.
 **1. Configure the server.** Set environment variables:
 
 ```bash
-export XYNE_SPACES_BASE_URL="https://spaces.xyne.juspay.net"   # optional; this is the default
+export XYNE_SPACES_BASE_URL="https://example.org"       # required: your Xyne Spaces deployment
 export XYNE_SPACES_TIMEOUT_MS=120000                           # optional; this is the default
 ```
 

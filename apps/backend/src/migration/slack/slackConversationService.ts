@@ -826,7 +826,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         const channelName = xyneChannel.name;
         const workspaceId = xyneChannel.workspaceId;
         wsConfig = getBotConfigByWorkspaceId(workspaceId);
-        xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
+        xyneSpaceChannelLink = `<${config.frontendUrl}/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
         if (xyneChannel.isMigrated) {
           logger.info('analytics_event', {
             event: 'channel_remigrated',
@@ -1139,7 +1139,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         xyneSpaceWorkspaceId = ch?.workspaceId;
       }
       const xyneSpacesLink = input.xyneSpaceChannelId && xyneSpaceWorkspaceId
-        ? `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${input.xyneSpaceChannelId}|Xyne Spaces>`
+        ? `<${config.frontendUrl}/${xyneSpaceWorkspaceId}/chat/dir/${input.xyneSpaceChannelId}|Xyne Spaces>`
         : 'Xyne Spaces';
       let finalMessage = `<!channel> This Channel has been migrated to ${xyneSpacesLink}. Please move your conversations there only this channel will be soon archived.`;
       const finalMsgSuffix = wsConfig.migrationFinalMessage;
@@ -1279,7 +1279,7 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
     // DM flow (sync-dm): prefer the caller-supplied channel so all updates land
     // in the dedicated sync-dm channel, not the generic workspace migration log.
     const dmLogChannelId = responseChannelId || dmWsConfig.slackMigrationLogChannelId || dmChannelId;
-    const xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${xyneSpaceWorkspaceId}/chat/dir/${xyneSpaceChannelId}|${channelName}>`;
+    const xyneSpaceChannelLink = `<${config.frontendUrl}/${xyneSpaceWorkspaceId}/chat/dir/${xyneSpaceChannelId}|${channelName}>`;
 
     // Post thread-starter to log channel
     const blocks = getMigrationMessageBlocks({

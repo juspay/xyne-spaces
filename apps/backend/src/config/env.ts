@@ -166,6 +166,10 @@ const envSchema = Joi.object({
   FRONTEND_URL: Joi.string().default('http://localhost:5173'),
   FOLLOW_HEADER_REDIRECTION: Joi.boolean().default(true),
   TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default(''),
+  INTERNAL_APP_HOSTS: Joi.string().allow('').default(''),
+  ORG_EMAIL_DOMAIN: Joi.string().allow('').default(''),
+  API_KEY_USER_EMAIL_DOMAIN: Joi.string().allow('').default(''),
+  API_KEY_DEFAULT_USER_EMAIL: Joi.string().allow('').default(''),
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
@@ -404,6 +408,7 @@ const envSchema = Joi.object({
   SCM_WEBHOOK_SECRET: Joi.string().default(''),
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
+  BITBOT_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
   BITBUCKET_BASE_URL: Joi.string().allow('').default(''),
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
@@ -735,6 +740,7 @@ export const config = {
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
   research_agent_url: envVars.RESEARCH_AGENT_URL,
+  bitbot_base_url: envVars.BITBOT_BASE_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
   nx_graph_server_url: envVars.NX_GRAPH_SERVER_URL,
   nx_graph_server_urls: envVars.NX_GRAPH_SERVER_URLS
@@ -972,6 +978,12 @@ export const config = {
   trustedOriginalHostDomains: envVars.TRUSTED_ORIGINAL_HOST_DOMAINS.split(',')
     .map((domain: string) => domain.trim().toLowerCase())
     .filter(Boolean),
+  internalAppHosts: (envVars.INTERNAL_APP_HOSTS as string).split(',')
+    .map((host: string) => host.trim().toLowerCase())
+    .filter(Boolean),
+  orgEmailDomain: (envVars.ORG_EMAIL_DOMAIN as string).trim().toLowerCase(),
+  apiKeyUserEmailDomain: (envVars.API_KEY_USER_EMAIL_DOMAIN as string).trim().toLowerCase(),
+  apiKeyDefaultUserEmail: (envVars.API_KEY_DEFAULT_USER_EMAIL as string).trim().toLowerCase(),
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,

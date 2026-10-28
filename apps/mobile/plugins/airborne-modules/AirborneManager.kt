@@ -17,8 +17,9 @@ class AirborneManager private constructor() {
 
     companion object {
         private const val TAG = "AirborneManager"
-        private const val RELEASE_URL =
-            "https://airborne.juspay.in/release/xyne/xyne-mobile-android"
+        // Placeholder replaced at prebuild from LOTUS_AIRBORNE_RELEASE_URL_ANDROID
+        // (plugins/withAirborneAndroid.cjs).
+        private const val RELEASE_URL = "__LOTUS_AIRBORNE_RELEASE_URL__"
         private const val NAMESPACE = "xyne-mobile-android"
         private const val CUG_URI = "juspay://pay/cug"
         private const val CUG_PACKAGE = "in.juspay.cug"

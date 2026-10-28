@@ -18,12 +18,13 @@ import { dirname, join } from "node:path";
 import { createClient, type SpacesClient, type SsoSession } from "@xyne/spaces-sdk";
 
 /**
- * This deployment, not the SDK's own default (`https://spaces.xyne.app`).
- * `resolveConfig` always produces a concrete string and always passes it to
- * `createClient`, so the SDK default is never reached — which is deliberate,
- * and worth knowing before anyone "simplifies" this away.
+ * The deployment to talk to comes from `XYNE_SPACES_BASE_URL` or the stored
+ * config; there is no built-in deployment hostname. `resolveConfig` always
+ * passes a concrete string to `createClient`, so the SDK's own default
+ * (`https://spaces.xyne.app`) is never reached — which is deliberate, and
+ * worth knowing before anyone "simplifies" this away.
  */
-const DEFAULT_BASE_URL = "https://spaces.xyne.juspay.net";
+const BASE_URL_HINT = "set XYNE_SPACES_BASE_URL to your Xyne Spaces deployment, e.g. https://example.org";
 
 /**
  * Long enough for the unbounded reads in this API.
@@ -135,10 +136,13 @@ export interface SpacesConfig {
 	timeoutMs: number;
 }
 
-/** env → `~/.xyne/agent/spaces.json` → default. */
+/** env → `~/.xyne/agent/spaces.json`; no built-in default. */
 export function resolveConfig(): SpacesConfig {
 	const stored = loadStoredConfig();
-	const baseUrl = [process.env.XYNE_SPACES_BASE_URL, stored.baseUrl].find(isUsableBaseUrl) ?? DEFAULT_BASE_URL;
+	const baseUrl = [process.env.XYNE_SPACES_BASE_URL, stored.baseUrl].find(isUsableBaseUrl);
+	if (!baseUrl) {
+		throw new Error(`No Xyne Spaces base URL configured: ${BASE_URL_HINT}`);
+	}
 	const envSession = sessionFromCookie(process.env.XYNE_SPACES_COOKIE);
 	const fileSession = isStoredSession(stored.session) ? stored.session : undefined;
 	// Read-only unless writes are explicitly turned on. Anything else — unset,

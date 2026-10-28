@@ -413,7 +413,17 @@ function withAirborneManagerFile(config) {
         fs.copyFileSync(sourcePath, targetPath);
         const v = getPrebuildVariant();
         const taskId = iosAirborneOtaTaskIdentifier(v);
+        // Airborne endpoints come from `.env.<variant>` (see .env.example); prebuild fails
+        // loudly rather than baking a guessed URL into the native project.
+        const releaseUrl = (process.env.LOTUS_AIRBORNE_RELEASE_URL_IOS || '').trim();
+        if (!releaseUrl) {
+          throw new Error(
+            '[withAirborneOTAIOS] LOTUS_AIRBORNE_RELEASE_URL_IOS is not set; the Airborne OTA ' +
+              'release-config URL is baked into AirborneManager.swift (see .env.example).',
+          );
+        }
         let swift = fs.readFileSync(targetPath, 'utf8');
+        swift = swift.split('__LOTUS_AIRBORNE_RELEASE_URL__').join(releaseUrl);
         swift = swift.replace(
           /private static let backgroundTaskIdentifier = "[^"]*"/,
           `private static let backgroundTaskIdentifier = "${taskId}"`,

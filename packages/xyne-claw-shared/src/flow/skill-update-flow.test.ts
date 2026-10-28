@@ -24,7 +24,7 @@ describe("buildSkillUpdateApprovalFlow", () => {
     diffText: diff,
     summary: "add step",
     agentSlug: "architect",
-    spacesBaseUrl: "https://spaces.example.com",
+    spacesBaseUrl: "https://example.org",
   });
 
   it("carries only authoritative identifiers in data (no content/diff blob)", () => {

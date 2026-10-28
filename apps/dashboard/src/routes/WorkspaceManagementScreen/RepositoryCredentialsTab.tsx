@@ -367,7 +367,7 @@ function AddCredentialForm(props: { onCancel: () => void; onSaved: () => void })
               className='mt-2'
               value={host}
               onChange={event => setHost(event.target.value)}
-              placeholder='bitbucket.juspay.net'
+              placeholder='bitbucket.example.net'
               required
             />
           </label>

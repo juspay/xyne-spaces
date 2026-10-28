@@ -46,10 +46,10 @@ COPY package.json /package.json
 ARG SOURCE_COMMIT
 ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 
-# Target domain — overridable at build time with --build-arg
-ARG API_BASE_URL=https://spaces.xyne.juspay.net/api
-ARG CALL_INVITE_BASE_URL=https://call.xyne.juspay.net/external
-ARG INTERNAL_DASHBOARD_BASE_URL=https://spaces.xyne.juspay.net
+# Target deployment — pass at build time with --build-arg (no built-in defaults)
+ARG API_BASE_URL=
+ARG CALL_INVITE_BASE_URL=
+ARG INTERNAL_DASHBOARD_BASE_URL=
 ENV VITE_API_BASE_URL=$API_BASE_URL
 ENV VITE_CALL_INVITE_BASE_URL=$CALL_INVITE_BASE_URL
 ENV VITE_INTERNAL_DASHBOARD_BASE_URL=$INTERNAL_DASHBOARD_BASE_URL

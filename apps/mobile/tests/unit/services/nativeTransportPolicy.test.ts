@@ -77,15 +77,15 @@ describe('native transport destination policy', () => {
     assert.match(iosSocketSource, /willPerformHTTPRedirection/);
     assert.equal(
       isApprovedWebSocketDestination(
-        'wss://app.spaces.xyne.juspay.net/zero',
-        'https://app.spaces.xyne.juspay.net',
+        'wss://app.example.org/zero',
+        'https://app.example.org',
       ),
       true,
     );
     assert.equal(
       isApprovedWebSocketDestination(
-        'wss://app.spaces.xyne.juspay.net.evil.test/zero',
-        'https://app.spaces.xyne.juspay.net',
+        'wss://app.example.org.evil.test/zero',
+        'https://app.example.org',
       ),
       false,
     );

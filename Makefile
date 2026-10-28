@@ -19,6 +19,12 @@ SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short
 # of git). Empty default: local builds ship a bundle with analytics disabled.
 VITE_POSTHOG_KEY ?=
 VITE_POSTHOG_HOST ?=
+VITE_API_URL ?=
+VITE_INTERNAL_XYNE_HOSTS ?=
+VITE_TRUSTED_ORIGINS ?=
+VITE_APPS_PUBLIC_BASE_URL ?=
+VITE_LEGAL_CONTACT_EMAIL ?=
+VITE_PRIVACY_CONTACT_EMAIL ?=
 
 #temp2
 # Backend targets 3s
@@ -61,11 +67,11 @@ clean-runner:
 build-dashboard:
 	$(info Building $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --load .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --build-arg "VITE_API_URL=$(VITE_API_URL)" --build-arg "VITE_INTERNAL_XYNE_HOSTS=$(VITE_INTERNAL_XYNE_HOSTS)" --build-arg "VITE_TRUSTED_ORIGINS=$(VITE_TRUSTED_ORIGINS)" --build-arg "VITE_APPS_PUBLIC_BASE_URL=$(VITE_APPS_PUBLIC_BASE_URL)" --build-arg "VITE_LEGAL_CONTACT_EMAIL=$(VITE_LEGAL_CONTACT_EMAIL)" --build-arg "VITE_PRIVACY_CONTACT_EMAIL=$(VITE_PRIVACY_CONTACT_EMAIL)" --load .
 
 push-dashboard:
 	$(info Pushing to registry: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --push .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --build-arg "VITE_API_URL=$(VITE_API_URL)" --build-arg "VITE_INTERNAL_XYNE_HOSTS=$(VITE_INTERNAL_XYNE_HOSTS)" --build-arg "VITE_TRUSTED_ORIGINS=$(VITE_TRUSTED_ORIGINS)" --build-arg "VITE_APPS_PUBLIC_BASE_URL=$(VITE_APPS_PUBLIC_BASE_URL)" --build-arg "VITE_LEGAL_CONTACT_EMAIL=$(VITE_LEGAL_CONTACT_EMAIL)" --build-arg "VITE_PRIVACY_CONTACT_EMAIL=$(VITE_PRIVACY_CONTACT_EMAIL)" --push .
 	$(info Successfully pushed: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-dashboard:
@@ -79,7 +85,7 @@ DASHBOARD_BUNDLE_OUT ?= out/dashboard-bundle
 export-dashboard-bundle:
 	$(info Exporting dashboard bundle to $(DASHBOARD_BUNDLE_OUT) / git-head: $(SOURCE_COMMIT))
 	rm -rf $(DASHBOARD_BUNDLE_OUT)
-	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" .
+	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --build-arg "VITE_API_URL=$(VITE_API_URL)" --build-arg "VITE_INTERNAL_XYNE_HOSTS=$(VITE_INTERNAL_XYNE_HOSTS)" --build-arg "VITE_TRUSTED_ORIGINS=$(VITE_TRUSTED_ORIGINS)" --build-arg "VITE_APPS_PUBLIC_BASE_URL=$(VITE_APPS_PUBLIC_BASE_URL)" --build-arg "VITE_LEGAL_CONTACT_EMAIL=$(VITE_LEGAL_CONTACT_EMAIL)" --build-arg "VITE_PRIVACY_CONTACT_EMAIL=$(VITE_PRIVACY_CONTACT_EMAIL)" .
 	$(info Exported: $(DASHBOARD_BUNDLE_OUT))
 
 # Dashboard edge targets (nginx + Node app serving bundles from object storage; apps/dashboard-edge)

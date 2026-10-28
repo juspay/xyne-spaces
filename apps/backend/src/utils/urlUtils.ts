@@ -277,23 +277,36 @@ export function extractFirstUrl(text: string): string | null {
 // Internal link detection
 // ---------------------------------------------------------------------------
 
-const INTERNAL_HOSTS = [
-  'spaces.xyne.juspay.net',
-  'spaces.sandbox.xyne.juspay.net',
-  'app.spaces.xyne.juspay.net',
-  'xyne-spaces.web.app',
-];
+// First-party app hosts: FRONTEND_URL's host plus INTERNAL_APP_HOSTS (deployment
+// config — no hostnames are hardcoded here). Entries carrying a port are matched
+// on `host` (hostname:port); the rest on `hostname`.
+function frontendHost(): string | null {
+  try {
+    return new URL(config.frontendUrl).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+const CONFIGURED_HOSTS = [...new Set([frontendHost(), ...config.internalAppHosts].filter((h): h is string => !!h))];
+
+const INTERNAL_HOSTS = CONFIGURED_HOSTS.filter((h) => !h.includes(':'));
 
 const INTERNAL_HOSTS_WITH_PORT = [
+  ...CONFIGURED_HOSTS.filter((h) => h.includes(':')),
   'localhost:5173',
   '127.0.0.1:5173',
 ];
 
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Pre-compiled regex for internal URL extraction (avoids creating new RegExp on each call)
-// Matches: production and sandbox domains. Allows an optional `/{workspaceId}` segment
-// between the host and `/chat/...` (introduced by org/workspace routing, XYNE-11716).
-const INTERNAL_URL_REGEX =
-  /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net|app\.spaces\.xyne\.juspay\.net|xyne-spaces\.web\.app|localhost:\d+|127\.0\.0\.1:\d+)(?:\/[^/\s]+)?\/chat\/[^\s<>"'\)\]]*/i;
+// Matches: the configured app hosts and local dev hosts. Allows an optional `/{workspaceId}`
+// segment between the host and `/chat/...` (introduced by org/workspace routing, XYNE-11716).
+const INTERNAL_URL_REGEX = new RegExp(
+  `https?:\\/\\/(?:${[...INTERNAL_HOSTS, ...INTERNAL_HOSTS_WITH_PORT].map(escapeRegex).join('|')}|localhost:\\d+|127\\.0\\.0\\.1:\\d+)(?:\\/[^/\\s]+)?\\/chat\\/[^\\s<>"'\\)\\]]*`,
+  'i'
+);
 
 export interface InternalLinkInfo {
   type: 'message' | 'conversation' | 'ticket';
