@@ -395,3 +395,85 @@ export async function assertWebhookUrlSafe(rawUrl: string): Promise<void> {
   const allowPrivate = isAllowPrivate() && config.env === 'development';
   await assertHostIsExternal(parsed.hostname, allowPrivate);
 }
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const CROSS_ORIGIN_STRIPPED_HEADERS = ['authorization', 'cookie', 'proxy-authorization'];
+
+/**
+ * safeWebhookFetch for callers that need redirects followed (provider file downloads
+ * answer with a 302 to a signed CDN URL). Each hop goes back through safeWebhookFetch, so
+ * every redirect target is validated and pinned like the first request. Credentials are
+ * dropped when a hop leaves the original origin.
+ */
+export async function safeFetchFollowingRedirects(
+  rawUrl: string,
+  init: RequestInit = {},
+  maxRedirects: number = 5,
+): Promise<Response> {
+  let url = rawUrl;
+  let current: RequestInit = { ...init, redirect: 'manual' };
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const res = await safeWebhookFetch(url, current);
+    const location = res.headers.get('location');
+    if (!REDIRECT_STATUSES.has(res.status) || !location) return res;
+    await res.body?.cancel().catch(() => undefined);
+
+    let next: URL;
+    try {
+      next = new URL(location, url);
+    } catch {
+      throw new SsrfBlockedError(location, null, 'invalid redirect URL');
+    }
+    const headers = new Headers(current.headers);
+    if (next.origin !== new URL(url).origin) {
+      for (const name of CROSS_ORIGIN_STRIPPED_HEADERS) headers.delete(name);
+    }
+    const toGet =
+      res.status === 303 ||
+      ((res.status === 301 || res.status === 302) && current.method?.toUpperCase() === 'POST');
+    current = { ...current, headers, ...(toGet ? { method: 'GET', body: undefined } : {}) };
+    url = next.toString();
+  }
+  throw new SsrfBlockedError(rawUrl, null, `too many redirects (more than ${maxRedirects})`);
+}
+
+/**
+ * Synchronous, DNS-free check for where a URL first enters the system (request
+ * validation, stored config): http(s) only, no embedded credentials, and the host is not a
+ * known-internal name or a private / loopback / metadata IP literal. It cannot see what a
+ * hostname resolves to, so it complements the fetch-time guard and never replaces it.
+ * Honors the same bypasses as assertWebhookUrlSafe. Returns the parsed URL.
+ */
+export function assertUrlSyntaxSafe(rawUrl: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new SsrfBlockedError(parsed.hostname, null, 'only http(s) URLs are allowed');
+  }
+  if (parsed.username || parsed.password) {
+    throw new SsrfBlockedError(parsed.hostname, null, 'credentials in the URL are not allowed');
+  }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (!host) throw new SsrfBlockedError(rawUrl, null, 'empty host');
+
+  const literalKind = isIP(host);
+  if (config.webhooks.allowInternalHosts) {
+    if (isMetadataHostname(host) || (literalKind === 4 && isMetadataV4(host)) || (literalKind === 6 && isMetadataV6(host))) {
+      throw new SsrfBlockedError(host, literalKind ? host : null, 'loopback / link-local / metadata');
+    }
+    return parsed;
+  }
+  if (isAllowPrivate() && config.env === 'development') return parsed;
+
+  if (isBlockedHostname(host)) {
+    throw new SsrfBlockedError(host, null, 'hostname maps to an internal-only address');
+  }
+  if ((literalKind === 4 && isBlockedV4(host)) || (literalKind === 6 && isBlockedV6(host))) {
+    throw new SsrfBlockedError(host, host, 'private / loopback / link-local address');
+  }
+  return parsed;
+}

@@ -13,13 +13,14 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { errMsg } from "../../lib/errors.js";
 import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
+import { safeFetch } from "../../lib/safe-fetch.js";
 
 // The Jenkins base URL comes from a user-stored connection credential. Refuse
 // internal / private / metadata destinations before every request (which carries
 // the connection's Basic-auth credentials) so a crafted baseUrl cannot SSRF.
 async function guardedFetch(input: string, init?: RequestInit): Promise<Response> {
   await assertSafeOutboundUrl(input);
-  return fetch(input, init);
+  return safeFetch(input, init, { timeoutMs: 60_000 });
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────

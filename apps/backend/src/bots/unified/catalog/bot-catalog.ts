@@ -15,6 +15,7 @@ import type {
 } from '../types/index.js';
 import { isInternalBot, isExternalBot } from '../types/index.js';
 import {logger} from '@/utils/logger';
+import { assertUrlSyntaxSafe } from '@/utils/ssrfGuard';
 
 
 /**
@@ -52,6 +53,7 @@ class BotCatalogImpl {
    * Register an external bot (config-based)
    */
   registerExternal(definition: ExternalBotDefinition): void {
+    assertUrlSyntaxSafe(definition.externalApi.endpoint);
     if (this.bots.has(definition.id)) {
       logger.warn(`[BotCatalog] Bot '${definition.id}' already registered, replacing...`);
     }

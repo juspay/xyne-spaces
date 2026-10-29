@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { assertUrlSyntaxSafe, safeFetchFollowingRedirects } from '@/utils/ssrfGuard';
 import { Prisma } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
 import { AttachmentEntityType, CanvasRole, CanvasVisibility } from '@xyne/shared';
@@ -55,7 +56,8 @@ async function rehostCanvasImages(html: string, canvasId: string, createdBy: str
     try {
       const info = await slackFileInfo(token, fileId);
       if (!info?.url) continue;
-      const resp = await fetch(info.url, { headers: { Authorization: `Bearer ${token}` } });
+      assertUrlSyntaxSafe(info.url);
+      const resp = await safeFetchFollowingRedirects(info.url, { headers: { Authorization: `Bearer ${token}` } });
       if (!resp.ok) continue;
       const buffer = Buffer.from(await resp.arrayBuffer());
       const [up] = await uploadFiles([{ originalname: info.name || fileId, mimetype: info.mimetype || 'application/octet-stream', size: buffer.length, buffer } as Express.Multer.File]);
@@ -132,7 +134,8 @@ async function resolveMentions(blocks: BlockNoteBlock[], target: MigrationTarget
 async function fetchFileText(token: string, url?: string): Promise<string | undefined> {
   if (!url) return undefined;
   try {
-    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    assertUrlSyntaxSafe(url);
+    const resp = await safeFetchFollowingRedirects(url, { headers: { Authorization: `Bearer ${token}` } });
     return resp.ok ? await resp.text() : undefined;
   } catch (e) {
     logger.warn('[ChannelCanvases] canvas fetch failed', { url, error: msg(e) });
