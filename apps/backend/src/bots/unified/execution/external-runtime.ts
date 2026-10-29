@@ -22,6 +22,7 @@ import {
 } from '../types/index.js';
 import { sseParserRegistry } from '../adapters/index.js';
 import { logger } from '@/utils/logger';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 /**
  * External Bot Runtime
@@ -52,8 +53,9 @@ class ExternalBotRuntime {
 
     try {
       // Make HTTP request
-      const response = await fetch(externalApi.endpoint, {
+      const response = await safeWebhookFetch(externalApi.endpoint, {
         method: externalApi.method,
+        redirect: 'manual',
         headers: {
           'Content-Type': 'application/json',
           ...headers,
