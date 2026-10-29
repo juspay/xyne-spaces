@@ -84,7 +84,7 @@ const UpdateHeadlessRecordingSchema = z
   .object({
     title: z.string().trim().min(1).max(255).optional(),
     labels: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
-    markedItems: z.array(z.record(z.unknown())).max(200).optional(),
+    markedItems: z.array(z.record(z.string(), z.unknown())).max(200).optional(),
     summaryTemplateId: z.string().min(1).nullable().optional(),
   })
   .refine(value => Object.keys(value).length > 0, {
@@ -306,7 +306,7 @@ export class CallController {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0]?.message || 'Invalid request body' });
+        res.status(400).json({ success: false, error: error.issues[0]?.message || 'Invalid request body' });
         return;
       }
 
@@ -370,7 +370,7 @@ export class CallController {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0]?.message || 'Invalid request body' });
+        res.status(400).json({ success: false, error: error.issues[0]?.message || 'Invalid request body' });
         return;
       }
 
@@ -1775,7 +1775,7 @@ export class CallController {
       res.json({ success: true, message: 'Recording updated' });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        res.status(400).json({ success: false, error: error.issues[0]?.message });
         return;
       }
       logger.error('Failed to update recording title:', error);
@@ -1823,7 +1823,7 @@ export class CallController {
       res.json({ success: true, labels });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        res.status(400).json({ success: false, error: error.issues[0]?.message });
         return;
       }
       logger.error('Failed to update call labels:', error);
@@ -1894,7 +1894,7 @@ export class CallController {
       res.status(202).json({ success: true, status: 'pending' });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0]?.message });
+        res.status(400).json({ success: false, error: error.issues[0]?.message });
         return;
       }
       logger.error(`[${callId}] Failed to start recording summary regeneration`, error);
@@ -2710,7 +2710,7 @@ export class CallController {
       res.json({ success: true });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ success: false, error: error.errors[0]?.message || 'Invalid request body' });
+        res.status(400).json({ success: false, error: error.issues[0]?.message || 'Invalid request body' });
         return;
       }
 

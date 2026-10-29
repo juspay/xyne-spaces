@@ -176,7 +176,6 @@
     "lucide-react": "^0.544.0",
     "marked": "^15.0.12",
     "mermaid": "^11.15.0",
-    "openai-partial-stream": "^0.3.9",
     "papaparse": "^5.5.3",
     "pdfjs-dist": "5.4.296",
     "posthog-js": "^1.413.2",
@@ -234,7 +233,6 @@
     "y-protocols": "^1.0.6",
     "yjs": "^13.6.27",
     "zod": "^4.1.12",
-    "zodsdk": "npm:zod@3.25.76",
     "zustand": "4.5.7"
   },
   "devDependencies": {

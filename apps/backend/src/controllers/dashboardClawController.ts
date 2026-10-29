@@ -48,13 +48,13 @@ const getTableSchemaBody = z.object({
 
 const runQueryBody = z.object({
   dataSourceId: z.string().min(1),
-  queryPlan: z.record(z.unknown()),
+  queryPlan: z.record(z.string(), z.unknown()),
 });
 
 const emitBody = z.object({
   dataSourceId: z.string().min(1),
   draftId: z.string().min(1),
-  args: z.record(z.unknown()),
+  args: z.record(z.string(), z.unknown()),
 });
 
 interface AuthedContext {
@@ -87,7 +87,7 @@ export class DashboardClawController {
     return true;
   }
 
-  private badRequest(res: Response, parsed: z.SafeParseError<unknown>): void {
+  private badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
     res.status(400).json({ text: `Invalid request: ${formatIssues(parsed.error)}` });
   }
 

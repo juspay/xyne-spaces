@@ -1946,7 +1946,7 @@ export class TicketController {
 
       const bodyResult = AddAttachmentsFromConversationBodySchema.safeParse(req.body);
       if (!bodyResult.success) {
-        res.status(400).json({ error: bodyResult.error.errors[0]?.message ?? 'Invalid request body' });
+        res.status(400).json({ error: bodyResult.error.issues[0]?.message ?? 'Invalid request body' });
         return;
       }
       const { sourceConversationId, sourceMessageId } = bodyResult.data;

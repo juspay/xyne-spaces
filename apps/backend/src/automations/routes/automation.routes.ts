@@ -1,6 +1,5 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
 import { ConditionOperator } from '../types/operators';
@@ -71,6 +70,20 @@ const OPERATOR_METADATA: Record<
   [ConditionOperator.EXISTS]: { label: 'exists', valueType: 'none' },
   [ConditionOperator.HAS_TAG]: { label: 'has tag', valueType: 'tag' },
 };
+
+// `io: 'input'` keeps defaulted fields optional; dates become `date-time` strings, which the
+// dashboard's date fields key off.
+const JSON_SCHEMA_OPTIONS = {
+  target: 'draft-7',
+  io: 'input',
+  unrepresentable: 'any',
+  override: (ctx) => {
+    if (ctx.zodSchema._zod.def.type === 'date') {
+      ctx.jsonSchema.type = 'string';
+      ctx.jsonSchema.format = 'date-time';
+    }
+  },
+} satisfies z.core.ToJSONSchemaParams;
 
 const AutomationPayloadSchema = z.object({
   name: z.string().trim().min(1).optional(),
@@ -210,10 +223,7 @@ router.get('/schema/triggers/:type', (req: Request, res: Response) => {
     return;
   }
   const impl = triggerRegistry.get(type);
-  const rawConfig = zodToJsonSchema(impl.configSchema as z.ZodSchema, { name: 'config' }) as Record<
-    string,
-    unknown
-  >;
+  const rawConfig = z.toJSONSchema(impl.configSchema, JSON_SCHEMA_OPTIONS);
   res.json({
     success: true,
     data: {
@@ -223,7 +233,7 @@ router.get('/schema/triggers/:type', (req: Request, res: Response) => {
       category: impl.category,
       icon: impl.icon,
       configSchema: impl.decorateConfigSchema(rawConfig),
-      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output' }),
+      outputSchema: z.toJSONSchema(impl.outputSchema, JSON_SCHEMA_OPTIONS),
       ...(impl.type === WEBHOOK_EVENT ? { webhookUrl: webhookEndpoint() } : {}),
     },
     timestamp: new Date().toISOString(),
@@ -254,8 +264,8 @@ router.get('/schema/steps/:type', (req: Request, res: Response) => {
       description: impl.description,
       category: impl.category,
       icon: impl.icon,
-      configSchema: zodToJsonSchema(impl.configSchema as z.ZodSchema, { name: 'config' }),
-      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output', $refStrategy: 'none' }),
+      configSchema: z.toJSONSchema(impl.configSchema, JSON_SCHEMA_OPTIONS),
+      outputSchema: z.toJSONSchema(impl.outputSchema, { ...JSON_SCHEMA_OPTIONS, reused: 'inline' }),
     },
     timestamp: new Date().toISOString(),
   });

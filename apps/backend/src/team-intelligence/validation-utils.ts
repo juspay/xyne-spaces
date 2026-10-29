@@ -1,4 +1,4 @@
-type ValidationPath = Array<string | number>;
+type ValidationPath = PropertyKey[];
 
 interface ValidationIssueLike {
   path: ValidationPath;
@@ -13,7 +13,7 @@ function valueAtPath(root: unknown, path: ValidationPath): unknown {
       continue;
     }
     if (!current || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[segment];
+    current = (current as Record<PropertyKey, unknown>)[segment];
   }
   return current;
 }

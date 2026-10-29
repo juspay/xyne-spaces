@@ -52,7 +52,7 @@ export class AppController {
         res.status(400).json({ 
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }
@@ -142,7 +142,7 @@ export class AppController {
         res.status(400).json({ 
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }
@@ -210,7 +210,7 @@ export class AppController {
     try {
       const paramsResult = AppIdParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: paramsResult.error.errors });
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: paramsResult.error.issues });
         return;
       }
       const { appId } = paramsResult.data;
@@ -365,7 +365,7 @@ export class AppController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }
@@ -438,7 +438,7 @@ export class AppController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }
@@ -493,7 +493,7 @@ export class AppController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }

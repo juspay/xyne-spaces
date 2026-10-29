@@ -17,8 +17,8 @@ const WebhookTriggerConfigSchema = z.object({
 export type WebhookTriggerConfig = z.infer<typeof WebhookTriggerConfigSchema>;
 
 const WebhookTriggerOutputSchema = z.object({
-  body: z.record(z.unknown()),
-  headers: z.record(z.unknown()),
+  body: z.record(z.string(), z.unknown()),
+  headers: z.record(z.string(), z.unknown()),
   receivedAt: z.string(),
 });
 

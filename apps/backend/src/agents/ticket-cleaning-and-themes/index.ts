@@ -15,7 +15,7 @@ import {
   type RunState,
   type RunConfig,
   type TraceEvent,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 
 import { config } from '../../config/env.js';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';

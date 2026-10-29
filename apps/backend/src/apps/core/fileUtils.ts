@@ -21,7 +21,7 @@ const IngestAttachmentParamsSchema = z.object({
   userId: z.string().min(1, 'User ID is required').trim(),
   text: z.string().trim().optional(),
   markdownText: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   conversationId: z.string().trim().optional(),
   workspaceId: z.string().trim().optional(),
 });
@@ -40,7 +40,7 @@ export async function ingestAttachment(
     const paramsResult = IngestAttachmentParamsSchema.safeParse(params);
 
     if (!paramsResult.success) {
-      const errorMessages = paramsResult.error.errors
+      const errorMessages = paramsResult.error.issues
         .map((err) => `${err.path.join('.')}: ${err.message}`)
         .join(', ');
       throw new Error(`Validation error: ${errorMessages}`);
