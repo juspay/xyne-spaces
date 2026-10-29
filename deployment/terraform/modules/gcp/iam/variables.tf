@@ -26,6 +26,11 @@ variable "buckets" {
   default = {}
 }
 
+variable "redis_iam" {
+  type    = bool
+  default = false
+}
+
 variable "signing_identities" {
   type    = list(string)
   default = ["backend", "worker", "ysweet"]

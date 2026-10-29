@@ -19,6 +19,20 @@ variable "private_service_range_name" {
   default = ""
 }
 
+variable "subnetwork" {
+  type = string
+}
+
+variable "iam_auth" {
+  type    = bool
+  default = false
+}
+
+variable "node_type" {
+  type    = string
+  default = "STANDARD_SMALL"
+}
+
 variable "tier" {
   type    = string
   default = "STANDARD_HA"

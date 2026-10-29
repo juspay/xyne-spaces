@@ -137,6 +137,18 @@ function connectRedis() {
   try {
     const mod = require(redis.modulePath);
     const Ctor = mod.Redis || mod.default || mod;
+    if (redis.iamModulePath) {
+      // Memorystore IAM auth: fetch a fresh access token on every (re)connect (see redis-iam-auth.ts).
+      const auth = new (require(redis.iamModulePath).GoogleAuth)({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
+      const connect = Ctor.prototype.connect;
+      Ctor.prototype.connect = function (...args) {
+        this.condition = this.condition || { select: this.options.db, subscriber: false };
+        return auth.getAccessToken().catch(() => undefined).then((token) => {
+          this.options.password = token;
+          return connect.apply(this, args);
+        });
+      };
+    }
     const client = new Ctor(redis.options);
     client.on("error", () => {});
     return client;
@@ -365,6 +377,7 @@ setInterval(() => {
 
 export interface WatchdogRedisConfig {
   modulePath: string;
+  iamModulePath?: string | undefined;
   options: Record<string, unknown>;
   podAliveKey: string;
   podAliveTtlSeconds: number;
@@ -379,13 +392,16 @@ export function redisWorkerConfig(env: NodeJS.ProcessEnv = process.env): Watchdo
   const host = env["REDIS_HOST"];
   if (!host) return null;
   let modulePath: string;
+  let iamModulePath: string | undefined;
   try {
     modulePath = createRequire(import.meta.url).resolve("ioredis");
+    if (env["REDIS_IAM_AUTH"] === "true") iamModulePath = createRequire(import.meta.url).resolve("google-auth-library");
   } catch {
     return null;
   }
   return {
     modulePath,
+    iamModulePath,
     options: {
       host,
       port: Number(env["REDIS_PORT"] ?? 6379),

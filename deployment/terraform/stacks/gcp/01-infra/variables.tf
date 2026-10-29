@@ -352,6 +352,11 @@ variable "redis_version" {
   default = "REDIS_7_2"
 }
 
+variable "redis_iam_auth" {
+  type    = bool
+  default = false
+}
+
 variable "redis_tls" {
   type    = bool
   default = false

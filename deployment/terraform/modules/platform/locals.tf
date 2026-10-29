@@ -250,10 +250,11 @@ locals {
         }
       }
       redis = {
-        mode = var.redis.mode
-        host = var.redis.host
-        port = var.redis.port
-        tls  = var.redis.tls
+        mode    = var.redis.mode
+        host    = var.redis.host
+        port    = var.redis.port
+        tls     = var.redis.tls
+        iamAuth = var.redis.iam_auth
       }
       storage = {
         mode              = var.storage.mode
@@ -272,6 +273,7 @@ locals {
         claw              = var.identities.claw
         clawAuth          = var.identities.claw_auth
         transcription     = var.identities.transcription
+        lighton           = var.identities.lighton
         lbController      = var.identities.lb_controller
         clusterAutoscaler = var.identities.cluster_autoscaler
         externalDns       = var.identities.external_dns

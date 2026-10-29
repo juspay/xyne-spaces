@@ -37,7 +37,14 @@ locals {
       ksa_names  = ["xyne-transcription-agent"]
       buckets    = { transcription = "roles/storage.objectAdmin" }
     }
+    lighton = {
+      account_id = "${var.name}-lighton"
+      ksa_names  = ["xyne-lighton-ocr"]
+      buckets    = {}
+    }
   }
+
+  redis_identities = ["backend", "worker", "claw", "claw_auth", "transcription", "lighton"]
 
   bucket_bindings = merge([
     for identity, spec in local.identities : {
@@ -73,6 +80,14 @@ resource "google_storage_bucket_iam_member" "this" {
   bucket = each.value.bucket
   role   = each.value.role
   member = google_service_account.this[each.value.identity].member
+}
+
+resource "google_project_iam_member" "redis" {
+  for_each = var.redis_iam ? toset(local.redis_identities) : toset([])
+
+  project = var.project
+  role    = "roles/memorystore.dbConnectionUser"
+  member  = google_service_account.this[each.key].member
 }
 
 resource "google_service_account_iam_member" "workload_identity" {

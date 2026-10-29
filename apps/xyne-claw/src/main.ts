@@ -1,6 +1,7 @@
 // Identify this process in structured logs (overridden by deployment env).
 process.env.SERVICE_NAME ||= "xyne-claw";
 
+import "./redis-iam-auth.js";
 import express from "express";
 import { DATA_DIR_IS_EXPLICIT, PATHS, SERVER } from "./config.js";
 import { initStore } from "./store.js";
