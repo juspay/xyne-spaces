@@ -96,7 +96,6 @@ kubectl -n xyne-apps logs <pod> --previous --tail=50   # why the last container 
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Backend TLS errors to Redis on GCP with `redis_tls = true` | the Memorystore CA is not given to the pods | `redis_tls = false` |
 | `NOAUTH` or resets to Redis on AWS | AUTH needs TLS; `REDIS_URL` must be `rediss://` | keep `redis_tls = true` with `redis_auth`; re-run both stages |
 | Backend `403` on bucket access | the workload identity annotation is missing, usually a `namespace` mismatch between the stages | make `namespace` equal in both; re-run both |
 | A worker gets AWS `AccessDenied` although its role exists | the worker's ServiceAccount name does not match the role's trust (`xyne-worker-<name>`) | the root chart names workers `xyne-worker-<name>`; check `kubectl -n xyne-apps get sa` |
