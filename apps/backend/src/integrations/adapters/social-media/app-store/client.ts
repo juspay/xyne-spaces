@@ -11,6 +11,9 @@ import {
   APP_STORE_TOKEN_REFRESH_MARGIN_SECONDS,
   APP_STORE_TOKEN_TTL_SECONDS,
 } from './constants';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const appStoreFetch = allowlistedFetch(() => [APP_STORE_API_BASE]);
 
 const TAG = '[AppStoreClient]';
 
@@ -184,7 +187,7 @@ export class AppStoreClient {
     if (origin !== APP_STORE_API_BASE) {
       throw new Error(`App Store Connect: refusing request to ${origin}`);
     }
-    const response = await fetch(target, {
+    const response = await appStoreFetch(target, {
       method: init?.method ?? 'GET',
       headers: {
         Authorization: `Bearer ${this.mintToken(credentials, init?.cacheKey)}`,

@@ -6,6 +6,9 @@
  */
 
 import { type MSCalEvent, type MSCalListResponse } from '@/services/microsoftCalendarCallStore';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const graphFetch = allowlistedFetch(() => ['graph.microsoft.com']);
 
 const GRAPH_SELECT = 'id,subject,bodyPreview,start,end,location,organizer,attendees,isAllDay,isCancelled,isOnlineMeeting,onlineMeetingUrl,onlineMeeting,webLink';
 const GRAPH_ORIGIN = 'https://graph.microsoft.com';

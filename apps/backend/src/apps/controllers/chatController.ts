@@ -15,7 +15,10 @@ import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
-import { safeWebhookFetch } from '@/utils/ssrfGuard';
+import { allowlistedFetch, safeWebhookFetch } from '@/utils/ssrfGuard';
+
+// The first-party Spaces backend callback (same origin as backendUrl).
+const backendFetch = allowlistedFetch(() => [config.backendUrl]);
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
@@ -909,7 +912,7 @@ export class ChatController {
       // Internal S2S callbacks are trusted-config hosts (kept on the plain client);
       // external targets are caller-supplied, so validate + pin (rebinding-safe).
       const callbackRes = isInternalSpacesCallback
-        ? await fetch(actionableUrl, callbackInit)
+        ? await backendFetch(actionableUrl, callbackInit)
         : await safeWebhookFetch(actionableUrl, callbackInit);
       if (!callbackRes.ok) {
         const text = await callbackRes.text().catch(() => '');

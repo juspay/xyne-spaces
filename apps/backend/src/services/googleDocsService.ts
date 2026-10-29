@@ -1,4 +1,7 @@
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
 const GOOGLE_DOCS_BASE_URL = 'https://docs.googleapis.com/v1/documents';
+const googleFetch = allowlistedFetch(() => ['googleapis.com']);
 
 interface GoogleDocsErrorBody {
   error?: {
@@ -35,7 +38,7 @@ async function parseGoogleDocsError(response: Response): Promise<GoogleDocsApiEr
 
 export class GoogleDocsService {
   async createDocument(accessToken: string, title: string): Promise<string> {
-    const response = await fetch(GOOGLE_DOCS_BASE_URL, {
+    const response = await googleFetch(GOOGLE_DOCS_BASE_URL, {
       method: 'POST',
       headers: googleDocsHeaders(accessToken),
       body: JSON.stringify({ title }),
@@ -58,7 +61,7 @@ export class GoogleDocsService {
   }
 
   async insertText(accessToken: string, documentId: string, text: string): Promise<void> {
-    const response = await fetch(
+    const response = await googleFetch(
       `${GOOGLE_DOCS_BASE_URL}/${encodeURIComponent(documentId)}:batchUpdate`,
       {
         method: 'POST',

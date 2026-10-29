@@ -1,6 +1,9 @@
 import { MessageType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { redisService } from './redisService';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const clawFetch = allowlistedFetch(() => [config.xyneClaw.authUrl]);
 
 /**
  * Clear every in-flight agent-progress signal for a conversation and broadcast
@@ -77,7 +80,7 @@ export function requestClawAgentCancel(params: {
   /** The run to cancel, when the caller knows it. */
   sessionId?: string;
 }): Promise<globalThis.Response> {
-  return fetch(
+  return clawFetch(
     `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/${encodeURIComponent(params.agentSlug)}/chat/cancel`,
     {
       method: 'POST',

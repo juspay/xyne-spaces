@@ -1,4 +1,4 @@
-import axios, { AxiosError } from 'axios';
+import { allowlistedFetch, createHttpClient, isHttpError, type HttpError } from '@/utils/ssrfGuard';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { resolveSecret } from '@/config/secretResolver';
@@ -14,6 +14,8 @@ export const sanitizeForLog = (value: string): string =>
 
 export class GithubManager implements IGitProvider {
   private readonly config: GithubConfig;
+  // Only the configured GitHub API host.
+  private readonly http = createHttpClient(allowlistedFetch(() => [this.config.apiUrl]));
 
   constructor() {
     this.config = {
@@ -135,7 +137,7 @@ export class GithubManager implements IGitProvider {
       description: safeDescription,
     });
     try {
-      await axios.post(url, payload, { headers: await this.getHeaders() });
+      await this.http.post(url, payload, { headers: await this.getHeaders() });
       logger.info('[GitHub-API] Commit status posted', {
         owner: safeOwner,
         repo: safeRepo,
@@ -145,7 +147,7 @@ export class GithubManager implements IGitProvider {
         description: safeDescription,
       });
     } catch (error) {
-      const axiosError = error as AxiosError;
+      const axiosError = error as HttpError;
       logger.error('[GitHub-API] Error posting commit status:', {
         status: axiosError.response?.status,
         data: axiosError.response?.data,
@@ -170,7 +172,7 @@ export class GithubManager implements IGitProvider {
       repo,
     )}/commits/${encodeURIComponent(commitSha)}/statuses`;
     try {
-      const response = await axios.get<Array<{ context?: string }>>(url, {
+      const response = await this.http.get<Array<{ context?: string }>>(url, {
         headers: await this.getHeaders(),
         // Newest first; a commit will not have more contexts than this.
         params: { per_page: 100 },
@@ -179,7 +181,7 @@ export class GithubManager implements IGitProvider {
     } catch (error) {
       logger.warn('[GitHub-API] Could not read commit statuses', {
         sha: encodeURIComponent(commitSha),
-        error: error instanceof AxiosError ? error.message : String(error),
+        error: isHttpError(error) ? error.message : String(error),
       });
       return false;
     }
@@ -225,7 +227,7 @@ export class GithubManager implements IGitProvider {
     try {
       logger.info(`[GithubManager] Creating PR: ${headBranch} → ${baseBranch} in ${owner}/${repoSlug}`);
 
-      const response = await axios.post(
+      const response = await this.http.post(
         `${this.config.apiUrl}/repos/${owner}/${repoSlug}/pulls`,
         {
           title,
@@ -241,7 +243,7 @@ export class GithubManager implements IGitProvider {
       logger.info(`[GithubManager] Successfully created PR: ${prUrl}`);
       return prUrl;
     } catch (error) {
-      const axiosError = error as AxiosError;
+      const axiosError = error as HttpError;
 
       // Handle duplicate PR error (422 with "A pull request already exists")
       if (axiosError.response?.status === 422) {
@@ -265,7 +267,7 @@ export class GithubManager implements IGitProvider {
    */
   private async findExistingPr(owner: string, repo: string, headBranch: string): Promise<string | undefined> {
     try {
-      const response = await axios.get(
+      const response = await this.http.get(
         `${this.config.apiUrl}/repos/${owner}/${repo}/pulls`,
         {
           headers: await this.getHeaders(),
@@ -310,7 +312,7 @@ export class GithubManager implements IGitProvider {
     description: string
   ): Promise<void> {
     try {
-      await axios.patch(
+      await this.http.patch(
         `${this.config.apiUrl}/repos/${projectKey}/${repoSlug}/pulls/${prId}`,
         {
           body: description,
@@ -319,7 +321,7 @@ export class GithubManager implements IGitProvider {
       );
       logger.info(`[GithubManager] Updated PR description for PR #${prId}`);
     } catch (error) {
-      const axiosError = error as AxiosError;
+      const axiosError = error as HttpError;
       logger.error('[GithubManager] Failed to update PR description:', axiosError.response?.data || axiosError.message);
       throw error;
     }
@@ -333,7 +335,7 @@ export class GithubManager implements IGitProvider {
       logger.info(`[GithubManager] Fetching PR files for PR #${prId} in ${projectKey}/${repoSlug}`);
 
       // GitHub's PR files endpoint returns the list of changed files
-      const response = await axios.get(
+      const response = await this.http.get(
         `${this.config.apiUrl}/repos/${projectKey}/${repoSlug}/pulls/${prId}/files`,
         { headers: await this.getHeaders() }
       );
@@ -344,7 +346,7 @@ export class GithubManager implements IGitProvider {
       logger.info(`[GithubManager] Fetched ${gitDiffFiles.length} files for PR #${prId}`);
       return gitDiffFiles;
     } catch (error) {
-      const axiosError = error as AxiosError;
+      const axiosError = error as HttpError;
       logger.error('[GithubManager] Failed to fetch PR diff:', axiosError.response?.data || axiosError.message);
       return [];
     }
@@ -363,7 +365,7 @@ export class GithubManager implements IGitProvider {
       logger.info(`[GithubManager] Fetching diff between ${sinceHash} and ${untilHash}`);
 
       // GitHub's compare endpoint
-      const response = await axios.get(
+      const response = await this.http.get(
         `${this.config.apiUrl}/repos/${projectKey}/${repoSlug}/compare/${sinceHash}...${untilHash}`,
         { headers: await this.getHeaders() }
       );
@@ -374,7 +376,7 @@ export class GithubManager implements IGitProvider {
       logger.info(`[GithubManager] Fetched ${gitDiffFiles.length} files from diff`);
       return gitDiffFiles;
     } catch (error) {
-      const axiosError = error as AxiosError;
+      const axiosError = error as HttpError;
       logger.error('[GithubManager] Failed to fetch diff:', axiosError.response?.data || axiosError.message);
       return [];
     }
@@ -391,7 +393,7 @@ export class GithubManager implements IGitProvider {
     try {
       logger.info(`[GithubManager] Fetching latest commit on branch ${branch}`);
 
-      const response = await axios.get(
+      const response = await this.http.get(
         `${this.config.apiUrl}/repos/${projectKey}/${repoSlug}/commits/${branch}`,
         {
           headers: await this.getHeaders(),
@@ -402,7 +404,7 @@ export class GithubManager implements IGitProvider {
       const commit = response.data;
       return { id: commit.sha };
     } catch (error) {
-      const axiosError = error as AxiosError;
+      const axiosError = error as HttpError;
       logger.error('[GithubManager] Failed to fetch latest commit:', axiosError.response?.data || axiosError.message);
       return null;
     }

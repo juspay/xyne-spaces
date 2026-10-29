@@ -2,6 +2,12 @@ import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const clawFetch = allowlistedFetch(() => [
+  config.xyneClaw.authUrl,
+  config.xyneClaw.clawAuthCallbackUrlAutomation,
+]);
 import crypto from 'crypto';
 
 function signWebhookPayload(payload: string, signingSecret: string): string {
@@ -58,7 +64,7 @@ class ClawClient {
     const url = `${this.authUrl}/claw/api/v1/agents`;
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await clawFetch(url, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json', ...this.s2sHeaders },
         signal: AbortSignal.timeout(15_000),
@@ -101,7 +107,7 @@ class ClawClient {
     const signature = signWebhookPayload(body, signingSecret);
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await clawFetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

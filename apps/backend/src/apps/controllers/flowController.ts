@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
-import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
+import { internalAppFetch, prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { decrypt } from '@/services/encryptionService';
 import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
 import { mintFlowToken, verifyFlowToken } from '@/apps/core/flowToken';
@@ -248,7 +248,7 @@ export class FlowController {
         signal: AbortSignal.timeout(30_000),
       };
       const appResponse = dispatchIsInternal
-        ? await fetch(dispatchUrl, dispatchInit)
+        ? await internalAppFetch(dispatchUrl, dispatchInit)
         : await safeWebhookFetch(dispatchUrl, dispatchInit);
 
       if (!appResponse.ok) {

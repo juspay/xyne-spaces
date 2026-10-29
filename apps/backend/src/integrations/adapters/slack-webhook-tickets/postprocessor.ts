@@ -9,6 +9,9 @@ import { ExternalSourceRepository } from '../../../database/repositories/externa
 import { logger } from '../../../utils/logger';
 import { decrypt } from '../../../services/encryptionService';
 import { config } from '../../../config/env';
+import { allowlistedFetch } from '../../../utils/ssrfGuard';
+
+const slackFetch = allowlistedFetch(() => ['slack.com']);
 
 export class SlackPostprocessor extends BasePostprocessor {
   private conversationRepo = new ConversationRepository();
@@ -68,7 +71,7 @@ export class SlackPostprocessor extends BasePostprocessor {
 
       const xyneLink = `${config.frontendUrl}/chat/${xyneChannelId}/${context.conversationId}`;
 
-      const response = await fetch('https://slack.com/api/chat.postMessage', {
+      const response = await slackFetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${creds.botOauthToken}`,

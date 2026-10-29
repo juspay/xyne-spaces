@@ -14,6 +14,10 @@ import { extractSlackChannelId } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { ExternalAttachmentService } from '@/services/externalAttachmentService';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// Slack's Web API and the file-upload hosts it returns.
+const slackFetch = allowlistedFetch(() => ['slack.com', 'slack-files.com', 'slack-edge.com']);
 import { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
 import { sendSlackReplyTx } from '@/bypassAcl/transactions/slackDeskService';
 
@@ -114,7 +118,7 @@ export class SlackDeskService {
 
     if (hasText) {
       const postMessage = async (token: string) => {
-        const slackResponse = await fetch('https://slack.com/api/chat.postMessage', {
+        const slackResponse = await slackFetch('https://slack.com/api/chat.postMessage', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -283,7 +287,7 @@ export class SlackDeskService {
     for (const att of attachments) {
       const buffer = typeof att.content === 'string' ? Buffer.from(att.content) : att.content;
 
-      const getResp = await fetch('https://slack.com/api/files.getUploadURLExternal', {
+      const getResp = await slackFetch('https://slack.com/api/files.getUploadURLExternal', {
         method: 'POST',
         headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ filename: att.name, length: String(buffer.length) }),
@@ -295,12 +299,12 @@ export class SlackDeskService {
 
       const form = new FormData();
       form.append('file', new Blob([buffer], { type: att.contentType || 'application/octet-stream' }), att.name);
-      const uploadResp = await fetch(getData.upload_url, { method: 'POST', body: form });
+      const uploadResp = await slackFetch(getData.upload_url, { method: 'POST', body: form });
       if (!uploadResp.ok) {
         throw new Error(`Slack upload_url POST failed: ${uploadResp.status}`);
       }
 
-      const completeResp = await fetch('https://slack.com/api/files.completeUploadExternal', {
+      const completeResp = await slackFetch('https://slack.com/api/files.completeUploadExternal', {
         method: 'POST',
         headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
