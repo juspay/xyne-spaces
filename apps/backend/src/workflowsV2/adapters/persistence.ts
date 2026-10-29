@@ -888,12 +888,12 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   }
 
   /**
-   * The only path that decrypts. Called by the executor to hand a step its auth, and by
-   * the credential-test route.
+   * The only path that decrypts. Called by the executor to hand a step its auth.
    *
    * A running execution passes the workflow identity (whose `attributes` carry the
-   * tenant the run acts as); the test route has no execution, so it passes trusted
-   * workspace attributes directly. Revoked credentials resolve to null so a step fails
+   * tenant the run acts as). Callers must pass attributes the server set — never ones
+   * from a request body. The SDK's credential-test route did exactly that, which is why
+   * it is in `DISABLED_ROUTES`. Revoked credentials resolve to null so a step fails
    * closed.
    */
   async resolveCredential(
