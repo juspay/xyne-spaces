@@ -18,11 +18,6 @@ variable "subnetwork" {
   type = string
 }
 
-variable "node_type" {
-  type    = string
-  default = "STANDARD_SMALL"
-}
-
 variable "maintenance_window" {
   type = object({
     day     = string

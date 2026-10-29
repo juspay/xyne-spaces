@@ -71,8 +71,9 @@ plan failing on a data source:
 ```bash
 gcloud services enable compute.googleapis.com container.googleapis.com iam.googleapis.com \
   iamcredentials.googleapis.com cloudresourcemanager.googleapis.com servicenetworking.googleapis.com \
-  sqladmin.googleapis.com redis.googleapis.com storage.googleapis.com secretmanager.googleapis.com \
-  dns.googleapis.com logging.googleapis.com monitoring.googleapis.com
+  sqladmin.googleapis.com memorystore.googleapis.com networkconnectivity.googleapis.com \
+  storage.googleapis.com secretmanager.googleapis.com dns.googleapis.com logging.googleapis.com \
+  monitoring.googleapis.com
 ```
 
 **Permissions.** `roles/owner` on the project is simplest. The least-privilege set: Compute
