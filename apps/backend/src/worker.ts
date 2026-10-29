@@ -1,3 +1,4 @@
+import '@/services/redisIamAuth'
 import { config } from 'dotenv'
 import { config as appConfig } from '@/config/env'
 // Disabled (LLM)

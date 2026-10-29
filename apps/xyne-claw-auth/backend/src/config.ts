@@ -213,6 +213,7 @@ export const CONFIG = {
   redisPort: Number(process.env["REDIS_PORT"] ?? 6379),
   redisPassword: process.env["REDIS_PASSWORD"] || undefined,
   redisTls: process.env["REDIS_TLS"] === "true",
+  redisIamAuth: process.env["REDIS_IAM_AUTH"] === "true",
   // Fan out live run events (tool calls + progress labels) to v3 chat viewers
   // over Redis pub/sub + an SSE endpoint. ON by default; set
   // LIVE_TOOLCALLS_ENABLED=false to disable.

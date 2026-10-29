@@ -20,6 +20,7 @@ from transcription import (
     TranscriptionHandler,
 )
 from infra import WebhookNotifier, GCSBucketProvider, S3BucketProvider
+from infra.redis_iam import IamCredentialProvider
 from history import ConversationStore
 from ai import AISessionManager
 from orchestration import CleanupManager, ParticipantTracker, RoomLifecycle
@@ -154,6 +155,8 @@ async def entrypoint(ctx: JobContext):
         }
         if config.redis_password:
             redis_kwargs["password"] = config.redis_password
+        if config.redis_iam_auth:
+            redis_kwargs["credential_provider"] = IamCredentialProvider()
         if config.redis_tls:
             # Match TypeScript: tls: { rejectUnauthorized: false }
             redis_kwargs["ssl"] = True
