@@ -23,7 +23,11 @@ export function getLangfuseClient(): LangfuseClient | null {
   }
   
   if (!langfuseClient) {
-    langfuseClient = new LangfuseClient();
+    langfuseClient = new LangfuseClient({
+      publicKey: config.publicKey,
+      secretKey: config.secretKey,
+      baseUrl: config.baseUrl,
+    });
   }
   
   return langfuseClient;

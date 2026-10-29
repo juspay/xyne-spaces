@@ -3,6 +3,7 @@ import Joi from 'joi';
 
 dotenv.config();
 
+import { getKmsSecrets } from '@/config/kmsSecrets';
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
 const envSchema = Joi.object({
@@ -731,7 +732,7 @@ const envSchema = Joi.object({
   CONNECT_RETRY_MAX_DELAY_MS: Joi.number().integer().min(1).empty('').default(30_000),
 }).unknown();
 
-const { error, value: envVars } = envSchema.validate(process.env);
+const { error, value: envVars } = envSchema.validate({ ...process.env, ...getKmsSecrets() });
 
 if (error) {
   throw new Error(`Config validation error: ${error.message}`);
