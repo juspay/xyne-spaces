@@ -56,7 +56,7 @@ export class GuestController {
   create = async (req: Request, res: Response): Promise<void> => {
     const bodyResult = CreateGuestBodySchema.safeParse(req.body);
     if (!bodyResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
       return;
     }
     try {
@@ -73,7 +73,7 @@ export class GuestController {
   list = async (req: Request, res: Response): Promise<void> => {
     const bodyResult = ListGuestsBodySchema.safeParse(req.body ?? {});
     if (!bodyResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
       return;
     }
     try {
@@ -90,7 +90,7 @@ export class GuestController {
   update = async (req: Request, res: Response): Promise<void> => {
     const bodyResult = UpdateGuestBodySchema.safeParse(req.body);
     if (!bodyResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
       return;
     }
     try {
@@ -107,7 +107,7 @@ export class GuestController {
   token = async (req: Request, res: Response): Promise<void> => {
     const bodyResult = GuestTokenBodySchema.safeParse(req.body);
     if (!bodyResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
       return;
     }
     try {

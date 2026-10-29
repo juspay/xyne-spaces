@@ -5,7 +5,7 @@ import { z } from 'zod';
  */
 export const BaseComponentSchema = z.object({
   type: z.string(),
-  props: z.record(z.any()).optional(),
+  props: z.record(z.string(), z.any()).optional(),
 });
 
 /**

@@ -262,7 +262,7 @@ const deskMetricsQuery = z.object({
 // const connectorCallBody = z
 //   .object({
 //     tool: z.string().min(1).max(200),
-//     args: z.record(z.unknown()).optional(),
+//     args: z.record(z.string(), z.unknown()).optional(),
 //   })
 //   .strict();
 

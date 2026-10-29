@@ -13,7 +13,7 @@ import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
 import { convertToBase64 } from '@/utils/attachmentBase64';
 import { convertToJAFAttachment } from '@/agents/xyne-ai/utils/attachmentConverter';
-import type { Attachment } from '@juspay-jaf/jaf';
+import type { Attachment } from '@/agents/llmClient';
 
 const EMAIL_SUMMARY_CACHE_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
 const EMAIL_SUMMARY_CACHE_PREFIX = 'email-summary';

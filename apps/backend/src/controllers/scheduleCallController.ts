@@ -574,7 +574,7 @@ export class ScheduleCallController {
         res.status(400).json({
           success: false,
           error: 'Invalid schedule call request',
-          details: error.errors,
+          details: error.issues,
         });
         return;
       }

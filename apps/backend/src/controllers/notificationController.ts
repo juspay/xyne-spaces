@@ -89,7 +89,7 @@ export class NotificationController {
       logger.error('Failed to register mobile push token:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid mobile token data', details: error.errors });
+        res.status(400).json({ error: 'Invalid mobile token data', details: error.issues });
         return;
       }
 
@@ -115,7 +115,7 @@ export class NotificationController {
       logger.error('Failed to unregister mobile push token:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid mobile token data', details: error.errors });
+        res.status(400).json({ error: 'Invalid mobile token data', details: error.issues });
         return;
       }
 
@@ -145,7 +145,7 @@ export class NotificationController {
       logger.error('Failed to save notification subscription:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid subscription data', details: error.errors });
+        res.status(400).json({ error: 'Invalid subscription data', details: error.issues });
         return;
       }
 
@@ -170,7 +170,7 @@ export class NotificationController {
       logger.error('Failed to remove notification subscription:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid unsubscribe data', details: error.errors });
+        res.status(400).json({ error: 'Invalid unsubscribe data', details: error.issues });
         return;
       }
 
@@ -310,7 +310,7 @@ export class NotificationController {
       logger.error('Failed to update notification preferences:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid preferences data', details: error.errors });
+        res.status(400).json({ error: 'Invalid preferences data', details: error.issues });
         return;
       }
 

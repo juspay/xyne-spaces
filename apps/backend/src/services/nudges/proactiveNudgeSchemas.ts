@@ -61,7 +61,7 @@ export const SuggestedActionSchema = z.object({
     'CREATE_DECISION',
     'CREATE_FOLLOWUP_REMINDER',
   ]),
-  payload: z.record(z.any()),
+  payload: z.record(z.string(), z.any()),
 });
 
 const NudgeSchema = z.object({

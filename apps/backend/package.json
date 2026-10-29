@@ -63,7 +63,6 @@
     "@clearfeed-ai/slack-to-html": "^1.1.0",
     "@clickhouse/client": "^1.18.5",
     "@google-cloud/pubsub": "^4.11.0",
-    "@juspay-jaf/jaf": "0.1.43",
     "@langfuse/client": "^4.5.1",
     "@langfuse/otel": "^4.5.1",
     "@langfuse/tracing": "^4.5.1",
@@ -165,8 +164,7 @@
     "xlsx": "npm:@e965/xlsx@0.20.3",
     "yauzl": "^3.2.1",
     "yjs": "^13.6.27",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.25.0",
+    "zod": "^4.3.6",
     "tsx": "^4.20.6"
   },
   "devDependencies": {

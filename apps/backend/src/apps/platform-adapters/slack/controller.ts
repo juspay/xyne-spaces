@@ -98,7 +98,7 @@ const SlackArraySchema = z.preprocess(
 );
 const SlackRecordSchema = z.preprocess(
 	parseJsonString,
-	z.record(z.unknown()).optional(),
+	z.record(z.string(), z.unknown()).optional(),
 );
 const SlackOptionalStringSchema = z
 	.string()

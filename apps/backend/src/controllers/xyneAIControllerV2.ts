@@ -4,7 +4,7 @@ import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { getOtelTraceId } from '@juspay-jaf/jaf';
+import { getOtelTraceId } from '@/agents/llmClient';
 import {
   getAskAIQueriesTotal,
   getAskAIQueryDuration,
@@ -105,8 +105,8 @@ const AttachedContextItemSchema = z.object({
   eventName: z.string().optional(),
   eventCategory: z.string().optional(),
   timestamp: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
-  relatedData: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  relatedData: z.record(z.string(), z.unknown()).optional(),
 });
 
 // Attached context schema
@@ -239,7 +239,9 @@ const ConversationNotesSchema = z.object({
 
 const FeedbackRequestSchema = z.object({
   traceId: z.string().min(1, 'traceId is required'),
-  value: z.enum(['LIKE', 'DISLIKE'], { required_error: 'value must be LIKE or DISLIKE' }),
+  value: z.enum(['LIKE', 'DISLIKE'], {
+    error: (issue) => (issue.input === undefined ? 'value must be LIKE or DISLIKE' : undefined),
+  }),
 });
 
 /**
@@ -269,7 +271,7 @@ export class XyneAIControllerV2 {
     if (!parseResult.success) {
       res.status(400).json({
         error: 'Invalid input',
-        details: parseResult.error.errors.map((e) => ({
+        details: parseResult.error.issues.map((e) => ({
           field: e.path.join('.'),
           message: e.message,
         })),
@@ -722,7 +724,7 @@ export class XyneAIControllerV2 {
     if (!parseResult.success) {
       res.status(400).json({
         error: 'Invalid input',
-        details: parseResult.error.errors.map((e) => ({
+        details: parseResult.error.issues.map((e) => ({
           field: e.path.join('.'),
           message: e.message,
         })),

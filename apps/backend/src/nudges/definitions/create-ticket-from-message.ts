@@ -6,7 +6,7 @@ import {
   type Agent,
   type RunConfig,
   type RunState,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { OrgLLMServiceAccountPurpose, NudgeKind, SurfaceAreaType } from '@xyne/shared';

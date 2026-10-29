@@ -98,7 +98,7 @@ export const AppFetchResponseMappingSchema = z.object({
       additionalFormFields: z.string().default('additionalFormFields'),
       attachments: z.string().default('attachments'),
     })
-    .default({}),
+    .prefault({}),
 });
 
 export type AppFetchResponseMapping = z.infer<typeof AppFetchResponseMappingSchema>;
@@ -113,7 +113,7 @@ export const AppFetchConfigSchema = z.object({
    */
   url: z.string().min(1, 'A fetch URL is required').max(MAX_URL_LENGTH),
   method: HttpMethod.default('POST'),
-  headers: z.record(z.string().max(MAX_HEADER_VALUE_LENGTH)).optional(),
+  headers: z.record(z.string(), z.string().max(MAX_HEADER_VALUE_LENGTH)).optional(),
   secretHeaders: z.array(z.string().max(MAX_HEADER_NAME_LENGTH)).max(MAX_HEADERS).optional(),
   encoding: z.enum(['JSON', 'FORM', 'RAW']).default('JSON'),
   /** Request body; `{{...}}` refs are resolved. Not sent for GET. */
@@ -143,7 +143,7 @@ export const AppFetchConfigSchema = z.object({
    * `cursor` mode, where the app controls page size.
    */
   pageSize: z.number().int().positive().max(1_000).default(DEFAULT_PAGE_SIZE),
-  response: AppFetchResponseMappingSchema.default({}),
+  response: AppFetchResponseMappingSchema.prefault({}),
 })
   .superRefine((cfg, ctx) => {
     for (const name of Object.keys(cfg.headers ?? {})) {
