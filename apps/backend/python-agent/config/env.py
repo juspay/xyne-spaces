@@ -125,8 +125,7 @@ class Config:
     redis_port: int
     redis_password: Optional[str]
     redis_tls: bool
-    redis_iam_auth: bool
-
+    
     # Environment
     node_env: str
     is_development: bool
@@ -272,8 +271,7 @@ class Config:
             redis_port=int(os.getenv("REDIS_PORT", "6379")),
             redis_password=os.getenv("REDIS_PASSWORD"),  # None if not set
             redis_tls=_get_bool_env("REDIS_TLS", False),
-            redis_iam_auth=_get_bool_env("REDIS_IAM_AUTH", False),
-
+            
             # Transcript incremental flush cadence (events per GCS upload)
             transcript_flush_every_n=int(os.getenv("TRANSCRIPT_FLUSH_EVERY_N_EVENTS", "5")),
 
