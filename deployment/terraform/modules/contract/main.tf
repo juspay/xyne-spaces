@@ -143,10 +143,5 @@ resource "terraform_data" "inputs" {
       condition     = !var.livekit_enabled || var.redis_mode != "incluster"
       error_message = "livekit_enabled requires redis_mode to be managed or external."
     }
-
-    precondition {
-      condition     = !var.livekit_enabled || !try(var.managed_redis.iam_auth, false)
-      error_message = "livekit_enabled requires an external Redis when Memorystore uses IAM auth: LiveKit cannot authenticate to Redis with IAM tokens."
-    }
   }
 }
