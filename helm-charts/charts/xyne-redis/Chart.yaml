@@ -3,7 +3,7 @@ name: xyne-redis
 description: Single-node Redis (append-only persistence) for Xyne Spaces queues, caches and pub/sub
 type: application
 version: 0.1.0
-appVersion: "7.4"
+appVersion: "8.1"
 keywords:
   - xyne
   - redis

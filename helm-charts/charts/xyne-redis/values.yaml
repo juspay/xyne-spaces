@@ -7,7 +7,7 @@ fullnameOverride: ""
 
 image:
   registry: docker.io
-  repository: redis
+  repository: valkey/valkey
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent
@@ -33,7 +33,7 @@ revisionHistoryLimit: 3
 strategy: {}
 
 command:
-  - redis-server
+  - valkey-server
 args:
   - --requirepass
   - $(REDIS_PASSWORD)

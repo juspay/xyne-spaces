@@ -73,14 +73,14 @@ services:
 
   # Redis (shared)
   redis:
-    image: public.ecr.aws/docker/library/redis:7-alpine
+    image: public.ecr.aws/valkey/valkey:8-alpine
     container_name: xyne-sandbox-redis
     ports:
       - "6379:6379"
     volumes:
-      - sandbox_redis_data:/data
+      - sandbox_valkey_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -246,7 +246,7 @@ volumes:
     driver: local
   sandbox_postgres_data:
     driver: local
-  sandbox_redis_data:
+  sandbox_valkey_data:
     driver: local
   sandbox_fake_gcs_data:
     driver: local
