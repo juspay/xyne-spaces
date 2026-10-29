@@ -1,5 +1,6 @@
 import { logger } from "@/utils/logger";
 import { config } from "@/config/env";
+import { allowlistedFetch } from "@/utils/ssrfGuard";
 import type { ProcessingResult, ChunkMetadata } from "./types";
 
 /**
@@ -35,6 +36,8 @@ interface DoclingProcessResponse {
  */
 export class DoclingService {
   private baseUrl: string;
+  // Only the configured Docling service.
+  private readonly doclingFetch = allowlistedFetch(() => [this.baseUrl]);
   private healthEndpoint: string;
   private processEndpoint: string;
   private timeoutMs: number;
@@ -91,7 +94,7 @@ export class DoclingService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout for health check
 
-      const response = await fetch(healthUrl, {
+      const response = await this.doclingFetch(healthUrl, {
         method: "GET",
         signal: controller.signal,
       });
@@ -175,7 +178,7 @@ export class DoclingService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      const response = await fetch(processUrl, {
+      const response = await this.doclingFetch(processUrl, {
         method: "POST",
         body: formData,
         signal: controller.signal,

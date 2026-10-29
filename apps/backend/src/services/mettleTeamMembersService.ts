@@ -1,6 +1,8 @@
-import axios from 'axios';
 import { config as appConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch, createHttpClient } from '@/utils/ssrfGuard';
+
+const http = createHttpClient(allowlistedFetch(() => [appConfig.mettleApiBaseUrl]));
 
 export interface MettleTeamMembersResponse {
   active_employee_count?: number;
@@ -40,7 +42,7 @@ class MettleTeamMembersService {
         url,
       });
 
-      const response = await axios.get<MettleTeamMembersResponse>(url, {
+      const response = await http.get<MettleTeamMembersResponse>(url, {
         headers: {
           mettleToken: this.token,
           'Content-Type': 'application/json',

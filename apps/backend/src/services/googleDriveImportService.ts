@@ -1,18 +1,22 @@
-import fetch, { type Response as FetchResponse } from 'node-fetch';
-import https from 'https';
+import { Readable } from 'stream';
+import { Agent } from 'undici';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 // Fresh-socket direct agent — mirrors googleSheetsService: the egress proxy in
 // some environments prematurely closes reused connections to googleapis, causing
-// "socket hang up" (ECONNRESET). keepAlive:false + retries avoid stale sockets.
-const driveAgent = new https.Agent({ keepAlive: false });
+// "socket hang up" (ECONNRESET). No connection reuse + retries avoid stale sockets.
+const driveAgent = new Agent({ keepAliveTimeout: 1, keepAliveMaxTimeout: 1 });
+// Only Google's own hosts (the Drive API and its download redirects).
+const googleFetch = allowlistedFetch(() => ['googleapis.com', 'googleusercontent.com']);
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 3;
 
 /** Transient network failures worth retrying. */
 function isTransient(err: unknown): boolean {
-  const code = (err as { code?: string }).code;
+  const wrapped = err as { code?: string; cause?: { code?: string } };
+  const code = wrapped.code ?? wrapped.cause?.code;
   const msg = err instanceof Error ? err.message : String(err);
   return (
     code === 'ECONNRESET' ||
@@ -25,13 +29,13 @@ function isTransient(err: unknown): boolean {
 }
 
 /** GET with the direct agent, a hard timeout, and retry/backoff on transient errors. */
-async function driveFetch(url: string, headers?: Record<string, string>): Promise<FetchResponse> {
+async function driveFetch(url: string, headers?: Record<string, string>): Promise<Response> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      return await fetch(url, { method: 'GET', agent: driveAgent, signal: controller.signal, headers });
+      return await googleFetch(url, { method: 'GET', dispatcher: driveAgent, signal: controller.signal, headers } as never);
     } catch (err) {
       lastErr = err;
       if (!isTransient(err) || attempt === MAX_RETRIES - 1) break;
@@ -283,7 +287,7 @@ export async function downloadFile(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { method: 'GET', agent: driveAgent, signal: controller.signal, headers: authHeader(accessToken) });
+    const res = await googleFetch(url, { method: 'GET', dispatcher: driveAgent, signal: controller.signal, headers: authHeader(accessToken) } as never);
     if (res.status === 401) {
       const body = await res.text().catch(() => '');
       logger.warn('[DRIVE_IMPORT] Download rejected the access token', {
@@ -318,7 +322,7 @@ export async function downloadFile(
 
     const chunks: Buffer[] = [];
     let received = 0;
-    for await (const chunk of res.body) {
+    for await (const chunk of Readable.fromWeb(res.body as never)) {
       const buf = chunk as Buffer;
       received += buf.length;
       if (received > MAX_FILE_BYTES) {

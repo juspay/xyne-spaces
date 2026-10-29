@@ -22,6 +22,9 @@ import { decrypt } from '@/services/encryptionService';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { logger } from '@/utils/logger';
 import { stopGmailWatchBeforeDeactivation } from '@/services/gmailWatchStopService';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const googleFetch = allowlistedFetch(() => ['googleapis.com']);
 
 const TAG = '[WorkspaceDesk]';
 const router = express.Router();
@@ -116,7 +119,7 @@ router.post(
           };
           const tokenToRevoke = creds.refreshToken || creds.accessToken;
           if (tokenToRevoke) {
-            const revokeRes = await fetch(
+            const revokeRes = await googleFetch(
               `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(tokenToRevoke)}`,
               { method: 'POST' },
             );

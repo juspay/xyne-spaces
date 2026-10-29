@@ -1,10 +1,12 @@
 import { PRMetricsRepository } from "@/database/repositories/pullRequestsRepository";
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 import { transformBitbucketDiff } from '@/utils/diffUtils';
 import { PullRequestData, BitbucketDuplicatePRError } from '@/types/bitbucket';
 import { config } from '@/config/env';
 
 const BASE_URL = config.bitbucket.baseUrl;
+const bitbucketFetch = allowlistedFetch(() => [config.bitbucket.baseUrl]);
 
 export class BitbucketManager {
   constructor(private prMetricsRepository = new PRMetricsRepository()) {}
@@ -44,7 +46,7 @@ export class BitbucketManager {
     private async makeRequest<T>(url: string, method: 'GET' | 'POST' | 'PUT', body?: any): Promise<{ data: T; status: number }> {
         logger.info(`${method} ${url}`);
 
-    const response = await fetch(url, {
+    const response = await bitbucketFetch(url, {
       method,
       headers: this.getAuthHeaders(),
       body: body ? JSON.stringify(body) : undefined,
@@ -269,7 +271,7 @@ export class BitbucketManager {
         description,
       });
 
-      const response = await fetch(buildStatusUrl, {
+      const response = await bitbucketFetch(buildStatusUrl, {
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify(payload),
@@ -301,7 +303,7 @@ export class BitbucketManager {
     const url = `${BASE_URL}/projects/${projectKey}/repos/${repositorySlug}/permissions/users?name=${encodeURIComponent(username)}&permission=REPO_WRITE`;
 
     try {
-      const response = await fetch(url, {
+      const response = await bitbucketFetch(url, {
         method: 'PUT',
         headers: this.getAuthHeaders(),
       });

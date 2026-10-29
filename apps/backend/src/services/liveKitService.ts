@@ -9,7 +9,7 @@ import {
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { resolveWebhookHostAllowingInternal } from '@/utils/ssrfGuard';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import { redisService } from '@/services/redisService';
 import { repositories } from '@/database/repositories';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -296,10 +296,7 @@ export class LiveKitService {
     const timeout = setTimeout(() => controller.abort(), AGENT_HEALTH_CHECK_TIMEOUT_MS);
     const startedAt = Date.now();
     try {
-      // Agent URLs are operator config and may be in-cluster, so internal hosts stay allowed;
-      // loopback and cloud-metadata are refused, and a redirect is never followed.
-      await resolveWebhookHostAllowingInternal(new URL(url).hostname);
-      const response = await fetch(url, { signal: controller.signal, redirect: 'manual' });
+      const response = await safeWebhookFetch(url, { signal: controller.signal, redirect: 'manual' });
       const latencyMs = Date.now() - startedAt;
       if (response.ok) {
         logger.info(`${tag}transcription_agent_health_check_ok | url=${url}, status=${response.status}, latency_ms=${latencyMs}`);

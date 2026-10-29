@@ -1,6 +1,8 @@
-import axios from 'axios';
 import { config as appConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch, createHttpClient } from '@/utils/ssrfGuard';
+
+const http = createHttpClient(allowlistedFetch(() => [appConfig.mettleApiBaseUrl]));
 
 export interface MettleTeam {
   id: string;
@@ -43,7 +45,7 @@ class MettleTeamSyncService {
       }
 
       const url = `${this.baseUrl}/api/external/team/list`;
-      const response = await axios.get<unknown>(url, {
+      const response = await http.get<unknown>(url, {
         headers: {
           mettleToken: this.token,
           'Content-Type': 'application/json',

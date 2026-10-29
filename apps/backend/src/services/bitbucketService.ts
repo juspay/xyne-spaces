@@ -6,6 +6,7 @@ import {
   PullRequestData,
 } from '../types/bitbucket.js';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 import {
   PullRequestDataPartial,
   BitbucketChangesResponse,
@@ -21,6 +22,8 @@ export class BitbucketService {
   private readonly MAX_DELAY_MS = 30000;
   // Bound outbound calls so a hung upstream can't pin analysis/webhooks.
   private readonly REQUEST_TIMEOUT_MS = 30000;
+  // Only the configured Bitbucket host.
+  private readonly apiFetch = allowlistedFetch(() => [this.config.baseUrl]);
 
   constructor(config: BitbucketConfig) {
     this.config = config;
@@ -112,7 +115,7 @@ export class BitbucketService {
 
     for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
       try {
-        const response = await fetch(url, {
+        const response = await this.apiFetch(url, {
           method: 'GET',
           headers: {
             Accept: acceptHeader,
@@ -596,7 +599,7 @@ export class BitbucketService {
     const url = `${this.config.baseUrl}${endpoint}`;
 
     try {
-      const response = await fetch(url, {
+      const response = await this.apiFetch(url, {
         method: 'PUT',
         headers: {
           'Accept': 'application/json;charset=UTF-8',

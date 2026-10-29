@@ -13,9 +13,8 @@
  */
 
 import { Request, Response } from 'express';
-import axios from 'axios';
-import FormData from 'form-data';
 import { ExternalSource } from '@prisma/client';
+import { allowlistedFetch, createHttpClient } from '@/utils/ssrfGuard';
 import { AttachmentEntityType } from '@xyne/shared';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
@@ -27,6 +26,8 @@ import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+
+const zohoHttp = createHttpClient(allowlistedFetch(() => ['zoho.com']));
 
 const PENDING_ENTITY_PREFIX = 'pending-email:';
 const PENDING_COMPOSE_ENTITY_PREFIX = 'pending-compose:';
@@ -241,24 +242,18 @@ export class ZohoUploadController {
   ): Promise<string | null> {
     try {
       const formData = new FormData();
-      formData.append('file', file.buffer, {
-        filename: file.originalname,
-        contentType: file.mimetype,
-      });
-      const response = await axios.post(
+      formData.append('file', new Blob([file.buffer], { type: file.mimetype }), file.originalname);
+      const response = await zohoHttp.post<{ id: string }>(
         'https://desk.zoho.com/api/v1/uploads',
         formData,
         {
           headers: {
-            ...formData.getHeaders(),
             orgId,
             Authorization: `Zoho-oauthtoken ${accessToken}`,
           },
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity,
         },
       );
-      return response.data.id as string;
+      return response.data.id;
     } catch (error: any) {
       logger.error(`[emailUpload] Zoho upload failed for ${file.originalname}: ${error?.message}`);
       return null;

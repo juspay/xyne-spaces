@@ -19,6 +19,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { buildClassifierPrompt } from './prompt';
 import { getThreadTypeVocabulary } from './vocabulary';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 const TAG = '[MessageClassification]';
 
@@ -469,7 +470,8 @@ async function callLiteLLM(
   logLLMCallStart(AGENT_NAME, model, 'ORG_LITELLM_SERVICE_ACCOUNT');
 
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, {
+    const response = await safeWebhookFetch(url, {
+      redirect: 'manual',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
