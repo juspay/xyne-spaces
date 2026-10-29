@@ -1,7 +1,7 @@
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 import { randomUUID } from 'node:crypto';
 import readline from 'readline';
-import fetch from 'node-fetch';
+import { assertUrlSyntaxSafe, safeFetchFollowingRedirects } from '@/utils/ssrfGuard';
 import { WebClient, LogLevel } from '@slack/web-api';
 import { ChannelRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -521,6 +521,12 @@ export class SlackMigrationEngine {
     const uploaded = await this.uploadedFileSet(gcsPrefix);
     if (uploaded.has(dest)) return this.storage.buildStorageUri(dest);
     const url = file.url_private_download || file.url_private;
+    try {
+      assertUrlSyntaxSafe(url);
+    } catch (e) {
+      logger.warn('[SlackMigration] attachment URL refused — skipping', { id: file.id, error: e instanceof Error ? e.message : String(e) });
+      return undefined;
+    }
 
     // Retry transient failures (429 / 5xx / timeout / network). The token is only held during collection, so a file
     // not captured here can't be recovered at ingest. Permanent errors (403/404) skip without retry.
@@ -529,7 +535,7 @@ export class SlackMigrationEngine {
       const timer = setTimeout(() => controller.abort(), cfg.fileTimeoutMs);
       const startedAt = Date.now();
       try {
-        const res = await fetch(url, {
+        const res = await safeFetchFollowingRedirects(url, {
           headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'Xyne-Spaces-Backend/1.0' },
           signal: controller.signal,
         });
@@ -549,7 +555,7 @@ export class SlackMigrationEngine {
           logger.warn('[SlackMigration] attachment download failed — skipping', { id: file.id, status: res.status, statusText: res.statusText, attempt });
           return undefined;
         }
-        const body = res.body as NodeJS.ReadableStream;
+        const body = Readable.fromWeb(res.body as never) as NodeJS.ReadableStream;
         // node-fetch emits the abort/socket error on the body stream out-of-band; without a listener it becomes an
         // uncaught exception that can crash the pod. Handle it here so a slow/aborted download is contained, not fatal.
         body.on('error', (err: unknown) => logger.warn('[SlackMigration] attachment stream aborted — skipping', {

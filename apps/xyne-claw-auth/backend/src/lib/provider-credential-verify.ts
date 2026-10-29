@@ -1,5 +1,6 @@
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import { errMsg } from "./errors.js";
+import { safeFetch } from "./safe-fetch.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("provider-verify");
@@ -124,7 +125,7 @@ async function getJson(
     return { ok: false, kind: "rejected", message: "The base URL must be a public https endpoint." };
   }
   try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS) });
+    const res = await safeFetch(url, { headers }, { timeoutMs: VERIFY_TIMEOUT_MS });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       return classify(provider, res.status, text);
