@@ -1,5 +1,7 @@
-import fetch from 'node-fetch';
-import { assertUrlSyntaxSafe, safeFetchFollowingRedirects } from '@/utils/ssrfGuard';
+import { allowlistedFetch, assertUrlSyntaxSafe, safeFetchFollowingRedirects } from '@/utils/ssrfGuard';
+
+// Slack's Web API.
+const slackFetch = allowlistedFetch(() => ['slack.com']);
 import { Prisma } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
 import { AttachmentEntityType, CanvasRole, CanvasVisibility } from '@xyne/shared';
@@ -24,7 +26,7 @@ const attachmentRepo = new MessageAttachmentRepository();
 /** files.info → { downloadUrl, name, mimetype } for a Slack file. */
 async function slackFileInfo(token: string, fileId: string): Promise<{ url?: string; name?: string; mimetype?: string } | undefined> {
   try {
-    const resp = await fetch('https://slack.com/api/files.info?file=' + fileId, { headers: { Authorization: `Bearer ${token}` } });
+    const resp = await slackFetch('https://slack.com/api/files.info?file=' + fileId, { headers: { Authorization: `Bearer ${token}` } });
     const j = (await resp.json()) as { ok?: boolean; file?: { url_private_download?: string; url_private?: string; name?: string; mimetype?: string } };
     if (!j.ok || !j.file) return undefined;
     return { url: j.file.url_private_download || j.file.url_private, name: j.file.name, mimetype: j.file.mimetype };
@@ -145,7 +147,7 @@ async function fetchFileText(token: string, url?: string): Promise<string | unde
 
 async function fileDownloadUrl(token: string, fileId: string): Promise<string | undefined> {
   try {
-    const resp = await fetch('https://slack.com/api/files.info?file=' + fileId, { headers: { Authorization: `Bearer ${token}` } });
+    const resp = await slackFetch('https://slack.com/api/files.info?file=' + fileId, { headers: { Authorization: `Bearer ${token}` } });
     const j = (await resp.json()) as { ok?: boolean; file?: { url_private_download?: string; url_private?: string } };
     return j.ok ? (j.file?.url_private_download || j.file?.url_private) : undefined;
   } catch (e) {

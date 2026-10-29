@@ -17,6 +17,10 @@ import {
   type CalendarSourceCredentials,
 } from '@/database/repositories/externalSourceRepository';
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// Google's and Microsoft's token endpoints.
+const tokenFetch = allowlistedFetch(() => ['googleapis.com', 'login.microsoftonline.com']);
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const TOKEN_REFRESH_RETRY_DELAY_MS = 500;
@@ -38,7 +42,7 @@ async function fetchTokenWithRetry(url: string, initFactory: () => RequestInit):
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(url, initFactory());
+      const res = await tokenFetch(url, initFactory());
       if (res.status < 500 || attempt === 1) {
         return res;
       }

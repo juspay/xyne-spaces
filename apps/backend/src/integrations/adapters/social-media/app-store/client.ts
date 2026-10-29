@@ -11,6 +11,9 @@ import {
   APP_STORE_TOKEN_REFRESH_MARGIN_SECONDS,
   APP_STORE_TOKEN_TTL_SECONDS,
 } from './constants';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const appStoreFetch = allowlistedFetch(() => [APP_STORE_API_BASE]);
 
 const TAG = '[AppStoreClient]';
 
@@ -179,7 +182,7 @@ export class AppStoreClient {
     credentials: AppStoreCredentials,
     init?: { method?: string; body?: unknown; cacheKey?: string },
   ): Promise<T> {
-    const response = await fetch(url.startsWith('http') ? url : `${APP_STORE_API_BASE}${url}`, {
+    const response = await appStoreFetch(url.startsWith('http') ? url : `${APP_STORE_API_BASE}${url}`, {
       method: init?.method ?? 'GET',
       headers: {
         Authorization: `Bearer ${this.mintToken(credentials, init?.cacheKey)}`,

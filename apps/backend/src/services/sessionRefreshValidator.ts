@@ -1,5 +1,5 @@
 import { OAuth2Client, gaxios } from 'google-auth-library';
-import axios from 'axios';
+import { allowlistedFetch, createHttpClient } from '../utils/ssrfGuard';
 import { AuthProvider } from '@xyne/shared';
 import { config } from '../config/env';
 import { logger } from '../utils/logger';
@@ -10,6 +10,9 @@ import {
   googleClientKeyFromDeviceInfo,
   orderedGoogleClientKeys,
 } from '../services/googleOAuthClients';
+
+// Microsoft Graph and the Microsoft sign-in host.
+const microsoftHttp = createHttpClient(allowlistedFetch(() => ['graph.microsoft.com', 'login.microsoftonline.com']));
 
 const userSessionService = new UserSessionService();
 
@@ -101,7 +104,7 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
   }
 
   try {
-    const graphResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+    const graphResponse = await microsoftHttp.get('https://graph.microsoft.com/v1.0/me', {
       headers: { Authorization: `Bearer ${session.accessToken}` },
       validateStatus: () => true, // Don't throw on non-2xx
       timeout: MS_REQUEST_TIMEOUT_MS,
@@ -115,7 +118,7 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
     if (graphResponse.status === 401) {
       // Access token expired — try refreshing via the Microsoft token endpoint.
       const tenantId = config.microsoft.tenantId || 'common';
-      const tokenResponse = await axios.post(
+      const tokenResponse = await microsoftHttp.post(
         `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
         new URLSearchParams({
           client_id: config.microsoft.clientId,

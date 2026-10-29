@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { OAuth2Client, gaxios } from 'google-auth-library';
-import axios from 'axios';
+import { allowlistedFetch, createHttpClient } from '../utils/ssrfGuard';
 import { jwtService } from '../services/jwtService';
 import { logger as baseLogger } from '../utils/logger';
 import '../types/express';
@@ -9,6 +9,9 @@ import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { AuthProvider } from '@xyne/shared';
 import { isRefreshAllowed } from '../services/sessionRefreshValidator';
+
+// Microsoft Graph and the Microsoft sign-in host.
+const microsoftHttp = createHttpClient(allowlistedFetch(() => ['graph.microsoft.com', 'login.microsoftonline.com']));
 
 const logger = baseLogger.child({ module: 'AuthV2Middleware' });
 class AuthV2Middleware {
@@ -161,7 +164,7 @@ class AuthV2Middleware {
           // Verify if the user is still valid in Azure AD via Microsoft Graph API
           if (session.accessToken) {
             try {
-              const graphResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+              const graphResponse = await microsoftHttp.get('https://graph.microsoft.com/v1.0/me', {
                 headers: { Authorization: `Bearer ${session.accessToken}` },
                 validateStatus: () => true, // Don't throw on non-2xx
               });
@@ -171,7 +174,7 @@ class AuthV2Middleware {
               } else if (graphResponse.status === 401) {
                 // Access token expired — try refreshing via Microsoft token endpoint
                 const tenantId = config.microsoft.tenantId || 'common';
-                const tokenResponse = await axios.post(
+                const tokenResponse = await microsoftHttp.post(
                   `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
                   new URLSearchParams({
                     client_id: config.microsoft.clientId,

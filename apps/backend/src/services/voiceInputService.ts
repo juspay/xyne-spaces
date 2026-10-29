@@ -1,7 +1,9 @@
-import axios from 'axios';
-import FormData from 'form-data';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch, createHttpClient, isHttpError } from '@/utils/ssrfGuard';
+
+// Only the configured Python transcription agent.
+const agentHttp = createHttpClient(allowlistedFetch(() => [config.pythonAgentUrl]));
 
 interface PythonTranscriptionResponse {
   text: string;
@@ -23,10 +25,7 @@ export class VoiceInputService {
     }
 
     const form = new FormData();
-    form.append('audio', file.buffer, {
-      filename: file.originalname,
-      contentType: file.mimetype,
-    });
+    form.append('audio', new Blob([file.buffer], { type: file.mimetype }), file.originalname);
 
     if (options?.language) {
       form.append('language', options.language);
@@ -44,13 +43,10 @@ export class VoiceInputService {
     const _t0 = Date.now();
 
     try {
-      const response = await axios.post<PythonTranscriptionResponse>(
+      const response = await agentHttp.post<PythonTranscriptionResponse>(
         `${pythonAgentUrl}/transcribe-audio`,
         form,
-        {
-          headers: form.getHeaders(),
-          timeout: 60_000,
-        },
+        { timeout: 60_000 },
       );
 
       const elapsed = Date.now() - _t0;
@@ -61,7 +57,7 @@ export class VoiceInputService {
       );
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
+      if (isHttpError(error)) {
         const status = error.response?.status;
         const body = error.response?.data as { error?: string } | undefined;
 

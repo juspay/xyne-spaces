@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// The configured Langfuse host, or the default Periscope host.
+const periscopeFetch = allowlistedFetch(() => [config.langfuse.baseUrl, 'https://periscope.breeze.in']);
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { getOtelTraceId } from '@/agents/llmClient';
@@ -768,7 +772,7 @@ export class XyneAIControllerV2 {
         `[XyneAIv2] Submitting feedback to: ${periscopeUrl}, traceId: ${otelTraceId}, value: ${value}`
       );
 
-      const response = await fetch(periscopeUrl, {
+      const response = await periscopeFetch(periscopeUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

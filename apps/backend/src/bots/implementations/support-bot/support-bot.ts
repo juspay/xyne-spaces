@@ -6,7 +6,8 @@ import type {
   BotEvent,
 } from '@/bots/unified/types/index.js'
 import { logger } from '@/utils/logger'
-import { Channel, User } from '@prisma/client';import axios from 'axios'
+import { Channel, User } from '@prisma/client';
+import { allowlistedFetch, createHttpClient, isHttpError } from '@/utils/ssrfGuard'
 import { MessageType } from '@xyne/shared';
 import { superpositionClient } from '@/services/superpositionClient'
 import { UserGroupRepository, UserRepository } from '@/database/repositories'
@@ -85,6 +86,8 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
   }
 
   private readonly BACKEND_URL: string;
+  // Only the Spaces backend this bot posts back to.
+  private readonly http = createHttpClient(allowlistedFetch(() => [this.BACKEND_URL]));
   private readonly APP_JWT_KEY: string;
   private userGroupRepository = new UserGroupRepository();
   private userRepository = new UserRepository();
@@ -245,7 +248,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
       }
 
 
-      await axios.post(
+      await this.http.post(
         `${this.BACKEND_URL}/api/apps/chat/postMessage`,
         {
           conversationId: params.conversationId,
@@ -269,11 +272,11 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
           // Sanitize error to avoid circular reference issues when logging
     const errorDetails = {
       message: error instanceof Error ? error.message : String(error),
-      ...(axios.isAxiosError(error) && {
+      ...(isHttpError(error) && {
         status: error.response?.status,
         statusText: error.response?.statusText,
         code: error.code,
-        url: error.config?.url,
+        url: this.BACKEND_URL,
       }),
     };
       logger.error(`[SupportBot] Failed to send support message:`, errorDetails)
@@ -289,7 +292,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
   public async validateChannel(channelId: string): Promise<boolean> {
     try {
       logger.info(`[SupportBot] Validating channel ID: ${channelId}`)
-      const response = await axios.post(
+      const response = await this.http.post(
         `${this.BACKEND_URL}/api/apps/channel/info`,
         { 
           channelId: channelId
@@ -308,11 +311,11 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
     } catch (error) {
       const errorDetails = {
         message: error instanceof Error ? error.message : String(error),
-        ...(axios.isAxiosError(error) && {
+        ...(isHttpError(error) && {
           status: error.response?.status,
           statusText: error.response?.statusText,
           code: error.code,
-          url: error.config?.url,
+          url: this.BACKEND_URL,
         }),
       };
       logger.error('[SupportBot] Failed to validate channel:', errorDetails);
@@ -333,7 +336,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
     params: { assigneeId?: string; stage?: string; groupId?: string }
   ): Promise<boolean> {
     try {
-      await axios.post(
+      await this.http.post(
         `${this.BACKEND_URL}/api/apps/ticket/updateTicket`,
         {
           ticketId,
@@ -355,11 +358,11 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
     } catch (error) {
       const errorDetails = {
         message: error instanceof Error ? error.message : String(error),
-        ...(axios.isAxiosError(error) && {
+        ...(isHttpError(error) && {
           status: error.response?.status,
           statusText: error.response?.statusText,
           code: error.code,
-          url: error.config?.url,
+          url: this.BACKEND_URL,
         }),
       }; 
       logger.error(`[SupportBot] Failed to update ticket ${ticketId}:`, errorDetails);

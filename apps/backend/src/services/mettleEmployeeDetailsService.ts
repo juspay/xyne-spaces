@@ -1,5 +1,8 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const mettleFetch = allowlistedFetch(() => [config.mettleApiBaseUrl]);
 
 export interface MettleEmployeeDetails {
   assigned_emp_id: string | null;
@@ -62,7 +65,7 @@ export class MettleEmployeeDetailsService {
 
       logger.info(`Fetching employee details from Mettle for email: ${email}`);
 
-      const response = await fetch(url, {
+      const response = await mettleFetch(url, {
         method: 'GET',
         headers: {
           'Accept': 'application/json',

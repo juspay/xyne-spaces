@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { config as envConfig } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 const CLASSIFIER_URL = envConfig.messageClassifier.url;
 const CLASSIFIER_TIMEOUT_MS = envConfig.messageClassifier.timeoutMs;
@@ -40,6 +41,8 @@ const isClassificationResult = (value: unknown): value is ClassificationResult =
 
 class MessageClassifierService {
   private baseUrl: string;
+  // Only the configured classifier service.
+  private readonly classifierFetch = allowlistedFetch(() => [this.baseUrl]);
   private timeoutMs: number;
   private isAvailable: boolean | null = null;
   private lastHealthCheck: number = 0;
@@ -64,7 +67,7 @@ class MessageClassifierService {
     try {
       timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      const response = await fetch(`${this.baseUrl}/health`, {
+      const response = await this.classifierFetch(`${this.baseUrl}/health`, {
         method: 'GET',
         signal: controller.signal,
       });
@@ -148,7 +151,7 @@ class MessageClassifierService {
     try {
       timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      const response = await fetch(`${this.baseUrl}/classify`, {
+      const response = await this.classifierFetch(`${this.baseUrl}/classify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

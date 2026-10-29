@@ -25,6 +25,11 @@ import {
   mathInlineServerSpec,
 } from '@/utils/canvasCustomBlockServerSpecs.js';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes.js';
+import { allowlistedFetch } from '@/utils/ssrfGuard.js';
+
+// The configured y-sweet server, plus the base URLs that server itself advertised in tokens it issued.
+const advertisedOrigins = new Set<string>();
+const ysweetFetch = allowlistedFetch(() => [config.ysweet.url, ...advertisedOrigins]);
 
 const canvasCommentThreadStyleSpec = createStyleSpec(
   {
@@ -174,7 +179,7 @@ function withDocId(base: string, path: string, docId: string): string {
 }
 
 async function ysweetRequest(url: string, path: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
+  const res = await ysweetFetch(url, init);
   if (!res.ok) {
     throw new YSweetHttpError(res.status, path);
   }
@@ -191,7 +196,16 @@ async function ysweetJson<T>(base: string, path: string, docId: string, body: un
     headers: { 'Content-Type': 'application/json', ...serverTokenHeaders() },
     body: JSON.stringify(body),
   });
-  return (await res.json()) as T;
+  const data = (await res.json()) as T;
+  const advertised = (data as { baseUrl?: unknown } | null)?.baseUrl;
+  if (typeof advertised === 'string') {
+    try {
+      advertisedOrigins.add(new URL(advertised).origin);
+    } catch {
+      // not a URL: nothing to allow
+    }
+  }
+  return data;
 }
 
 /** POST /doc/new */

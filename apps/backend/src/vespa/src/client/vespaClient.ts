@@ -5,6 +5,7 @@ import { consoleLogger, getErrorMessage } from '../utils';
 import { cleanDocumentFields } from '../../../utils/vespaTextValidation';
 import type { InsertDocument, VespaSchema } from '../types';
 import { config as appConfig } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 type VespaConfigValues = {
   namespace?: string;
@@ -25,6 +26,8 @@ class VespaClient {
   private feedTimeoutMs: number;
   private feedEndpoint: string;
   private queryEndpoint: string;
+  // Only this client's own Vespa feed and query endpoints.
+  private readonly vespaFetch = allowlistedFetch(() => [this.feedEndpoint, this.queryEndpoint]);
   private logger: ILogger;
   private feedDispatcher: Agent;
   private queryDispatcher: Agent;
@@ -96,7 +99,7 @@ class VespaClient {
     }
     this.logger.info('timeout for vespa insertion',{timeoutMs});
     try {
-      const response = await fetch(url, { ...options, dispatcher } as any);
+      const response = await this.vespaFetch(url, { ...options, dispatcher } as any);
       if (!response.ok) {
         // Don't need to retry for non-retryable status codes
         if (nonRetryableStatusCodes.includes(response.status)) {

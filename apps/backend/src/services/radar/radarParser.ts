@@ -2,6 +2,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { logLLMCallStart } from '@/agents/agentLogger';
 import { formatErrors, validate } from '@/services/entityExtraction/pipeline';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 const TAG = '[RADAR-PARSER]';
 const AGENT_NAME = 'RadarParser';
@@ -262,7 +263,8 @@ async function callLiteLLM(
   logLLMCallStart(AGENT_NAME, model, auth.keyName);
 
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, {
+    const response = await safeWebhookFetch(url, {
+      redirect: 'manual',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

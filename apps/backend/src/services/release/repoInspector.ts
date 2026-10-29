@@ -4,6 +4,13 @@
 
 import { config } from '@/config/env';
 import { resolveSecret } from '@/config/secretResolver';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// The configured GitHub (or Enterprise) API and Bitbucket hosts.
+const vcsFetch = allowlistedFetch(() => [
+  config.github?.apiUrl ?? 'https://api.github.com',
+  config.bitbucket.baseUrl,
+]);
 import { parseGitHubRepoUrl, parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
 import { normalizeBitbucketApiBaseUrl } from '@/services/release/buildVcsClient';
 import { GitHubService } from '@/services/githubService';
@@ -43,7 +50,7 @@ export async function testRepoConnection(opts: {
     const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const resp = await fetch(
+    const resp = await vcsFetch(
       `${apiUrl}/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`,
       { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) },
     );
@@ -86,7 +93,7 @@ export async function testRepoConnection(opts: {
       ).toString('base64');
       headers.Authorization = `Basic ${basic}`;
     }
-    const resp = await fetch(
+    const resp = await vcsFetch(
       `${baseUrl}/projects/${encodeURIComponent(parsed.projectKey)}/repos/${encodeURIComponent(parsed.repoSlug)}`,
       { headers, signal: AbortSignal.timeout(API_TIMEOUT_MS) },
     );

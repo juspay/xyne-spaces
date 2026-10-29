@@ -8,7 +8,7 @@
  * worker actually sends.
  */
 
-import { isInternalMappedHost, prepareAppWebhookDispatch } from './appUrlResolver';
+import { internalAppFetch, isInternalMappedHost, prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import type { SignedFetchRequest } from './appFetchConfig';
 
@@ -106,6 +106,6 @@ export async function dispatchAppFetch(
   // Internal pod hosts resolve to private addresses by design, so they bypass
   // the guard that exists to keep external URLs off the internal network.
   return dispatch.isInternal
-    ? await fetch(dispatch.url, init)
+    ? await internalAppFetch(dispatch.url, init)
     : await safeWebhookFetch(dispatch.url, init);
 }

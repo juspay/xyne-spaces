@@ -16,6 +16,7 @@ import { decrypt } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 // A brief run streams nothing while the model composes; undici's default 300s
 // bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
@@ -363,6 +364,12 @@ function getClawBaseUrl(): string {
   return config.xyneClaw.authUrl;
 }
 
+// Every call here goes to the claw-auth service (its base URL, or the automation webhook root).
+const clawFetch = allowlistedFetch(() => [
+  config.xyneClaw.authUrl,
+  config.xyneClaw.clawAuthCallbackUrlAutomation,
+]);
+
 function getS2SWebhookUrl(spacesAppId: string): string {
   const url = new URL(config.xyneClaw.clawAuthCallbackUrlAutomation);
   const pathname = url.pathname.replace(/\/+$/, '');
@@ -389,7 +396,7 @@ export async function synthesizeSpeech(payload: {
   voice?: string;
 }): Promise<SynthesizedSpeechResult> {
   const url = `${getClawBaseUrl()}/claw/api/v1/internal/tts`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
     body: JSON.stringify({ text: payload.text, ...(payload.voice ? { voice: payload.voice } : {}) }),
@@ -658,7 +665,7 @@ export async function runClawAgentStream(
   );
   if (typeof (res as any).flush === 'function') (res as any).flush();
 
-  const response = await fetch(clawAuthUrl, {
+  const response = await clawFetch(clawAuthUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -891,7 +898,7 @@ export async function cancelClawAgentRun(
 ): Promise<{ success: boolean; status: string; error?: string }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/run/stream/cancel`;
   try {
-    const response = await fetch(url, {
+    const response = await clawFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -985,7 +992,7 @@ export async function listAccessibleClawAgents(req: {
   workspaceId?: string;
 }): Promise<{ success: boolean; data: AccessibleClawAgent[] }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agents?userId=${encodeURIComponent(req.userId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1098,7 +1105,7 @@ export async function warmClawAgent(
   agentSlug: string
 ): Promise<void> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-warm/${encodeURIComponent(agentSlug)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'POST',
     headers: {
       ...getS2SHeaders(),
@@ -1128,7 +1135,7 @@ export async function listClawAgentModels(
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
   try {
-    const response = await fetch(url, {
+    const response = await clawFetch(url, {
       headers: {
         ...getS2SHeaders(),
         ...extractUserIdHeader(req.userId),
@@ -1256,7 +1263,7 @@ export async function listClawConversations(
       if (value) params.set(key, value);
     }
   }
-  const response = await fetch(`${getClawBaseUrl()}${path}?${params.toString()}`, {
+  const response = await clawFetch(`${getClawBaseUrl()}${path}?${params.toString()}`, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1280,7 +1287,7 @@ export async function getClawConversationMessages(
 ): Promise<ClawMessagesResponse> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/messages${scopeQuery(scope)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1301,7 +1308,7 @@ export async function listClawConversationArtifacts(
   convId: string
 ): Promise<{ success: boolean; artifacts: unknown[] }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts?conversationId=${encodeURIComponent(convId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1322,7 +1329,7 @@ export async function getClawConversationArtifact(
   artifactId: string
 ): Promise<{ success: boolean; artifact: unknown }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1343,7 +1350,7 @@ export async function clawArtifactComments(
   artifactId: string,
 ): Promise<unknown> {
   const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     headers: { ...extractUserIdHeader(req.userId), ...extractCookieHeader(req) },
   });
   if (!response.ok) {
@@ -1360,7 +1367,7 @@ export async function addClawArtifactComment(
   payload: { body: string; anchor?: unknown },
 ): Promise<unknown> {
   const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1384,7 +1391,7 @@ export async function resolveClawArtifactComment(
   resolved: boolean,
 ): Promise<unknown> {
   const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments/${encodeURIComponent(commentId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -1407,7 +1414,7 @@ export async function updateClawConversationArtifact(
   patch: { title?: string; pinned?: boolean; status?: string }
 ): Promise<{ success: boolean; artifact: unknown }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -1441,7 +1448,7 @@ export async function rateClawRun(
   comment?: string | null
 ): Promise<{ success: boolean }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/runs/by-message/${encodeURIComponent(chatMessageId)}/rate`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'POST',
     headers: {
       // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -1477,7 +1484,7 @@ export async function streamClawConversationLive(
   opts: { signal?: AbortSignal; scope?: ClawConversationScope } = {}
 ): Promise<void> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(convId)}/live${scopeQuery(opts.scope)}`;
-  const upstream = await fetch(url, {
+  const upstream = await clawFetch(url, {
     headers: {
       Accept: 'text/event-stream',
       ...extractUserIdHeader(req.userId),
@@ -1519,7 +1526,7 @@ export async function deleteClawConversation(
 ): Promise<{ success: boolean; data: { deleted: number } }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'DELETE',
     headers: {
       ...extractUserIdHeader(req.userId),
@@ -1554,7 +1561,7 @@ export async function saveClawConversationNotes(
 }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}/notes`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1593,7 +1600,7 @@ export async function patchClawConversation(
 ): Promise<{ success: boolean; data: { title: string | null; pinned: boolean } }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -1649,7 +1656,7 @@ export async function getClawDebugArtifacts(
   // Qualified: bare `Response` resolves to express's in this module.
   let response: globalThis.Response;
   try {
-    response = await fetch(url, {
+    response = await clawFetch(url, {
       headers: {
         ...getS2SHeaders(),
         ...extractUserIdHeader(req.userId),
@@ -1707,7 +1714,7 @@ export async function approveClawAction(
     signature: payload.signature || '',
   };
 
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1751,7 +1758,7 @@ export async function downloadClawAttachment(
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/attachments/${attachmentId}/download`;
   logger.info(`[ClawAgentService] Downloading attachment: ${attachmentId}`);
 
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     headers: {
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
@@ -1796,7 +1803,7 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agents`;
   let res: globalThis.Response;
   try {
-    res = await fetch(url, {
+    res = await clawFetch(url, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
       signal: AbortSignal.timeout(15_000),
@@ -1827,7 +1834,7 @@ export async function listS2SClawSkills(
   workspaceId?: string
 ): Promise<Array<{ id: string; scope: string; ownerUserId: string | null }>> {
   const url = `${getClawBaseUrl()}/claw/api/v1/skills?userId=${encodeURIComponent(userId)}`;
-  const res = await fetch(url, {
+  const res = await clawFetch(url, {
     // The pinned user scopes the list to their org.
     headers: {
       'Content-Type': 'application/json',
@@ -1873,7 +1880,7 @@ export async function isSpacesAppClawAgent(spacesAppId: string): Promise<boolean
   let res: globalThis.Response;
   try {
     // Above claw-auth's own DB retry budget, so a slow-but-healthy answer isn't cut off.
-    res = await fetch(url, { method: 'GET', headers: { 'x-s2s-key': key }, signal: AbortSignal.timeout(15_000) });
+    res = await clawFetch(url, { method: 'GET', headers: { 'x-s2s-key': key }, signal: AbortSignal.timeout(15_000) });
   } catch (err) {
     throw new ClawAgentLookupError(`claw-auth unreachable (${err instanceof Error ? err.message : String(err)})`);
   }
@@ -1934,7 +1941,7 @@ export async function listScopedClawAgents(
   identity: ScopedClawIdentity,
 ): Promise<S2SClawAgent[]> {
   const url = `${getClawBaseUrl()}/claw/api/v1/agents?userId=${encodeURIComponent(identity.userId)}`;
-  const res = await fetch(url, {
+  const res = await clawFetch(url, {
     headers: {
       ...getS2SHeaders(),
       ...extractUserIdHeader(identity.userId, identity.workspaceId),
@@ -2053,7 +2060,7 @@ async function dispatchClawAgent(
   const signature = signWebhookPayload(body, decrypt(app.signingSecret));
   let res: globalThis.Response;
   try {
-    res = await fetch(url, {
+    res = await clawFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2086,7 +2093,7 @@ export async function cancelS2SClawRun(
 ): Promise<{ success: boolean; status: string; error?: string }> {
   const url = `${getClawBaseUrl()}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`;
   try {
-    const response = await fetch(url, {
+    const response = await clawFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2120,7 +2127,7 @@ export async function getS2SClawRunStatus(
   userId: string
 ): Promise<S2SClawRunStatus | null> {
   const url = `${getClawBaseUrl()}/claw/api/v1/runs/${encodeURIComponent(sessionId)}`;
-  const response = await fetch(url, {
+  const response = await clawFetch(url, {
     headers: {
       ...getS2SHeaders(),
       'x-user-id': userId,
@@ -2287,7 +2294,7 @@ async function fetchClawChatMessages(params: {
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(conversationId)}/messages`;
   let res: globalThis.Response;
   try {
-    res = await fetch(url, {
+    res = await clawFetch(url, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -2337,7 +2344,7 @@ export async function forkClawConversation(params: {
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(agentSlug)}/chat/${encodeURIComponent(sourceConversationId)}/fork`;
   let res: globalThis.Response;
   try {
-    res = await fetch(url, {
+    res = await clawFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2379,7 +2386,7 @@ export async function getDailyBriefConfig(
   req: { headers?: { cookie?: string } },
   userId: string
 ): Promise<unknown> {
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/config`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/config`, {
     method: 'GET',
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
@@ -2397,7 +2404,7 @@ export async function saveDailyBriefConfig(
   userId: string,
   body: { enabled?: boolean; instructions?: string | null; instructionsEnabled?: boolean }
 ): Promise<unknown> {
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/config`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/config`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -2419,7 +2426,7 @@ export async function getDailyBriefSettings(
   req: { headers?: { cookie?: string } },
   userId: string
 ): Promise<unknown> {
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/settings`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/settings`, {
     method: 'GET',
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
@@ -2437,7 +2444,7 @@ export async function saveDailyBriefSettings(
   userId: string,
   body: { agentSlug?: string | null }
 ): Promise<{ status: number; json: unknown }> {
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/settings`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/settings`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -2455,7 +2462,7 @@ export async function getLatestDailyBrief(
   req: { headers?: { cookie?: string } },
   userId: string
 ): Promise<unknown> {
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/latest`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/latest`, {
     method: 'GET',
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
@@ -2477,7 +2484,7 @@ export async function getDailyBriefHistory(
     typeof limit === 'number' && Number.isFinite(limit)
       ? `?limit=${encodeURIComponent(limit)}`
       : '';
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/history${qs}`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/history${qs}`, {
     method: 'GET',
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
@@ -2496,7 +2503,7 @@ export async function getDailyBriefDates(
   limit?: number
 ): Promise<unknown> {
   const qs = typeof limit === 'number' && Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/dates${qs}`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/dates${qs}`, {
     method: 'GET',
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
@@ -2512,7 +2519,7 @@ export async function getDailyBriefByDate(
   userId: string,
   date: string
 ): Promise<{ status: number; json: unknown }> {
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/by-date/${encodeURIComponent(date)}`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/by-date/${encodeURIComponent(date)}`, {
     method: 'GET',
     headers: { ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
   });
@@ -2525,7 +2532,7 @@ export async function postDailyBriefSwitched(
   userId: string,
   source: string
 ): Promise<number> {
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/switched`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/switched`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...extractCookieHeader(req), ...extractUserIdHeader(userId) },
     body: JSON.stringify({ source }),
@@ -2551,7 +2558,7 @@ export async function regenerateDailyBriefStream(
     'X-Accel-Buffering': 'no',
   });
 
-  const response = await fetch(`${DAILY_BRIEF_BASE()}/regenerate`, {
+  const response = await clawFetch(`${DAILY_BRIEF_BASE()}/regenerate`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

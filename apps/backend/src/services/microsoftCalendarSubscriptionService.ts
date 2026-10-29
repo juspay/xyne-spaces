@@ -17,6 +17,9 @@ import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefres
 import { parseCalendarCredentials } from '@/database/repositories/externalSourceRepository';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const graphFetch = allowlistedFetch(() => ['graph.microsoft.com']);
 
 const TAG = '[CALENDAR_SYNC][MICROSOFT][WATCH]';
 const DEFAULT_SUBSCRIPTION_TTL_MINUTES = 4190;
@@ -69,7 +72,7 @@ export class MicrosoftCalendarSubscriptionService {
 
     logger.info(`${TAG} Creating subscription`, { sourceId, email });
 
-    const response = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
+    const response = await graphFetch('https://graph.microsoft.com/v1.0/subscriptions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${credentials.accessToken}`,
@@ -159,7 +162,7 @@ export class MicrosoftCalendarSubscriptionService {
       subscriptionId: subscription.externalIdentifier,
     });
 
-    const response = await fetch(
+    const response = await graphFetch(
       `https://graph.microsoft.com/v1.0/subscriptions/${subscription.externalIdentifier}`,
       {
         method: 'PATCH',
@@ -255,7 +258,7 @@ export class MicrosoftCalendarSubscriptionService {
 }
 
 async function deleteSubscriptionApi(accessToken: string, subscriptionId: string): Promise<void> {
-  const response = await fetch(`https://graph.microsoft.com/v1.0/subscriptions/${subscriptionId}`, {
+  const response = await graphFetch(`https://graph.microsoft.com/v1.0/subscriptions/${subscriptionId}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
     signal: AbortSignal.timeout(15_000),

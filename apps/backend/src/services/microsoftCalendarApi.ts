@@ -6,6 +6,9 @@
  */
 
 import { type MSCalEvent, type MSCalListResponse } from '@/services/microsoftCalendarCallStore';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const graphFetch = allowlistedFetch(() => ['graph.microsoft.com']);
 
 const GRAPH_SELECT = 'id,subject,bodyPreview,start,end,location,organizer,attendees,isAllDay,isCancelled,isOnlineMeeting,onlineMeetingUrl,onlineMeeting,webLink';
 
@@ -63,7 +66,7 @@ export async function fetchMicrosoftEventsInRange(
   let truncated = false;
 
   while (url) {
-    const res = await fetch(url, {
+    const res = await graphFetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -95,7 +98,7 @@ export async function fetchMicrosoftDeltaChanges(
   deltaLink: string,
   maxEvents?: number,
 ): Promise<MicrosoftDeltaChangesResult> {
-  const res = await fetch(deltaLink, {
+  const res = await graphFetch(deltaLink, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Prefer: graphPreferHeader(maxEvents),
@@ -160,7 +163,7 @@ export async function fetchAllMicrosoftEventsForBaseline(
   let truncated = false;
 
   while (url) {
-    const res = await fetch(url, {
+    const res = await graphFetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         Prefer: graphPreferHeader(maxEvents),

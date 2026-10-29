@@ -17,6 +17,17 @@ import { ExternalSourceRepository } from '../database/repositories/externalSourc
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
 import { CHANNEL_EMAIL_SOURCE_TYPES } from './channelEmailAliasService';
 import { createChannelAndSourceTx } from '@/bypassAcl/transactions/microsoftDeskService';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// Microsoft Graph (configured base URL), the sign-in host, and the Outlook/Office hosts that serve upload sessions.
+const microsoftFetch = allowlistedFetch(() => [
+  config.microsoftGraph.baseUrl,
+  'microsoftonline.com',
+  'microsoft.com',
+  'office.com',
+  'office365.com',
+  'sharepoint.com',
+]);
 
 export type PendingChannelData =
   | PendingChannelCreate
@@ -188,7 +199,7 @@ export class MicrosoftDeskService {
   }
 
   async resolveEmail(accessToken: string, idToken?: string): Promise<string | null> {
-    const graphResponse = await fetch(`${config.microsoftGraph.baseUrl}/me`, {
+    const graphResponse = await microsoftFetch(`${config.microsoftGraph.baseUrl}/me`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
@@ -233,7 +244,7 @@ export class MicrosoftDeskService {
     const expirationDateTime = new Date();
     expirationDateTime.setMinutes(expirationDateTime.getMinutes() + GRAPH_SUBSCRIPTION_MAX_MINUTES);
 
-    const response = await fetch(`${config.microsoftGraph.baseUrl}/subscriptions`, {
+    const response = await microsoftFetch(`${config.microsoftGraph.baseUrl}/subscriptions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -473,7 +484,7 @@ export class MicrosoftDeskService {
       throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET required for token refresh');
     }
 
-    const response = await fetch(
+    const response = await microsoftFetch(
       `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
       {
         method: 'POST',
@@ -556,7 +567,7 @@ export class MicrosoftDeskService {
       let url: string | null =
         `${config.microsoftGraph.baseUrl}/me/contacts?$top=${PAGE_SIZE}&$select=displayName,emailAddresses`;
       while (url) {
-        const res: Response = await fetch(url, {
+        const res: Response = await microsoftFetch(url, {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
         if (!res.ok) {
@@ -591,7 +602,7 @@ export class MicrosoftDeskService {
         let url: string | null =
           `${config.microsoftGraph.baseUrl}/me/people?$top=${PAGE_SIZE}&$select=displayName,scoredEmailAddresses`;
         while (url) {
-          const res: Response = await fetch(url, {
+          const res: Response = await microsoftFetch(url, {
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           if (!res.ok) {
@@ -633,7 +644,7 @@ export class MicrosoftDeskService {
 
   private static async deleteDraft(accessToken: string, draftId: string): Promise<void> {
     try {
-      const res = await fetch(`${config.microsoftGraph.baseUrl}/me/messages/${draftId}`, {
+      const res = await microsoftFetch(`${config.microsoftGraph.baseUrl}/me/messages/${draftId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -708,7 +719,7 @@ export class MicrosoftDeskService {
     buffer: Buffer,
   ): Promise<void> {
     const contentBytes = buffer.toString('base64');
-    const res = await fetch(
+    const res = await microsoftFetch(
       `${config.microsoftGraph.baseUrl}/me/messages/${draftId}/attachments`,
       {
         method: 'POST',
@@ -750,7 +761,7 @@ export class MicrosoftDeskService {
     const totalSize = buffer.length;
 
     // 1. Create upload session.
-    const sessionRes = await fetch(
+    const sessionRes = await microsoftFetch(
       `${config.microsoftGraph.baseUrl}/me/messages/${draftId}/attachments/createUploadSession`,
       {
         method: 'POST',
@@ -792,7 +803,7 @@ export class MicrosoftDeskService {
       const chunk = buffer.subarray(offset, end);
       const contentRange = `bytes ${offset}-${end - 1}/${totalSize}`;
 
-      const putRes = await fetch(uploadUrl, {
+      const putRes = await microsoftFetch(uploadUrl, {
         method: 'PUT',
         headers: {
           'Content-Length': String(chunk.length),
@@ -870,7 +881,7 @@ export class MicrosoftDeskService {
         let graphMessageId: string | null = null;
 
         // 1. Primary: lookup by internetMessageId.
-        const searchResponse = await fetch(
+        const searchResponse = await microsoftFetch(
           `${config.microsoftGraph.baseUrl}/me/messages?$filter=internetMessageId eq '${encodeURIComponent(latestExternalMessageId)}'&$select=id`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
@@ -881,7 +892,7 @@ export class MicrosoftDeskService {
 
         // 2. Fallback: look up any message in the conversation.
         if (!graphMessageId && threadId) {
-          const conversationResponse = await fetch(
+          const conversationResponse = await microsoftFetch(
             `${config.microsoftGraph.baseUrl}/me/messages?$filter=conversationId eq '${encodeURIComponent(threadId)}'&$orderby=receivedDateTime desc&$top=1&$select=id`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           );
@@ -908,7 +919,7 @@ export class MicrosoftDeskService {
           //    NB: `from` is intentionally NOT set in the createReply body —
           //    Graph silently ignores it there. The reliable path is a
           //    follow-up PATCH on the draft (step 1b below).
-          const createReplyResponse = await fetch(
+          const createReplyResponse = await microsoftFetch(
             `${config.microsoftGraph.baseUrl}/me/messages/${graphMessageId}/createReply`,
             {
               method: 'POST',
@@ -945,7 +956,7 @@ export class MicrosoftDeskService {
           //     here before send so the user gets a clear "permission
           //     missing" error instead of a silently-from-my-mailbox mail.
           if (fromEmailAddress) {
-            const patchResponse = await fetch(
+            const patchResponse = await microsoftFetch(
               `${config.microsoftGraph.baseUrl}/me/messages/${draft.id}`,
               {
                 method: 'PATCH',
@@ -995,7 +1006,7 @@ export class MicrosoftDeskService {
           }
 
           // 2. Send the draft.
-          const sendResponse = await fetch(
+          const sendResponse = await microsoftFetch(
             `${config.microsoftGraph.baseUrl}/me/messages/${draft.id}/send`,
             {
               method: 'POST',
@@ -1018,7 +1029,7 @@ export class MicrosoftDeskService {
           //    of every successful send.
           if (fromEmailAddress) {
             try {
-              const sentLookup = await fetch(
+              const sentLookup = await microsoftFetch(
                 `${config.microsoftGraph.baseUrl}/me/messages/${draft.id}?$select=from`,
                 { headers: { Authorization: `Bearer ${accessToken}` } },
               );
@@ -1062,7 +1073,7 @@ export class MicrosoftDeskService {
           saveToSentItems: true,
         };
 
-        const sendMailResponse = await fetch(`${config.microsoftGraph.baseUrl}/me/sendMail`, {
+        const sendMailResponse = await microsoftFetch(`${config.microsoftGraph.baseUrl}/me/sendMail`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -1077,7 +1088,7 @@ export class MicrosoftDeskService {
           throw new Error(`Failed to send email: ${sendMailResponse.status}`);
         }
 
-        const sentItemsResponse = await fetch(
+        const sentItemsResponse = await microsoftFetch(
           `${config.microsoftGraph.baseUrl}/me/mailFolders/sentitems/messages?$top=1&$orderby=sentDateTime desc&$select=internetMessageId,conversationId,from`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
@@ -1155,7 +1166,7 @@ export class MicrosoftDeskService {
           saveToSentItems: true,
         };
 
-        const sendMailResponse = await fetch(`${config.microsoftGraph.baseUrl}/me/sendMail`, {
+        const sendMailResponse = await microsoftFetch(`${config.microsoftGraph.baseUrl}/me/sendMail`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(sendMailPayload),
@@ -1167,7 +1178,7 @@ export class MicrosoftDeskService {
           throw new Error(`Failed to send email: ${sendMailResponse.status}`);
         }
 
-        const sentItemsResponse = await fetch(
+        const sentItemsResponse = await microsoftFetch(
           `${config.microsoftGraph.baseUrl}/me/mailFolders/sentitems/messages?$top=1&$orderby=sentDateTime desc&$select=internetMessageId,conversationId,from`,
           { headers: { Authorization: `Bearer ${accessToken}` } },
         );

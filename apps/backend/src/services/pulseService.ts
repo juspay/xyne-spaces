@@ -1,4 +1,7 @@
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const pulseFetch = allowlistedFetch(() => [config.pulse.apiUrl]);
 import { logger } from '@/utils/logger';
 
 export interface PulseActionItem {
@@ -88,7 +91,7 @@ export class PulseService {
   async fetchOrgList(): Promise<PulseOrg[]> {
     const { apiUrl } = config.pulse;
     try {
-      const response = await fetch(`${apiUrl}/curie/s2s/organization/fetch/list`, {
+      const response = await pulseFetch(`${apiUrl}/curie/s2s/organization/fetch/list`, {
         method: 'POST',
         headers: this.headersNoBody,
         // No body — the API returns 400 when it receives Content-Type + empty JSON
@@ -117,7 +120,7 @@ export class PulseService {
   async fetchOrgLeadData(orgId: string): Promise<PulseProduct[]> {
     const { apiUrl } = config.pulse;
     try {
-      const response = await fetch(`${apiUrl}/curie/s2s/organization/lead/data/${orgId}`, {
+      const response = await pulseFetch(`${apiUrl}/curie/s2s/organization/lead/data/${orgId}`, {
         method: 'POST',
         headers: this.headersNoBody,
         // No body — same pattern as fetchOrgList
@@ -242,7 +245,7 @@ export class PulseService {
         `(orgId=${orgContext.orgId}, productId=${orgContext.productId})`
       );
 
-      const response = await fetch(
+      const response = await pulseFetch(
         `${apiUrl}/curie/s2s/update/meeting/actionables/entity`,
         {
           method: 'POST',

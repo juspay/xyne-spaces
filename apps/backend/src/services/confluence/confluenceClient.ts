@@ -1,4 +1,5 @@
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 export interface ConfluenceClientConfig {
   baseUrl: string;
@@ -103,6 +104,8 @@ interface ConfluencePageResponse<T> {
 
 export class ConfluenceClient {
   private readonly baseUrl: string;
+  // Only the configured Confluence host.
+  private readonly confluenceFetch = allowlistedFetch(() => [this.baseUrl]);
 
   constructor(private readonly config: ConfluenceClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, '');
@@ -218,7 +221,7 @@ export class ConfluenceClient {
   }
 
   private fetchRaw(pathOrUrl: string, init?: RequestInit): Promise<Response> {
-    return fetch(this.resolveUrl(pathOrUrl), {
+    return this.confluenceFetch(this.resolveUrl(pathOrUrl), {
       ...init,
       headers: {
         Accept: 'application/json',

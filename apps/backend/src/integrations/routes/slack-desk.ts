@@ -25,6 +25,9 @@ import { decrypt, encrypt } from '@/services/encryptionService';
 import { redisService } from '@/services/redisService';
 import { validateZod } from '@/middleware/validation';
 import { z } from 'zod';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const slackFetch = allowlistedFetch(() => ['slack.com']);
 
 const TAG = '[SlackDesk]';
 const router = express.Router();
@@ -61,7 +64,7 @@ router.get(
         limit: '200',
       });
 
-      const response = await fetch(`https://slack.com/api/users.conversations?${params}`, {
+      const response = await slackFetch(`https://slack.com/api/users.conversations?${params}`, {
         headers: { Authorization: `Bearer ${botToken}` },
       });
 

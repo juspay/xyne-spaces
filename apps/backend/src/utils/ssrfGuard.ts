@@ -3,7 +3,7 @@ import { promises as dns } from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import { BlockList, isIP } from 'node:net';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent, ProxyAgent, fetch as undiciFetch } from 'undici';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
@@ -366,6 +366,36 @@ export async function safeWebhookFetch(rawUrl: string, init: RequestInit = {}): 
 }
 
 /**
+ * safeWebhookFetch's stricter sibling for a URL that has no legitimate internal target (a link
+ * preview): private, loopback and in-cluster hosts are always refused, whatever
+ * WEBHOOK_ALLOW_INTERNAL_HOSTS says. The connection is pinned to the validated addresses, or sent
+ * through `proxyUrl` when one is configured (the proxy then makes the outbound connection, so
+ * address pinning applies to direct connections only). Callers must follow redirects themselves.
+ */
+export async function safeExternalFetch(
+  rawUrl: string,
+  init: RequestInit = {},
+  opts: { proxyUrl?: string } = {},
+): Promise<Response> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
+  }
+  const pinned = await resolveExternalHostPinned(
+    parsed.hostname,
+    isAllowPrivate() && config.env === 'development',
+  );
+  const dispatcher = opts.proxyUrl
+    ? new ProxyAgent(opts.proxyUrl)
+    : pinned
+      ? pinnedDispatcherFor(parsed.hostname, pinned)
+      : new Agent({ keepAliveTimeout: 1000 });
+  return (await undiciFetch(rawUrl, { ...init, redirect: 'manual', dispatcher } as never)) as unknown as Response;
+}
+
+/**
  * SSRF guard for outbound webhook URLs (app webhooks, automation
  * trigger_webhook). Ensures the host does not resolve to an internal / private /
  * loopback / link-local address. Throws SsrfBlockedError on any violation.
@@ -476,4 +506,245 @@ export function assertUrlSyntaxSafe(rawUrl: string): URL {
     throw new SsrfBlockedError(host, host, 'private / loopback / link-local address');
   }
   return parsed;
+}
+
+export type GuardedFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+export interface HttpRequestConfig {
+  headers?: Record<string, string>;
+  params?: Record<string, string | number | boolean | undefined>;
+  /** Milliseconds; the request is aborted after this long. */
+  timeout?: number;
+  /** Return true for a status that should resolve rather than throw. Defaults to 2xx. */
+  validateStatus?: (status: number) => boolean;
+  /** 0 returns a redirect response to the caller instead of following it. */
+  maxRedirects?: number;
+  /** Bytes; a larger response body is refused instead of being read into memory. */
+  maxContentLength?: number;
+  responseType?: 'json' | 'text' | 'arraybuffer';
+  signal?: AbortSignal;
+}
+
+export interface HttpResponse<T = unknown> {
+  data: T;
+  status: number;
+  statusText: string;
+  headers: Headers;
+}
+
+/**
+ * Thrown for a non-2xx response (or one `validateStatus` rejects) and for a failed request
+ * (timeout, connection error), shaped like an axios error: `response` is set only when the
+ * server answered, and `code` is ECONNABORTED for a timeout or ERR_NETWORK otherwise.
+ */
+export class HttpError<T = unknown> extends Error {
+  public override readonly name = 'HttpError';
+  public readonly isHttpError = true;
+  public constructor(
+    message: string,
+    public readonly response?: { status: number; statusText: string; data: T; headers: Headers },
+    public readonly code?: string,
+    cause?: unknown,
+  ) {
+    super(message);
+    if (cause !== undefined) (this as { cause?: unknown }).cause = cause;
+  }
+}
+
+export function isHttpError(error: unknown): error is HttpError {
+  return error instanceof HttpError;
+}
+
+async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
+  const tooLarge = (): HttpError =>
+    new HttpError(`maxContentLength size of ${maxBytes} exceeded`, undefined, 'ERR_BAD_RESPONSE');
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = res.body?.getReader();
+  if (reader) {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw tooLarge();
+      }
+      chunks.push(value);
+    }
+  }
+  return Buffer.concat(chunks);
+}
+
+async function readBody(
+  res: Response,
+  responseType: HttpRequestConfig['responseType'],
+  maxBytes?: number,
+): Promise<unknown> {
+  if (responseType === 'arraybuffer') {
+    return maxBytes === undefined ? Buffer.from(await res.arrayBuffer()) : readCapped(res, maxBytes);
+  }
+  const text = maxBytes === undefined ? await res.text() : (await readCapped(res, maxBytes)).toString('utf8');
+  if (responseType === 'text') return text;
+  if (!text) return '';
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * A small axios-shaped client over a guarded fetch (allowlistedFetch or safeWebhookFetch): the
+ * `{ data, status, headers }` result, a throw on a non-2xx status with `error.response`, params,
+ * timeout, validateStatus and a JSON body, so call sites keep their shape while every request
+ * goes through the SSRF guard.
+ */
+export function createHttpClient(
+  guardedFetch: GuardedFetch,
+  defaults: { baseURL?: string; headers?: Record<string, string>; timeout?: number } = {},
+): {
+  request<T = any>(method: string, url: string, data?: unknown, config?: HttpRequestConfig): Promise<HttpResponse<T>>;
+  get<T = any>(url: string, config?: HttpRequestConfig): Promise<HttpResponse<T>>;
+  post<T = any>(url: string, data?: unknown, config?: HttpRequestConfig): Promise<HttpResponse<T>>;
+  put<T = any>(url: string, data?: unknown, config?: HttpRequestConfig): Promise<HttpResponse<T>>;
+  patch<T = any>(url: string, data?: unknown, config?: HttpRequestConfig): Promise<HttpResponse<T>>;
+  delete<T = any>(url: string, config?: HttpRequestConfig): Promise<HttpResponse<T>>;
+} {
+  async function request<T = any>(
+    method: string,
+    url: string,
+    data?: unknown,
+    config: HttpRequestConfig = {},
+  ): Promise<HttpResponse<T>> {
+    const target = new URL(url, defaults.baseURL);
+    for (const [key, value] of Object.entries(config.params ?? {})) {
+      if (value !== undefined) target.searchParams.append(key, String(value));
+    }
+
+    const headers: Record<string, string> = { ...defaults.headers, ...config.headers };
+    let body: RequestInit['body'] | undefined;
+    if (data !== undefined && data !== null && method !== 'GET' && method !== 'HEAD') {
+      const isPlainObject = typeof data === 'object' && Object.getPrototypeOf(data) === Object.prototype;
+      if (isPlainObject || Array.isArray(data)) {
+        body = JSON.stringify(data);
+        if (!Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')) {
+          headers['Content-Type'] = 'application/json';
+        }
+      } else {
+        body = data as RequestInit['body'];
+      }
+    }
+
+    const timeout = config.timeout ?? defaults.timeout;
+    const signals = [config.signal, timeout ? AbortSignal.timeout(timeout) : undefined].filter(
+      (signal): signal is AbortSignal => signal !== undefined,
+    );
+    let res: Response;
+    try {
+      res = await guardedFetch(target, {
+        method,
+        headers,
+        ...(body !== undefined ? { body } : {}),
+        ...(signals.length > 0 ? { signal: AbortSignal.any(signals) } : {}),
+        ...(config.maxRedirects === 0 ? { redirect: 'manual' as const } : {}),
+      });
+    } catch (error) {
+      if (error instanceof SsrfBlockedError) throw error;
+      const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+      throw new HttpError(
+        error instanceof Error ? error.message : 'Network error',
+        undefined,
+        timedOut ? 'ECONNABORTED' : 'ERR_NETWORK',
+        error,
+      );
+    }
+
+    const payload = (await readBody(res, config.responseType, config.maxContentLength)) as T;
+    const accepted = config.validateStatus ? config.validateStatus(res.status) : res.ok;
+    if (!accepted) {
+      throw new HttpError(`Request failed with status code ${res.status}`, {
+        status: res.status,
+        statusText: res.statusText,
+        data: payload,
+        headers: res.headers,
+      });
+    }
+    return { data: payload, status: res.status, statusText: res.statusText, headers: res.headers };
+  }
+
+  return {
+    request,
+    get: (url, config) => request('GET', url, undefined, config),
+    post: (url, data, config) => request('POST', url, data, config),
+    put: (url, data, config) => request('PUT', url, data, config),
+    patch: (url, data, config) => request('PATCH', url, data, config),
+    delete: (url, config) => request('DELETE', url, undefined, config),
+  };
+}
+
+/**
+ * fetch for a caller that only ever talks to a fixed set of hosts: a vendor API, an in-cluster
+ * service or a configured base URL. `allowed` lists hostnames (matched exactly or as a parent
+ * domain) or full origins, and is read on every call so config changes are picked up. A request to
+ * any other host is refused, and a redirect is followed only to another allowed host (credentials
+ * are dropped when it leaves the origin), so a tampered URL or a redirect cannot steer the call
+ * elsewhere. It does not resolve or pin DNS, so never use it for a URL that a user, an app or
+ * stored config can influence: that is what safeWebhookFetch is for.
+ */
+export function allowlistedFetch(
+  allowed: () => ReadonlyArray<string | undefined>,
+  maxRedirects: number = 5,
+): (input: string | URL, init?: RequestInit) => Promise<Response> {
+  const isAllowed = (url: URL): boolean => {
+    for (const entry of allowed()) {
+      if (!entry) continue;
+      if (entry.includes('://')) {
+        try {
+          if (new URL(entry).origin === url.origin) return true;
+        } catch {
+          // an unparseable entry matches nothing
+        }
+      } else {
+        const host = entry.toLowerCase();
+        if (url.hostname === host || url.hostname.endsWith(`.${host}`)) return true;
+      }
+    }
+    return false;
+  };
+
+  return async (input, init = {}) => {
+    let url = new URL(input.toString());
+    const followRedirects = init.redirect !== 'manual' && init.redirect !== 'error';
+    let current: RequestInit = followRedirects ? { ...init, redirect: 'manual' } : init;
+    for (let hop = 0; hop <= maxRedirects; hop++) {
+      if (!isAllowed(url)) {
+        throw new SsrfBlockedError(url.hostname, null, 'host is not on this client\'s allow-list');
+      }
+      const res = await globalThis.fetch(url, current);
+      const location = res.headers.get('location');
+      if (!followRedirects || !REDIRECT_STATUSES.has(res.status) || !location) return res;
+      await res.body?.cancel().catch(() => undefined);
+
+      let next: URL;
+      try {
+        next = new URL(location, url);
+      } catch {
+        throw new SsrfBlockedError(location, null, 'invalid redirect URL');
+      }
+      const headers = new Headers(current.headers);
+      if (next.origin !== url.origin) {
+        for (const name of CROSS_ORIGIN_STRIPPED_HEADERS) headers.delete(name);
+      }
+      const toGet =
+        res.status === 303 ||
+        ((res.status === 301 || res.status === 302) && current.method?.toUpperCase() === 'POST');
+      current = { ...current, headers, ...(toGet ? { method: 'GET', body: undefined } : {}) };
+      url = next;
+    }
+    throw new SsrfBlockedError(url.hostname, null, `too many redirects (more than ${maxRedirects})`);
+  };
 }
