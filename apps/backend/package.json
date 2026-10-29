@@ -13,7 +13,7 @@
   },
   "scripts": {
     "prebuild": "bash ../../scripts/validate-no-acl-bypass.sh",
-    "build": "tsc",
+    "build": "tsc && tsc-alias -p tsconfig.alias.json --resolve-full-paths",
     "build:watch": "tsc -w",
     "start": "tsx dist/index.js",
     "start:prod": "NODE_ENV=production tsx dist/index.js",
@@ -78,6 +78,7 @@
     "@paralleldrive/cuid2": "2.3.1",
     "@parse/node-apn": "^7.0.1",
     "@prisma/client": "^5.22.0",
+    "@prisma/internals": "^5.22.0",
     "@pyroscope/nodejs": "^0.6.4",
     "@rocicorp/zero": "1.9.0",
     "@slack/web-api": "^7.12.0",
@@ -134,7 +135,7 @@
     "node-html-markdown": "^2.0.0",
     "node-html-parser": "^6.1.13",
     "node-rsa": "^1.1.1",
-    "nodemailer": "^9.0.1",
+    "nodemailer": "^10.0.6",
     "p-limit": "^3.1.0",
     "partial-json": "^0.1.7",
     "pdf-lib": "^1.17.1",
@@ -165,11 +166,11 @@
     "yauzl": "^3.2.1",
     "yjs": "^13.6.27",
     "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.25.0"
+    "zod-to-json-schema": "^3.25.0",
+    "tsx": "^4.20.6"
   },
   "devDependencies": {
     "@passionfroot/prisma-generator-zero": "^0.4.0",
-    "@prisma/internals": "^5.22.0",
     "@types/compression": "^1.7.5",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
@@ -210,7 +211,7 @@
     "ts-node-dev": "^2.0.0",
     "ts-patch": "^3.3.0",
     "tsconfig-paths": "^4.2.0",
-    "tsx": "^4.20.6",
+    "tsc-alias": "^1.8.0",
     "typescript": "^5.3.3"
   },
   "engines": {

@@ -90,13 +90,10 @@ export const JoinRequestsSection = ({ orgId }: JoinRequestsSectionProps): ReactE
 
     setReviewingRequestId(request.id);
     try {
-      await apiInstance.post(
-        `/join-requests/${request.workspaceId}/${request.id}/review`,
-        {
-          action,
-          reviewNote: reviewNote || undefined,
-        },
-      );
+      await apiInstance.post(`/join-requests/${request.workspaceId}/${request.id}/review`, {
+        action,
+        reviewNote: reviewNote || undefined,
+      });
       toast.success(
         action === WorkspaceJoinRequestAction.APPROVE
           ? `Approved ${request.email}`

@@ -21,7 +21,7 @@ function getCanvasMetadataSource(canvas: Canvas): string | undefined {
     return undefined;
   }
 
-  const source = metadata.source;
+  const source = metadata['source'];
   return typeof source === 'string' ? source : undefined;
 }
 

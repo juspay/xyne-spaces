@@ -1066,7 +1066,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     selectedCanvas?.metadata &&
     typeof selectedCanvas.metadata === 'object' &&
     !Array.isArray(selectedCanvas.metadata) &&
-    selectedCanvas.metadata.source === 'call_detailed_summary';
+    selectedCanvas.metadata['source'] === 'call_detailed_summary';
 
   const handleFileUpload = useCallback(
     async (file: File) => {
