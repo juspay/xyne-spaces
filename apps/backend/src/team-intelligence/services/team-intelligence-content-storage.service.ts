@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
-import { getStorageService } from '@/services/storage';
+import { config } from '@/config/env';
+import { getStorageService, workspaceStoragePath } from '@/services/storage';
 import { logger } from '@/utils/logger';
 
 export interface TeamIntelligenceStoredContentPointer {
@@ -70,12 +71,13 @@ class TeamIntelligenceContentStorageService {
     const serialized = JSON.stringify(input.payload ?? null);
     const checksum = buildChecksum(serialized);
     const timestamp = Date.now();
-    const path = [
+    // The sync feed belongs to DEFAULT_WORKSPACE_ID (team-intelligence.service.ts resolveDefaultOrgId)
+    const path = workspaceStoragePath(config.defaultWorkspaceId, [
       'team-intelligence',
       input.entityType,
       input.entityId,
       `${input.contentType}-${timestamp}-${checksum.slice(0, 12)}.json`,
-    ].join('/');
+    ].join('/'));
 
     const upload = await storageService.uploadFileV2(Buffer.from(serialized, 'utf8'), {
       path,

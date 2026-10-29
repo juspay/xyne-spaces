@@ -2746,7 +2746,7 @@ export class TicketController {
           senderNameReceived: senderName,
         });
       }
-      const uploadedFiles = files.length > 0 ? await uploadFiles(files) : [];
+      const uploadedFiles = files.length > 0 ? await uploadFiles(files, undefined, undefined, channel.workspaceId) : [];
 
       const ownerUser = channelPref.ownerUserId ? await repositories.users.findById(channelPref.ownerUserId) : null;
       // The desk's own address comes from its mailbox source, never from the app

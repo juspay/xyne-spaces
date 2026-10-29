@@ -89,6 +89,10 @@ export class SafeStorageService implements StorageService {
     return this.inner.moveFile(sourcePath, destinationPath, await this.keyOptions(sourcePath));
   }
 
+  async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+    return this.inner.copyFile(sourcePath, destinationPath, await this.keyOptions(sourcePath));
+  }
+
   async generateSignedUrl(filename: string, expirationHours?: number): Promise<string> {
     if (await this.keyOptions(filename)) {
       throw new Error(`Signed URLs are not available for encrypted objects: ${filename}`);

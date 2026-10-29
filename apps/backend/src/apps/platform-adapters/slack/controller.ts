@@ -404,6 +404,7 @@ export class SlackController {
 					const verificationResult = await outageAlertService.processOutageAlert(
 						alertText,
 						result.conversationId,
+						context.workspaceId,
 					);
 
 					if (!verificationResult.uploadedFile) return;
@@ -1080,7 +1081,7 @@ export class SlackController {
 				return;
 			}
 
-			const { userId } = getSlackAuthContext(req);
+			const { userId, workspaceId } = getSlackAuthContext(req);
 			if (userId !== state.userId) {
 				res.status(200).json({ ok: false, error: "not_authed" });
 				return;
@@ -1130,7 +1131,7 @@ export class SlackController {
 				path: "",
 			} as Express.Multer.File;
 
-			const uploadResult = (await uploadFiles([syntheticFile]))[0];
+			const uploadResult = (await uploadFiles([syntheticFile], undefined, undefined, workspaceId))[0];
 			if (!uploadResult) {
 				throw new Error("File upload returned no result");
 			}

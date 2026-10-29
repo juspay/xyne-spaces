@@ -54,6 +54,8 @@ export interface UploadOptions {
   scopeType?: string;
   scopeId?: string;
   encryption?: ObjectEncryption;
+  /** When set, the file goes under workspaces/{workspaceId}/ instead of the bucket root. */
+  workspaceId?: string;
 }
 
 export interface UploadV2Options {
@@ -144,6 +146,8 @@ export interface StorageService {
   listFiles(prefix: string): Promise<ListedFile[]>;
   listPrefixes(prefix: string): Promise<string[]>;
   moveFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void>;
+  /** Copy within the bucket, keeping the source. Server-side where the provider supports it. */
+  copyFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void>;
   ensureBucketExists(): Promise<void>;
   checkBucketExists(): Promise<void>;
   buildStorageUri(path: string): string;

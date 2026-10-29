@@ -2086,7 +2086,7 @@ export class JiraMigrationImportService {
         return cachedDownload;
       }
 
-      const downloadPromise = this.jiraClient.downloadAttachment(attachment, issue.key);
+      const downloadPromise = this.jiraClient.downloadAttachment(attachment, issue.key, workspaceId);
       downloadCache.set(attachment.id, downloadPromise);
       return downloadPromise;
     };
@@ -2288,7 +2288,7 @@ export class JiraMigrationImportService {
       ATTACHMENT_IMPORT_CONCURRENCY,
       async attachment => {
         const uploadedBy = await this.userResolver.resolveUser(attachment.author, fallbackUserId, unresolvedUsers, issue.key);
-        const downloaded = await this.jiraClient.downloadAttachment(attachment, issue.key);
+        const downloaded = await this.jiraClient.downloadAttachment(attachment, issue.key, workspaceId);
 
         return {
           id: randomUUID(),

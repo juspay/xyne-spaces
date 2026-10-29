@@ -1,5 +1,6 @@
 import { Storage, Bucket, File, StorageOptions } from '@google-cloud/storage';
 import { isPreconditionFailed, type GcsStorageConfig } from './types.js';
+import { workspaceRoot } from './pathUtils.js';
 
 import { logger } from './logger.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -12,6 +13,7 @@ export interface GCSUploadOptions {
   scopeType?: string;
   scopeId?: string;
   encryption?: ObjectEncryption;
+  workspaceId?: string;
 }
 
 export interface GCSUploadResult {
@@ -639,7 +641,7 @@ export class GCSService {
 
   /**
    * Generate structured file path based on scope and timestamp
-   * Format: attachments/{scopeType}/{scopeId}/{year}/{month}/{timestamp}-{uuid}-{filename}
+   * Format: [workspaces/{workspaceId}/]attachments/{scopeType}/{scopeId}/{year}/{month}/{timestamp}-{uuid}-{filename}
    */
   private generateFilePath(options: GCSUploadOptions): string {
     const now = new Date();
@@ -663,7 +665,8 @@ export class GCSService {
     const finalFilename = `${timestamp}-${uuid}-${sanitizedFilename}`;
     pathComponents.push(finalFilename);
 
-    return pathComponents.join('/');
+    const filePath = pathComponents.join('/');
+    return options.workspaceId ? `${workspaceRoot(options.workspaceId)}${filePath}` : filePath;
   }
 
   /**
@@ -712,6 +715,15 @@ export class GCSService {
     // The same key on both ends: GCS rewrites a CSEK object only when given its source key.
     await this.file(sourcePath, options?.encryptionKey).move(this.file(destinationPath, options?.encryptionKey));
     logger.info(`File moved in GCS: ${sourcePath} -> ${destinationPath}`);
+  }
+
+  /**
+   * Copy a file within the same bucket, keeping the source. Server-side (no download).
+   * A CSEK object keeps its key and custom metadata (the wrapped key) in the copy.
+   */
+  async copyFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void> {
+    await this.file(sourcePath, options?.encryptionKey).copy(this.file(destinationPath, options?.encryptionKey));
+    logger.info(`File copied in GCS: ${sourcePath} -> ${destinationPath}`);
   }
 
   /**

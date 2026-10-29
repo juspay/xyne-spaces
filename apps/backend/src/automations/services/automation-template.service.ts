@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { db } from '@/database/client';
 import { config } from '@/config/env';
 import type { UploadedFileResult } from '@/services/fileUploadService';
-import { storageService } from '@/services/storage';
+import { storageService, storageWorkspace } from '@/services/storage';
 import { normalizeStoragePath } from '@xyne/storage';
 import { logger } from '@/utils/logger';
 import type { AutomationContext } from '../types/context';
@@ -281,6 +281,7 @@ export async function prepareRenderedAutomationFiles(params: {
 export async function createAutomationDeliveryFiles(params: {
   files: PreparedAutomationTemplateFile[];
   automationId: string;
+  workspaceId?: string;
 }): Promise<UploadedFileResult[]> {
   const results = await Promise.allSettled(
     params.files.map(async (file): Promise<UploadedFileResult> => {
@@ -289,6 +290,7 @@ export async function createAutomationDeliveryFiles(params: {
         contentType: file.mimeType,
         scopeType: 'AUTOMATION_DELIVERY',
         scopeId: params.automationId,
+        ...storageWorkspace(params.workspaceId),
         metadata: { sourceAttachmentId: file.sourceAttachmentId },
       };
       const upload =

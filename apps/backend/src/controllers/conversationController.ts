@@ -485,7 +485,8 @@ export class ConversationController {
           uploadedFiles = await uploadFiles(
             files,
             thumbnails.length > 0 ? thumbnails : undefined,
-            fileMetadata
+            fileMetadata,
+            req.user?.workspaceId
           );
         } catch (error) {
           logger.error('File upload failed:', error);
@@ -1048,7 +1049,8 @@ export class ConversationController {
           uploadedFiles = await uploadFiles(
             files,
             thumbnails.length > 0 ? thumbnails : undefined,
-            fileMetadata
+            fileMetadata,
+            req.user?.workspaceId
           );
         } catch (error) {
           logger.error('File upload failed:', error);

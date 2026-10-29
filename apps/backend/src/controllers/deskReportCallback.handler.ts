@@ -120,7 +120,7 @@ export async function handleDeskReportCallback(
         size: buffer.byteLength,
         buffer,
       } as Express.Multer.File,
-    ]);
+    ], undefined, undefined, workspaceId);
     if (!uploaded) throw new Error('Desk report upload produced no result');
 
     await completeDeskReportAttachment(workspaceId, pending.id, uploaded, metadata);

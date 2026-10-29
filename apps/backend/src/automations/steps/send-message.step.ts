@@ -142,6 +142,7 @@ export class SendMessageStep extends BaseActionStep<
       const deliveryFiles = await createAutomationDeliveryFiles({
         files: preparedFiles,
         automationId,
+        workspaceId,
       });
       let result: Awaited<ReturnType<typeof conversationService.createConversationWithMessage>>;
       try {

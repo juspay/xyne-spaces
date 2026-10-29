@@ -272,7 +272,7 @@ export class ZohoUploadController {
   // back from GCS, attaches them to the outbound mail, and rewires the row's
   // entityId to the new Email.id so the file shows under the sent message.
   private async uploadToGcsAndStage(ctx: UploadContext): Promise<UploadOutcome> {
-    const uploaded = await uploadFiles(ctx.files);
+    const uploaded = await uploadFiles(ctx.files, undefined, undefined, ctx.workspaceId);
     if (uploaded.length === 0) return { ids: [], failures: [] };
 
     const pendingEntityId = ctx.conversationId

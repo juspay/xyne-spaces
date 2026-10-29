@@ -1,5 +1,5 @@
 import { config } from '@/config/env';
-import { getStorageService } from '@/services/storage';
+import { getStorageService, storageWorkspace } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
 
@@ -545,7 +545,7 @@ export class JiraMigrationClient {
     return comments;
   }
 
-  async downloadAttachment(attachment: JiraAttachmentRecord, issueKey: string) {
+  async downloadAttachment(attachment: JiraAttachmentRecord, issueKey: string, workspaceId?: string) {
     if (!attachment.content) {
       throw new Error(`Jira attachment ${attachment.id} does not have a content URL`);
     }
@@ -569,6 +569,7 @@ export class JiraMigrationClient {
       },
       scopeType: ChannelScopeType.TICKET,
       scopeId: issueKey,
+      ...storageWorkspace(workspaceId),
     });
 
     return {

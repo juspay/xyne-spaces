@@ -1,6 +1,6 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
-import { getStorageService } from './storage';
+import { getStorageService, workspaceStoragePath } from './storage';
 import { PrismaClient } from '@prisma/client';
 import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
@@ -902,17 +902,19 @@ export class UserManagementService {
       const uuid = uuidv4();
       const filename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
       const filePath = `profile-pictures/${userId}/${timestamp}-${uuid}-${filename}`;
+      const metadata = {
+        userId,
+        originalName: file.originalname,
+        uploadedAt: new Date().toISOString(),
+      };
 
-      // Upload to GCS
-      const uploadResult = await getStorageService().uploadFile(file.buffer, {
-        filename: filePath,
-        contentType: file.mimetype,
-        metadata: {
-          userId,
-          originalName: file.originalname,
-          uploadedAt: new Date().toISOString(),
-        },
-      });
+      // Per-workspace layout: stored at exactly workspaces/{workspaceId}/profile-pictures/{userId}/...
+      // Old layout: uploadFile treats filePath as a file name, so it lands under attachments/{YYYY}/{MM}/
+      const owner = await this.prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
+      const workspacePath = workspaceStoragePath(owner?.workspaceId, filePath);
+      const uploadResult = workspacePath !== filePath
+        ? await getStorageService().uploadFileV2(file.buffer, { path: workspacePath, contentType: file.mimetype, metadata })
+        : await getStorageService().uploadFile(file.buffer, { filename: filePath, contentType: file.mimetype, metadata });
 
       // Store only the storage path in database (not full URL)
       // Profile picture is served via streaming endpoint like custom emojis

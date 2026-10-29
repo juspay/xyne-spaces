@@ -1,6 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { UploadOptions } from './types.js';
 
+const WORKSPACE_ID = /^[A-Za-z0-9_-]+$/;
+
+/** Root folder for one workspace's files: workspaces/{workspaceId}/ */
+export function workspaceRoot(workspaceId: string): string {
+  if (!WORKSPACE_ID.test(workspaceId)) {
+    throw new Error(`Invalid workspaceId for a storage path: ${JSON.stringify(workspaceId)}`);
+  }
+  return `workspaces/${workspaceId}/`;
+}
+
 export function generateFilePath(options: UploadOptions): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -16,7 +26,8 @@ export function generateFilePath(options: UploadOptions): string {
   }
 
   parts.push(String(year), month, `${timestamp}-${uuid}-${sanitized}`);
-  return parts.join('/');
+  const filePath = parts.join('/');
+  return options.workspaceId ? `${workspaceRoot(options.workspaceId)}${filePath}` : filePath;
 }
 
 export function normalizeStoragePath(url: string): string {

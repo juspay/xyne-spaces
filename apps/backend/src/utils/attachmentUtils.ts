@@ -1,4 +1,4 @@
-import { storageService as defaultStorageService, type StorageService } from '../services/storage';
+import { storageService as defaultStorageService, isGeneratedUploadPath, type StorageService } from '../services/storage';
 import { logger } from './logger';
 
 interface CleanupProxiedFileOptions {
@@ -13,7 +13,7 @@ export async function cleanupProxiedFile(
   options: CleanupProxiedFileOptions = {}
 ): Promise<void> {
   const storagePath = file?.path;
-  if (!storagePath || !storagePath.startsWith('attachments/')) {
+  if (!storagePath || !isGeneratedUploadPath(storagePath)) {
     return;
   }
 

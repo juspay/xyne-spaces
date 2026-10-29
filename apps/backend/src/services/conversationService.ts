@@ -406,7 +406,7 @@ export class ConversationService {
     if (files.length > 0) {
       // Upload new files
       try {
-        let newFiles = await uploadFiles(files);
+        let newFiles = await uploadFiles(files, undefined, undefined, channel?.workspaceId);
         processedFiles.push(...newFiles);
       } catch (error) {
         logger.error('File upload failed:', error);
@@ -683,7 +683,7 @@ export class ConversationService {
     if (files.length > 0) {
       // Upload new files
       try {
-        let newFiles = await uploadFiles(files);
+        let newFiles = await uploadFiles(files, undefined, undefined, channel?.workspaceId);
         processedFiles.push(...newFiles);
       } catch (error) {
         logger.error('File upload failed:', error);
@@ -959,7 +959,7 @@ export class ConversationService {
     if (files.length > 0) {
       // Upload new files
       try {
-        let newFiles = await uploadFiles(files);
+        let newFiles = await uploadFiles(files, undefined, undefined, channel?.workspaceId);
         processedFiles.push(...newFiles);
         logger.info(
           `[ConversationService] Uploaded ${processedFiles.length} files for message ${messageId}`

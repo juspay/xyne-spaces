@@ -2,7 +2,7 @@ import multer from 'multer';
 import { PassThrough, Writable, type Readable } from 'node:stream';
 import { Parse as parseZipStream, type Entry as ZipEntry } from 'unzipper';
 import { logger } from '../utils/logger';
-import { storageService } from '../services/storage';
+import { storageService, storageWorkspace } from '../services/storage';
 import { AppError } from './errorHandler';
 import { config } from '@/config/env';
 import { db } from '../database/client';
@@ -612,6 +612,7 @@ const streamingStorage: multer.StorageEngine = {
           },
           scopeType: 'CONVERSATION',
           scopeId: 'temp',
+          ...storageWorkspace(req.user?.workspaceId),
         }),
       );
 
@@ -675,6 +676,7 @@ function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEng
           contentType: file.mimetype || 'application/octet-stream',
           scopeType: 'collection',
           scopeId,
+          ...storageWorkspace(req.user?.workspaceId),
           metadata: {
             originalName: file.originalname,
             uploadedAt: new Date().toISOString(),

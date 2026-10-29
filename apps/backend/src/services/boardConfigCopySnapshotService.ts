@@ -2,7 +2,7 @@ import { once } from 'node:events';
 import { createGzip } from 'node:zlib';
 import { FormContextType } from '@xyne/shared';
 import { db } from '@/database/client';
-import { storageService } from '@/services/storage';
+import { storageService, workspaceStoragePath } from '@/services/storage';
 import { logger } from '@/utils/logger';
 
 const TAG = '[BoardConfigCopySnapshot]';
@@ -49,7 +49,10 @@ class BoardConfigCopySnapshotService {
   async captureSnapshot(params: CaptureSnapshotParams): Promise<BoardSnapshotResult> {
     const { targetBoardId, sourceBoardId, workspaceId, actorUserId } = params;
     const startedAt = new Date();
-    const path = `${SNAPSHOT_PREFIX}/${workspaceId}/${targetBoardId}/${startedAt.toISOString().replace(/[:.]/g, '-')}.ndjson.gz`;
+    const fileName = `${targetBoardId}/${startedAt.toISOString().replace(/[:.]/g, '-')}.ndjson.gz`;
+    // Per-workspace layout: workspaces/{workspaceId}/board-config-copy-snapshots/...; old layout keeps the id in the path
+    const workspacePath = workspaceStoragePath(workspaceId, `${SNAPSHOT_PREFIX}/${fileName}`);
+    const path = workspacePath.startsWith('workspaces/') ? workspacePath : `${SNAPSHOT_PREFIX}/${workspaceId}/${fileName}`;
 
     const gzip = createGzip();
 
@@ -226,7 +229,12 @@ class BoardConfigCopySnapshotService {
   async sweepExpiredSnapshots(): Promise<void> {
     try {
       const cutoff = Date.now() - SNAPSHOT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-      const files = await storageService.listFiles(`${SNAPSHOT_PREFIX}/`);
+      // Old layout at the bucket root, plus each workspace's own snapshot folder
+      const workspaceRoots = await storageService.listPrefixes('workspaces/');
+      const files = (await Promise.all([
+        storageService.listFiles(`${SNAPSHOT_PREFIX}/`),
+        ...workspaceRoots.map((root) => storageService.listFiles(`${root}${SNAPSHOT_PREFIX}/`)),
+      ])).flat();
 
       for (const file of files) {
         if (!file.updated || file.updated.getTime() >= cutoff) continue;

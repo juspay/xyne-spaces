@@ -788,7 +788,7 @@ export class AttachmentController {
         height: metadata.height,
       }));
 
-      const uploadedFiles = await uploadFiles(files, undefined, fileMetadataArray);
+      const uploadedFiles = await uploadFiles(files, undefined, fileMetadataArray, req.user?.workspaceId);
 
       const workspaceId = req.user?.workspaceId;
       if (!workspaceId) {

@@ -2,7 +2,7 @@ import { createHash } from "crypto"
 import { isPreconditionFailed, normalizeStoragePath } from "@xyne/storage"
 import { isHeicAttachment, toWebpFilename } from "@xyne/shared"
 import { logger } from "@/utils/logger"
-import { storageService } from "@/services/storage"
+import { storageService, workspaceRootOf } from "@/services/storage"
 import {
     HeicRenditionThreadError,
     renderHeicBytes,
@@ -64,10 +64,12 @@ interface FailureMarker {
     at: number
 }
 
+// An original in the per-workspace layout keeps its renditions in that workspace's folder
 function cacheBasePath(storagePath: string): string {
     const normalized = normalizeStoragePath(storagePath)
     const pathHash = createHash("sha256").update(normalized).digest("hex")
-    return `${GCS_CACHE_PREFIX}/${pathHash}`
+    const root = workspaceRootOf(normalized)
+    return root ? `${root}cache/heic/v1/${pathHash}` : `${GCS_CACHE_PREFIX}/${pathHash}`
 }
 
 function isPermanentFailure(code: HeicRenditionError["code"]): boolean {

@@ -58,7 +58,7 @@ async function rehostCanvasImages(html: string, canvasId: string, createdBy: str
       const resp = await fetch(info.url, { headers: { Authorization: `Bearer ${token}` } });
       if (!resp.ok) continue;
       const buffer = Buffer.from(await resp.arrayBuffer());
-      const [up] = await uploadFiles([{ originalname: info.name || fileId, mimetype: info.mimetype || 'application/octet-stream', size: buffer.length, buffer } as Express.Multer.File]);
+      const [up] = await uploadFiles([{ originalname: info.name || fileId, mimetype: info.mimetype || 'application/octet-stream', size: buffer.length, buffer } as Express.Multer.File], undefined, undefined, target.workspaceId);
       if (!up) continue;
       const att = await attachmentRepo.create({
         entityId: canvasId, entityType: AttachmentEntityType.CANVAS, conversationId: `canvas_${canvasId}`, channelId: null,

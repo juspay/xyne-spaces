@@ -1,7 +1,7 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
-import { storageService } from '@/services/storage';
+import { storageService, storageWorkspace } from '@/services/storage';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { SubApp } from '@/vespa/src/types';
 import { IngestionStatus } from '@xyne/shared';
@@ -222,6 +222,7 @@ export async function processDriveImportJob(data: DriveImportJobData): Promise<v
           contentType: downloaded.contentType,
           scopeType: 'collection',
           scopeId: collectionId,
+          ...storageWorkspace(workspaceId),
         });
 
         const parentFolderId = df.relPath

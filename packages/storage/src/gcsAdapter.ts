@@ -83,6 +83,10 @@ export class GCSAdapter implements StorageService {
     return this.gcs.moveFile(sourcePath, destinationPath, options);
   }
 
+  async copyFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void> {
+    return this.gcs.copyFile(sourcePath, destinationPath, options);
+  }
+
   async ensureBucketExists(): Promise<void> {
     return this.gcs.ensureBucketExists();
   }

@@ -64,6 +64,8 @@ const envSchema = Joi.object({
   SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3', 'azure').default('gcs'),
+  // New files go under workspaces/{workspaceId}/. Reads use the stored path, so both layouts work together.
+  STORAGE_WORKSPACE_PATHS: Joi.boolean().default(false),
   // AWS S3 Configuration
   AWS_REGION: Joi.string().default('ap-south-1'),
   AWS_ACCESS_KEY_ID: Joi.string().allow('').default(''),
@@ -810,6 +812,7 @@ export const config = {
   defaultWorkspaceId: envVars.DEFAULT_WORKSPACE_ID,
   fileStorage: {
     provider: envVars.STORAGE_PROVIDER,
+    workspacePaths: envVars.STORAGE_WORKSPACE_PATHS as boolean,
   },
   s3: {
     region: envVars.AWS_REGION,
