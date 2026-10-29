@@ -41,6 +41,17 @@ export type ProvisionEntityResult = {
   message?: string;
 };
 
+export type GenerateStorageKeyInput = {
+  workspaceId: string;
+};
+
+export type StorageObjectKey = {
+  /** 32-byte AES-256 key for one storage object. Never persisted. */
+  key: Buffer;
+  /** `key` wrapped under the workspace storage key. */
+  wrappedKey: string;
+};
+
 export interface EncryptionProvider {
   getPublicConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
@@ -53,4 +64,6 @@ export interface EncryptionProvider {
   initializeOrg(orgId: string): Promise<void>;
   provisionEntity(input: ProvisionEntityInput): Promise<void>;
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;
+  generateStorageKey(input: GenerateStorageKeyInput): Promise<StorageObjectKey>;
+  unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]>;
 }
