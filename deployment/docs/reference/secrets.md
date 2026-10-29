@@ -56,7 +56,7 @@ The y-sweet tag is the `appVersion` of `helm-charts/charts/xyne-ysweet/Chart.yam
 | Variable | Constraint | Ends up in |
 |---|---|---|
 | `postgres_password` | 16+ characters; RDS also refuses `/ @ "` and spaces | the database role; every database URL in `xyne-backend-secrets`, `xyne-zero-secrets`, `xyne-claw-auth-secrets`; `xyne-pg-app` in `incluster` mode |
-| `redis_auth` | AWS `managed`: required, 16 to 128 characters without `/ @ "`; `incluster`: required; GCP and Azure `managed`: not used (the service's own AUTH is read) | `REDIS_URL` and `REDIS_PASSWORD` for the apps; `xyne-redis-auth` in `incluster` mode; the LiveKit server config |
+| `redis_auth` | AWS `managed`: required, 16 to 128 characters without `/ @ "`; `incluster`: required; GCP `managed`: not used (IAM auth); Azure `managed`: not used (the service's own AUTH is read) | `REDIS_URL` and `REDIS_PASSWORD` for the apps; `xyne-redis-auth` in `incluster` mode; the LiveKit server config |
 | `storage_credentials` | required for `incluster` and `external` storage; empty for `managed` | S3 keys in `xyne-backend-secrets` and `xyne-ysweet-secrets`; `xyne-minio-root` in `incluster` mode |
 | `livekit_api_key`, `livekit_api_secret` | required with `livekit_enabled` | the LiveKit server and egress config in the cloud's secret store; `xyne-backend-secrets` and `xyne-transcription-agent-secrets` |
 | `livekit_turn_cert_secret` | the *name* of a secret in the cloud's store, not a value | fetched by the LiveKit VMs at boot |

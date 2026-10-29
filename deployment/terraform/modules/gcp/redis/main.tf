@@ -15,6 +15,7 @@ resource "google_memorystore_instance" "this" {
   location                = var.region
   instance_id             = var.name
   labels                  = var.labels
+  engine_version          = "VALKEY_8_0"
   engine_configs          = var.redis_configs
   mode                    = "CLUSTER_DISABLED"
   shard_count             = 1

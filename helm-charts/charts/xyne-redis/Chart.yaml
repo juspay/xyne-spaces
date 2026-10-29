@@ -1,6 +1,6 @@
 apiVersion: v2
 name: xyne-redis
-description: Single-node Redis (append-only persistence) for Xyne Spaces queues, caches and pub/sub
+description: Single-node Valkey (append-only persistence) for Xyne Spaces queues, caches and pub/sub
 type: application
 version: 0.1.0
 appVersion: "8.1"
@@ -9,7 +9,7 @@ keywords:
   - redis
 home: https://github.com/juspay/xyne-spaces
 sources:
-  - https://github.com/redis/redis
+  - https://github.com/valkey-io/valkey
 dependencies:
   - name: xyne-common
     version: 0.1.0
