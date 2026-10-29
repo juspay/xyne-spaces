@@ -285,8 +285,6 @@ second Cloud SQL instance. The bastion (`e2-small`) is negligible.
 
 ## Known limits
 
-- **Memorystore and LiveKit**: Memorystore uses IAM auth and has no password, so `livekit_enabled`
-  needs `redis_mode = external`.
 - **No GPU pool** yet on GCP.
 - **The sandbox pool** needs an N1 or N2 machine type (`n1-standard-4` default), not E2, and has
   secure boot off.
