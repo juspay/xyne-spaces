@@ -23,7 +23,3 @@ output "redis_auth" {
   value     = ""
   sensitive = true
 }
-
-output "server_ca_certs" {
-  value = flatten([for ca in google_memorystore_instance.this.managed_server_ca[0].ca_certs : ca.certificates])
-}

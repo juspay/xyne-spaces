@@ -7,7 +7,6 @@ locals {
     "cloudresourcemanager.googleapis.com",
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
-    "redis.googleapis.com",
     "memorystore.googleapis.com",
     "networkconnectivity.googleapis.com",
     "storage.googleapis.com",

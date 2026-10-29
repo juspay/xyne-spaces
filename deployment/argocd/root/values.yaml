@@ -49,7 +49,6 @@ infra:
     host: ""
     port: 6379
     tls: false
-    iamAuth: false
   storage:
     mode: managed
     provider: s3

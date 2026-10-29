@@ -19,7 +19,7 @@ resource "google_memorystore_instance" "this" {
   mode                    = "CLUSTER_DISABLED"
   shard_count             = 1
   replica_count           = 1
-  node_type               = var.node_type
+  node_type               = "STANDARD_SMALL"
   authorization_mode      = "IAM_AUTH"
   transit_encryption_mode = "SERVER_AUTHENTICATION"
 
