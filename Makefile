@@ -7,7 +7,8 @@ RUNNER_IMAGE_NAME ?= xyne-spaces-runner
 DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard
 DASHBOARD_EDGE_IMAGE_NAME ?= xyne-spaces-dashboard-edge
 EXTERNAL_DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard-external
-LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= lighton-ocr-server
+LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= xyne-spaces-lighton-ocr-server
+TEI_BATCH_PROXY_IMAGE_NAME ?= xyne-spaces-tei-batch-proxy
 TRANSCRIPTION_AGENT_IMAGE_NAME ?= xyne-spaces-transcription-agent
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
@@ -126,6 +127,21 @@ clean-lighton-ocr-wrapper:
 	docker rmi $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+# TEI batch proxy targets (Node, no deps). Self-contained build context (tei-batch-proxy).
+build-tei-batch-proxy:
+	$(info Building $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd tei-batch-proxy && docker buildx build -f Dockerfile -t $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-tei-batch-proxy:
+	$(info Pushing to registry: $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd tei-batch-proxy && docker buildx build -f Dockerfile -t $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-tei-batch-proxy:
+	docker rmi $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
 # Transcription agent targets (Python / LiveKit agent). Self-contained build context
 # (apps/backend/python-agent) because the Dockerfile COPYs only from its own directory.
 build-transcription-agent:
@@ -242,11 +258,11 @@ push-claw-all: push-claw push-claw-auth-backend push-claw-auth-frontend
 clean-claw-all: clean-claw clean-claw-auth-backend clean-claw-auth-frontend
 
 # Combined targets
-build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-transcription-agent build-claw-all
+build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-tei-batch-proxy build-transcription-agent build-claw-all
 
-push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-transcription-agent push-claw-all
+push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-tei-batch-proxy push-transcription-agent push-claw-all
 
-clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-transcription-agent clean-claw-all
+clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-tei-batch-proxy clean-transcription-agent clean-claw-all
 
 test:
 	$(info Running tests for all components)
@@ -261,4 +277,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-tei-batch-proxy push-tei-batch-proxy clean-tei-batch-proxy build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
