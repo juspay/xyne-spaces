@@ -49,6 +49,7 @@ write_files:
 %{ if turn_cert_secret != "" ~}
       ExecStartPre=/bin/sh /usr/local/bin/xyne-turn-cert
 %{ endif ~}
+      ExecStartPre=/bin/chown -R ${container_uid} /etc/livekit
       ExecStartPre=-/usr/bin/docker rm -f livekit
       ExecStartPre=/usr/bin/docker pull ${image}
       ExecStart=/usr/bin/docker run --rm --name livekit --network host ${docker_flags} ${image} ${container_args}

@@ -19,6 +19,7 @@ locals {
       image          = var.server_image
       docker_flags   = "-v /etc/livekit:/etc/livekit:ro"
       container_args = "--config /etc/livekit/config.yaml"
+      container_uid  = 65532 # distroless :nonroot
       turn_cert      = var.turn_cert_secret
       instance_type  = var.instance_type
       public_ip      = true
@@ -28,6 +29,7 @@ locals {
       image          = var.egress_image
       docker_flags   = "--cap-add SYS_ADMIN -e EGRESS_CONFIG_FILE=/etc/livekit/config.yaml -v /etc/livekit:/etc/livekit:ro"
       container_args = ""
+      container_uid  = 1001 # upstream egress user
       turn_cert      = ""
       instance_type  = var.egress_instance_type
       public_ip      = false
@@ -332,6 +334,7 @@ resource "aws_launch_template" "this" {
     image            = each.value.image
     docker_flags     = each.value.docker_flags
     container_args   = each.value.container_args
+    container_uid    = each.value.container_uid
   }))
 
   iam_instance_profile {
