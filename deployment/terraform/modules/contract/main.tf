@@ -146,7 +146,7 @@ resource "terraform_data" "inputs" {
 
     precondition {
       condition     = !var.livekit_enabled || !try(var.managed_redis.iam_auth, false)
-      error_message = "livekit_enabled cannot be combined with redis_iam_auth: LiveKit cannot authenticate to Redis with IAM tokens."
+      error_message = "livekit_enabled requires an external Redis when Memorystore uses IAM auth: LiveKit cannot authenticate to Redis with IAM tokens."
     }
   }
 }

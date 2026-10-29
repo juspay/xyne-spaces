@@ -337,31 +337,6 @@ variable "redis_mode" {
   }
 }
 
-variable "redis_tier" {
-  type    = string
-  default = "STANDARD_HA"
-}
-
-variable "redis_memory_size_gb" {
-  type    = number
-  default = 4
-}
-
-variable "redis_version" {
-  type    = string
-  default = "REDIS_7_2"
-}
-
-variable "redis_iam_auth" {
-  type    = bool
-  default = false
-}
-
-variable "redis_tls" {
-  type    = bool
-  default = false
-}
-
 variable "redis_maintenance_window" {
   type = object({
     day     = string

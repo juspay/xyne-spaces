@@ -8,23 +8,12 @@ const clog = createLogger("redis-iam-auth");
 if (process.env["REDIS_IAM_AUTH"] === "true") {
   const auth = new GoogleAuth({ scopes: "https://www.googleapis.com/auth/cloud-platform" });
   const connect = Redis.prototype.connect;
-  const pending = new WeakMap<Redis, Promise<void>>();
-  Redis.prototype.connect = function (this: Redis, ...args: Parameters<typeof connect>) {
-    let attempt = pending.get(this);
-    if (!attempt) {
-      // ioredis builds `condition` inside connect(); commands issued while we await the token need it.
-      const client = this as unknown as { condition?: object };
-      client.condition ??= { select: this.options.db, subscriber: false };
-      attempt = auth
-        .getAccessToken()
-        .then(
-          (token) => void (this.options.password = token ?? undefined),
-          (error: Error) => clog.error("failed to fetch IAM access token", { message: error.message }),
-        )
-        .then(() => connect.apply(this, args))
-        .finally(() => pending.delete(this));
-      pending.set(this, attempt);
-    }
-    return attempt;
+  Redis.prototype.connect = async function (this: Redis, ...args: Parameters<typeof connect>) {
+    // ioredis sets `condition` inside connect(); commands queued while we await the token need it.
+    (this as unknown as { condition?: object }).condition ??= { select: this.options.db, subscriber: false };
+    this.options.password = (await auth.getAccessToken().catch((error: Error) => {
+      clog.error("failed to fetch IAM access token", { message: error.message });
+    })) ?? undefined;
+    return connect.apply(this, args);
   } as typeof connect;
 }

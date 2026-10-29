@@ -162,11 +162,7 @@ The other scripts all take `--env` and `--env-dir`:
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `redis_mode` | string | `managed` | `managed` (Memorystore), `incluster`, `external` |
-| `redis_tier` | string | `STANDARD_HA` | `BASIC` or `STANDARD_HA` |
-| `redis_memory_size_gb` | number | `4` | |
-| `redis_version` | string | `REDIS_7_2` | |
-| `redis_tls` | bool | `false` | server TLS (`SERVER_AUTHENTICATION`); the CA is not distributed to the apps, keep false |
+| `redis_mode` | string | `managed` | `managed` (Memorystore for Valkey, service-account IAM auth), `incluster`, `external` |
 | `redis_maintenance_window` | object{day, hour, minutes} | Sunday 03:00 | |
 | `redis_configs` | map(string) | `{}` | Redis configuration parameters |
 | `external_redis` | object{host, port=6379, tls=false} | `{}` | for `external` mode |

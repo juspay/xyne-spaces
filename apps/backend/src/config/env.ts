@@ -625,7 +625,6 @@ const envSchema = Joi.object({
   REDIS_PORT: Joi.number().integer().min(1).max(65535).default(6379),
   REDIS_PASSWORD: Joi.string().allow('').default(''),
   REDIS_TLS: Joi.boolean().default(false),
-  REDIS_IAM_AUTH: Joi.boolean().default(false),
   DATA_SOURCE_INGEST_TABLE_LIMIT: Joi.number().integer().positive().default(30),
   DATA_SOURCE_EDA_CONCURRENCY: Joi.number().integer().min(1).default(4),
   DATA_SOURCE_ALLOW_PRIVATE_HOSTS: Joi.boolean().default(false),
@@ -1454,7 +1453,6 @@ export const config = {
     port: envVars.REDIS_PORT as number,
     password: envVars.REDIS_PASSWORD as string,
     tls: envVars.REDIS_TLS as boolean,
-    iamAuth: envVars.REDIS_IAM_AUTH as boolean,
   },
   dataSource: {
     ingestTableLimit: envVars.DATA_SOURCE_INGEST_TABLE_LIMIT as number,

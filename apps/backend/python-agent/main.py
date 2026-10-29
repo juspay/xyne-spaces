@@ -155,7 +155,7 @@ async def entrypoint(ctx: JobContext):
         }
         if config.redis_password:
             redis_kwargs["password"] = config.redis_password
-        if config.redis_iam_auth:
+        if os.getenv("REDIS_IAM_AUTH") == "true":
             redis_kwargs["credential_provider"] = IamCredentialProvider()
         if config.redis_tls:
             # Match TypeScript: tls: { rejectUnauthorized: false }
