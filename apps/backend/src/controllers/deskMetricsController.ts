@@ -83,7 +83,7 @@ const queryBodySchema = z
       .object({
         keys: z.array(z.string().min(1)).min(1),
         perKeyFilters: z
-          .record(
+          .record(z.string(), 
             z.object({
               values: z.array(z.string()).optional(),
               textTerms: z.array(z.string().min(1)).optional(),

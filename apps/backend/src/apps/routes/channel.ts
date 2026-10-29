@@ -22,7 +22,7 @@ const OpenDmBodySchema = z.object({
 router.post('/openDm', requirePermission('im:write'), async (req: Request, res: Response) => {
   const result = OpenDmBodySchema.safeParse(req.body);
   if (!result.success) {
-    res.status(400).json({ error: 'Validation error', details: result.error.errors });
+    res.status(400).json({ error: 'Validation error', details: result.error.issues });
     return;
   }
   const { targetUserId } = result.data;

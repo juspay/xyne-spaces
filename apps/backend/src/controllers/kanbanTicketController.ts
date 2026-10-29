@@ -61,7 +61,7 @@ const kanbanCountsBodyObject = z.object({
       ticketTypes: z.array(z.string()).optional(),
       merchantIds: z.array(z.string()).optional(),
       dynamicFields: z
-        .record(
+        .record(z.string(), 
           z.union([
             z.array(z.string()),
             z.object({ start: z.number().optional(), end: z.number().optional() }),
@@ -113,7 +113,7 @@ export class KanbanTicketController {
     } catch (error) {
       logger.error('[KanbanTicketController] Failed to fetch Kanban counts:', error);
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid request body', details: error.errors });
+        res.status(400).json({ error: 'Invalid request body', details: error.issues });
         return;
       }
 
@@ -151,7 +151,7 @@ export class KanbanTicketController {
     } catch (error) {
       logger.error('[KanbanTicketController] Failed to fetch track Kanban counts:', error);
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid request body', details: error.errors });
+        res.status(400).json({ error: 'Invalid request body', details: error.issues });
         return;
       }
 

@@ -40,7 +40,7 @@ export const flowActionSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('update_state'),
-    stateUpdates: z.record(z.unknown()),
+    stateUpdates: z.record(z.string(), z.unknown()),
     successMessage: z.string().optional(),
   }),
   z.object({
@@ -84,7 +84,7 @@ export const flowComponentStyleSchema = z.object({
 const baseComponentSchema = z.object({
   id: z.string().min(1),
   type: z.string(),
-  props: z.record(z.unknown()).optional(),
+  props: z.record(z.string(), z.unknown()).optional(),
   style: flowComponentStyleSchema.optional(),
   hidden: z.union([z.boolean(), z.string()]).optional(),
   disabled: z.union([z.boolean(), z.string()]).optional(),
@@ -582,9 +582,9 @@ export const userQuestionPropsSchema = z.object({
   // Absent on cards posted before terminal question states were introduced;
   // the renderer interprets absence as `pending`.
   phase: z.enum(['pending', 'answered', 'declined']).optional(),
-  answers: z.record(z.union([z.string(), z.array(z.string())])).optional(),
+  answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
   /** Optional notes are scoped to the individual prompt id. */
-  notes: z.record(z.string()).optional(),
+  notes: z.record(z.string(), z.string()).optional(),
   decidedAt: z.string().optional(),
   submitAction: flowActionSchema.optional(),
   dismissAction: flowActionSchema.optional(),
@@ -1173,9 +1173,9 @@ export const flowComponentSchemaLenient: z.ZodType<any> = z.lazy(() =>
 // ============================================================================
 
 export const flowStateSchema = z.object({
-  values: z.record(z.unknown()),
-  touched: z.record(z.boolean()),
-  errors: z.record(z.string()),
+  values: z.record(z.string(), z.unknown()),
+  touched: z.record(z.string(), z.boolean()),
+  errors: z.record(z.string(), z.string()),
   submitting: z.boolean(),
   submitted: z.boolean(),
   history: z.array(z.string()),
@@ -1193,7 +1193,7 @@ export const flowDefinitionSchema = z.object({
   // Lenient on purpose — see flowComponentSchemaLenient. A single unknown
   // component must not reject the entire message at ingest.
   components: z.array(flowComponentSchemaLenient).min(1),
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
   state: flowStateSchema,
 });
 
@@ -1212,7 +1212,7 @@ export type MessageDelivery = (typeof MESSAGE_DELIVERY)[number];
 export const actionRequestSchema = z.object({
   actionId: z.string().min(1),
   type: z.enum(['submit', 'inputChange']),
-  values: z.record(z.unknown()),
+  values: z.record(z.string(), z.unknown()),
   context: z.object({
     flowJSON: flowDefinitionSchema,
     messageId: z.string().min(1),
@@ -1244,8 +1244,8 @@ export const appActionResponseSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('update_screen_data'),
-    data: z.record(z.unknown()),
-    componentUpdates: z.record(z.unknown()).optional(),
+    data: z.record(z.string(), z.unknown()),
+    componentUpdates: z.record(z.string(), z.unknown()).optional(),
   }),
   z.object({
     type: z.literal('ack'),

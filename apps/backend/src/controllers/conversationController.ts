@@ -426,7 +426,7 @@ export class ConversationController {
             error: 'Invalid file metadata format',
             details:
               error instanceof z.ZodError
-                ? error.errors
+                ? error.issues
                 : 'File metadata must be a valid JSON array',
           });
           return;
@@ -987,7 +987,7 @@ export class ConversationController {
             error: 'Invalid file metadata format',
             details:
               error instanceof z.ZodError
-                ? error.errors
+                ? error.issues
                 : 'File metadata must be a valid JSON array',
           });
           return;

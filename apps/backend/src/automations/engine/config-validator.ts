@@ -32,7 +32,7 @@ function declaredLeafToZod(type: string): z.ZodTypeAny {
     case 'array':
       return z.array(z.unknown());
     case 'object':
-      return z.record(z.unknown());
+      return z.record(z.string(), z.unknown());
     case 'secret':
     case 'string':
     default:
@@ -42,7 +42,7 @@ function declaredLeafToZod(type: string): z.ZodTypeAny {
 
 function declaredToZod(declaredRaw: unknown): z.ZodTypeAny {
   if (!declaredRaw || typeof declaredRaw !== 'object' || Array.isArray(declaredRaw)) {
-    return z.record(z.unknown());
+    return z.record(z.string(), z.unknown());
   }
   const shape: Record<string, z.ZodTypeAny> = {};
   for (const [key, value] of Object.entries(declaredRaw as Record<string, unknown>)) {
@@ -83,49 +83,63 @@ function buildRunAgentOutputSchema(stepConfig: unknown): z.ZodTypeAny {
   return declaredToZod(cfg.outputSchema);
 }
 
+/** Strips one optional/nullable/default wrapper, or returns null when `schema` is not one. */
+function unwrapModifier(schema: z.ZodTypeAny): z.ZodTypeAny | null {
+  if (
+    schema instanceof z.ZodOptional ||
+    schema instanceof z.ZodNullable ||
+    schema instanceof z.ZodDefault ||
+    schema instanceof z.ZodPrefault
+  ) {
+    return schema.unwrap() as z.ZodTypeAny;
+  }
+  return null;
+}
+
+function unwrapModifiers(schema: z.ZodTypeAny): z.ZodTypeAny {
+  let current = schema;
+  for (let inner = unwrapModifier(current); inner; inner = unwrapModifier(current)) {
+    current = inner;
+  }
+  return current;
+}
+
 function walkSchemaPath(schema: z.ZodTypeAny, segments: string[]): z.ZodTypeAny | null {
   if (segments.some(s => FORBIDDEN_KEYS.has(s))) return null;
 
   let current: z.ZodTypeAny = schema;
 
   for (const segment of segments) {
-    while (
-      current instanceof z.ZodOptional ||
-      current instanceof z.ZodNullable ||
-      current instanceof z.ZodDefault
-    ) {
-      current = (current as z.ZodOptional<z.ZodTypeAny>)._def.innerType;
-    }
+    current = unwrapModifiers(current);
 
     if (current instanceof z.ZodObject) {
       const next = (current.shape as Record<string, z.ZodTypeAny>)[segment];
       if (next) {
         current = next;
       } else {
-        const def = current._def as { unknownKeys?: string; catchall?: z.ZodTypeAny };
-        if (def.unknownKeys === 'passthrough') {
-          current = z.unknown();
-        } else if (def.catchall && !(def.catchall instanceof z.ZodNever)) {
-          current = def.catchall;
+        // `.passthrough()` is a catchall of z.unknown(); `.strict()` is z.never().
+        const catchall = current.def.catchall as z.ZodTypeAny | undefined;
+        if (catchall && !(catchall instanceof z.ZodNever)) {
+          current = catchall;
         } else {
           return null;
         }
       }
     } else if (current instanceof z.ZodArray) {
       if (/^\d+$/.test(segment) || segment === '*') {
-        current = (current as z.ZodArray<z.ZodTypeAny>)._def.type;
+        current = current.element as z.ZodTypeAny;
       } else {
         return null;
       }
     } else if (current instanceof z.ZodRecord) {
-      current = (current as z.ZodRecord<z.ZodTypeAny, z.ZodTypeAny>)._def.valueType;
+      current = current.valueType as z.ZodTypeAny;
     } else if (current instanceof z.ZodUnion) {
-      const options = (current as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>)._def.options;
+      const options = current.options as z.ZodTypeAny[];
       const walked = walkSchemaPath(options[0], [segment]);
       if (!walked) return null;
       current = walked;
     } else if (current instanceof z.ZodLazy) {
-      const inner = (current as z.ZodLazy<z.ZodTypeAny>)._def.getter();
+      const inner = current.def.getter() as z.ZodTypeAny;
       const walked = walkSchemaPath(inner, [segment]);
       if (!walked) return null;
       current = walked;
@@ -134,26 +148,17 @@ function walkSchemaPath(schema: z.ZodTypeAny, segments: string[]): z.ZodTypeAny 
     }
   }
 
-  while (
-    current instanceof z.ZodOptional ||
-    current instanceof z.ZodNullable ||
-    current instanceof z.ZodDefault
-  ) {
-    current = (current as z.ZodOptional<z.ZodTypeAny>)._def.innerType;
-  }
-
-  return current;
+  return unwrapModifiers(current);
 }
 
 const SCALAR_LIKE_ZOD_TYPES = new Set([
-  'ZodString',
-  'ZodNumber',
-  'ZodBigInt',
-  'ZodBoolean',
-  'ZodDate',
-  'ZodEnum',
-  'ZodNativeEnum',
-  'ZodLiteral',
+  'string',
+  'number',
+  'bigint',
+  'boolean',
+  'date',
+  'enum',
+  'literal',
 ]);
 
 function isZodCompatible(upstream: z.ZodTypeAny, consumer: z.ZodTypeAny): boolean {
@@ -163,57 +168,42 @@ function isZodCompatible(upstream: z.ZodTypeAny, consumer: z.ZodTypeAny): boolea
   // Output fields may be nullable/optional even when they are consumed as a
   // string variable. The runtime resolver safely stringifies nullish values,
   // so compare the underlying value types for reference validation.
-  while (
-    upstream instanceof z.ZodOptional ||
-    upstream instanceof z.ZodNullable ||
-    upstream instanceof z.ZodDefault
-  ) {
-    upstream = upstream._def.innerType;
-  }
-  while (
-    consumer instanceof z.ZodOptional ||
-    consumer instanceof z.ZodNullable ||
-    consumer instanceof z.ZodDefault
-  ) {
-    consumer = consumer._def.innerType;
-  }
+  upstream = unwrapModifiers(upstream);
+  consumer = unwrapModifiers(consumer);
 
-  const upType = upstream._def.typeName as string;
-  const conType = consumer._def.typeName as string;
+  const upType = upstream.def.type;
+  const conType = consumer.def.type;
 
   if (upType === conType) return true;
 
   if (SCALAR_LIKE_ZOD_TYPES.has(upType) && SCALAR_LIKE_ZOD_TYPES.has(conType)) return true;
 
-  if (conType === 'ZodString') return true;
+  if (conType === 'string') return true;
 
   if (consumer instanceof z.ZodUnion) {
-    return (consumer._def.options as z.ZodTypeAny[]).some(branch => isZodCompatible(upstream, branch));
+    return (consumer.options as z.ZodTypeAny[]).some(branch => isZodCompatible(upstream, branch));
   }
 
   return false;
 }
 
 const ZOD_HUMAN_TYPE: Record<string, string> = {
-  ZodString: 'text',
-  ZodNumber: 'number',
-  ZodBigInt: 'number',
-  ZodBoolean: 'true/false',
-  ZodDate: 'date',
-  ZodArray: 'list',
-  ZodObject: 'object',
-  ZodEnum: 'option',
-  ZodNativeEnum: 'option',
-  ZodLiteral: 'fixed value',
-  ZodUnion: 'value',
-  ZodDiscriminatedUnion: 'value',
-  ZodTuple: 'list',
-  ZodRecord: 'object',
+  string: 'text',
+  number: 'number',
+  bigint: 'number',
+  boolean: 'true/false',
+  date: 'date',
+  array: 'list',
+  object: 'object',
+  enum: 'option',
+  literal: 'fixed value',
+  union: 'value',
+  tuple: 'list',
+  record: 'object',
 };
 
 function humanZodType(schema: z.ZodTypeAny): string {
-  const name = schema._def.typeName as string;
-  return ZOD_HUMAN_TYPE[name] ?? 'value';
+  return ZOD_HUMAN_TYPE[schema.def.type] ?? 'value';
 }
 
 export class ConfigValidator {

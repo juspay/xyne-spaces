@@ -2001,7 +2001,7 @@ export function buildSubagentTools(
   return { subagentTools, directTools, remainingCustomTools };
 }
 
-// ── DeepWiki & Context7 MCP loaders (stdio transport, cached) ─────────────
+// ── Context7 MCP loader (stdio transport, cached) ─────────────
 
 const MCP_LOAD_RETRY_MS = 60_000;
 
@@ -2030,8 +2030,6 @@ function cachedStdioMcpLoader(name: string, command: string, args: string[]): ()
     return inflight;
   };
 }
-
-export const loadDeepwikiTools = cachedStdioMcpLoader("deepwiki", "npx", ["-y", "deepwiki-mcp"]);
 
 export const loadContext7Tools = cachedStdioMcpLoader("context7", "npx", ["-y", "@upstash/context7-mcp@latest"]);
 
