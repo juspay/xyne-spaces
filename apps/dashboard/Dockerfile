@@ -39,10 +39,13 @@ COPY package.json /package.json
 
 ENV NODE_OPTIONS="--max-old-space-size=8192"
 
-# Run validation (TypeScript + ESLint)
-# validate:raw, not validate: the image has no scripts/ directory, and an image
-# build has no use for the interactive agent handoff the wrapper adds.
-RUN pnpm --filter xyne-spaces-dashboard run validate:raw
+# NOTE: `validate:raw` (typecheck + prettier format:check + eslint) is intentionally
+# NOT run here. Linting/formatting are CI quality gates, not requirements to produce
+# the deployable bundle, and running eslint inside the (emulated) image build is very
+# slow. Type safety is still enforced — the `build` script below is `tsc --noEmit &&
+# vite build`, so a type error still fails the image. Run lint/format in CI (or the
+# Jenkins validation stage) against the source, not in the image build.
+# RUN pnpm --filter xyne-spaces-dashboard run validate:raw
 
 # Accept build argument for source commit
 ARG SOURCE_COMMIT
@@ -89,41 +92,41 @@ FROM scratch AS bundle
 COPY --from=builder /repo/apps/dashboard/dist /
 COPY --from=builder /repo/apps/dashboard/releases /releases
 
-# Production image with nginx
-FROM nginx:alpine AS runner
+# ---------------------------------------------------------------------------
+# Production image — hardened, non-root nginx.
+#
+# Hardening vs the old `nginx:alpine` stage:
+#   - Base is nginxinc/nginx-unprivileged: the master process runs as the nginx
+#     user (uid 101) by default — no root, no manual user creation.
+#   - nodejs + npm REMOVED. 
+#   - Base pinned to a minor tag for reproducibility.
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS runner
 
-# Install Node.js and npm for running node commands in pod
-RUN apk add --no-cache nodejs npm
+# The pinned base can ship outdated Alpine packages (libssl3/libcrypto3/curl/
+# libexpat/libpng/libxml2/zlib/…), which is the ENTIRE CVE surface of this image
+# (no node_modules in the runtime). Upgrade them to the latest patched versions
+# to clear those base CVEs. apk needs root; the base runs as uid 101, so switch
+# up for the upgrade and back down.
+USER root
+RUN apk upgrade --no-cache
+USER 101
 
-# Create a non-root user
-RUN addgroup --system --gid 1001 frontend && \
-    adduser --system --uid 1001 frontend
+# Static assets + Electron OTA releases. Read-only — the uid-101 worker only
+# needs read access, which the default root-owned, world-readable copy provides.
+COPY --from=builder /repo/apps/dashboard/dist /usr/share/nginx/html
+COPY --from=builder /repo/apps/dashboard/releases /usr/share/nginx/html/releases
 
-# Copy nginx configuration as template for envsubst
-COPY --chown=frontend:frontend apps/dashboard/nginx.conf /etc/nginx/nginx.conf.template
+# nginx.conf as a template; ONLY ${ENABLE_MIGRATION} is substituted at startup
+# (nginx's own $variables are left untouched by the explicit envsubst arg).
+COPY apps/dashboard/nginx.conf /etc/nginx/nginx.conf.template
 
-# Only the built assets cross into the runner, so the builder's workspace layout
-# does not matter here — no node_modules or symlinks are carried over.
-COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard/dist /usr/share/nginx/html
-
-# Copy releases folder with dashboard.zip for Electron OTA updates
-COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard/releases /usr/share/nginx/html/releases
-
-# Set default value for migration flag
+# Migration feature flag (nginx.conf proxies /migration/ only when true).
 ENV ENABLE_MIGRATION=false
-
-# Change ownership of nginx directories (fast)
-RUN chown -R frontend:frontend /var/cache/nginx && \
-    chown -R frontend:frontend /var/log/nginx && \
-    chown -R frontend:frontend /etc/nginx/conf.d && \
-    touch /etc/nginx/nginx.conf && \
-    chown frontend:frontend /etc/nginx/nginx.conf && \
-    touch /var/run/nginx.pid && \
-    chown frontend:frontend /var/run/nginx.pid
-
-USER frontend
 
 EXPOSE 8080
 
-# Use envsubst to replace environment variables at runtime
-CMD ["/bin/sh", "-c", "envsubst '${ENABLE_MIGRATION}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]
+# uid 101 can't write /etc/nginx, so render the config into /tmp (writable) and
+# run from there. ENTRYPOINT cleared so only this renders+runs (we do envsubst
+# ourselves rather than via the base image's template entrypoint).
+ENTRYPOINT []
+CMD ["/bin/sh", "-c", "envsubst '${ENABLE_MIGRATION}' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && exec nginx -c /tmp/nginx.conf -g 'daemon off;'"]

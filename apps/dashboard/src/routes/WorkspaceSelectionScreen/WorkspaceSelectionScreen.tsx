@@ -127,29 +127,29 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
   };
 
   // const handleCreateWorkspace = async (e: React.FormEvent): Promise<void> => {
-    // e.preventDefault();
-    // if (!newWorkspaceName.trim()) return;
+  // e.preventDefault();
+  // if (!newWorkspaceName.trim()) return;
 
-    // setIsCreating(true);
-    // setCreateError('');
-    // try {
-      // const response = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
-        // '/auth/create-workspace-pending',
-        // { workspaceName: newWorkspaceName.trim(), workspaceType: WorkspaceType.ENTERPRISE },
-      // );
-      // const newWorkspaceId = response.data.user.workspaceId;
-      // localStorage.setItem('user_id', response.data.user.id);
-      // window.location.href = `/${newWorkspaceId}`;
-    // } catch (err) {
-      // if (err instanceof AxiosError) {
-        // const msg = (err.response?.data as { message?: string } | undefined)?.message;
-        // setCreateError(msg ?? 'Failed to create workspace.');
-      // } else {
-        // setCreateError('Failed to create workspace.');
-      // }
-    // } finally {
-      // setIsCreating(false);
-    // }
+  // setIsCreating(true);
+  // setCreateError('');
+  // try {
+  // const response = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
+  // '/auth/create-workspace-pending',
+  // { workspaceName: newWorkspaceName.trim(), workspaceType: WorkspaceType.ENTERPRISE },
+  // );
+  // const newWorkspaceId = response.data.user.workspaceId;
+  // localStorage.setItem('user_id', response.data.user.id);
+  // window.location.href = `/${newWorkspaceId}`;
+  // } catch (err) {
+  // if (err instanceof AxiosError) {
+  // const msg = (err.response?.data as { message?: string } | undefined)?.message;
+  // setCreateError(msg ?? 'Failed to create workspace.');
+  // } else {
+  // setCreateError('Failed to create workspace.');
+  // }
+  // } finally {
+  // setIsCreating(false);
+  // }
   // };
 
   const handleTryDifferentAccount = (): void => {

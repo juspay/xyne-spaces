@@ -304,8 +304,7 @@ const GlobalTopBar = ({
           {/* Pills collapse from the left as the bar narrows: Invite first
               (below 1100px), then Support (below 950px). Update always stays.
               Connection status now lives in the sidebar rail. */}
-          <div className='flex items-center gap-1 max-[1100px]:hidden'>
-          </div>
+          <div className='flex items-center gap-1 max-[1100px]:hidden'></div>
           {isRecording && onStopRecording && (
             <Tooltip content='Stop recording'>
               <button

@@ -5,10 +5,7 @@ import { Button } from '../../components/ui/Button/Button';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { API_BASE_URL } from '../../config';
-import {
-  authActor,
-  setLastActiveWorkspaceId,
-} from '../../machines/authMachine';
+import { authActor, setLastActiveWorkspaceId } from '../../machines/authMachine';
 
 interface InvitationDetails {
   id: string;

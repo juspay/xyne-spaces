@@ -205,29 +205,29 @@ const AuthScreen = (): ReactElement | null => {
   };
 
   // const handleCreateEnterpriseWorkspace = async (): Promise<void> => {
-    // if (!newEnterpriseWorkspaceName.trim()) return;
-    // setIsCreatingEnterpriseWorkspace(true);
-    // setCreateEnterpriseWorkspaceError('');
-    // try {
-      // const res = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
-        // '/auth/create-workspace-pending',
-        // {
-          // workspaceName: newEnterpriseWorkspaceName.trim(),
-        // },
-      // );
-      // const newWorkspaceId = res.data.user.workspaceId;
-      // localStorage.setItem('user_id', res.data.user.id);
-      // window.location.href = `/${newWorkspaceId}`;
-    // } catch (err) {
-      // if (err instanceof AxiosError) {
-        // const msg = (err.response?.data as { message?: string } | undefined)?.message;
-        // setCreateEnterpriseWorkspaceError(msg ?? 'Failed to create workspace.');
-      // } else {
-        // setCreateEnterpriseWorkspaceError('Failed to create workspace.');
-      // }
-    // } finally {
-      // setIsCreatingEnterpriseWorkspace(false);
-    // }
+  // if (!newEnterpriseWorkspaceName.trim()) return;
+  // setIsCreatingEnterpriseWorkspace(true);
+  // setCreateEnterpriseWorkspaceError('');
+  // try {
+  // const res = await apiInstance.post<{ user: { workspaceId: string; id: string } }>(
+  // '/auth/create-workspace-pending',
+  // {
+  // workspaceName: newEnterpriseWorkspaceName.trim(),
+  // },
+  // );
+  // const newWorkspaceId = res.data.user.workspaceId;
+  // localStorage.setItem('user_id', res.data.user.id);
+  // window.location.href = `/${newWorkspaceId}`;
+  // } catch (err) {
+  // if (err instanceof AxiosError) {
+  // const msg = (err.response?.data as { message?: string } | undefined)?.message;
+  // setCreateEnterpriseWorkspaceError(msg ?? 'Failed to create workspace.');
+  // } else {
+  // setCreateEnterpriseWorkspaceError('Failed to create workspace.');
+  // }
+  // } finally {
+  // setIsCreatingEnterpriseWorkspace(false);
+  // }
   // };
 
   const handleEmailSubmit = async (e: React.FormEvent): Promise<void> => {
