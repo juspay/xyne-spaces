@@ -57,7 +57,7 @@ services:
     ports:
       - "${REDIS_BIND_PORT:-6379}:6379"
     volumes:
-      - valkey_data:/data
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
@@ -379,7 +379,7 @@ volumes:
     driver: local
   postgres_data:
     driver: local
-  valkey_data:
+  redis_data:
     driver: local
   zero_cache_data:
     driver: local

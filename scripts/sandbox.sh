@@ -775,7 +775,7 @@ cmd_reset() {
   $CONTAINER_RUNTIME network rm sandbox-net >/dev/null 2>&1 || true
 
   echo -e "${GREEN}✓ Reset complete. Run 'pnpm run sandbox -- create <name>' to rebuild shared infra.${NC}"
-  echo -e "${BLUE}   Data volumes preserved: sandbox_postgres_data, sandbox_valkey_data, sandbox_fake_gcs_data.${NC}"
+  echo -e "${BLUE}   Data volumes preserved: sandbox_postgres_data, sandbox_redis_data, sandbox_fake_gcs_data.${NC}"
   echo -e "${BLUE}   For a total wipe including data, use: pnpm run sandbox -- destroy-all && podman volume prune${NC}"
 }
 
