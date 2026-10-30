@@ -490,6 +490,8 @@ const envSchema = Joi.object({
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8083'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
   VESPA_CONFIG_SERVER_URL: Joi.string().uri().default('http://127.0.0.1:19071'),
+  // When Vespa holds hashed values (encryption gateway), search hits are refilled from Postgres before they are shown.
+  VESPA_HYDRATE_RESULTS_FROM_DB: Joi.boolean().default(true),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(true),
@@ -1544,6 +1546,7 @@ export const config = {
     feedUrl: envVars.VESPA_FEED_URL as string,
     queryUrl: envVars.VESPA_QUERY_URL as string,
     configServerUrl: envVars.VESPA_CONFIG_SERVER_URL as string,
+    hydrateResultsFromDb: envVars.VESPA_HYDRATE_RESULTS_FROM_DB as boolean,
     queueNames: envVars.VESPA_QUEUE_NAMES as string,
     fileQueueName: envVars.VESPA_FILE_QUEUE_NAME as string,
     workerQueueName: envVars.VESPA_WORKER_QUEUE_NAME as string,

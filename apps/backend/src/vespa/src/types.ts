@@ -161,7 +161,6 @@ export enum RankProfile {
   nativeRank = "default_native",
   unifiedRank = 'unified',
   personalizedRank = 'personalized',
-  fuzzyRank = 'default_fuzzy',
   duplicateDetection = 'duplicate_detection'
 }
 
