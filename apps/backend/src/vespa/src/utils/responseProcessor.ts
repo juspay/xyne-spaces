@@ -137,8 +137,8 @@ const stripHighlightTags = (text: string): string => {
    * phrase or with every term appearing as a substring somewhere.
    *
    * This is the recall path that nativeRank cannot express: the ticket rank profile scores
-   * `nativeRank(title, description)` only, so a hit that matched via the 3-gram fields
-   * (title_fuzzy/description_fuzzy) or via xyneId scores exactly 0 and would otherwise be
+   * `nativeRank(title, description)` only, so a hit that matched via another field of the
+   * `default` fieldset or via xyneId scores exactly 0 and would otherwise be
    * dropped even though the user's text is right there in the ticket. Purely semantic
    * (nearestNeighbor) hits have no such literal overlap, so they stay filtered out and do
    * not leak back in as noise.

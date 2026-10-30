@@ -24,18 +24,20 @@ import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, ty
 import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
-import { executeFuzzyFallback } from '../utils/fallback';
 import { highlightText } from '../utils/highlight';
 import { config as appConfig } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
+import { hydrateHitsFromDb } from '@/services/vespaSearch/hydrateHits';
 
 /**
  * Vespa document-summary class used when the caller does not ask for a specific one.
  * `lean` returns only the fields the search UI needs, keeping payloads small.
  */
 const DEFAULT_PRESENTATION_SUMMARY = 'lean';
+// Gateway mode: `lean` without the hashed fields the backend refills from Postgres (vespa-core-1 document-summary hydrate).
+const HYDRATE_SUMMARY = 'hydrate';
 
 function escapeQueryForUserInput(query: string): string {
   if (!query) return query;
@@ -311,7 +313,6 @@ export class SearchService {
         meeting = {},
         mail = {},
         call = {},
-        prefixBoostWeight = 0.2,
         presentationSummary = DEFAULT_PRESENTATION_SUMMARY,
         mentionHighlights = [],
         workspaceId,
@@ -407,10 +408,23 @@ export class SearchService {
 
       if (rankProfile === RankProfile.personalizedRank || rankProfile === RankProfile.unifiedRank ) {
         try {
-          const userDoc = await this.vespa.getDocument({docId:userId,schema:userSchema,namespace:config.namespace});
+          // Read through the search (query) containers, not the document API: production serves document/v1 only on
+          // the feed containers. channelWeights, userWeights and email are summary fields, so a docId lookup returns them.
+          const lookup = await this.vespa.search<{ root?: { children?: { fields?: Record<string, any> }[] } }>({
+            yql: `select * from sources ${userSchema} where docId contains @personalizationUserId`,
+            personalizationUserId: userId,
+            hits: 1,
+          });
+          const userDoc = lookup?.root?.children?.[0];
           channelWeights = userDoc?.fields?.channelWeights || {};
           userWeights = userDoc?.fields?.userWeights || {};
           personalizationUserEmail = userDoc?.fields?.email || undefined;
+          // With the encryption gateway the user doc's email is a hash; sent as the involvement term it would be hashed
+          // again and match no mail. Use the plaintext address from Postgres so the gateway hashes it once.
+          if (appConfig.vespa.hydrateResultsFromDb) {
+            const user = await db.user.findUnique({ where: { id: userId }, select: { email: true } });
+            personalizationUserEmail = user?.email || undefined;
+          }
           if (!personalizationUserEmail) {
             this.logger.warn(`No email on Vespa user doc ${userId}; mail involvement rank terms skipped`);
           }
@@ -423,7 +437,11 @@ export class SearchService {
         }
       }
 
-      const buildPayload = (useFuzzy: boolean, useSemanticAnyway: boolean, wsId: string | undefined) => {
+      const requestedSummary = presentationSummary?.trim() || DEFAULT_PRESENTATION_SUMMARY;
+      // With the gateway, lean's hashed text is refilled from Postgres anyway, so ask Vespa only for what it alone knows.
+      const summaryClass = appConfig.vespa.hydrateResultsFromDb && requestedSummary === DEFAULT_PRESENTATION_SUMMARY
+        ? HYDRATE_SUMMARY : requestedSummary;
+      const buildPayload = (useSemanticAnyway: boolean, wsId: string | undefined) => {
         const escapedQuery = escapeQueryForUserInput(searchQuery);
         const effectiveQuery = escapedQuery || '*';
         const { yql, params: boundParams } = this.yqlBuilder.buildYql(
@@ -439,7 +457,6 @@ export class SearchService {
           userId,
           mail,
           call,
-          useFuzzy,
           useSemanticAnyway,
           wsId,
           sort,
@@ -450,7 +467,7 @@ export class SearchService {
 
         const hasQuery = !!(searchQuery && searchQuery.trim());
         const queryLength = searchQuery?.trim().length || 0;
-        const shouldEmbed = hasQuery && queryLength > 3 && (useSemanticAnyway || useFuzzy);
+        const shouldEmbed = hasQuery && queryLength > 3 && useSemanticAnyway;
 
         return {
           yql,
@@ -460,19 +477,18 @@ export class SearchService {
           ...boundParams,
           hits: limit,
           offset,
-          ...(useFuzzy ? { "ranking.profile": RankProfile.fuzzyRank } : { "ranking.profile": rankProfile }),
+          "ranking.profile": rankProfile,
           "input.query(alpha)": 0.5,
           "input.query(chunk_limit)": chunkLimit,
           "input.query(query_length)": queryWordCount,
           timeout: '30s',
           ...(shouldEmbed ? { 'input.query(e)': 'embed(hf-embedder, @query)' } : {}),
-          ...(useFuzzy ? { "gram.match": "weakAnd" } : {}),
           "input.query(freshness_weight)": freshnessWeight,
           "input.query(filtering_weight)": filteringWeight,
           "input.query(time_from)": timeRangeStart,
           "input.query(time_to)": timeRangeEnd,
           "ranking.listFeatures": true,
-          "presentation.summary": presentationSummary?.trim() || DEFAULT_PRESENTATION_SUMMARY,
+          "presentation.summary": summaryClass,
           tracelevel: 0,
           // Exact match turns off the default searchrules.sr rewriting (stopword removal + ranking
           // boosts): stripping a word like "is"/"the" mid-query silently breaks phrase adjacency.
@@ -516,7 +532,7 @@ export class SearchService {
         true,
         {}
       );
-      const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
+      const payload = buildPayload(useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
       this.logger.info(`Payload: ${privateQuery ? '(private query, not logged)' : JSON.stringify(payload)}`);
       if (captureDebug) {
         captureDebug({
@@ -529,18 +545,18 @@ export class SearchService {
       const totalStartTime = Date.now();
       const exactStartTime = Date.now();
       let response = await this.vespa.search<VespaSearchResponse>(payload, { privateQuery });
+      // Vespa may hold hashed values (encryption gateway): refill with plaintext before anything reads or highlights it.
+      await hydrateHitsFromDb(response, { query: searchQuery, mentionNames: mentionHighlights, addMissing: summaryClass === HYDRATE_SUMMARY });
       const exactDuration = Date.now() - exactStartTime;
 
        // Filter by nativerank if enabled
        // Skip nativeRank filtering for filter-only searches (no query text)
        // nativeRank is based on text matching - meaningless without a query
-      let textMatchRescuedIds = new Set<string>();
        if (nativeRankThreshold > 0 && searchQuery?.trim()) {
         const filtered = filterByNativeRank(response, nativeRankThreshold , this.logger, {
           query: searchQuery,
         });
         response = filtered.response;
-        textMatchRescuedIds = filtered.rescuedIds;
       }
 
       // Vespa's own match count. root.children.length is WRONG for grouped queries
@@ -552,90 +568,7 @@ export class SearchService {
       const expectedCount = limit - offset;
       this.logger.info(`Exact search returned ${exactResultCount} results, expected ${expectedCount}`);
 
-      // Hits kept only by the ticket text-match rescue scored below the nativeRank threshold,
-      // so they are not evidence that the exact pass did well. Counting them would push
-      // exactResultCount over expectedCount and silently skip the 3-gram fuzzy fallback that
-      // recovers typo and prefix queries. Clamped because root.children are group nodes when
-      // grouping is on, while rescued ids are collected from the hits nested inside them.
-      const strongExactResultCount = Math.max(0, exactResultCount - textMatchRescuedIds.size);
-
-      const isTranscriptOnly = app.length === 1 && app[0].toLowerCase() === 'transcript';
-      // Mirrors isTranscriptOnly: exclude a search that is ONLY files, not any search that
-      // happens to include them. `.some()` meant one `file` entry in the All tab's six-app
-      // list disabled the fuzzy fallback for all six.
-      const isFileSearch = app.length === 1 && app[0].toLowerCase() === 'file';
-      // Minimum results required before we skip the fuzzy fallback. It previously fired whenever
-      // the exact pass returned fewer than `limit` hits, so a query with 3 solid matches still
-      // pulled in 3-gram fuzzy noise and buried them. Raise to broaden, lower to tighten.
-      // Below this many results the exact pass is considered insufficient and we broaden with
-      // the 3-gram fuzzy pass. Tunable at runtime via the `vespa_min_good_results` flag.
-      const MIN_RESULTS = await superpositionClient.getNumberValue('vespa_min_good_results', 5, {});
-      const oldFallback = strongExactResultCount < MIN_RESULTS && searchQuery?.trim() && !isTranscriptOnly && !isFileSearch
-
-      const FALLBACK_SCORE_THRESHOLD = await superpositionClient.getNumberValue(
-        'vespa_fallback_score_threshold',
-        0.1,
-        {}
-      );
-      // Same reasoning as strongExactResultCount: a rescued hit can carry a passable
-      // relevance from the vector half of the profile despite a zero nativeRank, so it must
-      // not count toward "we already have enough good results".
-      const goodResults = response.root?.children?.filter(
-        child =>
-          !textMatchRescuedIds.has(String(child.id ?? '')) &&
-          (child.relevance ?? 0) >= FALLBACK_SCORE_THRESHOLD
-      ) ?? [];
-
-      // Same MIN_RESULTS rule as oldFallback. Broadening a result set that already has real
-      // matches is what let vector/3-gram strays outrank them.
-      const newFallback =
-        searchQuery?.trim() &&
-        !isTranscriptOnly &&
-        !isFileSearch &&
-        goodResults.length < MIN_RESULTS;
-
-
-      // Exact-match queries never fall back to fuzzy — 3-gram fuzzy would defeat "exact".
-      const needsFallback = !isExactMatch && (newFallbackMethod ? newFallback : oldFallback);
-      let fallbackDuration = 0
-
-      if(needsFallback){
-        const fallbackStartTime = Date.now();
-        const fallbackResult = await executeFuzzyFallback(
-        response,
-        async () => {
-          const fuzzyPayload = buildPayload(true, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
-          this.logger.info(
-            `Fuzzy Search Payload: ${privateQuery ? '(private query, not logged)' : JSON.stringify(fuzzyPayload)}`
-          );
-          if (captureDebug) {
-            captureDebug({
-              stage: "fuzzy-fallback",
-              yql: fuzzyPayload.yql as string,
-              vespaParams: fuzzyPayload as Record<string, unknown>,
-            });
-          }
-          return this.vespa.search<VespaSearchResponse>(fuzzyPayload, { privateQuery });
-        },
-        
-        {
-          searchQuery,
-          limit,
-          prefixBoostWeight,
-          mentionNames: mentionHighlights,
-        },
-        this.logger
-      );
-
-      response = fallbackResult.mergedResponse;
-      fallbackDuration = Date.now() - fallbackStartTime;
-
-      this.logger.info(
-        `Fallback completed: ${fallbackResult.exactCount} exact + ${fallbackResult.fuzzyCount} fuzzy results`
-      );
-    }
-
-      // Re-bold the mention name as one phrase: strip existing <hi> tags (our per-token fuzzy pass
+      // Re-bold the mention name as one phrase: strip existing <hi> tags (per-token highlighting
       // fragments multi-word names) and re-apply highlightText. Rebuilt immutably.
       if (mentionHighlights.length && response.root?.children) {
         response.root.children = response.root.children.map((child) => {
@@ -707,10 +640,10 @@ export class SearchService {
         useFuzzy: false,
         exactResultCount,
         expectedCount,
-        fallBack: needsFallback,
+        fallBack: false,           // the 3-gram fuzzy fallback was removed with the *_fuzzy fields
         newFallbackMethod: newFallbackMethod,
         exactDuration,
-        fallbackDuration,
+        fallbackDuration: 0,
         totalDuration,
         hasTimeKeyword: parsedQuery.hasTimeKeyword,
       });
