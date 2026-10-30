@@ -47,7 +47,7 @@ pub fn client_type(declared: &ValueType) -> &'static str {
 pub fn mismatches(catalog: &Catalog, schema: &ClientSchema) -> Vec<String> {
     let mut found = Vec::new();
     let mut tables: Vec<_> = schema.tables.iter().collect();
-    tables.sort_by(|(a, _), (b, _)| a.cmp(b));
+    tables.sort_by_key(|(name, _)| *name);
     for (name, spec) in tables {
         let Some(table) = catalog.table(name) else {
             found.push(format!(
@@ -57,7 +57,7 @@ pub fn mismatches(catalog: &Catalog, schema: &ClientSchema) -> Vec<String> {
             continue;
         };
         let mut columns: Vec<_> = spec.columns.iter().collect();
-        columns.sort_by(|(a, _), (b, _)| a.cmp(b));
+        columns.sort_by_key(|(name, _)| *name);
         for (column, declared) in columns {
             let Some(known) = table.column(column) else {
                 found.push(format!(

@@ -26,12 +26,18 @@ For a local first run, see the README's Quick start.
 docker build -f docker/server/Dockerfile -t streamgres .
 ```
 
-The image is a slim Debian image of about 125 MB:
-- It has one binary, `/app/server`, run as the unprivileged user `streamgres`
-  (uid 10001).
+The image runs on Google's distroless `cc-debian13` (built on
+`rust:1.89-trixie`). The runtime has no shell, no package manager and no
+coreutils:
+- It has one binary, `/app/server`, run as the unprivileged user `nonroot`
+  (uid 65532).
 - It listens on port 4848 and writes JSON log lines to stderr.
+- It has no Docker `HEALTHCHECK` (there is no curl to run one): probe
+  `/healthz` and `/readyz` over HTTP from the platform instead, which
+  answer 503 until the server is ready (section 6).
 - It needs no file system, except an optional writable directory for
-  `STREAMGRES_PLAN_FILE` (section 5).
+  `STREAMGRES_PLAN_FILE` (section 5), and a writable `/tmp` for heap
+  profiles when Pyroscope is on and the root file system is read-only.
 
 `.github/workflows/docker-publish.yml` publishes the image to the GitHub
 Container Registry as `ghcr.io/<owner>/streamgres`. It runs on pushes to the
@@ -80,10 +86,8 @@ branch name and the short commit SHA.
   directly to PostgreSQL for the logical feed and snapshot minting.
   Replication must not use the read pool.
 
-**The server writes nothing to the database it follows.** It reads rows and
-the replication stream. Its position in the stream comes from each commit and
-from the keepalives PostgreSQL sends anyway. So `STREAMGRES_PG_DSN` can point
-at:
+The change feed writes nothing to the database it follows. Its position comes
+from commits and PostgreSQL keepalives. `STREAMGRES_PG_DSN` can point at:
 - the primary,
 - a logical replica, or
 - a physical standby (PostgreSQL 16 or later, the first version that can do
@@ -101,34 +105,17 @@ limits concurrent reads sent toward PgBouncer; `STREAMGRES_READ_IDLE_CONNECTIONS
 limits how many Streamgres-to-PgBouncer client connections remain open while
 idle. PgBouncer's own pool settings control the PostgreSQL backend connections.
 
-### One-time setup
+### Startup setup
 
-1. **Create the publication** on the primary. The server checks for it at
-   startup and exits if it is missing:
-
-   ```sql
-   CREATE PUBLICATION xyne_sync_pub FOR ALL TABLES;  -- needs a superuser
-   ```
-
-   The name is set by `STREAMGRES_PUBLICATION`. The publication must include
-   your application's mutation-tracking tables (section 4).
-
-2. **Install the schema-change event trigger** on the primary. The server
-   refuses to start without it:
-
-   ```bash
-   psql "$DATABASE_URL" < scripts/sql/ddl-triggers.sql
-   ```
-
-   The checked-in stack is for app `xyne`, shard 0 and publication
-   `xyne_sync_pub`. For another app, shard or publication, generate the
-   stack with `trigger_stack_sql` in `src/client/ddl_triggers.rs`.
-
-   This creates the event trigger `<app>_ddl_end_<shard>`. During every
-   migration, inside the migration's own transaction, it records the published
-   schema before and after into the WAL. The server therefore sees each schema
-   change at its commit, on any topology. Use the same app id and shard you set
-   in `STREAMGRES_APP_ID` and `STREAMGRES_SHARD`.
+`STREAMGRES_MASTER_PG_DSN` connects to the writable primary. On first startup,
+Streamgres creates the `<app>_<shard>` mutation schema, publication, DDL
+functions, and event triggers. Existing objects are validated without
+replacement; mismatches stop startup. The master role must be a PostgreSQL
+superuser to create the publication and event triggers. Choose
+`STREAMGRES_PUBLICATION` and `STREAMGRES_SCHEMAS` for the publication scope.
+Trigger names and the WAL message prefix come from `STREAMGRES_APP_ID` and
+`STREAMGRES_SHARD`; the triggers record the published schema before and after
+DDL in that transaction's WAL.
 
 ### Replication slots
 
@@ -225,6 +212,7 @@ directory is read first, and variables already set take precedence.
 | variable | meaning |
 |---|---|
 | `STREAMGRES_PG_DSN` | direct PostgreSQL endpoint for catalog, feed and snapshot minting (section 3) |
+| `STREAMGRES_MASTER_PG_DSN` | writable primary used during startup setup |
 | `STREAMGRES_QUERY_URL` | the application server's query endpoint |
 | `STREAMGRES_MUTATE_URL` | the application server's mutate endpoint |
 
@@ -263,8 +251,6 @@ depend on what the defaults happen to be:
 | `STREAMGRES_ADDR` | `0.0.0.0:4848` | listen address |
 | `STREAMGRES_SCHEMAS` | `public,<app>_<shard>` | schemas whose tables are served |
 | `STREAMGRES_PUBLICATION` | `xyne_sync_pub` | the publication the change feed streams |
-| `STREAMGRES_DDL_TRIGGER` | `<app>_ddl_end_<shard>` | the schema-change event trigger the server requires |
-| `STREAMGRES_DDL_PREFIX` | `<app>/<shard>/ddl` | the prefix of that trigger's messages |
 | `STREAMGRES_FORWARD_COOKIES` | `true` | forward the connection's cookies to the application server |
 | `STREAMGRES_SNAPSHOT_ROTATION_MS` | `1000` | how often a fresh read snapshot is created |
 | `STREAMGRES_SLOT_CLEANUP_AGE_MS` | `0` (off) | at startup, drop inactive slots of ended processes older than this (PostgreSQL 17+) |
