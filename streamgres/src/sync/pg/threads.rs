@@ -182,7 +182,7 @@ pub async fn require_ddl_trigger(dsn: &str, name: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "the event trigger `{name}` (STREAMGRES_DDL_TRIGGER) is not on this database or is disabled; the server hears of schema changes through it and will not serve without it"
+            "the event trigger `{name}` is missing or disabled; the server hears of schema changes through it and will not serve without it"
         ))
     }
 }

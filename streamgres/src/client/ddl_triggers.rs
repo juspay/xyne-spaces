@@ -10,7 +10,7 @@ use crate::sync::pg::sql::{quote_ident, quote_literal};
 
 /// The advisory lock every DDL statement takes under zero-cache's start
 /// trigger, so that the schemas its messages carry diff in order.
-const DDL_LOCK: i64 = 0x3c6b_8468_f1ba_c0b0;
+pub(crate) const DDL_LOCK: i64 = 0x3c6b_8468_f1ba_c0b0;
 
 /// The command tags zero-cache's triggers fire on.
 const DDL_TAGS: [&str; 7] = [
@@ -37,16 +37,73 @@ pub fn trigger_stack_sql(app: &str, shard: u32, publications: &[&str]) -> String
         .iter()
         .map(|name| quote_literal(name))
         .collect();
+    let app_literal = app.replace('\'', "''");
     TRIGGER_STACK
         .replace("@SCHEMA@", &quote_ident(&format!("{app}_{shard}")))
         .replace("@START@", &quote_ident(&format!("{app}_ddl_start_{shard}")))
         .replace("@END@", &quote_ident(&format!("{app}_ddl_end_{shard}")))
-        .replace("@APP@", app)
         .replace("@SHARD@", &shard.to_string())
         .replace("@PUBLICATIONS@", &publications.join(", "))
         .replace("@TAGS_AND_COMMENT@", &format!("{tags}, 'COMMENT'"))
         .replace("@TAGS@", &tags)
         .replace("@LOCK@", &DDL_LOCK.to_string())
+        .replace("@APP@", &app_literal)
+}
+
+pub(crate) struct FunctionSpec {
+    pub name: String,
+    pub args: Vec<String>,
+    pub body: String,
+    pub language: String,
+}
+
+pub(crate) fn function_specs(app: &str, shard: u32, publications: &[&str]) -> Vec<FunctionSpec> {
+    let sql = trigger_stack_sql(app, shard, publications);
+    let mut specs = Vec::new();
+    let mut rest = sql.as_str();
+    while let Some(start) = rest.find("FUNCTION ") {
+        rest = &rest[start + "FUNCTION ".len()..];
+        let Some(header_end) = rest.find("\nRETURNS ") else {
+            break;
+        };
+        let header = &rest[..header_end];
+        let Some((_, signature)) = header.rsplit_once('.') else {
+            break;
+        };
+        let Some(open) = signature.find('(') else {
+            break;
+        };
+        let Some(close) = signature.rfind(')') else {
+            break;
+        };
+        let args = signature[open + 1..close]
+            .split(',')
+            .filter_map(|arg| arg.split_whitespace().last())
+            .map(str::to_ascii_lowercase)
+            .collect();
+        let Some(body_start) = rest[header_end..].find("AS $$") else {
+            break;
+        };
+        let body_start = header_end + body_start + "AS $$".len();
+        let Some(body_end) = rest[body_start..].find("$$ LANGUAGE ") else {
+            break;
+        };
+        let body = rest[body_start..body_start + body_end].to_owned();
+        let language_start = body_start + body_end + "$$ LANGUAGE ".len();
+        let Some(language_end) = rest[language_start..].find(';') else {
+            break;
+        };
+        specs.push(FunctionSpec {
+            name: signature[..open].trim_matches('"').to_owned(),
+            args,
+            body,
+            language: rest[language_start..language_start + language_end]
+                .trim()
+                .to_ascii_lowercase(),
+        });
+        rest = &rest[language_start + language_end + 1..];
+    }
+    specs
 }
 
 /// [`trigger_stack_sql`]'s text, with the names to fill in marked.
@@ -135,21 +192,21 @@ tables AS (SELECT json_build_object(
                                      ELSE "maxLen" END,
       'notNull', "notNull",
       'dflt', "dflt"
-    )
+    ) ORDER BY col
   ),
   'primaryKey', ARRAY( SELECT json_object_keys(
     json_strip_nulls(
       json_object_agg(
-        DISTINCT "col", "keyPos" ORDER BY "keyPos"
+        DISTINCT "col", "keyPos" ORDER BY "keyPos", "col"
       )
     )
   )),
   'publications', json_object_agg(
     DISTINCT
     "publication",
-    jsonb_build_object('rowFilter', "rowFilter")
+    jsonb_build_object('rowFilter', "rowFilter") ORDER BY "publication"
   )
-) AS "table" FROM published_columns
+) AS "table", "schema", "name" FROM published_columns
   GROUP BY "schema", "schemaOID", "name", "oid", "replicaIdentity"),
 
   indexed_columns AS (SELECT
@@ -157,6 +214,7 @@ tables AS (SELECT json_build_object(
       pg_indexes.tablename as "tableName",
       pg_indexes.indexname as "name",
       index_column.name as "col",
+      index_column.pos as "pos",
       CASE WHEN pg_index.indoption[index_column.pos-1] & 1 = 1 THEN 'DESC' ELSE 'ASC' END as "dir",
       (pg_index.indisunique AND pg_index.indpred IS NULL) as "unique",
       pg_index.indisprimary as "isPrimaryKey",
@@ -205,14 +263,14 @@ tables AS (SELECT json_build_object(
       'isReplicaIdentity', "isReplicaIdentity",
       'isImmediate', "isImmediate",
       'predicateSQL', "predicateSQL",
-      'columns', json_object_agg("col", "dir")
-    ) AS index FROM indexed_columns
+      'columns', json_object_agg("col", "dir" ORDER BY "pos")
+    ) AS index, "schema", "tableName", "name" FROM indexed_columns
       GROUP BY "schema", "tableName", "name", "unique",
          "isPrimaryKey", "isReplicaIdentity", "isImmediate", "predicateSQL")
 
     SELECT json_build_object(
-      'tables', COALESCE((SELECT json_agg("table") FROM tables), '[]'::json),
-      'indexes', COALESCE((SELECT json_agg("index") FROM indexes), '[]'::json)
+      'tables', COALESCE((SELECT json_agg("table" ORDER BY "schema", "name") FROM tables), '[]'::json),
+      'indexes', COALESCE((SELECT json_agg("index" ORDER BY "schema", "tableName", "name") FROM indexes), '[]'::json)
     ) as "publishedSchema"
 $$ LANGUAGE sql;
 
@@ -400,6 +458,9 @@ mod tests {
         assert!(sql.contains("\"zero_0\".schema_specs()"));
         assert!(sql.contains("pb.pubname IN ('zero_public_0', 'zero_meta')"));
         assert!(sql.contains("ARRAY['zero_public_0', 'zero_meta']"));
+        assert!(sql.contains("json_agg(\"table\" ORDER BY \"schema\", \"name\")"));
+        assert!(sql.contains("json_agg(\"index\" ORDER BY \"schema\", \"tableName\", \"name\")"));
+        assert!(sql.contains("json_object_agg(\"col\", \"dir\" ORDER BY \"pos\")"));
         let unfilled = sql
             .split('@')
             .skip(1)
