@@ -8,6 +8,7 @@ import {
   hasTurnedOffHostControl,
   getHostControls,
 } from '@/services/liveKitService';
+import { callEncryptionService } from '@/services/callEncryptionService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import {
@@ -279,12 +280,16 @@ export const callLobbyController = {
       // Refresh cookie on join
       setSessionCookie(res, participant.id, call.callId, call.roomName);
 
+      // An admitted guest is a participant like any other and needs the media key.
+      const encryption = callRecord ? callEncryptionService.credentialsFor(callRecord) : undefined;
+      if (encryption) res.set('Cache-Control', 'no-store');
       res.json({
         token,
         serverUrl: livekitService.getServerUrl(),
         externalId: call.roomName,
         callType: call.callType,
         participantId: participant.id,
+        ...(encryption && { encryption }),
       });
     } catch (err) {
       logger.error(`[call-lobby] externalJoin failed | error=${err}`);

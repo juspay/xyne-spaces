@@ -5,6 +5,7 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 const CAPTION: Record<CallStatus, string> = {
+  [CallStatus.PENDING]: 'started a call',
   [CallStatus.SCHEDULED]: 'scheduled a call',
   [CallStatus.ACTIVE]: 'started a call',
   [CallStatus.IN_PROGRESS]: 'started a call',

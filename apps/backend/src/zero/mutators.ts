@@ -188,6 +188,7 @@ import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
+import { callEncryptionService } from '@/services/callEncryptionService';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -5017,6 +5018,7 @@ export function createMutators(
         }),
         async ({ tx, args: { channelId, callType, targetUserIds, externalId, roomLink, timestamp, callId, creatorParticipantId, targetParticipantIds = {} } }) => {
           const now = timestamp;
+          const e2ee = await callEncryptionService.stateForNewCall({ callType, workspaceId: authData.workspaceId });
 
           // Create system message for the call (will be shown as overlay while active)
           const { messageId: systemMessageId, conversationId } = await sendCallSystemMessage(tx, {
@@ -5050,6 +5052,7 @@ export function createMutators(
             metadata: {
               systemMessageId,
               conversationId,
+              ...(e2ee && { e2ee }),
             },
           });
 
@@ -5160,7 +5163,9 @@ export function createMutators(
                 startedAt: now,
                 lastActivityAt: now,
                 updatedAt: now,
+                // Merge, so encryption state and calendar fields survive activation.
                 metadata: {
+                  ...((call.metadata as Record<string, unknown> | null) ?? {}),
                   systemMessageId: result.messageId,
                   conversationId: result.conversationId,
                 },

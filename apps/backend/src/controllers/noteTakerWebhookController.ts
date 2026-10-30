@@ -1,16 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
-import { RecordingType, CallType } from '@xyne/shared';
+import { RecordingType, CallStatus, CallType } from '@xyne/shared';
 import type { WebhookEvent } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
+import { getCallIntent } from '@/database/repositories/callRepository';
 import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { callRecordingService } from '@/services/callRecordingService';
 import { queueRecordingTranscriptFeed } from '@/services/callVespaQueue';
 import { livekitService } from '@/services/liveKitService';
 import { emitCallStarted, emitCallEnded } from '@/automations/triggers/call.trigger';
-import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { isRecordingType } from '@/utils/callTypeUtils';
 import type { Call } from '@prisma/client';
 
@@ -71,7 +71,14 @@ class NoteTakerWebhookController {
 
     const existing = await repositories.calls.findByExternalId(roomName);
 
-    if (existing) {
+    if (!existing) {
+      // livekitWebhookController routes here from the Call row, so this cannot happen;
+      // room metadata is never read as a substitute.
+      logger.warn('[NoteTaker Webhook] unknown_room_dropped', { room: roomName });
+      return;
+    }
+
+    if (existing.status !== CallStatus.PENDING) {
       // A headless room only contains its creator, so a subsequent join is a
       // reconnect. Keep activity fresh without creating participant state.
       await noteTakerCallRepository.touchCallActivity(existing.id, new Date());
@@ -79,78 +86,47 @@ class NoteTakerWebhookController {
       return;
     }
 
-    let roomMetadata: Record<string, unknown>;
-    try {
-      roomMetadata = event.room?.metadata ? JSON.parse(event.room.metadata) : {};
-    } catch (parseError) {
-      logger.error('[NoteTaker Webhook] metadata_parse_failed', {
-        room: roomName,
-        raw_metadata: (event.room?.metadata ?? '').substring(0, 200),
-        error: parseError,
-      });
-      return;
-    }
-
-    const workspaceId =
-      typeof roomMetadata.workspaceId === 'string' ? roomMetadata.workspaceId : undefined;
-    const createdBy =
-      typeof roomMetadata.createdBy === 'string' ? roomMetadata.createdBy : participant.identity;
-    const notesCanvasId =
-      typeof roomMetadata.notesCanvasId === 'string' ? roomMetadata.notesCanvasId : undefined;
-    const detailedSummaryCanvasId =
-      typeof roomMetadata.detailedSummaryCanvasId === 'string'
-        ? roomMetadata.detailedSummaryCanvasId
-        : undefined;
-    // Present only when the recording was started from inside a thread (see
-    // callController's headless-initiate branch, which stamps these two onto
-    // the LiveKit room metadata synchronously). messageId is generated here,
-    // not in callController, so the anchor message is only ever posted once
-    // the recording has actually started (this webhook fires) — a mic
-    // permission denial or room-creation failure between initiate and here
+    // First join: activate the PENDING row /initiate wrote, from the intent it persisted.
+    const intent = getCallIntent(existing);
+    const workspaceId = existing.workspaceId;
+    const createdBy = existing.createdByUserId;
+    const notesCanvasId = intent?.notesCanvasId;
+    const detailedSummaryCanvasId = intent?.detailedSummaryCanvasId;
+    // Present only when the recording was started from inside a thread. messageId
+    // is generated here, not in callController, so the anchor message is only
+    // ever posted once the recording has actually started (this webhook fires) —
+    // a mic permission denial or room-creation failure between initiate and here
     // never leaves a ghost message in the thread.
-    const conversationId =
-      typeof roomMetadata.conversationId === 'string' ? roomMetadata.conversationId : undefined;
-    const threadChannelId =
-      typeof roomMetadata.channelId === 'string' ? roomMetadata.channelId : undefined;
+    const conversationId = intent?.conversationId;
+    const threadChannelId = intent?.channelId;
     const messageId = conversationId && threadChannelId ? uuidv4() : undefined;
-    const requestedRecordingType = roomMetadata.recordingType;
+    const requestedRecordingType = intent?.recordingType;
     const recordingType = isRecordingType(requestedRecordingType)
       ? requestedRecordingType
       : RecordingType.AUDIO_ONLY;
 
-    if (!workspaceId) {
-      logger.error(`[NoteTaker Webhook] Missing workspaceId in room metadata for ${roomName}`);
-      return;
-    }
     if (!notesCanvasId) {
-      logger.error(`[NoteTaker Webhook] Missing notesCanvasId in room metadata for ${roomName}`);
+      logger.error(`[NoteTaker Webhook] Missing notesCanvasId in call intent for ${roomName}`);
       return;
     }
     if (!detailedSummaryCanvasId) {
-      logger.error(`[NoteTaker Webhook] Missing detailedSummaryCanvasId in room metadata for ${roomName}`);
+      logger.error(`[NoteTaker Webhook] Missing detailedSummaryCanvasId in call intent for ${roomName}`);
       return;
     }
 
-    const callId = uuidv4();
-    const roomLink = buildCallInviteUrl(roomName);
-
     let call;
     try {
-      call = await noteTakerCallRepository.createCall({
-        callId,
-        roomName,
-        workspaceId,
-        createdBy,
+      call = await noteTakerCallRepository.activatePendingCall({
+        call: existing,
         notesCanvasId,
         detailedSummaryCanvasId,
-        roomLink,
         now: new Date(),
       });
     } catch (error) {
       // The recorder UI has already connected by the time this webhook arrives.
-      // Do not let it continue as a ghost recording: there is no Call row to
+      // Do not let it continue as a ghost recording: there is no live Call row to
       // associate its transcript, audio, or eventual stop event with.
-      logger.error('[NoteTaker Webhook] call_record_creation_failed', {
+      logger.error('[NoteTaker Webhook] call_activation_failed', {
         room: roomName,
         workspaceId,
         createdBy,
@@ -186,7 +162,7 @@ class NoteTakerWebhookController {
       return;
     }
 
-    logger.info(`[NoteTaker Webhook] Created note taker call record for ${roomName}`, {
+    logger.info(`[NoteTaker Webhook] Activated note taker call record for ${roomName}`, {
       callId: call.externalId,
     });
 
