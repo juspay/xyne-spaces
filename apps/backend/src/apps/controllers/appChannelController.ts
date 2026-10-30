@@ -176,7 +176,7 @@ export class AppChannelController {
   listParticipants = async (req: Request, res: Response): Promise<void> => {
     const queryResult = ListParticipantsQuerySchema.safeParse(req.query);
     if (!queryResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.issues });
       return;
     }
     const { channelId, limit, cursor } = queryResult.data;

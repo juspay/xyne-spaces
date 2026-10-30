@@ -232,7 +232,7 @@ router.post('/refresh', sdkSsoRefreshLimiter, async (req: Request, res: Response
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         error: 'invalid_request',
-        message: error.errors[0].message,
+        message: error.issues[0].message,
       });
     }
     logger.error('[SDK-SSO] Error refreshing session:', error);
@@ -257,7 +257,7 @@ router.post('/logout', sdkSsoRefreshLimiter, async (req: Request, res: Response)
     if (error instanceof z.ZodError) {
       return res.status(400).json({
         error: 'invalid_request',
-        message: error.errors[0].message,
+        message: error.issues[0].message,
       });
     }
     logger.error('[SDK-SSO] Error signing out:', error);

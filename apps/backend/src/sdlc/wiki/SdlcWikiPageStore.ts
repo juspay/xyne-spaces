@@ -7,7 +7,6 @@ import {
   SDLC_HUB_ITEM_RELATION,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_WIKI_FOLDER,
-  SDLC_WIKI_WORKFLOW_RELATION,
   type SdlcWikiPageAction,
   type WriteSdlcWikiPageInput,
 } from '@xyne/shared';
@@ -22,9 +21,6 @@ import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from '../sdlcCanvasSy
 import { ensureHubWikiFolder, ensureRepositoryWikiFolder } from '../hubFolders';
 import { mutateMarkdownSection } from '../markdownSection';
 import { isSdlcHubAdmin } from '../sdlcChannelMembership';
-import { SDLC_AGENT_STEP_TYPE } from '@/workflowsV2/agents/sdlc-agent-provider';
-import { sdlcAuthorOf } from '@/workflowsV2/agents/sdlc-dispatch';
-import { TERMINAL_EXECUTION_STATUSES } from '@/workflowsV2/constants';
 
 export interface WikiScopeInput {
   workspaceId: string;
@@ -118,49 +114,11 @@ export class SdlcWikiPageStore {
     }
   }
 
-  /** Wiki generation runs as the workflow author, who may not be an admin: trust the commit only if that run is live. */
-  async isGenerationRun(input: Pick<WriteSdlcWikiPageInput, 'channelId' | 'actorUserId' | 'repoId' | 'generationCommit'>): Promise<boolean> {
-    const commit = input.generationCommit;
-    if (!commit) return false;
-    const link = await this.prisma.sdlcEntityLink.findFirst({
-      where: {
-        channelId: input.channelId,
-        sourceType: 'CHANNEL',
-        targetType: 'WORKFLOW',
-        relationType: SDLC_WIKI_WORKFLOW_RELATION,
-      },
-      select: { targetId: true },
-    });
-    if (!link) return false;
-    const workflow = await this.prisma.workflow.findUnique({
-      where: { id: link.targetId },
-      select: { metadata: true },
-    });
-    if (sdlcAuthorOf(workflow?.metadata) !== input.actorUserId) return false;
-    const executions = await this.prisma.workflowExecution.findMany({
-      where: { workflowId: link.targetId, status: { notIn: [...TERMINAL_EXECUTION_STATUSES] } },
-      select: { id: true },
-    });
-    if (!executions.length) return false;
-    // A dispatched SDLC agent step waits in EXTERNAL_WAIT with its resolved config as `input`.
-    const steps = await this.prisma.workflowStep.findMany({
-      where: {
-        workflowExecutionId: { in: executions.map((execution) => execution.id) },
-        status: 'EXTERNAL_WAIT',
-        data: { contains: commit },
-      },
-      select: { data: true },
-    });
-    return steps.some((step) => {
-      try {
-        const data = JSON.parse(step.data ?? '{}') as { type?: unknown; input?: { repoId?: unknown; generationCommit?: unknown } };
-        return data.type === SDLC_AGENT_STEP_TYPE
-          && data.input?.generationCommit === commit
-          && (data.input.repoId ?? null) === (input.repoId ?? null);
-      } catch {
-        return false;
-      }
-    });
+  /** Wiki generation ran as a workflow V2 run, which this build no longer has: no write is one. */
+  isGenerationRun(
+    _input: Pick<WriteSdlcWikiPageInput, 'channelId' | 'actorUserId' | 'repoId' | 'generationCommit'>,
+  ): Promise<boolean> {
+    return Promise.resolve(false);
   }
 
   /** A public hub's Wiki is readable by the workspace; writing still needs membership. */

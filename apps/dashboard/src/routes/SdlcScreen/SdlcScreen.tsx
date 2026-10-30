@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  ChannelAddUserPolicy,
   ChannelRole,
   ChannelType,
   SDLC_HUB_KNOWLEDGE_FOLDER,
@@ -811,18 +810,19 @@ export default function SdlcScreen(): ReactElement {
       ),
     [channel, auth.userID],
   );
-  // Same rule as the channel's Add members button: an agent joins as a channel member.
-  const addAgentBlockedReason = useMemo((): string | null => {
-    const me = (channel?.participants ?? []).find(
-      participant => participant.userId === auth.userID,
-    );
-    if (!me) return 'Join this hub to add agents.';
-    return me.role === ChannelRole.ADMIN ||
-      (channel?.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE) ===
-        ChannelAddUserPolicy.EVERYONE
-      ? null
-      : 'Only hub admins can add agents to this hub.';
-  }, [channel, auth.userID]);
+  // Disabled (Claw)
+  // // Same rule as the channel's Add members button: an agent joins as a channel member.
+  // const addAgentBlockedReason = useMemo((): string | null => {
+  //   const me = (channel?.participants ?? []).find(
+  //     participant => participant.userId === auth.userID,
+  //   );
+  //   if (!me) return 'Join this hub to add agents.';
+  //   return me.role === ChannelRole.ADMIN ||
+  //     (channel?.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE) ===
+  //       ChannelAddUserPolicy.EVERYONE
+  //     ? null
+  //     : 'Only hub admins can add agents to this hub.';
+  // }, [channel, auth.userID]);
   // Archiving takes one click, so the toast names what went and offers the way back.
   const archiveArtifact = (canvasId: string, archived: boolean, title?: string): void => {
     void apiInstance

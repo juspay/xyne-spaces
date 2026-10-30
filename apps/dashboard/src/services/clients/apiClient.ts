@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { API_BASE_URL, APP_BASE_PATH, isExternalApp } from '../../config';
+import { API_BASE_URL, isExternalApp } from '../../config';
 import { logger, Logger, getWebDeviceKey, WEB_DEVICE_KEY_STORAGE_KEY } from '../../utils/logger';
 import {
   httpRequestDuration,

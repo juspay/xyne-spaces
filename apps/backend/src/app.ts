@@ -11,7 +11,7 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
-import { runWithContext, tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
+import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
@@ -251,9 +251,10 @@ import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';
-import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
-import { publicChannels, roomAllows, type RoomRef } from '@/services/proactivity/roomScope';
-import { decodeDraftContext, type DraftResult } from '@/services/proactivity/dispatch';
+// Disabled (Claw)
+// import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
+// import { publicChannels, roomAllows, type RoomRef } from '@/services/proactivity/roomScope';
+// import { decodeDraftContext, type DraftResult } from '@/services/proactivity/dispatch';
 
 
 export class App {

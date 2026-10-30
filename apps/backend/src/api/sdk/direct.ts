@@ -58,6 +58,7 @@ import {
   // listScopedClawAgents,
   // runScopedClawAgent,
   ClawAgentNotAvailableError,
+  ClawAgentNotInstalledError,
   // Disabled (Claw)
   // type ScopedClawIdentity,
 } from '@/services/clawAgentService';
