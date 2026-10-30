@@ -1,22 +1,11 @@
 import { type Call, type Prisma } from '@prisma/client';
-import { CallStatus, CallType } from '@xyne/shared';
+import { CallStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from './index';
 import { createThreadAnchorMessageTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleParticipantLeaveTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleRoomFinishedTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { markThreadAnchorDeletedTx, type ThreadAnchorRemoval } from '@/bypassAcl/transactions/noteTakerCallRepository';
-
-export interface CreateNoteTakerCallParams {
-  callId: string;
-  roomName: string;
-  workspaceId: string;
-  createdBy: string;
-  notesCanvasId: string;
-  detailedSummaryCanvasId: string;
-  roomLink: string;
-  now: Date;
-}
 
 interface NoteTakerCallMetadata {
   notesCanvasId?: string;
@@ -73,36 +62,6 @@ export class NoteTakerCallRepository {
     });
   }
 
-  async createCall(params: CreateNoteTakerCallParams): Promise<Call> {
-    const { callId, roomName, workspaceId, createdBy, notesCanvasId, detailedSummaryCanvasId, roomLink, now } = params;
-
-    const metadata: NoteTakerCallMetadata = {
-      notesCanvasId,
-      detailedSummaryCanvasId,
-      detailedSummaryReady: false,
-      // From creation the summary pipeline is nominally in flight (auto
-      // generation runs at call end). Without this, a freshly-created
-      // recording reads as ready=false+canvasId, which the UI treats as a
-      // stranded/failed run and offers "Try again" instead of the shimmer.
-      detailedSummaryStatus: 'pending',
-    };
-
-    return this.db.call.create({
-      data: {
-        id: callId,
-        externalId: roomName,
-        workspaceId,
-        createdByUserId: createdBy,
-        callType: CallType.HEADLESS,
-        recordingParticipants: JSON.stringify([createdBy]),
-        status: CallStatus.ACTIVE,
-        roomLink,
-        metadata: metadata as Prisma.InputJsonValue,
-        startedAt: now,
-        lastActivityAt: now,
-      },
-    });
-  }
 
   /**
    * Update the thread's single anchor message once a thread-linked recording

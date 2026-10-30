@@ -331,13 +331,6 @@ export class CallRepository {
     });
   }
 
-  /** Rollback for a PENDING row whose LiveKit room was never created. */
-  async deletePendingCall(id: string): Promise<void> {
-    await DatabaseClient.getInstance().call.deleteMany({
-      where: { id, status: CallStatus.PENDING },
-    });
-  }
-
   /** A PENDING row nobody joined: the room timed out or the webhook never came. */
   async cancelPendingCall(id: string, endedAt: Date): Promise<boolean> {
     const { count } = await DatabaseClient.getInstance().call.updateMany({

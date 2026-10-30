@@ -978,7 +978,7 @@ export class CallController {
       // Past room creation the webhook owns the row (room_finished cancels it);
       // before that nothing else references it, so take it back out.
       if (pendingCallId && stage === 'livekit_room_creation') {
-        await repositories.calls.deletePendingCall(pendingCallId).catch((cleanupError) => {
+        await repositories.calls.delete(pendingCallId).catch((cleanupError) => {
           logger.error(`[${callIdForLog}] pending_call_cleanup_failed`, { pendingCallId, cleanupError });
         });
       }
