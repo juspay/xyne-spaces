@@ -703,8 +703,8 @@ const envSchema = Joi.object({
   NOTIFICATION_TRACE_USER_IDS: Joi.string().allow('').default(''),
   LOTUS_OWN_MESSAGE_PREFETCH_ENABLED: Joi.boolean().empty('').default(false),
   RELEASE_AUTOSTUB_MISSING_TICKETS: Joi.string().allow('').default(''),
-  SOFFICE_PATH: Joi.string().empty('').default('soffice'),
-  SOFFICE_MAX_CONCURRENCY: Joi.number().integer().min(1).empty('').default(3),
+  OFFICE_CONVERSION_MAX_CONCURRENCY: Joi.number().integer().min(1).empty('').default(3),
+  OFFICE_CONVERSION_FONT_DIR: Joi.string().empty('').default('assets/ream-fonts'),
   STAGE_ETA_DEADLINE_BATCH_SIZE: Joi.number().integer().empty('').default(15),
   STAGE_ETA_DEADLINE_BATCH_SLEEP_MS: Joi.number().integer().empty('').default(1000),
   LANGFUSE_PROMPT_CACHE_TTL: Joi.number().empty('').default(300), // seconds
@@ -1549,9 +1549,10 @@ export const config = {
   lotusOwnMessagePrefetchEnabled: envVars.LOTUS_OWN_MESSAGE_PREFETCH_ENABLED as boolean,
   releaseAutostubMissingTickets: envVars.RELEASE_AUTOSTUB_MISSING_TICKETS as string,
   presenceOfflineGracePeriodMs: envVars.PRESENCE_OFFLINE_GRACE_PERIOD_MS as number,
-  soffice: {
-    path: envVars.SOFFICE_PATH as string,
-    maxConcurrency: envVars.SOFFICE_MAX_CONCURRENCY as number,
+  officeConversion: {
+    maxConcurrency: envVars.OFFICE_CONVERSION_MAX_CONCURRENCY as number,
+    // Ream's fonts (assets/ream-fonts); relative paths resolve against the working directory.
+    fontDir: envVars.OFFICE_CONVERSION_FONT_DIR as string,
   },
   stageEtaDeadline: {
     batchSize: envVars.STAGE_ETA_DEADLINE_BATCH_SIZE as number,

@@ -26,8 +26,8 @@ The service keeps the current Docling-style response envelope and strict chunk o
 
 ## Flow
 
-- Accept `.pdf`, `.docx`, `.pptx`, `.txt`, `.png`, `.jpg`, `.jpeg`, `.bmp`, `.webp`, `.tif`, and `.tiff`.
-- Rasterize PDFs/images locally with PyMuPDF/Pillow. DOCX/PPTX are converted to PDF with headless LibreOffice first; TXT is rendered into wrapped image pages with Pillow. No GPU is required in this service.
+- Accept `.pdf`, `.txt`, `.png`, `.jpg`, `.jpeg`, `.bmp`, `.webp`, `.tif`, and `.tiff`. Office files are converted to PDF upstream (the backend's Ream conversion), so this service never runs LibreOffice and rejects `.docx`/`.pptx`.
+- Rasterize PDFs/images locally with PyMuPDF/Pillow; TXT is rendered into wrapped image pages with Pillow. No GPU is required in this service.
 - Send rendered pages to LightOn as OpenAI-compatible chat-completion image requests.
 - Parse LightOn bbox markers in the documented `![image](image_N.png)x1,y1,x2,y2` format, normalized to `0..1000`.
 - Cap parsed bbox regions before merge with `LIGHTON_MAX_IMAGE_REGIONS_PER_PAGE` to bound worst-case page work.

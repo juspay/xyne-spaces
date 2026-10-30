@@ -24,6 +24,8 @@ WORKDIR /workspace
 # copied too so that --ignore-workspace below is an explicit choice rather than
 # an accident of the file being absent.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm applies these at install time (root package.json → pnpm.patchedDependencies).
+COPY patches ./patches
 
 # Only the root project's own dependencies (the yama tooling) are needed here,
 # not the 20 workspace members. --ignore-workspace installs the root in

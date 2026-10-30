@@ -648,8 +648,7 @@ and async-job settings (`OCR_PDF_RENDER_DPI`, `OCR_MAX_PAGES`, `OCR_ASYNC_MAX_IN
 empty), PDB `maxUnavailable: 1`. Requests 1 CPU / 2 GiB, limit 4 GiB.
 `terminationGracePeriodSeconds: 120`.
 
-**Storage.** EmptyDir `tmp` at `/tmp`. `HOME=/tmp` on that emptyDir is needed by LibreOffice
-(`soffice`) for docx/pptx conversion.
+**Storage.** EmptyDir `tmp` at `/tmp`, holding uploads while they are rasterized.
 
 ## xyne-lighton-model
 

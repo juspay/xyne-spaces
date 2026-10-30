@@ -809,7 +809,7 @@ export class App {
     this.app.use('/api/merchants', authMiddleware.authenticate, merchantRoutes);
     this.app.use('/api/form-field-values', authMiddleware.authenticate, formFieldValuesRoutes);
 
-    // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
+    // Office document (pptx, docx, ...) -> PDF conversion, via Ream (reamConversionPool).
     // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.
     this.app.use('/api/office-conversion', authMiddleware.authenticate, officeConversionRoutes);
 
