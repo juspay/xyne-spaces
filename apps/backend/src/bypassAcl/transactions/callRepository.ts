@@ -8,7 +8,7 @@ import { DatabaseClient } from '@/database/client';
 import type { Call } from '@prisma/client';
 import { transaction } from '../base';
 import { setSlashCommandArtifactLifecycle } from '@/database/repositories/messageArtifactRepository';
-import { CallMetadata, CallRepository, CreateCallParticipantInput, parseRecordingParticipantIds, scheduledCallPillContent, scheduledCallPillMetadata } from '@/database/repositories/callRepository';
+import { CallMetadata, CallRepository, CreateCallParticipantInput, parseRecordingParticipantIds, scheduledCallPillContent, scheduledCallPillMetadata, type CallEncryptionState } from '@/database/repositories/callRepository';
 import { queueCallVespaFeed, CallVespaFeedSource } from '@/services/callVespaQueue';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { logger } from '@/utils/logger';
@@ -422,7 +422,7 @@ export function activateScheduledCallTx(callParam: Call, workspaceId: string | u
   });
 }
 
-export function createCallWithParticipantsAndMessageTx(callId: string, roomName: string, wsId: string, createdBy: string, channelId: string, workspaceId: string | undefined, callType: CallType, roomLink: string, isHeadless: boolean, now: Date, callOrigin: CallOrigin | undefined, messageId: string, conversationId: string, artifactMessageId: string | undefined, agentName: string | undefined, dispatchStatus: string | undefined, self: CallRepository, channelParticipants: { userId: string; }[], joiningUserId: string, pendingCall?: Call) {
+export function createCallWithParticipantsAndMessageTx(callId: string, roomName: string, wsId: string, createdBy: string, channelId: string, workspaceId: string | undefined, callType: CallType, roomLink: string, isHeadless: boolean, now: Date, callOrigin: CallOrigin | undefined, messageId: string, conversationId: string, artifactMessageId: string | undefined, agentName: string | undefined, dispatchStatus: string | undefined, self: CallRepository, channelParticipants: { userId: string; }[], joiningUserId: string, pendingCall?: Call, e2ee?: CallEncryptionState) {
   return transaction(['Call', 'CallParticipant', 'ChannelStats', 'Conversation', 'Message', 'MessageArtifact', 'User'], 'createCallWithParticipantsAndMessage: call, participants, conversation, system message and channel stats must commit atomically; tx is not ACL-wrapped', DatabaseClient.getInstance(), async (tx) => {
     const activationMetadata = {
       systemMessageId: messageId,
@@ -431,8 +431,8 @@ export function createCallWithParticipantsAndMessageTx(callId: string, roomName:
       ...(agentName && { agentName }),
       ...(dispatchStatus && { dispatchStatus }),
     };
-    // /initiate wrote the row as PENDING; first join activates it in place. The
-    // create branch remains for callers that never wrote a pending row.
+    // /initiate wrote the row as PENDING (encryption already on it); first join activates
+    // it in place. The create branch serves callers that never wrote a pending row.
     const call = pendingCall
       ? await tx.call.update({
           where: { id: pendingCall.id, status: CallStatus.PENDING },
@@ -462,7 +462,7 @@ export function createCallWithParticipantsAndMessageTx(callId: string, roomName:
         startedAt: now,
         lastActivityAt: now,
         callOrigin: callOrigin || CallOrigin.CHANNEL,
-        metadata: activationMetadata,
+        metadata: { ...activationMetadata, ...(e2ee && { e2ee }) },
       },
     });
 

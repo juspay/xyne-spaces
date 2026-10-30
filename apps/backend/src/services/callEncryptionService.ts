@@ -3,7 +3,7 @@ import type { Call } from '@prisma/client';
 import { CallType, type CallEncryptionCredentials } from '@xyne/shared';
 import { config } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
-import { getCallEncryptionState, type CallEncryptionState } from '@/database/repositories/callRepository';
+import type { CallEncryptionState } from '@/database/repositories/callRepository';
 import { logger } from '@/utils/logger';
 
 /**
@@ -29,6 +29,11 @@ const DEFAULT_CONFIG = { enabled: false };
 
 export type { CallEncryptionCredentials };
 
+// Type-only import above: the repository stamps state through this service at every
+// Call creation, so this module must not need the repository at runtime.
+const encryptionStateOf = (call: Pick<Call, 'metadata'>): CallEncryptionState | undefined =>
+  (call.metadata as { e2ee?: CallEncryptionState } | null)?.e2ee;
+
 class CallEncryptionService {
   private masterKey(): Buffer | null {
     const raw = config.livekit.e2eeMasterKey;
@@ -42,8 +47,9 @@ class CallEncryptionService {
   }
 
   /**
-   * Encryption state for a call being created. Undefined means the call runs
-   * unencrypted and no key is ever issued for it. HEADLESS recordings stay clear:
+   * Encryption state for a call being created, decided once when its row is written
+   * (every creator in callRepository, the automation transaction and the Zero mutator
+   * call this). Undefined means the call runs unencrypted and no key is ever issued. HEADLESS recordings stay clear:
    * their only participants are the recorder and the agent, neither of which
    * holds a key yet.
    */
@@ -65,11 +71,11 @@ class CallEncryptionService {
   }
 
   isCallEncrypted(call: Pick<Call, 'metadata'>): boolean {
-    return getCallEncryptionState(call)?.enabled === true;
+    return encryptionStateOf(call)?.enabled === true;
   }
 
   currentKeyIndex(call: Pick<Call, 'metadata'>): number {
-    return getCallEncryptionState(call)?.keyIndex ?? 0;
+    return encryptionStateOf(call)?.keyIndex ?? 0;
   }
 
   deriveKey(roomName: string, keyIndex: number): Buffer {
@@ -84,7 +90,7 @@ class CallEncryptionService {
 
   /** The key material a join response carries, or undefined for an unencrypted call. */
   credentialsFor(call: Pick<Call, 'externalId' | 'metadata'>, keyIndex?: number): CallEncryptionCredentials | undefined {
-    return this.credentialsForState(call.externalId, getCallEncryptionState(call), keyIndex);
+    return this.credentialsForState(call.externalId, encryptionStateOf(call), keyIndex);
   }
 
   /** Same, for a call whose row is being written in the same request. */

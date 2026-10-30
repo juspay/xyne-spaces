@@ -5,9 +5,6 @@ jest.mock('@/config/env', () => ({ config: mockConfig }));
 jest.mock('@/services/superpositionClient', () => ({
   superpositionClient: { getObjectValue: (...args: unknown[]) => mockGetObjectValue(...args) },
 }));
-jest.mock('@/database/repositories/callRepository', () => ({
-  getCallEncryptionState: (call: { metadata: { e2ee?: unknown } | null }) => call.metadata?.e2ee,
-}));
 jest.mock('@/utils/logger', () => ({ logger: { error: jest.fn(), info: jest.fn(), warn: jest.fn() } }));
 // The bare package resolves to its ESM dist, which jest cannot parse; the service only needs the enum.
 jest.mock('@xyne/shared', () => ({ CallType: { AUDIO: 'AUDIO', VIDEO: 'VIDEO', HEADLESS: 'HEADLESS' } }));

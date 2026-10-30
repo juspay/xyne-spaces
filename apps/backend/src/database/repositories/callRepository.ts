@@ -9,6 +9,7 @@ import { CallOrigin, CallRingNotification, CallStatus, CallType, InvitationRespo
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { callEncryptionService } from '@/services/callEncryptionService';
 import type { CallParticipantMetadata } from '@xyne/shared';
 import { normalizeEmailList } from '@/utils/email';
 import { CALENDAR_CALL_ORIGINS } from '@/utils/callTypeUtils';
@@ -138,18 +139,15 @@ export interface CallIntent {
   recordingType?: string;
 }
 
-export interface CallEncryptionState {
+/** A type alias, not an interface, so it is assignable to Prisma and Zero JSON columns. */
+export type CallEncryptionState = {
   enabled: boolean;
   /** Key ring index the call is currently on. Rotation increments it; frames carry it. */
   keyIndex: number;
-}
+};
 
 export const getCallIntent = (call: Pick<Call, 'metadata'>): CallIntent | undefined =>
   (call.metadata as CallMetadata | null)?.intent;
-
-export const getCallEncryptionState = (
-  call: Pick<Call, 'metadata'>,
-): CallEncryptionState | undefined => (call.metadata as CallMetadata | null)?.e2ee;
 
 /** A PENDING row older than this with no participant is swept to CANCELLED. */
 export const PENDING_CALL_TTL_MS = 10 * 60 * 1000;
@@ -917,6 +915,9 @@ export class CallRepository {
     tx: Prisma.TransactionClient,
   ): Promise<{ callId: string; participantUserIds: string[] }> {
     const workspaceId = await repositories.channels.getWorkspaceId(params.channelId);
+    // Encryption is decided here, once; joins only read it back from the row.
+    const e2ee = await callEncryptionService.stateForNewCall({ callType: params.callType, workspaceId });
+    const metadata = { ...params.metadata, ...(e2ee && { e2ee }) };
 
     const baseParticipantUserIds = params.targetUserIds?.length
       ? params.targetUserIds
@@ -950,7 +951,7 @@ export class CallRepository {
         updatedAt: new Date(),
         lastActivityAt: new Date(),
         participantCount: participantUserIds.length + externalInvitees.length,
-        ...(params.metadata && { metadata: params.metadata as Prisma.InputJsonValue }),
+        ...(Object.keys(metadata).length > 0 && { metadata: metadata as Prisma.InputJsonValue }),
         ...(params.callUpdatesChannel !== undefined && { callUpdatesChannel: params.callUpdatesChannel }),
         ...(params.summaryTemplateId && { summaryTemplateId: params.summaryTemplateId }),
       },
@@ -1544,7 +1545,10 @@ export class CallRepository {
     // Prefer the caller-supplied workspaceId, else derive from the call's channel.
     const wsId = workspaceId ?? await repositories.channels.getWorkspaceId(channelId);
 
-    const result = await createCallWithParticipantsAndMessageTx(callId, roomName, wsId, createdBy, channelId, workspaceId, callType, roomLink, isHeadless, now, callOrigin, messageId, conversationId, artifactMessageId, agentName, dispatchStatus, this, channelParticipants, joiningUserId, pendingCall);
+    // /initiate stamped encryption on its PENDING row; a caller with no such row (automations) gets it here.
+    const e2ee = pendingCall ? undefined : await callEncryptionService.stateForNewCall({ callType, workspaceId: wsId });
+
+    const result = await createCallWithParticipantsAndMessageTx(callId, roomName, wsId, createdBy, channelId, workspaceId, callType, roomLink, isHeadless, now, callOrigin, messageId, conversationId, artifactMessageId, agentName, dispatchStatus, this, channelParticipants, joiningUserId, pendingCall, e2ee);
 
     await messageMetadataService.syncInitialMessageMd(conversationId);
 
@@ -2196,7 +2200,10 @@ export class CallRepository {
       // mirrored (unmanaged) events have none, so inherit the workspace of the
       // organizer who owns the calendar sync instead of denormalizing from a channel.
       const workspaceId = await resolveWorkspaceIdFromModel(DatabaseClient.getInstance(), 'user', { id: data.createdByUserId });
-      await DatabaseClient.getInstance().call.create({ data: { ...data, workspaceId } });
+      const e2ee = await callEncryptionService.stateForNewCall({ callType: data.callType, workspaceId });
+      await DatabaseClient.getInstance().call.create({
+        data: { ...data, workspaceId, metadata: { ...data.metadata, ...(e2ee && { e2ee }) } },
+      });
       queueCallVespaFeed(data.id, { source: CallVespaFeedSource.CallRepositoryUpsertExternalCalendarCallCreate });
       return;
     }
