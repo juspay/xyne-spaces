@@ -244,43 +244,44 @@ class WorkerService {
         await etaDeadlineWorker.start();
       }
 
-      if (appConfig.enableAutomationWorker) {
-        logger.info('Initializing notification service for automation worker...');
-        await notificationService.initialize();
-        logger.info('Initializing automations module...');
-        const { initializeAutomations } = await import('@/automations');
-        await initializeAutomations();
-        const { automationWorker } = await import('@/automations/queue/automation.worker');
-        logger.info('Starting automation run worker...');
-        await automationWorker.start();
-        const { automationScheduleWorker } = await import(
-          '@/automations/queue/automation-schedule.worker'
-        );
-        logger.info('Starting automation schedule worker...');
-        await automationScheduleWorker.start();
+      // Disabled (Automations)
+      // if (appConfig.enableAutomationWorker) {
+      //   logger.info('Initializing notification service for automation worker...');
+      //   await notificationService.initialize();
+      //   logger.info('Initializing automations module...');
+      //   const { initializeAutomations } = await import('@/automations');
+      //   await initializeAutomations();
+      //   const { automationWorker } = await import('@/automations/queue/automation.worker');
+      //   logger.info('Starting automation run worker...');
+      //   await automationWorker.start();
+      //   const { automationScheduleWorker } = await import(
+      //     '@/automations/queue/automation-schedule.worker'
+      //   );
+      //   logger.info('Starting automation schedule worker...');
+      //   await automationScheduleWorker.start();
 
-        const { deskLabelBackfillWorker } = await import(
-          '@/automations/queue/desk-label-backfill.worker'
-        );
-        logger.info('Starting desk auto-label backfill worker...');
-        await deskLabelBackfillWorker.start();
+      //   const { deskLabelBackfillWorker } = await import(
+      //     '@/automations/queue/desk-label-backfill.worker'
+      //   );
+      //   logger.info('Starting desk auto-label backfill worker...');
+      //   await deskLabelBackfillWorker.start();
 
-        const { cleanupUnreferencedAutomationTemplates } = await import(
-          '@/automations/services/automation-template.service'
-        );
-        const cleanupTemplates = (): void => {
-          void cleanupUnreferencedAutomationTemplates()
-            .then((removed) => {
-              if (removed > 0) {
-                logger.info(`[automations] Cleaned up ${removed} unreferenced templates`);
-              }
-            })
-            .catch((error) => logger.error('[automations] Template cleanup failed', error));
-        };
-        cleanupTemplates();
-        this.automationTemplateCleanupTimer = setInterval(cleanupTemplates, 60 * 60 * 1000);
-        this.automationTemplateCleanupTimer.unref();
-      }
+      //   const { cleanupUnreferencedAutomationTemplates } = await import(
+      //     '@/automations/services/automation-template.service'
+      //   );
+      //   const cleanupTemplates = (): void => {
+      //     void cleanupUnreferencedAutomationTemplates()
+      //       .then((removed) => {
+      //         if (removed > 0) {
+      //           logger.info(`[automations] Cleaned up ${removed} unreferenced templates`);
+      //         }
+      //       })
+      //       .catch((error) => logger.error('[automations] Template cleanup failed', error));
+      //   };
+      //   cleanupTemplates();
+      //   this.automationTemplateCleanupTimer = setInterval(cleanupTemplates, 60 * 60 * 1000);
+      //   this.automationTemplateCleanupTimer.unref();
+      // }
 
       if (appConfig.enableEmailFetchWorker) {
         logger.info('Initializing notification service for email refetch worker...');
@@ -522,12 +523,13 @@ class WorkerService {
       //   await aiProvisioningWorker.shutdown();
       // }
 
-      if (appConfig.enableAutomationWorker) {
-        const { deskLabelBackfillWorker } = await import(
-          '@/automations/queue/desk-label-backfill.worker'
-        );
-        await deskLabelBackfillWorker.shutdown();
-      }
+      // Disabled (Automations)
+      // if (appConfig.enableAutomationWorker) {
+      //   const { deskLabelBackfillWorker } = await import(
+      //     '@/automations/queue/desk-label-backfill.worker'
+      //   );
+      //   await deskLabelBackfillWorker.shutdown();
+      // }
 
       // Disabled (LLM)
       // await autoDraftWorker.shutdown();
