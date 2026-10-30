@@ -957,13 +957,13 @@ sidecar, so calls to it on port 80 bypass the mesh.
 
 ## xyne-redis
 
-A single-node `redis-server` with append-only persistence, for queues, caches and pub/sub. Not a
+A single-node `valkey-server` with append-only persistence, for queues, caches and pub/sub. Not a
 cluster, not a sentinel pair.
 
-**Image.** `docker.io/redis`, third party, `appVersion` `7.4`.
+**Image.** `docker.io/valkey/valkey`, third party, `appVersion` `8.1`.
 
-**Command.** `redis-server --requirepass $(REDIS_PASSWORD) --appendonly yes --dir /data`.
-`redis-server` is configured entirely through `args`; there is no config file.
+**Command.** `valkey-server --requirepass $(REDIS_PASSWORD) --appendonly yes --dir /data`.
+`valkey-server` is configured entirely through `args`; there is no config file.
 
 **Workload.** `workloadKind: StatefulSet`, `OrderedReady`, `RollingUpdate`,
 `persistentVolumeClaimRetentionPolicy` `Retain`/`Retain`.
@@ -971,7 +971,7 @@ cluster, not a sentinel pair.
 **Ports.** Container and Service `tcp-redis` 6379. The port is named `tcp-redis` so Istio treats
 it as opaque TCP. The Service is a normal ClusterIP (`clusterIP: ""`); nothing needs per-pod DNS.
 
-**Health.** Liveness and readiness are `tcpSocket`: `redis-cli ping` would need the password.
+**Health.** Liveness and readiness are `tcpSocket`: `valkey-cli ping` would need the password.
 
 **Secrets.** The password is read from the Secret named by `auth.existingSecret` /
 `auth.existingSecretKey` (defaults `xyne-redis-auth` / `password`). The chart never creates it.

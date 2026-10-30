@@ -1,21 +1,25 @@
+locals {
+  primary = one([
+    for c in google_memorystore_instance.this.endpoints[0].connections : c.psc_auto_connection[0]
+    if c.psc_auto_connection[0].connection_type == "CONNECTION_TYPE_PRIMARY"
+  ])
+}
+
 output "instance_id" {
-  value = google_redis_instance.this.id
+  value = google_memorystore_instance.this.id
 }
 
 output "redis" {
   value = {
-    mode = "managed"
-    host = google_redis_instance.this.host
-    port = google_redis_instance.this.port
-    tls  = var.tls
+    mode     = "managed"
+    host     = local.primary.ip_address
+    port     = local.primary.port
+    tls      = true
+    iam_auth = true
   }
 }
 
 output "redis_auth" {
-  value     = google_redis_instance.this.auth_string
+  value     = ""
   sensitive = true
-}
-
-output "server_ca_certs" {
-  value = [for c in google_redis_instance.this.server_ca_certs : c.cert]
 }

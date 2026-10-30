@@ -28,6 +28,7 @@
     "bullmq": "^5.81.2",
     "exceljs": "^4.4.0",
     "express": "^4.21.0",
+    "google-auth-library": "^10.4.0",
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",

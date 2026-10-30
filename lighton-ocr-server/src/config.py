@@ -219,6 +219,10 @@ class Settings:
         kwargs: dict = {"decode_responses": True}
         if _REDIS_TLS:
             kwargs["ssl_cert_reqs"] = "none"
+        if _bool_env("REDIS_IAM_AUTH", False):
+            from redis_iam import IamCredentialProvider
+
+            kwargs["credential_provider"] = IamCredentialProvider()
         return kwargs
 
 

@@ -82,7 +82,7 @@ In-cluster names are fixed: `xyne-pg-pooler-rw.<ns>.svc`, `xyne-pg-pooler-ro.<ns
 ### `redis`, `redis_auth` (sensitive, may be empty)
 
 ```hcl
-redis = { mode, host, port, tls }   # incluster host: xyne-redis.<ns>.svc
+redis = { mode, host, port, tls, iam_auth }   # incluster host: xyne-redis.<ns>.svc
 ```
 
 ### `storage`, `storage_credentials` (sensitive)
