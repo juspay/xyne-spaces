@@ -191,7 +191,7 @@ export type RoomMachineEvent =
   | {
       /**
        * Join a call whose credentials (LiveKit token + serverUrl) are already known
-       * (e.g. provided in the VoIP push payload). Transitions directly to `connecting`,
+       * (e.g. fetched while accepting an incoming call). Transitions directly to `connecting`,
        * skipping the backend joinCall API call that `JOIN_CALL` would trigger.
        */
       type: 'JOIN_CALL_WITH_CREDENTIALS';
@@ -1384,7 +1384,7 @@ export const roomMachine = setup({
           ],
         },
         JOIN_CALL_WITH_CREDENTIALS: {
-          // Credentials already available (from VoIP push payload) — skip the joinCall API call
+          // Credentials already fetched (e.g. by the incoming-call accept path) — skip the joinCall API call
           // and go straight to connecting so LiveKit can join immediately.
           target: 'connecting',
           actions: [

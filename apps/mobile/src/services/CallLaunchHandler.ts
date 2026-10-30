@@ -199,7 +199,7 @@ class CallLaunchHandler {
       this.handled = true;
 
       // Build the CallKit payload
-      const payload: CallKitPayload = {
+      const payload: CallKitPayload & { token?: string; serverUrl?: string } = {
         callId: launchIntent.callId,
         callUUID: launchIntent.callId,
         callerName: launchIntent.callerName,

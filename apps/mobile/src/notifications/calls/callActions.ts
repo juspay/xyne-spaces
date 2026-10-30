@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 import { CallType } from '@xyne/shared';
 import { roomActor } from '@/src/machines/roomMachine';
@@ -226,6 +226,41 @@ async function leaveCurrentCall(nextCallId: string): Promise<void> {
   });
 }
 
+/** A radio waking up for the ring can fail the first request, so joining gets one retry. */
+const JOIN_CALL_MAX_ATTEMPTS = 2;
+const JOIN_CALL_RETRY_DELAY_MS = 1_000;
+
+/** Null once every attempt has failed, or when the session changed between them. */
+async function requestJoinCredentials(
+  callId: string,
+  expectedGeneration: number,
+): Promise<JoinCallResponse | null> {
+  for (let attempt = 1; attempt <= JOIN_CALL_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await callService.joinCall({ callId });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[XCALL][ACCEPT] joinCall failed', {
+        callId,
+        attempt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (attempt < JOIN_CALL_MAX_ATTEMPTS) {
+      await new Promise(resolve => setTimeout(resolve, JOIN_CALL_RETRY_DELAY_MS));
+      if (expectedGeneration !== callSessionGeneration) return null;
+    }
+  }
+  return null;
+}
+
+/** The answer could not become a join: end the native call rather than show it as connected. */
+function failAcceptedCall(payload: CallKitPayload): void {
+  clearAcceptedCallTracking(payload.callId);
+  callKitService.reportCallEnded(payload.callUUID, 'FAILED');
+  Alert.alert('Failed to join call', 'Unable to connect to the call. Please try again.');
+}
+
 export async function acceptIncomingCall(
   payload: CallKitPayload,
   expectedGeneration = callSessionGeneration,
@@ -244,41 +279,30 @@ export async function acceptIncomingCall(
     callKitService.bringToForeground();
   }
 
-  let credentials: JoinCallResponse | null = null;
-  try {
-    if (payload.token && payload.serverUrl) {
-      credentials = {
-        token: payload.token,
-        livekitUrl: payload.serverUrl,
-        externalId: payload.callId,
-        roomLink: '',
-        ...(payload.channelId ? { channelId: payload.channelId } : {}),
-      };
-    } else {
-      credentials = await callService.joinCall({ callId: payload.callId });
-    }
-  } catch {
-    // Continue — native screen may still resolve credentials
-  }
+  const credentials = await requestJoinCredentials(payload.callId, expectedGeneration);
 
   if (expectedGeneration !== callSessionGeneration) return;
 
-  callKitService.reportCallConnected(payload.callUUID);
   pendingAccept = null;
 
-  if (credentials?.token && credentials.livekitUrl) {
-    await leaveCurrentCall(payload.callId);
-    if (expectedGeneration !== callSessionGeneration) return;
-    roomActor.send({
-      type: 'JOIN_CALL_WITH_CREDENTIALS',
-      callId: payload.callId,
-      token: credentials.token,
-      serverUrl: credentials.livekitUrl,
-      ...(credentials.channelId ? { channelId: credentials.channelId } : {}),
-      callType: payload.callType,
-      viewMode: 'full',
-    });
+  if (!credentials) {
+    failAcceptedCall(payload);
+    return;
   }
+
+  callKitService.reportCallConnected(payload.callUUID);
+
+  await leaveCurrentCall(payload.callId);
+  if (expectedGeneration !== callSessionGeneration) return;
+  roomActor.send({
+    type: 'JOIN_CALL_WITH_CREDENTIALS',
+    callId: payload.callId,
+    token: credentials.token,
+    serverUrl: credentials.livekitUrl,
+    ...(credentials.channelId ? { channelId: credentials.channelId } : {}),
+    callType: payload.callType,
+    viewMode: 'full',
+  });
 
   router.replace({
     pathname: '/(protected)/native-call',

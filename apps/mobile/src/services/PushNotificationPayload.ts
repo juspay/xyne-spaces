@@ -75,11 +75,6 @@ export function parseIncomingCallPayload(data: unknown): CallKitPayload | null {
 
   const callType = metadata['callType'] === 'VIDEO' ? CallType.VIDEO : CallType.AUDIO;
   const channelId = typeof metadata['channelId'] === 'string' ? metadata['channelId'] : undefined;
-  const token = typeof metadata['token'] === 'string' ? metadata['token'] : undefined;
-  const liveKitUrl =
-    typeof metadata['liveKitUrl'] === 'string' ? metadata['liveKitUrl'] : undefined;
-  const serverUrlFromMetadata =
-    typeof metadata['serverUrl'] === 'string' ? metadata['serverUrl'] : undefined;
 
   const payload: CallKitPayload = {
     callId,
@@ -90,13 +85,6 @@ export function parseIncomingCallPayload(data: unknown): CallKitPayload | null {
 
   if (channelId) {
     payload.channelId = channelId;
-  }
-  if (token) {
-    payload.token = token;
-  }
-  const serverUrl = liveKitUrl ?? serverUrlFromMetadata;
-  if (serverUrl) {
-    payload.serverUrl = serverUrl;
   }
 
   return payload;
