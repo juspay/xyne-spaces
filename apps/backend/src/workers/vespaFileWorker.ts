@@ -9,7 +9,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, computeCanvasPermissions, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { superpositionClient } from '@/services/superpositionClient';
-import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
+// Disabled (LLM)
+// import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
 import { config } from '@/config/env';
 import { SubApp } from '@/vespa/src/types';
 import { maybeNotifyCollectionIngestionComplete } from '@/services/collectionIngestionNotifier';
@@ -35,11 +36,11 @@ export class VespaFileWorker {
 		try {
 			// Redis configuration from environment
 			const redisConfig = {
-				host: process.env.REDIS_HOST || 'localhost',
-				port: parseInt(process.env.REDIS_PORT || '6379', 10),
+				host: config.redis.host,
+				port: config.redis.port,
 				maxRetriesPerRequest: 3,
-				...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-				...(process.env.REDIS_TLS === 'true' && {
+				...(config.redis.password && { password: config.redis.password }),
+				...(config.redis.tls && {
 					tls: {
 						rejectUnauthorized: false
 					}
@@ -47,7 +48,7 @@ export class VespaFileWorker {
 			};
 
 			// File worker connects to the file-specific queue
-			const queueName = process.env.VESPA_FILE_QUEUE_NAME || 'vespa-files';
+			const queueName = config.vespa.fileQueueName;
 			this.queue = new Bull<VespaJob>(queueName, {
 				redis: redisConfig,
 				defaultJobOptions: {
@@ -98,7 +99,7 @@ export class VespaFileWorker {
 		}
 
 		// Process file jobs with configured concurrency (default: 1 for heavy operations)
-		const concurrency = parseInt(process.env.VESPA_FILE_WORKER_CONCURRENCY || '1', 10);
+		const concurrency = config.vespa.fileWorkerConcurrency;
 		this.queue.process('*', concurrency, async (job) => {
 			return this.processJob(job);
 		});
@@ -220,22 +221,23 @@ export class VespaFileWorker {
 			// scheduler (if enabled). When routed, the scheduler owns processing —
 			// skip synchronous parsing. The name-only feed never parses content, so
 			// it must not be routed to the scheduler.
-			if (
-				jobType === 'feed' &&
-				schema === fileSchema &&
-				!job.data.nameOnly &&
-				(app === SubApp.COLLECTIONS ||
-					app === SubApp.CHAT_ATTACHMENT ||
-					app === SubApp.TICKET_ATTACHMENT)
-			) {
-				const routed = await routePdfToScheduler(docId, app);
-				if (routed) {
-					logger.info(
-						`[VESPA_FILE_WORKER] Routed ${docId} (${app}) to async OCR scheduler; skipping sync processing`,
-					);
-					return;
-				}
-			}
+			// Disabled (LLM)
+			// if (
+			// 	jobType === 'feed' &&
+			// 	schema === fileSchema &&
+			// 	!job.data.nameOnly &&
+			// 	(app === SubApp.COLLECTIONS ||
+			// 		app === SubApp.CHAT_ATTACHMENT ||
+			// 		app === SubApp.TICKET_ATTACHMENT)
+			// ) {
+			// 	const routed = await routePdfToScheduler(docId, app);
+			// 	if (routed) {
+			// 		logger.info(
+			// 			`[VESPA_FILE_WORKER] Routed ${docId} (${app}) to async OCR scheduler; skipping sync processing`,
+			// 		);
+			// 		return;
+			// 	}
+			// }
 
 			// Check if file indexing is enabled
 			if (jobType === 'feed' && schema === fileSchema) {

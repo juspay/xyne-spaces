@@ -20,6 +20,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { config as appConfig } from '@/config/env';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -358,7 +359,7 @@ export class GoogleService {
   // ─── Gmail API — Watch ───────────────────────────────────────────────────
 
   async setupGmailWatch(): Promise<WatchResult> {
-    const topicName = process.env.GOOGLE_PUBSUB_TOPIC;
+    const topicName = appConfig.google.pubsubTopic;
     if (!topicName) throw new Error('GOOGLE_PUBSUB_TOPIC env variable is not set');
 
     try {
@@ -635,11 +636,11 @@ export class GoogleService {
 
     const credentials = GoogleService.loadPubSubServiceAccount();
     const pubsub = new PubSub({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+      projectId: appConfig.google.cloudProjectId,
       credentials,
     });
 
-    const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
+    const topicName = appConfig.google.pubsubTopic || DEFAULT_PUBSUB_TOPIC;
     const subscriptionName = GoogleService.getSharedSubscriptionName();
 
     const topic = pubsub.topic(topicName);
@@ -679,7 +680,7 @@ export class GoogleService {
   }
 
   static generateWebhookUrl(): string {
-    const baseUrl = process.env.BACKEND_URL || DEFAULT_BACKEND_URL;
+    const baseUrl = appConfig.backendUrl || DEFAULT_BACKEND_URL;
     return `${baseUrl}${SHARED_GOOGLE_WEBHOOK_PATH}`;
   }
 
@@ -687,10 +688,10 @@ export class GoogleService {
     // Env classification from BACKEND_URL — keeps detection in sync with how
     // urlUtils.ts already distinguishes deployments, and avoids needing a new
     // dedicated env var:
-    //   spaces.sandbox.xyne.juspay.net → sandbox
+    //   sandbox.example.org → sandbox
     //   localhost / ngrok / trycloudflare / 127.0.0.1 → dev
     //   anything else (prod domain) → prod
-    const backendUrl = (process.env.BACKEND_URL || '').toLowerCase();
+    const backendUrl = (appConfig.backendUrl).toLowerCase();
     let suffix: string;
     if (backendUrl.includes('sandbox')) {
       suffix = 'sandbox';
@@ -792,10 +793,10 @@ export class GoogleService {
 
     const credentials = GoogleService.loadPubSubServiceAccount();
     const pubsub = new PubSub({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+      projectId: appConfig.google.cloudProjectId,
       credentials,
     });
-    const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
+    const topicName = appConfig.google.pubsubTopic || DEFAULT_PUBSUB_TOPIC;
     const topic = pubsub.topic(topicName);
 
     // 1. Make sure the shared sub exists FIRST so events have a destination
@@ -864,11 +865,11 @@ export class GoogleService {
   }
 
   static validatePushInfrastructure(): void {
-    if (!process.env.GOOGLE_CLOUD_PROJECT_ID) {
+    if (!appConfig.google.cloudProjectId) {
       throw new Error('Google channel email mailbox requires GOOGLE_CLOUD_PROJECT_ID to be configured');
     }
 
-    if (!process.env.GOOGLE_PUBSUB_TOPIC) {
+    if (!appConfig.google.pubsubTopic) {
       throw new Error('Google channel email mailbox requires GOOGLE_PUBSUB_TOPIC to be configured');
     }
 
@@ -1070,9 +1071,9 @@ export class GoogleService {
 
   private static createOAuth2Client(credentials: GoogleCredentials): OAuth2Client {
     const client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI,
+      appConfig.email.clientId,
+      appConfig.email.clientSecret,
+      appConfig.email.redirectUri,
     ) as unknown as OAuth2Client;
 
     client.setCredentials({
@@ -1084,7 +1085,7 @@ export class GoogleService {
   }
 
   private static loadPubSubServiceAccount(): ServiceAccountCredentials {
-    const base64Json = process.env.GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64;
+    const base64Json = appConfig.google.pubsubServiceAccountBase64;
     if (!base64Json) {
       throw new Error('GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 is not set');
     }

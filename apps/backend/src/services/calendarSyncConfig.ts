@@ -7,7 +7,7 @@ export const CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS = 5_000;
 const XYNE_TEAM_ELIGIBILITY_FLAG_KEY = 'xyne-team-domains';
 
 export interface TeamEligibilityConfig {
-  /** Email domains eligible for Xyne Call auto-injection, e.g. "juspay.in". */
+  /** Email domains eligible for Xyne Call auto-injection, e.g. "example.com". */
   domains: string[];
   /** UserProfile.team values eligible for Xyne Call auto-injection. */
   teams: string[];
@@ -18,7 +18,7 @@ const EMPTY_ELIGIBILITY_CONFIG: TeamEligibilityConfig = { domains: [], teams: []
 /**
  * Single Superposition (CAC) key gating Xyne Call auto-injection eligibility
  * (see Xyne Call Link Auto-Injection PRD, FR-2). Value shape:
- *   { "domains": ["juspay.in"], "teams": ["Xyne"] }
+ *   { "domains": ["example.com"], "teams": ["Xyne"] }
  * Both lists must be populated for the feature to act on anyone — an
  * organizer must match an entry in each (see isTeamEligible).
  * Sourced from Superposition instead of a plain env var so it can be

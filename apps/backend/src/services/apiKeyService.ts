@@ -3,6 +3,7 @@ import { AuthProvider, UserStatus, AccessType } from '@xyne/shared';
 import { DatabaseClient } from '../database/client';
 import { logger } from '../utils/logger';
 import { CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyListItem, ApiKeyUser } from '../types/express';
+import { config } from '@/config/env';
 
 export class ApiKeyService {
   private db = DatabaseClient.getInstance();
@@ -32,7 +33,7 @@ export class ApiKeyService {
     const token = authHeader.split(' ')[1];
     
     // Check if the raw token matches the environment API key first
-    const envApiKey = process.env.API_KEY;
+    const envApiKey = config.apiKey;
     if (envApiKey && token === envApiKey) {
       return token; // Return raw environment API key
     }
@@ -55,13 +56,17 @@ export class ApiKeyService {
   async validateApiKey(apiKey: string, userHeaders?: { name?: string; email?: string; workspaceId?: string }): Promise<ApiKeyUser | null> {
     try {
       // Check for environment API key first
-      const envApiKey = process.env.API_KEY;
+      const envApiKey = config.apiKey;
       if (envApiKey && apiKey === envApiKey) {
         logger.info('Environment API key used for authentication');
         
         // Use custom user details from headers if provided, otherwise use defaults
         const userName = userHeaders?.name || 'API User';
-        const userEmail = userHeaders?.email || 'api@xyne.juspay.in';
+        const userEmail = userHeaders?.email || config.apiKeyDefaultUserEmail;
+        if (!userEmail) {
+          logger.error('API key user email missing: pass an email header or set API_KEY_DEFAULT_USER_EMAIL');
+          return null;
+        }
         
         logger.info(`API key user: ${userName} (${userEmail})`);
         
@@ -324,8 +329,11 @@ export class ApiKeyService {
         ? new Date(Date.now() + request.expiresInDays * 24 * 60 * 60 * 1000)
         : null;
 
-      // Generate email for API key user
-      const apiKeyUserEmail = `${request.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}@api.xyne.juspay.in`;
+      // Generate email for API key user (synthetic identity on API_KEY_USER_EMAIL_DOMAIN)
+      if (!config.apiKeyUserEmailDomain) {
+        throw new Error('API_KEY_USER_EMAIL_DOMAIN is not configured; cannot create API key user');
+      }
+      const apiKeyUserEmail = `${request.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}@${config.apiKeyUserEmailDomain}`;
 
       // Fetch existing orgMember by email (should exist for workspace members)
       const orgMember = await this.db.orgMember.findFirst({

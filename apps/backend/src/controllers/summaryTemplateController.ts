@@ -125,10 +125,7 @@ const SummaryTemplateDraftSchema = z.object({
 // Selection is decided by Meeting Context, so that test refuses drafts without one.
 const SummaryTemplateSelectionDraftSchema = SummaryTemplateDraftSchema.extend({
   autoTriggerPrompt: z
-    .string({
-      required_error: 'Add a Meeting Context to test template selection',
-      invalid_type_error: 'Add a Meeting Context to test template selection',
-    })
+    .string({ error: 'Add a Meeting Context to test template selection' })
     .trim()
     .min(1, 'Add a Meeting Context to test template selection')
     .max(LIMITS.meetingContext),
@@ -150,7 +147,7 @@ const SummaryTemplateOutputTestSchema = z.object({
 
 function sendError(res: Response, error: unknown): void {
   if (error instanceof z.ZodError) {
-    res.status(400).json({ success: false, error: error.errors[0]?.message });
+    res.status(400).json({ success: false, error: error.issues[0]?.message });
     return;
   }
   if (error instanceof SummaryTemplateError) {
@@ -196,7 +193,7 @@ export class SummaryTemplateController {
     try {
       const parsed = SummaryTemplateBulkCreateSchema.safeParse(req.body);
       if (!parsed.success) {
-        const issue = parsed.error.errors[0];
+        const issue = parsed.error.issues[0];
         const index = issue?.path[0] === 'templates' ? issue.path[1] : undefined;
         const prefix = typeof index === 'number' ? `Template ${index + 1}: ` : '';
         res.status(400).json({ success: false, error: `${prefix}${issue?.message ?? 'Invalid'}` });

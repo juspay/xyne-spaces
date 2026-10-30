@@ -2,14 +2,11 @@
 
 // @ts-ignore TS1294
 export enum TicketCategory {
-  USER_ONBOARDING = 'USER_ONBOARDING',
-  QUERY_WORKFLOW = 'QUERY_WORKFLOW',
   QUERY = 'QUERY',
   ISSUE = 'ISSUE',
   REQUIREMENT_NEW = 'REQUIREMENT_NEW',
   REQUIREMENT_ENHANCEMENT = 'REQUIREMENT_ENHANCEMENT',
   FULL_PG_INTEGRATION = 'FULL_PG_INTEGRATION',
-  STAGE_APPROVAL_WORKFLOW = 'STAGE_APPROVAL_WORKFLOW',
 }
 
 // @ts-ignore TS1294
@@ -254,27 +251,9 @@ export enum WorkspaceRole {
 
 export const WorkspaceType = {
   ENTERPRISE: 'ENTERPRISE',
-  COMMUNITY: 'COMMUNITY',
 } as const;
 
 export type WorkspaceType = typeof WorkspaceType[keyof typeof WorkspaceType];
-
-export const WorkspaceJoinPolicy = {
-  INVITE_ONLY: 'INVITE_ONLY',
-  OPEN: 'OPEN',
-  REQUEST_TO_JOIN: 'REQUEST_TO_JOIN',
-} as const;
-
-export type WorkspaceJoinPolicy = typeof WorkspaceJoinPolicy[keyof typeof WorkspaceJoinPolicy];
-
-export const CommunityJoinResultStatus = {
-  JOINED: 'JOINED',
-  REQUEST_PENDING: 'REQUEST_PENDING',
-  REQUEST_REJECTED: 'REQUEST_REJECTED',
-} as const;
-
-export type CommunityJoinResultStatus =
-  typeof CommunityJoinResultStatus[keyof typeof CommunityJoinResultStatus];
 
 export const WorkspaceJoinRequestStatus = {
   PENDING: 'PENDING',
@@ -1315,7 +1294,6 @@ export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
   CALL: 'CALL',
-  WORKFLOW: 'WORKFLOW',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];

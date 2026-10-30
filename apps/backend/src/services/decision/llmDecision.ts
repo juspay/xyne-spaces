@@ -1,35 +1,37 @@
-import { LLMClient, createUserMessage } from '@framework';
-import { config as envConfig } from '@/config/env';
+// import { LLMClient, createUserMessage } from '@framework'; // framework removed
+// import { config as envConfig } from '@/config/env';
 import type { DecisionAnswer, DecisionQuestion, LlmReply } from './types';
 
 /** The classification agents' default model, so the classifiers are measured against what they replace. */
 export const LLM_DECISION_MODEL = 'glm-flash-experimental';
 const LLM_DECISION_TIMEOUT_MS = 30_000;
 
-const SYSTEM_PROMPT = [
-  'You are given a STATE and QUESTIONS about it. Answer every question using only the STATE. Do not explain.',
-  'Reply with one JSON object: {"answers": {"<question id>": <answer>}}.',
-  'A yes/no question: {"noul": p}, where p is the probability from 0 to 1 that the answer is yes.',
-  'A choice question: {"choice": "<option id>"}, exactly one of the listed ids.',
-  'A score question: {"level": i}, the index of the level that fits, 0 being the first.',
-].join('\n');
+// const SYSTEM_PROMPT = [
+//   'You are given a STATE and QUESTIONS about it. Answer every question using only the STATE. Do not explain.',
+//   'Reply with one JSON object: {"answers": {"<question id>": <answer>}}.',
+//   'A yes/no question: {"noul": p}, where p is the probability from 0 to 1 that the answer is yes.',
+//   'A choice question: {"choice": "<option id>"}, exactly one of the listed ids.',
+//   'A score question: {"level": i}, the index of the level that fits, 0 being the first.',
+// ].join('\n');
+//
+// LLM framework removed; original kept below.
+export const isLlmDecisionConfigured = (): boolean => false;
+// export const isLlmDecisionConfigured = (): boolean =>
+//   Boolean(envConfig.litellm.baseUrl && envConfig.litellm.apiKey);
 
-export const isLlmDecisionConfigured = (): boolean =>
-  Boolean(envConfig.litellm.baseUrl && envConfig.litellm.apiKey);
-
-const renderQuestion = (id: string, question: DecisionQuestion): string => {
-  const head = `- id: ${id}\n  question: ${question.instructions}`;
-  if (question.type === 'choice') {
-    const options = Object.entries(question.criteria).map(([key, meaning]) => `    ${key}: ${meaning}`);
-    return `${head}\n  type: choice\n  options:\n${options.join('\n')}`;
-  }
-  if (question.type === 'score') {
-    const levels = question.criteria.map((level, i) => `    ${i}: ${level}`);
-    return `${head}\n  type: score\n  levels:\n${levels.join('\n')}`;
-  }
-  return `${head}\n  type: yes/no`;
-};
-
+// const renderQuestion = (id: string, question: DecisionQuestion): string => {
+//   const head = `- id: ${id}\n  question: ${question.instructions}`;
+//   if (question.type === 'choice') {
+//     const options = Object.entries(question.criteria).map(([key, meaning]) => `    ${key}: ${meaning}`);
+//     return `${head}\n  type: choice\n  options:\n${options.join('\n')}`;
+//   }
+//   if (question.type === 'score') {
+//     const levels = question.criteria.map((level, i) => `    ${i}: ${level}`);
+//     return `${head}\n  type: score\n  levels:\n${levels.join('\n')}`;
+//   }
+//   return `${head}\n  type: yes/no`;
+// };
+//
 /** A yes/no as a probability: a number, a boolean, or "yes"/"no". */
 const toProbability = (value: unknown): number => {
   if (typeof value === 'boolean') return value ? 1 : 0;
@@ -82,24 +84,26 @@ export const parseLlmAnswers = (
 
 /** The LLM's answers to the same typed questions the classifiers get, on LITELLM_*. Throws on failure. */
 export async function requestLlmAnswers(
-  state: string | Record<string, unknown>,
-  questions: Record<string, DecisionQuestion>,
-  timeoutMs = LLM_DECISION_TIMEOUT_MS
+  _state: string | Record<string, unknown>,
+  _questions: Record<string, DecisionQuestion>,
+  _timeoutMs = LLM_DECISION_TIMEOUT_MS
 ): Promise<LlmReply<Record<string, DecisionAnswer>>> {
-  const client = new LLMClient({
-    provider: {
-      type: 'litellm',
-      config: { apiKey: envConfig.litellm.apiKey, baseUrl: envConfig.litellm.baseUrl, timeout: timeoutMs },
-    },
-    defaultModel: LLM_DECISION_MODEL,
-  });
-  const stateText = typeof state === 'string' ? state : JSON.stringify(state, null, 2);
-  const questionText = Object.entries(questions).map(([id, question]) => renderQuestion(id, question));
-  const response = await client.generate({
-    messages: [createUserMessage(`STATE:\n${stateText}\n\nQUESTIONS:\n${questionText.join('\n')}`)],
-    systemPrompt: SYSTEM_PROMPT,
-    parameters: { temperature: 0 },
-    extraBody: { chat_template_kwargs: { enable_thinking: false } },
-  });
-  return { answer: parseLlmAnswers(response.content, questions), model: response.model, usage: response.usage };
-}
+  // LLM framework removed; original kept below.
+  throw new Error('LLM client is not configured');
+  //   const client = new LLMClient({
+  //     provider: {
+  //       type: 'litellm',
+  //       config: { apiKey: envConfig.litellm.apiKey, baseUrl: envConfig.litellm.baseUrl, timeout: timeoutMs },
+  //     },
+  //     defaultModel: LLM_DECISION_MODEL,
+  //   });
+  //   const stateText = typeof state === 'string' ? state : JSON.stringify(state, null, 2);
+  //   const questionText = Object.entries(questions).map(([id, question]) => renderQuestion(id, question));
+  //   const response = await client.generate({
+  //     messages: [createUserMessage(`STATE:\n${stateText}\n\nQUESTIONS:\n${questionText.join('\n')}`)],
+  //     systemPrompt: SYSTEM_PROMPT,
+  //     parameters: { temperature: 0 },
+  //     extraBody: { chat_template_kwargs: { enable_thinking: false } },
+  //   });
+  //   return { answer: parseLlmAnswers(response.content, questions), model: response.model, usage: response.usage };
+  }

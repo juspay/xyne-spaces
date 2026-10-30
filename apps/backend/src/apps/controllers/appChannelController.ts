@@ -32,7 +32,7 @@ const CreateChannelBodySchema = z
     memberEmails: z.array(email).max(100).default([]),
     projectName: z.string().trim().min(1).max(120).optional(),
     /** Channel fields by name, e.g. { "Merchant ID": "M123" }. */
-    fields: z.record(z.unknown()).optional(),
+    fields: z.record(z.string(), z.unknown()).optional(),
     /** Put it on the app's Channels desk, so its new threads become tickets there. */
     desk: z.boolean().optional(),
   })
@@ -41,7 +41,7 @@ const CreateChannelBodySchema = z
 const UpdateChannelBodySchema = z
   .object({
     channelId: z.string().trim().min(1),
-    fields: z.record(z.unknown()).optional(),
+    fields: z.record(z.string(), z.unknown()).optional(),
     /** On (true) or off (false) the app's Channels desk. */
     desk: z.boolean().optional(),
     /** People to add to the channel, as admins or as members. */
@@ -103,7 +103,7 @@ export class AppChannelController {
   create = async (req: Request, res: Response): Promise<void> => {
     const bodyResult = CreateChannelBodySchema.safeParse(req.body);
     if (!bodyResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
       return;
     }
     const input = bodyResult.data;
@@ -176,7 +176,7 @@ export class AppChannelController {
   listParticipants = async (req: Request, res: Response): Promise<void> => {
     const queryResult = ListParticipantsQuerySchema.safeParse(req.query);
     if (!queryResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.issues });
       return;
     }
     const { channelId, limit, cursor } = queryResult.data;
@@ -274,7 +274,7 @@ export class AppChannelController {
   update = async (req: Request, res: Response): Promise<void> => {
     const bodyResult = UpdateChannelBodySchema.safeParse(req.body);
     if (!bodyResult.success) {
-      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+      res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
       return;
     }
     const { channelId, fields, desk, updateRoles } = bodyResult.data;

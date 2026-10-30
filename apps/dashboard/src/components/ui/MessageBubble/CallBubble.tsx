@@ -1,19 +1,28 @@
 import React, { useState } from 'react';
 import { CreateDocumentModal } from './CreateDocumentModal';
 import { recordingService } from '../../../services/Recording/recordingService';
-import { Loader2, ClipboardList, FileText } from 'lucide-react';
+import {
+  Loader2,
+  ClipboardList,
+  // Disabled (LLM)
+  // FileText,
+} from 'lucide-react';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import { CanvasPreview } from '../../Canvas/CanvasPreview/CanvasPreview';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOverlay';
 import { useGeneratePRD } from '../../../hooks/useGeneratePRD';
-import { useGenerateDetailedSummary } from '../../../hooks/useGenerateDetailedSummary';
+// Disabled (LLM)
+// import { useGenerateDetailedSummary } from '../../../hooks/useGenerateDetailedSummary';
 import { MessageMetadata } from './MessageBubble.utils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
-import { xyneAIActor } from '../../../machines/xyneAIMachine';
-import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
-import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
+// Disabled (Claw)
+// import { xyneAIActor } from '../../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+// Disabled (LLM)
+// import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
 import { useSpeakerIdentificationEnabled } from '../../SpeakerIdentification/useSpeakerIdentificationEnabled';
 
 type AttachmentType = QueryResultType<
@@ -90,105 +99,107 @@ export const GeneratePRDButton: React.FC<{
   );
 };
 
-/**
- * Button component for generating a detailed summary from call transcript
- */
-const GenerateSummaryButton: React.FC<{
-  callId: string;
-  messageId: string;
-  isCanvasCreated?: boolean;
-}> = ({ callId, messageId, isCanvasCreated }) => {
-  const { generateDetailedSummary, isLoading } = useGenerateDetailedSummary();
-  const [isModalOpen, setIsModalOpen] = useState(false);
+// Disabled (LLM)
+// /**
+//  * Button component for generating a detailed summary from call transcript
+//  */
+// const GenerateSummaryButton: React.FC<{
+//   callId: string;
+//   messageId: string;
+//   isCanvasCreated?: boolean;
+// }> = ({ callId, messageId, isCanvasCreated }) => {
+//   const { generateDetailedSummary, isLoading } = useGenerateDetailedSummary();
+//   const [isModalOpen, setIsModalOpen] = useState(false);
+//
+//   const handleGenerate = async (customPrompt?: string): Promise<void> => {
+//     setIsModalOpen(false);
+//     await generateDetailedSummary(callId, messageId, customPrompt);
+//   };
+//
+//   return (
+//     <>
+//       <button
+//         type='button'
+//         onClick={() => setIsModalOpen(true)}
+//         data-track-category='MESSAGE'
+//         data-track-name='OPEN_CALL_DETAILS'
+//         disabled={isLoading}
+//         className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
+//         title={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
+//         aria-label={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
+//       >
+//         {isLoading ? (
+//           <Loader2 className='h-4 w-4 animate-spin' />
+//         ) : (
+//           <FileText className='h-4 w-4' />
+//         )}
+//       </button>
+//
+//       <CreateDocumentModal
+//         isOpen={isModalOpen}
+//         onClose={() => setIsModalOpen(false)}
+//         onGenerate={handleGenerate}
+//         isLoading={isLoading}
+//         title='Generate Summary'
+//         description='Choose how you want to generate the detailed summary.'
+//         standardOptionLabel='Standard Summary'
+//         standardOptionSubtext='Generate a detailed summary based on the entire call transcript.'
+//         customOptionLabel='Custom Instructions'
+//         customOptionSubtext='Provide specific details or focus areas for the summary.'
+//         customInputPlaceholder='E.g., Focus on action items and decisions made...'
+//       />
+//     </>
+//   );
+// };
 
-  const handleGenerate = async (customPrompt?: string): Promise<void> => {
-    setIsModalOpen(false);
-    await generateDetailedSummary(callId, messageId, customPrompt);
-  };
+// Disabled (Claw)
+// /**
+//  * Button component for chatting with Ask AI about the call transcript
+//  */
+// const ChatWithAskAIButton: React.FC<{
+//   channelId?: string | undefined;
+//   conversationId?: string | undefined;
+//   metadata?: MessageMetadata | null | undefined;
+//   attachments?: readonly AttachmentType[] | undefined;
+// }> = ({ channelId, conversationId, metadata, attachments }) => {
+//   const handleClick = (): void => {
+//     if (!channelId) return;
 
-  return (
-    <>
-      <button
-        type='button'
-        onClick={() => setIsModalOpen(true)}
-        data-track-category='MESSAGE'
-        data-track-name='OPEN_CALL_DETAILS'
-        disabled={isLoading}
-        className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
-        title={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
-        aria-label={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
-      >
-        {isLoading ? (
-          <Loader2 className='h-4 w-4 animate-spin' />
-        ) : (
-          <FileText className='h-4 w-4' />
-        )}
-      </button>
+//     // Get call title from metadata if available
+//     const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
 
-      <CreateDocumentModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onGenerate={handleGenerate}
-        isLoading={isLoading}
-        title='Generate Summary'
-        description='Choose how you want to generate the detailed summary.'
-        standardOptionLabel='Standard Summary'
-        standardOptionSubtext='Generate a detailed summary based on the entire call transcript.'
-        customOptionLabel='Custom Instructions'
-        customOptionSubtext='Provide specific details or focus areas for the summary.'
-        customInputPlaceholder='E.g., Focus on action items and decisions made...'
-      />
-    </>
-  );
-};
+//     // Get attachment IDs from the call message (transcript)
+//     const attachmentIds = attachments?.map(att => att.id) || [];
 
-/**
- * Button component for chatting with Ask AI about the call transcript
- */
-const ChatWithAskAIButton: React.FC<{
-  channelId?: string | undefined;
-  conversationId?: string | undefined;
-  metadata?: MessageMetadata | null | undefined;
-  attachments?: readonly AttachmentType[] | undefined;
-}> = ({ channelId, conversationId, metadata, attachments }) => {
-  const handleClick = (): void => {
-    if (!channelId) return;
+//     // Create thread info for the call transcript pill
+//     const threadInfo = {
+//       conversationId: conversationId || '',
+//       previewText: callTitle,
+//       ...(attachmentIds.length > 0 && { attachmentIds }),
+//     };
 
-    // Get call title from metadata if available
-    const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
+//     // Open sidebar with thread info
+//     xyneAIActor.send({
+//       type: 'OPEN',
+//       trackSource: 'call_bubble',
+//       channelId,
+//       threadInfo,
+//     });
+//   };
 
-    // Get attachment IDs from the call message (transcript)
-    const attachmentIds = attachments?.map(att => att.id) || [];
-
-    // Create thread info for the call transcript pill
-    const threadInfo = {
-      conversationId: conversationId || '',
-      previewText: callTitle,
-      ...(attachmentIds.length > 0 && { attachmentIds }),
-    };
-
-    // Open sidebar with thread info
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'call_bubble',
-      channelId,
-      threadInfo,
-    });
-  };
-
-  return (
-    <button
-      type='button'
-      onClick={handleClick}
-      data-track-category='MESSAGE'
-      data-track-name='CHAT_WITH_CALL_TRANSCRIPT'
-      className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
-      title='Chat with Transcript'
-    >
-      <img alt='Ask AI' width='16' height='16' src='/svgs/icons/ai-bot-gradient-star.svg' />
-    </button>
-  );
-};
+//   return (
+//     <button
+//       type='button'
+//       onClick={handleClick}
+//       data-track-category='MESSAGE'
+//       data-track-name='CHAT_WITH_CALL_TRANSCRIPT'
+//       className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
+//       title='Chat with Transcript'
+//     >
+//       <img alt='Ask AI' width='16' height='16' src='/svgs/icons/ai-bot-gradient-star.svg' />
+//     </button>
+//   );
+// };
 
 /**
  * CallBubble component displays call-related messages with specialized UI.
@@ -200,13 +211,15 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   callId,
   isActiveCall,
   channelId,
-  conversationId,
+  // Disabled (Claw)
+  // conversationId,
   context,
   attachments,
 }) => {
   const metadata = message.metadata;
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
-  const askAIAvailable = useAskAIAvailable();
+  // Disabled (Claw)
+  // const askAIAvailable = useAskAIAvailable();
 
   // For headless recordings: show only the identified transcript (fall back to plain transcript
   // if identified is absent). For regular calls: hide the identified transcript attachment.
@@ -295,6 +308,8 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                         const callActionIcons =
                           !isActiveCall && message.hasAttachment && isTranscript && index === 0 ? (
                             <>
+                              {/* Disabled (LLM) */}
+                              {/*
                               <GeneratePRDButton
                                 callId={callId}
                                 messageId={message.messageId}
@@ -307,6 +322,9 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                   isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
                                 />
                               )}
+                              */}
+                              {/* Disabled (Claw) */}
+                              {/*
                               {askAIAvailable && (
                                 <ChatWithAskAIButton
                                   channelId={channelId}
@@ -315,6 +333,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                   attachments={attachments}
                                 />
                               )}
+                              */}
                               {recordingAttachment && (
                                 <AudioPlayer
                                   onLoad={signal =>

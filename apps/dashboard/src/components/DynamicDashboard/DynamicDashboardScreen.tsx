@@ -3,7 +3,14 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Panel, ResizableGroup, Separator } from '../ui/Resizable/Resizable';
-import { LayoutDashboard, MoreVertical, Plus, Share, Sparkles } from 'lucide-react';
+import {
+  LayoutDashboard,
+  MoreVertical,
+  Plus,
+  Share,
+  // Disabled (Claw)
+  // Sparkles,
+} from 'lucide-react';
 import { DashboardRole } from '@xyne/shared';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { listDataSources } from '../../services/DynamicDashboard/dataSourcesService';
@@ -144,17 +151,18 @@ const DynamicDashboardScreen = (): ReactElement => {
     });
   }, [tiles, dashboard?.id]);
 
-  // Tile focus for the AI chat: clicking a tile marks it as the chat's
-  // focused component (and opens the chat); clicking again clears it.
-  const handleSelectComponent = useCallback(
-    (id: string) => {
-      const isUnfocusing = focusedComponentId === id;
-      setFocusedComponentId(isUnfocusing ? null : id);
-      // Only open the chat when focusing a tile — unfocusing shouldn't force it open.
-      if (!isUnfocusing) setChatOpen(true);
-    },
-    [focusedComponentId],
-  );
+  // Disabled (Claw)
+  // // Tile focus for the AI chat: clicking a tile marks it as the chat's
+  // // focused component (and opens the chat); clicking again clears it.
+  // const handleSelectComponent = useCallback(
+  //   (id: string) => {
+  //     const isUnfocusing = focusedComponentId === id;
+  //     setFocusedComponentId(isUnfocusing ? null : id);
+  //     // Only open the chat when focusing a tile — unfocusing shouldn't force it open.
+  //     if (!isUnfocusing) setChatOpen(true);
+  //   },
+  //   [focusedComponentId],
+  // );
 
   const focusedComponentTitle = useMemo(
     () => gridComponents.find(c => c.id === focusedComponentId)?.title ?? undefined,
@@ -278,6 +286,8 @@ const DynamicDashboardScreen = (): ReactElement => {
                   Share
                 </button>
               )}
+              {/* Disabled (Claw) */}
+              {/*
               {canShare && (
                 <button
                   type='button'
@@ -295,6 +305,7 @@ const DynamicDashboardScreen = (): ReactElement => {
                   Chat
                 </button>
               )}
+              */}
               <button
                 type='button'
                 className='inline-flex items-center justify-center w-8 h-8 rounded-lg text-xyne-gray-600 hover:bg-xyne-gray-100 transition-colors'
@@ -362,7 +373,8 @@ const DynamicDashboardScreen = (): ReactElement => {
               onEditComponent={canShare ? setEditingComponentId : undefined}
               onAddComponent={canShare ? () => setAddComponentOpen(true) : undefined}
               {...(focusedComponentId ? { selectedComponentId: focusedComponentId } : {})}
-              {...(canShare ? { onSelect: handleSelectComponent } : {})}
+              // Disabled (Claw)
+              // {...(canShare ? { onSelect: handleSelectComponent } : {})}
             />
           </div>
         </Panel>

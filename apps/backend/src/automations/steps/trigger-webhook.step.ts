@@ -30,7 +30,7 @@ const TriggerWebhookConfigSchema = z.object({
   ).describe('Destination URL (HTTPS, domain name).'),
   method: HttpMethod.default('POST').describe('HTTP method.'),
   headers: z
-    .record(z.string())
+    .record(z.string(), z.string())
     .optional()
     .describe('Custom request headers as key → value pairs. Values support placeholders.'),
   secretHeaders: z

@@ -9,8 +9,7 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
-import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
-import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
+import { WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 
 import '../types/express';
 import { config } from '@/config/env';
@@ -82,10 +81,10 @@ export class AuthV2Controller {
   }
 
   constructor() {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const mobileClientId = process.env.GOOGLE_MOBILE_CLIENT_ID;
-    const mobileClientSecret = process.env.GOOGLE_MOBILE_CLIENT_SECRET;
+    const clientId = config.email.clientId;
+    const clientSecret = config.email.clientSecret;
+    const mobileClientId = config.email.mobileClientId;
+    const mobileClientSecret = config.email.mobileClientSecret;
 
     if (!clientId || !clientSecret) {
       throw new Error(
@@ -95,8 +94,8 @@ export class AuthV2Controller {
 
     this.googleClient = new OAuth2Client(clientId, clientSecret);
 
-    const clientIdNew = process.env.GOOGLE_CLIENT_ID_NEW;
-    const clientSecretNew = process.env.GOOGLE_CLIENT_SECRET_NEW;
+    const clientIdNew = config.email.clientIdNew;
+    const clientSecretNew = config.email.clientSecretNew;
     if (clientIdNew && clientSecretNew) {
       this.googleClientNew = new OAuth2Client(clientIdNew, clientSecretNew);
     }
@@ -246,17 +245,6 @@ export class AuthV2Controller {
     return 'web';
   }
 
-  private getEnterpriseAwareWorkspaces<T extends { workspaceType?: string | null }>(
-    workspaces: T[],
-    enterpriseLogin?: boolean,
-  ): T[] {
-    if (!enterpriseLogin) {
-      return workspaces;
-    }
-
-    return workspaces.filter(workspace => workspace.workspaceType !== WorkspaceType.COMMUNITY);
-  }
-
   initiateLogin = async (req: Request, res: Response): Promise<void> => {
     const flowId = randomUUID();
 
@@ -276,7 +264,7 @@ export class AuthV2Controller {
       let validatedRedirectTo: string | undefined;
       const redirectToParam = req.query['redirect_to'] as string | undefined;
       if (redirectToParam) {
-        const allowedOrigins = (process.env.ALLOWED_REDIRECT_ORIGINS ?? '')
+        const allowedOrigins = config.allowedRedirectOrigins
           .split(',')
           .map((o) => o.trim())
           .filter(Boolean);
@@ -322,7 +310,7 @@ export class AuthV2Controller {
       });
 
       // sameSite=lax so the cookie survives Google's top-level callback redirect.
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       res.cookie('oauth_state', state, {
         httpOnly: true,
         secure: isProduction,
@@ -468,7 +456,7 @@ export class AuthV2Controller {
       logger.info(`${tag()} Verifying ID token`);
       const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy ? config.email.clientIdNew : config.email.clientId,
       });
 
       const payload = ticket.getPayload();
@@ -516,10 +504,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = this.getEnterpriseAwareWorkspaces(
-        await this.userService.getWorkspacesByEmail(googleUserData.email),
-        stateData.enterpriseLogin,
-      );
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
 
       // Check for pending invitation from cookie (web) or OAuth state (electron/mobile)
@@ -538,8 +523,8 @@ export class AuthV2Controller {
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
         // Public email domains can never create enterprise workspaces — the only
-        // path forward for a workspace-less user without a pending community join
-        // or invitation — so fail fast on them regardless of the entry flow. The
+        // path forward for a workspace-less user without an invitation — so fail
+        // fast on them regardless of the entry flow. The
         // remaining domain-conflict assert stays gated on the explicit
         // enterprise intent.
         try {
@@ -568,7 +553,7 @@ export class AuthV2Controller {
         }
       }
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const tokenKey = await this.storePendingOAuthTokens(
         refresh_token,
         access_token,
@@ -581,7 +566,7 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+      }, config.jwt.secret, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -786,7 +771,7 @@ export class AuthV2Controller {
         lastActivity: new Date(),
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
 
       const cookieMaxAge = accessTokenLifetimeSeconds * 1000;
       const targetWorkspaceId = session.user.workspaceId;
@@ -907,7 +892,7 @@ export class AuthV2Controller {
       logger.info(`${tag()} Verifying ID token`);
       const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? process.env.GOOGLE_CLIENT_ID_NEW : process.env.GOOGLE_CLIENT_ID,
+        audience: stateData.isNy ? config.email.clientIdNew : config.email.clientId,
       });
 
       const payload = ticket.getPayload();
@@ -952,10 +937,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = this.getEnterpriseAwareWorkspaces(
-        await this.userService.getWorkspacesByEmail(googleUserData.email),
-        stateData.enterpriseLogin,
-      );
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
@@ -997,7 +979,7 @@ export class AuthV2Controller {
         }
       }
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
 
       // If an invitation is pending: set google_access_token so the Electron renderer can later
       // call acceptInvitation + loginWorkspace, then return a hasInvitation signal. The renderer
@@ -1017,7 +999,7 @@ export class AuthV2Controller {
           picture: googleUserData.picture,
           provider: AuthProvider.GOOGLE,
           tokenKey,
-        }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+        }, config.jwt.secret, { expiresIn: '10m' }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'strict' as const,
@@ -1114,7 +1096,7 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), {
+      }, config.jwt.secret, { expiresIn: '10m' }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -1276,7 +1258,7 @@ export class AuthV2Controller {
       const ticket = await this.mobileGoogleClient.verifyIdToken({
         idToken: id_token,
         // Accept both web and iOS client IDs
-        audience: [process.env.GOOGLE_MOBILE_CLIENT_ID!, process.env.GOOGLE_IOS_CLIENT_ID!].filter(
+        audience: [config.email.mobileClientId, config.email.iosClientId].filter(
           Boolean
         ),
       });
@@ -1319,10 +1301,7 @@ export class AuthV2Controller {
         return;
       }
 
-      const workspaces = this.getEnterpriseAwareWorkspaces(
-        await this.userService.getWorkspacesByEmail(googleUserData.email),
-        enterpriseLogin,
-      );
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       logger.info(`${tag()} User has ${workspaces.length} workspace(s) before invitation check`);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
@@ -1354,7 +1333,7 @@ export class AuthV2Controller {
         }
       }
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction || isMobileNative, // Must be secure for sameSite: 'none'
@@ -1376,7 +1355,7 @@ export class AuthV2Controller {
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, process.env.JWT_SECRET!, { expiresIn: '10m' }), cookieOptions);
+      }, config.jwt.secret, { expiresIn: '10m' }), cookieOptions);
       logger.info(`${tag()} Stored pending auth data for workspace selection`);
 
       /**
@@ -1740,7 +1719,7 @@ export class AuthV2Controller {
         memberId: workspaceUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
@@ -1925,7 +1904,7 @@ export class AuthV2Controller {
         memberId: workspaceUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieOptions = {
         httpOnly: true,
         secure: isProduction,
@@ -2121,7 +2100,7 @@ export class AuthV2Controller {
         accessTokenLifetimeSeconds
       );
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
 
       // Set workspace-specific cookies
@@ -2198,26 +2177,17 @@ export class AuthV2Controller {
           return;
         }
 
-        const { workspaceName, workspaceType, joinPolicy } = req.body as {
+        const { workspaceName, workspaceType } = req.body as {
           workspaceName?: string;
           workspaceType?: string;
-          joinPolicy?: string;
         };
 
         if (!workspaceName) {
           res.status(400).json({ error: 'Missing required fields', message: 'workspaceName is required' });
           return;
         }
-        if (
-          workspaceType &&
-          workspaceType !== WorkspaceType.ENTERPRISE &&
-          workspaceType !== WorkspaceType.COMMUNITY
-        ) {
-          res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE or COMMUNITY' });
-          return;
-        }
-        if (joinPolicy && !Object.values(WorkspaceJoinPolicy).includes(joinPolicy as WorkspaceJoinPolicyValue)) {
-          res.status(400).json({ error: 'Invalid join policy', message: 'joinPolicy must be INVITE_ONLY, OPEN, or REQUEST_TO_JOIN' });
+        if (workspaceType && workspaceType !== WorkspaceType.ENTERPRISE) {
+          res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE' });
           return;
         }
 
@@ -2278,10 +2248,6 @@ export class AuthV2Controller {
         const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
           { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },
           workspaceName,
-          {
-            workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
-            joinPolicy: joinPolicy as WorkspaceJoinPolicyValue | undefined,
-          },
         );
 
         await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
@@ -2322,7 +2288,7 @@ export class AuthV2Controller {
           memberId: workspaceUser.orgMemberId,
         });
 
-        const isProduction = process.env.NODE_ENV === 'production';
+        const isProduction = config.env === 'production';
         const cookieOptions = {
           httpOnly: true,
           secure: isProduction,
@@ -2402,25 +2368,16 @@ export class AuthV2Controller {
    */
   createWorkspaceAuth = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { workspaceName, workspaceType, joinPolicy } = req.body as {
+      const { workspaceName, workspaceType } = req.body as {
         workspaceName?: string;
         workspaceType?: string;
-        joinPolicy?: string;
       };
       if (!workspaceName) {
         res.status(400).json({ error: 'Missing required fields', message: 'workspaceName is required' });
         return;
       }
-      if (
-        workspaceType &&
-        workspaceType !== WorkspaceType.ENTERPRISE &&
-        workspaceType !== WorkspaceType.COMMUNITY
-      ) {
-        res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE or COMMUNITY' });
-        return;
-      }
-      if (joinPolicy && !Object.values(WorkspaceJoinPolicy).includes(joinPolicy as WorkspaceJoinPolicyValue)) {
-        res.status(400).json({ error: 'Invalid join policy', message: 'joinPolicy must be INVITE_ONLY, OPEN, or REQUEST_TO_JOIN' });
+      if (workspaceType && workspaceType !== WorkspaceType.ENTERPRISE) {
+        res.status(400).json({ error: 'Invalid workspace type', message: 'workspaceType must be ENTERPRISE' });
         return;
       }
 
@@ -2441,10 +2398,6 @@ export class AuthV2Controller {
       const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
         { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture, authProvider: fullUser.authProvider as AuthProvider },
         workspaceName,
-        {
-          workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
-          joinPolicy: joinPolicy as WorkspaceJoinPolicyValue | undefined,
-        },
       );
 
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
@@ -2488,7 +2441,7 @@ export class AuthV2Controller {
         memberId: workspaceUser.orgMemberId,
       });
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
 
       // Set workspace-specific cookies
@@ -2553,7 +2506,7 @@ export class AuthV2Controller {
     pendingTokenKey: string | undefined;
   } | null> {
     try {
-      const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
+      const decoded = jwt.verify(cookie, config.jwt.secret) as {
         googleId?: string;
         providerUserId?: string;
         email?: string;

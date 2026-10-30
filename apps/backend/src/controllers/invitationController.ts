@@ -19,7 +19,7 @@ import {
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { ProjectType, WorkspaceRole, WorkspaceType, OrgRole } from '@xyne/shared';
+import { ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -27,7 +27,7 @@ import { getEncryptionProvider } from '@/services/encryption';
 
 /**
  * Extract the hostname from an Origin header value.
- * e.g. "https://external.spaces.xyne.juspay.io" → "external.spaces.xyne.juspay.io"
+ * e.g. "https://external.example.org" → "external.example.org"
  */
 function extractDomainFromOrigin(origin: string): string | null {
   try {
@@ -42,7 +42,7 @@ function extractDomainFromOrigin(origin: string): string | null {
  *
  * 1. Extract the domain from the request Origin header
  * 2. Look up `frontend_url` in CAC (Superposition) with { domain } context
- *    — this lets us map e.g. "spaces.xyne.juspay.net" → "https://app.spaces.xyne.juspay.net"
+ *    — this lets us map e.g. "example.org" → "https://app.example.org"
  * 3. If CAC has no override, use the Origin itself (for domains where origin = frontend)
  * 4. If no Origin, fall back to SLACK_FRONTEND_URL env
  */
@@ -116,26 +116,12 @@ export class InvitationController {
         return;
       }
 
-      // Non-admins can only send the invite role matching the workspace type —
-      // MEMBER in an enterprise workspace, COMMUNITY_MEMBER in a community
-      // workspace. Minting any other role (ADMIN, GUEST, cross-type) is admin-only.
-      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
-        const workspace = await DatabaseClient.getInstance().workspace.findUnique({
-          where: { id: workspaceId },
-          select: { workspaceType: true },
-        });
-        if (!workspace) {
-          res.status(404).json({ error: 'Workspace not found' });
-          return;
-        }
-        const allowedRole =
-          workspace.workspaceType === WorkspaceType.COMMUNITY
-            ? WorkspaceRole.COMMUNITY_MEMBER
-            : WorkspaceRole.MEMBER;
-        if (role !== allowedRole) {
-          res.status(403).json({ error: 'Only workspace admins can send this invitation type' });
-          return;
-        }
+      // Non-admin members can only send MEMBER invitations. Minting any other role
+      // (ADMIN, GUEST) is admin-only.
+      const isWorkspaceAdmin = inviterRole === 'ADMIN' || inviterRole === 'OWNER';
+      if (!isWorkspaceAdmin && (inviterRole !== WorkspaceRole.MEMBER || role !== WorkspaceRole.MEMBER)) {
+        res.status(403).json({ error: 'Only workspace admins can send this invitation type' });
+        return;
       }
 
       // Create the invitation (includes workspace data)
@@ -177,11 +163,7 @@ export class InvitationController {
       });
 
       let tempPassword: string | null = null;
-      if (
-        existingWorkspaceUsers === 0 &&
-        role !== 'GUEST' &&
-        role !== WorkspaceRole.COMMUNITY_MEMBER
-      ) {
+      if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
         tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
       }
 
@@ -381,7 +363,7 @@ export class InvitationController {
       let provider: string;
 
       try {
-        const decoded = jwt.verify(pendingAuthRaw, process.env.JWT_SECRET!) as {
+        const decoded = jwt.verify(pendingAuthRaw, config.jwt.secret) as {
           email?: string;
           name?: string;
           providerUserId?: string;

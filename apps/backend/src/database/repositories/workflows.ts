@@ -8,11 +8,9 @@ import {
   Workflow,
   CreateWorkflowInput,
   UpdateWorkflowInput,
-  WorkflowWithExecutions,
   WorkflowExecution,
   CreateWorkflowExecutionInput,
   UpdateWorkflowExecutionInput,
-  FullWorkflowExecution,
   QueryOptions,
 } from '@/types/database';
 import {
@@ -24,8 +22,6 @@ import {
   WorkflowExecutionWithState,
 } from './workflowExecutionStateUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
-import { claimNextPendingExecutionRow } from '@/bypassAcl/workflowServices';
 import { deleteTx } from '@/bypassAcl/transactions/workflows';
 import { approveProposalTx } from '@/bypassAcl/transactions/workflows';
 
@@ -46,37 +42,6 @@ function getDescriptionFromTicketUpdateInput(
   }
 
   return undefined;
-}
-
-function buildClaimQuery(workflowType?: string, tags?: string[]): string {
-  const tagFilter = tags && tags.length > 0
-    ? `AND "tag" IN (${tags.map(t => `'${t.replace(/'/g, "''")}'`).join(', ')})`
-    : ''
-
-  const typeFilter = workflowType
-    ? `AND "workflowType" = '${workflowType.replace(/'/g, "''")}'`
-    : ''
-
-  const dedicatedExecutionFilter = `AND ("workflowType" IS NULL OR "workflowType" NOT IN (${GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES.map(type => `'${type}'`).join(', ')}))`
-
-  return `
-    WITH claimed AS (
-      SELECT "id"
-      FROM "workflow"."workflow_executions"
-      WHERE "status" = 'PENDING'
-      ${tagFilter}
-      ${typeFilter}
-      ${dedicatedExecutionFilter}
-      ORDER BY "createdAt" ASC
-      LIMIT 1
-      FOR UPDATE SKIP LOCKED
-    )
-    UPDATE "workflow"."workflow_executions"
-    SET "status" = 'RUNNING', "updatedAt" = NOW()
-    FROM claimed
-    WHERE "workflow_executions"."id" = claimed."id"
-    RETURNING "workflow_executions"."id"
-  `
 }
 
 export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, UpdateTicketInput> {
@@ -217,32 +182,6 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
   async delete(id: string): Promise<Workflow> {
     return await this.db.workflow.delete({
       where: { id },
-    });
-  }
-
-  async findByStatus(status: string): Promise<Workflow[]> {
-    return await this.db.workflow.findMany({
-      where: { status },
-    });
-  }
-
-  async findByTicketId(ticketId: string): Promise<Workflow[]> {
-    return await this.db.workflow.findMany({
-      where: { ticketId },
-    });
-  }
-
-  async findWithExecutions(id: string): Promise<WorkflowWithExecutions | null> {
-    return await this.db.workflow.findUnique({
-      where: { id },
-      include: {
-        workflowExecutions: {
-          include: {
-            childWorkflowExecutions: true,
-            workflowSteps: true,
-          },
-        },
-      },
     });
   }
 
@@ -412,123 +351,6 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
     });
   }
 
-  async findFullExecution(id: string): Promise<(FullWorkflowExecution & { context: string | null; output: string | null }) | null> {
-    const execution = await this.db.workflowExecution.findUnique({
-      where: { id },
-      include: {
-        workflow: true,
-        parentWorkflowExecution: true,
-        childWorkflowExecutions: true,
-        workflowSteps: true,
-      },
-    });
-    return stitchExecutionState(execution);
-  }
-
-  async findByStatus(status: string, workflowType?: string, limit?: number, tags?: string[]): Promise<WorkflowExecutionWithState[]> {
-    const whereClause: any = { status }
-    
-    if (workflowType) {
-      whereClause.OR = [
-        { workflowType: workflowType },
-        { 
-          workflowType: null,
-          workflow: { workflowType: workflowType }
-        }
-      ]
-    }
-
-    if (tags && tags.length > 0) {
-      whereClause.tag = { in: tags }
-    }
-    
-    const executions = await this.db.workflowExecution.findMany({
-      where: whereClause,
-      include: {
-        workflow: true,
-        workflowSteps: true,
-      },
-      orderBy: { createdAt: 'asc' },
-      take: limit,
-    });
-    return stitchExecutionStateMany(executions);
-  }
-
-  async findByWorkflowId(workflowId: string): Promise<WorkflowExecutionWithState[]> {
-    const executions = await this.db.workflowExecution.findMany({
-      where: { workflowId },
-      include: {
-        workflowSteps: true,
-      },
-    });
-    return stitchExecutionStateMany(executions);
-  }
-
-  async findPendingExecutions(): Promise<WorkflowExecutionWithState[]> {
-    const executions = await this.db.workflowExecution.findMany({
-      where: {
-        status: {
-          in: ['NEW', 'PENDING', 'SCHEDULED'],
-        },
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-    });
-    return stitchExecutionStateMany(executions);
-  }
-
-  async findChildExecutions(parentId: string): Promise<WorkflowExecutionWithState[]> {
-    const executions = await this.db.workflowExecution.findMany({
-      where: {
-        parentWorkflowExecutionId: parentId,
-      },
-    });
-    return stitchExecutionStateMany(executions);
-  }
-
-  async claimNextPendingExecution(workflowType?: string, tags?: string[]): Promise<WorkflowExecutionWithState | null> {
-    const claimed = await claimNextPendingExecutionRow(this.db, buildClaimQuery(workflowType, tags))
-
-    if (claimed.length === 0) return null
-
-    const execution = await this.db.workflowExecution.findUnique({
-      where: { id: claimed[0].id },
-    })
-
-    return stitchExecutionState(execution)
-  }
-
-  async findRunningExecutionIds(): Promise<string[]> {
-    const executions = await this.db.workflowExecution.findMany({
-      where: {
-        status: 'RUNNING',
-        NOT: { workflowType: { in: [...GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES] } },
-      },
-      select: { id: true },
-    })
-    return executions.map(e => e.id)
-  }
-
-  async resetExecutionsToPending(ids: string[]): Promise<void> {
-    if (ids.length === 0) return
-    await this.db.workflowExecution.updateMany({
-      where: {
-        id: { in: ids },
-        status: 'RUNNING',
-        NOT: { workflowType: { in: [...GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES] } },
-      },
-      data: { status: 'PENDING' },
-    })
-  }
-
-  async getCreatedBy(executionId: string): Promise<string | null> {
-    const execution = await this.db.workflowExecution.findUnique({
-      where: { id: executionId },
-      select: { createdBy: true },
-    });
-    return execution?.createdBy ?? null;
-  }
 }
 
 

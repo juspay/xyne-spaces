@@ -44,11 +44,10 @@ export interface CommentMark {
 /**
  * How the annotator reaches the content it is annotating.
  *
- * The three surfaces differ only here: a document renders in an iframe we own
- * and talks over postMessage, the AI screen's browser is a webview driven with
- * executeJavaScript, and a folder's browser is held by the host window over a
- * hole in this frame and is reached through the frame bridge. Everything above
- * this interface — the picker UI, the marks, the jump — is the same code.
+ * The surfaces differ only here: a document renders in an iframe we own and
+ * talks over postMessage, and a browser — the AI screen's, a folder's — is a
+ * webview driven with executeJavaScript. Everything above this interface — the
+ * picker UI, the marks, the jump — is the same code.
  */
 export interface AnnotateTransport {
   /** True once the content is reachable; the toggle stays hidden until then. */

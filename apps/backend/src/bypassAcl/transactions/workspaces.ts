@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { WorkspaceRepository } from '@/database/repositories/workspaces';
 import { getEncryptionProvider } from '@/services/encryption';
-import { WorkspaceType, WorkspaceJoinPolicy } from '@xyne/shared';
+import { WorkspaceType } from '@xyne/shared';
 import { Prisma } from '@prisma/client';
 
 
@@ -11,7 +11,6 @@ export function createTx(self: WorkspaceRepository, data: Prisma.WorkspaceCreate
       data: {
         ...data,
         workspaceType: (data as any).workspaceType ?? WorkspaceType.ENTERPRISE,
-        joinPolicy: (data as any).joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY,
       },
     });
     await getEncryptionProvider().provisionEntity({

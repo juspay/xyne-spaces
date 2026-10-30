@@ -1,5 +1,6 @@
 import { notificationService } from '@/services/notificationService';
-import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, flagThreadRecommendation } from '@/services/threadSummaryService';
+// Disabled (LLM)
+// import { getOrGenerateThreadSummary, isThreadSummaryEnabledForChannel, flagThreadRecommendation } from '@/services/threadSummaryService';
 import { db } from '@/database/client';
 import { NotificationType } from '@xyne/shared';
 import { BaseSideEffectHandler } from '../base-handler';
@@ -43,20 +44,23 @@ export class ConversationParticipantsSideEffectHandler extends BaseSideEffectHan
       return;
     }
 
-    const { conversationId, userId, channelId } = participant;
+    // Disabled (LLM)
+    // const { conversationId, userId, channelId } = participant;
+    const { conversationId, userId } = participant;
 
     if (this.ctx.userID === userId) {
       logger.info(`[ConversationParticipantsHandler] Skipping self-join: user ${userId} in conversation ${conversationId}`);
       return;
     }
 
-    if (!isThreadSummaryEnabledForChannel(channelId)) {
-      return;
-    }
+    // Disabled (LLM)
+    // if (!isThreadSummaryEnabledForChannel(channelId)) {
+    //   return;
+    // }
 
-    await flagThreadRecommendation(conversationId, userId);
+    // await flagThreadRecommendation(conversationId, userId);
 
-    await getOrGenerateThreadSummary(conversationId);
+    // await getOrGenerateThreadSummary(conversationId);
   }
 
   async onUpdate(job: SideEffectJobConfig): Promise<void> {

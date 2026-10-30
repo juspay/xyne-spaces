@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { Ticket } from '@prisma/client';
-import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository, emitTicketCreated } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -62,7 +62,9 @@ import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stag
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
-import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+// Disabled (LLM)
+// import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { suggestTicketFields, type TicketFieldSuggestionInput } from '@/services/ticketFieldSuggestions';
 import { AgentsConfig } from '@/agents/config';
@@ -96,10 +98,9 @@ const AddAttachmentsFromConversationBodySchema = z.object({
 });
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { unifiedBotUserService } from '@/bots/unified';
-import { workflowManager } from '@/workflows/services/workflowManager';
-import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ticketService } from '@/services/ticketService';
-import { emailService } from '@/services/emailService';
+// Disabled (Claw)
+// import { emailService } from '@/services/emailService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { createTicketWithConversationTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { createTicketTx, TicketCreateAccessError } from '@/bypassAcl/transactions/controllersTicketController';
@@ -118,26 +119,27 @@ type MyTicketBoardOption = {
   projectId?: string;
 };
 
-const MAX_DUPLICATE_DECISIONS = 20;
+// Disabled (LLM)
+// const MAX_DUPLICATE_DECISIONS = 20;
 
-const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: string[] } => {
-  let value = raw;
-  if (typeof value === 'string') {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return { sameAs: null, notSame: [] };
-    }
-  }
-  if (!value || typeof value !== 'object') return { sameAs: null, notSame: [] };
-  const { sameAs, notSame } = value as { sameAs?: unknown; notSame?: unknown };
-  return {
-    sameAs: typeof sameAs === 'string' && sameAs.length > 0 ? sameAs : null,
-    notSame: (Array.isArray(notSame) ? notSame : [])
-      .filter((id): id is string => typeof id === 'string' && id.length > 0)
-      .slice(0, MAX_DUPLICATE_DECISIONS),
-  };
-};
+// const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: string[] } => {
+//   let value = raw;
+//   if (typeof value === 'string') {
+//     try {
+//       value = JSON.parse(value);
+//     } catch {
+//       return { sameAs: null, notSame: [] };
+//     }
+//   }
+//   if (!value || typeof value !== 'object') return { sameAs: null, notSame: [] };
+//   const { sameAs, notSame } = value as { sameAs?: unknown; notSame?: unknown };
+//   return {
+//     sameAs: typeof sameAs === 'string' && sameAs.length > 0 ? sameAs : null,
+//     notSame: (Array.isArray(notSame) ? notSame : [])
+//       .filter((id): id is string => typeof id === 'string' && id.length > 0)
+//       .slice(0, MAX_DUPLICATE_DECISIONS),
+//   };
+// };
 
 export class TicketController {
   ticketRepository: TicketRepository;
@@ -301,20 +303,21 @@ export class TicketController {
     // not be published before the transaction above commits.
     void emitTicketCreated(ticket, undefined, createdBy);
 
-    ticketDuplicateService.persistDuplicateReferences({
-      ticketId: ticket.id,
-      ticketCreatedBy: ticket.createdBy,
-      title,
-      description,
-      projectId,
-      userId: createdBy,
-      channelId: ticket.channelId,
-    }).catch((error: Error) => {
-      logger.error('Failed to persist duplicate references for ticket', {
-        ticketId: ticket.id,
-        error,
-      });
-    });
+    // Disabled (LLM)
+    // ticketDuplicateService.persistDuplicateReferences({
+    //   ticketId: ticket.id,
+    //   ticketCreatedBy: ticket.createdBy,
+    //   title,
+    //   description,
+    //   projectId,
+    //   userId: createdBy,
+    //   channelId: ticket.channelId,
+    // }).catch((error: Error) => {
+    //   logger.error('Failed to persist duplicate references for ticket', {
+    //     ticketId: ticket.id,
+    //     error,
+    //   });
+    // });
 
     return ticket;
   }
@@ -890,7 +893,8 @@ export class TicketController {
       }
 
       let formFieldChangesForEmit: FormFieldChanges | undefined;
-      let duplicateScopeValues: DuplicateScopeFieldValue[] | undefined;
+      // Disabled (LLM)
+      // let duplicateScopeValues: DuplicateScopeFieldValue[] | undefined;
       if (formFields.length > 0) {
         const fieldsWithValues = formFields
           .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
@@ -901,7 +905,8 @@ export class TicketController {
           }));
         if (fieldsWithValues.length > 0) {
           formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
-          duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }));
+          // Disabled (LLM)
+          // duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }));
         }
       }
 
@@ -959,20 +964,21 @@ export class TicketController {
         // No-ops unless the channel has auto-draft switched on; fire-and-forget,
         // because a draft is a convenience and must never fail or delay the
         // ticket.
-        void emailService
-          .triggerOpeningAutoDraft({
-            ticketId: ticket.id,
-            conversationId: ticket.conversationId,
-            channelId: ticketChannelId,
-            title: ticket.title,
-            description: description ?? '',
-          })
-          .catch(err =>
-            logger.warn('[createTicket] opening auto-draft failed', {
-              ticketId: ticket.id,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
+        // Disabled (Claw)
+        // void emailService
+        //   .triggerOpeningAutoDraft({
+        //     ticketId: ticket.id,
+        //     conversationId: ticket.conversationId,
+        //     channelId: ticketChannelId,
+        //     title: ticket.title,
+        //     description: description ?? '',
+        //   })
+        //   .catch(err =>
+        //     logger.warn('[createTicket] opening auto-draft failed', {
+        //       ticketId: ticket.id,
+        //       error: err instanceof Error ? err.message : String(err),
+        //     }),
+        //   );
       }
 
       // Create TicketTag records for each tag
@@ -1136,26 +1142,27 @@ export class TicketController {
         userName: req.user?.name ?? null,
       });
 
-      const duplicateDecisions = duplicateDecisionsOf(req.body.duplicateDecisions);
-      if (!duplicateDecisions.sameAs) {
-        ticketDuplicateService.persistDuplicateReferences({
-          ticketId: ticket.id,
-          ticketCreatedBy: ticket.createdBy,
-          title,
-          description,
-          projectId,
-          userId,
-          parentTicketId,
-          channelId: ticket.channelId,
-          scopeFieldValues: duplicateScopeValues,
-          excludeTicketIds: duplicateDecisions.notSame,
-        }).catch(error => {
-          logger.error('Failed to persist duplicate references for ticket', {
-            ticketId: ticket.id,
-            error,
-          });
-        });
-      }
+      // Disabled (LLM)
+      // const duplicateDecisions = duplicateDecisionsOf(req.body.duplicateDecisions);
+      // if (!duplicateDecisions.sameAs) {
+      //   ticketDuplicateService.persistDuplicateReferences({
+      //     ticketId: ticket.id,
+      //     ticketCreatedBy: ticket.createdBy,
+      //     title,
+      //     description,
+      //     projectId,
+      //     userId,
+      //     parentTicketId,
+      //     channelId: ticket.channelId,
+      //     scopeFieldValues: duplicateScopeValues,
+      //     excludeTicketIds: duplicateDecisions.notSame,
+      //   }).catch(error => {
+      //     logger.error('Failed to persist duplicate references for ticket', {
+      //       ticketId: ticket.id,
+      //       error,
+      //     });
+      //   });
+      // }
 
       const response: GetTicketDetailsResponse = {
         id: ticket.id,
@@ -1180,28 +1187,6 @@ export class TicketController {
       };
 
       res.status(201).json(response);
-
-      // Check if this is a support channel by fetching the channel type
-      const channel = await this.channelRepository.findById(ticket.channelId);
-      if (channel && channel.type === ChannelType.SUPPORT) {
-        // Trigger IT_SUPPORT_WORKFLOW for support channels
-        await workflowManager.startWorkflow({
-          ticketId: ticket.id,
-          workflowType: WorkflowType.IT_SUPPORT_WORKFLOW,
-          context: {
-            title: ticket.title,
-            description: ticket.description,
-            ticketId: ticket.id,
-            queryText: description,
-            channelId: channel.id,
-            userId,
-            userName: req.user?.name,
-            conversationId: ticket.conversationId,
-            xyneId: ticket.xyneId,
-          },
-          createdBy: userId,
-        })
-      }
 
       // Trigger commit analysis for commit-range release tickets only.
       const releaseTicket = isReleaseTicket(ticket.ticketType as BaseTicketType);
@@ -1856,110 +1841,6 @@ export class TicketController {
     }
   };
 
-  getPendingHumanIntervention = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { ticketId } = req.params;
-
-      if (!ticketId) {
-        res.status(400).json({ error: 'ticketId is required' });
-        return;
-      }
-      const pendingStep = await this.findPendingUserApprovalStep(ticketId);
-
-      if (!pendingStep) {
-        res.status(200).json({
-          requiresIntervention: false,
-          step: null
-        });
-        return;
-      }
-
-      let stepTitle = 'Human Intervention Required';
-      let responseSchema = null;
-
-      if (pendingStep.data) {
-        try {
-          const stepData = JSON.parse(pendingStep.data);
-          stepTitle = stepData?.externalMetadata?.title || stepTitle;
-          responseSchema = stepData?.externalMetadata?.response_schema || null;
-        } catch (e) {
-          // Ignore parse errors
-        }
-      }
-
-      res.status(200).json({
-        requiresIntervention: true,
-        step: {
-          id: pendingStep.id,
-          stepName: pendingStep.stepName,
-          title: stepTitle,
-          responseSchema,
-          workflowExecutionId: pendingStep.workflowExecutionId,
-          createdAt: pendingStep.createdAt
-        }
-      });
-    } catch (error) {
-      logger.error('Error checking pending human intervention:', error);
-      res.status(500).json({ error: 'Failed to check pending human intervention' });
-    }
-  };
-
-  private async findPendingUserApprovalStep(ticketId: string) {
-    const workflows = await prisma.workflow.findMany({
-      where: { ticketId },
-      select: { id: true }
-    });
-
-    if (workflows.length === 0) {
-      return null;
-    }
-
-    const workflowIds = workflows.map(w => w.id);
-
-    const executions = await prisma.workflowExecution.findMany({
-      where: { workflowId: { in: workflowIds } },
-      select: { id: true }
-    });
-
-    if (executions.length === 0) {
-      return null;
-    }
-
-    const executionIds = executions.map(e => e.id);
-
-    // Step 3: Find input steps with stepSubType 'user_approval'
-    const inputSteps = await prisma.workflowStep.findMany({
-      where: {
-        workflowExecutionId: { in: executionIds },
-        stepExecutorType: 'external',
-        stepSubType: 'user_approval',
-        type: 'input'
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    if (inputSteps.length === 0) {
-      return null;
-    }
-
-    for (const inputStep of inputSteps) {
-      // Any approver's response counts as answered, so it runs above the caller's own scope.
-      const externalStepResponse = await withWorkspaceScope(() =>
-        prisma.externalStepResponse.findUnique({
-          where: {
-            workflowStepId: inputStep.id
-          }
-        }),
-      );
-
-      if (!externalStepResponse) {
-        return inputStep;
-      }
-    }
-
-    return null;
-  }
-
   suggestBoard = async (req: Request, res: Response): Promise<void> => {
     try {
       const { title, description, projectId } = req.body as TicketBoardSuggestionRequest;
@@ -2065,7 +1946,7 @@ export class TicketController {
 
       const bodyResult = AddAttachmentsFromConversationBodySchema.safeParse(req.body);
       if (!bodyResult.success) {
-        res.status(400).json({ error: bodyResult.error.errors[0]?.message ?? 'Invalid request body' });
+        res.status(400).json({ error: bodyResult.error.issues[0]?.message ?? 'Invalid request body' });
         return;
       }
       const { sourceConversationId, sourceMessageId } = bodyResult.data;

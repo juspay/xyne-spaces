@@ -71,25 +71,6 @@ export type UpdateTicketInput = Prisma.TicketUpdateInput;
 export type Workflow = Prisma.WorkflowGetPayload<{}>;
 export type CreateWorkflowInput = Prisma.WorkflowUncheckedCreateInput;
 export type UpdateWorkflowInput = Prisma.WorkflowUncheckedUpdateInput;
-export type WorkflowWithSteps = Prisma.WorkflowGetPayload<{
-  include: {
-    workflowExecutions: {
-      include: {
-        workflowSteps: true;
-      };
-    };
-  };
-}>;
-export type WorkflowWithExecutions = Prisma.WorkflowGetPayload<{
-  include: {
-    workflowExecutions: {
-      include: {
-        childWorkflowExecutions: true;
-        workflowSteps: true;
-      };
-    };
-  };
-}>;
 
 // Note: WorkflowWithTicket removed - no FK relation between Workflow and Ticket
 
@@ -102,30 +83,9 @@ export type UpdateWorkflowExecutionInput = Prisma.WorkflowExecutionUpdateInput &
   context?: string | null;
   output?: string | null;
 };
-export type FullWorkflowExecution = Prisma.WorkflowExecutionGetPayload<{
-  include: {
-    workflow: true;
-    parentWorkflowExecution: true;
-    childWorkflowExecutions: true;
-    workflowSteps: true;
-  };
-}>;
-
-export type WorkflowExecutionLock = Prisma.WorkflowExecutionLockGetPayload<{}>;
-export type CreateWorkflowExecutionLockInput = Prisma.WorkflowExecutionLockCreateInput;
-export type UpdateWorkflowExecutionLockInput = Prisma.WorkflowExecutionLockUpdateInput;
-
 export type WorkflowStep = Prisma.WorkflowStepGetPayload<{}>;
 export type CreateWorkflowStepInput = Prisma.WorkflowStepCreateInput;
 export type UpdateWorkflowStepInput = Prisma.WorkflowStepUpdateInput;
-
-export type AgentStep = Prisma.AgentStepGetPayload<{}>;
-export type CreateAgentStepInput = Prisma.AgentStepCreateInput;
-export type UpdateAgentStepInput = Prisma.AgentStepUpdateInput;
-
-export type ExternalStepResponse = Prisma.ExternalStepResponseGetPayload<{}>;
-export type CreateExternalStepResponseInput = Prisma.ExternalStepResponseCreateInput;
-export type UpdateExternalStepResponseInput = Prisma.ExternalStepResponseUpdateInput;
 
 
 // Workspace types

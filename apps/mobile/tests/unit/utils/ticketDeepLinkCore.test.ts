@@ -8,10 +8,10 @@ import {
   ticketDeepLinkRouteParams,
 } from '@/src/utils/messageDeepLinkCore';
 
-const TRUSTED_ORIGINS = new Set(['https://spaces.xyne.juspay.net']);
+const TRUSTED_ORIGINS = new Set(['https://example.org']);
 
 const TICKET_DETAIL_URL =
-  'https://spaces.xyne.juspay.net/00000000-0000-4000-8000-000000000001' +
+  'https://example.org/00000000-0000-4000-8000-000000000001' +
   '/chat/dir/cmmw4b63v0q6z575f2x8teulu/cms91mfbf058nx4zkjfe419tg/cms91mfbs058qx4zk9mimdz5h' +
   '?selectedTab=details';
 
@@ -29,7 +29,7 @@ describe('ticket deep-link contract', (): void => {
 
   it('maps selectedTab=thread onto the native thread tab', (): void => {
     const parsed = parseTicketDeepLinkCore(
-      'https://spaces.xyne.juspay.net/chat/dir/c1/v1/t1?selectedTab=thread',
+      'https://example.org/chat/dir/c1/v1/t1?selectedTab=thread',
       TRUSTED_ORIGINS,
     );
     assert.deepEqual(parsed, {
@@ -43,20 +43,20 @@ describe('ticket deep-link contract', (): void => {
   it('maps selectedTab=messages onto thread and defaults unknown tabs to overview', (): void => {
     assert.equal(
       parseTicketDeepLinkCore(
-        'https://spaces.xyne.juspay.net/chat/dir/c1/v1/t1?selectedTab=messages',
+        'https://example.org/chat/dir/c1/v1/t1?selectedTab=messages',
         TRUSTED_ORIGINS,
       )?.selectedTab,
       'thread',
     );
     assert.equal(
       parseTicketDeepLinkCore(
-        'https://spaces.xyne.juspay.net/chat/dir/c1/v1/t1?selectedTab=overview',
+        'https://example.org/chat/dir/c1/v1/t1?selectedTab=overview',
         TRUSTED_ORIGINS,
       )?.selectedTab,
       'overview',
     );
     assert.equal(
-      parseTicketDeepLinkCore('https://spaces.xyne.juspay.net/chat/dir/c1/v1/t1', TRUSTED_ORIGINS)
+      parseTicketDeepLinkCore('https://example.org/chat/dir/c1/v1/t1', TRUSTED_ORIGINS)
         ?.selectedTab,
       'overview',
     );
@@ -65,7 +65,7 @@ describe('ticket deep-link contract', (): void => {
   it('accepts org + workspace scope and the custom app scheme', (): void => {
     assert.deepEqual(
       parseTicketDeepLinkCore(
-        'https://spaces.xyne.juspay.net/org-9/ws-1/chat/dir/c1/v1/t1?selectedTab=details',
+        'https://example.org/org-9/ws-1/chat/dir/c1/v1/t1?selectedTab=details',
         TRUSTED_ORIGINS,
       ),
       {
@@ -89,13 +89,13 @@ describe('ticket deep-link contract', (): void => {
   it('does not steal message or call links, and rejects untrusted hosts', (): void => {
     assert.equal(
       parseTicketDeepLinkCore(
-        'https://spaces.xyne.juspay.net/ws-1/chat/dir/channel-1/thread-1',
+        'https://example.org/ws-1/chat/dir/channel-1/thread-1',
         TRUSTED_ORIGINS,
       ),
       null,
     );
     assert.equal(
-      parseTicketDeepLinkCore('https://spaces.xyne.juspay.net/chat/dir/channel-1', TRUSTED_ORIGINS),
+      parseTicketDeepLinkCore('https://example.org/chat/dir/channel-1', TRUSTED_ORIGINS),
       null,
     );
     assert.equal(
@@ -103,15 +103,12 @@ describe('ticket deep-link contract', (): void => {
       null,
     );
     assert.equal(
-      parseTicketDeepLinkCore(
-        'https://spaces.xyne.juspay.net/a/b/c/chat/dir/c1/v1/t1',
-        TRUSTED_ORIGINS,
-      ),
+      parseTicketDeepLinkCore('https://example.org/a/b/c/chat/dir/c1/v1/t1', TRUSTED_ORIGINS),
       null,
     );
     assert.equal(
       parseMessageDeepLinkCore(
-        'https://spaces.xyne.juspay.net/ws-1/chat/dir/channel-1/thread-1',
+        'https://example.org/ws-1/chat/dir/channel-1/thread-1',
         TRUSTED_ORIGINS,
       )?.threadId,
       'thread-1',
@@ -145,7 +142,7 @@ describe('ticket deep-link contract', (): void => {
       '00000000-0000-4000-8000-000000000001/chat/dir/cmmw4b63v0q6z575f2x8teulu/cms91mfbf058nx4zkjfe419tg/cms91mfbs058qx4zk9mimdz5h?selectedTab=details',
     );
     assert.deepEqual(
-      parseTicketDeepLinkCore(`https://spaces.xyne.juspay.net/${relative}`, TRUSTED_ORIGINS),
+      parseTicketDeepLinkCore(`https://example.org/${relative}`, TRUSTED_ORIGINS),
       payload,
     );
   });

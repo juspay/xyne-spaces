@@ -80,9 +80,8 @@ import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
 import { RunOriginChip } from './RunOriginChip';
 import { PhoneDefault } from '@xyne/icons';
-import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
-import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
+import { PendingIcon } from '../../../assets/icons/PendingIcon';
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
@@ -96,13 +95,16 @@ import { RecordingBubble } from './RecordingBubble';
 import { CallShareBubble } from './CallShareBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
-import { TicketSuggestions } from './TicketSuggestions';
+// Disabled (LLM)
+// import { TicketSuggestions } from './TicketSuggestions';
 import { AppActions } from './AppActions';
 import { parseMarkdownWithAppActions } from '../../../utils/markdownAppActions';
-import { PulseTickets } from './PulseTickets';
+// Disabled (LLM)
+// import { PulseTickets } from './PulseTickets';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
-import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
+// Disabled (LLM)
+// import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import MobileReactionDrawer from './MobileReactionDrawer';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import AddReactionDrawerMobile from '../../Chat/AddReactionDrawerMobile/AddReactionDrawerMobile';
@@ -542,7 +544,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   channelScopeType,
   isFirstInThread = false,
   allThreadAttachments,
-  workflowNumber,
   showLinkPreview: shouldRenderLinkPreview = true,
   callLinkCardShown,
   searchItemView = false,
@@ -563,7 +564,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showLinkPreview, setShowLinkPreview] = useState(true);
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
-  const isBotMessage = message.msgType === MessageType.BOT;
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
   const previewResult = parsePreviewMd(message.link_preview_md);
@@ -616,13 +616,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     color: 'hsl(var(--muted-foreground))',
     opacity: 0.5,
   };
-  const isWorkflowMessage =
-    (isSystemMessage && metadata?.workflowId && metadata?.ticketId && !metadata?.messageSubtype) ||
-    (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isTicketCardMessage =
-    !!conversation?.ticket_md &&
-    conversation?.initialMessageId === message.messageId &&
-    !isWorkflowMessage;
+    !!conversation?.ticket_md && conversation?.initialMessageId === message.messageId;
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isCallMessage = metadata?.isCallMessage === true;
   // Read-only scheduled-call card. Kept off isCallMessage on purpose: that flag opts a
@@ -678,8 +673,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
   }, [isMarkdownContent, hasSuggestedTickets, message.content]);
 
-  const ticketSuggestions = parsedMarkdown.ticketSuggestions;
-  const ticketsCreated = parsedMarkdown.ticketsCreated;
+  // Disabled (LLM)
+  // const ticketSuggestions = parsedMarkdown.ticketSuggestions;
+  // const ticketsCreated = parsedMarkdown.ticketsCreated;
 
   const { user } = useAuth();
 
@@ -705,21 +701,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return { ...parsed, appActions: visibleActions };
   }, [hasAppActions, message.content, user?.id]);
 
-  const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
+  // Disabled (LLM)
+  // const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
   const isChannelEmailMessage = metadata?.['messageSubtype'] === 'channel_email';
 
   const { isMobile } = usePlatform();
   const sender = useUser(message.senderId);
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
-  const actionableCount = useMemo(
-    () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
-    [message.nudgeCounts],
-  );
-  const countRowIds = useMemo(
-    () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
-    [message.nudgeCounts],
-  );
+  // Disabled (LLM)
+  // const actionableCount = useMemo(
+  //   () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
+  //   [message.nudgeCounts],
+  // );
+  // const countRowIds = useMemo(
+  //   () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
+  //   [message.nudgeCounts],
+  // );
 
   const handleUserClick = (userId: string): void => {
     if (onUserClick) {
@@ -845,7 +843,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         threadInfo={threadInfo}
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
-        workflowNumber={workflowNumber}
         {...(recordingShare && {
           recordingShare,
         })}
@@ -934,19 +931,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* ================== LEFT AVATAR ================== */}
         {!contentOnly && (
           <div
-            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isWorkflowMessage && !isHeadlessRecordingAnchor ? 'pt-[4px]' : ''}`}
+            className={`w-8 h-full flex items-start justify-center ${showAvatar && !isHeadlessRecordingAnchor ? 'pt-[4px]' : ''}`}
           >
             {message.isDeleted ? (
               <div className='w-8 h-8 rounded-md flex items-center justify-center bg-muted'>
                 <Trash2 className='w-4 h-4 text-muted-foreground' />
               </div>
-            ) : isWorkflowMessage ? (
-              <img
-                src={workflowBotAvatar}
-                alt='No files shared in this channel yet.'
-                width={32}
-                height={32}
-              />
             ) : showAvatar && isCallMessage && !isForwardedMessage ? (
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted-foreground/10'}`}
@@ -1138,7 +1128,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           )}
 
-          {showAvatar && !isWorkflowMessage && (
+          {showAvatar && (
             <div className='w-full flex items-baseline gap-2 min-h-4 '>
               {isCallMessage && !isForwardedMessage ? (
                 <h3
@@ -1351,15 +1341,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   conversationId={message.conversationId}
                   showButton={true}
                 />
-              ) : isPulseActionablesMessage && metadata?.callId ? (
-                <PulseTickets
-                  content={message.content}
-                  callId={metadata?.callId}
-                  {...(channelId && { channelId })}
-                  conversationId={message.conversationId}
-                  messageId={message.messageId}
-                />
-              ) : isChannelEmailMessage ? (
+              ) : // Disabled (LLM)
+              // ) : isPulseActionablesMessage && metadata?.callId ? (
+              //   <PulseTickets
+              //     content={message.content}
+              //     callId={metadata?.callId}
+              //     {...(channelId && { channelId })}
+              //     conversationId={message.conversationId}
+              //     messageId={message.messageId}
+              //   />
+              isChannelEmailMessage ? (
                 <ChannelEmailCard
                   subject={typeof metadata?.['subject'] === 'string' ? metadata['subject'] : ''}
                   from={typeof metadata?.['from'] === 'string' ? metadata['from'] : ''}
@@ -1468,7 +1459,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         />
                       </div>
                     ))}
-                  {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
+                  {/* Disabled (LLM) */}
+                  {/* {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
                     <TicketSuggestions
                       suggestions={ticketSuggestions}
                       ticketsCreated={ticketsCreated}
@@ -1476,7 +1468,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       messageId={message.messageId}
                       conversationId={message.conversationId}
                     />
-                  )}
+                  )} */}
                   {(parsedAppActions.appActions.length > 0 ||
                     parsedAppActions.actioned.length > 0) && (
                     <AppActions
@@ -1641,7 +1633,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             <div className='jp-message-html inline-block'>
                               <RenderMessageWithHTML
                                 disableLinks={disableLinks}
-                                message={isWorkflowMessage ? 'Workflow created' : message.content}
+                                message={message.content}
                                 showEdited={message.edited}
                                 isSystemMessage={isSystemMessage}
                                 messageId={message.messageId}
@@ -1677,7 +1669,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               )}
 
-              {conversation && conversation.ticket_md && !isWorkflowMessage && (
+              {conversation && conversation.ticket_md && (
                 <BotBubble
                   context={context}
                   messageId={message.messageId}
@@ -1742,7 +1734,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </div>
               )}
 
-              {!contentOnly && (
+              {/* Disabled (LLM) */}
+              {/* {!contentOnly && (
                 <SurfaceNudgeList
                   messageId={message.messageId}
                   actionableCount={actionableCount}
@@ -1753,7 +1746,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   messageType={message.msgType}
                   isDeleted={message.isDeleted}
                 />
-              )}
+              )} */}
               {!contentOnly && (
                 <ReactionView
                   reactionsMd={message.reactions_md}

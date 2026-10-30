@@ -126,7 +126,7 @@ class AuthV2Middleware {
         if (session.user.authProvider === AuthProvider.GOOGLE && session.refreshToken) {
           try {
             // Verify if the user is still valid in Google by checking their refresh token
-            const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+            const googleClient = new OAuth2Client(config.email.clientId, config.email.clientSecret);
             googleClient.setCredentials({ refresh_token: session.refreshToken });
 
             // Attempt to get a new access token.
@@ -171,12 +171,12 @@ class AuthV2Middleware {
                 logger.info(`[Auto-Refresh] Microsoft Graph verification successful for user ${session.user.email}`);
               } else if (graphResponse.status === 401) {
                 // Access token expired — try refreshing via Microsoft token endpoint
-                const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+                const tenantId = config.microsoft.tenantId || 'common';
                 const tokenResponse = await axios.post(
                   `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
                   new URLSearchParams({
-                    client_id: process.env.MICROSOFT_CLIENT_ID!,
-                    client_secret: process.env.MICROSOFT_CLIENT_SECRET!,
+                    client_id: config.microsoft.clientId,
+                    client_secret: config.microsoft.clientSecret,
                     grant_type: 'refresh_token',
                     refresh_token: session.refreshToken,
                     scope: 'openid email profile User.Read',
@@ -251,7 +251,7 @@ class AuthV2Middleware {
       });
 
       // Set new cookie with updated lifespan
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const targetWorkspaceId = session.user.workspaceId;
 
       // NEW: Multi-workspace cookies

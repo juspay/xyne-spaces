@@ -1,9 +1,6 @@
 import { TicketRepository } from '../database/repositories/ticketRepository';
-import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
-import { ImageAttachment } from '@/workflows/types/workflow-enums';
 import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
-import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { Prisma } from '@prisma/client';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
@@ -18,25 +15,13 @@ import { assertFlowStepSkippable } from '@/services/flowCascadeService';
 import { updateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
 import { bulkUpdateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
 
-
 export const prisma = DatabaseClient.getInstance();
-
-const sanitizeFilename = (filename: string): string => {
-  return filename
-    .replace(/[/\\:*?"<>|]/g, '_')
-    .replace(/\.\.+/g, '_')
-    .replace(/^\.+/, '')
-    .substring(0, 255)
-    .trim();
-};
 
 export class TicketService {
   private ticketRepository: TicketRepository;
-  private messageAttachmentRepository: MessageAttachmentRepository;
 
   constructor() {
     this.ticketRepository = new TicketRepository();
-    this.messageAttachmentRepository = new MessageAttachmentRepository();
   }
 
   /**
@@ -619,41 +604,6 @@ export class TicketService {
     return { updated, unchanged, skipped, totalAdded, totalRemoved };
   }
 
-  /**
-   * Fetch and download all image attachments for a ticket
-   * Converts them to Base64 format for use in vision-enabled AI workflows
-   */
-  async getImagesForTicket(ticketId: string): Promise<ImageAttachment[]> {
-    try {
-      const attachments = await this.messageAttachmentRepository.findByTicketId(ticketId);
-
-      const imageAttachmentPromises = attachments
-        .filter(a => a.mimetype.startsWith('image/'))
-        .map(async (attachment, index): Promise<ImageAttachment | null> => {
-          try {
-            const buffer = await getStorageService().getFileBuffer(attachment.url);
-            const rawFileName = attachment.url.split('/').pop() || `image-${index}`;
-            const fileName = sanitizeFilename(rawFileName);
-            return {
-              id: `img-${index}-${Date.now()}`,
-              type: 'image' as const,
-              data: buffer.toString('base64'),
-              mimeType: attachment.mimetype,
-              name: fileName,
-            };
-          } catch (err) {
-            logger.error('Failed to download image from GCS', { url: attachment.url, error: err });
-            return null;
-          }
-        });
-
-      const imageAttachmentsRaw = await Promise.all(imageAttachmentPromises);
-      return imageAttachmentsRaw.filter((a): a is ImageAttachment => a !== null);
-    } catch (error) {
-      logger.error('Failed to fetch image attachments for ticket', { ticketId, error });
-      return [];
-    }
-  }
 }
 
 // Export a singleton instance

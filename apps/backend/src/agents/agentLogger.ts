@@ -13,7 +13,7 @@
  *   logLLMError('TitleGenerator', error);
  */
 
-import type { TraceEvent } from '@juspay-jaf/jaf';
+import type { TraceEvent } from '@/agents/llmClient';
 import { logger } from '../utils/logger.js';
 
 const MAX_OUTPUT_LOG_LENGTH = 1000;

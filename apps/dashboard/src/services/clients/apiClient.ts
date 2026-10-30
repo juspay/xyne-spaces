@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { API_BASE_URL, APP_BASE_PATH, isExternalApp } from '../../config';
+import { API_BASE_URL, isExternalApp } from '../../config';
 import { logger, Logger, getWebDeviceKey, WEB_DEVICE_KEY_STORAGE_KEY } from '../../utils/logger';
 import {
   httpRequestDuration,
@@ -93,11 +93,7 @@ apiConfig.interceptors.request.use(
 
       // X-Workspace-Id for multi-workspace. Main routes are /:workspaceId/...; standalone
       // /newWindow/* windows carry it as a query param (then fall back to lastActiveWorkspaceId).
-      // The lane serves under the /sdlc-app basename, whose segment would otherwise
-      // read as the workspace id. APP_BASE_PATH is '' in the main bundle.
-      const path = window.location.pathname;
-      const appPath = path.startsWith(APP_BASE_PATH) ? path.slice(APP_BASE_PATH.length) : path;
-      const firstPathSegment = appPath.match(/^\/([^/]+)/)?.[1];
+      const firstPathSegment = window.location.pathname.match(/^\/([^/]+)/)?.[1];
       let workspaceId: string | undefined = firstPathSegment;
       if (firstPathSegment === 'newWindow') {
         const search = new URLSearchParams(window.location.search);

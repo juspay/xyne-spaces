@@ -4,13 +4,6 @@
 
 import { apiInstance } from '../clients/apiClient';
 
-export interface ApproveKnowledgeResponse {
-  success: boolean;
-  alreadyApproved?: boolean;
-  message: string;
-  documentIds?: string[];
-}
-
 export interface KnowledgeDocument {
   id: string;
   projectId: string;
@@ -21,18 +14,6 @@ export interface KnowledgeDocument {
   approvedAt: string;
   createdAt: string;
   updatedAt: string;
-}
-
-/**
- * Approve a knowledge canvas and create a KnowledgeDocument
- * @param canvasId - The canvas id
- * @returns Approval result with success status and document IDs
- */
-export async function approveKnowledgeCanvas(canvasId: string): Promise<ApproveKnowledgeResponse> {
-  const response = await apiInstance.post<ApproveKnowledgeResponse>('/knowledge/approve', {
-    canvasId,
-  });
-  return response.data;
 }
 
 /**

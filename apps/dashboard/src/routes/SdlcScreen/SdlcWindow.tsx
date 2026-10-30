@@ -1,18 +1,16 @@
-import { ReactElement, useEffect, useRef, useState } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
-import { SDLC_APP_BASE_PATH } from '../../config';
-import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
+import { ReactElement, useEffect, useLayoutEffect } from 'react';
+import { Navigate, useLocation, useParams } from 'react-router-dom';
 import { openLink } from '../../utils/openLink';
 import { routePopupToEmbeddedWebview } from '../../utils/embeddedWebviewRegistry';
-import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
-import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
-import { SDLC_WINDOW_FRAME_NAME } from './useSdlcFrameBridge';
+import { SDLC_WINDOW_NAME } from '../../utils/electronApp';
 import { keepDownloads } from '../../components/InAppBrowser';
+import { GlobalCallOverlay } from '../../components/Call/CallOverlay/GlobalCallOverlay';
 
 /**
- * The SDLC lane as a whole window, at /newWindow/sdlc/:workspaceId/:channelId/:section.
- * Hosts the same iframe SdlcFrameHost does, without its viewport and portal: here
- * the frame is the window, so it is never hidden or reparented.
+ * An SDLC item in a window of its own, at /newWindow/sdlc/:workspaceId/:channelId/:section.
+ * Names the window and hands it to the hub's own route, which renders there without
+ * the app's chrome (isSdlcWindow): the item keeps its conversation, threads and Ask
+ * AI, and moving around the hub stays in this window.
  */
 const SdlcWindow = (): ReactElement => {
   const { workspaceId, channelId, section } = useParams<{
@@ -22,61 +20,29 @@ const SdlcWindow = (): ReactElement => {
   }>();
   const location = useLocation();
 
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Before the redirect lands, so the hub's route already knows where it is.
+  useLayoutEffect(() => {
+    window.name = SDLC_WINDOW_NAME;
+  }, []);
 
-  const { initiateCall } = useCallJoinOrInitiate();
-  const initiateCallRef = useRef(initiateCall);
-  initiateCallRef.current = initiateCall;
-
-  const [src, setSrc] = useState(
-    () => `${SDLC_APP_BASE_PATH}/${workspaceId}/sdlc/${channelId}/${section}${location.search}`,
+  return (
+    <Navigate
+      replace
+      to={`/${workspaceId}/sdlc/${channelId}/${section}${location.search}${location.hash}`}
+    />
   );
-  const [resetCount, setResetCount] = useState(0);
+};
 
-  useEffect(() => {
-    const onMessage = (event: MessageEvent): void => {
-      if (event.origin !== window.location.origin) return;
-      if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
-
-      const message = parseSdlcFrameMessage(event.data);
-      if (!message) return;
-
-      if (message.type === SDLC_FRAME_MESSAGE.initiateCall) {
-        initiateCallRef.current({
-          channelId: message.channelId,
-          ...(message.targetUserIds && { targetUserIds: message.targetUserIds }),
-          ...(message.callDisplayName && { callDisplayName: message.callDisplayName }),
-          ...(message.conversationId && { conversationId: message.conversationId }),
-          ...(message.sdlcLink && { sdlcLink: message.sdlcLink }),
-        });
-        return;
-      }
-
-      if (message.type === SDLC_FRAME_MESSAGE.openLink) {
-        // Forced in-app: the lane asked for this because it wants the link in
-        // the app, not handed to the operating system.
-        openLink(message.url, null, { force: 'in-app' });
-        return;
-      }
-
-      if (message.type === SDLC_FRAME_MESSAGE.reset) {
-        setSrc(`${SDLC_APP_BASE_PATH}/${workspaceId}/sdlc?_reset=${Date.now()}`);
-        setResetCount(count => count + 1);
-      }
-    };
-
-    window.addEventListener('message', onMessage);
-    return (): void => window.removeEventListener('message', onMessage);
-  }, [workspaceId]);
-
+/** What a window of its own needs that the main window's handlers give it there. */
+export const SdlcWindowHost = (): ReactElement => {
   /**
    * Popups from a page embedded in this window.
    *
    * Main denies every popup a webview asks for and forwards the url to the
    * window that embedded it. In the app's main window BrowserPanelHandler picks
    * that up and offers it to the embedded webview before falling back to the
-   * browser panel — but this route renders SdlcWindow alone, without AppRoot, so
-   * here there is nobody to offer it to and the click was being dropped.
+   * browser panel — but this window has no browser panel, so here there is
+   * nobody else to offer it to.
    */
   useEffect(() => {
     const api = window.electronAPI;
@@ -100,25 +66,8 @@ const SdlcWindow = (): ReactElement => {
     return api?.onAppZoomRequest?.(step => api.zoomApp?.(step));
   }, []);
 
-  return (
-    <div className='relative h-full w-full'>
-      <iframe
-        key={resetCount}
-        ref={iframeRef}
-        src={src}
-        title='SDLC'
-        name={SDLC_WINDOW_FRAME_NAME}
-        className='h-full w-full border-0'
-        allow='clipboard-read; clipboard-write'
-      />
-      {/* The window fills its wrapper, so the frame's own coordinates are the
-          wrapper's; no offset to add. */}
-      <SdlcEmbeddedWebview
-        offset={{ top: 0, left: 0 }}
-        getFrameWindow={() => iframeRef.current?.contentWindow ?? null}
-      />
-    </div>
-  );
+  // roomActor is a module singleton, so this window needs its own.
+  return <GlobalCallOverlay autoJoinOnAccept={false} />;
 };
 
 export default SdlcWindow;

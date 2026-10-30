@@ -142,7 +142,9 @@ export const InternalXyneLink = ({
   const { data: appData } = useQuery({
     queryKey: ['artifact-app', parsedLink?.appId ?? ''],
     queryFn: () => getArtifactApp(parsedLink?.appId ?? ''),
-    enabled: parsedLink?.kind === 'app' && !!parsedLink.appId,
+    // Disabled (Claw)
+    // enabled: parsedLink?.kind === 'app' && !!parsedLink.appId,
+    enabled: false,
     retry: false,
     staleTime: 5 * 60_000,
   });
@@ -1014,7 +1016,7 @@ const parseNode = (
   const tag = el.tagName.toLowerCase();
 
   // Inside code blocks / inline code, a mention span is almost always a false
-  // positive — e.g. `@Juspay` inside the email `guruprasad.bhosale@Juspay.in`
+  // positive — e.g. `@Example` inside the email `alice@Example.com`
   // in a SQL snippet. Render it as inert text instead of an interactive chip.
   if (insideCode && el.hasAttribute('data-mention')) {
     return (

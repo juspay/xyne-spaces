@@ -16,6 +16,7 @@ import {
   type CalendarProvider,
   type CalendarSourceCredentials,
 } from '@/database/repositories/externalSourceRepository';
+import { config } from '@/config/env';
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const TOKEN_REFRESH_RETRY_DELAY_MS = 500;
@@ -56,8 +57,8 @@ async function fetchTokenWithRetry(url: string, initFactory: () => RequestInit):
 async function refreshGoogleToken(
   refreshToken: string
 ): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = config.email.clientId;
+  const clientSecret = config.email.clientSecret;
 
   if (!clientId || !clientSecret) {
     throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required');
@@ -90,9 +91,9 @@ async function refreshGoogleToken(
 async function refreshMicrosoftToken(
   refreshToken: string
 ): Promise<{ accessToken: string; accessTokenExpiry: Date }> {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+  const clientId = config.microsoft.clientId;
+  const clientSecret = config.microsoft.clientSecret;
+  const tenantId = config.microsoft.tenantId || 'common';
 
   if (!clientId || !clientSecret) {
     throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET are required');

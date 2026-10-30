@@ -13,7 +13,8 @@ import {
   MessageCircleMore,
   Volume2,
   ChevronUp,
-  Bot,
+  // Disabled (LLM)
+  // Bot,
   Pencil,
   MoreVertical,
   PencilRuler,
@@ -43,11 +44,12 @@ import { RecordingButton } from './RecordingButton';
 import { MarkMomentButton } from './MarkMomentButton';
 import {
   buildCallInviteText,
-  getAiButtonColorClass,
-  getAiButtonDisabled,
-  getAiControlState,
-  getAiButtonTitle,
-  handleAiButtonClick,
+  // Disabled (LLM)
+  // getAiButtonColorClass,
+  // getAiButtonDisabled,
+  // getAiControlState,
+  // getAiButtonTitle,
+  // handleAiButtonClick,
 } from '../../../utils/callControls';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import {
@@ -155,8 +157,9 @@ export function CallControls({
   onToggleNotes,
   isTranscriptOpen = false,
   onToggleTranscript,
-  isAIAssistantEnabled,
-  aiController,
+  // Disabled (LLM)
+  // isAIAssistantEnabled,
+  // aiController,
   localParticipantId,
   callId: callId,
   roomLink,
@@ -166,19 +169,22 @@ export function CallControls({
   onDisconnect,
   onToggleChat,
   onToggleParticipantsSidebar,
-  onToggleAIAssistant,
-  onRequestControl,
+  // Disabled (LLM)
+  // onToggleAIAssistant,
+  // onRequestControl,
   onSendReaction,
   viewMode = 'full',
   iconSize = 20,
   buttonPadding = 16,
-  pendingControlRequest,
-  requestedAiController,
+  // Disabled (LLM)
+  // pendingControlRequest,
+  // requestedAiController,
   isCallChatOpen,
   onToggleCallChat,
   unreadCallChatCount = 0,
   hideThreadChat = false,
-  hideAIAssistant = false,
+  // Disabled (LLM)
+  // hideAIAssistant = false,
   hidePresentationMode = false,
   isExternalUser = false,
   isRecording = false,
@@ -303,8 +309,9 @@ export function CallControls({
     return () => window.removeEventListener('keyup', handleKeyUp);
   }, [isPushToTalkActive]);
 
-  const { isController, isControlledByOther, hasPendingRequestFromOther, isRequestingUser } =
-    getAiControlState({ localParticipantId, aiController, pendingControlRequest });
+  // Disabled (LLM)
+  // const { isController, isControlledByOther, hasPendingRequestFromOther, isRequestingUser } =
+  // getAiControlState({ localParticipantId, aiController, pendingControlRequest });
 
   // Use LiveKit's device selection hooks
   const {
@@ -368,27 +375,28 @@ export function CallControls({
   const menuIconProps = controlIconProps(sizing);
   const popoverClass = 'bg-[#1e1f20] ring-1 ring-white/10 text-[#e3e3e3] shadow-2xl';
 
-  const isAiButtonDisabled = getAiButtonDisabled({
-    hasPendingRequestFromOther,
-    isRequestingUser,
-    requestedAiController,
-  });
-  const aiButtonTitle = getAiButtonTitle({
-    hasPendingRequestFromOther,
-    isRequestingUser,
-    isControlledByOther,
-    isAIAssistantEnabled,
-    pendingControlRequest,
-    aiController,
-  });
-  const aiButtonColorClass = getAiButtonColorClass({
-    hasPendingRequestFromOther,
-    isController,
-    isAIAssistantEnabled,
-    isControlledByOther,
-    defaultControlClass: '',
-  });
-  const showAiButton = !hideAIAssistant && isTranscriptionEnabled;
+  // Disabled (LLM)
+  // const isAiButtonDisabled = getAiButtonDisabled({
+  //   hasPendingRequestFromOther,
+  //   isRequestingUser,
+  //   requestedAiController,
+  // });
+  // const aiButtonTitle = getAiButtonTitle({
+  //   hasPendingRequestFromOther,
+  //   isRequestingUser,
+  //   isControlledByOther,
+  //   isAIAssistantEnabled,
+  //   pendingControlRequest,
+  //   aiController,
+  // });
+  // const aiButtonColorClass = getAiButtonColorClass({
+  //   hasPendingRequestFromOther,
+  //   isController,
+  //   isAIAssistantEnabled,
+  //   isControlledByOther,
+  //   defaultControlClass: '',
+  // });
+  // const showAiButton = !hideAIAssistant && isTranscriptionEnabled;
   const showPresentationMode = !hidePresentationMode && !!onTogglePresentationMode;
 
   const publishWhiteboardVisibility = (isOpen: boolean, timestamp: number): void => {
@@ -802,37 +810,38 @@ export function CallControls({
     />
   );
 
-  // AI Assistant (mini window; the full view has it in the People panel). Hidden
-  // while transcription is off — talk-back depends on STT.
-  const aiControl = showAiButton && (
-    <ControlButton
-      sizing={sizing}
-      shape={panelShape}
-      icon={Bot}
-      label={aiButtonTitle}
-      inactive={hasPendingRequestFromOther}
-      className={aiButtonColorClass}
-      onClick={() =>
-        handleAiButtonClick({
-          hasPendingRequestFromOther,
-          isControlledByOther,
-          onRequestControl,
-          onToggleAIAssistant,
-        })
-      }
-      disabled={isAiButtonDisabled}
-      data-track-category='CALLS'
-      data-track-name='AI_Assistant'
-      data-track-metadata={JSON.stringify({
-        isControlledByOther,
-        hasPendingRequest: hasPendingRequestFromOther,
-      })}
-    >
-      {isControlledByOther && !hasPendingRequestFromOther && (
-        <span className='absolute right-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-[#131314] bg-[#dc362e]' />
-      )}
-    </ControlButton>
-  );
+  // Disabled (LLM)
+  // // AI Assistant (mini window; the full view has it in the People panel). Hidden
+  // // while transcription is off — talk-back depends on STT.
+  // const aiControl = showAiButton && (
+  //   <ControlButton
+  //     sizing={sizing}
+  //     shape={panelShape}
+  //     icon={Bot}
+  //     label={aiButtonTitle}
+  //     inactive={hasPendingRequestFromOther}
+  //     className={aiButtonColorClass}
+  //     onClick={() =>
+  //       handleAiButtonClick({
+  //         hasPendingRequestFromOther,
+  //         isControlledByOther,
+  //         onRequestControl,
+  //         onToggleAIAssistant,
+  //       })
+  //     }
+  //     disabled={isAiButtonDisabled}
+  //     data-track-category='CALLS'
+  //     data-track-name='AI_Assistant'
+  //     data-track-metadata={JSON.stringify({
+  //       isControlledByOther,
+  //       hasPendingRequest: hasPendingRequestFromOther,
+  //     })}
+  //   >
+  //     {isControlledByOther && !hasPendingRequestFromOther && (
+  //       <span className='absolute right-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-[#131314] bg-[#dc362e]' />
+  //     )}
+  //   </ControlButton>
+  // );
 
   const copyInviteControl = (
     <ControlButton
@@ -887,7 +896,8 @@ export function CallControls({
         {peopleControl}
         {copyInviteControl}
         {reactionsControl}
-        {aiControl}
+        {/* Disabled (LLM) */}
+        {/* {aiControl} */}
         {notesControl}
         {threadChatControl}
         {presentationModeControl}

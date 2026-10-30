@@ -1,0 +1,29 @@
+{
+  "//": "Used ONLY by tsc-alias (build: `tsc && tsc-alias -p tsconfig.alias.json`).",
+  "//2": "Rewrites our own @/* aliases and the #zero-internal subpaths to real",
+  "//3": "relative paths, but deliberately OMITS @xyne/* so those stay as bare",
+  "//4": "specifiers and resolve via node_modules. That keeps `pnpm deploy`'s",
+  "//5": "flattened tree working (the full tsconfig.json points @xyne/* at",
+  "//6": "../../../packages/*/dist, which does not exist in a deploy).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "./src",
+    "paths": {
+      "#zero-internal/query-internals": ["../node_modules/@rocicorp/zero/out/zql/src/query/query-internals"],
+      "#zero-internal/pg-query-executor": ["../node_modules/@rocicorp/zero/out/zero-server/src/pg-query-executor"],
+      "#zero-internal/schema": ["../node_modules/@rocicorp/zero/out/zero-server/src/schema"],
+      "#zero-internal/compiler": ["../node_modules/@rocicorp/zero/out/z2s/src/compiler"],
+      "#zero-internal/sql": ["../node_modules/@rocicorp/zero/out/z2s/src/sql"],
+      "@/*": ["*"],
+      "@/config/*": ["config/*"],
+      "@/controllers/*": ["controllers/*"],
+      "@/middleware/*": ["middleware/*"],
+      "@/routes/*": ["routes/*"],
+      "@/services/*": ["services/*"],
+      "@/types/*": ["types/*"],
+      "@/utils/*": ["utils/*"],
+      "@/validators/*": ["validators/*"],
+      "@/zero/*": ["zero/*"]
+    }
+  }
+}

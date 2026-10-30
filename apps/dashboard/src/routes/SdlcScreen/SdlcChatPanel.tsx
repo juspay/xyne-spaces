@@ -53,7 +53,7 @@ interface SdlcChatPanelProps {
     conversationId: string | null,
     options?: { selectedTab?: 'details' },
   ) => void;
-  /** Thread header's Ask AI. Raised so the host can route it past the frame. */
+  /** Thread header's Ask AI. Raised so the SDLC screen can open it for the hub. */
   onAskAI?: (threadInfo?: ThreadInfo) => void;
   /** Whose discussions these are: the track's, the item's or the artifact's name. */
   title: string;

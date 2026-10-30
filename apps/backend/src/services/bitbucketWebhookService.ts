@@ -9,13 +9,14 @@ import { logger } from '@/utils/logger';
 import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhooks';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runBitbucketWebhook } from '@/bypassAcl/webhookIngestServices';
-import { forwardPrCardStatus } from '@/services/prCardStatusForwarder';
-import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
+// Disabled (Claw)
+// import { forwardPrCardStatus } from '@/services/prCardStatusForwarder';
+// Disabled (LLM)
+// import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -83,9 +84,8 @@ export class BitbucketWebhookService {
         return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
       }
 
-      // Handle comment events separately
       if (this.isCommentEvent(eventKey)) {
-        return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload, workspaceId);
+        return { success: true, message: `Comment event ${eventKey} acknowledged but not processed` };
       }
 
       // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
@@ -125,19 +125,20 @@ export class BitbucketWebhookService {
         // gate. Fire-and-forget, like the GitHub hook. The raw self link, not
         // context.prUrl: that is rebuilt by string replace and can carry a
         // trailing "/overview" segment into the middle of the URL.
-        const pr = context.pr;
-        resolveRadarOnPrMerge({
-          workspaceId: context.workspace,
-          provider: 'Bitbucket',
-          prUrl: pr.links?.self?.[0]?.href ?? context.prUrl,
-          storedPrUrl: context.prUrl,
-          prNumber: context.prId,
-          prTitle: pr.title,
-          repoFullName: `${context.projectName}/${pr.toRef.repository.slug}`,
-          baseBranch: context.destinationBranch,
-          mergedBy: payload.actor?.displayName ?? payload.actor?.name ?? context.prAuthor ?? 'unknown',
-          mergedAt: pr.closedDate ? new Date(pr.closedDate) : new Date(),
-        }).catch(err => logger.error('[Bitbucket-Webhook] radar PR-merge pass failed:', err));
+        // Disabled (LLM)
+        // const pr = context.pr;
+        // resolveRadarOnPrMerge({
+        //   workspaceId: context.workspace,
+        //   provider: 'Bitbucket',
+        //   prUrl: pr.links?.self?.[0]?.href ?? context.prUrl,
+        //   storedPrUrl: context.prUrl,
+        //   prNumber: context.prId,
+        //   prTitle: pr.title,
+        //   repoFullName: `${context.projectName}/${pr.toRef.repository.slug}`,
+        //   baseBranch: context.destinationBranch,
+        //   mergedBy: payload.actor?.displayName ?? payload.actor?.name ?? context.prAuthor ?? 'unknown',
+        //   mergedAt: pr.closedDate ? new Date(pr.closedDate) : new Date(),
+        // }).catch(err => logger.error('[Bitbucket-Webhook] radar PR-merge pass failed:', err));
       }
 
         // PR doesn't exist or wasn't created by workflow - run full validation
@@ -174,76 +175,6 @@ export class BitbucketWebhookService {
    */
   private isCommentEvent(eventKey: string): boolean {
     return eventKey.startsWith('pr:comment:');
-  }
-
-  /**
-   * Handle PR comment events
-   */
-  private async handleCommentEvent(
-    eventKey: BitbucketPREventType,
-    payload: BitbucketWebhookEnvelope,
-    workspaceId: string,
-  ): Promise<{ success: boolean; message: string }> {
-    try {
-      if (!payload.comment || !payload.pullRequest) {
-        logger.warn(`[Bitbucket-Webhook] Comment event ${eventKey} missing comment or PR data`);
-        return { success: true, message: 'Missing comment or PR data' };
-      }
-
-      const comment = payload.comment;
-      const pr = payload.pullRequest;
-      const commentText = comment.text || '';
-
-      logger.info(`[Bitbucket-Webhook] Processing comment event ${eventKey} on PR #${pr.id}`);
-      logger.debug(`[Bitbucket-Webhook] Comment text: ${commentText.substring(0, 100)}...`);
-
-      const mentions = this.extractMentions(commentText);
-      
-      if (mentions.some(m => m.toLowerCase() === 'john.doe@gmail.com')) {
-        logger.info(`[Bitbucket-Webhook] Detected @john.doe@gmail.com mention in PR #${pr.id} comment #${comment.id}`);
-        
-        const context = this.extractPRContext(payload, workspaceId);
-        
-        await xyneCommentService.handleXyneMention({
-          prId: context.prId,
-          prUrl: context.prUrl,
-          projectName: context.projectName,
-          repoName: context.repoName,
-        });
-      }
-
-      return { 
-        success: true, 
-        message: `Comment event ${eventKey} processed successfully` 
-      };
-    } catch (error) {
-      logger.error(`[Bitbucket-Webhook] Error handling comment event:`, error);
-      return { success: true, message: 'Comment event error acknowledged' };
-    }
-  }
-
-  /**
-   * Extract mentions from comment text (e.g., @john.doe@gmail.com or @"john.doe@gmail.com")
-   */
-  private extractMentions(text: string): string[] {
-    const emailMentionRegex = /@"?([\w.-]+@[\w.-]+)"?/g;
-    const simpleMentionRegex = /@"?([\w.-]+)"?/g;
-    
-    const mentions: string[] = [];
-    let match: RegExpExecArray | null;
-    
-    while ((match = emailMentionRegex.exec(text)) !== null) {
-      mentions.push(match[1]);
-    }
-    
-    while ((match = simpleMentionRegex.exec(text)) !== null) {
-      const mentionText = match[1];
-      if (!mentions.some(m => m.includes(mentionText))) {
-        mentions.push(mentionText);
-      }
-    }
-    
-    return mentions;
   }
 
   /**
@@ -453,7 +384,8 @@ export class BitbucketWebhookService {
 
     // Also post a fresh PR status card into the originating Spaces thread (if an
     // agent opened this PR). Fully decoupled from the ticket sync below.
-    this.forwardPrCardStatus(context, 'merged');
+    // Disabled (Claw)
+    // this.forwardPrCardStatus(context, 'merged');
 
     const result = await this.prMetricsRepository.markMergedPr({
       prId: context.prId,
@@ -557,7 +489,8 @@ export class BitbucketWebhookService {
 
     // Also post a fresh PR status card into the originating Spaces thread (if an
     // agent opened this PR). Fully decoupled from the ticket sync below.
-    this.forwardPrCardStatus(context, 'declined');
+    // Disabled (Claw)
+    // this.forwardPrCardStatus(context, 'declined');
 
     const result = await this.prMetricsRepository.markDeclinedPr({
       prId: context.prId,
@@ -626,7 +559,8 @@ export class BitbucketWebhookService {
 
     // Also post a fresh PR status card into the originating Spaces thread (if an
     // agent opened this PR). Fully decoupled from the ticket sync below.
-    this.forwardPrCardStatus(context, 'deleted');
+    // Disabled (Claw)
+    // this.forwardPrCardStatus(context, 'deleted');
 
     const trackedPr = await this.prMetricsRepository.findPrByIdAndUrl(
       context.prId,
@@ -696,23 +630,24 @@ export class BitbucketWebhookService {
     logger.info(`[Bitbucket-Webhook] ✅ Marked PR as DELETED in database: ${context.prUrl}`);
   }
 
-  /** Move the agent's PR card for this PR (if any) to `status` — see forwardPrCardStatus. */
-  private forwardPrCardStatus(
-    context: PREventContext,
-    status: 'merged' | 'declined' | 'deleted',
-  ): void {
-    forwardPrCardStatus(
-      {
-        provider: 'bitbucket',
-        status,
-        prUrl: context.prUrl,
-        number: context.prId,
-        repo: `${context.projectName}/${context.repoName}`,
-        title: context.pr.title,
-      },
-      '[Bitbucket-Webhook]',
-    );
-  }
+  // Disabled (Claw)
+  // /** Move the agent's PR card for this PR (if any) to `status` — see forwardPrCardStatus. */
+  // private forwardPrCardStatus(
+  //   context: PREventContext,
+  //   status: 'merged' | 'declined' | 'deleted',
+  // ): void {
+  //   forwardPrCardStatus(
+  //     {
+  //       provider: 'bitbucket',
+  //       status,
+  //       prUrl: context.prUrl,
+  //       number: context.prId,
+  //       repo: `${context.projectName}/${context.repoName}`,
+  //       title: context.pr.title,
+  //     },
+  //     '[Bitbucket-Webhook]',
+  //   );
+  // }
 }
 
 // Singleton instance

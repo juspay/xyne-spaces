@@ -196,10 +196,13 @@ import {
   getActivityIcon,
 } from '../../components/Tickets/TicketActivity/TicketActivity';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import Tooltip from '../../components/ui/Tooltip';
-import { XyneAIStar } from '../../components/icons/xyne-ai';
+// Disabled (Claw)
+// import Tooltip from '../../components/ui/Tooltip';
+// Disabled (Claw)
+// import { XyneAIStar } from '../../components/icons/xyne-ai';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
-import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { useFlowRunPersistence } from './useFlowRunPersistence';
 import { flowGroupCoverId } from '../../components/Board/FlowRun/useFlowRunGraph';
 import Avatar from '../../components/ui/Avatar/Avatar';
@@ -3045,16 +3048,17 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
   const selectedRunExportTitle = selectedFlowRunRootTicket
     ? `${selectedFlowRunRootTicket.xyneId} ${selectedFlowRunRootTicket.title} — ${noun.singularTitle} Tracker`
     : flowRunExportTitle;
-  const flowAskAIThreadInfo = useMemo((): ThreadInfo | null => {
-    if (!selectedFlowRunRootTicket?.conversationId) return null;
-    return {
-      conversationId: selectedFlowRunRootTicket.conversationId,
-      ...(selectedFlowRunRootTicket.channelId && {
-        channelId: selectedFlowRunRootTicket.channelId,
-      }),
-      previewText: `${selectedFlowRunRootTicket.xyneId} ${selectedFlowRunRootTicket.title}`,
-    };
-  }, [selectedFlowRunRootTicket]);
+  // Disabled (Claw)
+  // const flowAskAIThreadInfo = useMemo((): ThreadInfo | null => {
+  //   if (!selectedFlowRunRootTicket?.conversationId) return null;
+  //   return {
+  //     conversationId: selectedFlowRunRootTicket.conversationId,
+  //     ...(selectedFlowRunRootTicket.channelId && {
+  //       channelId: selectedFlowRunRootTicket.channelId,
+  //     }),
+  //     previewText: `${selectedFlowRunRootTicket.xyneId} ${selectedFlowRunRootTicket.title}`,
+  //   };
+  // }, [selectedFlowRunRootTicket]);
   const handleFlowRunExport = useCallback(
     async (format: 'excel' | 'pdf'): Promise<void> => {
       const rows = selectedGraphRootTicketId ? selectedRunExportRows : flowRunExportRows;
@@ -4724,6 +4728,8 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                     className='h-9 w-full rounded-[10px] border border-border bg-muted/40 pl-[34px] pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
                   />
                 </label>
+                {/* Disabled (Claw) */}
+                {/*
                 <Tooltip content='Ask AI' side='bottom'>
                   <button
                     type='button'
@@ -4750,6 +4756,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                     <XyneAIStar />
                   </button>
                 </Tooltip>
+                */}
                 <DropdownMenu.Root>
                   <DropdownMenu.Trigger asChild>
                     <button
@@ -4778,6 +4785,8 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                   </span>
                 </div>
                 <div className='flex items-center gap-2'>
+                  {/* Disabled (Claw) */}
+                  {/*
                   <Tooltip content='Ask AI' side='bottom'>
                     <button
                       type='button'
@@ -4800,6 +4809,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                       <XyneAIStar />
                     </button>
                   </Tooltip>
+                  */}
                   {flowRunExportRows.length > 0 && (
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger asChild>

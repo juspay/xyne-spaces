@@ -39,38 +39,38 @@ COPY package.json /package.json
 
 ENV NODE_OPTIONS="--max-old-space-size=8192"
 
-# Run validation (TypeScript + ESLint)
-# validate:raw, not validate: the image has no scripts/ directory, and an image
-# build has no use for the interactive agent handoff the wrapper adds.
-RUN pnpm --filter xyne-spaces-dashboard run validate:raw
+# NOTE: `validate:raw` (typecheck + prettier format:check + eslint) is intentionally
+# NOT run here. Linting/formatting are CI quality gates, not requirements to produce
+# the deployable bundle, and running eslint inside the (emulated) image build is very
+# slow. Type safety is still enforced — the `build` script below is `tsc --noEmit &&
+# vite build`, so a type error still fails the image. Run lint/format in CI (or the
+# Jenkins validation stage) against the source, not in the image build.
+# RUN pnpm --filter xyne-spaces-dashboard run validate:raw
 
 # Accept build argument for source commit
 ARG SOURCE_COMMIT
 ENV REACT_APP_SOURCE_COMMIT=$SOURCE_COMMIT
 
 # Accept build argument for API URL
-ENV VITE_API_URL=https://spaces.xyne.juspay.net/api
+ARG VITE_API_URL=
+ENV VITE_API_URL=${VITE_API_URL}
 
-# --- Deployment lane -------------------------------------------------------
-# Defaults build the main bundle. The SDLC image adds:
-#   --build-arg BUILD_SCRIPT=build:sdlc --build-arg STATIC_SUBDIR=sdlc-app
-# Everything else comes from .env.sdlc via `vite build --mode sdlc`, including
-# VITE_ZERO_PATH.
-#
+ARG VITE_INTERNAL_XYNE_HOSTS=
+ENV VITE_INTERNAL_XYNE_HOSTS=${VITE_INTERNAL_XYNE_HOSTS}
+ARG VITE_TRUSTED_ORIGINS=
+ENV VITE_TRUSTED_ORIGINS=${VITE_TRUSTED_ORIGINS}
+ARG VITE_APPS_PUBLIC_BASE_URL=
+ENV VITE_APPS_PUBLIC_BASE_URL=${VITE_APPS_PUBLIC_BASE_URL}
+ARG VITE_LEGAL_CONTACT_EMAIL=
+ENV VITE_LEGAL_CONTACT_EMAIL=${VITE_LEGAL_CONTACT_EMAIL}
+ARG VITE_PRIVACY_CONTACT_EMAIL=
+ENV VITE_PRIVACY_CONTACT_EMAIL=${VITE_PRIVACY_CONTACT_EMAIL}
+
 # VITE_ZERO_SERVER is deliberately NOT set here. config.ts reads it when present,
 # and baking an absolute URL made it win over the serving host — a bundle on
-# app.spaces.xyne.juspay.net opened wss://spaces.xyne.juspay.net/zero. Unset, the
+# app.example.org opened wss://example.org/zero. Unset, the
 # URL derives from whatever host serves the bundle. Local dev, sandbox and the
 # test compose file still set it themselves via their own .env files.
-ARG BUILD_SCRIPT=build
-
-# Only read by the main bundle; defaults to /sdlc-app in config.ts.
-ARG SDLC_APP_BASE_PATH=""
-ENV VITE_SDLC_APP_BASE_PATH=${SDLC_APP_BASE_PATH}
-
-# Subdirectory the assets are stored under, matching the base path they were
-# built with, so the edge needs no rewriting. Empty for the main bundle.
-ARG STATIC_SUBDIR=""
 
 # Mixpanel token (public client-side analytics; injected at build time)
 ARG VITE_MIXPANEL_TOKEN=""
@@ -91,7 +91,7 @@ ENV VITE_SLACK_APP_INSTALL_URL=${VITE_SLACK_APP_INSTALL_URL}
 
 # Build the Vite React app with increased memory
 ENV NODE_OPTIONS="--max-old-space-size=8192"
-RUN pnpm --filter xyne-spaces-dashboard run ${BUILD_SCRIPT}
+RUN pnpm --filter xyne-spaces-dashboard run build
 
 # Create ZIP of the built assets for Electron OTA updates
 # The ZIP will be served at /releases/dashboard.zip
@@ -104,44 +104,41 @@ FROM scratch AS bundle
 COPY --from=builder /repo/apps/dashboard/dist /
 COPY --from=builder /repo/apps/dashboard/releases /releases
 
-# Production image with nginx
-FROM nginx:alpine AS runner
+# ---------------------------------------------------------------------------
+# Production image — hardened, non-root nginx.
+#
+# Hardening vs the old `nginx:alpine` stage:
+#   - Base is nginxinc/nginx-unprivileged: the master process runs as the nginx
+#     user (uid 101) by default — no root, no manual user creation.
+#   - nodejs + npm REMOVED. 
+#   - Base pinned to a minor tag for reproducibility.
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS runner
 
-# Install Node.js and npm for running node commands in pod
-RUN apk add --no-cache nodejs npm
+# The pinned base can ship outdated Alpine packages (libssl3/libcrypto3/curl/
+# libexpat/libpng/libxml2/zlib/…), which is the ENTIRE CVE surface of this image
+# (no node_modules in the runtime). Upgrade them to the latest patched versions
+# to clear those base CVEs. apk needs root; the base runs as uid 101, so switch
+# up for the upgrade and back down.
+USER root
+RUN apk upgrade --no-cache
+USER 101
 
-# Create a non-root user
-RUN addgroup --system --gid 1001 frontend && \
-    adduser --system --uid 1001 frontend
+# Static assets + Electron OTA releases. Read-only — the uid-101 worker only
+# needs read access, which the default root-owned, world-readable copy provides.
+COPY --from=builder /repo/apps/dashboard/dist /usr/share/nginx/html
+COPY --from=builder /repo/apps/dashboard/releases /usr/share/nginx/html/releases
 
-# Copy nginx configuration as template for envsubst
-COPY --chown=frontend:frontend apps/dashboard/nginx.conf /etc/nginx/nginx.conf.template
+# nginx.conf as a template; ONLY ${ENABLE_MIGRATION} is substituted at startup
+# (nginx's own $variables are left untouched by the explicit envsubst arg).
+COPY apps/dashboard/nginx.conf /etc/nginx/nginx.conf.template
 
-# Re-declare in the runner stage: ARGs do not cross stage boundaries.
-ARG STATIC_SUBDIR=""
-
-# Only the built assets cross into the runner, so the builder's workspace layout
-# does not matter here — no node_modules or symlinks are carried over.
-COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard/dist /usr/share/nginx/html/${STATIC_SUBDIR}
-
-# Copy releases folder with dashboard.zip for Electron OTA updates
-COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard/releases /usr/share/nginx/html/releases
-
-# Set default value for migration flag
+# Migration feature flag (nginx.conf proxies /migration/ only when true).
 ENV ENABLE_MIGRATION=false
-
-# Change ownership of nginx directories (fast)
-RUN chown -R frontend:frontend /var/cache/nginx && \
-    chown -R frontend:frontend /var/log/nginx && \
-    chown -R frontend:frontend /etc/nginx/conf.d && \
-    touch /etc/nginx/nginx.conf && \
-    chown frontend:frontend /etc/nginx/nginx.conf && \
-    touch /var/run/nginx.pid && \
-    chown frontend:frontend /var/run/nginx.pid
-
-USER frontend
 
 EXPOSE 8080
 
-# Use envsubst to replace environment variables at runtime
-CMD ["/bin/sh", "-c", "envsubst '${ENABLE_MIGRATION}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"]
+# uid 101 can't write /etc/nginx, so render the config into /tmp (writable) and
+# run from there. ENTRYPOINT cleared so only this renders+runs (we do envsubst
+# ourselves rather than via the base image's template entrypoint).
+ENTRYPOINT []
+CMD ["/bin/sh", "-c", "envsubst '${ENABLE_MIGRATION}' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && exec nginx -c /tmp/nginx.conf -g 'daemon off;'"]

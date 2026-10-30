@@ -8,13 +8,15 @@ import { pullRequestValidationService } from '@/services/pullRequestValidationSe
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { PRStatusEvent } from '@xyne/shared';
-import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runGitHubWebhook } from '@/bypassAcl/webhookIngestServices';
-import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
-import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
+// Disabled (Claw)
+// import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
+import { type PrCardStatus } from '@/services/prCardStatusForwarder';
+// Disabled (LLM)
+// import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
 
 /**
  * GitHub webhook event types for pull requests
@@ -80,21 +82,6 @@ interface GitHubPullRequestPayload {
   };
 }
 
-interface GitHubIssueCommentPayload {
-  action: 'created' | 'edited' | 'deleted';
-  issue: {
-    number: number;
-    pull_request?: {
-      html_url: string;
-    };
-  };
-  comment: {
-    body: string;
-    user: GitHubUser;
-  };
-  repository: GitHubRepository;
-}
-
 interface PREventContext {
   pr: GitHubPullRequest;
   prId: number;
@@ -109,9 +96,6 @@ interface PREventContext {
   prAuthor?: string;
   prAuthorEmail?: string;
 }
-
-const XYNE_MENTION_EMAIL = 'john.doe@gmail.com';
-const XYNE_MENTION_USERNAME = 'xynespaces';
 
 export class GitHubWebhookService {
   private prMetricsRepository: PRMetricsRepository;
@@ -156,10 +140,6 @@ export class GitHubWebhookService {
           return { success: true, message: 'pull_request skipped: no workspaceId on legacy route' };
         }
         return await this.handlePullRequestEvent(payload as GitHubPullRequestPayload, workspaceId);
-      }
-
-      if (eventType === 'issue_comment') {
-        return await this.handleIssueCommentEvent(payload as GitHubIssueCommentPayload);
       }
 
       logger.info(`[GitHub-Webhook] Event ${eventType} acknowledged but not processed`);
@@ -214,17 +194,18 @@ export class GitHubWebhookService {
         // Radar asks about this PR ("review/merge #42") are settled by the merge
         // whether or not its title names a ticket, so this also fires before the
         // gate. Fire-and-forget: it may call the LLM, and GitHub waits on us.
-        resolveRadarOnPrMerge({
-          workspaceId: context.workspace,
-          provider: 'GitHub',
-          prUrl: context.prUrl,
-          prNumber: context.prId,
-          prTitle: pr.title,
-          repoFullName: payload.repository.full_name,
-          baseBranch: context.destinationBranch,
-          mergedBy: payload.sender?.login ?? context.prAuthor ?? 'unknown',
-          mergedAt: pr.merged_at ? new Date(pr.merged_at) : new Date(),
-        }).catch(err => logger.error('[GitHub-Webhook] radar PR-merge pass failed:', err));
+        // Disabled (LLM)
+        // resolveRadarOnPrMerge({
+        //   workspaceId: context.workspace,
+        //   provider: 'GitHub',
+        //   prUrl: context.prUrl,
+        //   prNumber: context.prId,
+        //   prTitle: pr.title,
+        //   repoFullName: payload.repository.full_name,
+        //   baseBranch: context.destinationBranch,
+        //   mergedBy: payload.sender?.login ?? context.prAuthor ?? 'unknown',
+        //   mergedAt: pr.merged_at ? new Date(pr.merged_at) : new Date(),
+        // }).catch(err => logger.error('[GitHub-Webhook] radar PR-merge pass failed:', err));
       }
 
       // Keep the PR card an agent posted for this PR in step with it. Not gated on
@@ -232,17 +213,18 @@ export class GitHubWebhookService {
       // to the ticket sync, so a PR whose title fails validation still updates.
       const cardStatus = this.prCardStatusFor(action, pr);
       if (cardStatus) {
-        forwardPrCardStatus(
-          {
-            provider: 'github',
-            status: cardStatus,
-            prUrl: context.prUrl,
-            number: context.prId,
-            repo: `${context.projectName}/${context.repoName}`,
-            title: pr.title,
-          },
-          '[GitHub-Webhook]',
-        );
+        // Disabled (Claw)
+        // forwardPrCardStatus(
+        //   {
+        //     provider: 'github',
+        //     status: cardStatus,
+        //     prUrl: context.prUrl,
+        //     number: context.prId,
+        //     repo: `${context.projectName}/${context.repoName}`,
+        //     title: pr.title,
+        //   },
+        //   '[GitHub-Webhook]',
+        // );
       }
 
       // Validate PR title (same validation as Bitbucket)
@@ -261,58 +243,6 @@ export class GitHubWebhookService {
     } catch (error) {
       logger.error('[GitHub-Webhook] Error handling pull_request event:', error);
       return { success: true, message: 'Error acknowledged' };
-    }
-  }
-
-  /**
-   * Handle issue_comment events (for PR comments with @xyne mentions)
-   */
-  private async handleIssueCommentEvent(
-    payload: GitHubIssueCommentPayload
-  ): Promise<{ success: boolean; message: string }> {
-    try {
-      if (payload.action !== 'created') {
-        return { success: true, message: `Comment ${payload.action} acknowledged` };
-      }
-
-      // Check if this is a PR comment
-      const issueData = payload.issue;
-      const prData = issueData?.pull_request;
-
-      if (!prData) {
-        logger.info('[GitHub-Webhook] Comment on regular issue (not PR), skipping');
-        return { success: true, message: 'Issue comment acknowledged but not processed' };
-      }
-
-      const prNumber = issueData.number;
-      const prUrl = prData.html_url;
-      const commentText = payload.comment.body || '';
-
-      logger.info(`[GitHub-Webhook] Processing comment on PR #${prNumber}`);
-
-      const mentions = this.extractMentions(commentText);
-
-      const isXyneMentioned = mentions.some(
-        (m) =>
-          m.toLowerCase() === XYNE_MENTION_EMAIL ||
-          m.toLowerCase() === XYNE_MENTION_USERNAME
-      );
-
-      if (isXyneMentioned) {
-        logger.info(`[GitHub-Webhook] Detected XyneSpaces mention in PR #${prNumber}`);
-
-        await xyneCommentService.handleXyneMention({
-          prId: prNumber,
-          prUrl: prUrl,
-          projectName: payload.repository.owner.login,
-          repoName: payload.repository.name,
-        });
-      }
-
-      return { success: true, message: 'Comment event processed successfully' };
-    } catch (error) {
-      logger.error('[GitHub-Webhook] Error handling issue_comment event:', error);
-      return { success: true, message: 'Comment event error acknowledged' };
     }
   }
 
@@ -691,29 +621,6 @@ export class GitHubWebhookService {
     }
   }
 
-  /**
-   * Extract mentions from comment text
-   */
-private extractMentions(text: string): string[] {
-    const mentions: string[] = [];
-    const emailMentionRegex = /@([\w.-]+@[\w.-]+)/g;
-    const simpleMentionRegex = /@([\w-]+)/g;
-
-    let match: RegExpExecArray | null;
-
-    while ((match = emailMentionRegex.exec(text)) !== null) {
-      mentions.push(match[1]);
-    }
-
-    while ((match = simpleMentionRegex.exec(text)) !== null) {
-      const mentionText = match[1];
-      if (!mentions.some((m) => m.includes(mentionText))) {
-        mentions.push(mentionText);
-      }
-    }
-
-    return mentions;
-  }
 }
 
 export const githubWebhookService = new GitHubWebhookService();

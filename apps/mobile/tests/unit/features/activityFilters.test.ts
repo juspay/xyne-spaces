@@ -175,7 +175,6 @@ describe('getActivityTypes', () => {
     const types = getActivityTypes('tickets');
     assert.ok(types.includes('eta_warning'));
     assert.ok(types.includes('ticket_assigned'));
-    assert.ok(types.includes('workflow_question'));
   });
 
   it('returns an empty list for classification/all tabs', () => {

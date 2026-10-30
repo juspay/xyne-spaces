@@ -1,5 +1,5 @@
 /**
- * Slack postprocessor - handles ticket and workflow creation for top-level messages
+ * Slack postprocessor - links new top-level messages back to Xyne
  */
 
 import { BasePostprocessor } from '../../core/basePostprocessor';
@@ -8,7 +8,7 @@ import { ConversationRepository } from '../../../database/repositories/conversat
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
 import { logger } from '../../../utils/logger';
 import { decrypt } from '../../../services/encryptionService';
-import { botProcessor } from '../../../services/bots/botProcessor';
+import { config } from '../../../config/env';
 
 export class SlackPostprocessor extends BasePostprocessor {
   private conversationRepo = new ConversationRepository();
@@ -16,7 +16,7 @@ export class SlackPostprocessor extends BasePostprocessor {
 
   /**
    * Process Slack message after conversation/message creation
-   * Creates tickets for top-level messages only
+   * Posts a View-in-Xyne link for top-level messages only
    */
   async process(context: PostprocessContext): Promise<void> {
     const conversation = await this.conversationRepo.findById(context.conversationId);
@@ -32,41 +32,14 @@ export class SlackPostprocessor extends BasePostprocessor {
 
       const isNew = conversation.initialMessageId === context.entityId;
 
-      // Only create tickets for new top-level messages
+      // Only link new top-level messages
       if (!isNew || !context.normalizedData.metadata?.isTopLevelMessage) {
-        return;
-      }
-
-      const ticketOwnerId = this.getTicketOwnerId(source);
-      const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
-      const contentPreview = context.normalizedData.content.substring(0, 40) || 'Untitled';
-      const title = `Alert: ${contentPreview} [${timestamp}]`;
-      const description = `Query from Alert:\n\n${context.normalizedData.content}`;
-
-      // Queue ticket-bot job (uses bot flow like manual ticket creation)
-      const queued = await botProcessor.queueBotExecution({
-        executionId: conversation.initialMessageId,
-        conversationId: context.conversationId,
-        botName: 'ticket-bot',
-        input: {
-          title,
-          description,
-          scope: 'alert-query',
-          owner: ticketOwnerId,
-          workflowType: 'QUERY_WORKFLOW',
-        },
-        userId: ticketOwnerId,
-      });
-
-      if (!queued) {
         return;
       }
 
       await this.postSlackMessage(source, context, conversation.channelId);
     } catch (error) {
-      if (!(error instanceof Error && error.message.includes('ticketOwnerId'))) {
-        logger.error('Slack postprocess: failed to queue ticket-bot job', { error });
-      }
+      logger.error('Slack postprocess: failed to post link', { error });
     }
   }
 
@@ -93,7 +66,7 @@ export class SlackPostprocessor extends BasePostprocessor {
         return;
       }
 
-      const xyneLink = `https://spaces.xyne.juspay.net/chat/${xyneChannelId}/${context.conversationId}`;
+      const xyneLink = `${config.frontendUrl}/chat/${xyneChannelId}/${context.conversationId}`;
 
       const response = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
@@ -120,19 +93,5 @@ export class SlackPostprocessor extends BasePostprocessor {
     } catch (error) {
       logger.error('Slack postprocess: error posting message', { error });
     }
-  }
-
-  /**
-   * Get ticket owner ID from Slack integration credentials
-   */
-  private getTicketOwnerId(source: any): string {
-    const decryptedCreds = decrypt(source.credentials);
-    const creds = JSON.parse(decryptedCreds);
-
-    if (!creds.ticketOwnerId) {
-      throw new Error('ticketOwnerId not found in Slack credentials');
-    }
-
-    return creds.ticketOwnerId;
   }
 }

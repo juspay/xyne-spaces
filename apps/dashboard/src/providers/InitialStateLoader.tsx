@@ -21,7 +21,7 @@ import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
-import { dropZeroDatabases } from '../zero/dropZeroDatabases';
+import { dropAllDatabases } from '@rocicorp/zero';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
@@ -206,8 +206,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
         });
       });
 
-      // Clear this lane's Zero local databases
-      void dropZeroDatabases();
+      // Clear Zero's local databases
+      void dropAllDatabases();
 
       // Clear all cookies and auth tokens (handles Electron + Web)
       clearAuthTokens();

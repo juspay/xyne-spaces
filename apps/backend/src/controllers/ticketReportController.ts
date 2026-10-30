@@ -43,7 +43,7 @@ export class TicketReportController {
         success: false,
         error:
           error instanceof z.ZodError
-            ? error.errors
+            ? error.issues
             : error instanceof AppError
               ? error.message
               : 'Failed to download export',

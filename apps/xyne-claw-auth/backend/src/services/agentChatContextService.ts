@@ -265,23 +265,13 @@ export async function buildAttachedContextPayload(
   opts?: {
     threadConversationId?: string;
     canvasViewAccessId?: string;
-    workflowId?: string;
-    workflowExecutionId?: string;
     /** The run's user — artifact apps are resolved against their access. */
     userId?: string;
   },
 ): Promise<{ promptPrefix?: string; contextFiles: ContextFile[] }> {
   const threadConversationId = opts?.threadConversationId;
   const canvasViewAccessId = opts?.canvasViewAccessId;
-  const workflowId = opts?.workflowId;
-  const workflowExecutionId = opts?.workflowExecutionId;
-  if (
-    items.length === 0 &&
-    !threadConversationId &&
-    !canvasViewAccessId &&
-    !workflowId &&
-    !workflowExecutionId
-  ) {
+  if (items.length === 0 && !threadConversationId && !canvasViewAccessId) {
     return { contextFiles: [] };
   }
 
@@ -333,10 +323,6 @@ export async function buildAttachedContextPayload(
         inlineText: `Unable to resolve canvas: ${message}. Read it with \`spaces-read-canvas\` (viewAccessId=${canvasViewAccessId}).`,
       });
     }
-  }
-
-  if (workflowId || workflowExecutionId) {
-    sections.unshift(buildWorkflowScopeSection(workflowId, workflowExecutionId));
   }
 
   const lines: string[] = [
@@ -795,33 +781,6 @@ async function resolveActivitySection(item: AttachedContextRef): Promise<Resolve
 /** A Spaces thread/conversation the user opened the assistant from. It arrives
  *  as agentConfig.SPACES_CONVERSATION_ID (NOT via the attachedContext array),
  *  so it's resolved here and folded into the same "# Attached context" block. */
-function buildWorkflowScopeSection(
-  workflowId?: string,
-  workflowExecutionId?: string,
-): ResolvedContextSection {
-  if (workflowExecutionId) {
-    return {
-      header: `Workflow run (executionId=${workflowExecutionId})`,
-      inlineText: [
-        "The user is looking at this run in the workflow viewer, and is almost certainly",
-        "asking about it. Your `workflow_*` tools are already scoped to it — call",
-        "`workflow_run_get` with no id to read its status, steps and errors, and",
-        "`workflow_step_events` for a step that failed. Do not call `workflow_run_list` to",
-        "find it; it is already in scope.",
-      ].join(" "),
-    };
-  }
-  return {
-    header: `Workflow (id=${workflowId})`,
-    inlineText: [
-      "The user is looking at this workflow in the builder, and is almost certainly asking",
-      "about it — read \"this workflow\" as this one. Your `workflow_*` tools are already",
-      "scoped to it: call `workflow_get` with no id to read its current definition. Do not",
-      "call `workflow_list` to work out which workflow is meant.",
-    ].join(" "),
-  };
-}
-
 async function resolveThreadSection(conversationId: string, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
   const header = `Spaces thread (conversationId=${conversationId})`;
   const rows = (await interact({

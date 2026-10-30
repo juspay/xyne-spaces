@@ -18,7 +18,7 @@ import {
   type RunConfig,
   type Message,
   type TraceEvent,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 
 // Import config for environment variables
 // Import prompts

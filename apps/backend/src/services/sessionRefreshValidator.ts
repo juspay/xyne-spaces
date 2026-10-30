@@ -114,12 +114,12 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
 
     if (graphResponse.status === 401) {
       // Access token expired — try refreshing via the Microsoft token endpoint.
-      const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+      const tenantId = config.microsoft.tenantId || 'common';
       const tokenResponse = await axios.post(
         `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
         new URLSearchParams({
-          client_id: process.env.MICROSOFT_CLIENT_ID!,
-          client_secret: process.env.MICROSOFT_CLIENT_SECRET!,
+          client_id: config.microsoft.clientId,
+          client_secret: config.microsoft.clientSecret,
           grant_type: 'refresh_token',
           refresh_token: session.refreshToken,
           scope: 'openid email profile User.Read',

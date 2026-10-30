@@ -2,7 +2,8 @@
   The Xyne Scribe Details Screen
  */
 
-import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
+// Disabled (Claw)
+// import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
@@ -13,7 +14,11 @@ import {
   type RecordingTicketLinkState,
 } from '../../services/Recording/recordingService';
 import { useShortcut } from '../../shortcuts';
-import { RefreshCw, StickyNote } from 'lucide-react';
+import {
+  // Disabled (LLM)
+  // RefreshCw,
+  StickyNote,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   logRecordingError,
@@ -29,11 +34,14 @@ import {
 } from '../../utils/recordingTabPreference';
 import {
   clearSummaryRequested,
-  getSummaryProgress,
+  // Disabled (LLM)
+  // getSummaryProgress,
   getSummaryRequest,
-  getSummaryStage,
+  // Disabled (LLM)
+  // getSummaryStage,
   markSummaryRequested,
-  saveSummaryProgress,
+  // Disabled (LLM)
+  // saveSummaryProgress,
 } from '../../utils/recordingSummaryRequest';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -43,10 +51,11 @@ import {
   Spinner,
   Flag,
   SidebarRightOpen,
-  ChevronDown,
-  File02Text,
-  EnvelopeDefault,
-  Hashtag,
+  // Disabled (LLM)
+  // ChevronDown,
+  // File02Text,
+  // EnvelopeDefault,
+  // Hashtag,
   SidebarRightClose,
   Share02,
   ArrowLeft,
@@ -56,18 +65,22 @@ import {
   isSummaryTemplateMenuStep,
   summaryTemplateTour,
   useSummaryTemplateTour,
-  useSummaryTemplateTourTaken,
+  // Disabled (LLM)
+  // useSummaryTemplateTourTaken,
 } from '../../components/SummaryTemplateTour';
 import { Dialog } from '../../components/ui/Dialog';
-import { Popover } from '../../components/ui/Popover';
+// Disabled (LLM)
+// import { Popover } from '../../components/ui/Popover';
 import { cn, Tooltip } from '../../components/ui/Tooltip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../../components/ui/dropdown-menu';
-import XyneAIStar from '../../components/icons/xyne-ai/XyneAIStar';
+// Disabled (LLM)
+// import {
+//   DropdownMenu,
+//   DropdownMenuContent,
+//   DropdownMenuItem,
+//   DropdownMenuTrigger,
+// } from '../../components/ui/dropdown-menu';
+// Disabled (LLM)
+// import XyneAIStar from '../../components/icons/xyne-ai/XyneAIStar';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { RecordingShareModal } from './components/RecordingShareModal';
 import { RecordingDetailV2Skeleton } from './components/RecordingDetailV2Skeleton';
@@ -84,7 +97,8 @@ import {
   RecordingContentTabs,
   type RecordingSummaryTemplate,
 } from './components/RecordingContentTabs';
-import { SummaryGenerationPanel } from './components/SummaryGenerationPill/SummaryGenerationPanel';
+// Disabled (LLM)
+// import { SummaryGenerationPanel } from './components/SummaryGenerationPill/SummaryGenerationPanel';
 import { deriveSummaryPanelState } from './summaryPanelState';
 import { PostRecordingToChannelModal } from './components/PostRecordingToChannelModal';
 import { PostRecordingToEmailModal } from './components/PostRecordingToEmailModal';
@@ -104,11 +118,16 @@ import {
   TranscriptSidePanel,
   type TranscriptPanelTarget,
 } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
-import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
+import {
+  ORIGINAL_TRANSCRIPT_LANGUAGE,
+  // Disabled (LLM)
+  // SUPPORTED_TRANSCRIPT_LANGUAGES,
+} from '@xyne/shared';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
-import { xyneAIActor } from '../../machines/xyneAIMachine';
+// Disabled (Claw)
+// import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import {
@@ -123,7 +142,8 @@ import {
   shouldOfferDefaultSummaryTemplate,
   useRecordingDefaultSummaryTemplate,
 } from '../../hooks/useRecordingDefaultSummaryTemplate';
-import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
+// Disabled (LLM)
+// import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
@@ -177,8 +197,9 @@ const PRIVATE_SUMMARY_TEMPLATE_OPTION: RecordingSummaryTemplate = {
   icon: '🔒',
 };
 
-const POST_SPLIT_BUTTON_CLASS =
-  'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
+// Disabled (LLM)
+// const POST_SPLIT_BUTTON_CLASS =
+//   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
 const CANVAS_POPOVER_LAYER_CLASS = '[&_[style*="--bn-ui-base-z-index"]]:!z-[15]';
 
@@ -220,7 +241,8 @@ export default function RecordingDetailV2Screen({
   onBack,
 }: RecordingDetailV2ScreenProps): ReactElement {
   const { isMobile, isElectron } = usePlatform();
-  const askAIAvailable = useAskAIAvailable();
+  // Disabled (Claw)
+  // const askAIAvailable = useAskAIAvailable();
   const params = useParams<{ recordingId: string }>();
   const recordingId = recordingIdOverride ?? params.recordingId;
   const navigate = useNavigate();
@@ -236,7 +258,8 @@ export default function RecordingDetailV2Screen({
     navState?.hasTranscript === true &&
     (stoppedAtMs === null || Date.now() - stoppedAtMs < NO_TRANSCRIPT_AFTER_MS);
   const currentUser = useSelf();
-  const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
+  // Disabled (LLM)
+  // const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -255,19 +278,23 @@ export default function RecordingDetailV2Screen({
     requestedTab === 'notes' ? 'notes' : justStopped ? 'secondary' : getRecordingV2Tab(),
   );
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
-  const [selectedTranscriptLanguage, setSelectedTranscriptLanguage] = useState(
-    ORIGINAL_TRANSCRIPT_LANGUAGE,
-  );
+  const [
+    selectedTranscriptLanguage,
+    // Disabled (LLM)
+    // setSelectedTranscriptLanguage,
+  ] = useState(ORIGINAL_TRANSCRIPT_LANGUAGE);
 
   // Deep link `?lang=…` opens the transcript panel on arrival
   useEffect(() => {
     const lang = new URLSearchParams(location.search).get('lang');
     if (!lang) return;
-    const isValid =
-      lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
-      SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
+    // Disabled (LLM)
+    // const isValid =
+    //   lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
+    //   SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
     setShowTranscriptPanel(true);
-    setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
+    // Disabled (LLM)
+    // setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
   }, [location.search]);
 
   const [showShareModal, setShowShareModal] = useState(false);
@@ -281,7 +308,8 @@ export default function RecordingDetailV2Screen({
   // The template tour starts in the dropdown and finishes inside the templates
   // dialog; closing that dialog mid-way, or leaving the recording, ends it.
   const { activeStep: templateTourStep } = useSummaryTemplateTour();
-  const templateTourTaken = useSummaryTemplateTourTaken();
+  // Disabled (LLM)
+  // const templateTourTaken = useSummaryTemplateTourTaken();
   useEffect(() => {
     if (
       templateTourStep &&
@@ -292,20 +320,29 @@ export default function RecordingDetailV2Screen({
     }
   }, [templateTourStep, templatesModalMode]);
   useEffect(() => (): void => summaryTemplateTour.dismiss(), []);
-  const [isTemplateInfoOpen, setIsTemplateInfoOpen] = useState(false);
-  const handleStartTemplateTour = (): void => {
-    setIsTemplateInfoOpen(false);
-    handleTabSelect('summary');
-    summaryTemplateTour.start();
-  };
+  // Disabled (LLM)
+  // const [isTemplateInfoOpen, setIsTemplateInfoOpen] = useState(false);
+  // const handleStartTemplateTour = (): void => {
+  //   setIsTemplateInfoOpen(false);
+  //   handleTabSelect('summary');
+  //   summaryTemplateTour.start();
+  // };
   const [shouldLoadSummaryTemplates, setShouldLoadSummaryTemplates] = useState(false);
   const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } = useSummaryTemplates(
     shouldLoadSummaryTemplates || templatesModalMode !== null,
   );
-  const { defaultSummaryTemplateId, setDefaultSummaryTemplateId } =
-    useRecordingDefaultSummaryTemplate();
+  const {
+    defaultSummaryTemplateId,
+    // Disabled (LLM)
+    // setDefaultSummaryTemplateId,
+  } = useRecordingDefaultSummaryTemplate();
   // Shown next to the template selector once a template has been switched to often.
-  const [defaultTemplateOffer, setDefaultTemplateOffer] = useState<{
+  const [
+    ,
+    // Disabled (LLM)
+    // defaultTemplateOffer,
+    setDefaultTemplateOffer,
+  ] = useState<{
     templateId: string;
     name: string;
   } | null>(null);
@@ -325,11 +362,21 @@ export default function RecordingDetailV2Screen({
     storedSummaryTemplateDetails.type === 'complete' &&
     !storedSummaryTemplate;
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
-  const [pendingSummaryTemplateId, setPendingSummaryTemplateId] = useState<string | null>(null);
+  const [
+    ,
+    // Disabled (LLM)
+    // pendingSummaryTemplateId,
+    setPendingSummaryTemplateId,
+  ] = useState<string | null>(null);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
   const [awaitingSummary, setAwaitingSummary] = useState(false);
   // Summary Generation panel states
-  const [summaryRunNonce, setSummaryRunNonce] = useState(0);
+  const [
+    ,
+    // Disabled (LLM)
+    // summaryRunNonce,
+    setSummaryRunNonce,
+  ] = useState(0);
   const [summaryFailed, setSummaryFailed] = useState(false);
   const [citationNonce, setCitationNonce] = useState(0);
   /** Set once the audio poll below gives up, so the player stops implying progress. */
@@ -337,9 +384,10 @@ export default function RecordingDetailV2Screen({
   // Which line the transcript panel opens on: set by a timeline marker, null when the
   // panel is opened from the toolbar with no particular moment in mind.
   const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
-  // "Retry with …" footer popover: lets the owner regenerate this summary with
-  // the other model tier, optionally making it their default going forward.
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  // Disabled (LLM)
+  // // "Retry with …" footer popover: lets the owner regenerate this summary with
+  // // the other model tier, optionally making it their default going forward.
+  // const [modelMenuOpen, setModelMenuOpen] = useState(false);
 
   useEffect(() => {
     if (requestedTab === 'notes') {
@@ -979,23 +1027,25 @@ export default function RecordingDetailV2Screen({
     }
   };
 
-  /**
-   * "Retry with …" footer actions: regenerate the current summary with the given
-   * model tier. When `makeDefault` is set, also make that tier the user's default
-   * for every future recording (otherwise their default is left unchanged).
-   */
-  const applyModel = async (target: 'fast' | 'thinking', makeDefault: boolean): Promise<void> => {
-    if (!recording || isRegeneratingSummary) return;
-    setModelMenuOpen(false);
-    if (makeDefault) setSummaryModelPreference(target);
-    const currentTemplateId = recording.summaryTemplateId ?? 'default';
-    await handleRegenerateSummary(currentTemplateId, target);
-  };
+  // Disabled (LLM)
+  // /**
+  //  * "Retry with …" footer actions: regenerate the current summary with the given
+  //  * model tier. When `makeDefault` is set, also make that tier the user's default
+  //  * for every future recording (otherwise their default is left unchanged).
+  //  */
+  // const applyModel = async (target: 'fast' | 'thinking', makeDefault: boolean): Promise<void> => {
+  //   if (!recording || isRegeneratingSummary) return;
+  //   setModelMenuOpen(false);
+  //   if (makeDefault) setSummaryModelPreference(target);
+  //   const currentTemplateId = recording.summaryTemplateId ?? 'default';
+  //   await handleRegenerateSummary(currentTemplateId, target);
+  // };
 
-  const [message] = useCachedQuery(
-    queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
-    { enabled: !!recording?.messageId },
-  );
+  // Disabled (Claw)
+  // const [message] = useCachedQuery(
+  //   queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
+  //   { enabled: !!recording?.messageId },
+  // );
 
   // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
   // reaches this screen through the store until the detail is refetched.
@@ -1004,78 +1054,80 @@ export default function RecordingDetailV2Screen({
     recording?.notesCanvasId ??
     null;
 
-  /**
-   * A note-taker recording has no channel, message or conversation — it is created
-   * from a LiveKit webhook rather than posted anywhere — so none of those can gate
-   * opening Ask AI. Each is passed only when it exists, which is the case for a
-   * channel call viewed on this screen; otherwise the panel opens unscoped, exactly
-   * as the recordings list does.
-   */
-  const handleAskAI = useCallback((): void => {
-    if (!recording) return;
-    const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
-    const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
-    // Both canvases are attached with an explicit role: from the row alone the
-    // agent cannot tell the machine-written summary from the user's own notes,
-    // and it must weigh them differently.
-    const canvasSelections = [
-      ...(recording.detailedSummaryCanvasId
-        ? [
-            {
-              id: recording.detailedSummaryCanvasId,
-              canvasId: recording.detailedSummaryCanvasId,
-              title: `${recording.title || 'Recording'} summary`,
-              canvasRole: 'call-summary' as const,
-            },
-          ]
-        : []),
-      ...(notesCanvasId && notesCanvasId !== recording.detailedSummaryCanvasId
-        ? [
-            {
-              id: notesCanvasId,
-              canvasId: notesCanvasId,
-              title: `${recording.title || 'Recording'} notes`,
-              canvasRole: 'call-notes' as const,
-            },
-          ]
-        : []),
-    ];
+  // Disabled (Claw)
+  // /**
+  //  * A note-taker recording has no channel, message or conversation — it is created
+  //  * from a LiveKit webhook rather than posted anywhere — so none of those can gate
+  //  * opening Ask AI. Each is passed only when it exists, which is the case for a
+  //  * channel call viewed on this screen; otherwise the panel opens unscoped, exactly
+  //  * as the recordings list does.
+  //  */
+  // const handleAskAI = useCallback((): void => {
+  //   if (!recording) return;
+  //   const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
+  //   const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
+  //   // Both canvases are attached with an explicit role: from the row alone the
+  //   // agent cannot tell the machine-written summary from the user's own notes,
+  //   // and it must weigh them differently.
+  //   const canvasSelections = [
+  //     ...(recording.detailedSummaryCanvasId
+  //       ? [
+  //           {
+  //             id: recording.detailedSummaryCanvasId,
+  //             canvasId: recording.detailedSummaryCanvasId,
+  //             title: `${recording.title || 'Recording'} summary`,
+  //             canvasRole: 'call-summary' as const,
+  //           },
+  //         ]
+  //       : []),
+  //     ...(notesCanvasId && notesCanvasId !== recording.detailedSummaryCanvasId
+  //       ? [
+  //           {
+  //             id: notesCanvasId,
+  //             canvasId: notesCanvasId,
+  //             title: `${recording.title || 'Recording'} notes`,
+  //             canvasRole: 'call-notes' as const,
+  //           },
+  //         ]
+  //       : []),
+  //   ];
 
-    xyneAIActor.send({
-      type: 'OPEN',
-      trackSource: 'recording_detail',
-      startFreshChat: true,
-      contextType: 'general',
-      initialContextSelections: {
-        recordings: [
-          {
-            // `id` is the canonical Call id. `externalId` is only the public
-            // recording-route id, so using it here would make Claw fail to
-            // resolve the attached call.
-            id: recording.id,
-            title: recording.title || 'Recording',
-            ...(recording.channelId ? { channelId: recording.channelId } : {}),
-            ...(recording.conversationId ? { conversationId: recording.conversationId } : {}),
-            externalId: recording.externalId,
-          },
-        ],
-        canvases: canvasSelections,
-      },
-      threadInfo: hasThreadContext
-        ? {
-            conversationId: recording.conversationId ?? '',
-            previewText: recording.title || 'Recording Transcript',
-            ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
-          }
-        : null,
-    });
-  }, [recording, message, notesCanvasId]);
+  //   xyneAIActor.send({
+  //     type: 'OPEN',
+  //     trackSource: 'recording_detail',
+  //     startFreshChat: true,
+  //     contextType: 'general',
+  //     initialContextSelections: {
+  //       recordings: [
+  //         {
+  //           // `id` is the canonical Call id. `externalId` is only the public
+  //           // recording-route id, so using it here would make Claw fail to
+  //           // resolve the attached call.
+  //           id: recording.id,
+  //           title: recording.title || 'Recording',
+  //           ...(recording.channelId ? { channelId: recording.channelId } : {}),
+  //           ...(recording.conversationId ? { conversationId: recording.conversationId } : {}),
+  //           externalId: recording.externalId,
+  //         },
+  //       ],
+  //       canvases: canvasSelections,
+  //     },
+  //     threadInfo: hasThreadContext
+  //       ? {
+  //           conversationId: recording.conversationId ?? '',
+  //           previewText: recording.title || 'Recording Transcript',
+  //           ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+  //         }
+  //       : null,
+  //   });
+  // }, [recording, message, notesCanvasId]);
 
-  const handleSummaryProgressPause = useCallback(
-    (progress: number, stageIndex: number): void =>
-      saveSummaryProgress(recordingId, progress, stageIndex),
-    [recordingId],
-  );
+  // Disabled (LLM)
+  // const handleSummaryProgressPause = useCallback(
+  //   (progress: number, stageIndex: number): void =>
+  //     saveSummaryProgress(recordingId, progress, stageIndex),
+  //   [recordingId],
+  // );
 
   const transcript = useTranscriptTranslation({
     externalId: recording?.externalId,
@@ -1190,8 +1242,9 @@ export default function RecordingDetailV2Screen({
       })),
   ];
   const selectedSummaryTemplateId = storedSummaryTemplateId;
-  const regeneratingSummaryTemplateId =
-    (pendingSummaryTemplateId ?? selectedSummaryTemplateId) || DEFAULT_SUMMARY_TEMPLATE_OPTION.id;
+  // Disabled (LLM)
+  // const regeneratingSummaryTemplateId =
+  //   (pendingSummaryTemplateId ?? selectedSummaryTemplateId) || DEFAULT_SUMMARY_TEMPLATE_OPTION.id;
   const selectedSummaryTemplate: RecordingSummaryTemplate =
     summaryTemplateOptions.find(template => template.id === selectedSummaryTemplateId) ??
     (storedSummaryTemplate?.id === selectedSummaryTemplateId
@@ -1226,7 +1279,8 @@ export default function RecordingDetailV2Screen({
     noTranscriptTimedOut: !isLive && !hasTranscript,
   });
   const showSummaryShimmer = summaryPanelState === 'pending';
-  const summaryFailedEffective = summaryPanelState === 'failed';
+  // Disabled (LLM)
+  // const summaryFailedEffective = summaryPanelState === 'failed';
 
   const handleMarkerSelect = (item: MarkedItem): void => {
     // A moment already announces itself in the transcript with a divider, so only
@@ -1260,10 +1314,11 @@ export default function RecordingDetailV2Screen({
     setTemplatesModalMode('browse');
   };
 
-  const handleNewSummaryTemplate = (): void => {
-    setShouldLoadSummaryTemplates(true);
-    setTemplatesModalMode('new');
-  };
+  // Disabled (LLM)
+  // const handleNewSummaryTemplate = (): void => {
+  //   setShouldLoadSummaryTemplates(true);
+  //   setTemplatesModalMode('new');
+  // };
 
   return (
     <div
@@ -1354,6 +1409,8 @@ export default function RecordingDetailV2Screen({
                   </Button>
                 </Tooltip>
               )}
+              {/* Disabled (Claw) */}
+              {/*
               {!isLive && askAIAvailable && (
                 <Tooltip content='Ask AI about this recording' side='bottom'>
                   <Button
@@ -1370,6 +1427,7 @@ export default function RecordingDetailV2Screen({
                   </Button>
                 </Tooltip>
               )}
+              */}
             </div>
           </div>
           <RecordingDetailV2Header
@@ -1413,39 +1471,42 @@ export default function RecordingDetailV2Screen({
                   onSelect={handleTabSelect}
                   hasSummary={hasDetailedSummary}
                   selectedTemplate={selectedSummaryTemplate}
-                  {...(isLive || !canEdit
-                    ? {}
-                    : {
-                        // showSummaryShimmer covers both a click in this tab and a
-                        // backend-published 'pending' (e.g. auto-generation after
-                        // the call ended, or a regen started from another tab).
-                        isRegenerating: isRegeneratingSummary || showSummaryShimmer,
-                        regeneratingTemplateId: regeneratingSummaryTemplateId,
-                        templates: summaryTemplateOptions,
-                        templatesLoading: summaryTemplatesLoading,
-                        onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
-                        onTemplateSelect: summaryTemplateId =>
-                          void handleRegenerateSummary(summaryTemplateId),
-                        onRegenerate: () =>
-                          void handleRegenerateSummary(selectedSummaryTemplate.id),
-                        onOpenTemplates: handleOpenSummaryTemplates,
-                        onNewTemplate: handleNewSummaryTemplate,
-                        defaultTemplateOffer,
-                        onAcceptDefaultTemplateOffer: (): void => {
-                          if (!defaultTemplateOffer) return;
-                          setDefaultSummaryTemplateId(defaultTemplateOffer.templateId);
-                          toast.success(
-                            `${defaultTemplateOffer.name} is now your default template`,
-                            {
-                              description:
-                                'New recordings will use it. Change it in Preferences › Recordings.',
-                            },
-                          );
-                          setDefaultTemplateOffer(null);
-                        },
-                        onDismissDefaultTemplateOffer: (): void => setDefaultTemplateOffer(null),
-                      })}
+                  // Disabled (LLM)
+                  // {...(isLive || !canEdit
+                  //   ? {}
+                  //   : {
+                  //       // showSummaryShimmer covers both a click in this tab and a
+                  //       // backend-published 'pending' (e.g. auto-generation after
+                  //       // the call ended, or a regen started from another tab).
+                  //       isRegenerating: isRegeneratingSummary || showSummaryShimmer,
+                  //       regeneratingTemplateId: regeneratingSummaryTemplateId,
+                  //       templates: summaryTemplateOptions,
+                  //       templatesLoading: summaryTemplatesLoading,
+                  //       onTemplateMenuOpen: () => setShouldLoadSummaryTemplates(true),
+                  //       onTemplateSelect: summaryTemplateId =>
+                  //         void handleRegenerateSummary(summaryTemplateId),
+                  //       onRegenerate: () =>
+                  //         void handleRegenerateSummary(selectedSummaryTemplate.id),
+                  //       onOpenTemplates: handleOpenSummaryTemplates,
+                  //       onNewTemplate: handleNewSummaryTemplate,
+                  //       defaultTemplateOffer,
+                  //       onAcceptDefaultTemplateOffer: (): void => {
+                  //         if (!defaultTemplateOffer) return;
+                  //         setDefaultSummaryTemplateId(defaultTemplateOffer.templateId);
+                  //         toast.success(
+                  //           `${defaultTemplateOffer.name} is now your default template`,
+                  //           {
+                  //             description:
+                  //               'New recordings will use it. Change it in Preferences › Recordings.',
+                  //           },
+                  //         );
+                  //         setDefaultTemplateOffer(null);
+                  //       },
+                  //       onDismissDefaultTemplateOffer: (): void => setDefaultTemplateOffer(null),
+                  //     })}
                 />
+                {/* Disabled (LLM) */}
+                {/*
                 {!isLive && canEdit && hasDetailedSummary && !templateTourTaken && (
                   <Popover
                     open={isTemplateInfoOpen}
@@ -1500,6 +1561,7 @@ export default function RecordingDetailV2Screen({
                     </div>
                   </Popover>
                 )}
+                */}
               </div>
 
               {/* The right slot belongs to whichever action the state allows: flag a
@@ -1523,78 +1585,79 @@ export default function RecordingDetailV2Screen({
                   <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
                   Mark this moment
                 </Button>
-              ) : canEdit && hasDetailedSummary ? (
-                <DropdownMenu>
-                  <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='sm'
-                      onClick={() => setShowPostToChannelModal(true)}
-                      className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold !rounded-2xl`}
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_channel_modal'
-                    >
-                      <Hashtag className='size-3.5' />
-                      Post to channel
-                    </Button>
-                    <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type='button'
-                        variant='ghost'
-                        size='iconSm'
-                        aria-label='More actions'
-                        className={POST_SPLIT_BUTTON_CLASS}
-                        data-track-category='RecordingDetailV2'
-                        data-track-name='open_recording_share_menu'
-                      >
-                        <ChevronDown className='size-3.5' />
-                      </Button>
-                    </DropdownMenuTrigger>
-                  </div>
-                  <DropdownMenuContent
-                    align='end'
-                    sideOffset={6}
-                    className='w-60 rounded-xl p-1.5 shadow-xl'
-                  >
-                    <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
-                      Send this summary to
-                    </p>
-                    <DropdownMenuItem
-                      onSelect={() => setShowPostToChannelModal(true)}
-                      className='rounded-lg px-2.5 py-2'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_channel_from_menu'
-                    >
-                      <Hashtag className='size-4 text-muted-foreground' />
-                      Post to channel
-                      <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-                        Default
-                      </span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => setShowPostToEmailModal(true)}
-                      className='rounded-lg px-2.5 py-2'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='open_post_to_email_modal'
-                    >
-                      <EnvelopeDefault className='size-4 text-muted-foreground' />
-                      Draft follow-up email
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => setShowGoogleDocPreviewModal(true)}
-                      disabled={isExportingGoogleDoc}
-                      className='rounded-lg px-2.5 py-2'
-                      data-track-category='RecordingDetailV2'
-                      data-track-name='export_recording_google_doc'
-                    >
-                      <File02Text className='size-4 text-muted-foreground' />
-                      {isExportingGoogleDoc ? 'Creating Google Doc…' : 'Export to Google Docs'}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
+              ) : // Disabled (LLM)
+              // ) : canEdit && hasDetailedSummary ? (
+              //   <DropdownMenu>
+              //     <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+              //       <Button
+              //         type='button'
+              //         variant='ghost'
+              //         size='sm'
+              //         onClick={() => setShowPostToChannelModal(true)}
+              //         className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold !rounded-2xl`}
+              //         data-track-category='RecordingDetailV2'
+              //         data-track-name='open_post_to_channel_modal'
+              //       >
+              //         <Hashtag className='size-3.5' />
+              //         Post to channel
+              //       </Button>
+              //       <span className='my-1.5 w-px bg-muted-foreground/50' aria-hidden='true' />
+              //       <DropdownMenuTrigger asChild>
+              //         <Button
+              //           type='button'
+              //           variant='ghost'
+              //           size='iconSm'
+              //           aria-label='More actions'
+              //           className={POST_SPLIT_BUTTON_CLASS}
+              //           data-track-category='RecordingDetailV2'
+              //           data-track-name='open_recording_share_menu'
+              //         >
+              //           <ChevronDown className='size-3.5' />
+              //         </Button>
+              //       </DropdownMenuTrigger>
+              //     </div>
+              //     <DropdownMenuContent
+              //       align='end'
+              //       sideOffset={6}
+              //       className='w-60 rounded-xl p-1.5 shadow-xl'
+              //     >
+              //       <p className='px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+              //         Send this summary to
+              //       </p>
+              //       <DropdownMenuItem
+              //         onSelect={() => setShowPostToChannelModal(true)}
+              //         className='rounded-lg px-2.5 py-2'
+              //         data-track-category='RecordingDetailV2'
+              //         data-track-name='open_post_to_channel_from_menu'
+              //       >
+              //         <Hashtag className='size-4 text-muted-foreground' />
+              //         Post to channel
+              //         <span className='ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              //           Default
+              //         </span>
+              //       </DropdownMenuItem>
+              //       <DropdownMenuItem
+              //         onSelect={() => setShowPostToEmailModal(true)}
+              //         className='rounded-lg px-2.5 py-2'
+              //         data-track-category='RecordingDetailV2'
+              //         data-track-name='open_post_to_email_modal'
+              //       >
+              //         <EnvelopeDefault className='size-4 text-muted-foreground' />
+              //         Draft follow-up email
+              //       </DropdownMenuItem>
+              //       <DropdownMenuItem
+              //         onSelect={() => setShowGoogleDocPreviewModal(true)}
+              //         disabled={isExportingGoogleDoc}
+              //         className='rounded-lg px-2.5 py-2'
+              //         data-track-category='RecordingDetailV2'
+              //         data-track-name='export_recording_google_doc'
+              //       >
+              //         <File02Text className='size-4 text-muted-foreground' />
+              //         {isExportingGoogleDoc ? 'Creating Google Doc…' : 'Export to Google Docs'}
+              //       </DropdownMenuItem>
+              //     </DropdownMenuContent>
+              //   </DropdownMenu>
+              null}
             </div>
           </motion.div>
 
@@ -1662,6 +1725,8 @@ export default function RecordingDetailV2Screen({
                       Fast. Each "Retry with …" opens a popover to apply the tier to
                       just this summary or make it the default for future
                       recordings. */}
+                  {/* Disabled (LLM) */}
+                  {/*
                   {canEdit && (
                     <div className='mt-auto'>
                       {recording.summaryModelUsed === 'thinking' ? (
@@ -1805,21 +1870,22 @@ export default function RecordingDetailV2Screen({
                       )}
                     </div>
                   )}
+                  */}
                 </>
-              ) : (
-                <SummaryGenerationPanel
-                  isAwaiting={showSummaryShimmer}
-                  canGenerate={hasTranscript}
-                  onGenerate={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
-                  onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
-                  hasFailed={summaryFailedEffective}
-                  generationRunId={summaryRunNonce}
-                  initialProgress={getSummaryProgress(recordingId)}
-                  initialStageIndex={getSummaryStage(recordingId)}
-                  onProgressPause={handleSummaryProgressPause}
-                  onReadTranscript={hasTranscript ? openTranscriptPanel : undefined}
-                />
-              )}
+              ) : // Disabled (LLM)
+              // <SummaryGenerationPanel
+              //   isAwaiting={showSummaryShimmer}
+              //   canGenerate={hasTranscript}
+              //   onGenerate={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
+              //   onRetry={() => void handleRegenerateSummary(selectedSummaryTemplate.id)}
+              //   hasFailed={summaryFailedEffective}
+              //   generationRunId={summaryRunNonce}
+              //   initialProgress={getSummaryProgress(recordingId)}
+              //   initialStageIndex={getSummaryStage(recordingId)}
+              //   onProgressPause={handleSummaryProgressPause}
+              //   onReadTranscript={hasTranscript ? openTranscriptPanel : undefined}
+              // />
+              null}
               {/* Shown to everyone with the recording. Each doc lives in the
                   exporting user's own Drive, so the list attributes the ones you
                   did not export — "ask them for access" is all Xyne can offer
@@ -1846,7 +1912,8 @@ export default function RecordingDetailV2Screen({
             markedTimestampsSeconds={markedMomentSeconds}
             title={recording.title}
             selectedLanguage={selectedTranscriptLanguage}
-            onLanguageChange={setSelectedTranscriptLanguage}
+            // Disabled (LLM)
+            // onLanguageChange={setSelectedTranscriptLanguage}
             isTranslating={transcript.isTranslating}
             onClose={() => {
               setShowTranscriptPanel(false);

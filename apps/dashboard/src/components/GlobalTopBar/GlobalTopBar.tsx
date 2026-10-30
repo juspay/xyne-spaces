@@ -1,18 +1,16 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import * as Popover from '@radix-ui/react-popover';
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Check,
   Circle,
   ExternalLink,
   Headset,
   LucideCommand,
   Search,
   CircleHelp,
-  Share2,
   Square,
 } from 'lucide-react';
 import { invokeShortcut } from '../../shortcuts';
@@ -23,9 +21,6 @@ import { Tooltip } from '../ui/Tooltip';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 import type { ChipData } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { formatElapsedTime } from '../../utils/recordingUtils';
-import { queries } from '../../zero/queries';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { WorkspaceJoinPolicy } from '@xyne/shared';
 
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
@@ -262,57 +257,6 @@ const NavigationAndSearch = (): ReactElement => {
   );
 };
 
-const WorkspaceInviteButton = (): ReactElement | null => {
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const [copied, setCopied] = useState(false);
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId ?? '' }), {
-    enabled: !!workspaceId,
-  });
-
-  if (!workspaceId) {
-    return null;
-  }
-
-  const joinPolicy = workspace?.joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY;
-  if (joinPolicy === WorkspaceJoinPolicy.INVITE_ONLY) {
-    return null;
-  }
-
-  const handleCopyInviteLink = async (): Promise<void> => {
-    const inviteUrl = `${window.location.origin}/community/join?workspaceId=${encodeURIComponent(workspaceId)}`;
-
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-      setCopied(true);
-      toast.success('Invite link copied');
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      toast.error('Failed to copy invite link');
-    }
-  };
-
-  return (
-    <Tooltip
-      content={workspace?.name ? `Invite to ${workspace.name} workspace` : 'Invite to workspace'}
-      side='bottom'
-      delayDuration={300}
-    >
-      <button
-        type='button'
-        onClick={() => void handleCopyInviteLink()}
-        className='flex h-6 items-center gap-1.5 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
-        aria-label='copy-workspace-invite-link'
-        data-track-category='GLOBAL_TOP_BAR'
-        data-track-name='CopyCommunityWorkspaceInvite'
-        data-track-metadata={JSON.stringify({ workspaceId })}
-      >
-        {copied ? <Check className='size-3.5 text-emerald-500' /> : <Share2 className='size-3.5' />}
-        <span>{copied ? 'Copied' : 'Invite'}</span>
-      </button>
-    </Tooltip>
-  );
-};
-
 const GlobalTopBar = ({
   onOpenErrorReport,
   onViewMyTickets,
@@ -360,9 +304,7 @@ const GlobalTopBar = ({
           {/* Pills collapse from the left as the bar narrows: Invite first
               (below 1100px), then Support (below 950px). Update always stays.
               Connection status now lives in the sidebar rail. */}
-          <div className='flex items-center gap-1 max-[1100px]:hidden'>
-            <WorkspaceInviteButton />
-          </div>
+          <div className='flex items-center gap-1 max-[1100px]:hidden'></div>
           {isRecording && onStopRecording && (
             <Tooltip content='Stop recording'>
               <button

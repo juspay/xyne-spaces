@@ -474,7 +474,6 @@ async function spawnSession(
 const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
   "xyne-spaces",
   "xyne-spaces-app-tools",
-  "xyne-workflows",
   "xyne-dashboard",
   "heisenberg",
   "research-agent-mcp",

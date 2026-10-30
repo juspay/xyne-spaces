@@ -15,7 +15,7 @@ import { classifyAndTagThread } from '@/services/messageClassification';
  * The delay is refreshed by every new message (see enqueueForMessage), so an active thread is
  * read once after it settles rather than once per burst.
  */
-const DEBOUNCE_MS = Number(process.env['MESSAGE_CLASSIFICATION_DEBOUNCE_MS'] ?? 10 * 60_000);
+const DEBOUNCE_MS = config.messageClassification.debounceMs;
 
 const QUEUE_NAME = 'message-classification';
 const JOB_NAME = 'classify-message';

@@ -220,7 +220,7 @@ export class DashboardController {
     return { userId, workspaceId };
   }
 
-  private badRequest(res: Response, parsed: z.SafeParseError<unknown>): void {
+  private badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
     res.status(400).json({
       error: 'ValidationError',
       message: 'Request body failed validation.',

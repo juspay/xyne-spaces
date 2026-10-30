@@ -3,8 +3,19 @@ import removeMarkdown from 'remove-markdown';
 import { logger } from '@/utils/logger';
 import { searchMemory, insertMemory, deleteMemory } from './memoryService';
 import { MemoryScope, VespaDocType, type VespaMemoryDocument } from '@/vespa/src/types';
-import type { ConversationSourceAdapter } from './conversationIngestion/types';
-import type { ExtractedSOP, ExtractedFACT } from './conversationAnalysisService';
+
+/** Memory entries formerly extracted by the retired conversation-analysis pipeline. */
+export interface ExtractedSOP {
+  userQuery: string;
+  content: string;
+  tags: string[];
+  filePointers: string[];
+  repoUrl?: string;
+  commitId?: string;
+  ticketId?: string;
+}
+
+export type ExtractedFACT = ExtractedSOP;
 
 const AGENT_NAME = 'conversation-analyst';
 const MAX_CHUNK_SIZE = 5000; // Max characters per chatSummary chunk
@@ -145,110 +156,6 @@ export class VespaKnowledgeIngestionService {
     logger.info(`[VESPA-KNOWLEDGE] replaceSession done session=${sessionId} inserted=${docs.length}`);
   }
 
-  /**
-   * Ingest all SOPs and Facts - completely replacing existing knowledge for this session
-   */
-  async ingestAll(
-    adapter: ConversationSourceAdapter,
-    sops: ExtractedSOP[],
-    facts: ExtractedFACT[],
-  ): Promise<void> {
-    const ctx = await adapter.buildMemoryContext();
-    const { sessionId, userId } = ctx;
-
-    logger.info(`[VESPA-KNOWLEDGE] Starting ingestion for session=${sessionId}: ${sops.length} SOPs, ${facts.length} Facts`);
-
-    // Step 1: Delete all existing knowledge for this session
-    await deleteAllForSession(sessionId);
-
-    // Step 2: Insert all new SOPs
-    for (const sop of sops) {
-      await this.insertNewSOP(sop, sessionId, userId);
     }
-
-    // Step 3: Insert all new Facts
-    for (const fact of facts) {
-      await this.insertNewFACT(fact, sessionId, userId);
-    }
-
-    logger.info(`[VESPA-KNOWLEDGE] Completed ingestion for session=${sessionId}: ${sops.length} SOPs, ${facts.length} Facts`);
-  }
-
-  private async insertNewSOP(
-    sop: ExtractedSOP,
-    sessionId: string,
-    userId: string,
-  ): Promise<void> {
-    const now = Date.now();
-    const docId = randomUUID();
-    const rawContent = sop.content;
-    const chatSummary = chunkContent(removeMarkdown(rawContent));
-
-    const doc: VespaMemoryDocument = {
-      docId,
-      docType: VespaDocType.SOP,
-      userId,
-      sessionId,
-      repoUrl: sop.repoUrl ?? '',
-      commitId: sop.commitId ?? '',
-      ticketId: sop.ticketId ?? '',
-      userQuery: sop.userQuery,
-      tags: sop.tags,
-      filePointers: sop.filePointers,
-      rawContent,
-      chatSummary,
-      createdAt: now,
-      updatedAt: now,
-      committedAt: now,
-      agentUsed: AGENT_NAME,
-      modelUsed: [],
-      parentRef: '',
-      reviewStatus: 'pending',
-    };
-
-    await insertMemory(doc);
-    logger.info(
-      `[VESPA-KNOWLEDGE] Inserted SOP docId=${docId} userQuery="${sop.userQuery}" chunks=${chatSummary.length}`,
-    );
-  }
-
-  private async insertNewFACT(
-    fact: ExtractedFACT,
-    sessionId: string,
-    userId: string,
-  ): Promise<void> {
-    const now = Date.now();
-    const docId = randomUUID();
-    const rawContent = fact.content;
-    const chatSummary = chunkContent(removeMarkdown(rawContent));
-
-    const doc: VespaMemoryDocument = {
-      docId,
-      docType: VespaDocType.FACT,
-      userId,
-      sessionId,
-      repoUrl: fact.repoUrl ?? '',
-      commitId: fact.commitId ?? '',
-      ticketId: fact.ticketId ?? '',
-      userQuery: fact.userQuery,
-      tags: fact.tags,
-      filePointers: fact.filePointers,
-      rawContent,
-      chatSummary,
-      createdAt: now,
-      updatedAt: now,
-      committedAt: now,
-      agentUsed: AGENT_NAME,
-      modelUsed: [],
-      parentRef: '',
-      reviewStatus: 'pending',
-    };
-
-    await insertMemory(doc);
-    logger.info(
-      `[VESPA-KNOWLEDGE] Inserted FACT docId=${docId} userQuery="${fact.userQuery}" chunks=${chatSummary.length}`,
-    );
-  }
-}
 
 export const vespaKnowledgeIngestionService = new VespaKnowledgeIngestionService();

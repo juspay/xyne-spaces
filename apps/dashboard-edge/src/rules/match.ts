@@ -36,19 +36,11 @@ export type ExistsFn = (bundle: string) => Promise<Existence>;
 
 /**
  * Turn a request path into the object key inside a bundle prefix.
- * strip_prefix is removed first, "/" and "" become index.html, and a trailing
- * "/" gets index.html appended. Parent segments are refused.
+ * "/" and "" become index.html, and a trailing "/" gets index.html appended.
+ * Parent segments are refused.
  */
-export function objectPath(rule: Pick<Rule, 'stripPrefix'>, path: string): string | null {
+export function objectPath(path: string): string | null {
   let p = path || '/';
-  const prefix = rule.stripPrefix;
-  if (prefix) {
-    if (p === prefix) {
-      p = '/';
-    } else if (p.startsWith(`${prefix}/`)) {
-      p = p.slice(prefix.length);
-    }
-  }
   if (p.split('/').includes('..')) {
     return null;
   }
@@ -151,7 +143,7 @@ export async function resolve(
       skipped.push({ id: rule.id, reason });
       continue;
     }
-    const object = objectPath(rule, req.path);
+    const object = objectPath(req.path);
     if (object === null) {
       skipped.push({ id: rule.id, reason: 'invalid path' });
       continue;

@@ -232,7 +232,7 @@ router.post(
       res.status(201).json({ channelId });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: error.errors[0]?.message ?? 'Invalid request' });
+        res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
         return;
       }
       handleRouteError(res, error, 'Failed to connect App Store desk');
@@ -275,7 +275,7 @@ router.post(
       res.json({ added: result.created + result.reactivated, ...result });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: error.errors[0]?.message ?? 'Invalid request' });
+        res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
         return;
       }
       handleRouteError(res, error, 'Failed to add App Store apps');
@@ -376,7 +376,7 @@ router.post(
       res.json({ updated: sources.length });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: error.errors[0]?.message ?? 'Invalid request' });
+        res.status(400).json({ error: error.issues[0]?.message ?? 'Invalid request' });
         return;
       }
       handleRouteError(res, error, 'Failed to rotate App Store credentials');

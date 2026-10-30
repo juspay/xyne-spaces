@@ -29,6 +29,7 @@ locals {
       image          = var.server_image
       docker_flags   = "-v /etc/livekit:/etc/livekit:ro"
       container_args = "--config /etc/livekit/config.yaml"
+      container_uid  = 65532 # distroless :nonroot
       turn_cert      = var.turn_cert_secret
       vm_size        = var.vm_size
       subnet_id      = var.subnet_id
@@ -41,6 +42,7 @@ locals {
       image          = var.egress_image
       docker_flags   = "--cap-add SYS_ADMIN -e EGRESS_CONFIG_FILE=/etc/livekit/config.yaml -v /etc/livekit:/etc/livekit:ro"
       container_args = ""
+      container_uid  = 1001 # upstream egress user
       turn_cert      = ""
       vm_size        = var.egress_vm_size
       subnet_id      = var.egress_subnet_id
@@ -67,6 +69,7 @@ locals {
       image            = spec.image
       docker_flags     = spec.docker_flags
       container_args   = spec.container_args
+      container_uid    = spec.container_uid
     })
   }
 

@@ -3,6 +3,7 @@ import Joi from 'joi';
 
 dotenv.config();
 
+import { getKmsSecrets } from '@/config/kmsSecrets';
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
 const envSchema = Joi.object({
@@ -18,9 +19,6 @@ const envSchema = Joi.object({
   USE_MOCK_ANALYSIS: Joi.boolean().default(false),
   USE_MOCK_BUILD: Joi.boolean().default(false),
   PORT: Joi.number().default(3001),
-
-  // This is for making the backend API available under a prefix path (e.g. /api/v1) for reverse proxy setups. Empty string means no prefix.
-  API_PATH_PREFIX: Joi.string().allow('').default(''),
   HOST: Joi.string().default('localhost'),
   CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
   ALLOWED_MEDIA_ORIGINS: Joi.string().default(
@@ -43,7 +41,6 @@ const envSchema = Joi.object({
   COMMON_DATABASE_POOL_SIZE: Joi.number().default(2),
   COMMON_DATABASE_POOL_TIMEOUT_SECONDS: Joi.number().default(10),
   ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
-  WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
   API_KEYS_ENABLED: Joi.boolean().default(false),
   API_KEYS_CONFIG: Joi.string().default('{}'),
   // Digital Twin: the email of the Digital Twin app's bot user (unique per
@@ -62,11 +59,6 @@ const envSchema = Joi.object({
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default('Xyne Spaces'),
-  COMMUNITY_JOIN_APPROVED_EMAIL_MESSAGE: Joi.string()
-    .allow('')
-    .default(
-      'Your request to join {{workspaceName}} Community is approved.\\n\\nYou can login community now: {{joinLink}}\\n\\nExcited to have you onboard.'
-    ),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
@@ -103,12 +95,7 @@ const envSchema = Joi.object({
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
   FAKE_GCS_HOST: Joi.string().allow('').default('localhost:4443'),
   TRANSCRIPTION_BUCKET_NAME: Joi.string().allow('').default(''),
-  GCS_WORKFLOW_STEPS_BUCKET_NAME: Joi.string().default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
-  GCS_WORKFLOW_VR_BUCKET_NAME: Joi.string().default(''),
-  ENABLE_WORKFLOW_STEP_GCS_SYNC: Joi.boolean().default(false),
-  ENABLE_CONVERSATION_INGESTION_QUEUE: Joi.boolean().default(false),
-  ENABLE_CONVERSATION_INGESTION_WORKER: Joi.boolean().default(false),
   ENABLE_EXTERNAL_SOURCE_REGISTRATION: Joi.boolean().default(true),
   ENABLE_SCHEDULED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
@@ -176,7 +163,6 @@ const envSchema = Joi.object({
   AI_PROVISIONING_QUEUE_ATTEMPTS: Joi.number().integer().min(1).default(3),
   AI_PROVISIONING_QUEUE_BACKOFF_MS: Joi.number().integer().min(0).default(5000),
   AI_PROVISIONING_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1000).default(30000),
-  COMMUNITY_WORKSPACE_USER_BUDGET: Joi.number().integer().min(0).allow(null).default(null),
   ENTERPRISE_WORKSPACE_USER_BUDGET: Joi.number().integer().min(0).allow(null).default(null),
   LITELLM_MANAGEMENT_BASE_URL: Joi.string().uri().allow('').default(''),
   LITELLM_MANAGEMENT_ADMIN_KEY: Joi.string().allow('').default(''),
@@ -188,6 +174,10 @@ const envSchema = Joi.object({
   FRONTEND_URL: Joi.string().default('http://localhost:5173'),
   FOLLOW_HEADER_REDIRECTION: Joi.boolean().default(true),
   TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default(''),
+  INTERNAL_APP_HOSTS: Joi.string().allow('').default(''),
+  ORG_EMAIL_DOMAIN: Joi.string().allow('').default(''),
+  API_KEY_USER_EMAIL_DOMAIN: Joi.string().allow('').default(''),
+  API_KEY_DEFAULT_USER_EMAIL: Joi.string().allow('').default(''),
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
@@ -304,11 +294,6 @@ const envSchema = Joi.object({
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
 
-  // @xyne/workflow-sdk
-  ENABLE_WORKFLOWS_WORKER: Joi.boolean().default(false),
-  WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
-  WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
-  WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -416,27 +401,14 @@ const envSchema = Joi.object({
   JENKINS_JOB_PATH: Joi.string().default(''),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
-  // OpenCode Configuration
-  OPENCODE_ENABLED: Joi.boolean().default(false),
-  OPENCODE_SPAWN_SERVER: Joi.boolean().default(false),
-  OPENCODE_BASE_URL: Joi.string().uri().default('http://localhost:4096'),
-  OPENCODE_TIMEOUT_MS: Joi.number().default(600000),
-  OPENCODE_AUTO_COMPACT: Joi.boolean().default(false),
-  OPENCODE_MODEL: Joi.string().allow('').default(''),
   QUESTION_TIMEOUT_MINUTES: Joi.number().default(2),
-  // Default workflow executor when not specified
-  DEFAULT_WORKFLOW_EXECUTOR: Joi.string().default('xyne-code'),
   // Default model ID for config sync service
   DEFAULT_MODEL_ID: Joi.string().default(''),
   DEFAULT_MODEL_NAME: Joi.string().default(''),
   // Default workspace ID for integrations that need it
   DEFAULT_WORKSPACE_ID: Joi.string().allow('').default(''),
-  // oh-my-opencode Plugin Configuration
-  OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
-  OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default('latest'),
   // Xyne AI Extended (web search, mem0, deep research, etc.)
   XYNE_AI_EXTENDED_URL: Joi.string().uri().allow('').default(''),
-  ENABLE_WORKFLOW_RECOVERY: Joi.boolean().default(true),
   // Otel Configuration
   ENABLE_OTEL_METRICS: Joi.boolean().default(true),
   OTEL_BASE_URL: Joi.string().default('http://localhost:4318'),
@@ -445,6 +417,7 @@ const envSchema = Joi.object({
   SCM_WEBHOOK_SECRET: Joi.string().default(''),
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
+  BITBOT_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
   BITBUCKET_BASE_URL: Joi.string().allow('').default(''),
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
@@ -512,8 +485,9 @@ const envSchema = Joi.object({
   DRIVE_IMPORT_MAX_FILES: Joi.number().integer().min(1).default(7000), // files per folder import
   DRIVE_IMPORT_MAX_TOTAL_BYTES: Joi.number().integer().min(1).default(1024 * 1024 * 1024), // 1 GB / folder
   DRIVE_IMPORT_MAX_DEPTH: Joi.number().integer().min(1).default(40), // folder nesting depth
-  VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion'),
-  VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8080'),
+  VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion,vespa-files'),
+  // 8083, not 8080: y-sweet owns 8080, so docker-compose.dev.yml publishes Vespa's feed port on 8083.
+  VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8083'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
   VESPA_CONFIG_SERVER_URL: Joi.string().uri().default('http://127.0.0.1:19071'),
   // Microsoft Graph API
@@ -684,9 +658,86 @@ const envSchema = Joi.object({
   PYROSCOPE_FLUSH_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
 
   DEEP_RESEARCH_BASE_URL: Joi.string().allow('').default(''),
+
+  // ── Keys previously read straight from process.env ──
+  ENABLE_DEV_AUTH: Joi.boolean().empty('').default(false),
+  ALLOWED_REDIRECT_ORIGINS: Joi.string().allow('').default(''),
+  DEFAULT_ADMIN_EMAIL: Joi.string().allow('').default(''),
+  TEST_AUTH_EMAIL: Joi.string().empty('').default('test-user@xyne-test.local'),
+  TEST_AUTH_NAME: Joi.string().empty('').default('Test User'),
+  API_KEY: Joi.string().allow('').default(''),
+  API_BASE_URL: Joi.string().allow('').default(''),
+  APP_JWT_KEY: Joi.string().allow('').default(''),
+  SUDO_QUERY_TOKEN: Joi.string().allow('').default(''),
+  GOOGLE_MOBILE_CLIENT_ID: Joi.string().allow('').default(''),
+  GOOGLE_MOBILE_CLIENT_SECRET: Joi.string().allow('').default(''),
+  GOOGLE_IOS_CLIENT_ID: Joi.string().allow('').default(''),
+  GOOGLE_REDIRECT_URI: Joi.string().allow('').default(''),
+  GOOGLE_CLOUD_PROJECT_ID: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_TOPIC: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').default(''),
+  MICROSOFT_CLIENT_ID: Joi.string().allow('').default(''),
+  MICROSOFT_CLIENT_SECRET: Joi.string().allow('').default(''),
+  MICROSOFT_TENANT_ID: Joi.string().allow('').default(''),
+  MICROSOFT_CALENDAR_SUBSCRIPTION_TTL_MINUTES: Joi.string().allow('').default(''), // validated by the subscription service
+  ENABLE_VESPA_WORKER: Joi.boolean().empty('').default(false),
+  ENABLE_VESPA_FILE_WORKER: Joi.boolean().empty('').default(false),
+  ENABLE_ACTIVITY_CLASSIFICATION_WORKER: Joi.boolean().empty('').default(false),
+  ENABLE_PROACTIVE_NUDGE_WORKER: Joi.boolean().empty('').default(false),
+  ENABLE_CALL_VALIDATION_WORKER: Joi.boolean().empty('').default(false),
+  ENABLE_DATA_SOURCE_INGESTION_WORKER: Joi.boolean().empty('').default(false),
+  ENABLE_NOTIFICATION_PRODUCER: Joi.boolean().empty('').default(false),
+  GMAIL_WATCH_RENEWAL_CRON: Joi.string().empty('').default('0 3 * * *'),
+  CALENDAR_RENEWAL_CRON: Joi.string().empty('').default('0 2 * * *'),
+  WARM_USER_REGISTRY_CRON: Joi.string().empty('').default('0 3 * * *'),
+  VESPA_NAMESPACE: Joi.string().empty('').default('namespace'),
+  CLUSTER: Joi.string().empty('').default('my_content'),
+  VESPA_PAGE_SIZE: Joi.number().integer().empty('').default(10),
+  VESPA_DEBUG_MODE: Joi.boolean().empty('').default(false),
+  VESPA_MAX_RETRY_ATTEMPTS: Joi.number().integer().empty('').default(3),
+  VESPA_RETRY_DELAY: Joi.number().integer().empty('').default(1000),
+  VESPA_FEED_TIMEOUT_MS: Joi.number().integer().empty('').default(180000),
+  VESPA_BACKFILL_AGE_DAYS: Joi.number().empty('').default(365),
+  VESPA_FILE_QUEUE_NAME: Joi.string().empty('').default('vespa-files'),
+  VESPA_WORKER_QUEUE_NAME: Joi.string().empty('').default('vespa-ingestion'),
+  VESPA_BACKFILL_QUEUE_NAMES: Joi.string().empty('').default('vespa-backfill-normal,vespa-backfill-file'),
+  VESPA_BACKFILL_FILE_QUEUE_NAME: Joi.string().empty('').default('vespa-backfill-file'),
+  VESPA_FILE_WORKER_CONCURRENCY: Joi.number().integer().min(1).empty('').default(1),
+  ZERO_UPSTREAM_DB: Joi.string().allow('').default(''),
+  ZERO_MAX_REQUESTS: Joi.number().integer().empty('').default(300),
+  ZERO_REQUEST_WINDOW: Joi.number().integer().empty('').default(60),
+  ALERT_BLACKLISTED_LABELS: Joi.string().allow('').default(''),
+  SNS_BLACKLISTED_LABELS: Joi.string().allow('').default(''),
+  NOTIFICATION_TRACE_USER_IDS: Joi.string().allow('').default(''),
+  LOTUS_OWN_MESSAGE_PREFETCH_ENABLED: Joi.boolean().empty('').default(false),
+  RELEASE_AUTOSTUB_MISSING_TICKETS: Joi.string().allow('').default(''),
+  SOFFICE_PATH: Joi.string().empty('').default('soffice'),
+  SOFFICE_MAX_CONCURRENCY: Joi.number().integer().min(1).empty('').default(3),
+  STAGE_ETA_DEADLINE_BATCH_SIZE: Joi.number().integer().empty('').default(15),
+  STAGE_ETA_DEADLINE_BATCH_SLEEP_MS: Joi.number().integer().empty('').default(1000),
+  LANGFUSE_PROMPT_CACHE_TTL: Joi.number().empty('').default(300), // seconds
+  LITELLM_FAST_MODEL: Joi.string().allow('').default(''),
+  LITELLM_BEST_MODEL: Joi.string().allow('').default(''),
+  IMAGE_DESCRIPTION_MODEL: Joi.string().allow('').default(''),
+  OPENAI_API_BASE: Joi.string().allow('').default(''),
+  OPENAI_API_KEY: Joi.string().allow('').default(''),
+  DOCLING_TEMP_RESULTS_DIR: Joi.string().allow('').default(''),
+  DOCLING_WRAPPER_GLOBAL_ACTIVE_KEY: Joi.string().empty('').default('docling:async:global:active'),
+  QPDF_TIMEOUT_MS: Joi.string().allow('').default(''), // validated by pdfProcessor
+  CLAW_DEBUG_PROXY_TIMEOUT_MS: Joi.string().allow('').default(''), // validated by clawAgentService
+  CONFLUENCE_IMPORT_ACTOR_USER_ID: Joi.string().allow('').default(''),
+  JIRA_MIGRATION_UNRESOLVED_USERS_PATH: Joi.string().allow('').default(''),
+  MESSAGE_CLASSIFICATION_DEBOUNCE_MS: Joi.number().integer().empty('').default(10 * 60_000),
+  MESSAGE_CLASSIFICATION_DM_CONTEXT: Joi.number().integer().empty('').default(5),
+  MESSAGE_CLASSIFICATION_MIN_NEW_MESSAGES: Joi.number().integer().empty('').default(3),
+  MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE: Joi.number().integer().empty('').default(1),
+  RETRY_ATTEMPTS: Joi.number().integer().min(1).empty('').default(3),
+  RETRY_BASE_DELAY_MS: Joi.number().integer().min(1).empty('').default(200),
+  RETRY_MAX_DELAY_MS: Joi.number().integer().min(1).empty('').default(5_000),
+  CONNECT_RETRY_MAX_DELAY_MS: Joi.number().integer().min(1).empty('').default(30_000),
 }).unknown();
 
-const { error, value: envVars } = envSchema.validate(process.env);
+const { error, value: envVars } = envSchema.validate({ ...process.env, ...getKmsSecrets() });
 
 if (error) {
   throw new Error(`Config validation error: ${error.message}`);
@@ -698,6 +749,7 @@ export const config = {
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
   research_agent_url: envVars.RESEARCH_AGENT_URL,
+  bitbot_base_url: envVars.BITBOT_BASE_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
   nx_graph_server_url: envVars.NX_GRAPH_SERVER_URL,
   nx_graph_server_urls: envVars.NX_GRAPH_SERVER_URLS
@@ -709,10 +761,6 @@ export const config = {
   // Email of the Digital Twin app's bot user (empty = twin delivery disabled).
   digitalTwinAppEmail: envVars.DIGITAL_TWIN_APP_EMAIL as string,
   port: envVars.PORT,
-  // Normalized to '/sdlc-api' form, or ''.
-  apiPathPrefix: (envVars.API_PATH_PREFIX as string)
-    ? `/${(envVars.API_PATH_PREFIX as string).trim().replace(/^\/+|\/+$/g, '')}`
-    : '',
   host: envVars.HOST,
   cors: {
     // The CORS allow-list (CORS_ORIGIN) plus the app's own frontend origin
@@ -769,8 +817,6 @@ export const config = {
     ticketSequenceEnabled: envVars.ENABLE_COMMON_DB_TICKET_SEQUENCE,
   },
   workflow: {
-    lockDurationMs: envVars.WORKFLOW_LOCK_DURATION_MS,
-    defaultExecutor: envVars.DEFAULT_WORKFLOW_EXECUTOR,
     defaultModelId: envVars.DEFAULT_MODEL_ID,
     defaultModelName: envVars.DEFAULT_MODEL_NAME,
   },
@@ -798,6 +844,11 @@ export const config = {
     litellmModel: envVars.ACTIVITY_CLASSIFICATION_MODEL,
     requestTimeoutMs: envVars.LLM_REQUEST_TIMEOUT_MS,
     teamIntelligenceRequestTimeoutMs: envVars.TEAM_INTELLIGENCE_LLM_REQUEST_TIMEOUT_MS,
+    fastModel: envVars.LITELLM_FAST_MODEL as string,
+    bestModel: envVars.LITELLM_BEST_MODEL as string,
+    imageDescriptionModel: envVars.IMAGE_DESCRIPTION_MODEL as string,
+    openaiApiBase: envVars.OPENAI_API_BASE as string,
+    openaiApiKey: envVars.OPENAI_API_KEY as string,
     // Call-specific LiteLLM config (falls back to main litellm if not set)
     callLitellmApiKey: envVars.CALL_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
     callLitellmModel: envVars.CALL_LITELLM_MODEL,
@@ -819,6 +870,7 @@ export const config = {
     baseUrl: envVars.LANGFUSE_BASE_URL,
     publicKey: envVars.LANGFUSE_PUBLIC_KEY,
     secretKey: envVars.LANGFUSE_SECRET_KEY,
+    promptCacheTtlSeconds: envVars.LANGFUSE_PROMPT_CACHE_TTL as number,
   },
   migrationEncryption: {
     keys: envVars.MIGRATION_ENC_KEYS,
@@ -839,16 +891,11 @@ export const config = {
     bundleBucketName: envVars.GCS_BUNDLE_BUCKET_NAME,
     canvasBucketName: envVars.GCS_CANVAS_BUCKET_NAME,
     docsBucketName: envVars.GCS_DOCS_BUCKET_NAME,
-    workflowStepsBucketName: envVars.GCS_WORKFLOW_STEPS_BUCKET_NAME,
     sessionRecordingBucketName: envVars.GCS_SESSION_RECORDING_BUCKET_NAME,
-    workflowVRBucketName: envVars.GCS_WORKFLOW_VR_BUCKET_NAME,
     maxFileSizeMB: envVars.GCS_MAX_FILE_SIZE_MB,
     fakeGcsHost: envVars.FAKE_GCS_HOST,
     transcriptionBucketName: envVars.TRANSCRIPTION_BUCKET_NAME,
   },
-  enableWorkflowStepGcsSync: envVars.ENABLE_WORKFLOW_STEP_GCS_SYNC,
-  enableConversationIngestionQueue: envVars.ENABLE_CONVERSATION_INGESTION_QUEUE,
-  enableConversationIngestionWorker: envVars.ENABLE_CONVERSATION_INGESTION_WORKER,
   enableExternalSourceRegistration: envVars.ENABLE_EXTERNAL_SOURCE_REGISTRATION,
   enableScheduledMessageWorker: envVars.ENABLE_SCHEDULED_MESSAGE_WORKER,
   enableStageEtaDeadlineWorker: envVars.ENABLE_STAGE_ETA_DEADLINE_WORKER,
@@ -925,8 +972,6 @@ export const config = {
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
     requestTimeoutMs: envVars.AI_PROVISIONING_REQUEST_TIMEOUT_MS as number,
-    communityWorkspaceUserBudget:
-      (envVars.COMMUNITY_WORKSPACE_USER_BUDGET as number | null) ?? null,
     enterpriseWorkspaceUserBudget:
       (envVars.ENTERPRISE_WORKSPACE_USER_BUDGET as number | null) ?? null,
     litellmManagementBaseUrl:
@@ -946,6 +991,12 @@ export const config = {
   trustedOriginalHostDomains: envVars.TRUSTED_ORIGINAL_HOST_DOMAINS.split(',')
     .map((domain: string) => domain.trim().toLowerCase())
     .filter(Boolean),
+  internalAppHosts: (envVars.INTERNAL_APP_HOSTS as string).split(',')
+    .map((host: string) => host.trim().toLowerCase())
+    .filter(Boolean),
+  orgEmailDomain: (envVars.ORG_EMAIL_DOMAIN as string).trim().toLowerCase(),
+  apiKeyUserEmailDomain: (envVars.API_KEY_USER_EMAIL_DOMAIN as string).trim().toLowerCase(),
+  apiKeyDefaultUserEmail: (envVars.API_KEY_DEFAULT_USER_EMAIL as string).trim().toLowerCase(),
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
@@ -975,6 +1026,7 @@ export const config = {
   autoSyncSlackChannel: {
     enabled: envVars.ENABLE_SLACK_MIGRATION_WORKER,
     sheetId: envVars.MIGRATION_SHEET_ID,
+    sheetsRefreshToken: envVars.MIGRATION_SHEETS_REFRESH_TOKEN,
     concurrency: envVars.SLACK_MIGRATION_CONCURRENCY as number,
     syncCron: envVars.SLACK_MIGRATION_SYNC_CRON as string,
     cleanupCron: envVars.SLACK_MIGRATION_CLEANUP_CRON as string,
@@ -1115,6 +1167,7 @@ export const config = {
     sshBaseUrl: envVars.BITBUCKET_SSH_BASE_URL,
     baseUrl: envVars.BITBUCKET_BASE_URL,
     password: envVars.BITBUCKET_PASSWORD,
+    token: envVars.BITBUCKET_TOKEN,
   },
   github: {
     webhookSecret: envVars.SCM_WEBHOOK_SECRET,
@@ -1141,18 +1194,6 @@ export const config = {
     apiToken: envVars.JENKINS_API_TOKEN,
     webhookSecret: envVars.JENKINS_WEBHOOK_SECRET,
   },
-  openCode: {
-    enabled: envVars.OPENCODE_ENABLED,
-    spawnServer: envVars.OPENCODE_SPAWN_SERVER,
-    baseUrl: envVars.OPENCODE_BASE_URL,
-    timeoutMs: envVars.OPENCODE_TIMEOUT_MS,
-    autoCompact: envVars.OPENCODE_AUTO_COMPACT,
-    model: envVars.OPENCODE_MODEL,
-    // oh-my-opencode plugin settings
-    pluginEnabled: envVars.OPENCODE_PLUGIN_ENABLED,
-    pluginVersion: envVars.OPENCODE_PLUGIN_VERSION,
-  },
-  workflowRecoveryEnabled: envVars.ENABLE_WORKFLOW_RECOVERY,
   ticketDescriptionClean: {
     model: envVars.TICKET_DESC_CLEAN_MODEL,
     maxRetries: envVars.TICKET_DESC_CLEAN_MAX_RETRIES,
@@ -1164,17 +1205,15 @@ export const config = {
     workerConcurrency: envVars.AUTOMATION_WORKER_CONCURRENCY as number,
   },
 
-  workflows: {
-    workerEnabled: envVars.ENABLE_WORKFLOWS_WORKER as boolean,
-    workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
-    lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
-    baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
-  },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
   messageClassification: {
     model: envVars.MESSAGE_CLASSIFIER_MODEL,
+    debounceMs: envVars.MESSAGE_CLASSIFICATION_DEBOUNCE_MS as number,
+    dmContextMessages: envVars.MESSAGE_CLASSIFICATION_DM_CONTEXT as number,
+    minNewMessages: envVars.MESSAGE_CLASSIFICATION_MIN_NEW_MESSAGES as number,
+    minThreadSize: envVars.MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE as number,
   },
   runWorkerInBackend: envVars.RUN_WORKER_IN_BACKEND,
   recapScheduler: {
@@ -1199,6 +1238,7 @@ export const config = {
     url: envVars.XYNE_AI_EXTENDED_URL,
   },
   jwt: {
+    secret: envVars.JWT_SECRET as string,
     expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,
     forceLogoutBefore: envVars.FORCE_LOGOUT_BEFORE,
   },
@@ -1246,6 +1286,7 @@ export const config = {
     issuePageSize: envVars.JIRA_MIGRATION_ISSUE_PAGE_SIZE as number,
     batchDelayMs: envVars.JIRA_MIGRATION_BATCH_DELAY_MS as number,
     reportCanvasChannelId: envVars.JIRA_MIGRATION_REPORT_CANVAS_CHANNEL_ID as string,
+    unresolvedUsersPath: envVars.JIRA_MIGRATION_UNRESOLVED_USERS_PATH as string,
   },
   confluence: {
     baseUrl: envVars.CONFLUENCE_BASE_URL as string,
@@ -1255,6 +1296,7 @@ export const config = {
     migrationFallbackEmail: envVars.CONFLUENCE_MIGRATION_FALLBACK_EMAIL as string,
     importBatchSize: envVars.CONFLUENCE_IMPORT_BATCH_SIZE as number,
     importBatchCooldownMs: envVars.CONFLUENCE_IMPORT_BATCH_COOLDOWN_MS as number,
+    importActorUserId: envVars.CONFLUENCE_IMPORT_ACTOR_USER_ID as string,
   },
   enc: {
     clientEncryptionEnabled: envVars.ZERO_CLIENT_ENCRYPTION_ENABLED as boolean,
@@ -1280,12 +1322,15 @@ export const config = {
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET as string,
+    clientIdNew: envVars.GOOGLE_CLIENT_ID_NEW as string,
+    clientSecretNew: envVars.GOOGLE_CLIENT_SECRET_NEW as string,
+    mobileClientId: envVars.GOOGLE_MOBILE_CLIENT_ID as string,
+    mobileClientSecret: envVars.GOOGLE_MOBILE_CLIENT_SECRET as string,
+    iosClientId: envVars.GOOGLE_IOS_CLIENT_ID as string,
+    redirectUri: envVars.GOOGLE_REDIRECT_URI as string,
     refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,
     fromEmail: envVars.EMAIL_FROM as string,
     fromName: envVars.EMAIL_FROM_NAME as string,
-  },
-  communityJoinApprovedEmail: {
-    message: envVars.COMMUNITY_JOIN_APPROVED_EMAIL_MESSAGE as string,
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
@@ -1298,6 +1343,7 @@ export const config = {
     webhookUrl: envVars.XYNE_CLAW_WEBHOOK_URL as string,
     clawAuthCallbackUrlAutomation: envVars.XYNE_CLAW_AUTH_CALLBACK_URL_AUTOMATION as string,
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
+    debugProxyTimeoutMs: envVars.CLAW_DEBUG_PROXY_TIMEOUT_MS as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
@@ -1355,6 +1401,8 @@ export const config = {
     timeoutMs: envVars.DOCLING_TIMEOUT_MS as number,
     healthCacheTtlMs: envVars.DOCLING_HEALTH_CACHE_TTL_MS as number,
     doOcr: envVars.DOCLING_DO_OCR as boolean,
+    tempResultsDir: envVars.DOCLING_TEMP_RESULTS_DIR as string,
+    wrapperGlobalActiveKey: envVars.DOCLING_WRAPPER_GLOBAL_ACTIVE_KEY as string,
   },
   kbIngestion: {
     queuePriority: envVars.KB_INGESTION_QUEUE_PRIORITY as number,
@@ -1417,6 +1465,7 @@ export const config = {
     maxPdfPageCount: envVars.MAX_PDF_PAGE_COUNT as number,
     disableFallbacks: envVars.PDF_PROCESSING_DISABLE_FALLBACKS as boolean,
     asyncSyncFallbackEnabled: envVars.PDF_ASYNC_SYNC_FALLBACK_ENABLED as boolean,
+    qpdfTimeoutMs: envVars.QPDF_TIMEOUT_MS as string,
     // LightOnOCR synchronous fallback engine. Active only when a URL is set
     // (points at the wrapper's /process). The Mode B OCR step.
     lightOnOcr: {
@@ -1448,4 +1497,83 @@ export const config = {
     flushIntervalMs: envVars.PYROSCOPE_FLUSH_INTERVAL_MS as number,
   },
   deepResearchBaseUrl: envVars.DEEP_RESEARCH_BASE_URL as string,
+  // ── Formerly read straight from process.env ──
+  enableDevAuth: envVars.ENABLE_DEV_AUTH as boolean,
+  allowedRedirectOrigins: envVars.ALLOWED_REDIRECT_ORIGINS as string,
+  defaultAdminEmail: envVars.DEFAULT_ADMIN_EMAIL as string,
+  testAuth: {
+    email: envVars.TEST_AUTH_EMAIL as string,
+    name: envVars.TEST_AUTH_NAME as string,
+  },
+  apiKey: envVars.API_KEY as string,
+  apiBaseUrl: envVars.API_BASE_URL as string,
+  appJwtKey: envVars.APP_JWT_KEY as string,
+  sudoQueryToken: envVars.SUDO_QUERY_TOKEN as string,
+  google: {
+    cloudProjectId: envVars.GOOGLE_CLOUD_PROJECT_ID as string,
+    pubsubTopic: envVars.GOOGLE_PUBSUB_TOPIC as string,
+    pubsubServiceAccountBase64: envVars.GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 as string,
+  },
+  microsoft: {
+    clientId: envVars.MICROSOFT_CLIENT_ID as string,
+    clientSecret: envVars.MICROSOFT_CLIENT_SECRET as string,
+    tenantId: envVars.MICROSOFT_TENANT_ID as string,
+    calendarSubscriptionTtlMinutes: envVars.MICROSOFT_CALENDAR_SUBSCRIPTION_TTL_MINUTES as string,
+  },
+  vespaWorkerEnabled: envVars.ENABLE_VESPA_WORKER as boolean,
+  vespaFileWorkerEnabled: envVars.ENABLE_VESPA_FILE_WORKER as boolean,
+  activityClassificationWorkerEnabled: envVars.ENABLE_ACTIVITY_CLASSIFICATION_WORKER as boolean,
+  proactiveNudgeWorkerEnabled: envVars.ENABLE_PROACTIVE_NUDGE_WORKER as boolean,
+  callValidationWorkerEnabled: envVars.ENABLE_CALL_VALIDATION_WORKER as boolean,
+  dataSourceIngestionWorkerEnabled: envVars.ENABLE_DATA_SOURCE_INGESTION_WORKER as boolean,
+  notificationProducerEnabled: envVars.ENABLE_NOTIFICATION_PRODUCER as boolean,
+  cron: {
+    gmailWatchRenewal: envVars.GMAIL_WATCH_RENEWAL_CRON as string,
+    calendarRenewal: envVars.CALENDAR_RENEWAL_CRON as string,
+    warmUserRegistry: envVars.WARM_USER_REGISTRY_CRON as string,
+  },
+  vespa: {
+    namespace: envVars.VESPA_NAMESPACE as string,
+    cluster: envVars.CLUSTER as string,
+    pageSize: envVars.VESPA_PAGE_SIZE as number,
+    debugMode: envVars.VESPA_DEBUG_MODE as boolean,
+    maxRetryAttempts: envVars.VESPA_MAX_RETRY_ATTEMPTS as number,
+    retryDelayMs: envVars.VESPA_RETRY_DELAY as number,
+    feedTimeoutMs: envVars.VESPA_FEED_TIMEOUT_MS as number,
+    backfillAgeDays: envVars.VESPA_BACKFILL_AGE_DAYS as number,
+    feedUrl: envVars.VESPA_FEED_URL as string,
+    queryUrl: envVars.VESPA_QUERY_URL as string,
+    configServerUrl: envVars.VESPA_CONFIG_SERVER_URL as string,
+    queueNames: envVars.VESPA_QUEUE_NAMES as string,
+    fileQueueName: envVars.VESPA_FILE_QUEUE_NAME as string,
+    workerQueueName: envVars.VESPA_WORKER_QUEUE_NAME as string,
+    backfillQueueNames: envVars.VESPA_BACKFILL_QUEUE_NAMES as string,
+    backfillFileQueueName: envVars.VESPA_BACKFILL_FILE_QUEUE_NAME as string,
+    fileWorkerConcurrency: envVars.VESPA_FILE_WORKER_CONCURRENCY as number,
+  },
+  zero: {
+    upstreamDb: envVars.ZERO_UPSTREAM_DB as string,
+    maxRequests: envVars.ZERO_MAX_REQUESTS as number,
+    requestWindowSeconds: envVars.ZERO_REQUEST_WINDOW as number,
+  },
+  alertBlacklistedLabels: envVars.ALERT_BLACKLISTED_LABELS as string,
+  snsBlacklistedLabels: envVars.SNS_BLACKLISTED_LABELS as string,
+  notificationTraceUserIds: envVars.NOTIFICATION_TRACE_USER_IDS as string,
+  lotusOwnMessagePrefetchEnabled: envVars.LOTUS_OWN_MESSAGE_PREFETCH_ENABLED as boolean,
+  releaseAutostubMissingTickets: envVars.RELEASE_AUTOSTUB_MISSING_TICKETS as string,
+  presenceOfflineGracePeriodMs: envVars.PRESENCE_OFFLINE_GRACE_PERIOD_MS as number,
+  soffice: {
+    path: envVars.SOFFICE_PATH as string,
+    maxConcurrency: envVars.SOFFICE_MAX_CONCURRENCY as number,
+  },
+  stageEtaDeadline: {
+    batchSize: envVars.STAGE_ETA_DEADLINE_BATCH_SIZE as number,
+    batchSleepMs: envVars.STAGE_ETA_DEADLINE_BATCH_SLEEP_MS as number,
+  },
+  retry: {
+    attempts: envVars.RETRY_ATTEMPTS as number,
+    baseDelayMs: envVars.RETRY_BASE_DELAY_MS as number,
+    maxDelayMs: envVars.RETRY_MAX_DELAY_MS as number,
+    connectMaxDelayMs: envVars.CONNECT_RETRY_MAX_DELAY_MS as number,
+  },
 };

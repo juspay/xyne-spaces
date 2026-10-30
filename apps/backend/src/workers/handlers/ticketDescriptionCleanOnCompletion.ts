@@ -173,7 +173,9 @@ export async function runTicketDescriptionCleanOnCompletion(
 
   const channelType = await resolveChannelType(mapped);
   const isEmailTicket = channelType === ChannelType.EMAIL;
-  const projectId = isEmailTicket ? await resolveTicketProjectId(ctx.docId, mapped) : null;
+  // Disabled (LLM)
+  // const projectId = isEmailTicket ? await resolveTicketProjectId(ctx.docId, mapped) : null;
+  const projectId = isEmailTicket && false ? await resolveTicketProjectId(ctx.docId, mapped) : null;
 
   let descriptionClean = cleaned;
   let usedLlm = false;

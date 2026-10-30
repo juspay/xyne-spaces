@@ -8,6 +8,22 @@ const fs = require('fs');
 const { readFileIfExists } = require('./utils/fs.cjs');
 const path = require('path');
 
+const AIRBORNE_RELEASE_URL_PLACEHOLDER = '__LOTUS_AIRBORNE_RELEASE_URL__';
+
+/**
+ * Airborne endpoints come from `.env.<variant>` (see .env.example); prebuild fails loudly
+ * rather than baking a guessed URL into the native project.
+ * @param {string} name
+ * @param {string} purpose
+ */
+function requiredAirborneEnv(name, purpose) {
+  const value = (process.env[name] || '').trim();
+  if (!value) {
+    throw new Error(`[withAirborneAndroid] ${name} is not set; ${purpose} (see .env.example).`);
+  }
+  return value;
+}
+
 /**
  * Copy AirborneManager.kt and AirborneInitWorker.kt into the Android project
  */
@@ -34,6 +50,10 @@ const withAirborneNativeFiles = (config) => {
       }
 
       const files = ['AirborneManager.kt', 'AirborneInitWorker.kt'];
+      const releaseUrl = requiredAirborneEnv(
+        'LOTUS_AIRBORNE_RELEASE_URL_ANDROID',
+        'the Airborne OTA release-config URL baked into AirborneManager.kt',
+      );
 
       for (const file of files) {
         const sourcePath = path.join(sourceDir, file);
@@ -41,6 +61,13 @@ const withAirborneNativeFiles = (config) => {
 
         if (fs.existsSync(sourcePath)) {
           fs.copyFileSync(sourcePath, targetPath);
+          if (file === 'AirborneManager.kt') {
+            const contents = fs.readFileSync(targetPath, 'utf8');
+            fs.writeFileSync(
+              targetPath,
+              contents.split(AIRBORNE_RELEASE_URL_PLACEHOLDER).join(releaseUrl),
+            );
+          }
         } else {
           console.warn(`[withAirborneAndroid] Source file not found: ${sourcePath}`);
         }
@@ -265,12 +292,15 @@ const withJuspayMavenRepo = (config) => {
         return config;
       }
 
-      const mavenUrl = 'https://maven.juspay.in/jp-build-packages/hyper-sdk/';
+      const mavenUrl = requiredAirborneEnv(
+        'LOTUS_AIRBORNE_MAVEN_REPO_URL',
+        'the Maven repository that hosts the Airborne Android SDK',
+      );
       const mavenRepoLine = `maven { url "${mavenUrl}" }`;
       // Idempotency: the quoted repo URL already present in any declaration form.
-      const mavenRepoPresent = /["']https:\/\/maven\.juspay\.in\/jp-build-packages\/hyper-sdk\/["']/.test(
-        contents,
-      );
+      const mavenRepoPresent = new RegExp(
+        `["']${mavenUrl.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}["']`,
+      ).test(contents);
 
       if (!mavenRepoPresent) {
         contents = contents.replace(

@@ -653,7 +653,7 @@ the worker would otherwise start and fail on object storage. The bound names tra
 
 ```hcl
 workers = [
-  { name = "default", env = { ENABLE_NOTIFICATION_WORKER = "true", ENABLE_WORKER_SCHEDULER = "true", ENABLE_WORKFLOW_RECOVERY = "true" } },
+  { name = "default", env = { ENABLE_NOTIFICATION_WORKER = "true", ENABLE_WORKER_SCHEDULER = "true" } },
   {
     name   = "vespa-ingestion"
     env    = { ENABLE_VESPA_WORKER = "true", VESPA_WORKER_QUEUE_NAME = "vespa-ingestion" }
@@ -664,7 +664,7 @@ workers = [
 ]
 ```
 
-`ENABLE_WORKER_SCHEDULER` and `ENABLE_WORKFLOW_RECOVERY` must be true on exactly one worker; the
+`ENABLE_WORKER_SCHEDULER` must be true on exactly one worker; the
 role flags are in [helm-charts/CHARTS.md](../../../helm-charts/CHARTS.md#xyne-worker). A new
 worker needs both stages (`setup.sh --env <env>`), because its identity is bound in `01-infra`.
 

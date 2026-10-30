@@ -24,45 +24,12 @@ export default defineConfig(({ command, mode }) => {
     ...process.env,
   };
 
-  // Deployment lane. Unset for the main bundle, which keeps base '/' and 5173.
-  const appBasePath = env.VITE_APP_BASE_PATH || '/';
-  const isSdlcSurface = env.VITE_XYNE_SURFACE === 'sdlc';
-  const devPort = Number(env.VITE_DEV_PORT) || (isSdlcSurface ? 5175 : 5173);
+  const devPort = Number(env.VITE_DEV_PORT) || 5173;
 
   const sharedSrc = path.resolve(__dirname, '../../packages/shared/src');
   const isDev = command === 'serve';
 
-  // Dev only: the main server stands in for the edge, so the iframe is same-origin
-  // exactly as in prod. No rewriting, mirroring the deployed setup.
-  const sdlcEdgeProxy = {
-    '/sdlc-app': {
-      target: env.VITE_SDLC_APP_URL || 'http://localhost:5175',
-      changeOrigin: true,
-      secure: false,
-      ws: true,
-    },
-    '/sdlc-api': {
-      target: env.VITE_SDLC_BACKEND_URL || 'http://localhost:3011',
-      changeOrigin: true,
-      secure: false,
-      ws: true,
-    },
-    // Shared local zero-cache: both lanes read the same Postgres in dev, so a
-    // second one adds setup for no coverage.
-    '/sdlc-zero': {
-      target: env.VITE_SDLC_ZERO_SERVER || 'http://localhost:4848',
-      changeOrigin: true,
-      secure: false,
-      ws: true,
-    },
-  };
-
   return {
-    base: appBasePath,
-    // Both lanes run from this same project dir, so they would share
-    // node_modules/.vite and invalidate each other's prebundled deps
-    // ("504 Outdated Optimize Dep"). Give the SDLC server its own.
-    ...(isSdlcSurface ? { cacheDir: 'node_modules/.vite-sdlc' } : {}),
     plugins: [
       react(),
       ...(isDev
@@ -136,17 +103,13 @@ export default defineConfig(({ command, mode }) => {
       manifest: true,
       reportCompressedSize: false,
       // The desktop call window is its own page with its own small entry, so it
-      // loads only the call, not the whole app. The SDLC surface has no calls.
-      ...(isSdlcSurface
-        ? {}
-        : {
-            rollupOptions: {
-              input: {
-                main: path.resolve(__dirname, 'index.html'),
-                callWindow: path.resolve(__dirname, 'newWindow/call.html'),
-              },
-            },
-          }),
+      // loads only the call, not the whole app.
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          callWindow: path.resolve(__dirname, 'newWindow/call.html'),
+        },
+      },
     },
     optimizeDeps: {
       exclude: ['@terrastruct/d2'],
@@ -159,13 +122,12 @@ export default defineConfig(({ command, mode }) => {
         // Same-origin proxy so the dashboard can call the claw-auth backend
         // (which sets no CORS headers) during local dev, mirroring
         // xyne-claw-auth/frontend/vite.config.ts.
-        '/claw/api/v1': {
-          target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
-          changeOrigin: true,
-          secure: false,
-        },
-        // The SDLC server is served through this one, so it must not self-proxy.
-        ...(isSdlcSurface ? {} : sdlcEdgeProxy),
+        // Disabled (Claw)
+        // '/claw/api/v1': {
+        // target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
+        // changeOrigin: true,
+        // secure: false,
+        // },
         ...(env.VITE_ENVIRONMENT === 'test' || env.VITE_DEV_PROXY === 'true'
           ? {
               '/api': {
@@ -191,11 +153,12 @@ export default defineConfig(({ command, mode }) => {
       proxy: {
         // Keep the same-origin routes used by browser tests when the test image
         // serves its prebuilt bundle with `vite preview`.
-        '/claw/api/v1': {
-          target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
-          changeOrigin: true,
-          secure: false,
-        },
+        // Disabled (Claw)
+        // '/claw/api/v1': {
+        // target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
+        // changeOrigin: true,
+        // secure: false,
+        // },
         ...(env.VITE_ENVIRONMENT === 'test'
           ? {
               '/api': {
