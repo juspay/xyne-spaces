@@ -178,14 +178,16 @@ jobs:
         if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-spaces-dashboard run format:check
 
+      # Exact-SHA key only, no restore-keys prefix fallback: a tsbuildinfo
+      # restored from a different commit can hide real type errors, so the
+      # check passes warm and fails cold (#3210). This still speeds up
+      # re-runs of the same commit.
       - name: Restore tsc incremental state
         if: steps.affected.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: apps/dashboard/node_modules/.tmp/tsconfig.app.tsbuildinfo
           key: dashboard-tsbuildinfo-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            dashboard-tsbuildinfo-${{ runner.os }}-
 
       - name: Typecheck
         if: steps.affected.outputs.run == 'true'
