@@ -7,6 +7,7 @@ on:
       - feat/build
       - feat/schema_upgrade
       - env_var_namechange
+      - harden-image
     tags:
       - "v*"
   workflow_dispatch:
@@ -46,12 +47,14 @@ jobs:
             type=ref,event=tag
             type=raw,value=${{ env.SHORT_SHA }}
 
-      - name: Build and push Docker image
+      - name: Build and push the image, with its SBOM and provenance
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/server/Dockerfile
           push: true
+          sbom: true
+          provenance: mode=max
           build-args: |
             SOURCE_COMMIT=${{ env.SHORT_SHA }}
           tags: ${{ steps.meta.outputs.tags }}

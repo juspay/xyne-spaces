@@ -43,8 +43,9 @@ clients                       Streamgres                             PostgreSQL
   PostgreSQL's write-ahead log. Initial reads use snapshots that are never ahead
   of it, and writes delivered while a read is in flight are applied to its
   result before it lands. A client never sees a row go backwards.
-- **Writes nothing to your database.** It follows a primary, a logical replica
-  or a physical standby over logical replication.
+- **The change feed is read-only.** Startup setup creates or validates the
+  mutation schema, publication and DDL triggers on the writable primary; the
+  feed then follows a primary, logical replica or physical standby.
 - **Live schema changes.** New tables and new columns with a constant default
   are picked up while running. Any other change to a served table stops the
   server with a message naming the change. Once restarted, by your
@@ -89,21 +90,10 @@ Run `cargo run --release --bin bench` to measure on your own hardware.
 
 ### 1. Prepare PostgreSQL
 
-```sql
--- the publication the change feed streams (FOR ALL TABLES needs a superuser)
-CREATE PUBLICATION xyne_sync_pub FOR ALL TABLES;
-```
-
-Install the schema-change event trigger the server listens to. It refuses to
-start without it:
-
-```bash
-psql "$DATABASE_URL" < scripts/sql/ddl-triggers.sql
-```
-
-The checked-in stack is for app `xyne`, shard 0 and publication
-`xyne_sync_pub`. For another app, shard or publication, generate the stack
-with `trigger_stack_sql` in `src/client/ddl_triggers.rs`.
+Set `STREAMGRES_MASTER_PG_DSN` to a writable PostgreSQL superuser connection.
+At startup, Streamgres creates or validates the mutation schema, publication
+and DDL trigger stack. It refuses to start if an existing object differs from
+the configured app ID, shard or publication.
 
 ### 2. Configure and run
 

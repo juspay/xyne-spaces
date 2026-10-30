@@ -83,21 +83,21 @@ tables AS (SELECT json_build_object(
                                      ELSE "maxLen" END,
       'notNull', "notNull",
       'dflt', "dflt"
-    )
+    ) ORDER BY col
   ),
   'primaryKey', ARRAY( SELECT json_object_keys(
     json_strip_nulls(
       json_object_agg(
-        DISTINCT "col", "keyPos" ORDER BY "keyPos"
+        DISTINCT "col", "keyPos" ORDER BY "keyPos", "col"
       )
     )
   )),
   'publications', json_object_agg(
     DISTINCT
     "publication",
-    jsonb_build_object('rowFilter', "rowFilter")
+    jsonb_build_object('rowFilter', "rowFilter") ORDER BY "publication"
   )
-) AS "table" FROM published_columns
+) AS "table", "schema", "name" FROM published_columns
   GROUP BY "schema", "schemaOID", "name", "oid", "replicaIdentity"),
 
   indexed_columns AS (SELECT
@@ -105,6 +105,7 @@ tables AS (SELECT json_build_object(
       pg_indexes.tablename as "tableName",
       pg_indexes.indexname as "name",
       index_column.name as "col",
+      index_column.pos as "pos",
       CASE WHEN pg_index.indoption[index_column.pos-1] & 1 = 1 THEN 'DESC' ELSE 'ASC' END as "dir",
       (pg_index.indisunique AND pg_index.indpred IS NULL) as "unique",
       pg_index.indisprimary as "isPrimaryKey",
@@ -153,14 +154,14 @@ tables AS (SELECT json_build_object(
       'isReplicaIdentity', "isReplicaIdentity",
       'isImmediate', "isImmediate",
       'predicateSQL', "predicateSQL",
-      'columns', json_object_agg("col", "dir")
-    ) AS index FROM indexed_columns
+      'columns', json_object_agg("col", "dir" ORDER BY "pos")
+    ) AS index, "schema", "tableName", "name" FROM indexed_columns
       GROUP BY "schema", "tableName", "name", "unique",
          "isPrimaryKey", "isReplicaIdentity", "isImmediate", "predicateSQL")
 
     SELECT json_build_object(
-      'tables', COALESCE((SELECT json_agg("table") FROM tables), '[]'::json),
-      'indexes', COALESCE((SELECT json_agg("index") FROM indexes), '[]'::json)
+      'tables', COALESCE((SELECT json_agg("table" ORDER BY "schema", "name") FROM tables), '[]'::json),
+      'indexes', COALESCE((SELECT json_agg("index" ORDER BY "schema", "tableName", "name") FROM indexes), '[]'::json)
     ) as "publishedSchema"
 $$ LANGUAGE sql;
 
