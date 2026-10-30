@@ -1,6 +1,9 @@
 import { KeyManagementServiceClient } from '@google-cloud/kms';
+import { readCiphertexts } from '@/config/kmsCiphertextSource';
 
-// Env vars that hold GCP KMS ciphertext (base64) whenever SECRETS_KMS_KEY_NAME is set.
+// Env vars that hold GCP KMS ciphertext (base64) whenever SECRETS_KMS_KEY_NAME is set. Which
+// keys are decrypted, and where their ciphertext comes from, is up to readCiphertexts()
+// (kmsCiphertextSource.ts; the default reads these listed names from env).
 // Decrypted once at startup by loadKmsSecrets(); the plaintext is kept here and merged
 // into config by env.ts, never written back to process.env (child processes inherit it).
 // To produce a value:
@@ -79,10 +82,11 @@ export async function loadKmsSecrets(env: NodeJS.ProcessEnv = process.env): Prom
   }
   const keyName = env.SECRETS_KMS_KEY_NAME!.trim();
   const kms = new KeyManagementServiceClient();
+  const ciphertexts = readCiphertexts(env, KMS_ENCRYPTED_KEYS);
   const entries = await Promise.all(
-    KMS_ENCRYPTED_KEYS.filter((key) => env[key]).map(async (key) => {
+    ciphertexts.map(async ([key, ciphertext]) => {
       try {
-        const [result] = await kms.decrypt({ name: keyName, ciphertext: Buffer.from(env[key]!, 'base64') });
+        const [result] = await kms.decrypt({ name: keyName, ciphertext: Buffer.from(ciphertext, 'base64') });
         return [key, Buffer.from(result.plaintext as Uint8Array).toString('utf8').trim()] as const;
       } catch (error) {
         throw new Error(`KMS decryption failed for ${key}: ${(error as Error).message}`);
