@@ -9,12 +9,16 @@
  * if the stream can't play, it falls back to downloading it once through `onLoad`.
  *
  *   idle → (toggle) → loading → playing ↔ paused
- *                            → idle (on error / ended)
+ *                            → idle (on error / timeout / ended)
+ *
+ * A failed or timed-out load sets `isUnavailable`, so the player can say the recording
+ * cannot be played instead of spinning; the next toggle clears it and retries.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useStopWhenCovered } from '../../../hooks/usePageCoverage';
+import { downloadRecording, startPlayback } from './playbackStart';
 
 export type AudioPlayState = 'idle' | 'loading' | 'playing' | 'paused';
 
@@ -30,6 +34,8 @@ export interface UseAudioPlaybackReturn {
   currentTime: number;
   duration: number;
   canSeek: boolean;
+  /** True after the last load failed or timed out — the media is missing or unreachable. */
+  isUnavailable: boolean;
   playbackRate: number;
   toggle: () => Promise<void>;
   seek: (seconds: number) => void;
@@ -48,6 +54,7 @@ export function useAudioPlayback({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(initialDurationSec);
   const [playbackRate, setPlaybackRateState] = useState(1);
+  const [isUnavailable, setIsUnavailable] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -114,7 +121,7 @@ export function useAudioPlayback({
       if (hasStarted) setState('idle');
     });
 
-    await audio.play();
+    await startPlayback(audio);
   };
 
   const loadAndPlay = async (): Promise<void> => {
@@ -130,7 +137,7 @@ export function useAudioPlayback({
     }
 
     abortRef.current = new AbortController();
-    const blob = await onLoad(abortRef.current.signal);
+    const blob = await downloadRecording(onLoad, abortRef.current);
     const url = URL.createObjectURL(blob);
     blobUrlRef.current = url;
     await startAudio(url, false);
@@ -150,13 +157,16 @@ export function useAudioPlayback({
     if (state !== 'idle') return;
 
     setState('loading');
+    setIsUnavailable(false);
     releaseAudio(); // free the previous element + blob before creating new ones
     try {
       await loadAndPlay();
     } catch (err: unknown) {
       if (isAbortError(err)) return;
+      releaseAudio(); // a stalled element must not start playing after we gave up on it
       setState('idle');
-      if (showToastOnError) toast.error('Failed to load recording');
+      setIsUnavailable(true);
+      if (showToastOnError) toast.error('Recording not available');
     }
   };
 
@@ -176,6 +186,7 @@ export function useAudioPlayback({
     currentTime,
     duration,
     canSeek: state === 'playing' || state === 'paused',
+    isUnavailable,
     playbackRate,
     toggle,
     seek,
