@@ -39,11 +39,7 @@ const CONFIGURED_INTERNAL_HOSTS = ((import.meta.env['VITE_INTERNAL_XYNE_HOSTS'] 
   .map(host => host.trim().toLowerCase())
   .filter(Boolean);
 
-const INTERNAL_XYNE_HOSTS = new Set([
-  ...CONFIGURED_INTERNAL_HOSTS,
-  'localhost',
-  '127.0.0.1',
-]);
+const INTERNAL_XYNE_HOSTS = new Set([...CONFIGURED_INTERNAL_HOSTS, 'localhost', '127.0.0.1']);
 
 /** Paths that should be treated as external (no internal router handling) */
 const EXTERNAL_PATH_PREFIXES = ['/claw', '/claw-preview', '/changelog'];

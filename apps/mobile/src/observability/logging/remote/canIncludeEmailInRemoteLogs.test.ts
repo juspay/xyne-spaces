@@ -72,12 +72,7 @@ describe('canIncludeEmailInRemoteLogs', () => {
       false,
     );
     assert.equal(
-      canIncludeEmailInRemoteLogs(
-        'http://example.org/godel/events',
-        'prod',
-        false,
-        PROD_ORIGIN,
-      ),
+      canIncludeEmailInRemoteLogs('http://example.org/godel/events', 'prod', false, PROD_ORIGIN),
       false,
     );
     assert.equal(
