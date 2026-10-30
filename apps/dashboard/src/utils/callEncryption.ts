@@ -34,15 +34,8 @@ export async function applyRoomEncryption(
   if (!keyProvider) {
     throw new Error('Room was created without encryption options');
   }
-  await keyProvider.setKey(base64ToArrayBuffer(credentials.key));
+  // Pass the string, not decoded bytes: bytes select HKDF here, while the mobile SDK
+  // always uses PBKDF2. A string gives PBKDF2 on both, so web and mobile derive one key.
+  await keyProvider.setKey(credentials.key);
   await room.setE2EEEnabled(true);
-}
-
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
 }

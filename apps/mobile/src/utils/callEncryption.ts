@@ -37,15 +37,7 @@ export async function applyRoomEncryption(
   if (!keyProvider) {
     throw new Error('Room was created without encryption options');
   }
-  await keyProvider.setSharedKey(base64ToBytes(credentials.key), credentials.keyIndex);
+  // Same string as web: both sides must run PBKDF2 over identical input to get one key.
+  await keyProvider.setSharedKey(credentials.key, credentials.keyIndex);
   await room.setE2EEEnabled(true);
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
 }
