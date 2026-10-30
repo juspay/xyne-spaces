@@ -1,7 +1,7 @@
-# meet-bot — Xyne Automatic for Google Meet
+# meet-bot — Xyne Automatic for Google Meet and Microsoft Teams
 
-Joins a Google Meet in a real (headed) Google Chrome, signed in as the bot's Google
-account with SSO, and streams the meeting's audio into a Xyne LiveKit room. The transcription
+Joins a Google Meet (signed in as the bot's Google account with SSO) or a Microsoft
+Teams meeting (as a guest) in a real (headed) Google Chrome, and streams the meeting's audio into a Xyne LiveKit room. The transcription
 agent and the note-taker pipeline then put the transcript, summary and labels on the
 call, exactly as for a Xyne recording.
 
@@ -16,9 +16,31 @@ meet-bot: fresh Chrome → signs the bot account in with SSO → opens the link 
 meeting ends / bot alone / removed → bot leaves → room closes → transcript + summary
 ```
 
+## Platforms
+
+Each platform is a join/leave flow (`src/platforms.ts`) plus a block of UI readers in
+`src/inpage/meeting-capture.js` (`PLATFORMS`: in call, lobby, ended, who is speaking).
+The audio capture itself is shared.
+
+| | Google Meet | Microsoft Teams |
+|---|---|---|
+| Links | `meet.google.com/abc-defg-hij` | `teams.microsoft.com/l/meetup-join/…`, `teams.microsoft.com/meet/<id>?p=…`, `teams.live.com/meet/…` |
+| Joins as | the bot's Google account (SSO), so it's let straight into internal meetings | a guest named `BOT_NAME`; someone lets it in from the lobby (or the meeting lets everyone in) |
+| Flow | `meetPage.ts` | `teamsPage.ts`: launcher "Continue on this browser" → pre-join (name, camera and mic off) → Join now |
+| People count | participant tiles | the People button (tiles undercount during screen share); 0 = unknown, so "alone" then relies on Teams' own message |
+
+Teams won't show its join screen until it has a camera and mic, so Teams sessions get
+Chrome's fake devices (`browser.ts`): a test-pattern camera and a mic playing silence,
+granted without a prompt. The bot turns both off before joining, and even if one were
+left on there is nothing real to send. Teams doesn't need SSO: guests can join unless
+the organizer's tenant blocks anonymous users (then the bot reports `blocked`).
+
+The link rules live in `src/meetingUrl.ts` and, for the backend and dashboard, in
+`packages/shared/src/utils/meetingLinks.ts`: keep them in step.
+
 ## How it captures audio
 
-`src/inpage/meet-capture.js` runs inside the Meet page before Meet's own code. It wraps
+`src/inpage/meeting-capture.js` runs inside the meeting page before Meet's own code. It wraps
 `RTCPeerConnection` to keep every remote audio track Meet receives, mixes them with Web
 Audio and hands 48 kHz mono PCM to Node (`window.__xyneAudio`, exposed by Playwright).
 Node publishes it to LiveKit with the native SDK (`src/livekitPublisher.ts`, participant

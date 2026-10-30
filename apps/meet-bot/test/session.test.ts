@@ -11,6 +11,7 @@ const inCall: MeetState = {
   removed: false,
   ended: false,
   notFound: false,
+  lobby: false,
   participants: 3,
   aloneMessage: false,
   speaker: null,

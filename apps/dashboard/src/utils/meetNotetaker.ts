@@ -1,10 +1,8 @@
-import { CallOrigin } from '@xyne/shared';
+import { CallOrigin, parseMeetingLink } from '@xyne/shared';
 
-const MEET_LINK = /(?:https?:\/\/)?meet\.google\.com\/[a-z]+-[a-z]+-[a-z]+/i;
-
-/** Whether the text contains a Google Meet meeting link. */
-export function looksLikeMeetLink(text: string): boolean {
-  return MEET_LINK.test(text.trim());
+/** Whether the text is a meeting link the bot can join (Google Meet or Microsoft Teams). */
+export function looksLikeMeetingLink(text: string): boolean {
+  return parseMeetingLink(text) !== null;
 }
 
 type NotetakerCarrier = { callOrigin?: string | null; metadata?: unknown };
@@ -34,7 +32,7 @@ const FAILURE_REASONS = new Map<string, string>([
   ['bot_restarted', 'the bot restarted'],
 ]);
 
-/** One-line notetaker progress for a Meet notetaker call, or null for any other call. */
+/** One-line notetaker progress for a notetaker call (Meet or Teams), or null for any other call. */
 export function meetNotetakerStatusText(call: NotetakerCarrier | null | undefined): string | null {
   if (!call || !isMeetNotetakerCall(call)) return null;
   const meetBot = meetBotOf(call);

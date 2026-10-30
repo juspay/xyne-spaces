@@ -2,7 +2,15 @@ import type { Call, Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@xyne/shared';
+import {
+  CallOrigin,
+  CallStatus,
+  CallType,
+  InvitationResponse,
+  MEETING_PLATFORM_LABELS,
+  parseMeetingLink,
+  type MeetingPlatform,
+} from '@xyne/shared';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -16,13 +24,12 @@ import {
 } from '@/bypassAcl/meetNotetakerServices';
 import { livekitService, LIVEKIT_ROOM_MAX_PARTICIPANTS } from '@/services/liveKitService';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
-import { extractMeetLinks } from '@/services/meetLinkService';
 import { logger } from '@/utils/logger';
 
 /**
- * Xyne Automatic notetaker for Google Meet.
+ * Xyne Automatic notetaker for Google Meet and Microsoft Teams.
  *
- * A user pastes a Meet link; we create a regular VIDEO Call (callOrigin MEET_LINK)
+ * A user pastes a meeting link; we create a regular VIDEO Call (callOrigin MEET_LINK)
  * and ask the meet-bot service (apps/meet-bot) to join it in Chrome. Once the bot is
  * admitted it asks us for a LiveKit room, publishes the meeting's audio into it, and
  * the transcription agent plus the note-taker pipeline (see usesNoteTakerPipeline)
@@ -34,7 +41,6 @@ import { logger } from '@/utils/logger';
  */
 
 export const MEET_BOT_IDENTITY_PREFIX = 'meet-bot-';
-const MEET_BOT_PARTICIPANT_NAME = 'Google Meet';
 // Long enough for the bot to reconnect to LiveKit during a long meeting.
 const MEET_BOT_TOKEN_TTL = '6h';
 
@@ -43,13 +49,15 @@ const BOT_REPORTED_STATUSES: readonly MeetBotStatus[] = ['joining', 'waiting_roo
 
 export interface MeetBotMetadata {
   status: MeetBotStatus;
+  /** Which meeting app; calls from before Teams support have none (Google Meet). */
+  platform?: MeetingPlatform;
   meetingCode: string;
   reason?: string;
   message?: string;
   updatedAt: string;
 }
 
-/** A Meet participant the bot heard speaking (Meet's participant id + tile name). */
+/** A meeting participant the bot heard speaking (their tile id + name in the meeting UI). */
 export interface MeetSpeaker {
   key: string;
   name: string;
@@ -106,16 +114,18 @@ class MeetNotetakerService {
     userId: string;
     workspaceId: string;
     meetingUrl: string;
-    /** Call title; defaults to "Google Meet (<code>)". */
+    /** Call title; defaults to "<platform> (<code>)", e.g. "Google Meet (abc-defg-hij)". */
     title?: string | null;
     /** Extra Call.metadata, e.g. the calendar event an auto-join came from. */
     metadata?: Record<string, unknown>;
   }): Promise<{ call: Call; alreadySentBy: { userId: string; name: string | null } | null }> {
     if (!this.enabled) throw new AppError('The Meet notetaker is not enabled', 503);
-    const meet = extractMeetLinks(input.meetingUrl)[0];
-    if (!meet) throw new AppError('Paste a Google Meet link, like https://meet.google.com/abc-defg-hij', 400);
+    const meeting = parseMeetingLink(input.meetingUrl);
+    if (!meeting) {
+      throw new AppError('Paste a Google Meet or Microsoft Teams link, like https://meet.google.com/abc-defg-hij', 400);
+    }
 
-    const existing = await findInFlightMeetNotetakerCall(input.workspaceId, meet.meetUrl);
+    const existing = await findInFlightMeetNotetakerCall(input.workspaceId, meeting.url);
     if (existing) {
       if (await this.isSessionRunning(existing.externalId)) {
         if (existing.createdByUserId !== input.userId) {
@@ -143,13 +153,18 @@ class MeetNotetakerService {
         callType: CallType.VIDEO,
         callOrigin: CallOrigin.MEET_LINK,
         status: CallStatus.SCHEDULED,
-        title: input.title?.trim() || `Google Meet (${meet.meetCode})`,
-        roomLink: meet.meetUrl,
+        title: input.title?.trim() || `${MEETING_PLATFORM_LABELS[meeting.platform]} (${meeting.code})`,
+        roomLink: meeting.url,
         startsAt: now,
         lastActivityAt: now,
         metadata: {
           ...input.metadata,
-          meetBot: { status: 'requested', meetingCode: meet.meetCode, updatedAt: now.toISOString() },
+          meetBot: {
+            status: 'requested',
+            platform: meeting.platform,
+            meetingCode: meeting.code,
+            updatedAt: now.toISOString(),
+          },
         } satisfies Record<string, unknown> as Prisma.InputJsonValue,
       },
     });
@@ -167,7 +182,7 @@ class MeetNotetakerService {
     try {
       await this.botRequest().post('/sessions', {
         sessionId: call.externalId,
-        meetingUrl: meet.meetUrl,
+        meetingUrl: meeting.url,
         callbackUrl: `${config.backendUrl.replace(/\/+$/, '')}/api/meet-bot/sessions/${call.externalId}`,
       });
     } catch (error) {
@@ -187,7 +202,7 @@ class MeetNotetakerService {
       );
     }
 
-    logger.info(`[${call.externalId}] meet_bot_requested`, { meetingCode: meet.meetCode, userId: input.userId });
+    logger.info(`[${call.externalId}] meet_bot_requested`, { platform: meeting.platform, meetingCode: meeting.code, userId: input.userId });
     return { call, alreadySentBy: null };
   }
 
@@ -278,7 +293,8 @@ class MeetNotetakerService {
     if (!isInFlight(call)) throw new AppError('This notetaker call has already ended', 409);
 
     const roomName = call.externalId;
-    if (speaker) return this.speakerToken(call, speaker);
+    const platform = meetBotOf(call)?.platform ?? 'google_meet';
+    if (speaker) return this.speakerToken(call, speaker, platform);
     if (call.status === CallStatus.SCHEDULED || !(await livekitService.getRoomInfo(roomName))) {
       const agentName = await livekitService.resolveAgentNameForUser(call.createdByUserId, { roomName });
       await livekitService.createRoom({
@@ -311,20 +327,24 @@ class MeetNotetakerService {
 
     const token = await livekitService.generateAccessToken({
       userIdentity: `${MEET_BOT_IDENTITY_PREFIX}${call.id}`,
-      userName: MEET_BOT_PARTICIPANT_NAME,
+      userName: MEETING_PLATFORM_LABELS[platform],
       roomName,
       ttl: MEET_BOT_TOKEN_TTL,
-      metadata: JSON.stringify({ source: 'google_meet' }),
+      metadata: JSON.stringify({ source: platform }),
     });
     return { livekitUrl: livekitService.getServerUrl(), token };
   }
 
   /**
-   * A token for one Meet speaker: the bot publishes each speaker's audio as its own
+   * A token for one meeting speaker: the bot publishes each speaker's audio as its own
    * LiveKit participant, named after them, so the transcript carries their name.
    * The room must already exist (the default participant creates it).
    */
-  private async speakerToken(call: Call, speaker: MeetSpeaker): Promise<{ livekitUrl: string; token: string }> {
+  private async speakerToken(
+    call: Call,
+    speaker: MeetSpeaker,
+    platform: MeetingPlatform,
+  ): Promise<{ livekitUrl: string; token: string }> {
     if (call.status !== CallStatus.ACTIVE) throw new AppError('The notetaker is not in the meeting yet', 409);
     const speakerId = createHash('sha256').update(speaker.key).digest('hex').slice(0, 12);
     const token = await livekitService.generateAccessToken({
@@ -332,7 +352,7 @@ class MeetNotetakerService {
       userName: speaker.name,
       roomName: call.externalId,
       ttl: MEET_BOT_TOKEN_TTL,
-      metadata: JSON.stringify({ source: 'google_meet', meetSpeaker: true }),
+      metadata: JSON.stringify({ source: platform, meetSpeaker: true }),
     });
     return { livekitUrl: livekitService.getServerUrl(), token };
   }

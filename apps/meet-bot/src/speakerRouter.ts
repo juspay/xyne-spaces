@@ -1,6 +1,6 @@
 import { log } from "./log.js";
 
-/** A Meet participant, as identified by their tile (see inpage/meet-capture.js). */
+/** A meeting participant, as identified by their tile (see inpage/meeting-capture.js). */
 export interface Speaker {
   /** Meet's participant id: stable for the meeting. */
   key: string;

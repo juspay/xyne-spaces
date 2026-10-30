@@ -9,7 +9,7 @@
 
 import { logger } from '@/utils/logger';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, findMeetingLinks } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { MAX_CALENDAR_EVENTS_PER_SYNC } from '@/services/calendarSyncConfig';
 import { isXyneOriginatedEvent } from '@/services/calendarEventPayload';
@@ -104,6 +104,10 @@ function resolveRoomLink(event: GCalEvent): string | undefined {
   if (event.hangoutLink) return event.hangoutLink;
   const videoEntry = event.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video');
   if (videoEntry?.uri) return videoEntry.uri;
+  // Invites from Outlook/Teams carry their join link only in the location or the
+  // (HTML) description; read it from the raw text, before tags are stripped.
+  const textLink = findMeetingLinks(`${event.location ?? ''}\n${event.description ?? ''}`)[0];
+  if (textLink) return textLink.url;
   return event.htmlLink;
 }
 

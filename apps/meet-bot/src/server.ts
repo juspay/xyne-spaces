@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
-import { parseMeetUrl } from "./meetUrl.js";
+import { parseMeetingUrl } from "./meetingUrl.js";
 import { backendClient } from "./backendClient.js";
 import type { SessionBackend, SessionRequest, SessionStatus } from "./session.js";
 
@@ -85,9 +85,9 @@ export function createBotServer(config: Config, createSession: SessionFactory): 
     if (req.method === "POST" && url.pathname === "/sessions") {
       const body = await readJson(req);
       const sessionId = requireString(body, "sessionId");
-      const meet = parseMeetUrl(requireString(body, "meetingUrl"));
-      if (!meet) throw new HttpError(400, "meetingUrl must be a Google Meet link");
-      const request: SessionRequest = { sessionId, meetingUrl: meet.url };
+      const meeting = parseMeetingUrl(requireString(body, "meetingUrl"));
+      if (!meeting) throw new HttpError(400, "meetingUrl must be a Google Meet or Microsoft Teams link");
+      const request: SessionRequest = { sessionId, platform: meeting.platform, meetingUrl: meeting.url };
       const callbackUrl = requireString(body, "callbackUrl");
       if (!/^https?:\/\//i.test(callbackUrl)) throw new HttpError(400, "callbackUrl must be an http(s) URL");
 
@@ -103,7 +103,7 @@ export function createBotServer(config: Config, createSession: SessionFactory): 
       );
       sessions.set(sessionId, session);
       void session.run().catch((error: unknown) => log.error("session_crashed", { sessionId, error: String(error) }));
-      log.info("session_started", { sessionId, meetingCode: meet.code });
+      log.info("session_started", { sessionId, platform: meeting.platform, meetingCode: meeting.code });
       send(res, 202, { sessionId, status: session.status });
       return;
     }

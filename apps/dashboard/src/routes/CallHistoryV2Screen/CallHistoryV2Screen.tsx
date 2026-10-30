@@ -1030,10 +1030,10 @@ const StartCallPill = ({
               </span>
               <span className='min-w-0'>
                 <span className='block text-sm font-semibold tracking-tight text-foreground'>
-                  Add notetaker to a Google Meet
+                  Add notetaker to a meeting
                 </span>
                 <span className='mt-0.5 block text-xs font-normal text-muted-foreground'>
-                  Xyne Automatic joins and takes notes.
+                  Google Meet or Teams: Xyne Automatic joins and takes notes.
                 </span>
               </span>
             </Button>

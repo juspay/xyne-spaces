@@ -5,11 +5,11 @@ import { LivekitPublisher, decodePcm } from "./livekitPublisher.js";
 import { SpeakerRouter, type Speaker } from "./speakerRouter.js";
 import { log } from "./log.js";
 import { installSsoResponder, signInWithSso } from "./sso.js";
+import type { MeetingPlatform } from "./meetingUrl.js";
+import { PLATFORM_FLOWS } from "./platforms.js";
 import {
-  CAPTURE_SCRIPT,
   MeetError,
-  joinMeeting,
-  leaveMeeting,
+  captureScript,
   readState,
   startCapture,
   waitUntilInCall,
@@ -21,8 +21,15 @@ export type SessionStatus = "joining" | "waiting_room" | "in_call" | "ended" | "
 
 export interface SessionRequest {
   sessionId: string;
+  platform: MeetingPlatform;
   meetingUrl: string;
 }
+
+/** The default LiveKit participant: audio before anyone is seen speaking. */
+const PLATFORM_PARTICIPANT: Record<MeetingPlatform, string> = {
+  google_meet: "Google Meet",
+  teams: "Microsoft Teams",
+};
 
 export interface StatusEvent {
   sessionId: string;
@@ -102,12 +109,16 @@ export class MeetSession {
     const { sessionId } = this.request;
     let context: BrowserContext | null = null;
     let page: Page | null = null;
+    let leave: () => Promise<void> = async () => undefined;
     try {
       await this.setStatus("joining");
-      context = await openBrowser(this.config);
-      await context.addInitScript({ content: CAPTURE_SCRIPT });
+      const flow = PLATFORM_FLOWS[this.request.platform];
+      context = await openBrowser(this.config, { fakeMediaDevices: flow.fakeMediaDevices });
+      await context.addInitScript({ content: captureScript(this.request.platform, this.config.botName) });
       page = await context.newPage();
-      const { sso } = this.config;
+      const activePage = page;
+      leave = () => flow.leave(activePage);
+      const sso = flow.googleSignIn ? this.config.sso : null;
       if (sso) {
         // Each meeting signs in afresh in its own browser: nothing to keep or expire.
         const lastSsoError = await installSsoResponder(page, sso);
@@ -118,7 +129,7 @@ export class MeetSession {
         await page.goto(this.request.meetingUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
       }
 
-      const joined = await joinMeeting(page, {
+      const joined = await flow.join(page, {
         botName: this.config.botName,
         allowGuest: this.config.allowGuest || !sso,
       });
@@ -131,7 +142,7 @@ export class MeetSession {
       // never leaves an empty "live" call behind.
       const livekit = await this.backend.startLivekit();
       if (livekit) {
-        const publisher = new LivekitPublisher(sessionId, "Google Meet");
+        const publisher = new LivekitPublisher(sessionId, PLATFORM_PARTICIPANT[this.request.platform]);
         this.publisher = publisher;
         await publisher.connect(async () => livekit);
         const router = new SpeakerRouter(sessionId, publisher, (speaker) => {
@@ -153,13 +164,13 @@ export class MeetSession {
       await this.setStatus("in_call");
 
       const reason = await this.watch(page);
-      await leaveMeeting(page);
+      await leave();
       await this.setStatus("ended", reason);
     } catch (error) {
       const reason = error instanceof MeetError ? error.reason : "error";
       const message = error instanceof Error ? error.message : String(error);
       log.warn("session_failed", { sessionId, reason, message });
-      if (page) await leaveMeeting(page);
+      await leave();
       // Cancelling is a normal end, not a failure.
       await this.setStatus(reason === "cancelled" ? "ended" : "failed", reason, message);
     } finally {

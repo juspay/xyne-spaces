@@ -120,9 +120,12 @@ export type CalendarMeetCall = Pick<
   'id' | 'externalId' | 'workspaceId' | 'createdByUserId' | 'title' | 'roomLink' | 'startsAt' | 'endsAt' | 'metadata'
 >;
 
+/** Hosts of the meeting links the bot joins (see parseMeetingLink in @xyne/shared). */
+const MEETING_LINK_HOSTS = ['meet.google.com/', 'teams.microsoft.com/', 'teams.live.com/', 'teams.cloud.microsoft/'];
+
 /**
- * These users' Google Calendar events with a Meet link starting between `from` and
- * `to` (one Call per user per occurrence, synced from their calendars).
+ * These users' Google/Outlook calendar events with a Meet or Teams link starting
+ * between `from` and `to` (one Call per user per occurrence, synced from their calendars).
  */
 export function findUpcomingCalendarMeetCalls(userIds: string[], from: Date, to: Date): Promise<CalendarMeetCall[]> {
   return asSystem(
@@ -131,11 +134,11 @@ export function findUpcomingCalendarMeetCalls(userIds: string[], from: Date, to:
     async () =>
       await db.call.findMany({
         where: {
-          callOrigin: CallOrigin.GOOGLE_CALENDAR,
+          callOrigin: { in: [CallOrigin.GOOGLE_CALENDAR, CallOrigin.MICROSOFT_CALENDAR] },
           status: CallStatus.SCHEDULED,
           startsAt: { gte: from, lte: to },
           createdByUserId: { in: userIds },
-          roomLink: { contains: 'meet.google.com/' },
+          OR: MEETING_LINK_HOSTS.map((host) => ({ roomLink: { contains: host } })),
         },
         select: {
           id: true,

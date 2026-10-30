@@ -11,7 +11,7 @@ import {
   sendMeetNotetaker,
   stopMeetNotetaker,
 } from '../../services/clients/meetNotetakerApi';
-import { looksLikeMeetLink } from '../../utils/meetNotetaker';
+import { looksLikeMeetingLink } from '../../utils/meetNotetaker';
 
 /** Whether the Meet notetaker bot is configured; the entry points hide when it isn't. */
 export function useMeetNotetakerEnabled(): boolean {
@@ -39,7 +39,7 @@ export function MeetNotetakerDialog({
   const navigate = useNavigate();
   const [meetingUrl, setMeetingUrl] = useState('');
   const [sending, setSending] = useState(false);
-  const isValid = looksLikeMeetLink(meetingUrl);
+  const isValid = looksLikeMeetingLink(meetingUrl);
 
   const stop = async (callExternalId: string): Promise<void> => {
     try {
@@ -88,8 +88,8 @@ export function MeetNotetakerDialog({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title='Add Xyne Automatic to a Google Meet'
-      description='Xyne Automatic joins the meeting and takes notes. The transcript and summary show up in Calls.'
+      title='Add Xyne Automatic to a meeting'
+      description='Paste a Google Meet or Microsoft Teams link. Xyne Automatic joins and takes notes, and the transcript and summary show up in Calls. In Teams, someone in the meeting lets it in from the lobby.'
       className='rounded-xl sm:max-w-md'
     >
       <form onSubmit={onSubmit} className='flex flex-col gap-3'>
@@ -98,8 +98,8 @@ export function MeetNotetakerDialog({
           variant='flat'
           value={meetingUrl}
           onChange={event => setMeetingUrl(event.target.value)}
-          placeholder='https://meet.google.com/abc-defg-hij'
-          aria-label='Google Meet link'
+          placeholder='Google Meet or Teams meeting link'
+          aria-label='Meeting link'
         />
         <div className='flex justify-end gap-2'>
           <Button type='button' variant='ghost' size='sm' onClick={() => onOpenChange(false)}>

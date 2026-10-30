@@ -2,13 +2,23 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "playwright";
+import type { MeetingPlatform } from "./meetingUrl.js";
 import type { Speaker } from "./speakerRouter.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-export const CAPTURE_SCRIPT = readFileSync(path.join(here, "inpage", "meet-capture.js"), "utf8");
+const CAPTURE_SOURCE = readFileSync(path.join(here, "inpage", "meeting-capture.js"), "utf8");
 
-/** What the Meet UI currently shows; produced by `state()` in inpage/meet-capture.js. */
+/** The in-page capture script for one platform (see inpage/meeting-capture.js). */
+export function captureScript(platform: MeetingPlatform, botName: string): string {
+  return (
+    `window.__xyneMeetingPlatform = ${JSON.stringify(platform)};\n` +
+    `window.__xyneBotName = ${JSON.stringify(botName)};\n` +
+    CAPTURE_SOURCE
+  );
+}
+
+/** What the meeting UI currently shows; produced by `state()` in inpage/meeting-capture.js. */
 export interface MeetState {
   inCall: boolean;
   nameInput: boolean;
@@ -18,6 +28,9 @@ export interface MeetState {
   removed: boolean;
   ended: boolean;
   notFound: boolean;
+  /** Waiting to be let in (Teams lobby). */
+  lobby: boolean;
+  /** People in the meeting, the bot included; 0 when the page doesn't say. */
   participants: number;
   /** Meet is showing its "You're the only one here" message. */
   aloneMessage: boolean;
@@ -89,7 +102,10 @@ export async function joinMeeting(
     if (state.nameInput) {
       if (!options.allowGuest) throw new MeetError("not_signed_in", "Meet shows the bot signed out");
       const input = page.locator('input[aria-label="Your name"]');
-      if ((await input.inputValue().catch(() => "")) !== options.botName) await input.fill(options.botName);
+      // Briefly: the box can flash up while the page loads and be gone a moment later.
+      if ((await input.inputValue().catch(() => "")) !== options.botName) {
+        await input.fill(options.botName, { timeout: 3_000 }).catch(() => undefined);
+      }
     }
     const clicked = await clickIfVisible(page, JOIN_BUTTON).catch(() => null);
     if (clicked) return /ask/i.test(clicked) ? "asked" : "joined";

@@ -9,7 +9,7 @@
 
 import { logger } from '@/utils/logger';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, findMeetingLinks } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { MAX_CALENDAR_EVENTS_PER_SYNC } from '@/services/calendarSyncConfig';
 import {
@@ -74,6 +74,10 @@ function resolveRoomLink(event: MSCalEvent): string | undefined {
     const joinUrl = event.onlineMeeting?.joinUrl ?? event.onlineMeetingUrl;
     if (joinUrl) return joinUrl;
   }
+  // An invite to someone else's meeting (e.g. a Google Meet) has its link in the
+  // location or the body only.
+  const textLink = findMeetingLinks(`${event.location?.displayName ?? ''}\n${event.bodyPreview ?? ''}`)[0];
+  if (textLink) return textLink.url;
   return event.webLink;
 }
 

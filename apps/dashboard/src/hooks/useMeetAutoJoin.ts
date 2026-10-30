@@ -3,7 +3,7 @@ import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { stateMachineActor } from '../machines/stateMachine';
 
-/** Which of my Google Meet calendar events Xyne Automatic joins by itself. */
+/** Which of my Google Meet / Teams calendar events Xyne Automatic joins by itself. */
 export type MeetAutoJoinMode = 'off' | 'organized' | 'all';
 
 /**

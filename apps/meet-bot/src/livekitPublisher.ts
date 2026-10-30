@@ -9,7 +9,7 @@ import {
 } from "@livekit/rtc-node";
 import { log } from "./log.js";
 
-/** Sample rate of the PCM the Meet page sends (see inpage/meet-capture.js). */
+/** Sample rate of the PCM the meeting page sends (see inpage/meeting-capture.js). */
 export const CAPTURE_SAMPLE_RATE = 48_000;
 // LiveKit takes audio in 10 ms frames.
 const FRAME_SAMPLES = CAPTURE_SAMPLE_RATE / 100;

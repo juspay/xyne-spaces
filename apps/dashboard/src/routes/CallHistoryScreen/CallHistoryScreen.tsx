@@ -936,8 +936,8 @@ const CallHistoryScreen = (): ReactElement => {
                 </div>
                 <div className='flex flex-col min-w-0 gap-0.5'>
                   <p className='text-sm font-medium text-foreground'>
-                    <span className='sm:hidden'>Meet notetaker</span>
-                    <span className='hidden sm:inline'>Add notetaker to a Google Meet</span>
+                    <span className='sm:hidden'>Notetaker</span>
+                    <span className='hidden sm:inline'>Add notetaker to a meeting</span>
                   </p>
                   <p className='hidden sm:block text-xs text-muted-foreground'>
                     Xyne Automatic joins and takes notes.

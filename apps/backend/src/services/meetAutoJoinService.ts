@@ -1,4 +1,4 @@
-import { CallStatus } from '@xyne/shared';
+import { CallStatus, parseMeetingLink } from '@xyne/shared';
 import {
   findMeetAutoJoinUsers,
   findRecentMeetNotetakerCalls,
@@ -7,16 +7,15 @@ import {
   type RecentMeetNotetakerCall,
 } from '@/bypassAcl/meetNotetakerServices';
 import { asService } from '@/bypassAcl/base';
-import { extractMeetLinks } from '@/services/meetLinkService';
 import { meetBotOf, meetNotetakerService } from '@/services/meetNotetakerService';
 import { logger } from '@/utils/logger';
 
 /**
- * Xyne Automatic joins people's Google Meet calendar events by itself.
+ * Xyne Automatic joins people's Google Meet and Microsoft Teams calendar events by itself.
  *
  * Users opt in (UserPreference.meetAutoJoin): 'organized' for meetings they organize,
- * 'all' for every meeting they haven't declined. Calendar sync already stores each
- * event as a GOOGLE_CALENDAR Call per attendee with its Meet link in roomLink; once a
+ * 'all' for every meeting they haven't declined. Calendar sync (Google and Outlook)
+ * already stores each event as a Call per attendee with its meeting link in roomLink; once a
  * minute the worker sends the bot to the ones starting now, through the same path as
  * "Send Xyne Automatic" (meetNotetakerService.sendToMeeting). External meetings are
  * included: there the host admits the bot from the lobby.
@@ -37,8 +36,10 @@ const RECENT_WINDOW_MS = 30 * 60_000;
 const RETRYABLE_REASONS = new Set(['bot_busy', 'bot_unreachable']);
 
 interface CalendarEventMetadata {
-  organizer?: { self?: boolean } | null;
-  attendees?: { self?: boolean; responseStatus?: string }[];
+  /** Whose calendar this copy of the event came from. */
+  calendarOwnerEmail?: string;
+  organizer?: { email?: string; self?: boolean } | null;
+  attendees?: { email?: string; self?: boolean; responseStatus?: string }[];
 }
 
 export function isMeetAutoJoinMode(value: unknown): value is MeetAutoJoinMode {
@@ -47,7 +48,7 @@ export function isMeetAutoJoinMode(value: unknown): value is MeetAutoJoinMode {
 
 /** Whether this user's copy of a calendar event is one the bot should join for them. */
 export function shouldAutoJoin(call: CalendarMeetCall, mode: MeetAutoJoinMode, now: Date): boolean {
-  if (!call.roomLink || !extractMeetLinks(call.roomLink)[0]) return false;
+  if (!call.roomLink || !parseMeetingLink(call.roomLink)) return false;
   if (call.endsAt && call.endsAt <= now) return false;
   if (call.startsAt && call.endsAt && call.endsAt.getTime() - call.startsAt.getTime() > MAX_MEETING_MS) return false;
 
@@ -55,9 +56,13 @@ export function shouldAutoJoin(call: CalendarMeetCall, mode: MeetAutoJoinMode, n
   // Attendees other than the organizer; none means a block on one person's calendar.
   const attendees = Array.isArray(metadata.attendees) ? metadata.attendees : [];
   if (attendees.length === 0) return false;
-  const organizes = metadata.organizer?.self === true;
+  // Google marks the calendar owner with `self`; Outlook events only have emails.
+  const owner = metadata.calendarOwnerEmail?.trim().toLowerCase();
+  const isOwner = (person: { email?: string; self?: boolean } | null | undefined) =>
+    person?.self === true || (!!owner && person?.email?.trim().toLowerCase() === owner);
+  const organizes = isOwner(metadata.organizer);
   if (mode === 'organized' && !organizes) return false;
-  const self = attendees.find((attendee) => attendee.self);
+  const self = attendees.find(isOwner);
   return self?.responseStatus !== 'declined';
 }
 
@@ -117,11 +122,11 @@ class MeetAutoJoinService {
   }
 
   private async joinForUser(call: CalendarMeetCall, now: Date): Promise<'sent' | 'skipped' | 'waiting'> {
-    const meet = extractMeetLinks(call.roomLink ?? '')[0];
-    if (!meet) return 'skipped';
+    const meeting = parseMeetingLink(call.roomLink ?? '');
+    if (!meeting) return 'skipped';
     const startsAt = call.startsAt ?? now;
     const since = new Date(Math.min(startsAt.getTime(), now.getTime()) - RECENT_WINDOW_MS);
-    const recent = await findRecentMeetNotetakerCalls(call.workspaceId, meet.meetUrl, since);
+    const recent = await findRecentMeetNotetakerCalls(call.workspaceId, meeting.url, since);
     if (autoJoinDecision(recent, call.createdByUserId) === 'skip') return 'skipped';
 
     // A new bot needs a free slot; joining a colleague's live bot does not.
@@ -142,7 +147,7 @@ class MeetAutoJoinService {
         meetNotetakerService.sendToMeeting({
           userId: call.createdByUserId,
           workspaceId: call.workspaceId,
-          meetingUrl: meet.meetUrl,
+          meetingUrl: meeting.url,
           title: call.title,
           metadata: { autoJoin: { calendarCallId: call.id, calendarExternalId: call.externalId } },
         }),

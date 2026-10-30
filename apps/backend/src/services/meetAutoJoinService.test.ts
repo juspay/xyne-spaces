@@ -3,6 +3,8 @@ jest.mock('@/utils/logger', () => ({
 }));
 // @xyne/shared ships ESM that jest's transform ignores — stub the imports used.
 jest.mock('@xyne/shared', () => ({
+  // The real link parser, from source (the package's dist is ESM).
+  ...jest.requireActual('../../../../packages/shared/src/utils/meetingLinks'),
   CallStatus: { SCHEDULED: 'SCHEDULED', ACTIVE: 'ACTIVE', ENDED: 'ENDED' },
 }));
 jest.mock('@/bypassAcl/meetNotetakerServices', () => ({
@@ -17,12 +19,6 @@ const notetaker = { enabled: true, hasCapacity: jest.fn(), sendToMeeting: jest.f
 jest.mock('@/services/meetNotetakerService', () => ({
   meetNotetakerService: notetaker,
   meetBotOf: (call: { metadata?: { meetBot?: unknown } }) => call.metadata?.meetBot ?? null,
-}));
-jest.mock('@/services/meetLinkService', () => ({
-  extractMeetLinks: (text: string) => {
-    const match = text.match(/meet\.google\.com\/([a-z]+-[a-z]+-[a-z]+)/i);
-    return match ? [{ meetCode: match[1].toLowerCase(), meetUrl: `https://meet.google.com/${match[1].toLowerCase()}` }] : [];
-  },
 }));
 
 import {
@@ -80,6 +76,29 @@ describe('shouldAutoJoin', () => {
       attendees: [{ email: 'u1@juspay.in', self: true, responseStatus: 'needsAction' }],
     });
     expect(shouldAutoJoin(call, 'all', NOW)).toBe(true);
+  });
+
+  it('joins Teams meetings, and reads Outlook events that have no `self` flags', () => {
+    const outlook = calendarCall(
+      { roomLink: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_ABC%40thread.v2/0?context=%7b%7d' },
+      {
+        calendarOwnerEmail: 'u1@juspay.in',
+        organizer: { email: 'Boss@Juspay.in' },
+        attendees: [{ email: 'U1@juspay.in', responseStatus: 'accepted' }],
+      },
+    );
+    expect(shouldAutoJoin(outlook, 'all', NOW)).toBe(true);
+    expect(shouldAutoJoin(outlook, 'organized', NOW)).toBe(false);
+    const organized = calendarCall(
+      { roomLink: 'https://teams.microsoft.com/meet/1234567890?p=x' },
+      { calendarOwnerEmail: 'u1@juspay.in', organizer: { email: 'u1@juspay.in' }, attendees: [{ email: 'a@b.com' }] },
+    );
+    expect(shouldAutoJoin(organized, 'organized', NOW)).toBe(true);
+    const declined = calendarCall(
+      {},
+      { calendarOwnerEmail: 'u1@juspay.in', organizer: { email: 'x@y.com' }, attendees: [{ email: 'u1@juspay.in', responseStatus: 'declined' }] },
+    );
+    expect(shouldAutoJoin(declined, 'all', NOW)).toBe(false);
   });
 
   it('skips declined meetings', () => {

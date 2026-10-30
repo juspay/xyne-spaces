@@ -1095,9 +1095,9 @@ const CalendarSection: FC<{ state: PreferencesState }> = ({ state }) => (
 );
 
 /**
- * Xyne Automatic joins my Google Meet calendar events by itself. Hidden when the Meet
- * notetaker isn't set up; disabled until a Google Calendar is connected, since the
- * worker finds meetings through the synced calendar.
+ * Xyne Automatic joins my Google Meet and Teams calendar events by itself. Hidden when
+ * the notetaker isn't set up; disabled until a calendar is connected, since the worker
+ * finds meetings through the synced calendar.
  */
 const MeetAutoJoinSetting: FC = () => {
   const enabled = useMeetNotetakerEnabled();
@@ -1109,15 +1109,16 @@ const MeetAutoJoinSetting: FC = () => {
     staleTime: 5 * 60_000,
   });
   if (!enabled) return null;
-  const connected = provider === 'GOOGLE';
+  // Google and Outlook calendars both sync meetings for the worker to find.
+  const connected = provider === 'GOOGLE' || provider === 'MICROSOFT';
   return (
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>
         <p className='text-sm font-medium text-foreground'>Xyne Automatic notetaker</p>
         <p className='text-xs text-muted-foreground mt-0.5'>
           {connected || isLoading
-            ? 'Xyne Automatic joins your Google Meet calls when they start and adds the transcript and summary to Calls. Outside guests see it join; in external meetings the host admits it.'
-            : 'Connect your Google Calendar to let Xyne Automatic join your Google Meet calls.'}
+            ? 'Xyne Automatic joins your Google Meet and Microsoft Teams calls when they start and adds the transcript and summary to Calls. Everyone in the meeting sees it join; in Teams and external meetings the host lets it in.'
+            : 'Connect your Google or Outlook calendar to let Xyne Automatic join your Google Meet and Teams calls.'}
         </p>
       </div>
       <RadioGroup

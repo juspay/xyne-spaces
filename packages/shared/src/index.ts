@@ -38,6 +38,7 @@ export * from './utils/canvasHierarchy';
 export * from './utils/canvasDestinationAccess';
 export * from './utils/canvasFolderNameConflict';
 export * from './utils/recordingAccess';
+export * from './utils/meetingLinks';
 export * from './utils/origins';
 export * from './utils/linkPreviewParser';
 export * from './utils/messageContent';

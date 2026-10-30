@@ -9,6 +9,8 @@ jest.mock('@/utils/logger', () => ({
 }));
 // @xyne/shared ships ESM that jest's transform ignores — stub the imports used.
 jest.mock('@xyne/shared', () => ({
+  // The real link parser, from source (the package's dist is ESM).
+  ...jest.requireActual('../../../../packages/shared/src/utils/meetingLinks'),
   CallOrigin: { MEET_LINK: 'MEET_LINK', CHANNEL: 'CHANNEL' },
   CallStatus: { SCHEDULED: 'SCHEDULED', ACTIVE: 'ACTIVE', ENDED: 'ENDED' },
   CallType: { VIDEO: 'VIDEO', HEADLESS: 'HEADLESS' },
@@ -40,12 +42,6 @@ jest.mock('@/services/liveKitService', () => ({
 }));
 jest.mock('@/controllers/noteTakerWebhookController', () => ({
   noteTakerWebhookController: { finishCall: jest.fn() },
-}));
-jest.mock('@/services/meetLinkService', () => ({
-  extractMeetLinks: (text: string) => {
-    const match = text.match(/meet\.google\.com\/([a-z]+-[a-z]+-[a-z]+)/i);
-    return match ? [{ meetCode: match[1].toLowerCase(), meetUrl: `https://meet.google.com/${match[1].toLowerCase()}` }] : [];
-  },
 }));
 const botClient = { get: jest.fn(), post: jest.fn(), delete: jest.fn() };
 jest.mock('axios', () => ({
@@ -85,7 +81,7 @@ beforeEach(() => jest.clearAllMocks());
 describe('sendToMeeting', () => {
   const input = { userId: 'user-1', workspaceId: 'ws-1', meetingUrl: 'https://meet.google.com/ABC-defg-hij?authuser=0' };
 
-  it('rejects anything that is not a Meet link', async () => {
+  it('rejects anything that is not a Meet or Teams link', async () => {
     await expect(meetNotetakerService.sendToMeeting({ ...input, meetingUrl: 'https://zoom.us/j/1' })).rejects.toMatchObject({
       statusCode: 400,
     });
@@ -159,6 +155,27 @@ describe('sendToMeeting', () => {
     });
   });
 
+  it('sends the bot to a Teams meeting, titled and tagged as Teams', async () => {
+    mocked(findInFlightMeetNotetakerCall).mockResolvedValue(null);
+    mocked(db.call.create).mockImplementation(async ({ data }) => data);
+    botClient.post.mockResolvedValue({ status: 202 });
+
+    const { call } = await meetNotetakerService.sendToMeeting({
+      ...input,
+      meetingUrl: 'https://teams.microsoft.com/meet/2345678901234?p=AbCd&utm=x',
+    });
+
+    expect(call).toMatchObject({
+      title: 'Microsoft Teams (2345678901234)',
+      roomLink: 'https://teams.microsoft.com/meet/2345678901234?p=AbCd',
+      metadata: { meetBot: { platform: 'teams', meetingCode: '2345678901234', status: 'requested' } },
+    });
+    expect(findInFlightMeetNotetakerCall).toHaveBeenCalledWith('ws-1', 'https://teams.microsoft.com/meet/2345678901234?p=AbCd');
+    expect(botClient.post).toHaveBeenCalledWith('/sessions', expect.objectContaining({
+      meetingUrl: 'https://teams.microsoft.com/meet/2345678901234?p=AbCd',
+    }));
+  });
+
   it('ends the call as failed when the bot is busy', async () => {
     mocked(findInFlightMeetNotetakerCall).mockResolvedValue(null);
     mocked(db.call.create).mockImplementation(async ({ data }) => data);
@@ -226,6 +243,16 @@ describe('startBotRoom', () => {
     expect(data.metadata.meetBot.status).toBe('in_call');
     expect(livekitService.generateAccessToken).toHaveBeenCalledWith(
       expect.objectContaining({ userIdentity: 'meet-bot-call-id', userName: 'Google Meet', roomName: 'room-1' }),
+    );
+  });
+
+  it("names the bot's default participant after the meeting's platform", async () => {
+    mocked(findMeetNotetakerCall).mockResolvedValue(
+      botCall({ metadata: { meetBot: { status: 'joining', platform: 'teams', meetingCode: '123', updatedAt: 'x' } } }),
+    );
+    await meetNotetakerService.startBotRoom('room-1');
+    expect(livekitService.generateAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({ userName: 'Microsoft Teams', metadata: JSON.stringify({ source: 'teams' }) }),
     );
   });
 
