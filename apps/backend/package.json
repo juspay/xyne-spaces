@@ -156,7 +156,7 @@
     "socket.io": "^4.8.1",
     "sudo-query": "^1.0.0",
     "superposition-provider": "^0.117.2",
-    "undici": "7.28.0",
+    "undici": "6.29.1",
     "unified": "^11.0.5",
     "unzipper": "^0.12.3",
     "uuid": "^9.0.1",
