@@ -41,6 +41,38 @@ export class NoteTakerCallRepository {
     return DatabaseClient.getInstance();
   }
 
+  /**
+   * First join of a recording whose PENDING row /initiate wrote: flip it live.
+   * Mirrors createCall's metadata so downstream readers see no difference.
+   */
+  async activatePendingCall(params: {
+    call: Call;
+    notesCanvasId: string;
+    detailedSummaryCanvasId: string;
+    now: Date;
+  }): Promise<Call> {
+    const { call, notesCanvasId, detailedSummaryCanvasId, now } = params;
+    const metadata: NoteTakerCallMetadata = {
+      notesCanvasId,
+      detailedSummaryCanvasId,
+      detailedSummaryReady: false,
+      detailedSummaryStatus: 'pending',
+    };
+    return this.db.call.update({
+      where: { id: call.id, status: CallStatus.PENDING },
+      data: {
+        status: CallStatus.ACTIVE,
+        recordingParticipants: JSON.stringify([call.createdByUserId]),
+        startedAt: now,
+        lastActivityAt: now,
+        metadata: {
+          ...((call.metadata as Prisma.InputJsonObject | null) ?? {}),
+          ...(metadata as Prisma.InputJsonObject),
+        },
+      },
+    });
+  }
+
   async createCall(params: CreateNoteTakerCallParams): Promise<Call> {
     const { callId, roomName, workspaceId, createdBy, notesCanvasId, detailedSummaryCanvasId, roomLink, now } = params;
 

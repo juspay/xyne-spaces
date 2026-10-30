@@ -1,5 +1,10 @@
 import { setup, assign, createActor, fromCallback, fromPromise } from 'xstate';
-import type { SdlcCallLink } from '@xyne/shared';
+import type { CallEncryptionCredentials, SdlcCallLink } from '@xyne/shared';
+import {
+  applyRoomEncryption,
+  attachRoomEncryption,
+  createRoomEncryptionOptions,
+} from '../utils/callEncryption';
 import {
   Room,
   RoomEvent as LiveKitRoomEvent,
@@ -211,6 +216,8 @@ export interface RoomContext {
   room: Room | null;
   token: string | null;
   serverUrl: string | null;
+  /** Media key of an end-to-end encrypted call; null for an unencrypted one. Never logged. */
+  encryption: CallEncryptionCredentials | null;
   callType: CallType;
   participants: ParticipantInfo[];
   connectionState: ConnectionState;
@@ -315,6 +322,8 @@ export type RoomMachineEvent =
       type: 'CONNECT';
       token: string;
       serverUrl: string;
+      /** Omitted = keep what a prior join stored; null = unencrypted. */
+      encryption?: CallEncryptionCredentials | null;
       callType: CallType;
       externalId: string;
       zero: Zero | null;
@@ -447,6 +456,7 @@ export type RoomMachineEvent =
 const buildCallWindowHandoff = (context: RoomContext): CallWindowHandoff => ({
   token: context.token ?? '',
   serverUrl: context.serverUrl ?? '',
+  encryption: context.encryption,
   callType: context.callType,
   externalId: context.externalId ?? '',
   callId: context.callId,
@@ -511,6 +521,7 @@ export const roomMachine = setup({
           externalId: result.externalId ?? null,
           token: result.token,
           livekitUrl: result.livekitUrl ?? null,
+          encryption: result.encryption ?? null,
           callType,
           roomLink: result.roomLink ?? null,
           channelId: result.channelId ?? null,
@@ -539,6 +550,7 @@ export const roomMachine = setup({
         externalId: result.externalId ?? callId,
         token: result.token,
         livekitUrl: result.livekitUrl ?? '',
+        encryption: result.encryption ?? null,
         callId: callId, // Pass through the externalId for DB writes
         roomLink: result.roomLink ?? null,
         channelId: result.channelId ?? null,
@@ -639,6 +651,20 @@ export const roomMachine = setup({
         // Same for connection state: the Connected event fired before this listener
         // existed, so seed from room.state instead of waiting for the next event.
         sendBack({ type: 'CONNECTION_STATE_CHANGED', state: room.state });
+
+        // A participant whose frames cannot be decrypted is silence and black video,
+        // not an error dialog from LiveKit; surface it so the user knows to rejoin.
+        room.on(LiveKitRoomEvent.EncryptionError, (error: Error) => {
+          logger.error(Event.LIVEKIT_ROOM_EVENT, {
+            callId,
+            eventName: 'encryption_error',
+            error: error.message,
+          });
+          toast.error('Could not decrypt this call', {
+            id: `encryption-error-${callId}`,
+            description: 'Media from a participant could not be decrypted. Try rejoining the call.',
+          });
+        });
 
         room.on(LiveKitRoomEvent.Reconnecting, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Reconnecting });
@@ -993,6 +1019,7 @@ export const roomMachine = setup({
           room: Room;
           token: string;
           serverUrl: string;
+          encryption: CallEncryptionCredentials | null;
           callType: CallType;
           externalId: string;
           roomLink?: string;
@@ -1017,6 +1044,7 @@ export const roomMachine = setup({
           room,
           token,
           serverUrl,
+          encryption,
           callType,
           externalId,
           roomLink,
@@ -1042,6 +1070,7 @@ export const roomMachine = setup({
           reactNativeBridge.livekitConnect({
             token,
             serverUrl,
+            ...(encryption && { encryption }),
             callType: callType,
             externalId,
             ...(roomLink && { roomLink }),
@@ -1097,6 +1126,12 @@ export const roomMachine = setup({
           websocketTimeout: 8000,
           peerConnectionTimeout: 8000,
         };
+
+        // The key must be in the provider before the first frame goes out or comes in.
+        if (encryption) {
+          await applyRoomEncryption(room, encryption);
+          logRoomMachineEvent(externalId, 'encryption_enabled', { keyIndex: encryption.keyIndex });
+        }
 
         const MAX_RETRIES = 5;
 
@@ -1324,9 +1359,12 @@ export const roomMachine = setup({
         const screenShareQuality =
           CALL_MEDIA_QUALITY_CONFIG[mediaQualitySettings.screenShareQuality];
 
+        // `encryption` (not the deprecated `e2ee`) so data messages are encrypted too.
+        const encryptionOptions = context.encryption ? createRoomEncryptionOptions() : null;
         const room = new Room({
           adaptiveStream: false,
           dynacast: true,
+          ...(encryptionOptions && { encryption: encryptionOptions }),
           videoCaptureDefaults: {
             resolution: {
               width: videoQuality.width,
@@ -1352,6 +1390,7 @@ export const roomMachine = setup({
             degradationPreference: 'maintain-resolution',
           },
         });
+        if (encryptionOptions) attachRoomEncryption(room, encryptionOptions);
         return room;
       },
     }),
@@ -1477,6 +1516,12 @@ export const roomMachine = setup({
     storeConnectionParams: assign({
       token: ({ event }) => (event.type === 'CONNECT' ? event.token : null),
       serverUrl: ({ event }) => (event.type === 'CONNECT' ? event.serverUrl : null),
+      encryption: ({ event, context }) =>
+        event.type === 'CONNECT'
+          ? event.encryption === undefined
+            ? context.encryption
+            : event.encryption
+          : null,
       callType: ({ event }) => (event.type === 'CONNECT' ? event.callType : CallType.VIDEO),
       externalId: ({ event }) => (event.type === 'CONNECT' ? event.externalId : null),
       zero: ({ event }) => (event.type === 'CONNECT' ? event.zero : null),
@@ -1780,6 +1825,7 @@ export const roomMachine = setup({
     room: null,
     token: null,
     serverUrl: null,
+    encryption: null,
     callType: CallType.VIDEO,
     participants: [],
     connectionState: ConnectionState.Disconnected,
@@ -2029,6 +2075,7 @@ export const roomMachine = setup({
                 externalId: ({ event }) => event.output.externalId ?? null,
                 token: ({ event }) => event.output.token ?? null,
                 serverUrl: ({ event }) => event.output.livekitUrl ?? null,
+                encryption: ({ event }) => event.output.encryption ?? null,
                 callType: ({ event, context }) => event.output.callType ?? context.callType,
                 roomLink: ({ event }) => event.output.roomLink ?? null,
                 channelId: ({ event }) => event.output.channelId ?? null,
@@ -2088,6 +2135,7 @@ export const roomMachine = setup({
                 externalId: ({ event }) => event.output.externalId ?? null,
                 token: ({ event }) => event.output.token ?? null,
                 serverUrl: ({ event }) => event.output.livekitUrl ?? null,
+                encryption: ({ event }) => event.output.encryption ?? null,
                 callId: ({ event }) => event.output.callId ?? null,
                 roomLink: ({ event }) => event.output.roomLink ?? null,
                 channelId: ({ event }) => event.output.channelId || null,
@@ -2147,6 +2195,7 @@ export const roomMachine = setup({
           room: context.room!,
           token: context.token!,
           serverUrl: context.serverUrl!,
+          encryption: context.encryption,
           callType: context.callType,
           externalId: context.externalId || '',
           ...(context.roomLink && { roomLink: context.roomLink }),

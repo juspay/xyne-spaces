@@ -225,6 +225,9 @@ const envSchema = Joi.object({
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
+  // 32 random bytes, base64. Master secret that per-call end-to-end encryption keys
+  // are derived from (callEncryptionService). Empty = encryption cannot be enabled.
+  CALL_E2EE_MASTER_KEY: Joi.string().allow('').base64().default(''),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
@@ -1047,6 +1050,7 @@ export const config = {
     url: envVars.LIVEKIT_URL,
     clientUrl: envVars.LIVEKIT_CLIENT_URL,
     serverUrl: envVars.LIVEKIT_SERVER_URL,
+    e2eeMasterKey: envVars.CALL_E2EE_MASTER_KEY as string,
   },
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,

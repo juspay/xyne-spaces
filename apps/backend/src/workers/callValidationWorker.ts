@@ -3,6 +3,7 @@ import { Call } from '@prisma/client';
 import { CallStatus, CallOrigin } from '@xyne/shared';
 import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
+import { PENDING_CALL_TTL_MS } from '@/database/repositories/callRepository';
 import { recurringCallService } from '@/services/recurringCallService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
@@ -98,6 +99,7 @@ export class CallValidationWorker {
       await Promise.all([
         this.validateLiveActiveCalls(),
         this.cleanupStaleScheduledCalls(),
+        this.cleanupStalePendingCalls(),
         this.failStalePendingSummaries(),
         this.clearStaleInCallUsers(),
         this.markStrandedParticipantsAsLeft(),
@@ -170,6 +172,37 @@ export class CallValidationWorker {
       }
     } catch (error) {
       logger.error('[CallValidationWorker] Error cleaning up stale scheduled calls:', error);
+    }
+  }
+
+  /**
+   * A PENDING row is normally activated by the first participant_joined or
+   * cancelled by room_finished. If neither webhook arrived, retire it here once
+   * it is older than PENDING_CALL_TTL_MS and its room has nobody in it.
+   */
+  private async cleanupStalePendingCalls(): Promise<void> {
+    try {
+      const staleBefore = new Date(Date.now() - PENDING_CALL_TTL_MS);
+      const staleCalls = await repositories.calls.findStalePendingCalls(STALE_SCHEDULED_BATCH_SIZE, staleBefore);
+      if (staleCalls.length === 0) return;
+
+      const roomInfos = await livekitService.listRooms(staleCalls.map(call => call.externalId));
+      const occupiedRooms = new Set(
+        roomInfos.filter(room => room.numParticipants > 0).map(room => room.name as string),
+      );
+
+      for (const call of staleCalls) {
+        if (occupiedRooms.has(call.externalId)) {
+          // Someone is in the room; participant_joined will activate it.
+          continue;
+        }
+        const cancelled = await repositories.calls.cancelPendingCall(call.id, new Date());
+        if (cancelled) {
+          logger.info(`[CallValidationWorker] Cancelled stale pending call ${call.externalId}`);
+        }
+      }
+    } catch (error) {
+      logger.error('[CallValidationWorker] Error cleaning up stale pending calls:', error);
     }
   }
 

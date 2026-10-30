@@ -24,6 +24,7 @@ router.post('/initiate', callController.initiateCall);
 // or not. The per-user call ACL would hide an uninvited call and answer 404, so the
 // handler's lookups run at workspace scope. joinCall still checks the workspace itself.
 router.post('/join', workspaceScopedRoute, callController.joinCall);
+router.get('/:callId/encryption-key', workspaceScopedRoute, callController.getCallEncryptionKey);
 router.post('/schedule', scheduleCallController.scheduleCall);
 
 // Recordings endpoints (HEADLESS calls)

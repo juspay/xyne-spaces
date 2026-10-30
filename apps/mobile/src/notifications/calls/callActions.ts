@@ -274,6 +274,7 @@ export async function acceptIncomingCall(
       callId: payload.callId,
       token: credentials.token,
       serverUrl: credentials.livekitUrl,
+      ...(credentials.encryption ? { encryption: credentials.encryption } : {}),
       ...(credentials.channelId ? { channelId: credentials.channelId } : {}),
       callType: payload.callType,
       viewMode: 'full',

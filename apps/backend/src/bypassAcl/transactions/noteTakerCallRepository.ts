@@ -177,6 +177,15 @@ export function handleRoomFinishedTx(self: NoteTakerCallRepository, callExternal
       return { shouldEndCall: false, call };
     }
 
+    // The recorder never joined: nothing was posted, so just retire the row.
+    if (call.status === CallStatus.PENDING) {
+      await tx.call.update({
+        where: { id: call.id },
+        data: { status: CallStatus.CANCELLED, endedAt },
+      });
+      return { shouldEndCall: false, call };
+    }
+
     await tx.call.update({
       where: { id: call.id },
       data: { status: CallStatus.ENDED, endedAt },

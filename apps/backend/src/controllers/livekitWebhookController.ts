@@ -6,6 +6,7 @@ import { type Call } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { getCallIntent } from '@/database/repositories/callRepository';
 import { v4 as uuidv4 } from 'uuid';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { livekitWebhookACL } from './livekitWebhookACL';
@@ -179,30 +180,22 @@ export class LiveKitWebhookController {
 
   /**
    * Determine whether a webhook event belongs to a NOTE_TAKER (HEADLESS) room.
-   * Prefers the DB row (authoritative once the call exists); falls back to the
-   * room metadata for events that arrive before the Call row is created
-   * (room_started, and the very first participant_joined).
+   * Decided from the Call row alone, which /initiate writes before the room
+   * exists; room metadata is never consulted. Unknown rooms fall through to the
+   * channel handlers, which drop them.
    */
   private async isNoteTakerRoom(event: WebhookEvent): Promise<boolean> {
     const roomName = event.room?.name;
     if (!roomName) return false;
 
     const call = await repositories.calls.findByExternalId(roomName);
-    if (call) return call.callType === CallType.HEADLESS;
-
-    if (!event.room?.metadata) return false;
-    try {
-      const metadata = JSON.parse(event.room.metadata) as Record<string, unknown>;
-      return metadata.callType === CallType.HEADLESS;
-    } catch {
-      return false;
-    }
+    return call?.callType === CallType.HEADLESS;
   }
 
   /**
    * Handle room_started event
    * Called when a room is first created and becomes active
-   * 
+   *
    * Note: We only log this event. All DB operations happen when the first participant joins.
    */
   private async handleRoomStarted(event: WebhookEvent): Promise<void> {
@@ -212,7 +205,6 @@ export class LiveKitWebhookController {
     logger.info(`[LiveKit Webhook] Room started: ${roomName}`, {
       sid: event.room?.sid,
       creationTime: event.room?.creationTime ? Number(event.room.creationTime) : undefined,
-      metadata: event.room?.metadata,
     });
   }
 
@@ -391,67 +383,37 @@ export class LiveKitWebhookController {
     }
 
     try {
-      // Check if call record already exists
       let call = await repositories.calls.findByExternalId(roomName);
-      const callNotExist = !call;
 
-      // If call doesn't exist, this is the first participant - create everything using repository
-      if (callNotExist) {
-        logger.info(`[LiveKit Webhook] First participant joined - creating call record for ${roomName}`);
+      // Only the backend creates Call rows (/initiate, scheduling, automations). An
+      // event for a room it never created is dropped: whoever holds the LiveKit API
+      // secret can sign webhooks and edit room metadata, so neither is trusted as intent.
+      if (!call) {
+        logger.warn('[LiveKit Webhook] unknown_room_dropped', {
+          room: roomName,
+          participant: participant.identity,
+        });
+        return;
+      }
 
-        // Parse room metadata to get channel info
-        // Unguarded JSON.parse would throw into the outer catch with no stage context.
-        let roomMetadata: Record<string, any>;
-        try {
-          roomMetadata = event.room?.metadata ? JSON.parse(event.room.metadata) : {};
-        } catch (parseError) {
-          logger.error('[LiveKit Webhook] metadata_parse_failed', {
-            stage: 'metadata_parse',
-            room: roomName,
-            raw_metadata: (event.room?.metadata ?? '').substring(0, 200),
-            error: parseError,
-          });
+      // First join of a PENDING call: activate it from the intent /initiate persisted.
+      if (call.status === CallStatus.PENDING) {
+        const pendingCall = call;
+        const intent = getCallIntent(pendingCall);
+        if (!intent?.channelId) {
+          logger.error('[LiveKit Webhook] pending_call_missing_intent', { room: roomName, call_id: pendingCall.id });
           return;
         }
-        const channelId = roomMetadata.channelId;
-        const createdBy = roomMetadata.createdBy || participant.identity;
-        const callType = roomMetadata.callType;
-        const callOrigin = roomMetadata.callOrigin;
-        const existingConversationId = roomMetadata.conversationId;
-        const artifactMessageId = roomMetadata.artifactMessageId;
-        const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
-        const agentName = typeof roomMetadata.agentName === 'string' ? roomMetadata.agentName : undefined;
+        logger.info(`[LiveKit Webhook] First participant joined - activating pending call ${roomName}`);
 
-        if (!channelId) {
-          logger.error(`[LiveKit Webhook] Missing channelId in room metadata for ${roomName}`);
-          return;
-        }
-
-        // ACL Validation: Verify permissions for call creation
-        // A DB timeout inside canCreateCall would fall into the outer catch with no stage label.
-        let aclCheck: Awaited<ReturnType<typeof livekitWebhookACL.canCreateCall>>;
-        try {
-          aclCheck = await livekitWebhookACL.canCreateCall({
-            channelId,
-            createdBy,
-            joiningUserId: participant.identity,
-          });
-        } catch (aclError) {
-          logger.error('[LiveKit Webhook] acl_check_failed', {
-            stage: 'acl_validation',
-            room: roomName,
-            channel: channelId,
-            error: aclError,
-          });
-          return;
-        }
-
-        if (!aclCheck.valid) {
-          logger.error(`[LiveKit Webhook] ACL validation failed: ${aclCheck.reason}`);
-          return;
-        }
-
-        logger.info(`[LiveKit Webhook] ACL validation passed for call creation: channel=${channelId}, creator=${createdBy}, joiner=${participant.identity}`);
+        const channelId = intent.channelId;
+        const createdBy = intent.createdBy;
+        const callType = intent.callType;
+        const callOrigin = intent.callOrigin;
+        const existingConversationId = intent.conversationId;
+        const artifactMessageId = intent.artifactMessageId;
+        const invitedUserIds = intent.invitedUserIds; // Selected participants for conversation calls
+        const agentName = intent.agentName;
 
         // Get channel participants for creating participant records
         let participantsToInvite: Array<{ userId: string }>;
@@ -480,24 +442,18 @@ export class LiveKitWebhookController {
 
         const conversationId = existingConversationId || uuidv4();
         const messageId = uuidv4();
-        const callId = uuidv4();
+        const callId = pendingCall.id;
+        const roomLink = pendingCall.roomLink ?? buildCallInviteUrl(roomName);
 
-        // Construct room link
-        const roomLink = buildCallInviteUrl(roomName);
-
-        // Use repository method to create call with all related records atomically
-        // If this transaction fails the LiveKit room is already live with no DB record — a
-        // "ghost room". Catch it specifically so the log contains the room name and explicit
-        // ghost_room_detected marker rather than the generic 'Error handling participant join'.
-        const channelRecord = await this.db.channel.findUnique({
-          where: { id: channelId },
-          select: { workspaceId: true },
-        });
+        // Activate the pending row and create participants, conversation and system
+        // message atomically. If this transaction fails the LiveKit room is live with a
+        // row still PENDING — room_finished or the stale sweep cancels it later.
+        const channelRecord = { workspaceId: pendingCall.workspaceId };
         const result = await repositories.calls.createCallWithParticipantsAndMessage({
           callId,
           roomName,
           channelId,
-          workspaceId: channelRecord?.workspaceId,
+          workspaceId: pendingCall.workspaceId,
           createdBy,
           callType,
           roomLink,
@@ -510,18 +466,14 @@ export class LiveKitWebhookController {
           ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
           agentName,
           dispatchStatus: agentName ? 'dispatched' : undefined,
+          pendingCall,
         }).catch((txError) => {
-          logger.error('[LiveKit Webhook] call_record_creation_failed', {
-            stage: 'call_record_creation',
+          logger.error('[LiveKit Webhook] call_activation_failed', {
+            stage: 'call_activation',
             room: roomName,
             channel: channelId,
+            call_id: callId,
             error: txError,
-          });
-          logger.error('[LiveKit Webhook] ghost_room_detected', {
-            room: roomName,
-            livekit_room_is_live: true,
-            no_db_record: true,
-            action: 'manual_cleanup_may_be_required',
           });
           return null;
         });
@@ -534,11 +486,7 @@ export class LiveKitWebhookController {
         // and its conversation exist, record the entity mapping. Owner is a
         // canvas or a track — either way the same two links are written:
         //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
-        const sdlcLink = (
-          roomMetadata as {
-            sdlcLink?: { ownerType?: string; ownerId?: string };
-          }
-        ).sdlcLink;
+        const sdlcLink = intent.sdlcLink;
         if (sdlcLink?.ownerType && sdlcLink.ownerId) {
           try {
             const linkWorkspaceId = channelRecord?.workspaceId ?? null;
@@ -675,7 +623,7 @@ export class LiveKitWebhookController {
           logger.info(`[LiveKit Webhook] Emitted call-started automation event for ${roomName}`);
         }
 
-        logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
+        logger.info(`[LiveKit Webhook] Successfully activated call ${roomName} for its first participant`);
 
         // Disabled (LLM)
         // // Generate title from thread call
@@ -706,7 +654,7 @@ export class LiveKitWebhookController {
             })
           );
         }
-      } else if (call) {
+      } else {
         // If it's a scheduled call, activate it FIRST
         if (call.status === CallStatus.SCHEDULED) {
           // ── Scheduled call activation ──────────────────────────────────────────

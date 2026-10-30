@@ -110,7 +110,56 @@ export interface CallMetadata {
   googleCalendarPush?: GoogleCalendarPushState;
   /** The call's channel pill. Separate from `systemMessageId`, which activation owns. */
   channelPillMessageId?: string;
+  /** What /initiate asked for; the webhook activates from this, never from LiveKit room metadata. */
+  intent?: CallIntent;
+  /** End-to-end encryption state fixed at creation. Absent = unencrypted call. */
+  e2ee?: CallEncryptionState;
 }
+
+/**
+ * Everything the webhook needs to turn a PENDING row into a live call. Written by
+ * /initiate on the Call row itself so a party holding the LiveKit API secret cannot
+ * forge it through room metadata or a signed webhook.
+ */
+export interface CallIntent {
+  createdBy: string;
+  workspaceId: string;
+  callType: CallType;
+  callOrigin?: CallOrigin;
+  channelId?: string;
+  conversationId?: string;
+  artifactMessageId?: string;
+  invitedUserIds?: string[];
+  sdlcLink?: { ownerType: string; ownerId: string };
+  agentName?: string;
+  // NOTE_TAKER (HEADLESS) recordings
+  notesCanvasId?: string;
+  detailedSummaryCanvasId?: string;
+  recordingType?: string;
+}
+
+export interface CallEncryptionState {
+  enabled: boolean;
+  /** Key ring index the call is currently on. Rotation increments it; frames carry it. */
+  keyIndex: number;
+}
+
+export const getCallIntent = (call: Pick<Call, 'metadata'>): CallIntent | undefined =>
+  (call.metadata as CallMetadata | null)?.intent;
+
+export const getCallEncryptionState = (
+  call: Pick<Call, 'metadata'>,
+): CallEncryptionState | undefined => (call.metadata as CallMetadata | null)?.e2ee;
+
+/** A PENDING row older than this with no participant is swept to CANCELLED. */
+export const PENDING_CALL_TTL_MS = 10 * 60 * 1000;
+/** A second /initiate in this window joins the pending room instead of creating another. */
+const PENDING_CALL_DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+
+const activeOrFreshPending = (): Prisma.CallWhereInput[] => [
+  { status: CallStatus.ACTIVE },
+  { status: CallStatus.PENDING, createdAt: { gte: new Date(Date.now() - PENDING_CALL_DEDUPE_WINDOW_MS) } },
+];
 
 const getArtifactMessageId = (metadata: Prisma.JsonValue | null): string | undefined =>
   (metadata as CallMetadata | null)?.artifactMessageId;
@@ -200,12 +249,13 @@ export class CallRepository {
     queueCallVespaFeed(id, { source: CallVespaFeedSource.CallRepositorySetRecordingUrl });
   }
 
+  /** ACTIVE, or PENDING and recent enough that a second /initiate should join it. */
   async findActiveCallByChannelId(channelId: string): Promise<Call | null> {
     const result = await DatabaseClient.getInstance().call.findFirst({
       where: {
         channelId,
-        status: CallStatus.ACTIVE,
         callOrigin: CallOrigin.CHANNEL,
+        OR: activeOrFreshPending(),
       },
       orderBy: {
         startedAt: 'desc'
@@ -222,18 +272,91 @@ export class CallRepository {
     const result = await DatabaseClient.getInstance().call.findFirst({
       where: {
         channelId,
-        status: CallStatus.ACTIVE,
         callOrigin: CallOrigin.CONVERSATION,
         metadata: {
           path: ['conversationId'],
           equals: conversationId
-        }
+        },
+        OR: activeOrFreshPending(),
       },
       orderBy: {
         startedAt: 'desc'
       }
     });
     return result;
+  }
+
+  /**
+   * The call row /initiate writes before the LiveKit room exists. Carries the
+   * intent the webhook activates from; participants, the conversation and the
+   * system message are created at activation so nothing is posted unless
+   * someone actually joins.
+   */
+  async createPendingCall(params: {
+    id: string;
+    externalId: string;
+    workspaceId: string;
+    createdByUserId: string;
+    channelId: string | null;
+    callType: CallType;
+    callOrigin: CallOrigin;
+    roomLink: string;
+    intent: CallIntent;
+    e2ee?: CallEncryptionState;
+    now: Date;
+  }): Promise<Call> {
+    const { id, externalId, workspaceId, createdByUserId, channelId, callType, callOrigin, roomLink, intent, e2ee, now } = params;
+    const metadata: CallMetadata = {
+      intent,
+      ...(intent.conversationId && { conversationId: intent.conversationId }),
+      ...(intent.artifactMessageId && { artifactMessageId: intent.artifactMessageId }),
+      ...(e2ee && { e2ee }),
+    };
+    return DatabaseClient.getInstance().call.create({
+      data: {
+        id,
+        externalId,
+        workspaceId,
+        createdByUserId,
+        channelId,
+        callType,
+        callOrigin,
+        status: CallStatus.PENDING,
+        roomLink,
+        timezone: 'UTC',
+        isRecurring: false,
+        recordingEnabled: callType === CallType.HEADLESS,
+        startedAt: now,
+        lastActivityAt: now,
+        metadata: metadata as unknown as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  /** Rollback for a PENDING row whose LiveKit room was never created. */
+  async deletePendingCall(id: string): Promise<void> {
+    await DatabaseClient.getInstance().call.deleteMany({
+      where: { id, status: CallStatus.PENDING },
+    });
+  }
+
+  /** A PENDING row nobody joined: the room timed out or the webhook never came. */
+  async cancelPendingCall(id: string, endedAt: Date): Promise<boolean> {
+    const { count } = await DatabaseClient.getInstance().call.updateMany({
+      where: { id, status: CallStatus.PENDING },
+      data: { status: CallStatus.CANCELLED, endedAt },
+    });
+    return count > 0;
+  }
+
+  async findStalePendingCalls(take: number, createdBefore: Date): Promise<Call[]> {
+    return DatabaseClient.getInstance().call.findMany({
+      where: {
+        status: CallStatus.PENDING,
+        createdAt: { lt: createdBefore },
+      },
+      take,
+    });
   }
 
   /**
@@ -1389,9 +1512,11 @@ export class CallRepository {
       now: Date;
       callOrigin?: CallOrigin;
       artifactMessageId?: string;
-      /** Transcription agent this call was pinned to at creation time (from room metadata). */
+      /** Transcription agent this call was pinned to at creation time. */
       agentName?: string;
       dispatchStatus?: string;
+      /** The PENDING row /initiate wrote. When set, it is activated in place instead of a new row being created. */
+      pendingCall?: Call;
     }
   ): Promise<{ call: Call; invitedParticipantIds: string[] }> {
     const {
@@ -1411,6 +1536,7 @@ export class CallRepository {
       artifactMessageId,
       agentName,
       dispatchStatus,
+      pendingCall,
     } = params;
 
     const isHeadless = callType === CallType.HEADLESS;
@@ -1418,7 +1544,7 @@ export class CallRepository {
     // Prefer the caller-supplied workspaceId, else derive from the call's channel.
     const wsId = workspaceId ?? await repositories.channels.getWorkspaceId(channelId);
 
-    const result = await createCallWithParticipantsAndMessageTx(callId, roomName, wsId, createdBy, channelId, workspaceId, callType, roomLink, isHeadless, now, callOrigin, messageId, conversationId, artifactMessageId, agentName, dispatchStatus, this, channelParticipants, joiningUserId);
+    const result = await createCallWithParticipantsAndMessageTx(callId, roomName, wsId, createdBy, channelId, workspaceId, callType, roomLink, isHeadless, now, callOrigin, messageId, conversationId, artifactMessageId, agentName, dispatchStatus, this, channelParticipants, joiningUserId, pendingCall);
 
     await messageMetadataService.syncInitialMessageMd(conversationId);
 

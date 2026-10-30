@@ -17,6 +17,7 @@ import type { CallLobbyRequest } from '@/types/express';
 // host starts the call land on the pre-join / waiting view instead of being
 // told "call ended".
 const JOINABLE_STATUSES: CallStatus[] = [
+  CallStatus.PENDING,
   CallStatus.SCHEDULED,
   CallStatus.ACTIVE,
   CallStatus.IN_PROGRESS,
