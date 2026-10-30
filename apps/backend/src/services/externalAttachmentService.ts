@@ -3,7 +3,7 @@ import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { decrypt } from './encryptionService';
-import fetch from 'node-fetch';
+import { assertUrlSyntaxSafe, safeFetchFollowingRedirects } from '@/utils/ssrfGuard';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { UploadedFileResult } from '@/services/fileUploadService';
@@ -299,13 +299,14 @@ export class ExternalAttachmentService {
       }
     } else {
       if (!fileUrl) throw new Error(`No URL or buffer for attachment: ${fileName}`);
+      assertUrlSyntaxSafe(fileUrl);
       logger.debug(`Downloading attachment: ${fileName} from ${fileUrl}`);
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
       let response;
       try {
-        response = await fetch(fileUrl, { method: 'GET', headers: authHeaders, signal: controller.signal });
+        response = await safeFetchFollowingRedirects(fileUrl, { method: 'GET', headers: authHeaders, signal: controller.signal });
       } finally {
         clearTimeout(timeoutId);
       }
@@ -315,7 +316,7 @@ export class ExternalAttachmentService {
       if (contentLength && parseInt(contentLength) > maxFileSize) {
         throw new Error(`File too large: ${contentLength} bytes (max: ${maxFileSize})`);
       }
-      buffer = await response.buffer();
+      buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.length > maxFileSize) {
         throw new Error(`File too large: ${buffer.length} bytes (max: ${maxFileSize})`);
       }

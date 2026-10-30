@@ -27,6 +27,9 @@ import { NAMESPACE } from '../../vespa/vespaConfig';
 import { vespaBackfillQueue } from '../../queues/vespaQueue';
 import { syncConversationTicketMdFromPrismaTicket } from '../../utils/ticketMd';
 import { ingestTicketTx } from '@/bypassAcl/transactions/slackJiraffeService';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const bitbotFetch = allowlistedFetch(() => ['bitbot.internal.svc.k8s.office.mum.juspay.net']);
 
 const ENABLE_NOTIFICATIONS = true;
 
@@ -146,7 +149,7 @@ async function fetchTicketsFromBitbot(
     url.searchParams.set('date', syncDate);
   }
 
-  const response = await fetch(url.toString(), {
+  const response = await bitbotFetch(url.toString(), {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });

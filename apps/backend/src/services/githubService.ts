@@ -1,6 +1,7 @@
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { resolveSecret } from '@/config/secretResolver';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 import { ChangeEntry, PullRequestInfo } from '../types/bitbucket';
 import { VcsClient } from '../types/vcs';
 
@@ -73,6 +74,8 @@ export class GitHubService implements VcsClient {
   private readonly MAX_DELAY_MS = 30000;
   // Bound outbound calls so a hung upstream can't pin analysis/webhooks.
   private readonly REQUEST_TIMEOUT_MS = 30000;
+  // Only the configured GitHub API host (api.github.com or the Enterprise host).
+  private readonly apiFetch = allowlistedFetch(() => [this.restBaseUrl]);
 
   constructor(config: GitHubServiceConfig) {
     this.config = config;
@@ -114,7 +117,7 @@ export class GitHubService implements VcsClient {
     }
 
     try {
-      const response = await fetch(this.graphqlUrl, {
+      const response = await this.apiFetch(this.graphqlUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify({ query, variables }),
@@ -235,7 +238,7 @@ export class GitHubService implements VcsClient {
 
     for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
       try {
-        const res = await fetch(url, {
+        const res = await this.apiFetch(url, {
           method: 'GET',
           headers,
           signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),

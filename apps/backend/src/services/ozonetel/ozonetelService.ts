@@ -1,6 +1,7 @@
 import https from 'node:https';
 import { logger } from '@/utils/logger';
 import { ozonetelConfigService } from './ozonetelConfigService';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 export class OzonetelError extends Error {}
 
@@ -72,7 +73,8 @@ export const ozonetelService = {
     if (!cfg) throw new OzonetelError('Ozonetel not configured for workspace');
 
     const subscribeBaseUrl = getSubscribeBaseUrl(cfg.baseUrl);
-    const res = await fetch(`${subscribeBaseUrl}/events/subscribe`, {
+    const res = await safeWebhookFetch(`${subscribeBaseUrl}/events/subscribe`, {
+      redirect: 'manual',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

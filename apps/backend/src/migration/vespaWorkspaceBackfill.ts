@@ -18,6 +18,7 @@ import {
   type VespaSchema,
 } from '@/vespa/src/types';
 import { config as appConfig } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 const router = Router();
 
@@ -26,6 +27,7 @@ const router = Router();
 // 8083, not 8080: y-sweet owns 8080 and MESSAGE_CLASSIFIER_URL uses 8082, so docker-compose.dev.yml publishes
 // Vespa's feed port on 8083 (container-internal port is still 8080).
 const FEED_ENDPOINT = appConfig.vespa.feedUrl;
+const vespaFetch = allowlistedFetch(() => [FEED_ENDPOINT]);
 const VESPA_NAMESPACE = NAMESPACE;
 const VESPA_CLUSTER = CLUSTER;
 
@@ -79,7 +81,7 @@ async function* visitAll(schema: string, batchSize = 100): AsyncGenerator<VespaD
     });
 
     const url = `${FEED_ENDPOINT}/document/v1/${VESPA_NAMESPACE}/${schema}/docid?${params}`;
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const res = await vespaFetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) {
       throw new Error(`Visit ${schema} failed: ${res.status} ${res.statusText}`);
     }

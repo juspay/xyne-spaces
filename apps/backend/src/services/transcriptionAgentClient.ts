@@ -1,6 +1,9 @@
-import axios from 'axios';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch, createHttpClient, isHttpError } from '@/utils/ssrfGuard';
+
+// Only the configured Python transcription agent.
+const agentHttp = createHttpClient(allowlistedFetch(() => [config.pythonAgentUrl]));
 
 /**
  * Client for the Python transcription agent's recording endpoint.
@@ -110,7 +113,7 @@ export class TranscriptionAgentClient {
     );
 
     try {
-      const response = await axios.post<TranscribeRecordingResponse>(
+      const response = await agentHttp.post<TranscribeRecordingResponse>(
         `${pythonAgentUrl}/transcribe-recording`,
         { jobId: input.jobId, recordingUrl: input.recordingUrl, ...(input.language && { language: input.language }) },
         { headers: { 'Content-Type': 'application/json' }, timeout: this.timeoutMs },
@@ -130,7 +133,7 @@ export class TranscriptionAgentClient {
     } catch (error) {
       if (error instanceof TranscriptionAgentError) throw error;
 
-      if (axios.isAxiosError(error)) {
+      if (isHttpError(error)) {
         const status = error.response?.status;
         const body = error.response?.data as { error?: string; code?: string } | undefined;
         const message = body?.error || error.message;

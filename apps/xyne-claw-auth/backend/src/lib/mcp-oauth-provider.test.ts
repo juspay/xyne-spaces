@@ -11,6 +11,7 @@ vi.mock("../db.js", () => ({ prisma: {} }));
 vi.mock("../crypto.js", () => ({ encrypt: () => ({ ciphertext: "c", iv: "i", authTag: "a" }) }));
 vi.mock("../tool-sync.js", () => ({ syncToolsForServer: vi.fn() }));
 vi.mock("../mcp/runner.js", () => ({ evictSession: vi.fn(async () => {}) }));
+vi.mock("./safe-fetch.js", () => ({ safeFetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) }));
 
 process.env["OAUTH_STATE_SECRET"] ||= "test-oauth-state-secret";
 process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);

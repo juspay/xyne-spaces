@@ -1,6 +1,9 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+import { allowlistedFetch, assertWebhookUrlSafe } from '@/utils/ssrfGuard';
+
+/** fetch for a dispatch that resolveAppWebhookUrl rewrote to a trusted in-cluster pod URL. */
+export const internalAppFetch = allowlistedFetch(() => Object.values(config.apps.internalHostMap));
 
 export interface ResolvedAppWebhook {
   url: string;

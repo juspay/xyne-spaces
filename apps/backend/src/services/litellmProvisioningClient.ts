@@ -1,4 +1,11 @@
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// The LiteLLM management API and the claw-auth internal URL.
+const provisioningFetch = allowlistedFetch(() => [
+  config.aiProvisioning.litellmManagementBaseUrl,
+  config.aiProvisioning.xyneClawAuthInternalUrl,
+]);
 
 const USER_MODELS = ['no-default-models'];
 const KEY_MODELS = ['all-team-models'];
@@ -323,7 +330,7 @@ class LiteLLMProvisioningClient {
     );
 
     try {
-      const response = await fetch(params.url, {
+      const response = await provisioningFetch(params.url, {
         method: 'POST',
         headers: params.headers,
         body: JSON.stringify(params.payload),

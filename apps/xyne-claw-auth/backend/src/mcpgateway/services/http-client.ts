@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { isAllowlistedPrivateOrigin } from "../../lib/safe-fetch.js";
+import { isAllowlistedPrivateOrigin, safeFetch } from "../../lib/safe-fetch.js";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -360,15 +360,19 @@ export async function httpRequest<T = unknown>(opts: HttpRequestOptions): Promis
       method: requestMethod,
       redirect: "manual",
     };
-    // NOTE: URL destination is validated before each fetch, but DNS may still
-    // be resolved again by the underlying runtime at connect-time.
+    // safeFetch pins the connection to the validated addresses; redirects stay manual here.
     if (redirectedHeaders) requestInit.headers = redirectedHeaders;
     if (requestBody !== undefined) requestInit.body = requestBody;
     if (timeoutMs) requestInit.signal = AbortSignal.timeout(timeoutMs);
 
     let response: Response;
     try {
-      response = await fetch(url, requestInit);
+      response = await safeFetch(url, requestInit, {
+        maxRedirects: 0,
+        allowLoopbackInDev: true,
+        timeoutMs: timeoutMs ?? 120_000,
+        maxResponseBytes: 50 * 1024 * 1024,
+      });
     } catch (error) {
       if (error instanceof DOMException && error.name === "TimeoutError") {
         throw new HttpRequestError({

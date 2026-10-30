@@ -5,7 +5,10 @@
 
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import axios from 'axios';
+import { allowlistedFetch, createHttpClient, isHttpError } from '@/utils/ssrfGuard';
+
+// Only the configured SAM service.
+const samHttp = createHttpClient(allowlistedFetch(() => [config.sam.baseUrl]));
 
 const CHAT_CONVERSATION_PREFIX = 'conversation_';
 
@@ -116,7 +119,7 @@ async function withRetry<T>(
       lastError = error instanceof Error ? error : new Error(String(error));
 
       // Don't retry on 4xx errors (client errors)
-      if (axios.isAxiosError(error) && error.response?.status && error.response.status >= 400 && error.response.status < 500) {
+      if (isHttpError(error) && error.response?.status && error.response.status >= 400 && error.response.status < 500) {
         throw error;
       }
 
@@ -185,7 +188,7 @@ export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise
     });
 
     const response = await withRetry(
-      () => axios.post(endpoint, payload, {
+      () => samHttp.post(endpoint, payload, {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Basic ${config.sam.apiKey}`,
@@ -214,7 +217,7 @@ export async function sendMeetMetadataToSam(metadata: MeetLinkMetadata): Promise
       zohoTicketId: metadata.zohoTicketId,
     };
 
-    if (axios.isAxiosError(error)) {
+    if (isHttpError(error)) {
       errorDetails.status = error.response?.status;
       errorDetails.statusText = error.response?.statusText;
       errorDetails.responseData = error.response?.data;

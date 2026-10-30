@@ -15,6 +15,7 @@ import type {
 import { VcsProviderError } from './types';
 import { defaultGitRunner, listFirstParentHistoryWithGit, type GitRunner } from './gitHistory';
 import { repositoryHost } from './repositoryHost';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 // Draft pull requests arrived in Bitbucket Data Center 8.18.
@@ -49,6 +50,8 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
   private version: Promise<string | null> | null = null;
   // Keyed by a token hash: counting pages through every repository the token reads.
   private readonly reach = new Map<string, { at: number; value: RepositoryReach }>();
+  // Only this adapter's own Bitbucket host.
+  private readonly apiFetch = allowlistedFetch(() => [this.host]);
 
   constructor(
     readonly host: string,
@@ -465,7 +468,7 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
   ): Promise<{ data: T; response: Response }> {
     let response: Response;
     try {
-      response = await fetch(`https://${this.host}${path}`, {
+      response = await this.apiFetch(`https://${this.host}${path}`, {
         ...init,
         headers: {
           Accept: 'application/json',

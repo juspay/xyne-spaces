@@ -2,6 +2,10 @@ import { BaseStrategy } from "./BaseStrategy"
 import type { ProcessingResult, StrategyConfig } from "../types"
 import { config } from '../../../config/env.js'
 import { logger } from '../../../utils/logger.js'
+import { allowlistedFetch } from '../../../utils/ssrfGuard.js'
+
+// Only the configured LiteLLM / OpenAI-compatible base URL.
+const llmFetch = allowlistedFetch(() => [config.litellm.baseUrl, config.llm.litellmBaseUrl, config.llm.openaiApiBase])
 
 /**
  * Prompt used to turn an image into searchable text. The description is what
@@ -96,7 +100,7 @@ export class ImageDescriptionStrategy extends BaseStrategy {
 
         try {
             logger.info(`[ImageStrategy] Calling LiteLLM for image description (model: ${model}, endpoint: ${endpoint}, docId: ${vespaDocId}, bytes: ${buffer.length})`)
-            const response = await fetch(endpoint, {
+            const response = await llmFetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

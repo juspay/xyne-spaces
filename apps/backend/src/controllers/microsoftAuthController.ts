@@ -9,6 +9,9 @@ import { pkceServiceV2 } from '../services/pkceServiceV2';
 import '../types/express';
 import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const microsoftFetch = allowlistedFetch(() => ['login.microsoftonline.com']);
 import jwt from 'jsonwebtoken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
@@ -1268,7 +1271,7 @@ export class MicrosoftAuthController {
         code_verifier: codeVerifier,
       });
 
-      const tokenResponse = await fetch(
+      const tokenResponse = await microsoftFetch(
         `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`,
         {
           method: 'POST',

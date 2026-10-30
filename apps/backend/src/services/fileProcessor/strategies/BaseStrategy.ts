@@ -3,6 +3,7 @@ import { config } from '../../../config/env.js'
 import { logger } from '../../../utils/logger.js'
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService'
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared'
+import { safeWebhookFetch } from '@/utils/ssrfGuard'
 
 const OUTLINE_MAX_INPUT_CHARS = 40000
 const OUTLINE_MAX_CHUNKS = 40
@@ -76,7 +77,8 @@ export abstract class BaseStrategy {
 
         try {
             logger.info(`[BaseStrategy] Calling LiteLLM for document outline (model: ${model}, endpoint: ${endpoint}, chunks: ${chunks.length}, inputChars: ${textContext.length})`)
-            const response = await fetch(endpoint, {
+            const response = await safeWebhookFetch(endpoint, {
+                redirect: 'manual',
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
