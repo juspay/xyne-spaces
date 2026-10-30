@@ -13,10 +13,7 @@ const canonicalize = (value: string, publicOrigin = PUBLIC_ORIGIN) =>
 
 test('uses the configured public origin when normalizing a retired link', () => {
   assert.equal(
-    canonicalize(
-      'https://public.example.org/chat/dir/channel-1',
-      'https://sandbox.example.org',
-    ),
+    canonicalize('https://public.example.org/chat/dir/channel-1', 'https://sandbox.example.org'),
     'https://sandbox.example.org/chat/dir/channel-1',
   );
 });
@@ -38,9 +35,7 @@ test('canonicalizes workspace-scoped deep links while preserving the workspace, 
   // Workspace-prefixed call link on a retired origin (the shape that previously
   // slipped past the `startsWith('/call/')` gate and failed to open in-app).
   assert.equal(
-    canonicalize(
-      'https://app.example.org/ws-42/call/call-9?type=VIDEO#src=notif',
-    ),
+    canonicalize('https://app.example.org/ws-42/call/call-9?type=VIDEO#src=notif'),
     'https://example.org/ws-42/call/call-9?type=VIDEO#src=notif',
   );
   // Workspace-prefixed chat link, honoring the configured target origin.
@@ -71,10 +66,7 @@ test('canonicalizes the workspace + project scoped link shape the web app emits'
 });
 
 test('does not reintroduce the retired custom scheme or rewrite unrelated URLs', () => {
-  assert.equal(
-    canonicalize('lotus://chat/dir/channel-1'),
-    'lotus://chat/dir/channel-1',
-  );
+  assert.equal(canonicalize('lotus://chat/dir/channel-1'), 'lotus://chat/dir/channel-1');
   assert.equal(
     canonicalize('https://app.example.org/apps/downloads'),
     'https://app.example.org/apps/downloads',

@@ -23,8 +23,8 @@ const CONTACT_SECTIONS: LegalSection[] =
               kind: 'paragraph',
               text: (
                 <>
-                  For any questions, requests, or grievances relating to this Privacy Policy or
-                  the processing of your Personal Data, you may contact us at{' '}
+                  For any questions, requests, or grievances relating to this Privacy Policy or the
+                  processing of your Personal Data, you may contact us at{' '}
                   {CONTACT_EMAILS.map((email, index) => (
                     <Fragment key={email}>
                       {index > 0 ? ' or ' : ''}

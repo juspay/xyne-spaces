@@ -27,8 +27,7 @@ const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 const ELECTRON_BACKEND_URL =
   import.meta.env['VITE_ELECTRON_BACKEND_URL'] || 'http://localhost:3001';
 const ELECTRON_BACKEND_ZERO_URL =
-  import.meta.env['VITE_ELECTRON_ZERO_BACKEND_URL'] ||
-  'http://localhost:4848';
+  import.meta.env['VITE_ELECTRON_ZERO_BACKEND_URL'] || 'http://localhost:4848';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 

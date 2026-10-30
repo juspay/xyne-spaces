@@ -18,10 +18,7 @@ describe('WebView security policies', (): void => {
   it('accepts only the exact dashboard origin, including its effective port', (): void => {
     assert.equal(isTrustedWebViewOrigin(`${dashboardOrigin}/workspace/1`, dashboardOrigin), true);
     assert.equal(
-      isTrustedWebViewOrigin(
-        'https://app.example.org.evil.example/workspace/1',
-        dashboardOrigin,
-      ),
+      isTrustedWebViewOrigin('https://app.example.org.evil.example/workspace/1', dashboardOrigin),
       false,
     );
     assert.equal(
@@ -29,10 +26,7 @@ describe('WebView security policies', (): void => {
       false,
     );
     assert.equal(
-      isTrustedWebViewOrigin(
-        'https://user:pass@app.example.org/workspace/1',
-        dashboardOrigin,
-      ),
+      isTrustedWebViewOrigin('https://user:pass@app.example.org/workspace/1', dashboardOrigin),
       false,
     );
     assert.equal(isTrustedWebViewOrigin('javascript:alert(1)', dashboardOrigin), false);
