@@ -45,10 +45,7 @@ describe('mTLS transport destination policy', () => {
       isApprovedTransportDestination('https://app.example.org.evil.test/', API_ORIGIN),
       false,
     );
-    assert.equal(
-      isApprovedTransportDestination('https://app.example.org:444/', API_ORIGIN),
-      false,
-    );
+    assert.equal(isApprovedTransportDestination('https://app.example.org:444/', API_ORIGIN), false);
     assert.equal(
       isApprovedTransportDestination('https://attacker.test/collect', API_ORIGIN),
       false,
@@ -56,10 +53,7 @@ describe('mTLS transport destination policy', () => {
   });
 
   it('rejects cleartext and credentials on non-loopback destinations', () => {
-    assert.equal(
-      isApprovedTransportDestination('http://app.example.org/api', API_ORIGIN),
-      false,
-    );
+    assert.equal(isApprovedTransportDestination('http://app.example.org/api', API_ORIGIN), false);
     assert.equal(
       isApprovedTransportDestination(
         `https://user:pass@${new URL(API_ORIGIN).host}/api`,

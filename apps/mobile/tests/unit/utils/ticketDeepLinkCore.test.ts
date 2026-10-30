@@ -103,10 +103,7 @@ describe('ticket deep-link contract', (): void => {
       null,
     );
     assert.equal(
-      parseTicketDeepLinkCore(
-        'https://example.org/a/b/c/chat/dir/c1/v1/t1',
-        TRUSTED_ORIGINS,
-      ),
+      parseTicketDeepLinkCore('https://example.org/a/b/c/chat/dir/c1/v1/t1', TRUSTED_ORIGINS),
       null,
     );
     assert.equal(

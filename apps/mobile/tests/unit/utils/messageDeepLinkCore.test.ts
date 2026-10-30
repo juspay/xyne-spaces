@@ -21,10 +21,7 @@ describe('message deep-link contract', (): void => {
       surface: 'dms',
       scopeType: 'DM',
     });
-    const parsed = parseMessageDeepLinkCore(
-      `https://example.org/${relative}`,
-      TRUSTED_ORIGINS,
-    );
+    const parsed = parseMessageDeepLinkCore(`https://example.org/${relative}`, TRUSTED_ORIGINS);
 
     assert.deepEqual(parsed, {
       channelId: 'channel 1',
@@ -78,10 +75,7 @@ describe('message deep-link contract', (): void => {
       relative.startsWith('00000000-0000-4000-8000-000000000001/chat/dir/'),
       'workspace segment should lead the path',
     );
-    const parsed = parseMessageDeepLinkCore(
-      `https://example.org/${relative}`,
-      TRUSTED_ORIGINS,
-    );
+    const parsed = parseMessageDeepLinkCore(`https://example.org/${relative}`, TRUSTED_ORIGINS);
     assert.deepEqual(parsed, payload);
   });
 
@@ -176,10 +170,7 @@ describe('message deep-link contract', (): void => {
       null,
     );
     assert.equal(
-      parseMessageDeepLinkCore(
-        'https://example.org/chat/dir/channel%2Fescape',
-        TRUSTED_ORIGINS,
-      ),
+      parseMessageDeepLinkCore('https://example.org/chat/dir/channel%2Fescape', TRUSTED_ORIGINS),
       null,
     );
     // Ticket-detail URLs have a third post-chat/dir segment; they are not message links.

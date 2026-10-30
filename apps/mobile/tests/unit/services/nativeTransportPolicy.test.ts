@@ -76,10 +76,7 @@ describe('native transport destination policy', () => {
     assert.match(androidSocketSource, /followRedirects\(false\)/);
     assert.match(iosSocketSource, /willPerformHTTPRedirection/);
     assert.equal(
-      isApprovedWebSocketDestination(
-        'wss://app.example.org/zero',
-        'https://app.example.org',
-      ),
+      isApprovedWebSocketDestination('wss://app.example.org/zero', 'https://app.example.org'),
       true,
     );
     assert.equal(

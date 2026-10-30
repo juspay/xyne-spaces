@@ -308,7 +308,8 @@ const TERMS_SECTIONS: LegalSection[] = [
           <>
             {LEGAL_CONTACT_EMAIL ? (
               <>
-                Notices to Juspay must be sent to <LegalEmailLink email={LEGAL_CONTACT_EMAIL} />.{' '}
+                Notices to Juspay must be sent to <LegalEmailLink email={LEGAL_CONTACT_EMAIL} />
+                .{' '}
               </>
             ) : null}
             Juspay may give notice through the Software, its website, or the repository.
