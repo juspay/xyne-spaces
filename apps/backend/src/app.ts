@@ -164,8 +164,7 @@ import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import { tagRoutes } from '@/tags';
 // Disabled (LLM)
 // import { tagGenerationPipeline } from '@/tags/pipeline';
-// Disabled (Automations)
-// import { automationRoutes, initializeAutomations } from '@/automations';
+import { automationRoutes, initializeAutomations } from '@/automations';
 // Disabled (Claw)
 // import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
 // import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
@@ -175,8 +174,7 @@ import { tagRoutes } from '@/tags';
 // import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
 // import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
 // import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCallback.handler';
-// Disabled (Automations)
-// import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
+import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
 import activityAliasesRoutes from '@/routes/activityAliases';
@@ -391,8 +389,7 @@ export class App {
     this.app.use('/api/channels-desks', authMiddleware.authenticate, channelsDeskRoutes);
     this.app.use('/api/proactivity', proactivityRoutes);
 
-    // Disabled (Automations)
-    // this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
+    this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
 
     // Claw MCP route (user + app auth)
@@ -810,9 +807,8 @@ export class App {
     // Generic tag routes (auth applied per-route within tagRoutes)
     this.app.use('/api/tags', tagRoutes);
 
-    // Disabled (Automations)
-    // // Automations routes (auth required, no ACL — matches /api/calls)
-    // this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);
+    // Automations routes (auth required, no ACL — matches /api/calls)
+    this.app.use('/api/automations', authMiddleware.authenticate, automationRoutes);
 
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
@@ -1060,9 +1056,8 @@ export class App {
       // await autoDraftQueue.initialize();
     }
 
-    // Disabled (Automations)
-    // logger.info('Initializing automations module (registries + queue producers)...');
-    // await initializeAutomations();
+    logger.info('Initializing automations module (registries + queue producers)...');
+    await initializeAutomations();
 
     // Initialize WebSocket server
     logger.info('Initializing WebSocket server...');
