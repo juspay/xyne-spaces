@@ -371,6 +371,15 @@ export class S3StorageService implements StorageService {
     logger.info(`File moved in S3: ${sourcePath} -> ${destinationPath}`);
   }
 
+  async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+    await this.client.send(new CopyObjectCommand({
+      Bucket: this.bucketName,
+      CopySource: `${this.bucketName}/${sourcePath}`,
+      Key: destinationPath,
+    }));
+    logger.info(`File copied in S3: ${sourcePath} -> ${destinationPath}`);
+  }
+
   async ensureBucketExists(): Promise<void> {
     try {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucketName }));

@@ -7,7 +7,7 @@ import { logger } from '@/utils/logger';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils';
-import { getStorageService } from '@/services/storage';
+import { getStorageService, storageWorkspace } from '@/services/storage';
 import { config } from '@/config/env';
 import { ProjectRepository } from '@/database/repositories/projectRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
@@ -1555,6 +1555,7 @@ export class ConfluenceImportService {
           contentType: downloaded.contentType,
           scopeType: 'CANVAS',
           scopeId: canvasId,
+          ...storageWorkspace(workspaceId),
           metadata: {
             confluencePageId: pageId,
             confluenceAttachmentId: attachment.id,

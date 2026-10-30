@@ -4,10 +4,12 @@ import type {
   EncryptBatchItem,
   EncryptedFieldConfig,
   EncryptionProvider,
+  GenerateStorageKeyInput,
   ProvisionEntityInput,
   ProvisionEntityResult,
   RegisterSessionKeyInput,
   RegisterSessionKeyResult,
+  StorageObjectKey,
 } from './types';
 
 function unsupported(operation: string): never {
@@ -84,6 +86,15 @@ const provider: EncryptionProvider = {
       }));
     }
     return unsupported('backfillEntities');
+  },
+
+  async generateStorageKey(_input: GenerateStorageKeyInput): Promise<StorageObjectKey> {
+    return unsupported('generateStorageKey');
+  },
+
+  async unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]> {
+    if (wrappedKeys.length === 0) return [];
+    return unsupported('unwrapStorageKeys');
   },
 };
 

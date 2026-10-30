@@ -1,9 +1,10 @@
-import { Storage, Bucket, StorageOptions } from '@google-cloud/storage';
+import { Storage, Bucket, File, StorageOptions } from '@google-cloud/storage';
 import { isPreconditionFailed, type GcsStorageConfig } from './types.js';
+import { workspaceRoot } from './pathUtils.js';
 
 import { logger } from './logger.js';
 import { v4 as uuidv4 } from 'uuid';
-import type { ObjectInfo, ObjectRead } from './types.js';
+import type { ObjectEncryption, ObjectInfo, ObjectKeyOptions, ObjectRead, ReadStreamOptions } from './types.js';
 
 export interface GCSUploadOptions {
   filename: string;
@@ -11,6 +12,8 @@ export interface GCSUploadOptions {
   metadata?: Record<string, string>;
   scopeType?: string;
   scopeId?: string;
+  encryption?: ObjectEncryption;
+  workspaceId?: string;
 }
 
 export interface GCSUploadResult {
@@ -52,6 +55,15 @@ export class GCSService {
     return this.bucketName;
   }
 
+  private file(path: string, encryptionKey?: Buffer): File {
+    return this.bucket.file(path, encryptionKey ? { encryptionKey } : undefined);
+  }
+
+  /** `metadata.metadata` is the object's custom metadata (x-goog-meta-*). */
+  private static customMetadata(encryption?: ObjectEncryption): { metadata?: Record<string, string> } {
+    return encryption ? { metadata: encryption.customMetadata } : {};
+  }
+
   async uploadFile(
     buffer: Buffer,
     options: GCSUploadOptions
@@ -79,13 +91,14 @@ export class GCSService {
         scopeId: options.scopeId,
       });
 
-      const file = this.bucket.file(filePath);
+      const file = this.file(filePath, options.encryption?.key);
 
       const uploadOptions = {
         metadata: {
           contentType: options.contentType,
           cacheControl: 'public, max-age=31536000',
           ...options.metadata,
+          ...GCSService.customMetadata(options.encryption),
         },
         resumable: false,
       };
@@ -135,7 +148,7 @@ export class GCSService {
       }
 
       const filePath = this.generateFilePath(options);
-      const file = this.bucket.file(filePath);
+      const file = this.file(filePath, options.encryption?.key);
       let totalBytes = 0;
 
       logger.info(`Streaming file upload to GCS: ${filePath}`, {
@@ -154,6 +167,7 @@ export class GCSService {
           contentType: options.contentType,
           cacheControl: 'public, max-age=31536000',
           ...options.metadata,
+          ...GCSService.customMetadata(options.encryption),
         },
         resumable: true,
       });
@@ -196,6 +210,7 @@ export class GCSService {
       resumable?: boolean;
       timeoutMs?: number;
       chunkSize?: number;
+      encryption?: ObjectEncryption;
     }
   ): Promise<GCSUploadResult> {
     try {
@@ -211,7 +226,7 @@ export class GCSService {
         throw new Error('Content type is required');
       }
 
-      const file = this.bucket.file(options.path);
+      const file = this.file(options.path, options.encryption?.key);
       let totalBytes = 0;
 
       logger.info(`Streaming file upload to GCS at exact path: ${options.path}`, {
@@ -227,6 +242,7 @@ export class GCSService {
           contentType: options.contentType,
           cacheControl: 'public, max-age=31536000',
           ...options.metadata,
+          ...GCSService.customMetadata(options.encryption),
         },
         resumable: options.resumable ?? true,
         // ifGenerationMatch: 0 = only create when the object does not exist
@@ -270,6 +286,7 @@ export class GCSService {
       metadata?: Record<string, string>;
       ifNotExists?: boolean;
       timeoutMs?: number;
+      encryption?: ObjectEncryption;
     }
   ): Promise<GCSUploadResult> {
     try {
@@ -292,13 +309,14 @@ export class GCSService {
         size: buffer.length,
       });
 
-      const file = this.bucket.file(filePath);
+      const file = this.file(filePath, options.encryption?.key);
 
       const uploadOptions = {
         metadata: {
           contentType: options.contentType,
           cacheControl: 'public, max-age=31536000',
           ...options.metadata,
+          ...GCSService.customMetadata(options.encryption),
         },
         resumable: false,
         ...(options.ifNotExists ? { preconditionOpts: { ifGenerationMatch: 0 } } : {}),
@@ -407,6 +425,7 @@ export class GCSService {
     contentType?: string;
     etag?: string;
     updated?: string;
+    metadata?: Record<string, string | number | boolean | null>;
   }): ObjectInfo {
     const info: ObjectInfo = {};
     const size = typeof metadata.size === 'string' ? Number(metadata.size) : metadata.size;
@@ -421,6 +440,11 @@ export class GCSService {
     }
     if (metadata.updated) {
       info.lastModified = new Date(metadata.updated);
+    }
+    if (metadata.metadata) {
+      info.metadata = Object.fromEntries(
+        Object.entries(metadata.metadata).flatMap(([k, v]) => (v == null ? [] : [[k, String(v)]])),
+      );
     }
     return info;
   }
@@ -439,12 +463,12 @@ export class GCSService {
   }
 
   /** Stream one object with its metadata, or null when it does not exist. */
-  async getObject(path: string): Promise<ObjectRead | null> {
+  async getObject(path: string, options?: ObjectKeyOptions): Promise<ObjectRead | null> {
     const info = await this.headObject(path);
     if (!info) {
       return null;
     }
-    return { info, stream: this.bucket.file(path).createReadStream() };
+    return { info, stream: this.file(path, options?.encryptionKey).createReadStream() };
   }
 
   async fileExists(filename: string): Promise<boolean> {
@@ -477,7 +501,7 @@ export class GCSService {
    * Retries are needed because blob finalization can take a moment after stream closes
    * Since webhook is called after upload completes, 3 retries should be sufficient
    */
-  async getFileBuffer(gcsPath: string, maxRetries: number = 3): Promise<Buffer> {
+  async getFileBuffer(gcsPath: string, maxRetries: number = 3, options?: ObjectKeyOptions): Promise<Buffer> {
     const initialDelay = 1000; // 1 second
     let lastError: Error | undefined;
 
@@ -487,7 +511,7 @@ export class GCSService {
           throw new Error('GCS path is required for file content retrieval');
         }
 
-        const file = this.bucket.file(gcsPath);
+        const file = this.file(gcsPath, options?.encryptionKey);
 
         // Check if file exists
         const [exists] = await file.exists();
@@ -537,7 +561,7 @@ export class GCSService {
   /**
    * Download file from GCS to local path
    */
-  async downloadFile(gcsPath: string, localPath: string): Promise<void> {
+  async downloadFile(gcsPath: string, localPath: string, options?: ObjectKeyOptions): Promise<void> {
     try {
       if (!gcsPath) {
         throw new Error('GCS path is required for file download');
@@ -547,7 +571,7 @@ export class GCSService {
         throw new Error('Local path is required for file download');
       }
 
-      const file = this.bucket.file(gcsPath);
+      const file = this.file(gcsPath, options?.encryptionKey);
 
       // Check if file exists
       const [exists] = await file.exists();
@@ -577,14 +601,14 @@ export class GCSService {
    */
   async createReadStream(
     gcsPath: string,
-    options?: { start?: number; end?: number }
+    options?: ReadStreamOptions
   ): Promise<NodeJS.ReadableStream> {
     try {
       if (!gcsPath) {
         throw new Error('GCS path is required for creating read stream');
       }
 
-      const file = this.bucket.file(gcsPath);
+      const file = this.file(gcsPath, options?.encryptionKey);
 
       // Check if file exists
       const [exists] = await file.exists();
@@ -617,7 +641,7 @@ export class GCSService {
 
   /**
    * Generate structured file path based on scope and timestamp
-   * Format: attachments/{scopeType}/{scopeId}/{year}/{month}/{timestamp}-{uuid}-{filename}
+   * Format: [workspaces/{workspaceId}/]attachments/{scopeType}/{scopeId}/{year}/{month}/{timestamp}-{uuid}-{filename}
    */
   private generateFilePath(options: GCSUploadOptions): string {
     const now = new Date();
@@ -641,7 +665,8 @@ export class GCSService {
     const finalFilename = `${timestamp}-${uuid}-${sanitizedFilename}`;
     pathComponents.push(finalFilename);
 
-    return pathComponents.join('/');
+    const filePath = pathComponents.join('/');
+    return options.workspaceId ? `${workspaceRoot(options.workspaceId)}${filePath}` : filePath;
   }
 
   /**
@@ -686,9 +711,19 @@ export class GCSService {
   /**
    * Move a file within the same bucket from one path to another.
    */
-  async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
-    await this.bucket.file(sourcePath).move(this.bucket.file(destinationPath));
+  async moveFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void> {
+    // The same key on both ends: GCS rewrites a CSEK object only when given its source key.
+    await this.file(sourcePath, options?.encryptionKey).move(this.file(destinationPath, options?.encryptionKey));
     logger.info(`File moved in GCS: ${sourcePath} -> ${destinationPath}`);
+  }
+
+  /**
+   * Copy a file within the same bucket, keeping the source. Server-side (no download).
+   * A CSEK object keeps its key and custom metadata (the wrapped key) in the copy.
+   */
+  async copyFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void> {
+    await this.file(sourcePath, options?.encryptionKey).copy(this.file(destinationPath, options?.encryptionKey));
+    logger.info(`File copied in GCS: ${sourcePath} -> ${destinationPath}`);
   }
 
   /**

@@ -1,7 +1,7 @@
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import PDFDocument from 'pdfkit';
-import { storageService } from './storage/index.js';
+import { storageService, storageWorkspace } from './storage/index.js';
 import type { UploadedFileResult } from './fileUploadService.js';
 
 const VERIFICATION_API_BASE = `${config.genius.apiUrl}/api/v3/analytics/list_genuine_outages`;
@@ -408,6 +408,7 @@ class OutageAlertService {
   async processOutageAlert(
     text: string,
     conversationId: string,
+    workspaceId?: string,
   ): Promise<ProcessOutageAlertResult> {
     if (!config.outageVerification.authKey) {
       logger.warn('[OUTAGE-ALERT] OUTAGE_VERIFICATION_AUTH_KEY not configured, skipping verification');
@@ -454,6 +455,7 @@ class OutageAlertService {
         },
         scopeType: 'CONVERSATION',
         scopeId: conversationId,
+        ...storageWorkspace(workspaceId),
       });
 
       const uploadedFile: UploadedFileResult = {

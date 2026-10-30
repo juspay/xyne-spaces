@@ -3,7 +3,7 @@ import { CollectionRepository } from '../database/repositories/collectionReposit
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
 import { uploadFilesSchema, DuplicateStrategy } from '../validators/fileUploadValidator';
-import { storageService } from '@/services/storage';
+import { storageService, storageWorkspace } from '@/services/storage';
 import { fileValidationService } from '@/services/fileValidationService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { SubApp } from '@/vespa/src/types';
@@ -677,6 +677,7 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             contentType: mimeType,
             scopeType: 'collection',
             scopeId: collectionId,
+            ...storageWorkspace(user.workspaceId),
         });
         const storageKey = result.path;
 

@@ -187,7 +187,8 @@ export class DraftAttachmentController {
       const uploadResults: UploadedFileResult[] = await uploadFiles(
         files,
         thumbnails,
-        fileMetadataArray
+        fileMetadataArray,
+        draftWorkspaceId ?? req.user?.workspaceId
       );
 
       // Process each file individually and create/update MessageAttachment records

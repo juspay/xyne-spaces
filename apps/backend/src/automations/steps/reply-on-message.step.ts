@@ -75,6 +75,7 @@ export class ReplyOnMessageStep extends BaseActionStep<
     const uploadedFiles = await uploadAgentAttachments({
       attachments: agentAttachmentsFromContext(context),
       automationId: context.automation.id,
+      workspaceId: context.automation.workspaceId,
     });
 
     let result: Awaited<ReturnType<typeof conversationService.addMessageToConversation>>;

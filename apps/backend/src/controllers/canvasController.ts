@@ -788,7 +788,7 @@ export class CanvasController {
         height: parsedHeight,
       });
 
-      const uploadResults = await uploadFiles([file]);
+      const uploadResults = await uploadFiles([file], undefined, undefined, req.user?.workspaceId);
 
       if (!uploadResults || uploadResults.length === 0) {
         logger.error(

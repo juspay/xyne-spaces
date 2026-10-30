@@ -1,4 +1,4 @@
-import { storageService } from './storage/index.js';
+import { storageService, storageWorkspace, isGeneratedUploadPath } from './storage/index.js';
 import { logger } from '../utils/logger';
 import { decodeUploadFilename } from '../utils/filename';
 import { isHeicBuffer } from '@xyne/shared';
@@ -26,7 +26,7 @@ interface FileMetadata {
 }
 
 function getExistingStoragePath(file: Express.Multer.File): string | undefined {
-  if (typeof file.path === 'string' && file.path.startsWith('attachments/')) {
+  if (typeof file.path === 'string' && isGeneratedUploadPath(file.path)) {
     return file.path;
   }
   return undefined;
@@ -42,7 +42,8 @@ function getExistingStoragePath(file: Express.Multer.File): string | undefined {
 export async function uploadFiles(
   files: Express.Multer.File[],
   thumbnailFiles?: Express.Multer.File[],
-  fileMetadata?: FileMetadata[]
+  fileMetadata?: FileMetadata[],
+  workspaceId?: string | null
 ): Promise<UploadedFileResult[]> {
   logger.info(`Processing ${files.length} files for upload`);
 
@@ -87,6 +88,7 @@ export async function uploadFiles(
           },
           scopeType: 'CONVERSATION',
           scopeId: 'temp',
+          ...storageWorkspace(workspaceId),
         });
 
         filePath = storageResult.path;
@@ -142,6 +144,7 @@ export async function uploadFiles(
                   },
                   scopeType: 'CONVERSATION',
                   scopeId: 'temp',
+                  ...storageWorkspace(workspaceId),
                 });
                 thumbnailUrl = thumbnailUpload.path;
               } else {

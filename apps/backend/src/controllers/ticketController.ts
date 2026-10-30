@@ -798,7 +798,7 @@ export class TicketController {
       if (files.length > 0 && (!draftAttachmentIds || draftAttachmentIds.length === 0)) {
         // Fail entire ticket creation if file upload fails
         // Pass fileMetadata to include dimensions for images/videos
-        uploadedFiles = await uploadFiles(files, undefined, fileMetadata);
+        uploadedFiles = await uploadFiles(files, undefined, fileMetadata, req.user?.workspaceId);
       }
 
       // Validate conversation access before transaction

@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash, randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
-import { storageService } from '@/services/storage';
+import { storageService, workspaceStoragePath } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { whatsAppMigrationProgressService } from '@/services/whatsappMigrationProgressService';
 import { redisService } from '@/services/redisService';
@@ -52,7 +52,9 @@ class WhatsAppBulkMigrationService {
   private buildStagingPath(workspaceId: string, stagedFileId: string, originalName: string): string {
     const extensionMatch = originalName.match(/(\.[a-zA-Z0-9]+)$/);
     const extension = extensionMatch?.[1]?.toLowerCase() || '.zip';
-    return `whatsapp-migrations/staging/${workspaceId}/${stagedFileId}${extension}`;
+    // Per-workspace layout: workspaces/{workspaceId}/whatsapp-migrations/staging/...; old layout keeps the id in the path
+    const workspacePath = workspaceStoragePath(workspaceId, `whatsapp-migrations/staging/${stagedFileId}${extension}`);
+    return workspacePath.startsWith('workspaces/') ? workspacePath : `whatsapp-migrations/staging/${workspaceId}/${stagedFileId}${extension}`;
   }
 
   private buildPreviewApprovalPayload(

@@ -82,8 +82,9 @@ export function agentAttachmentsFromContext(context: AutomationContext): AgentAt
 export async function uploadAgentAttachments(params: {
   attachments: AgentAttachment[];
   automationId: string;
+  workspaceId?: string;
 }): Promise<UploadedFileResult[]> {
-  const { attachments, automationId } = params;
+  const { attachments, automationId, workspaceId } = params;
   if (attachments.length === 0) return [];
 
   const capped = attachments.slice(0, AGENT_ATTACHMENT_MAX_FILES);
@@ -127,5 +128,5 @@ export async function uploadAgentAttachments(params: {
   }
 
   if (files.length === 0) return [];
-  return uploadFiles(files);
+  return uploadFiles(files, undefined, undefined, workspaceId);
 }

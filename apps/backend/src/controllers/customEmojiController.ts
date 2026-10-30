@@ -5,7 +5,7 @@ import {
   CreateCustomEmojiInput,
   CustomEmojiWithRelations,
 } from '../database/repositories/customEmojiRepository';
-import { getStorageService } from '../services/storage';
+import { getStorageService, isGeneratedUploadPath } from '../services/storage';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 
@@ -120,7 +120,7 @@ export class CustomEmojiController {
       // uploadSingle uses streamingStorage._handleFile -> storageService.uploadStream.
       // The file is expected to already be in object storage at this point.
       const emojiStoragePath = typeof file.path === 'string' ? file.path : '';
-      if (!emojiStoragePath.startsWith('attachments/')) {
+      if (!isGeneratedUploadPath(emojiStoragePath)) {
         logger.error('Expected streamed storage path is missing on uploaded emoji file', {
           fileName: file.originalname,
           hasPath: Boolean(file.path),

@@ -50,7 +50,7 @@ export async function ingestAttachment(
 
     // Upload files to GCS
     logger.info(`[INGEST-ATTACHMENT] Uploading ${files.length} file(s)`);
-    const uploadedFiles: UploadedFileResult[] = await uploadFiles(files);
+    const uploadedFiles: UploadedFileResult[] = await uploadFiles(files, undefined, undefined, workspaceId);
 
     let content: string;
     let isMarkdown: boolean;

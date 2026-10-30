@@ -1,4 +1,4 @@
-import { storageService, getStorageService } from './storage/index';
+import { storageService, getStorageService, storageWorkspace } from './storage/index';
 import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
@@ -60,6 +60,11 @@ export interface DownloadAttachmentsOptions {
    */
   scopeType?: string;
   scopeId?: string;
+
+  /**
+   * Workspace that owns the files (puts them under workspaces/{workspaceId}/ when that layout is on)
+   */
+  workspaceId?: string;
 
   /**
    * Override token for auth (e.g., Slack user token for DM attachments)
@@ -195,6 +200,7 @@ export class ExternalAttachmentService {
       ...options,
       scopeType: options.scopeType || 'EXTERNAL_MESSAGE',
       scopeId: options.scopeId || source.sourceType,
+      workspaceId: options.workspaceId ?? source.workspaceId,
     });
   }
 
@@ -247,7 +253,8 @@ export class ExternalAttachmentService {
       maxFileSize = ExternalAttachmentService.DEFAULT_MAX_FILE_SIZE,
       timeout = ExternalAttachmentService.DEFAULT_TIMEOUT,
       scopeType = 'EXTERNAL_MESSAGE',
-      scopeId = 'unknown'
+      scopeId = 'unknown',
+      workspaceId,
     } = options;
 
     const { fileName, fileUrl, mimeType: expectedMimeType, size: expectedSize } = attachment;
@@ -277,6 +284,7 @@ export class ExternalAttachmentService {
         },
         scopeType,
         scopeId,
+        ...storageWorkspace(workspaceId),
       });
       return {
         originalName: fileName,
@@ -343,6 +351,7 @@ export class ExternalAttachmentService {
         },
         scopeType,
         scopeId,
+        ...storageWorkspace(workspaceId),
       });
 
       return {

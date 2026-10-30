@@ -1,7 +1,7 @@
 import { AttachmentEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { storageService } from '@/services/storage';
+import { storageService, storageWorkspace } from '@/services/storage';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { telephonyEmailService } from './telephonyEmailService';
 import { transcriptService } from '@/services/transcriptService';
@@ -118,6 +118,7 @@ export class CallTranscriptionService {
       contentType: 'text/plain; charset=utf-8',
       scopeType: 'EMAIL',
       scopeId: emailId,
+      ...storageWorkspace(workspaceId),
       metadata: { type: CALL_TRANSCRIPT_ATTACHMENT_TYPE, emailId, workspaceId },
     });
 
