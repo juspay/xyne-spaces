@@ -133,6 +133,11 @@ overrides:
 
 packageExtensionsChecksum: sha256-kYla/jBKu002rBl6Loamo/+kTzooiIs3F5TZy64LHO8=
 
+patchedDependencies:
+  reamkit@1.33.1:
+    hash: 8e9f0e38403a99fb1c9bb443a53ec57a3198baedc737bd37bb0e748360dc2d33
+    path: patches/reamkit@1.33.1.patch
+
 importers:
 
   .:
@@ -450,6 +455,9 @@ importers:
       pptxgenjs:
         specifier: ^4.0.1
         version: 4.0.1
+      reamkit:
+        specifier: 1.33.1
+        version: 1.33.1(patch_hash=8e9f0e38403a99fb1c9bb443a53ec57a3198baedc737bd37bb0e748360dc2d33)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -17570,6 +17578,10 @@ packages:
   real-require@0.2.0:
     resolution: {integrity: sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==}
     engines: {node: '>= 12.13.0'}
+
+  reamkit@1.33.1:
+    resolution: {integrity: sha512-SVP55GfXtt/RepdrS2jtH4RIeTU7ul7ONo7YILmvelEvg5hmDCn9Tz72XDXHJ9kWaHCbGJFwtU1u3GXl5zS1/g==}
+    engines: {node: '>=20'}
 
   recharts-scale@0.4.5:
     resolution: {integrity: sha512-kivNFO+0OcUNu7jQquLXAxz1FIwZj8nrj+YkOKc5694NbjCvcT6aSZiIzNzd2Kul4o4rTto8QVR9lMNtxD4G1w==}
@@ -38659,6 +38671,11 @@ snapshots:
   readdirp@5.0.0: {}
 
   real-require@0.2.0: {}
+
+  reamkit@1.33.1(patch_hash=8e9f0e38403a99fb1c9bb443a53ec57a3198baedc737bd37bb0e748360dc2d33):
+    dependencies:
+      fast-xml-parser: 5.10.1
+      fflate: 0.8.3
 
   recharts-scale@0.4.5:
     dependencies:

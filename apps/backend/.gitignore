@@ -67,3 +67,6 @@ package.json
 
 # Generated Prisma client for common DB
 prisma-common/generated/
+
+# Ream's fonts, downloaded by scripts/fetch-ream-fonts.mjs (image build or local run)
+assets/ream-fonts/

@@ -7,7 +7,7 @@
  *
  * Also handles PPTX/PPT the same way: the scheduler (and the LightOnOCR
  * model behind it) only ever operates on PDF bytes, so a pptx/ppt
- * attachment is converted to PDF first (the same LibreOffice conversion
+ * attachment is converted to PDF first (the same Ream conversion
  * the viewer uses, GCS-cached by content hash) and the *converted* PDF is
  * what actually gets staged/split -- otherwise pptx would only ever reach
  * the synchronous FileProcessor path's plain generic Docling endpoint,

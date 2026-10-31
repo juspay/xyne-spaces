@@ -100,7 +100,6 @@ class OcrProcessor:
                 pdf_render_dpi=self.settings.pdf_render_dpi,
                 max_pages=self.settings.max_pages,
                 queue_size=render_queue_size,
-                office_convert_timeout_seconds=self.settings.office_convert_timeout_seconds,
                 text_page_width=self.settings.text_page_width,
                 text_page_height=self.settings.text_page_height,
                 text_font_size=self.settings.text_font_size,

@@ -29,6 +29,8 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm applies these at install time (root package.json → pnpm.patchedDependencies).
+COPY patches ./patches
 COPY packages/shared/package.json           packages/shared/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/cache/package.json            packages/cache/
@@ -74,6 +76,12 @@ RUN cat > /entrypoint.sh << 'ENTRY'
 set -e
 echo "[sandbox] Running prisma db push..."
 cd /repo/apps/backend && pnpm run db:push
+# At start, not build: sandboxes mount a fresh worktree over /app, which has no
+# fonts (assets/ream-fonts is gitignored). Files already present are kept. Not
+# fatal: without fonts only office previews fail, so the backend still starts.
+echo "[sandbox] Fetching Ream fonts..."
+cd /repo/apps/backend && node scripts/fetch-ream-fonts.mjs \
+  || echo "[sandbox] WARNING: could not fetch Ream fonts; office previews fail until a restart fetches them."
 echo "[sandbox] Starting backend dev server..."
 cd /repo/apps/backend && exec pnpm exec tsx watch \
   --ignore ../../packages/shared/node_modules \

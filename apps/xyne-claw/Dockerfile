@@ -45,6 +45,8 @@ WORKDIR /repo
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm applies these at install time (root package.json → pnpm.patchedDependencies).
+COPY patches ./patches
 COPY packages/kata-sdk/package.json         packages/kata-sdk/
 COPY packages/icons/package.json            packages/icons/
 COPY packages/litellm-client/package.json   packages/litellm-client/

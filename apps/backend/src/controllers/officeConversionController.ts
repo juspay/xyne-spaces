@@ -24,14 +24,6 @@ export class OfficeConversionController {
             res.setHeader("Content-Length", pdfBuffer.length)
             res.send(pdfBuffer)
         } catch (error) {
-            if (error instanceof OfficeConversionError && error.code === "SOFFICE_NOT_FOUND") {
-                logger.error("[OfficeConversion] LibreOffice not installed on this host", error)
-                res.status(503).json({
-                    error: "PDF conversion is not available on this server",
-                    code: "CONVERTER_UNAVAILABLE",
-                })
-                return
-            }
             if (error instanceof OfficeConversionError && error.code === "TIMEOUT") {
                 res.status(504).json({ error: "Conversion timed out", code: "TIMEOUT" })
                 return

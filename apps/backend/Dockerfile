@@ -12,6 +12,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
+
+# Ream's fonts (scripts/fetch-ream-fonts.mjs: pinned, checksummed) in their own
+# stage: its only input is that script, so the layer stays cached and code-only
+# builds download nothing. The runner copies it in as a separate layer.
+FROM node:22.23.4-slim AS ream-fonts
+COPY apps/backend/scripts/fetch-ream-fonts.mjs /fetch-ream-fonts.mjs
+RUN node /fetch-ream-fonts.mjs /fonts
+
 FROM base AS builder
 WORKDIR /repo
 
@@ -21,6 +29,8 @@ ENV NODE_OPTIONS="--max-old-space-size=8192"
 
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm applies these at install time (root package.json → pnpm.patchedDependencies).
+COPY patches ./patches
 COPY packages/shared/package.json           packages/shared/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/cache/package.json            packages/cache/
@@ -81,10 +91,10 @@ RUN pnpm --filter xyne-spaces-backend --prod --legacy deploy /app && \
 # Distroless runtime (chat-only hardening). Attack-surface reduction: no shell,
 # no package manager, no apt, no coreutils/curl/wget — so an RCE can't spawn
 # bash, dump env via `env | grep`, curl the metadata server, or run psql, the
-# way the Oct-2026 incident's command-executor did. Also drops libreoffice
-# (Office-doc PREVIEW + Office->PDF->OCR INGESTION — PPTX degrades to native
-# text, docx/xlsx conversion fails; upload + DOWNLOAD of originals and plain
-# chat are unaffected). The builder stage above stays a full Node image; only
+# way the Oct-2026 incident's command-executor did. Also drops libreoffice:
+# office-to-PDF conversion (previews and OCR ingestion) runs on Ream, in
+# process, with the fonts from the ream-fonts stage in /app/assets/ream-fonts.
+# The builder stage above stays a full Node image; only
 # this final runtime stage is distroless.
 #
 # NOTE (debugging): distroless has no shell, so `kubectl exec … -- sh` won't
@@ -118,6 +128,10 @@ COPY --from=libssl /libssl3.status /var/lib/dpkg/status.d/libssl3
 # node_modules + dist + both Prisma clients — no dev tree, no .pnpm store.
 # Owned by the distroless nonroot uid/gid (65532) so the process owns what it reads.
 COPY --from=builder --chown=65532:65532 /app /app
+
+# Ream's fonts as their own layer: unchanged between releases, so registries and
+# nodes reuse it rather than pushing and pulling it with every code change.
+COPY --from=ream-fonts --chown=65532:65532 /fonts /app/assets/ream-fonts
 
 # logger.ts reads the version from the repo-root package.json; with the app root
 # at /app, its ../../../package.json resolves to /package.json.

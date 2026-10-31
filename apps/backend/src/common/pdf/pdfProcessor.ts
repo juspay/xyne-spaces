@@ -331,11 +331,14 @@ export class PdfProcessor {
     const { url, timeoutMs } = config.pdf.lightOnOcr
     if (!url) throw new Error('LightOnOCR sync URL not configured')
 
+    // The body is always a PDF (a .pptx arrives here already converted), and the
+    // OCR server picks its renderer from the file extension.
+    const pdfFileName = /\.pdf$/i.test(fileName) ? fileName : `${fileName.replace(/\.[^./]+$/, '')}.pdf`
     const form = new FormData()
     form.append(
       'file',
       new Blob([buffer as unknown as Uint8Array], { type: 'application/pdf' }),
-      fileName,
+      pdfFileName,
     )
     form.append('doc_id', vespaDocId)
 

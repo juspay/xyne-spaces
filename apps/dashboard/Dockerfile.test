@@ -13,6 +13,8 @@ WORKDIR /repo
 # postinstall it worked around (`cd ../shared && npm install && npm run build`)
 # no longer exists, since workspace:* links handle it.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+# pnpm applies these at install time (root package.json → pnpm.patchedDependencies).
+COPY patches ./patches
 COPY packages/shared/package.json           packages/shared/
 COPY packages/icons/package.json            packages/icons/
 COPY apps/dashboard/package.json            apps/dashboard/

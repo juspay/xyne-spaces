@@ -512,20 +512,21 @@ const uploadFileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
 };
 
 /**
- * office-conversion is single-purpose (shell the upload out to LibreOffice's
- * `soffice --convert-to pdf`), so unlike the generic uploadFileFilter above —
+ * office-conversion is single-purpose (hand the upload to the office-to-PDF
+ * renderer), so unlike the generic uploadFileFilter above —
  * a denylist covering every other upload path in the app — this one is an
  * allowlist: only the office document types the FileViewer actually sends
  * (apps/dashboard/src/components/FileViewer/utils.ts) are accepted, not
  * "anything not explicitly blocked".
  */
+// Legacy .ppt is deliberately absent: the dashboard offers it for download
+// rather than previewing it.
 const OFFICE_CONVERSION_EXTENSIONS = new Set([
-  '.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls',
+  '.pptx', '.docx', '.doc', '.xlsx', '.xls',
 ]);
 
 const OFFICE_CONVERSION_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
-  'application/vnd.ms-powerpoint', // .ppt
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
   'application/msword', // .doc
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx

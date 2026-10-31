@@ -233,7 +233,7 @@ def _ensure_supported_file(upload: UploadFile) -> None:
     if not is_supported_upload(upload.filename or ""):
         raise HTTPException(
             status_code=400,
-            detail="Only PDF, DOCX, PPTX, TXT, and image files are accepted",
+            detail="Only PDF, TXT, and image files are accepted",
         )
 
 

@@ -39,7 +39,6 @@ write_files:
             - OCR_PDF_RENDER_DPI=200
             - OCR_MAX_PAGES=-1
             - OCR_JPEG_QUALITY=90
-            - OCR_OFFICE_CONVERT_TIMEOUT_SECONDS=120
             - LIGHTON_CROP_PADDING_PIXELS=5
             - LIGHTON_MIN_CROP_WIDTH=32
             - LIGHTON_MIN_CROP_HEIGHT=32

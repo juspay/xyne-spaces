@@ -1,0 +1,63 @@
+diff --git a/dist/esm/core/opc/package.js b/dist/esm/core/opc/package.js
+index 87c0c59e5de10d80d5b67d0f2484c6254cf6360d..22db7d96cddd84f69a7c0734c55239f60e67b74f 100644
+--- a/dist/esm/core/opc/package.js
++++ b/dist/esm/core/opc/package.js
+@@ -45,7 +45,9 @@ var OpcPackage = class OpcPackage {
+ 				violation ??= `more than ${maxEntries} entries`;
+ 				return false;
+ 			}
+-			if (info.originalSize === 4294967295) return true;
++			// No exemption for a declared size of 0xFFFFFFFF: fflate has already read the real
++			// sizes of genuine ZIP64 entries, so only a crafted entry still claims it, and fflate
++			// sizes its output buffer from that claim (4 GiB). Every entry gets the limits below.
+ 			if (info.originalSize > maxEntry) {
+ 				violation ??= `entry "${info.name}" declares ${info.originalSize} bytes (limit ${maxEntry})`;
+ 				return false;
+diff --git a/dist/esm/pptx/slide-parser.js b/dist/esm/pptx/slide-parser.js
+index 3623f2f348f36e20f29047f444ecae55495ba54b..c9effc916f629e19ae8427670b00d95fd623e1cd 100644
+--- a/dist/esm/pptx/slide-parser.js
++++ b/dist/esm/pptx/slide-parser.js
+@@ -40,7 +40,8 @@ function parseSlideShapes(container, ctx = {}, transform = IDENTITY_TRANSFORM, s
+ 	const out = [];
+ 	for (const child of poChildren(container)) {
+ 		if (skipPlaceholders && isPlaceholder(child)) continue;
+-		if (poIs(child, "p:sp")) {
++		// A connector (p:cxnSp) is a shape without text: same geometry, outline and style.
++		if (poIs(child, "p:sp") || poIs(child, "p:cxnSp")) {
+ 			const shape = parseSp(child, ctx, transform);
+ 			if (shape) out.push({
+ 				kind: "shape",
+@@ -169,13 +170,18 @@ function parseSp(sp, ctx, transform) {
+ 	const styled = withStatedDirection(resolved, spPr);
+ 	const lineFrom = from((n) => poChildren(n).some((c) => poIs(c, "a:ln")));
+ 	let line = lineFrom ? parseLine(lineFrom, colors) : void 0;
++	const lnNode = lineFrom ? poChildren(lineFrom).find((c) => poIs(c, "a:ln")) : void 0;
++	const lnHasFill = lnNode !== void 0 && poChildren(lnNode).some((c) => poIs(c, "a:noFill") || poIs(c, "a:solidFill") || poIs(c, "a:gradFill") || poIs(c, "a:pattFill"));
++	let fromStyle;
+ 	if (style) {
+-		const fromStyle = styleRefLine(style, colors, ctx.themeLineWidths);
++		fromStyle = styleRefLine(style, colors, ctx.themeLineWidths);
+ 		if (fromStyle) line = line ? {
+ 			...fromStyle,
+ 			...Object.fromEntries(Object.entries(line).filter(([, v]) => v !== void 0))
+ 		} : fromStyle;
+ 	}
++	// An <a:ln> without a fill of its own takes the style's; with no style line there is no outline.
++	if (line && lnNode !== void 0 && !lnHasFill && !fromStyle) line = void 0;
+ 	const shadowFrom = from((n) => poChildren(n).some((c) => poIs(c, "a:effectLst")));
+ 	const shadow = shadowFrom ? parseShadow(shadowFrom, colors) : void 0;
+ 	const visibleLine = line !== void 0 && line.fill !== "none";
+diff --git a/dist/esm/pptx/sp-helpers.js b/dist/esm/pptx/sp-helpers.js
+index 20f8c952d28ee80067dae33dae4ec12b36ae7054..73d063bc21418472efa282f0dab349cb280f0b07 100644
+--- a/dist/esm/pptx/sp-helpers.js
++++ b/dist/esm/pptx/sp-helpers.js
+@@ -43,7 +43,8 @@ function boxFromXfrm(xfrm) {
+ 	const ext = poChildren(xfrm).find((c) => poIs(c, "a:ext"));
+ 	const cx = ext ? poIntAttr(ext, "cx") : void 0;
+ 	const cy = ext ? poIntAttr(ext, "cy") : void 0;
+-	if (cx === void 0 || cy === void 0 || cx <= 0 || cy <= 0) return void 0;
++	// A horizontal or vertical line has one zero extent; only a box empty both ways is nothing.
++	if (cx === void 0 || cy === void 0 || cx < 0 || cy < 0 || cx === 0 && cy === 0) return void 0;
+ 	return {
+ 		x: (off ? poIntAttr(off, "x") : void 0) ?? 0,
+ 		y: (off ? poIntAttr(off, "y") : void 0) ?? 0,
