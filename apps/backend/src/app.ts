@@ -342,10 +342,13 @@ export class App {
     this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
-    // Migration routes (body parsing handled in route file)
-    this.app.use('/api/migration', migrationRoutes);
-
-    this.app.use('/migrate/api/migration', migrationRoutes);
+    // Migration routes (body parsing handled in route file). Only mounted when
+    // MIGRATION_ROUTES_ENABLED=true; otherwise these paths fall through to 404.
+    if (config.migrationRoutes.enabled) {
+      this.app.use('/api/migration', migrationRoutes);
+      this.app.use('/migrate/api/migration', migrationRoutes);
+      logger.info('Migration routes mounted at /api/migration and /migrate/api/migration');
+    }
 
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
     this.app.use('/api/webhooks',
