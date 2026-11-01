@@ -40,7 +40,8 @@ export class GCSService {
 
     if (cfg.apiEndpoint) {
       storageOptions.apiEndpoint = cfg.apiEndpoint;
-      logger.info(`GCS Service initialized with fake-gcs-server at ${cfg.apiEndpoint} for bucket: ${this.bucketName}`);
+      storageOptions.useAuthWithCustomEndpoint = cfg.useAuthWithCustomEndpoint ?? false;
+      logger.info(`GCS Service initialized with endpoint ${cfg.apiEndpoint} for bucket: ${this.bucketName}`);
     } else {
       logger.info(`GCS Service initialized with Application Default Credentials for bucket: ${this.bucketName}`);
     }
