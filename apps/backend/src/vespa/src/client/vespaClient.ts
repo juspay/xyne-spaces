@@ -25,6 +25,9 @@ class VespaClient {
   private feedTimeoutMs: number;
   private feedEndpoint: string;
   private queryEndpoint: string;
+  // Bearer tokens for an encryption gateway in front of Vespa (empty: none sent). Never logged.
+  private queryToken: string;
+  private feedToken: string;
   private logger: ILogger;
   private feedDispatcher: Agent;
   private queryDispatcher: Agent;
@@ -41,6 +44,8 @@ class VespaClient {
       maxConnections?: number;
       maxConcurrentRequests?: number;
       feedTimeoutMs?: number;
+      queryToken?: string;
+      feedToken?: string;
     },
   ) {
     this.logger = logger || consoleLogger;
@@ -51,6 +56,8 @@ class VespaClient {
     // published on 8083 (see vespa-core/deployment/docker-compose.dev.yml).
     this.feedEndpoint = config?.feedEndpoint || `http://localhost:8083`;
     this.queryEndpoint = config?.queryEndpoint || `http://localhost:8081`;
+    this.queryToken = config?.queryToken ?? appConfig.vespa.queryToken ?? '';
+    this.feedToken = config?.feedToken ?? appConfig.vespa.feedToken ?? '';
 
     const maxConnections = config?.maxConnections || 16;
     const agentOptions = {
@@ -85,10 +92,14 @@ class VespaClient {
     retryCount = 0,
     timeoutMs?: number,
   ): Promise<Response> {
-    const nonRetryableStatusCodes = [404];
-    const dispatcher = url.startsWith(this.queryEndpoint)
-      ? this.queryDispatcher
-      : this.feedDispatcher;
+    // 401/403: a missing or wrong gateway token does not get better on retry
+    const nonRetryableStatusCodes = [401, 403, 404];
+    const isQuery = url.startsWith(this.queryEndpoint);
+    const dispatcher = isQuery ? this.queryDispatcher : this.feedDispatcher;
+    const token = isQuery ? this.queryToken : this.feedToken;
+    if (token) {
+      options = { ...options, headers: { ...(options.headers as Record<string, string>), Authorization: `Bearer ${token}` } };
+    }
     // Opt-in per-attempt timeout (used by `insert`): a fresh abort signal each attempt
     // so retries get the full budget. Callers that pass no timeoutMs are untouched.
     if (timeoutMs) {
