@@ -1,8 +1,10 @@
 export interface GcsStorageConfig {
   projectId?: string;
   bucketName: string;
-  /** fake-gcs-server endpoint for dev/test, e.g. http://localhost:4443 */
+  /** Custom API endpoint: fake-gcs-server for dev/test (http://localhost:4443), or a GCS proxy. */
   apiEndpoint?: string;
+  /** Send credentials to apiEndpoint; off for fake-gcs-server. */
+  useAuthWithCustomEndpoint?: boolean;
 }
 
 export interface S3StorageConfig {
