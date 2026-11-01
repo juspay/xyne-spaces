@@ -9,7 +9,8 @@
     "enableNodeOptionsEnvironmentVariable": false,
     "enableNodeCliInspectArguments": false,
     "onlyLoadAppFromAsar": true,
-    "enableEmbeddedAsarIntegrityValidation": true
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "enableCookieEncryption": true
   },
   "protocols": [
     {
