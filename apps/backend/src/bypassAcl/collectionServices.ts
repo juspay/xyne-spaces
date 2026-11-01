@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { rawQuery } from './base';
+import { asService, rawQuery } from './base';
 
 type CollectionClient = PrismaClient | Prisma.TransactionClient;
 
@@ -24,5 +24,23 @@ export async function queryCollectionFolderTree(client: CollectionClient, folder
             )
             SELECT id, name, "parentId" FROM folder_tree
         `,
+  );
+}
+
+/**
+ * Relocated from services/driveImport/driveImportWorker.ts's processor. Background job → no
+ * request context; acts as the importing user in their workspace, as the in-process import from
+ * the request does.
+ */
+export function runDriveImportJob<T>(
+  job: { userId: string; workspaceId: string },
+  run: () => Promise<T>,
+): Promise<T> {
+  return asService(
+    ['Collection', 'CollectionItem'],
+    'drive import job: background job has no request context, scope opened from the job\'s workspace',
+    job.userId,
+    job.workspaceId,
+    run,
   );
 }

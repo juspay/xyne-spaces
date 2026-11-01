@@ -150,3 +150,21 @@ export async function appendCallMarkedItem(externalId: string, item: Prisma.Inpu
     `,
   );
 }
+
+/**
+ * Relocated from queues/callTranscriptionQueue.ts's processor. Background job → no request
+ * context; acts as the user who asked for the transcript, in the call's workspace, so the
+ * transcript attachment is stamped and written under the workspace storage key.
+ */
+export function runCallTranscriptionJob<T>(
+  job: { userId: string; workspaceId: string },
+  run: () => Promise<T>,
+): Promise<T> {
+  return asService(
+    ['Email', 'MessageAttachment', 'Ticket', 'Channel'],
+    'call transcription job: background job has no request context, scope opened from the job\'s workspace',
+    job.userId,
+    job.workspaceId,
+    run,
+  );
+}
