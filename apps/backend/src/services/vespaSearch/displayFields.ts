@@ -2,7 +2,7 @@ import { AttachmentEntityType, ChannelScopeType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
-import { flowMessageSearchText } from '@/utils/flowJson';
+import { getFlowJsonContentForNotification } from '@/zero/side-effects/tables/messages-handler';
 import { extractLinksFromContent } from '@/utils/urlUtils';
 import { buildFormFields, type TicketDynamicFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { SubApp } from '@/vespa/src/types';
@@ -95,7 +95,7 @@ const loaders: Record<string, Loader> = {
       const content = m.content || '';
       const channelId = channelOf.get(m.messageId);
       return [m.messageId, {
-        text: flowMessageSearchText(content) || extractPlainTextFromHtml(content) || '',
+        text: getFlowJsonContentForNotification(content) || extractPlainTextFromHtml(content) || '',
         username: senderName.get(m.senderId) || '',
         threadSenders: threads.get(m.conversationId) ?? [],
         links: extractLinksFromContent(content),
