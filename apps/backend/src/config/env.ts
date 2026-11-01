@@ -92,7 +92,6 @@ const envSchema = Joi.object({
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
   FAKE_GCS_HOST: Joi.string().allow('').default('localhost:4443'),
-  GCS_API_ENDPOINT: Joi.string().uri().allow('').default(''), // e.g. a GCS proxy; requests still carry the app's credentials
   TRANSCRIPTION_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_SESSION_RECORDING_BUCKET_NAME: Joi.string().default(''),
   ENABLE_EXTERNAL_SOURCE_REGISTRATION: Joi.boolean().default(true),
@@ -901,7 +900,6 @@ export const config = {
     sessionRecordingBucketName: envVars.GCS_SESSION_RECORDING_BUCKET_NAME,
     maxFileSizeMB: envVars.GCS_MAX_FILE_SIZE_MB,
     fakeGcsHost: envVars.FAKE_GCS_HOST,
-    apiEndpoint: envVars.GCS_API_ENDPOINT,
     transcriptionBucketName: envVars.TRANSCRIPTION_BUCKET_NAME,
   },
   enableExternalSourceRegistration: envVars.ENABLE_EXTERNAL_SOURCE_REGISTRATION,

@@ -20,11 +20,9 @@ function buildStorageConfig(): StorageConfig {
     gcs: {
       projectId: config.gcs.projectId,
       bucketName: config.gcs.bucketName,
-      ...(config.gcs.apiEndpoint
-        ? { apiEndpoint: config.gcs.apiEndpoint, useAuthWithCustomEndpoint: true }
-        : isEnvTestOrDevelopment && config.gcs.fakeGcsHost
-          ? { apiEndpoint: `http://${config.gcs.fakeGcsHost}` }
-          : {}),
+      ...(isEnvTestOrDevelopment && config.gcs.fakeGcsHost
+        ? { apiEndpoint: `http://${config.gcs.fakeGcsHost}` }
+        : {}),
     },
     s3: {
       region: config.s3.region,
