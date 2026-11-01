@@ -128,7 +128,7 @@ import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 // Disabled (LLM)
 // import aiRoutes from '@/routes/aiRoutes';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
-import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
+import ysweetRoutes, { ysweetStorageKeyRouter, ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 // Disabled (Claw)
 // import internalCanvasRoutes from '@/routes/internalCanvas';
@@ -714,6 +714,7 @@ export class App {
     // No user session here — the caller is the y-sweet server itself, gated
     // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
     this.app.use('/api/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
+    this.app.use('/api/ysweet/storage-key', requireYSweetServerToken, ysweetStorageKeyRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
@@ -1112,11 +1113,12 @@ export class App {
       logger.warn('Continuing startup without Superposition client...');
     }
 
-    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate (requireYSweetServerToken
-    // fails closed with 401 if it's empty). A missing token here is silent at
-    // request time — every canvas connect and every 10s revalidation poll
-    // just 401s — so surface it loudly at boot instead. Warn, don't crash:
-    // an empty value is expected in local dev where nothing calls this route.
+    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate and /api/ysweet/storage-key
+    // (requireYSweetServerToken fails closed with 401 if it's empty). A missing
+    // token here is silent at request time — every canvas connect, every 10s
+    // revalidation poll and every doc storage-key request just 401s — so surface
+    // it loudly at boot instead. Warn, don't crash: an empty value is expected in
+    // local dev where nothing calls these routes.
     if (!config.ysweet.serverToken) {
       logger.warn(
         'Y_SWEET_SERVER_TOKEN is not set.' +
