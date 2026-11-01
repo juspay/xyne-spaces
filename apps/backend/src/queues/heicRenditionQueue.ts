@@ -94,7 +94,7 @@ class HeicRenditionQueue {
     void this.queue.process(JOB_NAME, concurrency, async job => {
       const { storagePath, workspaceId } = job.data;
       if (workspaceId) {
-        await generateHeicRenditionsInWorkspace(workspaceId, () => generateHeicRenditions(storageService, storagePath));
+        await generateHeicRenditionsInWorkspace(workspaceId, storagePath);
       } else {
         await generateHeicRenditions(storageService, storagePath);
       }
