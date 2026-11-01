@@ -76,6 +76,21 @@ export function syncSocialMediaSources(
 }
 
 /**
+ * Relocated from workers/facebookCatchUpWorker.ts. The catch-up pass runs across workspaces, so
+ * each source syncs in its own workspace: ingested rows get workspaceId stamped and attachments
+ * are written under that workspace's storage key. Returns how many new interactions were synced.
+ */
+export function catchUpSocialMediaSource(workspaceId: string, sourceId: string): Promise<number> {
+  return asService(
+    ['ExternalSource', 'Ticket', 'Email'],
+    'facebook catch-up worker: background job has no request context, scope opened per source workspace',
+    'facebook-catch-up-worker',
+    workspaceId,
+    async () => (await socialMediaService.syncSource(sourceId)).synced,
+  );
+}
+
+/**
  * Relocated from workers/emailClassificationWorker.ts's processJob. Background job → no
  * request context; classification writes (ticket assignment, activity, workload) need
  * workspaceId stamped.
