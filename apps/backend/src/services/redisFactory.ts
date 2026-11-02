@@ -29,7 +29,7 @@ export function createRedisClient(name: string, overrides: RedisOptions = {}): R
     logger.warn(`[redis:${name}] reconnecting`, { delayMs })
   );
 
-  return wrapRedisWithEncryption(client);
+  return wrapRedisWithEncryption(client, name);
 }
 
 export async function connectWithRetryForever(client: Redis, name: string): Promise<void> {

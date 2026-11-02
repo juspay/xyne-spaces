@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || printf '%s' "${SCRIPT_DIR%/*}")"
 ROOT="$REPO_ROOT/apps/backend/src"
-ALLOWED_RE='apps/backend/src/services/(redisFactory|redisEncryption)\.ts:'
+ALLOWED_RE='apps/backend/src/services/redisFactory\.ts:'
 EXCLUDED_RE='(^|/)(node_modules|dist|build|generated|__tests__)/|\.test\.ts:|:[0-9]+:[[:space:]]*(//|\*)'
 
 hits=$(grep -rnE 'new (Redis|IORedis)\(' "$ROOT" --include='*.ts' 2>/dev/null \
