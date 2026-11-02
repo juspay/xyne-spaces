@@ -6,6 +6,7 @@ import { ConditionOperator } from '../types/operators';
 import { automationService } from '../services/automation.service';
 import {
   issueWebhookSecret,
+  revokeWebhookSecret,
   rotateWebhookSecret,
   webhookSecretExists,
 } from '../services/webhook-secret.service';
@@ -1005,6 +1006,32 @@ async function resolveWebhookAutomation(
   };
 }
 
+// Revoke and rotate use the same rule as issuing: no guests; the author or an automations admin.
+async function resolveWebhookForManagement(
+  req: Request<{ automationId: string }>,
+  auth: { userId: string; workspaceId: string },
+  res: Response,
+): Promise<string | null> {
+  const resolved = await resolveWebhookAutomation(req.params.automationId, auth.workspaceId);
+  if ('error' in resolved) {
+    res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
+    return null;
+  }
+  if (req.user?.role === 'GUEST') {
+    res.status(403).json({ success: false, error: 'Forbidden' });
+    return null;
+  }
+  if (resolved.createdById !== auth.userId) {
+    try {
+      await assertIsAutomationsAdmin(auth.userId);
+    } catch {
+      res.status(403).json({ success: false, error: 'Only the author or an automations admin can manage this URL' });
+      return null;
+    }
+  }
+  return resolved.seriesId;
+}
+
 // Read-only: the token is shown only once at creation, so this returns just
 // whether a secret has been issued (never the token itself).
 router.get(
@@ -1060,12 +1087,62 @@ router.post(
     const secret = rotate
       ? await rotateWebhookSecret(resolved.seriesId)
       : await issueWebhookSecret(resolved.seriesId);
+    const seriesId = resolved.seriesId;
     res.json({
       success: true,
       data: {
-        url: secret ? `${webhookEndpoint()}/${resolved.seriesId}/${secret}` : null,
+        url: secret ? `${webhookEndpoint()}/${seriesId}/${secret}` : null,
         alreadyIssued: secret === null,
       },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+// Revoking deletes the stored secret, so every URL already handed out stops working.
+router.delete(
+  '/:automationId/webhook',
+  async (req: Request<{ automationId: string }>, res: Response) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const seriesId = await resolveWebhookForManagement(req, auth, res);
+    if (!seriesId) return;
+
+    const revoked = await revokeWebhookSecret(seriesId);
+    logger.info(
+      `[automations] webhook secret revoked seriesId=${seriesId} byUserId=${auth.userId} existed=${revoked}`,
+    );
+    res.json({
+      success: true,
+      data: { revoked },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+// Rotation is the only way to replace a leaked secret: the old URL stops working
+// and the new token is returned once, as it is at creation.
+router.post(
+  '/:automationId/webhook/rotate',
+  async (req: Request<{ automationId: string }>, res: Response) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const seriesId = await resolveWebhookForManagement(req, auth, res);
+    if (!seriesId) return;
+
+    const secret = await rotateWebhookSecret(seriesId);
+    logger.info(
+      `[automations] webhook secret rotated seriesId=${seriesId} byUserId=${auth.userId}`,
+    );
+    res.json({
+      success: true,
+      data: { url: `${webhookEndpoint()}/${seriesId}/${secret}` },
       timestamp: new Date().toISOString(),
     });
   },
