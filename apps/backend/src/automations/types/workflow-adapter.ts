@@ -81,6 +81,20 @@ export function buildAutomationMetadata(input: AutomationMetadata): string {
   return JSON.stringify(input);
 }
 
+export function withAutomationCreator(raw: string, createdById: string): string {
+  let base: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      base = { ...(parsed as Record<string, unknown>) };
+    }
+  } catch {
+    base = {};
+  }
+  Reflect.deleteProperty(base, '__proto__');
+  return JSON.stringify({ ...base, createdById });
+}
+
 export function mayDrainInFlight(workflow: Workflow): boolean {
   return (
     workflow.status === AutomationStatus.DISABLED &&

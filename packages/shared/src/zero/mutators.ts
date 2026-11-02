@@ -145,6 +145,34 @@ import {
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
 
+const automationMetadataCreator = (raw: string | null | undefined): string => {
+  if (!raw) return '';
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const value = (parsed as Record<string, unknown>)['createdById'];
+      return typeof value === 'string' ? value : '';
+    }
+  } catch {
+    return '';
+  }
+  return '';
+};
+
+const withAutomationCreator = (raw: string, createdById: string): string => {
+  let base: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      base = { ...(parsed as Record<string, unknown>) };
+    }
+  } catch {
+    base = {};
+  }
+  Reflect.deleteProperty(base, '__proto__');
+  return JSON.stringify({ ...base, createdById });
+};
+
 /** Checks the caller may change the channel's published apps; returns its current rows. */
 async function loadChannelForAppPublish(
   tx: Transaction<Schema>,
@@ -12871,7 +12899,7 @@ export const mutators = defineMutators({
           status: 'DRAFT',
           automationSeriesId: automationSeriesId ?? id,
           context: configJson,
-          metadata: metadataJson,
+          metadata: withAutomationCreator(metadataJson, ctx.userID),
           ticketId: null,
           workspaceId: ctx.workspaceId,
           configuration: null,
@@ -12893,6 +12921,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({
+        ctx,
         tx,
         args: { id, name, configJson, metadataJson, eventType, timestamp },
       }) => {
@@ -12905,12 +12934,13 @@ export const mutators = defineMutators({
             `Automation "${id}" is ${existing.status}; only DRAFT proposals can be edited.`,
           );
         }
+        const author = automationMetadataCreator(existing.metadata) || ctx.userID;
 
         await tx.mutate.workflows.update({
           id,
           updatedAt: timestamp,
           ...(name !== undefined && { workflowName: name }),
-          ...(metadataJson !== undefined && { metadata: metadataJson }),
+          ...(metadataJson !== undefined && { metadata: withAutomationCreator(metadataJson, author) }),
           ...(configJson !== undefined && { context: configJson }),
           ...(configJson !== undefined && eventType !== undefined && { eventType }),
         });

@@ -85,7 +85,13 @@ class ApprovalService {
       );
     }
     const author = proposerOf(row);
-    if (author && author !== userId) {
+    if (!author) {
+      throw new ApprovalError(
+        `Automation "${proposalId}" has no recorded author, so ownership cannot be verified.`,
+        'not-owner',
+      );
+    }
+    if (author !== userId) {
       throw new ApprovalError(
         `Only the proposal's author can submit it.`,
         'not-owner',
