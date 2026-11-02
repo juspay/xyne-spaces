@@ -6,8 +6,8 @@ nameOverride: ""
 fullnameOverride: vespa-configserver
 
 image:
-  registry: ""
-  repository: vespaengine/vespa
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-vespa
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent

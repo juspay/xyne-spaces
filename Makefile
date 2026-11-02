@@ -9,6 +9,7 @@ DASHBOARD_EDGE_IMAGE_NAME ?= xyne-spaces-dashboard-edge
 EXTERNAL_DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard-external
 LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= xyne-spaces-lighton-ocr-server
 TEI_BATCH_PROXY_IMAGE_NAME ?= xyne-spaces-tei-batch-proxy
+VESPA_IMAGE_NAME ?= xyne-spaces-vespa
 TRANSCRIPTION_AGENT_IMAGE_NAME ?= xyne-spaces-transcription-agent
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
@@ -147,6 +148,21 @@ push-tei-batch-proxy:
 clean-tei-batch-proxy:
 	docker rmi $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
+# Vespa targets (upstream image with OS security updates applied).
+build-vespa:
+	$(info Building $(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd vespa && docker buildx build -f Dockerfile -t $(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-vespa:
+	$(info Pushing to registry: $(NS)/$(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd vespa && docker buildx build -f Dockerfile -t $(NS)/$(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-vespa:
+	docker rmi $(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(VESPA_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
 # Transcription agent targets (Python / LiveKit agent). Self-contained build context
 # (apps/backend/python-agent) because the Dockerfile COPYs only from its own directory.

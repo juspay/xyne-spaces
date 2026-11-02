@@ -77,6 +77,13 @@
     "charts": ["xyne-tei-batch-proxy"]
   },
   {
+    "name": "vespa",
+    "image": "xyne-spaces-vespa",
+    "dockerfile": "vespa/Dockerfile",
+    "context": "vespa",
+    "charts": ["xyne-vespa"]
+  },
+  {
     "name": "agent-workspace",
     "image": "xyne-spaces-agent-workspace",
     "dockerfile": "claw-deployments/kata-infra/agent-workspace/Dockerfile",
