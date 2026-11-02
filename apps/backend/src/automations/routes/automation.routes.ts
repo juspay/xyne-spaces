@@ -15,6 +15,8 @@ import { AutomationRunStatus } from '../types/status';
 // import { clawClient } from '../services/claw-client';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
+import { AccessType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { AutomationStatus } from '../types/status';
 import {
@@ -22,6 +24,7 @@ import {
   workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
+  parseAutomationMetadata,
   triggerTypeToEventType,
   workflowToAutomation,
 } from '../types/workflow-adapter';
@@ -47,6 +50,8 @@ import {
 import { postTx } from '@/bypassAcl/transactions/automationRoutes';
 import { putTx } from '@/bypassAcl/transactions/automationRoutes';
 import { putTx2 } from '@/bypassAcl/transactions/automationRoutes';
+
+const AUTOMATIONS_RESOURCE_NAME = 'AUTOMATIONS';
 
 const router = Router();
 
@@ -940,7 +945,9 @@ function webhookEndpoint(): string {
 async function resolveWebhookAutomation(
   automationId: string,
   workspaceId: string,
-): Promise<{ seriesId: string } | { error: { status: number; message: string } }> {
+): Promise<
+  { seriesId: string; createdById: string } | { error: { status: number; message: string } }
+> {
   // Scope by workspaceId so an authenticated user in one workspace cannot resolve
   // (and mint/read the webhook secret for) an automation owned by another workspace.
   const workflow = await db.workflow.findFirst({
@@ -953,7 +960,21 @@ async function resolveWebhookAutomation(
   if (!workflow) {
     return { error: { status: 404, message: 'Automation not found' } };
   }
-  return { seriesId: workflow.automationSeriesId ?? workflow.id };
+  return {
+    seriesId: workflow.automationSeriesId ?? workflow.id,
+    createdById: parseAutomationMetadata(workflow.metadata).createdById,
+  };
+}
+
+async function isAutomationsAdmin(userId: string): Promise<boolean> {
+  const resource = await repositories.resources.findByName(AUTOMATIONS_RESOURCE_NAME);
+  if (!resource) {
+    logger.warn(
+      '[automations] AUTOMATIONS resource is not configured — nobody can mint a webhook secret for an automation they do not own. Run scripts/seed-acl.ts.',
+    );
+    return false;
+  }
+  return repositories.resourceAccess.hasAccess(userId, resource.id, AccessType.ADMIN);
 }
 
 // Read-only: the token is shown only once at creation, so this returns just
@@ -993,6 +1014,14 @@ router.post(
     const resolved = await resolveWebhookAutomation(req.params.automationId, auth.workspaceId);
     if ('error' in resolved) {
       res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
+      return;
+    }
+    const isAuthor = !!resolved.createdById && resolved.createdById === auth.userId;
+    if (!isAuthor && !(await isAutomationsAdmin(auth.userId))) {
+      res.status(403).json({
+        success: false,
+        error: 'Only the automation owner or an AUTOMATIONS admin can create its webhook trigger',
+      });
       return;
     }
     const secret = await issueWebhookSecret(resolved.seriesId);
