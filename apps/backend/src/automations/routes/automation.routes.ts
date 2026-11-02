@@ -6,6 +6,8 @@ import { ConditionOperator } from '../types/operators';
 import { automationService } from '../services/automation.service';
 import {
   issueWebhookSecret,
+  revokeWebhookSecret,
+  rotateWebhookSecret,
   webhookSecretExists,
 } from '../services/webhook-secret.service';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
@@ -970,11 +972,32 @@ async function isAutomationsAdmin(userId: string): Promise<boolean> {
   const resource = await repositories.resources.findByName(AUTOMATIONS_RESOURCE_NAME);
   if (!resource) {
     logger.warn(
-      '[automations] AUTOMATIONS resource is not configured — nobody can mint a webhook secret for an automation they do not own. Run scripts/seed-acl.ts.',
+      '[automations] AUTOMATIONS resource is not configured — nobody can manage a webhook secret for an automation they do not own. Run scripts/seed-acl.ts.',
     );
     return false;
   }
   return repositories.resourceAccess.hasAccess(userId, resource.id, AccessType.ADMIN);
+}
+
+async function resolveWebhookForManagement(
+  automationId: string,
+  auth: { userId: string; workspaceId: string },
+  res: Response,
+): Promise<string | null> {
+  const resolved = await resolveWebhookAutomation(automationId, auth.workspaceId);
+  if ('error' in resolved) {
+    res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
+    return null;
+  }
+  const isAuthor = !!resolved.createdById && resolved.createdById === auth.userId;
+  if (!isAuthor && !(await isAutomationsAdmin(auth.userId))) {
+    res.status(403).json({
+      success: false,
+      error: 'Only the automation owner or an AUTOMATIONS admin can manage its webhook trigger',
+    });
+    return null;
+  }
+  return resolved.seriesId;
 }
 
 // Read-only: the token is shown only once at creation, so this returns just
@@ -1011,26 +1034,65 @@ router.post(
       sendUnauthorized(res);
       return;
     }
-    const resolved = await resolveWebhookAutomation(req.params.automationId, auth.workspaceId);
-    if ('error' in resolved) {
-      res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
-      return;
-    }
-    const isAuthor = !!resolved.createdById && resolved.createdById === auth.userId;
-    if (!isAuthor && !(await isAutomationsAdmin(auth.userId))) {
-      res.status(403).json({
-        success: false,
-        error: 'Only the automation owner or an AUTOMATIONS admin can create its webhook trigger',
-      });
-      return;
-    }
-    const secret = await issueWebhookSecret(resolved.seriesId);
+    const seriesId = await resolveWebhookForManagement(req.params.automationId, auth, res);
+    if (!seriesId) return;
+
+    const secret = await issueWebhookSecret(seriesId);
     res.json({
       success: true,
       data: {
-        url: secret ? `${webhookEndpoint()}/${resolved.seriesId}/${secret}` : null,
+        url: secret ? `${webhookEndpoint()}/${seriesId}/${secret}` : null,
         alreadyIssued: secret === null,
       },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+// Revoking deletes the stored secret, so every URL already handed out stops working.
+router.delete(
+  '/:automationId/webhook',
+  async (req: Request<{ automationId: string }>, res: Response) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const seriesId = await resolveWebhookForManagement(req.params.automationId, auth, res);
+    if (!seriesId) return;
+
+    const revoked = await revokeWebhookSecret(seriesId);
+    logger.info(
+      `[automations] webhook secret revoked seriesId=${seriesId} byUserId=${auth.userId} existed=${revoked}`,
+    );
+    res.json({
+      success: true,
+      data: { revoked },
+      timestamp: new Date().toISOString(),
+    });
+  },
+);
+
+// Rotation is the only way to replace a leaked secret: the old URL stops working
+// and the new token is returned once, as it is at creation.
+router.post(
+  '/:automationId/webhook/rotate',
+  async (req: Request<{ automationId: string }>, res: Response) => {
+    const auth = getAuthContext(req);
+    if (!auth) {
+      sendUnauthorized(res);
+      return;
+    }
+    const seriesId = await resolveWebhookForManagement(req.params.automationId, auth, res);
+    if (!seriesId) return;
+
+    const secret = await rotateWebhookSecret(seriesId);
+    logger.info(
+      `[automations] webhook secret rotated seriesId=${seriesId} byUserId=${auth.userId}`,
+    );
+    res.json({
+      success: true,
+      data: { url: `${webhookEndpoint()}/${seriesId}/${secret}` },
       timestamp: new Date().toISOString(),
     });
   },

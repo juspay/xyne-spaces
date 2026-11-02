@@ -24,6 +24,22 @@ export async function issueWebhookSecret(seriesId: string): Promise<string | nul
   return secret;
 }
 
+export async function revokeWebhookSecret(seriesId: string): Promise<boolean> {
+  const { count } = await db.workflowMapping.deleteMany({
+    where: { entityType: ENTITY_TYPE, entityId: seriesId },
+  });
+  return count > 0;
+}
+
+export async function rotateWebhookSecret(seriesId: string): Promise<string> {
+  await revokeWebhookSecret(seriesId);
+  const secret = await issueWebhookSecret(seriesId);
+  if (!secret) {
+    throw new Error(`Could not rotate the webhook secret for ${seriesId}`);
+  }
+  return secret;
+}
+
 export async function storedSecretMatches(seriesId: string, secret: string): Promise<boolean> {
   const row = await db.workflowMapping.findUnique({ where: mapKey(seriesId) });
   if (!row) return false;
