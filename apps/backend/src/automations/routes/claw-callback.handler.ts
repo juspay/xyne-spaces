@@ -11,38 +11,31 @@ export async function handleClawCallback(
   const payload = (req.body ?? {}) as Record<string, unknown>;
 
   try {
-    const [existingRow, workflowExecution] = await Promise.all([
-      db.workflowStep.findUnique({
-        where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
-        select: { data: true },
-      }),
-      db.workflowExecution.findUniqueOrThrow({
-        where: { id: executionId },
-        select: { workspaceId: true },
-      }),
-    ]);
+    const existingRow = await db.workflowStep.findUnique({
+      where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
+      select: { data: true },
+    });
     if (!existingRow) {
       logger.warn(
-        `[automations] claw-callback: no workflow_step row for execution=${executionId} step=${stepName} — proceeding with empty existing data`,
+        `[automations] claw-callback: no dispatched step for execution=${executionId} step=${stepName} — refusing`,
       );
+      res.status(404).json({ success: false, error: 'no dispatched step for this callback' });
+      return;
     }
 
-    const existing = parseRowData(existingRow?.data);
+    const existing = parseRowData(existingRow.data);
+    if (existing['agentRawResult'] !== undefined) {
+      logger.info(
+        `[automations] claw-callback: execution=${executionId} step=${stepName} already answered — ignoring`,
+      );
+      res.json({ success: true, ignored: 'already answered' });
+      return;
+    }
     const merged = { ...existing, agentRawResult: payload };
 
-    await db.workflowStep.upsert({
+    await db.workflowStep.update({
       where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
-      create: {
-        workflowExecutionId: executionId,
-        stepName,
-        stepExecutorType: 'RUN_AGENT',
-        status: 'EXTERNAL_WAIT',
-        data: JSON.stringify(merged),
-        workspaceId: workflowExecution.workspaceId,
-      },
-      update: {
-        data: JSON.stringify(merged),
-      },
+      data: { data: JSON.stringify(merged) },
     });
 
     await automationQueue.enqueueRun({ executionId });
