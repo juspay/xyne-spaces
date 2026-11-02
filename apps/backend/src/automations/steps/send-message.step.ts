@@ -134,6 +134,18 @@ export class SendMessageStep extends BaseActionStep<
       }
     }
 
+    if (channelId) {
+      const channelInWorkspace = await db.channel.findFirst({
+        where: { id: channelId, workspaceId },
+        select: { id: true },
+      });
+      if (!channelInWorkspace) {
+        throw new Error(
+          `[SendMessageStep] Channel ${channelId} not found in workspace ${workspaceId}`
+        );
+      }
+    }
+
     // Deliver to a single target — shared by the channel post and each DM so
     // both paths share the same createConversationWithMessage contract.
     const deliver = async (
