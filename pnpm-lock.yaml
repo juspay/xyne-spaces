@@ -134,9 +134,9 @@ overrides:
 packageExtensionsChecksum: sha256-kYla/jBKu002rBl6Loamo/+kTzooiIs3F5TZy64LHO8=
 
 patchedDependencies:
-  reamkit@1.33.1:
-    hash: 8e9f0e38403a99fb1c9bb443a53ec57a3198baedc737bd37bb0e748360dc2d33
-    path: patches/reamkit@1.33.1.patch
+  reamkit@1.33.2:
+    hash: 16aa5f25e74a89ab8fdd6e0eb802033808d198d274a509854b736b1843ae562e
+    path: patches/reamkit@1.33.2.patch
 
 importers:
 
@@ -456,8 +456,8 @@ importers:
         specifier: ^4.0.1
         version: 4.0.1
       reamkit:
-        specifier: 1.33.1
-        version: 1.33.1(patch_hash=8e9f0e38403a99fb1c9bb443a53ec57a3198baedc737bd37bb0e748360dc2d33)
+        specifier: 1.33.2
+        version: 1.33.2(patch_hash=16aa5f25e74a89ab8fdd6e0eb802033808d198d274a509854b736b1843ae562e)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -17579,8 +17579,8 @@ packages:
     resolution: {integrity: sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==}
     engines: {node: '>= 12.13.0'}
 
-  reamkit@1.33.1:
-    resolution: {integrity: sha512-SVP55GfXtt/RepdrS2jtH4RIeTU7ul7ONo7YILmvelEvg5hmDCn9Tz72XDXHJ9kWaHCbGJFwtU1u3GXl5zS1/g==}
+  reamkit@1.33.2:
+    resolution: {integrity: sha512-4q/hZ/6rJFY3+pfy6LfF5qeH1VWVL8XKFFngNSt8lOJHApoh34jlr8MIACZfNWEafPJgueXjCjaSZctw0hnjlw==}
     engines: {node: '>=20'}
 
   recharts-scale@0.4.5:
@@ -38672,7 +38672,7 @@ snapshots:
 
   real-require@0.2.0: {}
 
-  reamkit@1.33.1(patch_hash=8e9f0e38403a99fb1c9bb443a53ec57a3198baedc737bd37bb0e748360dc2d33):
+  reamkit@1.33.2(patch_hash=16aa5f25e74a89ab8fdd6e0eb802033808d198d274a509854b736b1843ae562e):
     dependencies:
       fast-xml-parser: 5.10.1
       fflate: 0.8.3

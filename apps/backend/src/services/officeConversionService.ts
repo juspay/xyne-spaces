@@ -19,7 +19,7 @@ import { convertWithReam, ReamConversionThreadError } from "@/services/reamConve
 // Content-addressed and immutable, so entries never need to expire. The
 // renderer and its patch level are part of the prefix: a different renderer
 // draws the same bytes differently, so its PDFs must not be served for it.
-const GCS_CACHE_PREFIX = "office-conversion-cache/reamkit-1.33.1-p2"
+const GCS_CACHE_PREFIX = "office-conversion-cache/reamkit-1.33.2-p1"
 
 function asArray<T>(value: T | T[] | undefined): T[] {
     if (value == null) return []
