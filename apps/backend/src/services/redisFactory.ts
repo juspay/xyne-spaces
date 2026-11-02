@@ -2,6 +2,7 @@ import Redis, { RedisOptions } from 'ioredis';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { retryForever } from '@/utils/retry';
+import { wrapRedisWithEncryption } from '@/services/redisEncryption';
 
 export function getBaseRedisOptions(role: 'default' | 'bullmq' = 'default'): RedisOptions {
   return {
@@ -28,7 +29,7 @@ export function createRedisClient(name: string, overrides: RedisOptions = {}): R
     logger.warn(`[redis:${name}] reconnecting`, { delayMs })
   );
 
-  return client;
+  return wrapRedisWithEncryption(client);
 }
 
 export async function connectWithRetryForever(client: Redis, name: string): Promise<void> {
