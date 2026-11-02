@@ -33,7 +33,8 @@ import analyticsRoutes from '@/routes/analytics';
 import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
-import secretsVaultRoutes from '@/routes/secretsVault';
+// Disabled (Secrets vault) — re-enable together with the route mount below.
+// import secretsVaultRoutes from '@/routes/secretsVault';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
@@ -341,10 +342,13 @@ export class App {
     this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
-    // Migration routes (body parsing handled in route file)
-    this.app.use('/api/migration', migrationRoutes);
-
-    this.app.use('/migrate/api/migration', migrationRoutes);
+    // Migration routes (body parsing handled in route file). Only mounted when
+    // MIGRATION_ROUTES_ENABLED=true; otherwise these paths fall through to 404.
+    if (config.migrationRoutes.enabled) {
+      this.app.use('/api/migration', migrationRoutes);
+      this.app.use('/migrate/api/migration', migrationRoutes);
+      logger.info('Migration routes mounted at /api/migration and /migrate/api/migration');
+    }
 
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
     this.app.use('/api/webhooks',
@@ -735,7 +739,9 @@ export class App {
     // user deactivation from dashboard 
     this.app.use('/api/user-activation', userActivationRoutes);
 
-    this.app.use('/api/secrets-vault', authMiddleware.authenticate, secretsVaultRoutes);
+    // Disabled (Secrets vault): access survives role downgrade and the vault is platform-wide;
+    // blocked until access control is fixed. Router logic in routes/secretsVault.ts is untouched.
+    // this.app.use('/api/secrets-vault', authMiddleware.authenticate, secretsVaultRoutes);
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);

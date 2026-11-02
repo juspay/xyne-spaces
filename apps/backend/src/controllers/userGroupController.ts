@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { UserGroupRepository } from '@/database/repositories/userGroups';
 import {logger} from '@/utils/logger';
+import { UserGroupValidationError } from '@/bypassAcl/transactions/userGroups';
 
 const userGroupRepository = new UserGroupRepository();
 
@@ -52,6 +53,12 @@ export class UserGroupController {
       res.status(201).json(group);
     } catch (error: any) {
       logger.error('Error creating user group:', error);
+
+      // Users/roles outside the caller's workspace
+      if (error instanceof UserGroupValidationError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
 
       // Handle validation errors from repository
       if (error.message.includes('alias')) {

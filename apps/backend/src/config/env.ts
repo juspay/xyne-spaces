@@ -649,6 +649,10 @@ const envSchema = Joi.object({
   // are unaffected either way (always strict).
   WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
+  // Migration routes (/api/migration/* and the /migrate/api/migration/* alias):
+  // Slack/Jira/WhatsApp/Confluence migration, cleanup, backfills. Off by default:
+  // the router is not mounted at all unless this is true.
+  MIGRATION_ROUTES_ENABLED: Joi.boolean().default(false),
   // Continuous CPU + heap profiling pushed to Grafana Pyroscope. Off by default;
   // needs PYROSCOPE_SERVER_ADDRESS (e.g. http://localhost:4040) to do anything.
   PYROSCOPE_ENABLED: Joi.boolean().default(false),
@@ -795,6 +799,10 @@ export const config = {
   database: {
     url: envVars.DATABASE_URL,
     readReplicaPoolUrl: envVars.DATABASE_READ_REPLICA_POOL_URL,
+  },
+  migrationRoutes: {
+    /** Master switch. The /api/migration router is not mounted at all when false. */
+    enabled: envVars.MIGRATION_ROUTES_ENABLED,
   },
   sdk: {
     /** Master switch. The router is not mounted at all when false. */
