@@ -347,9 +347,6 @@
       "image-size": "2.0.3",
       "@azure/msal-node": "7.1.0",
       "zod@4": "4.6.6"
-    },
-    "patchedDependencies": {
-      "reamkit@1.33.2": "patches/reamkit@1.33.2.patch"
     }
   }
 }

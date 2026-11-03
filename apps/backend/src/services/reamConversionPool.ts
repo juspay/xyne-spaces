@@ -7,7 +7,7 @@ import type { ThreadData, ThreadReady, ThreadResponse } from "./reamConversionTh
 
 /**
  * worker_threads pool that converts office documents to PDF with Ream
- * (reamkit, pure JavaScript, patched in patches/reamkit@1.33.2.patch).
+ * (reamkit, pure JavaScript).
  *
  * Ream replaces LibreOffice, which the distroless runtime no longer ships: it
  * runs in-process, starts no other program and needs no shell. A conversion is

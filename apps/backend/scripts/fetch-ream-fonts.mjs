@@ -4,20 +4,22 @@
 // or locally with `pnpm fonts:fetch`.
 //
 // The fonts are the open substitutes Ream asks for — Arimo (Arial), Tinos (Times
-// New Roman), Cousine (Courier New), Carlito (Calibri), Caladea (Cambria) and Noto
-// Sans Symbols — laid out the way Ream requests them, under its CDN base
+// New Roman), Cousine (Courier New), Carlito (Calibri), Caladea (Cambria), Noto
+// Sans Symbols and a Noto Sans face for each script of India (Devanagari, Bengali,
+// Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam) — laid out the way
+// Ream requests them, under its CDN base
 // https://cdn.jsdelivr.net/npm/@expo-google-fonts/. Ream's own URLs carry no
 // version, and jsDelivr serves several of them from the old 0.2.3 packages, so
 // each file is pinned here to the version Ream actually receives and checked by
 // SHA-256: any change fails the build instead of silently changing the output.
 //
-// Licences travel with the fonts: SIL OFL 1.1 (Arimo, Carlito, Caladea, Noto Sans
-// Symbols) and Apache 2.0 (Tinos, Cousine). Each font carries its own copyright
+// Licences travel with the fonts: SIL OFL 1.1 (Arimo, Carlito, Caladea, the Noto
+// faces) and Apache 2.0 (Tinos, Cousine). Each font carries its own copyright
 // notice.
 //
-// Only Latin text and symbols are covered; other scripts draw as boxes. To add
-// one, add its Noto face at the path Ream requests (SCRIPTS in reamkit's
-// core/fonts/remote-fonts.js).
+// Latin text, symbols and the scripts of India are covered; other scripts (CJK,
+// Arabic, Hebrew, Thai) draw as boxes. To add one, add its Noto face at the path
+// Ream requests (SCRIPTS in reamkit's core/fonts/remote-fonts.js).
 
 import { createHash } from "node:crypto"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
@@ -46,8 +48,17 @@ const FILES = [
   ["cousine/Cousine_400Regular_Italic.ttf", `${FONT_CDN}cousine@0.2.3/Cousine_400Regular_Italic.ttf`, "dc39e44bb6ee50ea8445210ce7871f3af836632024e84eed125785d1b3f24b05"],
   ["cousine/Cousine_700Bold.ttf", `${FONT_CDN}cousine@0.2.3/Cousine_700Bold.ttf`, "30ce88d0c9d9834cde36018fa6332f87a11adf17eb48239cafebad9e21637344"],
   ["cousine/Cousine_700Bold_Italic.ttf", `${FONT_CDN}cousine@0.2.3/Cousine_700Bold_Italic.ttf`, "bc3f577ce4f0036c9f8045bfcb2f36ce8795de91915ccf127371d9e722d5e518"],
+  ["noto-sans-bengali/400Regular/NotoSansBengali_400Regular.ttf", `${FONT_CDN}noto-sans-bengali@0.4.4/400Regular/NotoSansBengali_400Regular.ttf`, "6826d9667972f0f96e48c46f7a24e70afe97205032e6295cfb1f13fbbb8b90a3"],
+  ["noto-sans-devanagari/400Regular/NotoSansDevanagari_400Regular.ttf", `${FONT_CDN}noto-sans-devanagari@0.4.2/400Regular/NotoSansDevanagari_400Regular.ttf`, "30f20b135b2b7b8c370ea30dd8c88f5174c1209f0373534ad4c814717f375b9e"],
+  ["noto-sans-gujarati/400Regular/NotoSansGujarati_400Regular.ttf", `${FONT_CDN}noto-sans-gujarati@0.4.2/400Regular/NotoSansGujarati_400Regular.ttf`, "7cc0f340be8ef8b63f92181fd5576a4b19631059fd6576c6fd5fcd40f1543610"],
+  ["noto-sans-gurmukhi/400Regular/NotoSansGurmukhi_400Regular.ttf", `${FONT_CDN}noto-sans-gurmukhi@0.4.1/400Regular/NotoSansGurmukhi_400Regular.ttf`, "2b0fbe8d4cc2a18aa08c6f21d3924423c113fb7ec6d786a77c30cf1d3153c4c7"],
+  ["noto-sans-kannada/400Regular/NotoSansKannada_400Regular.ttf", `${FONT_CDN}noto-sans-kannada@0.4.3/400Regular/NotoSansKannada_400Regular.ttf`, "40e8188c98e3913aae2241d570b179fdc29fd90ecb6b5dc4376298bcbe45c38b"],
+  ["noto-sans-malayalam/400Regular/NotoSansMalayalam_400Regular.ttf", `${FONT_CDN}noto-sans-malayalam@0.4.2/400Regular/NotoSansMalayalam_400Regular.ttf`, "68cbfeac7177700d87671f2a3bdb3db70fa26016e41cdac24e20877bf3736485"],
+  ["noto-sans-oriya/400Regular/NotoSansOriya_400Regular.ttf", `${FONT_CDN}noto-sans-oriya@0.4.2/400Regular/NotoSansOriya_400Regular.ttf`, "ba383a603869b5874d88a51ccd9aa526aefd18130c497bae6ce25db09507dd6e"],
   ["noto-sans-symbols/400Regular/NotoSansSymbols_400Regular.ttf", `${FONT_CDN}noto-sans-symbols@0.4.1/400Regular/NotoSansSymbols_400Regular.ttf`, "aedeec1cd0514930aeeafc4a88a6deff83cda1e6b58086f0b9bb9c7dd0157578"],
   ["noto-sans-symbols-2/400Regular/NotoSansSymbols2_400Regular.ttf", `${FONT_CDN}noto-sans-symbols-2@0.4.1/400Regular/NotoSansSymbols2_400Regular.ttf`, "f67f40c65f929f029827ab37cfdc4897dfd9ae3c28d9e98ba46e0d52e39eb97e"],
+  ["noto-sans-tamil/400Regular/NotoSansTamil_400Regular.ttf", `${FONT_CDN}noto-sans-tamil@0.4.3/400Regular/NotoSansTamil_400Regular.ttf`, "f26d8b66bf6f38dd9af6326a52188fa1a8a0b9b2905c4bd7e07c865f65a85d79"],
+  ["noto-sans-telugu/400Regular/NotoSansTelugu_400Regular.ttf", `${FONT_CDN}noto-sans-telugu@0.4.2/400Regular/NotoSansTelugu_400Regular.ttf`, "7fcef235380f945d4a97fdfec030952afab6907004cfa37ed664fed8d4962eac"],
   ["tinos/Tinos_400Regular.ttf", `${FONT_CDN}tinos@0.2.3/Tinos_400Regular.ttf`, "054f3f97a338070c3558a9ce7e302565be85c7436b10bb0a01cf6a41f0782e61"],
   ["tinos/Tinos_400Regular_Italic.ttf", `${FONT_CDN}tinos@0.2.3/Tinos_400Regular_Italic.ttf`, "80f98dbb589cd1ede7585cb1863335e9dd149e000a152dbf86f8a2325fb52b76"],
   ["tinos/Tinos_700Bold.ttf", `${FONT_CDN}tinos@0.2.3/Tinos_700Bold.ttf`, "971a3f3e6a5cb3c0973074cd9384bbea2db3d647ee54240a8a749bb43e3569e7"],

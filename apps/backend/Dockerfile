@@ -29,8 +29,6 @@ ENV NODE_OPTIONS="--max-old-space-size=8192"
 
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-# pnpm applies these at install time (root package.json → pnpm.patchedDependencies).
-COPY patches ./patches
 COPY packages/shared/package.json           packages/shared/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/cache/package.json            packages/cache/
