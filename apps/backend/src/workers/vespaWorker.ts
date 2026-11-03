@@ -9,6 +9,7 @@ import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, VespaOperationType
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
+import { validateVespaJob } from '@/zero/vespa-injection/core/jobValidation';
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -84,6 +85,9 @@ export class VespaWorker {
 		if (!this.isInitialized) {
 			await this.initialize();
 		}
+		if (!this.isInitialized) {
+			throw new Error('[VESPA_WORKER] Failed to initialize queue consumer');
+		}
 
 		logger.info('[VESPA_WORKER] VespaWorker started successfully and ready to process jobs');
 	}
@@ -111,6 +115,10 @@ export class VespaWorker {
 
 		// Event: Job failed
 		this.queue.on('failed', async (job, err) => {
+
+			if (validateVespaJob(job.data, { allowFileSchema: false })) {
+				return;
+			}
 
 			// After max retries, record in database
 			if (job.attemptsMade >= (job.opts.attempts || 3)) {
@@ -193,6 +201,13 @@ export class VespaWorker {
 	 * Process a single job from the queue
 	 */
 	private async processJob(job: Bull.Job<VespaJob>): Promise<any> {
+		const invalidReason = validateVespaJob(job.data, { allowFileSchema: false });
+		if (invalidReason) {
+			logger.warn(`[VESPA_WORKER] Rejected job ${job.id} (${job.name}): ${invalidReason}`);
+			await job.discard();
+			throw new Error(`Rejected invalid Vespa job: ${invalidReason}`);
+		}
+
 		const { schema, docId, jobType, app } = job.data;
 
 		logger.info(

@@ -1128,8 +1128,8 @@ export const mapCall = async (args: Call, workspaceId?: string, orgId?: string):
     : null;
 
   const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
-    workspaceId,
-    () => Promise.resolve(channel?.workspaceId),
+    args.workspaceId || channel?.workspaceId || workspaceId,
+    undefined,
     orgId,
   );
 
@@ -1476,8 +1476,10 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
   const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
   const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
-    workspaceId,
-    channelId ? () => db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } }).then(r => r?.workspaceId) : undefined,
+    email.workspaceId ||
+      (channelId ? await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } }).then(r => r?.workspaceId) : undefined) ||
+      workspaceId,
+    undefined,
     orgId
   );
 

@@ -13,6 +13,16 @@ type VespaConfigValues = {
   userId?: string;
 };
 
+const documentPathSegment = (name: string, value: string | undefined): string => {
+  if (!value || value === '.' || value === '..' || /[/?#\\\s]/.test(value)) {
+    throw new Error(`Invalid Vespa document ${name}`);
+  }
+  return encodeURIComponent(value);
+};
+
+const documentPath = (namespace: string | undefined, schema: string | undefined, docId: string | undefined): string =>
+  `/document/v1/${documentPathSegment('namespace', namespace)}/${documentPathSegment('schema', schema)}/docid/${documentPathSegment('docId', docId)}`;
+
 export interface BatchResult {
   docId: string;
   success: boolean;
@@ -176,7 +186,7 @@ class VespaClient {
       // Clean document fields to remove Unicode replacement characters before insertion
       const cleanedDocument = cleanDocumentFields(document);
 
-      const url = `${this.feedEndpoint}/document/v1/${options.namespace}/${options.schema}/docid/${document.docId}`;
+      const url = `${this.feedEndpoint}${documentPath(options.namespace, options.schema, document.docId)}`;
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: {
@@ -204,7 +214,7 @@ class VespaClient {
 
   async getDocument(options: VespaConfigValues & { docId: string }): Promise<any> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}${documentPath(namespace, schema, docId)}`;
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'GET',
@@ -241,7 +251,7 @@ class VespaClient {
     const { docId, namespace, schema, create } = options;
     // create=true upserts: Vespa builds the doc from these assign ops when it
     // doesn't exist yet, instead of silently no-oping the partial update.
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}${
+    const url = `${this.feedEndpoint}${documentPath(namespace, schema, docId)}${
       create ? '?create=true' : ''
     }`;
 
@@ -285,7 +295,7 @@ class VespaClient {
 
   async deleteDocument(options: VespaConfigValues & { docId: string }): Promise<void> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}${documentPath(namespace, schema, docId)}`;
 
     try {
       const response = await this.fetchWithRetry(url, {

@@ -105,7 +105,7 @@ export async function extractMentionsFromContent(rawContent: string): Promise<Ex
       userPicture: userPicture || undefined,
     });
 
-    logger.info(`✅ [MENTION-HTML] Extracted mention from HTML span: @${username} -> ${userId} (${userEmail})`);
+    logger.info(`✅ [MENTION-HTML] Extracted mention from HTML span: @${username} -> ${userId}`);
   }
 
   // Method 2: Fallback to zero-width space delimited mentions (legacy format)
@@ -147,7 +147,7 @@ export async function extractMentionsFromContent(rawContent: string): Promise<Ex
           userPicture: user.picture || undefined,
         });
 
-        logger.info(`✅ [MENTION-ZWSP] Resolved @${username} to user ${user.id} (${user.email})`);
+        logger.info(`✅ [MENTION-ZWSP] Resolved @${username} to user ${user.id}`);
       } else {
         logger.warn(`⚠️ [MENTION-ZWSP] Could not resolve username: ${username}`);
       }

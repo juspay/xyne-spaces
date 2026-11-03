@@ -122,11 +122,12 @@ timeout 50 s; ServiceMonitor port `http`, path `/metrics`.
 
 ## xyne-worker
 
-The backend codebase started with its worker entrypoint (`pnpm run start:worker`). One install
+The backend codebase started with its worker entrypoint (`dist/main-worker.js`). One install
 runs one set of roles; install the chart once per role.
 
 **Image.** `ghcr.io/juspay/xyne-spaces-backend`, release-stamped; there is no separate worker
-image. `command: [pnpm, run, start:worker]`.
+image. The image is distroless (entrypoint `node`, no shell or pnpm), so the chart leaves
+`command` empty and sets `args: [--import, tsx, dist/main-worker.js]`.
 
 **Ports.** Container `http` 3001 and a Service with `http` 80 and `http-app` 3001 exist for
 parity only; worker mode starts no HTTP server, nothing listens.

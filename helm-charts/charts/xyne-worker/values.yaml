@@ -24,11 +24,11 @@ strategy:
     maxSurge: 25%
     maxUnavailable: 0
 
-command:
-  - pnpm
-  - run
-  - start:worker
-args: []
+command: []
+args:
+  - --import
+  - tsx
+  - dist/main-worker.js
 
 containerPorts:
   - name: http
