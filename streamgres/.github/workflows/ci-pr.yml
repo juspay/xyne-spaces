@@ -196,6 +196,7 @@ jobs:
             -e STREAMGRES_MUTATE_URL=http://127.0.0.1:4849/push \
             -e STREAMGRES_ROW_LIMIT=600 \
             -e STREAMGRES_ENABLE_ADMIN_ENDPOINTS=true \
+            -e STREAMGRES_ADMIN_TOKEN=ci-admin-token \
             -e OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
             -e OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
             -e OTEL_METRICS_EXPORTER=otlp \
@@ -213,6 +214,7 @@ jobs:
       - name: Sync, schema refusal, heavy reads and the OTLP push, end to end
         env:
           SMOKE_COLLECTOR: http://127.0.0.1:9464/metrics
+          STREAMGRES_ADMIN_TOKEN: ci-admin-token
         run: node scripts/smoke.mjs
 
       - name: The server's log, when something failed

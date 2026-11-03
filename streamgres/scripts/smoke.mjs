@@ -209,7 +209,7 @@ await c.until('the refusal', (s) => s.closed);
 if (c.errors[0]?.kind !== 'SchemaVersionNotSupported' || c.pokes > 0) fail('a client ahead of the database was not refused as the reference server refuses it: ' + JSON.stringify(c.errors));
 log('a fitting client schema was served and one naming an unknown column was refused with SchemaVersionNotSupported');
 
-const stats = await (await fetch(`${HTTP}/stats`)).json();
+const stats = await (await fetch(`${HTTP}/stats`, { headers: { authorization: `Bearer ${process.env.STREAMGRES_ADMIN_TOKEN}` } })).json();
 const limit = stats.gauges.read_row_limit;
 const heavy = stats.heavy_queries?.[0];
 if (limit !== 600) fail(`the server should run with STREAMGRES_ROW_LIMIT=600, it reports ${limit}`);

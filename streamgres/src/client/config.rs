@@ -188,6 +188,38 @@ pub struct Config {
     /// are served (false). Enable only for deployments that need the
     /// endpoints on the public port; prefer pushing metrics over OTLP.
     pub admin_endpoints: bool,
+    /// `STREAMGRES_ADMIN_TOKEN`: the bearer token `/stats` and `/metrics`
+    /// require. Without one they refuse every request.
+    pub admin_token: Option<AdminToken>,
+}
+
+/// The bearer token of the admin endpoints, kept out of `Debug` output.
+#[derive(Clone)]
+pub struct AdminToken(String);
+
+impl AdminToken {
+    pub fn new(token: String) -> Self {
+        Self(token)
+    }
+
+    /// Whether `given` is the token, comparing every byte whatever the
+    /// first difference, so the time taken does not reveal a matching prefix.
+    pub fn matches(&self, given: &str) -> bool {
+        let expected = self.0.as_bytes();
+        let given = given.as_bytes();
+        expected.len() == given.len()
+            && expected
+                .iter()
+                .zip(given)
+                .fold(0, |difference, (a, b)| difference | (a ^ b))
+                == 0
+    }
+}
+
+impl std::fmt::Debug for AdminToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("AdminToken(<redacted>)")
+    }
 }
 
 impl Config {
@@ -430,6 +462,9 @@ impl Config {
                     ));
                 }
             },
+            admin_token: first(&["STREAMGRES_ADMIN_TOKEN"])
+                .filter(|token| !token.is_empty())
+                .map(AdminToken::new),
         })
     }
 
@@ -586,6 +621,24 @@ mod tests {
             ("XYNE_SYNC_ADDR", "127.0.0.1:4848"),
         ]);
         assert_eq!(preferred.bind, "0.0.0.0:5000");
+    }
+
+    /// The admin token is optional, an empty one is no token, and it never
+    /// shows in the configuration's debug output.
+    #[test]
+    fn the_admin_token_is_read_and_stays_out_of_debug_output() {
+        assert!(config(&[]).unwrap().admin_token.is_none());
+        assert!(
+            config_with(&[("STREAMGRES_ADMIN_TOKEN", "")])
+                .admin_token
+                .is_none()
+        );
+        let config = config_with(&[("STREAMGRES_ADMIN_TOKEN", "s3cret")]);
+        let token = config.admin_token.as_ref().unwrap();
+        assert!(token.matches("s3cret"));
+        assert!(!token.matches("s3cres"));
+        assert!(!token.matches("s3cret2"));
+        assert!(!format!("{config:?}").contains("s3cret"));
     }
 
     #[test]
