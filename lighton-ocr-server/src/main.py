@@ -16,8 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from async_jobs import async_job_runner
@@ -34,6 +33,7 @@ from runtime_config import (
     start_runtime_config_poller,
     stop_runtime_config_poller,
 )
+from s2s_auth import require_s2s_key
 from tokenization import OffsetTokenizer
 
 if TYPE_CHECKING:
@@ -48,6 +48,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "[startup] lighton_url=%s lighton_model=%s",
         settings.lighton_url or "(not set)", settings.lighton_model,
     )
+    if not settings.s2s_key:
+        logger.error("[startup] OCR_S2S_KEY is not set: every route except /health will return 401")
     await start_runtime_config_poller()
     if settings.has_lighton_endpoint:
         lighton_client = LightOnClient(
@@ -93,13 +95,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await stop_runtime_config_poller()
 
 
-app = FastAPI(title="LightOn OCR Service", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# No CORS middleware: only internal services call this API, never a browser.
+# The interactive docs are off too; they would sit outside the s2s check.
+app = FastAPI(
+    title="LightOn OCR Service",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 
@@ -114,7 +117,7 @@ async def health_check() -> dict[str, object]:
     }
 
 
-@app.post("/process")
+@app.post("/process", dependencies=[Depends(require_s2s_key)])
 async def process_document_endpoint(
     file: Annotated[UploadFile, File()],
     doc_id: Annotated[str, Form()],
@@ -146,7 +149,7 @@ async def process_document_endpoint(
         _remove_file(tmp_path)
 
 
-@app.post("/process_async", status_code=202)
+@app.post("/process_async", status_code=202, dependencies=[Depends(require_s2s_key)])
 async def process_document_async_endpoint(
     file: Annotated[UploadFile, File()],
     job_id: Annotated[str, Form()],
@@ -195,12 +198,12 @@ async def process_document_async_endpoint(
     )
 
 
-@app.get("/status")
+@app.get("/status", dependencies=[Depends(require_s2s_key)])
 async def get_all_status() -> dict[str, dict[str, Any]]:
     return tracker.all()
 
 
-@app.get("/status/{identifier}")
+@app.get("/status/{identifier}", dependencies=[Depends(require_s2s_key)])
 async def get_status(identifier: str) -> dict[str, Any]:
     entry = tracker.find(identifier)
     if entry is None:
@@ -208,7 +211,7 @@ async def get_status(identifier: str) -> dict[str, Any]:
     return entry
 
 
-@app.get("/instance_status")
+@app.get("/instance_status", dependencies=[Depends(require_s2s_key)])
 async def instance_status() -> dict[str, object]:
     active = await async_job_runner.active_count()
     configured = current_wrapper_async_max_inflight()

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Creates a c4-standard-16 Managed Instance Group behind an internal managed HTTP LB.
-# Run from this repository root after setting LIGHTON_OCR_IMAGE_URI and REDIS_URL.
+# Run from this repository root after setting LIGHTON_OCR_IMAGE_URI, REDIS_URL and OCR_S2S_KEY.
 
 PROJECT="${PROJECT:-xyne-spaces-sbx}"
 REGION="${REGION:-asia-southeast1}"
@@ -30,6 +30,9 @@ LB_IP="${LB_IP:-}"
 LIGHTON_OCR_IMAGE_URI="${LIGHTON_OCR_IMAGE_URI:?Set LIGHTON_OCR_IMAGE_URI, for example asia-southeast1-docker.pkg.dev/xyne-spaces-sbx/ocr/lighton-ocr-server:final}"
 REDIS_URL="${REDIS_URL:?Set REDIS_URL reachable from the fleet, for example redis://10.2.0.2:6379/0}"
 OCR_ASYNC_GLOBAL_MAX_INFLIGHT="${OCR_ASYNC_GLOBAL_MAX_INFLIGHT:-20}"
+# Shared key the backend sends as x-s2s-key; must match OCR_S2S_KEY on the backend.
+OCR_S2S_KEY="${OCR_S2S_KEY:?Set OCR_S2S_KEY to the same value as OCR_S2S_KEY on the backend}"
+export LIGHTON_OCR_IMAGE_URI REDIS_URL OCR_ASYNC_GLOBAL_MAX_INFLIGHT OCR_S2S_KEY
 
 GCLOUD="${GCLOUD:-python3 /usr/local/Caskroom/gcloud-cli/532.0.0/google-cloud-sdk/lib/gcloud.py}"
 
@@ -47,6 +50,7 @@ print(
         LIGHTON_OCR_IMAGE_URI=os.environ["LIGHTON_OCR_IMAGE_URI"],
         REDIS_URL=os.environ["REDIS_URL"],
         OCR_ASYNC_GLOBAL_MAX_INFLIGHT=os.environ["OCR_ASYNC_GLOBAL_MAX_INFLIGHT"],
+        OCR_S2S_KEY=os.environ["OCR_S2S_KEY"],
     ),
     end="",
 )

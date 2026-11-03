@@ -15,6 +15,10 @@ The service keeps the current Docling-style response envelope and strict chunk o
 
 ## Endpoints
 
+Every endpoint except `/health` requires the `x-s2s-key` header to match `OCR_S2S_KEY`
+(the backend sends its own `OCR_S2S_KEY`). A missing or wrong key returns `401`, and so does every
+request when `OCR_S2S_KEY` is unset.
+
 | Endpoint | Description |
 | --- | --- |
 | `GET /health` | Ready when `LIGHTON_URL` is configured |

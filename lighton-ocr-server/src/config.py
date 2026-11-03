@@ -206,6 +206,10 @@ class Settings:
     runtime_config_key: str = _env("OCR_RUNTIME_CONFIG_KEY", "docling:runtime-config")
     runtime_config_poll_seconds: int = max(5, _int_env("OCR_RUNTIME_CONFIG_POLL_SECONDS", 300))
 
+    # Service-to-service auth. Callers send OCR_S2S_KEY in the x-s2s-key header.
+    # Unset = every route except /health returns 401 (fail closed).
+    s2s_key: str = _env("OCR_S2S_KEY")
+
     @property
     def has_lighton_endpoint(self) -> bool:
         return bool(self.lighton_url)
