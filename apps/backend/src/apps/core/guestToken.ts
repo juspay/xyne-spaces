@@ -86,8 +86,6 @@ export async function resolveGuestToken(token: string): Promise<AuthenticatedUse
     name: user.name,
     displayName: user.displayName,
     workspaceId: user.workspaceId,
-    isApiKeyUser: false,
-    scopes: [],
     role: user.role,
     orgRole: OrgRole.GUEST,
     memberId: member.memberId,
