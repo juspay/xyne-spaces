@@ -6,6 +6,7 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { TicketController } from '@/controllers/ticketController';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { generateTitle } from '@/services/agents/title-generator';
@@ -94,7 +95,19 @@ export class CreateTicketStep extends BaseActionStep<
     config: z.infer<typeof CreateTicketConfigSchema>,
     context: AutomationContext
   ): Promise<CreateTicketOutput> {
-    const createdBy = (config.createdById as string | undefined) ?? context.automation.createdById;
+    const configuredCreatedBy = config.createdById as string | undefined;
+    if (configuredCreatedBy) {
+      const inWorkspace = await db.user.findFirst({
+        where: { id: configuredCreatedBy, workspaceId: context.automation.workspaceId },
+        select: { id: true },
+      });
+      if (!inWorkspace) {
+        throw new Error(
+          `[CREATE_TICKET] createdById ${configuredCreatedBy} is not a user in workspace ${context.automation.workspaceId}`
+        );
+      }
+    }
+    const createdBy = configuredCreatedBy ?? context.automation.createdById;
 
     const rawTitle = config.title as string | undefined;
     const rawDescription = config.description as string;
