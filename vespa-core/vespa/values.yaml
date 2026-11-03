@@ -30,6 +30,11 @@ embedder:
   dimensions: 768
   endpoint: http://tei-batch-proxy:8080/v1/embeddings
   fileEndpoint: http://tei-batch-proxy:8080/v1/embeddings/file
+  # Secret the embedders send as `Authorization: Bearer <key>` to tei-batch-proxy.
+  # Self-hosted Vespa resolves it from the env var VESPA_SECRET_TEI_PROXY_S2S_KEY on the
+  # feed and query container pods (must equal the proxy's TEI_PROXY_S2S_KEY). If that
+  # env var is missing the embedders fail to start. Empty = send no key.
+  apiKeySecretRef: teiProxyS2sKey
 
 redundancy: 1
 

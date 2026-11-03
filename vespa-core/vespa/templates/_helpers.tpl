@@ -34,11 +34,17 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
   <model>{{ .Values.embedder.model }}</model>
   <dimensions>{{ .Values.embedder.dimensions }}</dimensions>
   <endpoint>{{ .Values.embedder.endpoint }}</endpoint>
+  {{- with .Values.embedder.apiKeySecretRef }}
+  <api-key-secret-ref>{{ . }}</api-key-secret-ref>
+  {{- end }}
 </component>
 <component id="embed-file" type="openai-embedder">
   <model>{{ .Values.embedder.model }}</model>
   <dimensions>{{ .Values.embedder.dimensions }}</dimensions>
   <endpoint>{{ .Values.embedder.fileEndpoint }}</endpoint>
+  {{- with .Values.embedder.apiKeySecretRef }}
+  <api-key-secret-ref>{{ . }}</api-key-secret-ref>
+  {{- end }}
 </component>
 {{- end }}
 

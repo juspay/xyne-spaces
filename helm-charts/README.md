@@ -256,12 +256,32 @@ kubectl -n xyne create secret generic xyne-lighton-ocr-secrets \
   --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}"
 ```
 
+With Vespa, `xyne-tei-batch-proxy` requires `Authorization: Bearer <TEI_PROXY_S2S_KEY>` on every
+route except `/health`, and Vespa's embedders send it from `VESPA_SECRET_TEI_PROXY_S2S_KEY`:
+
+```bash
+kubectl -n xyne create secret generic xyne-vespa-secrets \
+  --from-literal=TEI_PROXY_S2S_KEY="$(openssl rand -hex 32)"
+```
+
+The proxy chart reads it by default. Add the same key to the `xyne-vespa` releases that run the
+feed and search containers (not the config server or content nodes); without it their embedders
+fail to start:
+
+```yaml
+secretEnv:
+  VESPA_SECRET_TEI_PROXY_S2S_KEY:
+    name: xyne-vespa-secrets
+    key: TEI_PROXY_S2S_KEY
+```
+
 | Secret | Required keys | Optional keys |
 |---|---|---|
 | `xyne-claw-secrets` | `XYNE_CLAW_S2S_KEY`, `LITELLM_API_KEY` | `INTERNAL_S2S_KEY`, `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-claw-auth-secrets` | `DATABASE_URL`, `ENCRYPTION_KEY` (64 hex), `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY` | `SPACES_DB_URL`, `REDIS_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-transcription-agent-secrets` | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TRANSCRIPTION_AGENT_API_KEY` | `REDIS_PASSWORD`, `AZURE_OPENAI_STT_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_TTS_API_KEY`, `DEEPGRAM_API_KEY`, `CHUTES_STT_API_KEY`, `GOOGLE_VOICE_CREDENTIALS_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-lighton-ocr-secrets` | - | `LIGHTON_ACCESS_TOKEN`, `REDIS_PASSWORD` |
+| `xyne-vespa-secrets` | `TEI_PROXY_S2S_KEY` (proxy, and the Vespa feed and search pods as `VESPA_SECRET_TEI_PROXY_S2S_KEY`) | - |
 
 Anything else you need in a pod's environment goes through the same two keys on any chart:
 `secretEnv` (one variable from one Secret key) or `envFromSecrets` (every key of a Secret).
