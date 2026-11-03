@@ -18,16 +18,18 @@ export interface JwtPayload {
 }
 
 export class JwtService {
-  private readonly secret: string;
   private readonly issuer = 'xyne';
   private readonly audience = 'xyne-user';
+  private resolvedSecret: string | null = null;
 
-  constructor() {
+  private get secret(): string {
+    if (this.resolvedSecret) return this.resolvedSecret;
     const secret = config.jwt.secret;
     if (!secret || secret.length < 32) {
       throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
     }
-    this.secret = secret;
+    this.resolvedSecret = secret;
+    return secret;
   }
 
   /**
@@ -121,3 +123,11 @@ export class JwtService {
 }
 
 export const jwtService = new JwtService();
+
+/** Boot-time check for processes that sign or verify session tokens (the API). */
+export function assertJwtSecretConfigured(): void {
+  const secret = config.jwt.secret;
+  if (!secret || secret.length < 32) {
+    throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
+  }
+}

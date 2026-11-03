@@ -79,9 +79,6 @@ secretEnv:
   REDIS_URL:
     name: xyne-backend-secrets
     key: REDIS_URL
-  JWT_SECRET:
-    name: xyne-backend-secrets
-    key: JWT_SECRET
   ENCRYPTION_KEY:
     name: xyne-backend-secrets
     key: ENCRYPTION_KEY

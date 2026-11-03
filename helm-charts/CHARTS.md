@@ -134,10 +134,10 @@ parity only; worker mode starts no HTTP server, nothing listens.
 
 **Health.** All probes are empty on purpose. Use an exec probe if you need one.
 
-**Secrets.** `xyne-backend-secrets`: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`,
-`INTERNAL_S2S_KEY`. The last three are required because the backend's env validation is loaded
-even though the worker does not serve requests. Add `REDIS_PASSWORD` and the storage keys the
-same way as on the backend.
+**Secrets.** `xyne-backend-secrets`: `DATABASE_URL`, `REDIS_URL`, `ENCRYPTION_KEY`,
+`INTERNAL_S2S_KEY`. `JWT_SECRET` is optional: only the API and the automation CSAT step sign
+with it, so a worker that runs neither does not mount it. Add `REDIS_PASSWORD` and the storage
+keys the same way as on the backend.
 
 **Environment.** The same Redis, storage and Vespa settings as the backend (`REDIS_HOST=redis`,
 `STORAGE_PROVIDER=s3`, `VESPA_FEED_URL`, `VESPA_QUERY_URL`, `ENABLE_OTEL_METRICS="false"`), plus

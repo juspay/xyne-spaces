@@ -3,11 +3,8 @@ import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
 import { InsertDocument, samTranscriptSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
-import { db } from '@/database/client';
-import { NAMESPACE } from '@/vespa/vespaConfig';
-import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
-import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 import { validateVespaJob } from '@/zero/vespa-injection/core/jobValidation';
 
@@ -15,12 +12,6 @@ export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
 	private isInitialized = false;
 	private isInitializing = false;
-	private namespace: string;
-
-	constructor(namespace: string = NAMESPACE) {
-		this.namespace = namespace;
-	}
-
 	async initialize(): Promise<void> {
 		// Prevent concurrent initialization attempts
 		if (this.isInitialized || this.isInitializing) {
@@ -56,6 +47,7 @@ export class VespaWorker {
 						delay: 2000,
 					},
 					removeOnComplete: 1000,
+					removeOnFail: 5000,
 				},
 				settings: {
 					stalledInterval: 30 * 1000,    // 30 seconds
@@ -120,11 +112,10 @@ export class VespaWorker {
 				return;
 			}
 
-			// After max retries, record in database
+			// After max retries the job stays in Bull's failed set (bounded by removeOnFail).
 			if (job.attemptsMade >= (job.opts.attempts || 3)) {
-				await this.recordFailedJob(job, err);
 				logger.warn(
-					`[VESPA_WORKER] Recorded failed job ${job.id} to database after ${job.attemptsMade} failed attempts`
+					`[VESPA_WORKER] Job ${job.id} (${job.data.schema}/${job.data.docId}) failed after ${job.attemptsMade} attempts: ${err.message}`
 				);
 			}
 		});
@@ -149,52 +140,6 @@ export class VespaWorker {
 			}
 		}
 		return summary;
-	}
-
-	/**
-	 * Record a failed job in the database
-	 */
-	private async recordFailedJob(job: Bull.Job<VespaJob>, error: Error): Promise<void> {
-		try {
-			const entityId = job.data.docId;
-			const entityType = job.data.schema;
-			const userId = job.data.userId || null;
-			const workspaceId = job.data.workspaceId;
-			if (!workspaceId) {
-				logger.warn(
-					`[VESPA_WORKER] Skipping DB failure record for job ${job.id} (${entityType}/${entityId}): no workspaceId on job payload`,
-				);
-				return;
-			}
-			await db.vespaInsertionLogs.create({
-				data: {
-					entityId,
-					entityType,
-					workspaceId,
-					type: VespaOperationType[job.data.jobType],
-					status: VespaInsertionStatus.FAILED,
-					namespace: this.namespace,
-					errorMessage: `Job ${job.id} failed after ${job.attemptsMade} attempts: ${error.message}`,
-					errorDetails: JSON.stringify({
-						jobId: job.id,
-						jobName: job.name,
-						jobType: job.data.jobType,
-						attemptsMade: job.attemptsMade,
-						error: error.message,
-						stack: error.stack,
-						jobData: job.data,
-						timestamp: Date.now(),
-					}),
-					userId,
-					retryCount: job.attemptsMade || 0,
-					createdAt: new Date(),
-				},
-			});
-
-			logger.info(`[VESPA_WORKER] ✓ Recorded failed job ${job.id} in database`);
-		} catch (dbError) {
-			logger.error(`[VESPA_WORKER] Failed to record job ${job.id} failure in database:`, dbError);
-		}
 	}
 
 	/**

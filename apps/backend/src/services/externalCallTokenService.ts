@@ -17,14 +17,16 @@ const AUDIENCE = 'xyne-external-participant';
 const MAX_AGE_SECONDS = 24 * 60 * 60; // 24 hours
 
 class ExternalCallTokenService {
-  private readonly secret: string;
+  private resolvedSecret: string | null = null;
 
-  constructor() {
+  private get secret(): string {
+    if (this.resolvedSecret) return this.resolvedSecret;
     const secret = config.jwt.secret;
     if (!secret || secret.length < 32) {
       throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
     }
-    this.secret = secret;
+    this.resolvedSecret = secret;
+    return secret;
   }
 
   sign(payload: { participantId: string; callId: string; externalId: string }): string {
