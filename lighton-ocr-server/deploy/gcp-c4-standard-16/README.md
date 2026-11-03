@@ -28,6 +28,7 @@ chmod +x deploy/gcp-c4-standard-16/create-fleet.sh
 
 LIGHTON_OCR_IMAGE_URI='asia-southeast1-docker.pkg.dev/xyne-spaces-sbx/<repo>/lighton-ocr-server:final' \
 REDIS_URL='redis://<redis-internal-ip>:6379/0' \
+OCR_S2S_KEY='<same value as the backend OCR_S2S_KEY>' \
 deploy/gcp-c4-standard-16/create-fleet.sh
 ```
 

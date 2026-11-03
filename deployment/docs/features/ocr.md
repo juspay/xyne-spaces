@@ -22,6 +22,11 @@ With both on, the root chart wires them together: the backend gets
 `LIGHTON_TIMEOUT_SECONDS` (dense pages take longer than the 60-second default on smaller GPUs).
 The OCR service also reads `REDIS_PASSWORD` from `xyne-backend-secrets` for its async jobs.
 
+Every route except `/health` requires the `x-s2s-key` header. The backend, the workers and the OCR
+service all read `OCR_S2S_KEY` from `xyne-backend-secrets` (Terraform `app_secrets.ocr_s2s_key`), and
+the backend sends it on `/process_async` and the `/process` sync fallback. If the key is unset the OCR
+service answers 401 to everything, so OCR'd files fail until it is set on both sides.
+
 ## Turn it on
 
 `01-infra.tfvars` (AWS):

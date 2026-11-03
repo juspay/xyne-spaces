@@ -9,6 +9,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
       - PORT=${PORT:-8000}
+      - OCR_S2S_KEY=${OCR_S2S_KEY:-}
       - LIGHTON_URL=${LIGHTON_URL:-http://192.168.1.112:5002/v1/chat/completions}
       - LIGHTON_MODEL=${LIGHTON_MODEL:-lightonai/LightOnOCR-2-1B-bbox}
       - LIGHTON_ACCESS_TOKEN=${LIGHTON_ACCESS_TOKEN:-}
