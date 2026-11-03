@@ -106,7 +106,7 @@ const cpuSeconds = () => {
   const parts = text.split(':').map(Number);
   return parts.reduce((total, part) => total * 60 + part, 0);
 };
-const stats = async (reset) => (await fetch(`${HTTP}/stats${reset ? '?reset=1' : ''}`)).json();
+const stats = async (reset) => (await fetch(`${HTTP}/stats${reset ? '?reset=1' : ''}`, { headers: { authorization: `Bearer ${process.env.STREAMGRES_ADMIN_TOKEN}` } })).json();
 const clients = Array.from({ length: CONNECTIONS }, (_, i) => connect(i));
 const hydrateStarted = performance.now();
 while (!clients.every((c) => c.hydrated)) {

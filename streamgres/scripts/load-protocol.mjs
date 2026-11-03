@@ -298,7 +298,7 @@ log(`${users.length} users are members of ${channelIds.length} channel(s) (${cha
 /// The server's own measurements (its /stats endpoint), or null.
 async function serverStats(reset) {
   try {
-    const response = await fetch(STATS + (reset ? '?reset=1' : ''));
+    const response = await fetch(STATS + (reset ? '?reset=1' : ''), { headers: { authorization: `Bearer ${process.env.STREAMGRES_ADMIN_TOKEN}` } });
     return response.ok ? await response.json() : null;
   } catch { return null; }
 }

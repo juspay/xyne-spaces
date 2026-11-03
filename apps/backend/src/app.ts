@@ -95,7 +95,6 @@ import { notificationService } from '@/notification-service';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import linkPreviewRoutes from '@/routes/linkPreview';
-import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
@@ -440,9 +439,6 @@ export class App {
 
     // Mettle employee details route (JWT auth - fetch employee information)
     this.app.use('/api/mettle/employee', authMiddleware.authenticate, mettleEmployeeDetailsRoutes);
-
-    // Bundle serving routes (public, no auth required - frontend static assets)
-    this.app.use('/api/bundles', bundleRoutes);
 
     // External call lobby — PUBLIC, no auth middleware
     this.app.use('/api/call-lobby', callLobbyRoutes);

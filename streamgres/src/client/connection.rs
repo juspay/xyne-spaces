@@ -23,8 +23,9 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade, close_code};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::serve::ListenerExt;
 use futures_util::stream::{SplitSink, SplitStream};
@@ -35,7 +36,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use super::ast::{self, Ast, Translated};
 use super::backend::{Backend, Identity, PushOutcome, TransformOutcome};
-use super::config::Config;
+use super::config::{AdminToken, Config};
 use super::groups::{ConnectReply, DesiredOp, MutationResult, Outbound, Request, Socket};
 use super::plan::{self, PlanCache};
 use super::protocol::{
@@ -140,6 +141,7 @@ struct ConnectParams {
 /// once queries are served), and
 /// the server's measurements (`/stats`; `?reset=1` also zeroes the
 /// histograms after reading them, so a load run measures itself alone).
+/// `/stats` and `/metrics` require the admin token.
 pub fn router(state: Arc<AppState>) -> Router {
     let base = state.config.base_path.clone();
     let mut router =
@@ -150,11 +152,34 @@ pub fn router(state: Arc<AppState>) -> Router {
             .route(&format!("/{probe}"), get(health));
     }
     if state.config.admin_endpoints {
-        router = router
+        let admin = Router::new()
             .route("/stats", get(stats))
-            .route("/metrics", get(metrics));
+            .route("/metrics", get(metrics))
+            .route_layer(middleware::from_fn_with_state(
+                state.config.admin_token.clone(),
+                require_admin_token,
+            ));
+        router = router.merge(admin);
     }
     router.with_state(state)
+}
+
+/// Refuses a request without `Authorization: Bearer <admin token>`, and
+/// every request when no token is configured.
+async fn require_admin_token(
+    State(token): State<Option<AdminToken>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let given = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    match (token, given) {
+        (Some(token), Some(given)) if token.matches(given) => next.run(request).await,
+        _ => StatusCode::UNAUTHORIZED.into_response(),
+    }
 }
 
 /// The server's measurements in Prometheus exposition format.
@@ -1434,6 +1459,34 @@ mod tests {
     fn health_follows_readiness() {
         assert_eq!(readiness(false).0, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(readiness(true), (StatusCode::OK, "ok"));
+    }
+
+    /// Only the configured token gets through, and without one nothing does.
+    #[tokio::test]
+    async fn the_admin_routes_require_the_token() {
+        async fn status(token: Option<&str>, authorization: Option<&str>) -> u16 {
+            let token = token.map(|token| AdminToken::new(token.to_owned()));
+            let app = Router::new()
+                .route("/stats", get(|| async { "measurements" }))
+                .route_layer(middleware::from_fn_with_state(token, require_admin_token));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await });
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let mut request = client.get(format!("http://{address}/stats"));
+            if let Some(authorization) = authorization {
+                request = request.header("authorization", authorization);
+            }
+            let status = request.send().await.unwrap().status().as_u16();
+            server.abort();
+            status
+        }
+        assert_eq!(status(Some("s3cret"), Some("Bearer s3cret")).await, 200);
+        assert_eq!(status(Some("s3cret"), None).await, 401);
+        assert_eq!(status(Some("s3cret"), Some("Bearer wrong")).await, 401);
+        assert_eq!(status(Some("s3cret"), Some("s3cret")).await, 401);
+        assert_eq!(status(None, None).await, 401);
+        assert_eq!(status(None, Some("Bearer s3cret")).await, 401);
     }
 
     /// A group's mutation ids and waiting results are read in one

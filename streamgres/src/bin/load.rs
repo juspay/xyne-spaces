@@ -2625,12 +2625,11 @@ async fn server_stats(http: &reqwest::Client, base: &str, reset: bool) -> Option
     } else {
         format!("{base}/stats")
     };
-    let response = http
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await
-        .ok()?;
+    let mut request = http.get(url).timeout(Duration::from_secs(5));
+    if let Ok(token) = std::env::var("STREAMGRES_ADMIN_TOKEN") {
+        request = request.bearer_auth(token);
+    }
+    let response = request.send().await.ok()?;
     response.json().await.ok()
 }
 
