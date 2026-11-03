@@ -92,6 +92,13 @@ xyne-vespa-content:
 xyne-vespa-feed:
   enabled: false
   fullnameOverride: vespa-feed
+  # The openai-embedders send this to tei-batch-proxy as `Authorization: Bearer`; self-hosted
+  # Vespa resolves api-key-secret-ref "teiProxyS2sKey" from this env var.
+  secretEnv:
+    VESPA_SECRET_TEI_PROXY_S2S_KEY:
+      name: xyne-vespa-secrets
+      key: TEI_PROXY_S2S_KEY
+      optional: true
   args:
     - services
   containerPorts:
@@ -125,6 +132,13 @@ xyne-vespa-feed:
 xyne-vespa-search:
   enabled: false
   fullnameOverride: vespa-search
+  # The openai-embedders send this to tei-batch-proxy as `Authorization: Bearer`; self-hosted
+  # Vespa resolves api-key-secret-ref "teiProxyS2sKey" from this env var.
+  secretEnv:
+    VESPA_SECRET_TEI_PROXY_S2S_KEY:
+      name: xyne-vespa-secrets
+      key: TEI_PROXY_S2S_KEY
+      optional: true
   args:
     - services
   containerPorts:

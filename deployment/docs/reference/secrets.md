@@ -43,7 +43,7 @@ By hand, the constraints are:
 
 ```bash
 openssl rand -base64 24 | tr -d '/+=' | cut -c1-24     # 16+ characters, RDS-safe (postgres_password, redis_auth, zero_admin_password)
-openssl rand -base64 48 | tr -d '/+=' | cut -c1-48     # 32+ characters (jwt_secret, zero_auth_secret, internal_s2s_key, claw_s2s_key, transcription_agent_api_key)
+openssl rand -base64 48 | tr -d '/+=' | cut -c1-48     # 32+ characters (jwt_secret, zero_auth_secret, internal_s2s_key, claw_s2s_key, tei_proxy_s2s_key, transcription_agent_api_key)
 openssl rand -hex 32                                   # exactly 64 hex characters (encryption_key, claw_auth_encryption_key)
 docker run --rm ghcr.io/juspay/y-sweet:<tag> y-sweet gen-auth --json      # private_key -> ysweet_auth, server_token -> ysweet_server_token
 docker run --rm livekit/livekit-server:v1.9.1 generate-keys              # livekit_api_key, livekit_api_secret
@@ -71,6 +71,7 @@ The y-sweet tag is the `appVersion` of `helm-charts/charts/xyne-ysweet/Chart.yam
 | `encryption_key` | exactly 64 hex | data the backend encrypts at rest | `xyne-backend-secrets` |
 | `internal_s2s_key` | 32+ | service-to-service calls | backend, claw and claw-auth Secrets |
 | `claw_s2s_key` | 32+ | claw to claw-auth | claw and claw-auth Secrets |
+| `tei_proxy_s2s_key` | 32+ | Vespa's embedders to `tei-batch-proxy` (`Authorization: Bearer`) | `xyne-vespa-secrets` as `TEI_PROXY_S2S_KEY` |
 | `claw_auth_encryption_key` | exactly 64 hex | credentials claw-auth stores | `xyne-claw-auth-secrets` |
 | `ysweet_auth`, `ysweet_server_token` | from the same `gen-auth` run | the y-sweet signing key and the token the backend presents | `xyne-ysweet-secrets`, `xyne-backend-secrets` |
 | `transcription_agent_api_key` | 32+ | backend to transcription agent | `xyne-transcription-agent-secrets` |
@@ -95,6 +96,7 @@ All in the install namespace, labelled `app.kubernetes.io/managed-by: terraform`
 | `xyne-pg-app` (`kubernetes.io/basic-auth`) | `username`, `password` | `postgres_mode = "incluster"` |
 | `xyne-redis-auth` | `password` | `redis_mode = "incluster"` |
 | `xyne-minio-root` | `rootUser`, `rootPassword` | `storage_mode = "incluster"` |
+| `xyne-vespa-secrets` | `TEI_PROXY_S2S_KEY` (read by `tei-batch-proxy`, and by the Vespa feed and search pods as `VESPA_SECRET_TEI_PROXY_S2S_KEY`) | `enable_vespa` |
 | `hindsight-secrets` (namespace `hindsight`) | `HINDSIGHT_API_LLM_API_KEY` | `enable_hindsight` with a key set |
 
 `terraform -chdir=deployment/terraform/stacks/<cloud>/02-platform output secret_names` lists the
@@ -122,7 +124,7 @@ Every install needs a Google OAuth client; it can live in any Google Cloud proje
 
 ## Adding keys the tree does not know about
 
-`extra_secret_data` merges keys into any of the nine Secrets the install writes:
+`extra_secret_data` merges keys into any of the Secrets the install writes:
 
 ```hcl
 extra_secret_data = {

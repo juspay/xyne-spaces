@@ -162,6 +162,7 @@ variable "app_secrets" {
     encryption_key              = string
     internal_s2s_key            = string
     claw_s2s_key                = string
+    tei_proxy_s2s_key           = string
     claw_auth_encryption_key    = string
     ysweet_auth                 = string
     ysweet_server_token         = string

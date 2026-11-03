@@ -52,7 +52,13 @@ env:
   RETRY_BASE_MS: "1000"
   PROXY_PAYLOAD_LIMIT_BYTES: "200000000"
 
-secretEnv: {}
+# Every route except /health requires `Authorization: Bearer <TEI_PROXY_S2S_KEY>`; unset = all 401.
+# Vespa's feed and query pods must hold the same value as VESPA_SECRET_TEI_PROXY_S2S_KEY.
+secretEnv:
+  TEI_PROXY_S2S_KEY:
+    name: xyne-vespa-secrets
+    key: TEI_PROXY_S2S_KEY
+    optional: true
 envFromSecrets: []
 envFromConfigMaps: []
 extraEnv: []
