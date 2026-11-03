@@ -2,6 +2,7 @@ import { BaseStrategy } from "./BaseStrategy"
 import type { ProcessingResult, StrategyConfig, ChunkMetadata } from "../types"
 import JSZip from "jszip"
 import { XMLParser } from "fast-xml-parser"
+import { assertZipWithinLimits } from "../zipLimits"
 
 /**
  * DOCX parsing strategy that extracts text from .docx files.
@@ -29,6 +30,7 @@ export class DocxStrategy extends BaseStrategy {
     async parse(buffer: Buffer, vespaDocId: string): Promise<ProcessingResult> {
         try {
             const zip = await JSZip.loadAsync(buffer)
+            assertZipWithinLimits(zip, "docx")
 
             const documentXml = zip.file("word/document.xml")
             if (!documentXml) {

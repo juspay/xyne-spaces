@@ -7,8 +7,7 @@ import { DatabaseClient } from '@/database/client'
 import { CommonDatabaseClient } from '@/database/commonClient'
 import { describeRejection, logger } from '@/utils/logger'
 import { vespaWorker } from './workers/vespaWorker'
-// Disabled (not yet brought up)
-// import { vespaFileWorker } from './workers/vespaFileWorker'
+import { vespaFileWorker } from './workers/vespaFileWorker'
 // import {
 //   startDriveImportWorker,
 //   closeDriveImportQueue,
@@ -95,8 +94,7 @@ class WorkerService {
       // await vespaQueue.initialize()
 
       const vespaEnabled = appConfig.vespaWorkerEnabled
-      // Disabled (not yet brought up)
-      // const vespaFileWorkerEnabled = appConfig.vespaFileWorkerEnabled
+      const vespaFileWorkerEnabled = appConfig.vespaFileWorkerEnabled
       // Disabled (LLM)
       // const activityClassificationEnabled =
       //   appConfig.activityClassificationWorkerEnabled
@@ -139,10 +137,9 @@ class WorkerService {
       //   await callTimeoutWorker.startWorker()
       // }
 
-      // Disabled (not yet brought up)
-      // if (vespaFileWorkerEnabled) {
-      //   await vespaFileWorker.start()
-      // }
+      if (vespaFileWorkerEnabled) {
+        await vespaFileWorker.start()
+      }
 
       // Google Drive import worker. When disabled, the API process runs imports
       // in-process as a fallback (see collectionController.uploadFromDriveLink).
@@ -440,8 +437,7 @@ class WorkerService {
       //   this.automationTemplateCleanupTimer = null
       // }
       const vespaEnabled = appConfig.vespaWorkerEnabled
-      // Disabled (not yet brought up)
-      // const vespaFileWorkerEnabled = appConfig.vespaFileWorkerEnabled
+      const vespaFileWorkerEnabled = appConfig.vespaFileWorkerEnabled
       // Disabled (LLM)
       // const activityClassificationEnabled =
       //   appConfig.activityClassificationWorkerEnabled
@@ -470,10 +466,9 @@ class WorkerService {
       //   await redisService.disconnect()
       // }
 
-      // Disabled (not yet brought up)
-      // if (vespaFileWorkerEnabled) {
-      //   await vespaFileWorker.shutdown()
-      // }
+      if (vespaFileWorkerEnabled) {
+        await vespaFileWorker.shutdown()
+      }
       // if (appConfig.enableDriveImportWorker) {
       //   await closeDriveImportQueue()
       // }

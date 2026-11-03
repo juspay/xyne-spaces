@@ -1,5 +1,6 @@
 import JSZip from "jszip"
 import { XMLParser } from "fast-xml-parser"
+import { assertZipWithinLimits } from "./zipLimits"
 
 /**
  * Low-level PPTX (OOXML) parser for PptxStrategy's text extraction (Vespa
@@ -150,6 +151,7 @@ async function parseSlideXml(zip: JSZip, slideXmlPath: string, slideIndex: numbe
  */
 export async function parsePptxSlides(buffer: Buffer): Promise<ParsedPptx> {
     const zip = await JSZip.loadAsync(buffer)
+    assertZipWithinLimits(zip, "pptx")
 
     const presentationFile = zip.file("ppt/presentation.xml")
     if (!presentationFile) {

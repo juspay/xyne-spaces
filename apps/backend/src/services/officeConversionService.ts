@@ -10,6 +10,7 @@ import { logger } from "@/utils/logger"
 import { storageService } from "@/services/storage"
 import { isPreconditionFailed } from "@xyne/storage"
 import { config } from '@/config/env';
+import { assertZipWithinLimits } from "@/services/fileProcessor/zipLimits"
 
 /**
  * Converts an office document (pptx, docx, xlsx, ...) to PDF via LibreOffice's
@@ -78,7 +79,14 @@ function asArray<T>(value: T | T[] | undefined): T[] {
     return Array.isArray(value) ? value : [value]
 }
 
-const RELS_XML_PARSER = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" })
+const RELS_XML_PARSER = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: "@_",
+    processEntities: {
+        maxTotalExpansions: 10000,
+        maxEntityCount: 1000,
+    },
+})
 const RELS_XML_BUILDER = new XMLBuilder({
     ignoreAttributes: false,
     attributeNamePrefix: "@_",
@@ -121,6 +129,7 @@ async function stripExternalReferences(
     } catch {
         return buffer
     }
+    assertZipWithinLimits(zip, `office conversion ${originalFilename}`)
 
     let changed = false
     const stripped: StrippedReference[] = []

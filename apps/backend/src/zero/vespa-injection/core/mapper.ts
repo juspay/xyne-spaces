@@ -53,6 +53,26 @@ import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { buildFormFields, type TicketDynamicFieldValue } from './form-fields';
 import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 
+const MAX_INDEXABLE_OBJECT_BYTES = 100 * 1024 * 1024;
+
+type ObjectSizeReader = { headObject(path: string): Promise<{ size?: number } | null> };
+
+const toStorageKey = (key: string, label: string): string => {
+  const trimmed = key.trim();
+  if (!trimmed || trimmed.startsWith('/') || trimmed.split('/').some((s) => s === '..' || s === '.')) {
+    throw new Error(`${label}: refusing storage key "${trimmed}"`);
+  }
+  return trimmed;
+};
+
+const assertIndexableSize = async (storage: ObjectSizeReader, key: string, label: string): Promise<void> => {
+  const info = await storage.headObject(key);
+  if (!info) throw new Error(`${label}: object ${key} not found`);
+  if (info.size != null && info.size > MAX_INDEXABLE_OBJECT_BYTES) {
+    throw new Error(`${label}: object ${key} is ${info.size} bytes, above the ${MAX_INDEXABLE_OBJECT_BYTES} byte indexing limit`);
+  }
+};
+
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
 type ProjectsSchema = Schema['tables']['projects'];
@@ -810,7 +830,9 @@ export const mapCollection = async (
   } else if (attachment?.url) {
     try {
       const storageService = getStorageService();
-      const buffer = await storageService.getFileBuffer(attachment!.url);
+      const canvasKey = toStorageKey(attachment!.url, `canvas ${args.id}`);
+      await assertIndexableSize(storageService, canvasKey, `canvas ${args.id}`);
+      const buffer = await storageService.getFileBuffer(canvasKey);
 
       // Multi-engine fallback ladder (PDFs: Docling/Paddle → Gemini → PdfJs;
       // other types: Docling → local strategy).
@@ -1058,7 +1080,9 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
 
       // Use transcript bucket for fetching
       const storageService = getStorageService(config.gcs.transcriptionBucketName);
-      const buffer = await storageService.getFileBuffer(gcsPath);
+      const transcriptKey = toStorageKey(gcsPath, `transcript ${args.id}`);
+      await assertIndexableSize(storageService, transcriptKey, `transcript ${args.id}`);
+      const buffer = await storageService.getFileBuffer(transcriptKey);
       fileSize = buffer.length;
 
       const textStrategy = new TextStrategy();
@@ -1370,7 +1394,9 @@ export const mapFile = async (
       }
 
       const storageService = getStorageService();
-      const buffer = await storageService.getFileBuffer(gcsPath);
+      const fileKey = toStorageKey(gcsPath, `file ${args.id}`);
+      await assertIndexableSize(storageService, fileKey, `file ${args.id}`);
+      const buffer = await storageService.getFileBuffer(fileKey);
       fileSize = buffer.length;
 
       // Use FileProcessor with Docling fallback support
