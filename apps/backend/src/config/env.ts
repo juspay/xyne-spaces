@@ -41,8 +41,6 @@ const envSchema = Joi.object({
   COMMON_DATABASE_POOL_SIZE: Joi.number().default(2),
   COMMON_DATABASE_POOL_TIMEOUT_SECONDS: Joi.number().default(10),
   ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
-  API_KEYS_ENABLED: Joi.boolean().default(false),
-  API_KEYS_CONFIG: Joi.string().default('{}'),
   // Digital Twin: the email of the Digital Twin app's bot user (unique per
   // workspace). USER_MENTIONED is delivered to THIS app at workspace scope (in
   // addition to the existing channel-scoped app delivery) so the twin fires for
@@ -176,8 +174,6 @@ const envSchema = Joi.object({
   TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default(''),
   INTERNAL_APP_HOSTS: Joi.string().allow('').default(''),
   ORG_EMAIL_DOMAIN: Joi.string().allow('').default(''),
-  API_KEY_USER_EMAIL_DOMAIN: Joi.string().allow('').default(''),
-  API_KEY_DEFAULT_USER_EMAIL: Joi.string().allow('').default(''),
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
@@ -665,7 +661,6 @@ const envSchema = Joi.object({
   DEFAULT_ADMIN_EMAIL: Joi.string().allow('').default(''),
   TEST_AUTH_EMAIL: Joi.string().empty('').default('test-user@xyne-test.local'),
   TEST_AUTH_NAME: Joi.string().empty('').default('Test User'),
-  API_KEY: Joi.string().allow('').default(''),
   API_BASE_URL: Joi.string().allow('').default(''),
   APP_JWT_KEY: Joi.string().allow('').default(''),
   SUDO_QUERY_TOKEN: Joi.string().allow('').default(''),
@@ -995,8 +990,6 @@ export const config = {
     .map((host: string) => host.trim().toLowerCase())
     .filter(Boolean),
   orgEmailDomain: (envVars.ORG_EMAIL_DOMAIN as string).trim().toLowerCase(),
-  apiKeyUserEmailDomain: (envVars.API_KEY_USER_EMAIL_DOMAIN as string).trim().toLowerCase(),
-  apiKeyDefaultUserEmail: (envVars.API_KEY_DEFAULT_USER_EMAIL as string).trim().toLowerCase(),
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
@@ -1505,7 +1498,6 @@ export const config = {
     email: envVars.TEST_AUTH_EMAIL as string,
     name: envVars.TEST_AUTH_NAME as string,
   },
-  apiKey: envVars.API_KEY as string,
   apiBaseUrl: envVars.API_BASE_URL as string,
   appJwtKey: envVars.APP_JWT_KEY as string,
   sudoQueryToken: envVars.SUDO_QUERY_TOKEN as string,

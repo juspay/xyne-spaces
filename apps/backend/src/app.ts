@@ -30,7 +30,6 @@ import ticketRoutes from '@/routes/tickets';
 // import toolRoutes from '@/routes/tools';
 // import agentToolsMappingRoutes from '@/routes/agent-tools-mappings';
 import analyticsRoutes from '@/routes/analytics';
-import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
 import secretsVaultRoutes from '@/routes/secretsVault';
@@ -728,9 +727,6 @@ export class App {
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
     this.app.use('/api/search-feedback', authMiddleware.authenticate, searchFeedbackRoutes); // Search feedback routes (POST /api/search-feedback)
 
-    // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
-    this.app.use('/api/admin/api-keys', apiKeyRoutes);
-
     // User management routes - admin operations with ACL protection
     this.app.use(
       '/api/user-management',
@@ -859,11 +855,6 @@ export class App {
     // Disabled (LLM)
     // this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
 
-    // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
-    this.app.use('/api/admin/api-keys', apiKeyRoutes);
-
-    // API Key test route
-    this.app.use('/api/test/api-key', apiKeyRoutes);
     // User management routes - /users endpoint without ACL, others with ACL
     const userManagementController = UserManagementController.getInstance();
     this.app.get(

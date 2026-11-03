@@ -1,6 +1,6 @@
 # Authentication & Authorization Guide
 
-Authentication and authorization using JWT tokens, API keys, and ACL. Located in `src/middleware/` and `src/services/`.
+Authentication and authorization using JWT tokens and ACL. Located in `src/middleware/` and `src/services/`.
 
 ---
 
@@ -9,7 +9,6 @@ Authentication and authorization using JWT tokens, API keys, and ACL. Located in
 | Method | Middleware | Use Case |
 |--------|------------|----------|
 | **Google / Microsoft / Email login** | `authMiddleware.authenticate`, `authV2Middleware.authenticate` | User login; JWT cookie per workspace |
-| **API Key** | `authMiddleware.authenticate` | Programmatic access, integrations |
 | **Zero Auth** | `authMiddleware.authenticateZero` | Zero sync endpoints |
 
 No middleware ever refreshes a token. An expired or missing JWT is a `401` with a `code`
@@ -134,18 +133,6 @@ zero-cache forwards the browser cookies.
 
 ---
 
-## Scope-Based Authorization
-
-**Check Method:** `authMiddleware.requireScope(scopeName)`
-
-**Applies To:** API key users only (OAuth users allowed by default)
-
-**Admin Override:** Admin role users bypass scope checks
-
-**Scope Format:** `resource:action` (e.g., `tickets:read`, `workflows:execute`)
-
----
-
 ## Session Management
 
 **Service:** `authSessionService` (`src/services/authSessionService.ts`)
@@ -172,7 +159,7 @@ remain only until a later cleanup.
 
 | File | Purpose |
 |------|---------|
-| `src/middleware/auth.ts` | Main auth middleware (authenticate, authenticateZero, requireAdmin, requireScope) |
+| `src/middleware/auth.ts` | Main auth middleware (authenticate, authenticateZero, requireAdmin) |
 | `src/middleware/authV2Middleware.ts` | Auth for `/api/auth` and `/api/v2/auth` routes |
 | `src/middleware/decryptionMiddleware.ts` | Session-key request decryption (run by the auth middlewares) / response encryption |
 | `src/middleware/acl.ts` | ACL middleware (checkAccess, optionalCheckAccess, skipACL) |
@@ -181,7 +168,6 @@ remain only until a later cleanup.
 | `src/services/accessTokenService.ts` | Mint the JWT (`sid`, capped lifetime) and write the access cookies |
 | `src/services/loginCompletionService.ts` | Shared login tail: auth session + cookies + activity + contacts grant |
 | `src/services/authSessionService.ts` | Refresh sessions (`xs`, `auth_sessions`) |
-| `src/services/apiKeyService.ts` | API key validation and management |
 | `src/services/aclService.ts` | ACL logic, permission checking |
 
 ---
@@ -194,13 +180,11 @@ remain only until a later cleanup.
 
 3. **Store sensitive data in HTTP-only cookies** - Prevents XSS token theft
 
-4. **Use scopes for API key granularity** - Limit API key permissions
+4. **Check ACL for resource access** - Don't rely on authentication alone
 
-5. **Check ACL for resource access** - Don't rely on authentication alone
+5. **Key per-device state on `req.user.sid`** - Encryption keys, push tokens; never on cookies read by hand
 
-6. **Key per-device state on `req.user.sid`** - Encryption keys, push tokens; never on cookies read by hand
-
-7. **Log authentication failures** - For security monitoring
+6. **Log authentication failures** - For security monitoring
 
 ---
 
