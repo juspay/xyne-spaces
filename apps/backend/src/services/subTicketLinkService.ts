@@ -71,7 +71,7 @@ export async function hasGuestTicketAccess(
   return Boolean(participant);
 }
 
-/** Table ACL built from the re-resolved workspace role, not req.user.role (the API key's role). */
+/** Table ACL built from the re-resolved workspace role, not req.user.role. */
 function aclFor(
   model: 'ticket' | 'ticketSubTicketMapping',
   tx: PrismaTx,

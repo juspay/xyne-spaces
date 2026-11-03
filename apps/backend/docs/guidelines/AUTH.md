@@ -1,6 +1,6 @@
 # Authentication & Authorization Guide
 
-Authentication and authorization using JWT tokens, API keys, and ACL. Located in `src/middleware/` and `src/services/`.
+Authentication and authorization using JWT tokens and ACL. Located in `src/middleware/` and `src/services/`.
 
 ---
 
@@ -9,7 +9,6 @@ Authentication and authorization using JWT tokens, API keys, and ACL. Located in
 | Method | Middleware | Use Case |
 |--------|------------|----------|
 | **Google OAuth** | `authMiddleware.authenticate` | Primary user login via Google |
-| **API Key** | `authMiddleware.authenticate` | Programmatic access, integrations |
 | **Zero Auth** | `authMiddleware.authenticateZero` | Zero sync endpoints (strict, no auto-refresh) |
 
 ---
@@ -123,18 +122,6 @@ For Zero endpoints:
 
 ---
 
-## Scope-Based Authorization
-
-**Check Method:** `authMiddleware.requireScope(scopeName)`
-
-**Applies To:** API key users only (OAuth users allowed by default)
-
-**Admin Override:** Admin role users bypass scope checks
-
-**Scope Format:** `resource:action` (e.g., `tickets:read`, `workflows:execute`)
-
----
-
 ## Session Management
 
 **Service:** `UserSessionService`
@@ -153,11 +140,10 @@ For Zero endpoints:
 
 | File | Purpose |
 |------|---------|
-| `src/middleware/auth.ts` | Main auth middleware (authenticate, authenticateZero, requireAdmin, requireScope) |
+| `src/middleware/auth.ts` | Main auth middleware (authenticate, authenticateZero, requireAdmin) |
 | `src/middleware/acl.ts` | ACL middleware (checkAccess, optionalCheckAccess, skipACL) |
 | `src/middleware/authorize.ts` | Legacy resource-based authorization |
 | `src/services/jwtService.ts` | JWT generation and verification |
-| `src/services/apiKeyService.ts` | API key validation and management |
 | `src/services/aclService.ts` | ACL logic, permission checking |
 | `src/services/userSessionService.ts` | Session management |
 
@@ -171,13 +157,11 @@ For Zero endpoints:
 
 3. **Store sensitive data in HTTP-only cookies** - Prevents XSS token theft
 
-4. **Use scopes for API key granularity** - Limit API key permissions
+4. **Check ACL for resource access** - Don't rely on authentication alone
 
-5. **Check ACL for resource access** - Don't rely on authentication alone
+5. **Validate session on token refresh** - Ensure session is still active
 
-6. **Validate session on token refresh** - Ensure session is still active
-
-7. **Log authentication failures** - For security monitoring
+6. **Log authentication failures** - For security monitoring
 
 ---
 

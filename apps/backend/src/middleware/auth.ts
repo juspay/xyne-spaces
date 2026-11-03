@@ -6,7 +6,6 @@ import { logger } from '../utils/logger';
 import { loggerContext, LogContext } from '@/utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
-import { apiKeyService } from '../services/apiKeyService';
 import { jwtService } from '../services/jwtService';
 import '../types/express'; // Import the Express type extensions
 import { config } from '@/config/env';
@@ -36,7 +35,7 @@ export class AuthMiddleware {
       this.userSessionService = new UserSessionService();
       logger.info('[AUTH] Google OAuth authentication enabled');
     } else {
-      logger.info('[AUTH] Google OAuth authentication disabled - API key only mode');
+      logger.info('[AUTH] Google OAuth authentication disabled');
     }
   }
 
@@ -62,75 +61,18 @@ export class AuthMiddleware {
     });
 
     try {
-      // Try API Key authentication first
-      if (authHeader) {
-        let apiKey: string | null = null;
-
-        // Check for Bearer token format
-        if (authHeader.startsWith('Bearer ')) {
-          apiKey = apiKeyService.extractApiKey(authHeader);
-        }
-        // Check for Basic authentication format (curl -u)
-        else if (authHeader.startsWith('Basic ')) {
-          const base64Credentials = authHeader.split(' ')[1];
-          const credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
-          const [username] = credentials.split(':');
-          // Use username as API key (password is ignored)
-          apiKey = username;
-        }
-
-        if (apiKey) {
-          // Extract user details from headers
-          const userHeaders = {
-            name: req.headers['x-user-name'] as string,
-            email: req.headers['x-user-email'] as string,
-            workspaceId: req.headers['x-workspace-id'] as string,
-          };
-
-          const apiKeyUser = await apiKeyService.validateApiKey(apiKey, userHeaders);
-          if (apiKeyUser) {
-            // Attach API key user to request object
-            req.user = {
-              id: apiKeyUser.id,
-              googleId: '', // API key users don't have Google ID
-              email: apiKeyUser.email,
-              name: apiKeyUser.username,
-              isApiKeyUser: true,
-              scopes: apiKeyUser.scopes,
-              role: apiKeyUser.role,
-              workspaceId: apiKeyUser.workspaceId,
-              orgRole: apiKeyUser.orgRole,
-              memberId: apiKeyUser.memberId,
-            };
-
-            logger.info(
-              `[AUTH] API key authenticated user: ${apiKeyUser.username} (${apiKeyUser.id})`,
-              {
-                userId: apiKeyUser.id,
-                username: apiKeyUser.username,
-                email: apiKeyUser.email,
-                role: apiKeyUser.role,
-              }
-            );
-            next();
-            return;
-          }
-        }
-      }
-
-      // If Google OAuth is not enabled and API key failed, return 401
+      // If Google OAuth is not enabled, return 401
       if (!this.googleAuthEnabled) {
-        logger.warn(`[AUTH] Authentication failed: API key invalid and Google OAuth not configured`, {
+        logger.warn(`[AUTH] Authentication failed: Google OAuth not configured`, {
           authHeaderPresent: !!authHeader,
         });
         res.status(401).json({
           error: 'Authentication required',
-          message: 'Please provide a valid API key. Google OAuth is not configured.',
+          message: 'Google OAuth is not configured.',
         });
         return;
       }
 
-      // Continue with Google OAuth authentication if API key failed
       // Secure dev mode check - only allow in development environment
       const isDevEnvironment =
         config.env === 'development' && config.enableDevAuth;
@@ -189,8 +131,6 @@ export class AuthMiddleware {
         name: user.name,
         displayName: user.displayName,
         workspaceId: user.workspaceId,
-        isApiKeyUser: false,
-        scopes: [],
         role: user.role,
         orgRole: user.orgRole,
         memberId: user.orgMemberId,
@@ -533,8 +473,6 @@ export class AuthMiddleware {
         name: user.name,
         displayName: user.displayName,
         workspaceId: effectiveWorkspaceId,
-        isApiKeyUser: false,
-        scopes: [],
         role: user.role,
         orgRole: effectiveOrgRole,
         memberId: effectiveMemberId,
@@ -713,42 +651,6 @@ export class AuthMiddleware {
   };
 
   /**
-   * Middleware to check if user has required scope (for API key users)
-   */
-  requireScope = (requiredScope: string) => {
-    return (req: Request, res: Response, next: NextFunction): void => {
-      if (!req.user) {
-        res.status(401).json({
-          error: 'Authentication required',
-          message: 'Please authenticate to access this resource',
-        });
-        return;
-      }
-
-      // For API key users, check scopes
-      if (req.user.isApiKeyUser) {
-        if (req.user.role === 'admin') {
-          // Admin users have access to everything
-          next();
-          return;
-        }
-
-        if (!req.user.scopes || !req.user.scopes.includes(requiredScope)) {
-          res.status(403).json({
-            error: 'Insufficient permissions',
-            message: `Required scope: ${requiredScope}`,
-            userScopes: req.user.scopes,
-          });
-          return;
-        }
-      }
-
-      // For Google OAuth users, allow access (existing behavior)
-      next();
-    };
-  };
-
-  /**
    * Middleware to require admin role
    */
   requireAdmin = (req: Request, res: Response, next: NextFunction): void => {
@@ -893,8 +795,6 @@ export class AuthMiddleware {
         name: user.name,
         displayName: user.displayName,
         workspaceId: user.workspaceId,
-        isApiKeyUser: false,
-        scopes: [],
         role: user.role,
         orgRole: user.orgMember!.role,
         memberId: payload.memberId,
