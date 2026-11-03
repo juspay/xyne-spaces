@@ -9,7 +9,6 @@ import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
 import { logger } from '@/utils/logger';
 import { GoogleService } from '@/services/googleService';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalSourcePlatform } from '../core/types';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
@@ -26,7 +25,6 @@ import {
 import { encrypt } from '@/services/encryptionService';
 import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
-import { pubSubWatchService } from '@/pubsub';
 import { getAuthCallbackTx } from '@/bypassAcl/transactions/googleAuth';
 import { config } from '@/config/env';
 
@@ -1298,32 +1296,6 @@ router.post('/admin/migrate-to-shared-sub', authMiddleware.authenticate, async (
   } catch (error: any) {
     logger.error(`${TAG} migration failed`, error);
     res.status(500).json({ success: false, error: error?.message ?? 'Unknown error' });
-  }
-});
-
-// POST /api/integrations/google/watch/renew/:sourceName
-router.post('/watch/renew/:sourceName', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { sourceName } = req.params;
-    const repo = new ExternalSourceRepository();
-    const source = await repo.findByName(sourceName);
-
-    if (!source) { res.status(404).json({ error: 'External source not found' }); return; }
-    if (source.sourceType !== ExternalSourcePlatform.GOOGLE) {
-      res.status(400).json({ error: 'Source is not a Google integration' }); return;
-    }
-
-    // Renew the exact source row; Gmail source names are not reversible from email.
-    const result = await pubSubWatchService.renewSubscription('gmail', {
-      id: source.id,
-      email: source.displayName,
-    });
-
-    logger.info(`${TAG} Gmail watch renewed`, { sourceName });
-    res.json({ success: true, historyId: result.historyId, expiration: result.expiration });
-  } catch (error: any) {
-    logger.error(`${TAG} Error renewing Gmail watch:`, error);
-    res.status(500).json({ error: 'Failed to renew Gmail watch', details: error.message });
   }
 });
 

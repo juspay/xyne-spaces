@@ -226,10 +226,6 @@ the image CMD writes `/etc/nginx/nginx.conf`, and nginx writes `/tmp` and `/var/
 **Gotchas.**
 
 - Leave `command` empty: the image CMD renders `nginx.conf` from its template and starts nginx.
-- The image's nginx config proxies requests whose user agent matches `devqa-xyne-<branch>` to
-  `http://xyne-backend.xyne-apps.svc.cluster.local:3001` (`/api/bundles/<branch>/...`), so that
-  test-only path assumes namespace `xyne-apps`. Nothing else in the image depends on the
-  namespace.
 
 ## xyne-dashboard-external
 

@@ -9,9 +9,6 @@ import { EnrollmentEvent } from './logger/enrollment-events';
 import ElectronEvent from './logger/electron-events';
 import {
   isHexToken,
-  sanitizeAskAiText,
-  normalizeAskAiUrl,
-  normalizeAskAiDomain,
   isSafeInAppPath,
 } from '../utils/validation';
 
@@ -171,97 +168,7 @@ async function handleDeepLink(url: string): Promise<void> {
     return;
   }
 
-  // 2. Ask AI Context Case (from Chrome extension)
-  // e.g. xyne-spaces://ask-ai?text=...&url=...&domain=...&title=...
-  if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://ask-ai`)) {
-    try {
-      const urlObj = new URL(url);
-
-      // PY-JP-019: ask-ai params are attacker-controllable (any web page can invoke
-      // this protocol) and are forwarded verbatim to the privileged renderer, where
-      // they land in an AI prompt / DOM. Validate & sanitize every param against its
-      // expected format before forwarding; log and drop anything that fails.
-      const rawText = urlObj.searchParams.get('text') || '';
-      const rawUrl = urlObj.searchParams.get('url') || '';
-      const rawDomain = urlObj.searchParams.get('domain') || '';
-      const rawTitle = urlObj.searchParams.get('title') || '';
-
-      const text = sanitizeAskAiText(rawText, 8000);
-      const sourceUrl = normalizeAskAiUrl(rawUrl);
-      const domain = normalizeAskAiDomain(rawDomain);
-      const title = sanitizeAskAiText(rawTitle, 512);
-
-      if (rawUrl && !sourceUrl) {
-        Logger.error(ElectronEvent.DEEP_LINK_PARAM_REJECTED, { param: 'url', value: rawUrl.slice(0, 128) });
-        log.warn('[DeepLinks] Rejected invalid ask-ai url param');
-      }
-      if (rawDomain && !domain) {
-        Logger.error(ElectronEvent.DEEP_LINK_PARAM_REJECTED, { param: 'domain', value: rawDomain.slice(0, 128) });
-        log.warn('[DeepLinks] Rejected invalid ask-ai domain param');
-      }
-
-      log.info('[DeepLinks] Ask AI context received:', { text: text.slice(0, 50), domain, title });
-
-      // Wait for mainWindow to be available (app might be launching)
-      const waitForWindow = async (): Promise<BrowserWindow | null> => {
-        if (mainWindow) return mainWindow;
-        
-        // Wait up to 10 seconds for window to be created
-        for (let i = 0; i < 100; i++) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          if (mainWindow) return mainWindow;
-        }
-        return null;
-      };
-
-      const window = await waitForWindow();
-
-      if (window) {
-        if (window.isMinimized()) window.restore();
-        window.show();
-        window.focus();
-
-        // Wait for window to be ready before sending IPC
-        if (!window.webContents.isLoading()) {
-          window.webContents.send('open-xyne-ai-with-context', {
-            text,
-            url: sourceUrl,
-            domain,
-            title,
-            timestamp: Date.now(),
-          });
-        } else {
-          // Wait for page to finish loading
-          window.webContents.once('did-finish-load', () => {
-            window.webContents.send('open-xyne-ai-with-context', {
-              text,
-              url: sourceUrl,
-              domain,
-              title,
-              timestamp: Date.now(),
-            });
-          });
-        }
-
-        Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, {
-          url: 'ask-ai',
-          origin: 'chrome-extension',
-          hasText: !!text,
-          domain,
-        });
-      } else {
-        log.error('[DeepLinks] No window available after timeout');
-      }
-    } catch (error) {
-      Logger.logError(EnrollmentEvent.DEEP_LINK_HANDLING_FAILED, error, {
-        type: 'ask-ai',
-      });
-      log.error('Failed to handle ask-ai deep link:', error);
-    }
-    return;
-  }
-
-  // 3. Invite Deep Link Case
+  // 2. Invite Deep Link Case
   // e.g. xyne-spaces://invite?workspaceId=xxx&invitationId=yyy
   if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://invite`)) {
     try {
@@ -364,7 +271,7 @@ async function handleDeepLink(url: string): Promise<void> {
     return;
   }
 
-  // 4. Generic Navigation Case
+  // 3. Generic Navigation Case
   // e.g. xyne-spaces://chat/123 or xyne-spaces:///chat/123
   if (url.startsWith(`${config.DEEP_LINK_PROTOCOL}://`)) {
     // Strip protocol
