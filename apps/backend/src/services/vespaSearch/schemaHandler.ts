@@ -21,13 +21,13 @@ export const schemaHandler = async (req: Request, res: Response): Promise<void> 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       logger.error('[schemaHandler] Vespa config server returned error', { schemaName, status: response.status, text });
-      res.status(response.status).send(`Failed to fetch schema "${schemaName}": ${text.slice(0, 200)}`);
+      res.status(response.status).send(`Failed to fetch schema "${schemaName}"`);
       return;
     }
     const content = await response.text();
     res.type('text/plain').send(content);
   } catch (error) {
     logger.error('[schemaHandler] Failed to reach Vespa config server', { schemaName, url, error });
-    res.status(503).send(`Could not reach Vespa config server at ${CONFIG_SERVER_BASE}`);
+    res.status(503).send('Vespa config server unavailable');
   }
 };

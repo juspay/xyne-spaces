@@ -7,13 +7,13 @@ const router = Router();
 router.post('/:callId/transcript-ready', transcriptionAgentController.transcriptReady);
 
 // Ticket creation tool from Python agent (AI assistant)
-router.post('/:callId/ticket', transcriptionAgentController.ticketTool);
+router.post('/:callId/ticket', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.ticketTool));
 
 // Get tickets assigned to user (AI assistant query tool)
-router.get('/:callId/my-tickets', transcriptionAgentController.getMyTickets);
+router.get('/:callId/my-tickets', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.getMyTickets));
 
 // Search users by name (AI assistant invite tool)
-router.get('/:callId/search-users', transcriptionAgentController.searchUsers);
+router.get('/:callId/search-users', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.searchUsers));
 
 // Fetch all enrolled voice signatures for real-time speaker identification
 router.get('/voiceprints', transcriptionAgentController.getVoiceprints);

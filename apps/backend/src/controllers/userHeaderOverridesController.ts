@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { redisService } from '@/services/redisService';
+import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 
 const CLIENT_EVENTS = ['header_update', 'reload'] as const;
@@ -16,6 +18,7 @@ const BLOCKED_HEADERS = new Set([
   'x-user-id',
   'x-user-name',
   'x-user-email',
+  'x-session-id',
 ]);
 
 function validateUserIds(userIds: unknown): string | null {
@@ -61,6 +64,25 @@ function validateHeaders(headers: unknown): { normalized?: Record<string, string
     return { error: `headers too large: at most ${MAX_TOTAL_SIZE} chars in total` };
   }
   return { normalized };
+}
+
+async function filterToCallerWorkspace(req: Request, userIds: string[]): Promise<Set<string>> {
+  const workspaceId = req.user?.workspaceId;
+  if (!workspaceId || userIds.length === 0) return new Set();
+  const users = await withWorkspaceScope(() =>
+    DatabaseClient.getInstance().user.findMany({
+      where: { id: { in: userIds }, workspaceId },
+      select: { id: true },
+    }),
+  );
+  return new Set(users.map(u => u.id));
+}
+
+async function rejectOutsideWorkspace(req: Request, res: Response, userIds: string[]): Promise<boolean> {
+  const allowed = await filterToCallerWorkspace(req, userIds);
+  if (userIds.every(id => allowed.has(id))) return false;
+  res.status(403).json({ error: 'Forbidden', message: 'All userIds must belong to your workspace' });
+  return true;
 }
 
 interface CommandOptions {
@@ -120,6 +142,7 @@ export const postClientEvent = async (req: Request, res: Response): Promise<void
 
     const options: CommandOptions = { force, loadingSeconds };
     const ids = userIds as string[];
+    if (await rejectOutsideWorkspace(req, res, ids)) return;
     const results: Array<{ userId: string; published: boolean }> = [];
 
     if (event === 'header_update') {
@@ -152,10 +175,11 @@ export const postClientEvent = async (req: Request, res: Response): Promise<void
   }
 };
 
-export const getAllHeaderOverrides = async (_req: Request, res: Response): Promise<void> => {
+export const getAllHeaderOverrides = async (req: Request, res: Response): Promise<void> => {
   try {
     const overrides = await redisService.getAllUserHeaderOverrides();
-    res.json(overrides);
+    const allowed = await filterToCallerWorkspace(req, Object.keys(overrides));
+    res.json(Object.fromEntries(Object.entries(overrides).filter(([userId]) => allowed.has(userId))));
   } catch (error) {
     logger.error('[CLIENT-EVENT] Failed to get header overrides:', error);
     res.status(500).json({
@@ -186,6 +210,8 @@ export const removeHeaderOverrides = async (req: Request, res: Response): Promis
       res.status(400).json({ error: 'Invalid request', message: switchError });
       return;
     }
+
+    if (await rejectOutsideWorkspace(req, res, userIds as string[])) return;
 
     logger.info(`[CLIENT-EVENT] Admin ${req.user?.id} removing ${headerNames ? (headerNames as string[]).join(', ') : 'ALL'} for ${(userIds as string[]).length} user(s) (force=${force}, loadingSeconds=${loadingSeconds})`);
 

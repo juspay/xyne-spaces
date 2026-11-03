@@ -125,7 +125,7 @@ export const MembersTab = (): ReactElement => {
     const isGuest = user.role === WorkspaceRole.GUEST;
     return (
       <>
-        {canEditAccess && !isGuest && (
+        {canEditAccess && canManageMembers && !isGuest && (
           <Button
             variant='secondary'
             size='sm'

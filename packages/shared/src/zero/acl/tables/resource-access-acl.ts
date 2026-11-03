@@ -13,10 +13,6 @@ export class ResourceAccessACL extends BaseQueryACL<'resource_access'> {
       return query;
     }
 
-    return query.whereExists('resource', (resourceQuery) =>
-      resourceQuery.whereExists('resourceAccess', (accessQuery) =>
-        accessQuery.where('userId', this.ctx.userID),
-      ),
-    );
+    return query.where('userId', this.ctx.userID);
   }
 }

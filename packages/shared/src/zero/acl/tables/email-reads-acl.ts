@@ -8,6 +8,6 @@ export class EmailReadsACL extends BaseQueryACL<'email_reads'> {
   }
 
   canSelect<TReturn>(query: Query<'email_reads', Schema, TReturn>): Query<'email_reads', Schema, TReturn> {
-    return query.where('workspaceId', '=', this.ctx.workspaceId);
+    return query.where('workspaceId', '=', this.ctx.workspaceId).where('userId', '=', this.ctx.userID);
   }
 }
