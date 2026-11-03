@@ -18,6 +18,7 @@ import {
   PublicEmailDomainError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
+import { getProviderLoginDenial, isMicrosoftEmailVerified } from '@/services/emailDomainPolicy';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendingAuth';
 import { redisService } from '@/services/redisService';
@@ -266,7 +267,7 @@ export class MicrosoftAuthController {
       email?: string;
       name?: string;
       preferred_username?: string;
-      xms_edov?: boolean;
+      xms_edov?: boolean | number | string;
       oid?: string;
       sub?: string;
       tid?: string;
@@ -406,6 +407,13 @@ export class MicrosoftAuthController {
         const verifiedEmail = idTokenClaims.email;
         if (!verifiedEmail) {
           throw new Error('No email claim in ID token');
+        }
+
+        const loginDenial = getProviderLoginDenial(verifiedEmail, isMicrosoftEmailVerified(idTokenClaims.xms_edov));
+        if (loginDenial) {
+          logger.warn(`${tag()} Microsoft login rejected (reason=${loginDenial.error})`);
+          res.redirect(this.getRedirectUrl(req, { error: loginDenial.error, message: loginDenial.message }));
+          return;
         }
 
         const accessToken = token.access_token as string;
@@ -866,6 +874,13 @@ export class MicrosoftAuthController {
         throw new Error('No email claim in ID token');
       }
 
+      const loginDenial = getProviderLoginDenial(email, isMicrosoftEmailVerified(idTokenClaims.xms_edov));
+      if (loginDenial) {
+        logger.warn(`${tag()} Microsoft login rejected (reason=${loginDenial.error})`);
+        res.status(403).json({ success: false, ...loginDenial });
+        return;
+      }
+
       // Identity comes from the verified ID token — no Microsoft Graph call needed.
       // `sub` is the stable, app-scoped subject we persist as providerUserId; `oid`
       // is tenant-scoped and kept only to migrate legacy rows off it.
@@ -1299,14 +1314,16 @@ export class MicrosoftAuthController {
       const idTokenClaims = await this.verifyMicrosoftIdToken(idToken);
       logger.info(`${tag()} Verified Microsoft ID token claims`, { claims: idTokenClaims.xms_edov });
 
-      // const emailIsDomainVerified = idTokenClaims.xms_edov === true;
-      // if (!emailIsDomainVerified) {
-      //   throw new Error('Email is not verified from Microsoft');
-      // }
-
       const verifiedEmail = idTokenClaims.email;
       if (!verifiedEmail) {
         throw new Error('No email claim in ID token');
+      }
+
+      const loginDenial = getProviderLoginDenial(verifiedEmail, isMicrosoftEmailVerified(idTokenClaims.xms_edov));
+      if (loginDenial) {
+        logger.warn(`${tag()} Microsoft login rejected (reason=${loginDenial.error})`);
+        res.status(403).json({ success: false, ...loginDenial });
+        return;
       }
 
       // Identity comes from the verified ID token — no Microsoft Graph call needed.

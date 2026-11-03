@@ -14,6 +14,11 @@ import {
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
+import {
+  EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+  EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+  isEmailDomainAllowed,
+} from '@/services/emailDomainPolicy';
 import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
 import { setPasswordHash, getPasswordHash } from '@/services/orgMemberCredentialService';
@@ -79,6 +84,15 @@ export class EmailAuthController {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        logger.warn(`${tag()} Email login rejected (reason=email_domain_not_allowed)`);
+        res.status(403).json({
+          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+        });
+        return;
+      }
+
       const loginLockKey = `emaillogin:lock:${normalizedEmail}`;
       const loginAttemptKey = `emaillogin:attempts:${normalizedEmail}`;
 
@@ -451,6 +465,11 @@ export class EmailAuthController {
 
       const normalizedEmail = email.toLowerCase().trim();
 
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
+        return;
+      }
+
       // Rate-limit before account lookup so the public response stays uniform.
       const rateLimitKey = `pwdreset:ratelimit:${normalizedEmail}`;
       const rateLimited = await redisService.get(rateLimitKey);
@@ -538,6 +557,11 @@ export class EmailAuthController {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        res.status(400).json({ error: 'Invalid or expired code' });
+        return;
+      }
+
       const redisKey = `pwdreset:code:${normalizedEmail}`;
       const attemptsKey = `pwdreset:attempts:${normalizedEmail}`;
 

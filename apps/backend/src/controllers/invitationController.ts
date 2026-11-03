@@ -19,6 +19,7 @@ import {
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE, isEmailDomainAllowed } from '@/services/emailDomainPolicy';
 import { ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -386,6 +387,11 @@ export class InvitationController {
         provider = decoded.provider || 'GOOGLE';
       } catch {
         res.status(401).json({ error: 'Invalid authentication session. Please login again.' });
+        return;
+      }
+
+      if (!isEmailDomainAllowed(oauthUser.email)) {
+        res.status(403).json({ error: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE });
         return;
       }
 
