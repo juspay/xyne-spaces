@@ -71,11 +71,29 @@ describe('Android incoming-call credential handoff policy', () => {
     );
   });
 
-  it('retains authenticated API credential recovery for answered calls', () => {
+  it('always gets credentials for answered calls from the authenticated API', () => {
     assert.match(
       CALL_ACTIONS_SOURCE,
-      /if \(payload\.token && payload\.serverUrl\)[\s\S]*?callService\.joinCall\(\{ callId: payload\.callId \}\)/,
-      'answered calls must reacquire short-lived media credentials through the authenticated API',
+      /await requestJoinCredentials\(payload\.callId, expectedGeneration\)/,
+      'answered calls must acquire short-lived media credentials through the authenticated API',
+    );
+    assert.doesNotMatch(
+      CALL_ACTIONS_SOURCE,
+      /payload\.(?:token|serverUrl)/,
+      'the accept path must never take credentials from a push payload',
+    );
+  });
+
+  it('ends the native call instead of reporting it connected when joining fails', () => {
+    assert.match(
+      CALL_ACTIONS_SOURCE,
+      /if \(!credentials\) \{\s*failAcceptedCall\(payload\);\s*return;\s*\}\s*callKitService\.reportCallConnected/,
+      'a failed join must not be reported to CallKit as connected',
+    );
+    assert.match(
+      CALL_ACTIONS_SOURCE,
+      /function failAcceptedCall[\s\S]*?callKitService\.reportCallEnded\(payload\.callUUID, 'FAILED'\)/,
+      'a failed join must end the native call with the FAILED reason',
     );
   });
 
@@ -231,7 +249,7 @@ describe('Android incoming-call credential handoff policy', () => {
     );
     assert.match(
       CALL_ACTIONS_SOURCE,
-      /await callService\.joinCall\(\{ callId: payload\.callId \}\);[\s\S]*if \(expectedGeneration !== callSessionGeneration\) return;[\s\S]*callKitService\.reportCallConnected/,
+      /await requestJoinCredentials\(payload\.callId, expectedGeneration\);[\s\S]*if \(expectedGeneration !== callSessionGeneration\) return;[\s\S]*callKitService\.reportCallConnected/,
       'a late join response must not reconnect or navigate an old account session',
     );
   });

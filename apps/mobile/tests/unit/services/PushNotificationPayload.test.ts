@@ -31,8 +31,6 @@ describe('parseIncomingCallPayload', () => {
         callerName: 'Alice',
         callType: 'VIDEO',
         channelId: 'chan-1',
-        token: 'tok-1',
-        liveKitUrl: 'wss://livekit.example',
       }),
     });
 
@@ -42,8 +40,6 @@ describe('parseIncomingCallPayload', () => {
       callerName: 'Alice',
       callType: CallType.VIDEO,
       channelId: 'chan-1',
-      token: 'tok-1',
-      serverUrl: 'wss://livekit.example',
     });
   });
 
@@ -107,13 +103,23 @@ describe('parseIncomingCallPayload', () => {
     });
   });
 
-  it('uses metadata serverUrl when no liveKitUrl is present', () => {
+  it('ignores join credentials sent by an older backend', () => {
     const payload = parseIncomingCallPayload({
       type: 'INCOMING_CALL',
-      metadata: { callId: 'call-7', serverUrl: 'https://sfu.example' },
+      metadata: {
+        callId: 'call-7',
+        token: 'tok-7',
+        liveKitUrl: 'wss://livekit.example',
+        serverUrl: 'https://sfu.example',
+      },
     });
 
-    assert.equal(payload?.serverUrl, 'https://sfu.example');
+    assert.deepEqual(payload, {
+      callId: 'call-7',
+      callUUID: 'call-7',
+      callerName: 'Unknown Caller',
+      callType: CallType.AUDIO,
+    });
   });
 });
 
