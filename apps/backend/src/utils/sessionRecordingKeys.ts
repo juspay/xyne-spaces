@@ -2,31 +2,43 @@
  * Session Recording Key Utilities
  *
  * Generates Redis keys for session recording storage.
- * Format: session-recording:{sessionId}
+ * Format: session-recording:{userId}:{sessionId}
  *
- * Example: session-recording:sess-abc-123
+ * The key is scoped by the authenticated user so two users posting the same
+ * sessionId can never share (or poison) one list.
+ *
+ * Example: session-recording:user_123:sess-abc-123
  */
+
+const PREFIX = 'session-recording:';
 
 /**
  * Build a Redis key for session recording storage.
+ * @param userId - The authenticated user who owns the recording
  * @param sessionId - The session ID
  * @returns The Redis key string
  */
-export function buildSessionRecordingKey(sessionId: string): string {
-  return `session-recording:${sessionId}`;
+export function buildSessionRecordingKey(userId: string, sessionId: string): string {
+  return `${PREFIX}${userId}:${sessionId}`;
 }
 
 /**
- * Extract session ID from a Redis key.
- * @param key - The Redis key string (e.g., 'session-recording:sess-abc-123')
- * @returns The session ID, or null if invalid
+ * Extract user ID and session ID from a Redis key.
+ * @param key - The Redis key string (e.g., 'session-recording:user_123:sess-abc-123')
+ * @returns The ids, or null if the key is not in the expected format
  */
-export function parseSessionRecordingKey(key: string): string | null {
-  if (!key.startsWith('session-recording:')) {
+export function parseSessionRecordingKey(key: string): { userId: string; sessionId: string } | null {
+  if (!key.startsWith(PREFIX)) {
     return null;
   }
-  const sessionId = key.slice('session-recording:'.length);
-  return sessionId || null;
+  const rest = key.slice(PREFIX.length);
+  const sep = rest.indexOf(':');
+  if (sep <= 0) {
+    return null;
+  }
+  const userId = rest.slice(0, sep);
+  const sessionId = rest.slice(sep + 1);
+  return sessionId ? { userId, sessionId } : null;
 }
 
 /**

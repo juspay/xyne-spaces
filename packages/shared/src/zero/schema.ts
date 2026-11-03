@@ -4768,6 +4768,13 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     destField: ['id'],
     destSchema: channelTable,
   }),
+  // The release ticket a RELEASE_ENV_FORM / RELEASE_MIGRATION_FORM row belongs to
+  // (contextId = tickets.id); used to gate reads on the ticket's channel.
+  contextTicket: one({
+    sourceField: ['contextId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
 }));
 
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({

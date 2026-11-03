@@ -241,9 +241,30 @@ export class InvitationController {
   };
 
   /**
+   * Email from the httpOnly google_access_token cookie set after login, or null
+   * when absent or invalid. Used by verifyInvitation only to report whether the
+   * logged-in identity matches the invitation; acceptInvitation does its own
+   * full decode because it needs the provider fields too.
+   */
+  private readPendingAuthEmail(req: Request): string | null {
+    const raw = req.cookies?.google_access_token as string | undefined;
+    if (!raw) return null;
+    try {
+      const decoded = jwt.verify(raw, config.jwt.secret) as { email?: string };
+      return decoded.email ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * GET /api/invitations/:id/verify
    * Verify if an invitation is valid (not expired/revoked)
-   * Public endpoint - no authentication required
+   * Public endpoint - no authentication required. The only credential is the
+   * invitation token in the URL, so the response is limited to what the accept
+   * screen needs: role, workspace name, entity title and whether the
+   * pending-auth cookie (if any) belongs to the invited address. Internal ids
+   * and the invited email are never returned here.
    */
   verifyInvitation = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -288,12 +309,10 @@ export class InvitationController {
 
       // Build entity info
       let entityType: string | undefined;
-      let entityId: string | undefined;
       let entityTitle: string | null = null;
 
       if (invitation.entityType && invitation.entityId) {
         entityType = invitation.entityType;
-        entityId = invitation.entityId;
 
         const prisma = DatabaseClient.getInstance();
         if (invitation.entityType === 'CANVAS') {
@@ -317,17 +336,21 @@ export class InvitationController {
         }
       }
 
+      // Compare against the pending-auth cookie server-side so the client
+      // never needs the invited address to run its email-match guard.
+      const sessionEmail = this.readPendingAuthEmail(req);
+      const emailMatchesSession = sessionEmail
+        ? sessionEmail.toLowerCase() === invitation.email.toLowerCase()
+        : undefined;
+
       // Invitation is valid
       res.status(200).json({
         valid: true,
         invitation: {
-          id: invitation.id,
-          email: invitation.email,
+          emailMatchesSession,
           role: invitation.role,
           workspaceName: invitation.workspace?.name,
-          organizationName: invitation.organization?.name,
           entityType,
-          entityId,
           entityTitle,
           pendingApproval: invitation.isOrgApproved === false,
         },
@@ -418,8 +441,9 @@ export class InvitationController {
       }
 
       if (invitation.email.toLowerCase() !== oauthUser.email.toLowerCase()) {
+        // Do not echo the invited address: the caller only holds the link token.
         res.status(403).json({
-          error: `This invitation is for ${invitation.email}, but you are logged in as ${oauthUser.email}.`,
+          error: `This invitation was sent to a different email address. You are logged in as ${oauthUser.email}.`,
         });
         return;
       }

@@ -1,14 +1,22 @@
 import { Router } from 'express';
 import { HealthController } from '@/controllers/healthController';
+import { authMiddleware } from '@/middleware/auth';
 
 const router = Router();
 
 /**
  * @route GET /api/health
- * @desc Get health status of the application
+ * @desc Get health status of the application (status only)
  * @access Public
  */
 router.get('/', HealthController.getHealth);
+
+/**
+ * @route GET /api/health/details
+ * @desc Full diagnostics: environment, uptime, memory, version, database status
+ * @access Authenticated
+ */
+router.get('/details', authMiddleware.authenticate, HealthController.getHealthDetails);
 
 /**
  * @route GET /api/health/readiness

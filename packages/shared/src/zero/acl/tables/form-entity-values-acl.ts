@@ -34,10 +34,27 @@ export class FormEntityValuesACL extends BaseQueryACL<'form_entity_values'> {
       return inWorkspace;
     }
     // A channel's fields are read only by those who can see the channel (private ones: its members).
-    return inWorkspace.where(({ or, cmp, exists }) =>
+    // Release env-diff / migration rows are read only by those who can see the release ticket.
+    return inWorkspace.where(({ or, and, cmp, exists }) =>
       or(
-        cmp('entityType', '!=', FormEntityType.CHANNEL),
-        exists('channel', (c) => c.where(channelAccessWhere(this.ctx)))
+        and(
+          cmp('entityType', '!=', FormEntityType.CHANNEL),
+          cmp('entityType', '!=', FormEntityType.RELEASE_ENV_FORM),
+          cmp('entityType', '!=', FormEntityType.RELEASE_MIGRATION_FORM)
+        ),
+        and(
+          cmp('entityType', '=', FormEntityType.CHANNEL),
+          exists('channel', (c) => c.where(channelAccessWhere(this.ctx)))
+        ),
+        and(
+          or(
+            cmp('entityType', '=', FormEntityType.RELEASE_ENV_FORM),
+            cmp('entityType', '=', FormEntityType.RELEASE_MIGRATION_FORM)
+          ),
+          exists('contextTicket', (t) =>
+            t.whereExists('channel', (c) => c.where(channelAccessWhere(this.ctx)))
+          )
+        )
       )
     );
   }

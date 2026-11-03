@@ -4,8 +4,41 @@ import { DatabaseClient } from '@/database/client';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import { config } from '@/config/env';
 
+/**
+ * Health endpoints are mounted without authentication because Kubernetes probes,
+ * docker healthchecks and smoke tests call them. The public handlers therefore
+ * return only a status word; everything that describes the process or the
+ * deployment (environment, uptime, memory, version, database wiring) is served
+ * by getHealthDetails, which the router mounts behind authMiddleware.authenticate.
+ */
 export class HealthController {
   public static async getHealth(_req: Request, res: Response): Promise<void> {
+    try {
+      const isDatabaseHealthy = await DatabaseClient.healthCheck();
+
+      const response: ApiResponse<{ status: string; timestamp: string }> = {
+        success: true,
+        data: {
+          status: isDatabaseHealthy ? 'OK' : 'DEGRADED',
+          timestamp: new Date().toISOString(),
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+      res.status(isDatabaseHealthy ? 200 : 503).json(response);
+    } catch (error) {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Health check failed',
+        timestamp: new Date().toISOString(),
+      };
+
+      res.status(500).json(response);
+    }
+  }
+
+  /** Full diagnostics. Authenticated callers only (see routes/health.ts). */
+  public static async getHealthDetails(_req: Request, res: Response): Promise<void> {
     try {
       const memoryUsage = process.memoryUsage();
       const isDatabaseHealthy = await DatabaseClient.healthCheck();
@@ -65,13 +98,7 @@ export class HealthController {
       if (isReady) {
         const response: ApiResponse = {
           success: true,
-          data: {
-            status: 'ready',
-            database: {
-              connected: isDatabaseConnected,
-              healthy: isDatabaseReady,
-            },
-          },
+          data: { status: 'ready' },
           timestamp: new Date().toISOString(),
         };
         res.status(200).json(response);
@@ -79,12 +106,7 @@ export class HealthController {
         const response: ApiResponse = {
           success: false,
           error: 'Service not ready',
-          data: {
-            database: {
-              connected: isDatabaseConnected,
-              healthy: isDatabaseReady,
-            },
-          },
+          data: { status: 'not_ready' },
           timestamp: new Date().toISOString(),
         };
         res.status(503).json(response);
@@ -104,7 +126,7 @@ export class HealthController {
     // Simple liveness check - if the process is running, it's alive
     const response: ApiResponse = {
       success: true,
-      data: { status: 'alive', pid: process.pid },
+      data: { status: 'alive' },
       timestamp: new Date().toISOString(),
     };
 
