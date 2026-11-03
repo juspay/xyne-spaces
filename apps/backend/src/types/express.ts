@@ -54,13 +54,14 @@ export interface AuthenticatedUser {
   orgRole: string;
   memberId: string;
   authProvider?: string;
+  /** auth_sessions.id from the JWT `sid` claim; absent for API-key users. */
+  sid?: string;
 }
 
 declare global {
   namespace Express {
     interface Request {
       user?: AuthenticatedUser;
-      authenticatedSessionId?: string;
     }
   }
 }

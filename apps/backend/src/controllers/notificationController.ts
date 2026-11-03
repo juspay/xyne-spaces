@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
+import { getDeviceKey } from '@/services/authSessionService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
 
@@ -57,8 +58,9 @@ const preferencesSchema = z.record(
 );
 
 export class NotificationController {
+  /** The auth session (JWT `sid`) a mobile push token is registered against. */
   private resolveSessionId(req: Request): string | undefined {
-    return req.authenticatedSessionId;
+    return req.user?.sid;
   }
 
   registerMobilePushToken = async (req: Request, res: Response): Promise<void> => {
@@ -82,6 +84,8 @@ export class NotificationController {
         ...validated,
         sessionId,
         appVersion: req.headers['x-app-version'] as string | undefined,
+        orgMemberId: req.user?.memberId,
+        deviceKey: getDeviceKey(req),
       });
 
       res.json({ success: true });
@@ -108,7 +112,10 @@ export class NotificationController {
       mobileUnregisterSchema.parse(req.body ?? {});
       const sessionId = this.resolveSessionId(req);
 
-      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined);
+      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined, {
+        orgMemberId: req.user?.memberId,
+        deviceKey: getDeviceKey(req),
+      });
 
       res.json({ success: true });
     } catch (error) {

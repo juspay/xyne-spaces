@@ -32,7 +32,6 @@ router.post('/exchange-electron', authV2Controller.exchangeElectronCode);
 
 router.post('/exchange-mobile', authV2Controller.exchangeMobileCode);
 
-router.get('/refresh-session', authV2Controller.refreshSession);
 
 router.post('/email/login', emailAuthController.login);
 

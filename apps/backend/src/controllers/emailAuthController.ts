@@ -2,10 +2,9 @@ import crypto from 'crypto';
 import { AuthProvider } from '@xyne/shared';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
-import { UserSessionService } from '../services/userSessionService';
-import { authSessionService } from '../services/authSessionService';
+import { authSessionService, AuthSessionRevokeReason } from '../services/authSessionService';
+import { completeLogin, respondDeviceKeyRequired } from '../services/loginCompletionService';
 import { UserService } from '../services/userService';
-import { jwtService } from '../services/jwtService';
 import {
   hashPassword,
   validatePasswordComplexity,
@@ -21,6 +20,7 @@ import { setPasswordHash, getPasswordHash } from '@/services/orgMemberCredential
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { logger } from '@/utils/logger';
+import { PENDING_AUTH_COOKIE } from '@/services/accessTokenService';
 
 const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
 const workspaceOutcome = (count: number): string =>
@@ -36,12 +36,10 @@ const LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS = 5 * 60;
 const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
 
 export class EmailAuthController {
-  private userSessionService: UserSessionService;
   private userService: UserService;
   private prisma = DatabaseClient.getInstance();
 
   constructor() {
-    this.userSessionService = new UserSessionService();
     this.userService = new UserService();
   }
 
@@ -231,7 +229,7 @@ export class EmailAuthController {
         const userName = normalizedEmail.split('@')[0];
 
         res.cookie(
-          'google_access_token',
+          PENDING_AUTH_COOKIE,
           jwt.sign(
             {
               email: normalizedEmail,
@@ -266,7 +264,7 @@ export class EmailAuthController {
       const userName = workspaceUser.name || normalizedEmail.split('@')[0];
 
       res.cookie(
-        'google_access_token',
+        PENDING_AUTH_COOKIE,
         jwt.sign(
           {
             email: normalizedEmail,
@@ -293,50 +291,12 @@ export class EmailAuthController {
       }));
 
       if (workspaceUsers.length === 1) {
-        const refreshToken = crypto.randomUUID();
-        const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-        const session = await this.userSessionService.createSession({
-          userId: workspaceUser.id,
-          refreshToken,
-          refreshTokenExpiry,
-          deviceInfo: JSON.stringify({
-            userAgent: req.headers['user-agent'],
-            timestamp: new Date().toISOString(),
-          }),
-          ipAddress: req.ip || req.connection.remoteAddress || undefined,
-          // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password.
+        // Auth session (xs) + JWT cookies. The user row may still say GOOGLE/MICROSOFT for an
+        // SSO account that set a password, so the method is pinned to EMAIL.
+        await completeLogin(req, res, {
+          user: workspaceUser,
           loginMethod: AuthProvider.EMAIL,
-        });
-
-        const jwtToken = jwtService.generateToken({
-          sub: workspaceUser.id,
-          email: workspaceUser.email,
-          name: workspaceUser.name,
-          workspaceId: workspaceUser.workspaceId,
-          memberId: workspaceUser.orgMemberId,
-          providerUserId: `email-${workspaceUser.email}`,
-          provider: AuthProvider.EMAIL,
-        });
-
-        res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
-          ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
-        });
-        res.cookie('user_session_id', session.id, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
-        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
-        await authSessionService.issueOnLogin(req, res, {
-          orgMemberId: workspaceUser.orgMemberId,
-          workspaceId: workspaceUser.workspaceId ?? undefined,
+          cookieOptions: { sameSite: cookieBase.sameSite, secure: cookieBase.secure },
         });
 
         logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);
@@ -358,6 +318,7 @@ export class EmailAuthController {
         userExistsButRemoved: false,
       });
     } catch (error) {
+      if (respondDeviceKeyRequired(res, error)) return;
       logger.error(`${tag()} Email login failed:`, error);
       res.status(500).json({
         error: 'Login failed',
@@ -434,8 +395,8 @@ export class EmailAuthController {
       const newHash = await hashPassword(newPassword);
       await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
-      // Revoke all active sessions for this user — forces re-auth everywhere
-      await this.userSessionService.revokeAllUserSessions(userId, 'PASSWORD_CHANGED');
+      // Revoke every device's auth session for this org member — forces re-auth everywhere
+      await authSessionService.revokeAllForOrgMember(orgMember.memberId, AuthSessionRevokeReason.PASSWORD_CHANGED);
 
       res.status(200).json({ success: true, message: 'Password changed successfully. Please log in again.' });
     } catch (error) {
@@ -610,14 +571,8 @@ export class EmailAuthController {
       const newHash = await hashPassword(newPassword);
       await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
-      // Find all workspace users tied to this orgMember and revoke their sessions
-      const affectedUsers = await this.prisma.user.findMany({
-        where: { orgMemberId: orgMember.memberId },
-        select: { id: true },
-      });
-      for (const u of affectedUsers) {
-        await this.userSessionService.revokeAllUserSessions(u.id, 'PASSWORD_RESET');
-      }
+      // Auth sessions are org-level: one revoke covers every workspace and device.
+      await authSessionService.revokeAllForOrgMember(orgMember.memberId, AuthSessionRevokeReason.PASSWORD_RESET);
 
       // Delete the code from Redis (it's been consumed)
       await Promise.all([

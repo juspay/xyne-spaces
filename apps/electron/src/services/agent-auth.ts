@@ -1403,9 +1403,9 @@ class AgentAuthService {
       }
     }
 
-    // Backward compatibility fallback: old `google_access_token` cookie.
+    // Backward compatibility fallback: old `xyne_pending_auth` cookie.
     // Accept only JWT-shaped values to avoid using pending-auth JSON blobs.
-    const legacy = readCookie('google_access_token');
+    const legacy = readCookie('xyne_pending_auth');
     if (legacy && legacy.split('.').length === 3) {
       return legacy;
     }

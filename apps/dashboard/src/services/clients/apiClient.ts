@@ -44,9 +44,11 @@ function sanitizeUrl(url: string): string {
 
 // Single-flight refresh: concurrent 401s share one /auth/refresh-session call.
 // Plain axios (not apiInstance) so the refresh's own 401 never re-enters this interceptor.
-type RefreshOutcome = 'ok' | 'dead' | 'transient';
+// Exported for the few auth calls that deliberately bypass apiInstance (session validation)
+// and so must do their own refresh-and-retry on 401: the backend never refreshes on its own.
+export type RefreshOutcome = 'ok' | 'dead' | 'transient';
 let refreshInFlight: Promise<RefreshOutcome> | null = null;
-const refreshSessionOnce = (): Promise<RefreshOutcome> =>
+export const refreshSessionOnce = (): Promise<RefreshOutcome> =>
   (refreshInFlight ??= axios
     .get(`${BASE_URL}/auth/refresh-session`, { withCredentials: true })
     .then((): RefreshOutcome => 'ok')

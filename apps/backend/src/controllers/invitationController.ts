@@ -70,6 +70,7 @@ export async function buildInvitationLink(params: {
 import { createId } from '@paralleldrive/cuid2';
 import { provisionOrgTx } from '@/bypassAcl/transactions/invitationController';
 import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
+import { PENDING_AUTH_COOKIE } from '@/services/accessTokenService';
 
 export class InvitationController {
   /**
@@ -351,9 +352,9 @@ export class InvitationController {
         return;
       }
 
-      // Read identity from the httpOnly google_access_token cookie.
+      // Read identity from the httpOnly xyne_pending_auth cookie.
       // Supports both signed-JWT (new email/OAuth flows) and legacy JSON shapes.
-      const pendingAuthRaw = req.cookies?.google_access_token as string | undefined;
+      const pendingAuthRaw = req.cookies?.[PENDING_AUTH_COOKIE] as string | undefined;
       if (!pendingAuthRaw) {
         res.status(401).json({ error: 'Not authenticated. Please login first.' });
         return;
