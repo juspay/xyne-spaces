@@ -11,22 +11,27 @@ import { logger } from '@/utils/logger';
 
 const HttpMethod = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
+function webhookUrlProblem(raw: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return 'must be a valid URL';
+  }
+  if (parsed.protocol !== 'https:') return 'must use HTTPS';
+  if (isIP(parsed.hostname) !== 0) return 'must use a domain name, not an IP address';
+  return null;
+}
+
 const TriggerWebhookConfigSchema = z.object({
   url: variableRef(
     z
       .string()
       .url()
-      .refine(s => s.startsWith('https://'), { message: 'URL must use HTTPS.' })
-      .refine(
-        s => {
-          try {
-            return isIP(new URL(s).hostname) === 0;
-          } catch {
-            return false;
-          }
-        },
-        { message: 'URL must use a domain name, not an IP address.' },
-      ),
+      .superRefine((s, ctx) => {
+        const problem = webhookUrlProblem(s);
+        if (problem) ctx.addIssue({ code: 'custom', message: `URL ${problem}.` });
+      }),
   ).describe('Destination URL (HTTPS, domain name).'),
   method: HttpMethod.default('POST').describe('HTTP method.'),
   headers: z
@@ -88,6 +93,11 @@ export class TriggerWebhookStep extends BaseActionStep<
     cfg: z.infer<typeof TriggerWebhookConfigSchema>,
   ): Promise<TriggerWebhookOutput> {
     const { url, method, headers, encoding, body, timeoutMs } = cfg;
+
+    const urlProblem = webhookUrlProblem(url);
+    if (urlProblem) {
+      throw new Error(`[TRIGGER_WEBHOOK] resolved URL ${urlProblem}: ${url}`);
+    }
 
     const init: RequestInit = {
       method,
