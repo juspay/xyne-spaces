@@ -33,6 +33,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { resolveUserStatus } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 // Disabled (Claw)
 // import { XyneAIStar } from '../../icons/xyne-ai';
 
@@ -156,6 +157,9 @@ const ConversationHeaderMobile = ({
             <div style={{ height: ROOT_SIZE }} className='flex flex-col items-start justify-center'>
               <p className='text-sm font-medium whitespace-nowrap overflow-hidden text-foreground'>
                 {displayName}
+                {channel && isOneToOneDMChannel(channel.scopeType) && (
+                  <GuestLabel role={dmUser?.role} className='ml-1 text-xs' />
+                )}
               </p>
               {channel &&
               isOneToOneDMChannel(channel.scopeType) &&

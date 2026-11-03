@@ -190,6 +190,7 @@ import { RoleManagementScreen } from './RoleManagementScreen';
 // import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
+import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import {
   GeneralTab,
   GuestUsersTab,
@@ -1502,9 +1503,11 @@ export const router = createBrowserRouter([
               {
                 path: 'knowledge-base',
                 element: (
-                  <ToolbarProtectedRoute path='/knowledge-base'>
-                    <KnowledgeBaseV2Layout />
-                  </ToolbarProtectedRoute>
+                  <GuestBlockedRoute>
+                    <ToolbarProtectedRoute path='/knowledge-base'>
+                      <KnowledgeBaseV2Layout />
+                    </ToolbarProtectedRoute>
+                  </GuestBlockedRoute>
                 ),
                 children: [
                   {
@@ -1629,9 +1632,11 @@ export const router = createBrowserRouter([
               {
                 path: 'releaseManager',
                 element: (
-                  <ToolbarProtectedRoute path='/releaseManager'>
-                    <ReleaseManagerView />
-                  </ToolbarProtectedRoute>
+                  <GuestBlockedRoute>
+                    <ToolbarProtectedRoute path='/releaseManager'>
+                      <ReleaseManagerView />
+                    </ToolbarProtectedRoute>
+                  </GuestBlockedRoute>
                 ),
               },
               {
@@ -1897,9 +1902,11 @@ export const router = createBrowserRouter([
               {
                 path: 'automations',
                 element: (
-                  <ToolbarProtectedRoute path='/automations'>
-                    <AutomationsScreen />
-                  </ToolbarProtectedRoute>
+                  <GuestBlockedRoute>
+                    <ToolbarProtectedRoute path='/automations'>
+                      <AutomationsScreen />
+                    </ToolbarProtectedRoute>
+                  </GuestBlockedRoute>
                 ),
                 children: [
                   { index: true, element: <AutomationsListScreen /> },
@@ -1913,9 +1920,11 @@ export const router = createBrowserRouter([
               {
                 path: 'apps',
                 element: (
-                  <ToolbarProtectedRoute path='/apps'>
-                    <AppsScreen />
-                  </ToolbarProtectedRoute>
+                  <GuestBlockedRoute>
+                    <ToolbarProtectedRoute path='/apps'>
+                      <AppsScreen />
+                    </ToolbarProtectedRoute>
+                  </GuestBlockedRoute>
                 ),
               },
               // Disabled (Claw)
@@ -1947,9 +1956,11 @@ export const router = createBrowserRouter([
               {
                 path: 'migration/confluence',
                 element: (
-                  <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
-                    <ConfluenceMigrationScreen />
-                  </ResourceProtectedRoute>
+                  <GuestBlockedRoute>
+                    <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
+                      <ConfluenceMigrationScreen />
+                    </ResourceProtectedRoute>
+                  </GuestBlockedRoute>
                 ),
               },
               {
@@ -1957,7 +1968,11 @@ export const router = createBrowserRouter([
                 // TICKET-MIGRATION, Slack by its own toolbar path, and the index
                 // redirect 404s when neither is reachable.
                 path: 'migrations',
-                element: <MigrationsScreen />,
+                element: (
+                  <GuestBlockedRoute>
+                    <MigrationsScreen />
+                  </GuestBlockedRoute>
+                ),
                 children: [
                   { index: true, element: <MigrationsIndexRedirect /> },
                   {

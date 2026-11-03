@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
+import { Prisma, PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelScopeType, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
 
 type GuestScope = {
   workspaceId: string
@@ -236,20 +236,56 @@ export async function getGuestVisibleUserIds(
   workspaceId: string,
   userId: string
 ): Promise<string[]> {
-  const accessibleChannelIds = await getGuestAccessibleChannelIds(prisma, workspaceId, userId)
-  if (!accessibleChannelIds.length) {
-    return [userId]
+  const [accessibleChannelIds, accessibleCanvasIds] = await Promise.all([
+    getGuestAccessibleChannelIds(prisma, workspaceId, userId),
+    getGuestAccessibleCanvasIds(prisma, workspaceId, userId),
+  ])
+
+  // People the guest shares a channel or a canvas with (mirrors the Zero-side
+  // guestVisibleUserWhere).
+  const [channelParticipants, canvasParticipants] = await Promise.all([
+    accessibleChannelIds.length
+      ? prisma.channelParticipant.findMany({
+          where: {
+            channelId: { in: accessibleChannelIds },
+            channel: { workspaceId },
+          },
+          select: { userId: true },
+        })
+      : [],
+    accessibleCanvasIds.length
+      ? prisma.canvasParticipant.findMany({
+          where: { canvasId: { in: accessibleCanvasIds }, workspaceId, userId: { not: null } },
+          select: { userId: true },
+        })
+      : [],
+  ])
+
+  return unique([
+    userId,
+    ...channelParticipants.map((entry) => entry.userId),
+    ...canvasParticipants.flatMap((entry) => (entry.userId ? [entry.userId] : [])),
+  ])
+}
+
+/**
+ * A guest may create only a DM / group DM, and only with themselves plus people they can
+ * already see (who share a channel or canvas with them). A DM's name is its members' sorted
+ * ids (findOrCreateDMChannel; a self-DM is the bare id), so membership is read from it.
+ */
+export async function guestMayCreateChannel(
+  prisma: PrismaClient,
+  workspaceId: string,
+  userId: string,
+  channel: { scopeType?: string | null; name?: string | null }
+): Promise<boolean> {
+  if (channel.scopeType !== ChannelScopeType.DM && channel.scopeType !== ChannelScopeType.GROUP_DM) {
+    return false
   }
-
-  const participants = await prisma.channelParticipant.findMany({
-    where: {
-      channelId: { in: accessibleChannelIds },
-      channel: { workspaceId },
-    },
-    select: { userId: true },
-  })
-
-  return unique([userId, ...participants.map((entry) => entry.userId)])
+  const memberIds = String(channel.name ?? '').split(',').filter(Boolean)
+  if (!memberIds.includes(userId)) return false
+  const visible = new Set(await getGuestVisibleUserIds(prisma, workspaceId, userId))
+  return memberIds.every((id) => visible.has(id))
 }
 
 export async function getGuestAccessibleCanvasIds(

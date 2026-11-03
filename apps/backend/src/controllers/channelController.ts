@@ -35,6 +35,7 @@ import {
   ActivityClassification,
   ActivityClassificationJobType, ChannelType, ChannelRole,
   normalizeHistoryScope,
+  WorkspaceRole,
   type AddGroupDmParticipantsRequest,
   type AddGroupDmParticipantsResponse,
 } from '@xyne/shared';
@@ -816,6 +817,16 @@ export class ChannelController {
       } = req.body;
 
       const userId = req.user!.id;
+
+      // Guests may only start DMs; ChannelRepository.create enforces who with.
+      if (
+        req.user?.role === WorkspaceRole.GUEST &&
+        scopeType !== ChannelScopeType.DM &&
+        scopeType !== ChannelScopeType.GROUP_DM
+      ) {
+        res.status(403).json({ error: 'Guests cannot create channels' });
+        return;
+      }
 
       // Validate required fields. projectId is OPTIONAL only for a NATIVE channel
       // (scopeType DEFAULT + type DEFAULT/unset). Everything else still requires a

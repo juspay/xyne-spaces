@@ -228,6 +228,10 @@ export interface FileFilters {
   collectionId?: string[];
   fileId?: string[]; // Scope to specific file document(s) by docId
   projectId?: string[];
+  // When true, drop the public (isPrivate=false) branch: only canvases/attachments/collections
+  // the searcher owns or was given access to (a GUEST searcher must not find public surfaces
+  // they aren't on).
+  onlyExplicitAccess?: boolean;
 }
 
 export interface MeetingFilters {
@@ -747,6 +751,7 @@ export class YqlBuilder {
     // The current user's id is checked against ownerId/permissions in the subApp access
     // groups below; bind it once and reuse the placeholder.
     const accessUser = params.bind('permissions', userId);
+    const publicAccess = filters.onlyExplicitAccess ? '' : ` or isPrivate contains "false"`;
 
     // DocType filter
     conditions.push(`docType contains "file"`);
@@ -778,12 +783,12 @@ export class YqlBuilder {
     // Canvas: require owner/permissions/isPrivate check
     if (subApps.some((s) => s === 'CANVAS')) {
       subAppConditions.push(
-        `((subApp contains "CANVAS") and (ownerId contains ${accessUser} or permissions contains ${accessUser} or isPrivate contains "false"))`
+        `((subApp contains "CANVAS") and (ownerId contains ${accessUser} or permissions contains ${accessUser}${publicAccess}))`
       );
     }
 
     // Chat/Ticket attachments and transcripts: owner/channelPermissions/isPrivate check
-    const channelAccess = `ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"`;
+    const channelAccess = `ownerId contains ${accessUser} or channelPermissions contains ${accessUser}${publicAccess}`;
     if (subApps.some((s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT')) {
       subAppConditions.push(
         `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT") and (${channelAccess}))`
@@ -797,14 +802,14 @@ export class YqlBuilder {
       );
     }
 
-    // RCA: no permission check (public)
-    if (subApps.some((s) => s === 'RCA')) {
+    // RCA: no permission check (public) — workspace-wide, so never for an explicit-access-only searcher
+    if (subApps.some((s) => s === 'RCA') && !filters.onlyExplicitAccess) {
       subAppConditions.push(`subApp contains "RCA"`);
     }
 
     // Collections: require owner/permissions/isPrivate check + project scoping
     if (subApps.some((s) => s === 'collections')) {
-      let collectionCondition = `(subApp contains "collections") and (ownerId contains ${accessUser} or permissions contains ${accessUser} or isPrivate contains "false")`;
+      let collectionCondition = `(subApp contains "collections") and (ownerId contains ${accessUser} or permissions contains ${accessUser}${publicAccess})`;
       if (filters.projectId && filters.projectId.length > 0) {
         const projectCondition = filters.projectId
           .map((projectId) => `projectId contains ${params.bind('projectId', projectId)}`)
