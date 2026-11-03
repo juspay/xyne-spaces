@@ -4,7 +4,8 @@ import { Channel } from '@prisma/client';
 import { BoardType, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
-import { withWorkspaceScope } from '@/database/tenant/context';
+import { getContextOrNull, withWorkspaceScope } from '@/database/tenant/context';
+import { guestMayCreateChannel } from '@/database/acl/tables/channel-access-helper';
 import { newConnectId } from '@/database/connectGroup';
 import { createChannelWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
@@ -46,6 +47,19 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     super('channel');
   }
 
+  /**
+   * The channel insert runs in an ACL-free transaction, so ChannelsACL.canCreate never sees it.
+   * Checked here instead, before anything is written: a guest may create only a DM / group DM
+   * with people they can already see (see guestMayCreateChannel).
+   */
+  private async assertGuestMayCreate(data: CreateChannelInput): Promise<void> {
+    const ctx = getContextOrNull();
+    if (ctx?.role !== 'GUEST' || ctx.actor !== 'user') return;
+    if (!(await guestMayCreateChannel(this.db, data.workspaceId, ctx.userId, data))) {
+      throw new Error('Guests can only start a DM with people they share a channel or canvas with');
+    }
+  }
+
   async create(data: CreateChannelInput): Promise<Channel> {
     // Skip 255 char validation for DM and GROUP_DM channels
     // Their names are comma-separated user IDs (internal identifiers)
@@ -62,6 +76,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     if (data.visibility) {
       await this.validateEnum(data.visibility, 'visibility', ['PUBLIC', 'PRIVATE']);
     }
+
+    await this.assertGuestMayCreate(data);
 
     // Check for duplicate channel name within the workspace
     const isDuplicate = await this.checkDuplicateName(data.name, data.workspaceId);

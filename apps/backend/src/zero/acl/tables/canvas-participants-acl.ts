@@ -4,6 +4,7 @@ import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { assertConnectMutateAllowed } from '../core/connect-mutation-reach';
 import { zql } from '../../queries';
+import { hasGuestChannelAccess, isGuestVisibleUser } from '../core/guest-access';
 
 
 export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
@@ -99,8 +100,35 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     return canvas;
   }
 
+  /**
+   * A guest may share a canvas only with people they can already see (who share a channel or
+   * canvas with them), or with a channel they are in. Never with a user group: its members
+   * reach beyond the guest's view.
+   */
+  private async assertGuestMayShare(
+    args: InsertValue<TableSchema<'canvas_participants'>>,
+    tx: Transaction<Schema>,
+  ): Promise<void> {
+    const allowed = args.userGroupId
+      ? false
+      : args.channelId
+        ? await hasGuestChannelAccess(this.ctx, tx, args.channelId)
+        : args.userId
+          ? await isGuestVisibleUser(this.ctx, tx, args.userId)
+          : false;
+    if (!allowed) {
+      throw new MutationACLError(
+        'Canvas participant insert failed: guests can only share with people they share a channel or canvas with',
+        'canvas_participants',
+      );
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'canvas_participants'>>, tx: Transaction<Schema>): Promise<void> {
     const canvas = await this.verifyWorkspace(args.canvasId, tx);
+    if (this.ctx.role === 'GUEST') {
+      await this.assertGuestMayShare(args, tx);
+    }
     if (canvas.visibility === CanvasVisibility.PUBLIC) {
       return; // Anyone can be added to a public canvas
     }
