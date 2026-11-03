@@ -119,7 +119,7 @@ export class MobilePushChannel {
         try {
           // Only clear token if it's definitely invalid
           if (errorCode === 'UNREGISTERED' || errorCode === 'NOT_FOUND') {
-            await fcmPushService.clearSessionPushToken(sessionId);
+            await fcmPushService.clearPushTokenForSession(sessionId);
             logger.info('[MobilePush] Cleared invalid token for push notification');
           }
         } catch (clearError) {
