@@ -10,6 +10,7 @@ const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
+  ALLOWED_EMAIL_DOMAINS: Joi.string().allow('').default(''),
   RESEARCH_AGENT_URL: Joi.string().default('http://localhost:8000'),
   // Python transcription agent (health server also exposes /embed-voice)
   PYTHON_AGENT_URL: Joi.string().default('http://localhost:8080'),
@@ -748,6 +749,10 @@ export const config = {
   isTestEnv: envVars.NODE_ENV === 'test',
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
+  allowedEmailDomains: (envVars.ALLOWED_EMAIL_DOMAINS as string)
+    .split(',')
+    .map((domain) => domain.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean),
   research_agent_url: envVars.RESEARCH_AGENT_URL,
   bitbot_base_url: envVars.BITBOT_BASE_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,

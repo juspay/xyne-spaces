@@ -10,6 +10,11 @@ import { apiKeyService } from '../services/apiKeyService';
 import { jwtService } from '../services/jwtService';
 import '../types/express'; // Import the Express type extensions
 import { config } from '@/config/env';
+import {
+  EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+  EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+  isEmailDomainAllowed,
+} from '@/services/emailDomainPolicy';
 import { isRefreshAllowed } from '../services/sessionRefreshValidator';
 
 export class AuthMiddleware {
@@ -470,6 +475,15 @@ export class AuthMiddleware {
         return;
       }
 
+      if (!isEmailDomainAllowed(user.email)) {
+        logger.warn(`[AUTH] Request rejected (reason=email_domain_not_allowed)`, { userId: user.id });
+        res.status(401).json({
+          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+        });
+        return;
+      }
+
       /**
        * BACKWARD COMPATIBILITY SUPPORT
        *
@@ -871,6 +885,15 @@ export class AuthMiddleware {
         res.status(401).json({
           error: 'User not found',
           message: 'User associated with this token no longer exists',
+        });
+        return;
+      }
+
+      if (!isEmailDomainAllowed(user.email)) {
+        logger.warn(`[AUTH] Zero auth rejected (reason=email_domain_not_allowed)`, { userId: user.id });
+        res.status(401).json({
+          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
         });
         return;
       }

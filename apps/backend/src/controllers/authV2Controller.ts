@@ -14,6 +14,12 @@ import { WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import '../types/express';
 import { config } from '@/config/env';
 import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
+import {
+  EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+  EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+  getProviderLoginDenial,
+  isEmailDomainAllowed,
+} from '@/services/emailDomainPolicy';
 import { DatabaseClient } from '@/database/client';
 import { switchWorkspaceData, ensureSelfDmForUserData, getWorkspaceLandingChannelData } from '@/bypassAcl/authServices';
 import { getEncryptionProvider } from '@/services/encryption';
@@ -476,6 +482,15 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
+      const loginDenial = getProviderLoginDenial(googleUserData.email, payload.email_verified === true);
+      if (loginDenial) {
+        logger.warn(`${tag()} Google login rejected (reason=${loginDenial.error})`);
+        const frontendUrl = stateData.redirectTo ?? getFrontendUrl(req);
+        const params = new URLSearchParams({ error: loginDenial.error, message: loginDenial.message });
+        res.redirect(`${frontendUrl}?${params.toString()}`);
+        return;
+      }
+
       logger.info(`${tag()} Google auth success for: ${googleUserData.email}`);
 
       await migrateLegacyIdentity({
@@ -726,6 +741,15 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] Session found for user: ${session.user.email}`);
 
+      if (!isEmailDomainAllowed(session.user.email)) {
+        logger.warn(`[${requestId}] Session refresh rejected (reason=email_domain_not_allowed)`);
+        res.status(401).json({
+          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+        });
+        return;
+      }
+
       // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
       // Disabled → the original inline check (session status + expiry only) runs
       // verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
@@ -911,6 +935,13 @@ export class AuthV2Controller {
         name: payload.name!,
         picture: payload.picture,
       };
+
+      const loginDenial = getProviderLoginDenial(googleUserData.email, payload.email_verified === true);
+      if (loginDenial) {
+        logger.warn(`${tag()} Google login rejected (reason=${loginDenial.error})`);
+        res.status(403).json({ success: false, ...loginDenial });
+        return;
+      }
 
       logger.info(`${tag()} Google auth success for: ${googleUserData.email}`);
 
@@ -1277,6 +1308,13 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
+      const loginDenial = getProviderLoginDenial(googleUserData.email, payload.email_verified === true);
+      if (loginDenial) {
+        logger.warn(`${tag()} Google login rejected (reason=${loginDenial.error})`);
+        sendError(loginDenial.error, loginDenial.message, 403);
+        return;
+      }
+
       logger.info(`${tag()} Google auth success for: ${googleUserData.email}`);
 
       await migrateLegacyIdentity({
@@ -1618,6 +1656,15 @@ export class AuthV2Controller {
           return;
         }
         
+        if (!isEmailDomainAllowed(session.user.email)) {
+          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=email_domain_not_allowed)`);
+          res.status(401).json({
+            error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+            message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+          });
+          return;
+        }
+
         oauthUserData = {
           email: session.user.email,
           name: session.user.name || '',
@@ -2519,6 +2566,8 @@ export class AuthV2Controller {
         tokenKey?: string;
       };
       if (!decoded?.email) throw new Error('Invalid JWT payload');
+      // A pending-auth cookie issued before the allowlist changed must not finish a sign-in.
+      if (!isEmailDomainAllowed(decoded.email)) return null;
 
       let redisTokens: {
         refreshToken?: string | null;

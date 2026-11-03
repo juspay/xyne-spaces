@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
+import { extractEmailDomain } from '@/services/emailDomainPolicy';
 import { OrganizationDomainVerificationStatus, Status, WorkspaceType } from '@xyne/shared';
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
@@ -91,12 +92,7 @@ export class OrganizationDomainService {
   }
 
   extractEmailDomain(email: string): string | null {
-    const normalizedEmail = email.trim().toLowerCase();
-    const atIndex = normalizedEmail.lastIndexOf('@');
-    if (atIndex < 0 || atIndex === normalizedEmail.length - 1) {
-      return null;
-    }
-    return normalizedEmail.slice(atIndex + 1);
+    return extractEmailDomain(email);
   }
 
   shouldLookupDomain(email: string): boolean {
