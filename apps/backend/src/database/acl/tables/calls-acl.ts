@@ -87,7 +87,11 @@ export class CallsACL extends BaseQueryACL<
             ...(callIds.length
               ? [{ callType: { not: CallType.HEADLESS }, id: { in: callIds } }]
               : []),
-            { callType: CallType.HEADLESS, visibility: CallVisibility.PUBLIC },
+            // Public recordings are workspace-wide, which is wider than a guest's reach:
+            // guests see only recordings from their own channels and calls, or shared with them.
+            ...(isGuestContext(this.ctx)
+              ? []
+              : [{ callType: CallType.HEADLESS, visibility: CallVisibility.PUBLIC }]),
           ],
         },
         // Guests fail closed on a missing workspace, as before; members keep their filter.

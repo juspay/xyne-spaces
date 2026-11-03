@@ -1,7 +1,12 @@
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
+import {
+  getGuestAccessibleCanvasIds,
+  getGuestAccessibleChannelIds,
+  getGuestVisibleUserIds,
+  isGuestContext,
+} from './channel-access-helper'
 import { connectReachWhere } from '../../connectGroup'
 
 export class CanvasParticipantsACL extends BaseQueryACL<
@@ -149,6 +154,7 @@ export class CanvasParticipantsACL extends BaseQueryACL<
 
   async canCreate(data: Prisma.CanvasParticipantUncheckedCreateInput): Promise<boolean> {
     if (data.workspaceId !== this.ctx.workspaceId) return false;
+    if (isGuestContext(this.ctx) && !(await this.guestMayShare(data))) return false;
     const canvas = await this.prisma.canvas.findFirst({
       where: { id: data.canvasId, workspaceId: this.ctx.workspaceId },
       select: { visibility: true },
@@ -184,5 +190,21 @@ export class CanvasParticipantsACL extends BaseQueryACL<
       select: { id: true },
     });
     return effective !== null;
+  }
+
+  /**
+   * A guest may share a canvas only with people they can already see (who share a channel or
+   * canvas with them), or with a channel they are in. Never with a user group.
+   */
+  private async guestMayShare(data: Prisma.CanvasParticipantUncheckedCreateInput): Promise<boolean> {
+    const workspaceId = this.ctx.workspaceId ?? '';
+    if (data.userGroupId) return false;
+    if (data.channelId) {
+      const channelIds = await getGuestAccessibleChannelIds(this.prisma, workspaceId, this.ctx.userId);
+      return channelIds.includes(data.channelId);
+    }
+    if (!data.userId) return false;
+    const visible = await getGuestVisibleUserIds(this.prisma, workspaceId, this.ctx.userId);
+    return visible.includes(data.userId);
   }
 }
