@@ -481,7 +481,7 @@ const envSchema = Joi.object({
   // 8083, not 8080: y-sweet owns 8080, so docker-compose.dev.yml publishes Vespa's feed port on 8083.
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8083'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
-  // Bearer tokens of the encryption gateways behind VESPA_QUERY_URL / VESPA_FEED_URL (their AUTH_TOKEN_FILE).
+  // Bearer tokens of the encryption gateways behind VESPA_QUERY_URL / VESPA_FEED_URL (the gateway's auth_token secret).
   // Empty: no Authorization header, for a Vespa reached directly.
   VESPA_QUERY_TOKEN: Joi.string().min(32).allow('').default(''),
   VESPA_FEED_TOKEN: Joi.string().min(32).allow('').default(''),
