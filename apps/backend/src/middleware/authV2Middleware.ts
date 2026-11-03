@@ -188,6 +188,7 @@ class AuthV2Middleware {
         memberId: effectiveMemberId,
         authProvider: user.authProvider,
         sid: decoded.sid,
+        tokenExpiresAt: decoded.exp ? decoded.exp * 1000 : undefined,
       };
       logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email}`, {
         tokenPreview,

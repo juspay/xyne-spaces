@@ -34,6 +34,8 @@ export interface MintedAccessToken {
   token: string;
   /** Seconds the token (and its cookie) lives: min(JWT_EXPIRATION_SECONDS, time left on the session). */
   lifetimeSeconds: number;
+  /** Epoch ms the token expires; returned to the dashboard so it can refresh shortly before. */
+  expiresAt: number;
 }
 
 /**
@@ -78,7 +80,7 @@ export function mintAccessToken({ user, sessionId, refreshTokenExpiry }: MintAcc
     },
     lifetimeSeconds,
   );
-  return { token, lifetimeSeconds };
+  return { token, lifetimeSeconds, expiresAt: Date.now() + lifetimeSeconds * 1000 };
 }
 
 /** Set the JWT cookie for `workspaceId` and point `xyne_last_workspace` at it. */

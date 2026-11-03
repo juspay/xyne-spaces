@@ -685,7 +685,7 @@ export class AuthV2Controller {
         return;
       }
 
-      issueAccessCookies(res, { user, sessionId: session.id, refreshTokenExpiry: session.refreshTokenExpiry });
+      const minted = issueAccessCookies(res, { user, sessionId: session.id, refreshTokenExpiry: session.refreshTokenExpiry });
       await authSessionService.recordWorkspaceAccessById(session.id, workspaceId);
 
       logger.info(`[${requestId}] New JWT cookie set`, { authSessionId: session.id, workspaceId, email: user.email });
@@ -693,6 +693,7 @@ export class AuthV2Controller {
       res.status(200).json({
         success: true,
         workspaceId,
+        accessTokenExpiresAt: minted.expiresAt,
         message: 'Session refreshed successfully',
       });
     } catch (error) {
@@ -1533,7 +1534,7 @@ export class AuthV2Controller {
       const workspace = await getWorkspaceLandingChannelData(workspaceId);
 
       // Auth session (xs) + JWT cookies; supersedes any session the callback auto-login issued.
-      await completeLogin(req, res, {
+      const login = await completeLogin(req, res, {
         user: { ...workspaceUser, workspaceId },
         loginMethod: isAutoLogin ? 'AUTO_LOGIN' : (provider as AuthProvider),
         providerTokens: {
@@ -1581,6 +1582,7 @@ export class AuthV2Controller {
         isNewUser,
         selfDmChannelId,
         landingChannelId: workspace?.landingChannelId ?? null,
+        accessTokenExpiresAt: login.accessToken.expiresAt,
       });
     } catch (error) {
       if (respondDeviceKeyRequired(res, error)) return;
@@ -1799,7 +1801,7 @@ export class AuthV2Controller {
       }
       const { targetUser, selfDmChannelId, workspace } = data;
 
-      issueAccessCookies(res, {
+      const minted = issueAccessCookies(res, {
         user: { ...targetUser, workspaceId },
         sessionId: session.id,
         refreshTokenExpiry: session.refreshTokenExpiry,
@@ -1822,6 +1824,7 @@ export class AuthV2Controller {
         },
         selfDmChannelId,
         landingChannelId: workspace?.landingChannelId ?? null,
+        accessTokenExpiresAt: minted.expiresAt,
       });
     } catch (error) {
       logger.error('Error switching workspace:', error);

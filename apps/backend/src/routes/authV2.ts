@@ -74,6 +74,7 @@ router.get('/validate', authV2Middleware.authenticate, (req, res) => {
       memberId: req.user!.memberId,
       authProvider: req.user!.authProvider,
     },
+    accessTokenExpiresAt: req.user!.tokenExpiresAt ?? null,
   });
 });
 

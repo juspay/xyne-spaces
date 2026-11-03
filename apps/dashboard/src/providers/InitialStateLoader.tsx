@@ -18,9 +18,7 @@ import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
 import { DeferredLoader } from '../components/DeferredLoader';
-import axios from 'axios';
-import { API_BASE_URL } from '../config';
-import { v4 as uuidv4 } from 'uuid';
+import { refreshSessionOnce } from '../services/clients/sessionRefresh';
 import { dropAllDatabases } from '@rocicorp/zero';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
@@ -138,26 +136,14 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
 
     isRefreshing.current = true;
     try {
-      // Note: Using direct axios call instead of apiInstance
-      // Call refresh endpoint directly (browser receives Set-Cookie)
-      const refreshHeaders: Record<string, string> = {};
-      refreshHeaders['x-request-id'] = uuidv4();
-      if (logger.zeroClientId) {
-        refreshHeaders['x-client-id'] = logger.zeroClientId;
-      }
-      if (logger.zeroClientGroupId) {
-        refreshHeaders['x-zero-client-group-id'] = logger.zeroClientGroupId;
-      }
-      const userEmail = logger.emailId;
-      if (userEmail) {
-        refreshHeaders['x-user-email'] = userEmail;
-      }
       const refreshStartTime = Date.now();
 
-      await axios.get(`${API_BASE_URL}/auth/refresh-session`, {
-        withCredentials: true, // Send cookies (session ID)
-        headers: refreshHeaders,
-      });
+      // The shared single-flight refresh (also used by the 401 interceptors), so a
+      // Zero re-auth racing with an API 401 makes one /auth/refresh-session call.
+      const outcome = await refreshSessionOnce();
+      if (outcome !== 'ok') {
+        throw new Error(`Session refresh ${outcome}`);
+      }
 
       const refreshLatency = Date.now() - refreshStartTime;
 

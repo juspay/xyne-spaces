@@ -68,6 +68,8 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
     },
     selfDmChannelId,
     landingChannelId: workspace?.landingChannelId ?? null,
+    // The dashboard refreshes shortly before this so cookie-only loads (images, video, PDF) never 401.
+    accessTokenExpiresAt: req.user!.tokenExpiresAt ?? null,
   });
 });
 

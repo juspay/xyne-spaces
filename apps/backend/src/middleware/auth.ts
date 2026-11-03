@@ -378,6 +378,7 @@ export class AuthMiddleware {
         orgRole: effectiveOrgRole,
         memberId: effectiveMemberId,
         sid: payload.sid,
+        tokenExpiresAt: payload.exp ? payload.exp * 1000 : undefined,
       };
 
       logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id})`, {
@@ -630,6 +631,7 @@ export class AuthMiddleware {
         orgRole: user.orgMember!.role,
         memberId: payload.memberId,
         sid: payload.sid,
+        tokenExpiresAt: payload.exp ? payload.exp * 1000 : undefined,
       };
 
       const existingContext = loggerContext.getStore();

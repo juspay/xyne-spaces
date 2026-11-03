@@ -6,25 +6,7 @@ import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isTestEnv } from '../config';
 import { logger, Event as LoggerEvent } from '../utils/logger';
-import { refreshSessionOnce } from '../services/clients/apiClient';
-
-/**
- * The auth calls below use bare axios (not apiInstance), so apiInstance's
- * 401 → refresh → retry interceptor does not cover them. The backend never
- * refreshes on its own: an expired workspace JWT cookie is a plain 401, so
- * each of these does the refresh-and-retry once itself. Without it, every app
- * load (validate) or sign-out (logout) after the JWT expired would look like
- * a dead session and strand or half-log-out a signed-in user.
- */
-async function withSessionRefresh<T>(request: () => Promise<T>): Promise<T> {
-  try {
-    return await request();
-  } catch (error) {
-    const is401 = axios.isAxiosError(error) && error.response?.status === 401;
-    if (!is401 || (await refreshSessionOnce()) !== 'ok') throw error;
-    return request();
-  }
-}
+import { noteAccessTokenExpiry } from '../services/clients/sessionRefresh';
 
 import { clearAllSessionKeys } from '../services/sessionKeyStore';
 import { indexedDBService } from '../services/indexedDBService';
@@ -107,6 +89,8 @@ interface ValidateSessionResponse {
   user: User & { workspaceId?: string };
   selfDmChannelId?: string | null;
   landingChannelId?: string | null;
+  /** JWT expiry (epoch ms); the dashboard refreshes shortly before it. */
+  accessTokenExpiresAt?: number | null;
 }
 
 interface ApiErrorResponse {
@@ -1092,31 +1076,27 @@ export const authMachine = createMachine(
     },
     actors: {
       performLogout: fromPromise(async ({ input }: { input: { skipApi?: boolean } }) => {
-        // A 401 that survives the refresh-and-retry is itself a signal: the
-        // session was already gone before this POST — the signature of an
-        // externally-triggered (phantom) logout rather than a user-initiated
-        // one. Force-flush: the log buffer is in-memory only and the page is
-        // about to be torn down.
+        // A 401 that survives the default-axios refresh-and-retry (utils/logger.ts)
+        // is itself a signal: the session was already gone before this POST — the
+        // signature of an externally-triggered (phantom) logout rather than a
+        // user-initiated one. Force-flush: the log buffer is in-memory only and
+        // the page is about to be torn down.
         logger.info(LoggerEvent.LOGOUT_STARTED, { skipApi: input?.skipApi === true });
         logger.pushlogs();
         // A logout triggered by a 401 skips the POST: the session is already
         // dead, so /auth/logout would only fail with another 401.
         if (input?.skipApi !== true) {
           try {
-            // The POST must reach the backend so the refresh session (xs) is
-            // revoked server-side; an expired JWT alone must not prevent that.
-            const response = await withSessionRefresh(() =>
-              axios.post(
-                `${API_BASE_URL}/auth/logout`,
-                {},
-                {
-                  withCredentials: true,
-                  headers: {
-                    // eslint-disable-next-line @typescript-eslint/naming-convention
-                    'Content-Type': 'application/json',
-                  },
+            const response = await axios.post(
+              `${API_BASE_URL}/auth/logout`,
+              {},
+              {
+                withCredentials: true,
+                headers: {
+                  // eslint-disable-next-line @typescript-eslint/naming-convention
+                  'Content-Type': 'application/json',
                 },
-              ),
+              },
             );
             logger.info(LoggerEvent.LOGOUT_REQUEST_COMPLETED, { status: response.status });
           } catch (error) {
@@ -1195,17 +1175,13 @@ export const authMachine = createMachine(
             headers['x-user-email'] = userEmail;
           }
 
-          // Already-signed-in workspace picks authenticate with the JWT cookie; an
-          // expired one is a 401 TOKEN_EXPIRED that the retry after refresh clears.
-          const response = await withSessionRefresh(() =>
-            axios.post(
-              `${API_BASE_URL}/auth/login-workspace`,
-              { workspaceId: input.workspaceId },
-              {
-                withCredentials: true,
-                headers,
-              },
-            ),
+          const response = await axios.post(
+            `${API_BASE_URL}/auth/login-workspace`,
+            { workspaceId: input.workspaceId },
+            {
+              withCredentials: true,
+              headers,
+            },
           );
 
           const data = response.data as {
@@ -1213,7 +1189,9 @@ export const authMachine = createMachine(
             isNewUser?: boolean;
             selfDmChannelId?: string;
             landingChannelId?: string | null;
+            accessTokenExpiresAt?: number;
           };
+          noteAccessTokenExpiry(data.accessTokenExpiresAt);
           if (data.user) {
             return {
               user: data.user,
@@ -1300,19 +1278,19 @@ export const authMachine = createMachine(
           if (userEmail) {
             headers['x-user-email'] = userEmail;
           }
-          // Note: Using direct axios call instead of apiInstance (see withSessionRefresh)
-          const response = await withSessionRefresh(() =>
-            axios.get(`${API_BASE_URL}/auth/validate`, {
-              withCredentials: true,
-              headers: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention
-                'content-type': 'application/json',
-                ...headers,
-              },
-            }),
-          );
+          // Note: Using direct axios call instead of apiInstance. The default-axios
+          // interceptor (utils/logger.ts) handles 401 → refresh → retry for it.
+          const response = await axios.get(`${API_BASE_URL}/auth/validate`, {
+            withCredentials: true,
+            headers: {
+              // eslint-disable-next-line @typescript-eslint/naming-convention
+              'content-type': 'application/json',
+              ...headers,
+            },
+          });
 
           const data = response.data as ValidateSessionResponse;
+          noteAccessTokenExpiry(data.accessTokenExpiresAt);
 
           // Check for is_new_user cookie during session validation
           const isNewUserCookie = Cookies.get('is_new_user');

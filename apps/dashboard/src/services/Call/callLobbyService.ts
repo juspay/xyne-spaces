@@ -2,6 +2,7 @@ import { CallType, InvitationResponse } from '@xyne/shared';
 import type { CallChatMessage } from '@xyne/shared';
 import axios from 'axios';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
+import { refreshSessionOnce } from '../clients/sessionRefresh';
 
 export interface CallInfo {
   title: string | null;
@@ -114,11 +115,7 @@ export const callLobbyService = {
 
     // Signed-in member whose workspace JWT expired: the refresh token is only sent
     // to /auth/refresh-session, so refresh there and probe once more.
-    try {
-      await axios.get(`${BASE_URL}/auth/refresh-session`, { withCredentials: true });
-    } catch {
-      return { result: 'external' };
-    }
+    if ((await refreshSessionOnce()) !== 'ok') return { result: 'external' };
     const second = await probe();
     return second.result === 'needs-refresh' ? { result: 'external' } : second;
   },

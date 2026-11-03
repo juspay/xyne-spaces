@@ -56,6 +56,8 @@ export interface AuthenticatedUser {
   authProvider?: string;
   /** auth_sessions.id from the JWT `sid` claim; absent for API-key users. */
   sid?: string;
+  /** JWT `exp` in epoch ms; the dashboard refreshes shortly before it. Absent for API-key users. */
+  tokenExpiresAt?: number;
 }
 
 declare global {
