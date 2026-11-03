@@ -49,7 +49,12 @@ export const submitDoclingAsyncJob = async (input: SubmitDoclingAsyncJobInput): 
     try {
       const controller = new AbortController()
       submitTimer = setTimeout(() => controller.abort(), timeoutMs)
-      const response = await fetch(apiUrl, { method: 'POST', body: formData, signal: controller.signal })
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'x-s2s-key': config.ocrS2sKey },
+        body: formData,
+        signal: controller.signal,
+      })
       clearTimeout(submitTimer)
       submitTimer = null
 
