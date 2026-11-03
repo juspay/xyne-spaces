@@ -3,7 +3,6 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { notificationService } from '@/services/notificationService';
-import { livekitService } from '@/services/liveKitService';
 import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -222,19 +221,6 @@ class CallSideEffectService {
             });
 
             const callerName = caller?.displayName || caller?.name || 'Someone';
-            const recipient = await db.user.findUnique({
-                where: { id: recipientId },
-                select: { name: true, displayName: true, picture: true }
-            });
-
-            const token = await livekitService.generateAccessToken({
-                userIdentity: recipientId,
-                roomName: call.externalId,
-                userName: recipient?.displayName || recipient?.name || 'User',
-                metadata: JSON.stringify({ picture: recipient?.picture || null }),
-            });
-
-            const liveKitUrl = livekitService.getServerUrl();
 
             this.logger.info(`Triggering FCM push for user ${recipientId}, call ${call.externalId}`);
 
@@ -252,9 +238,8 @@ class CallSideEffectService {
                     callerId: invitedBy,
                     callerName: callerName,
                     callType: call.callType,
-                    token: token,
-                    liveKitUrl: liveKitUrl,
-                    serverUrl: liveKitUrl,
+                    // No join credentials here: this travels through FCM/APNs and is stored on
+                    // the notification row. Clients get a token from POST /calls/join on accept.
                     roomName: call.externalId,
                 }
             });
