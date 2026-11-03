@@ -1,4 +1,11 @@
 # syntax=docker/dockerfile:1
+
+# Ream's fonts (scripts/fetch-ream-fonts.mjs) in their own stage: cached until
+# that script changes, so code-only builds download nothing.
+FROM mirror.gcr.io/library/node:22.23.4-slim AS ream-fonts
+COPY apps/backend/scripts/fetch-ream-fonts.mjs /fetch-ream-fonts.mjs
+RUN node /fetch-ream-fonts.mjs /fonts
+
 FROM mirror.gcr.io/library/node:22.23.4-slim
 
 WORKDIR /app
@@ -44,6 +51,8 @@ COPY packages/cache         packages/cache
 COPY packages/secrets-vault packages/secrets-vault
 RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/cache --filter @xyne/secrets-vault run build
 COPY apps/backend apps/backend
+# Ream's fonts for office-to-PDF conversion (stage ream-fonts above).
+COPY --from=ream-fonts /fonts apps/backend/assets/ream-fonts
 RUN ln -s /repo/apps/backend /app
 WORKDIR /repo/apps/backend
 

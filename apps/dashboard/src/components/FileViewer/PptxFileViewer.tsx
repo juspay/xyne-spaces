@@ -6,19 +6,17 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { logger, Event as LogEvent } from '../../utils/logger';
 
 /**
- * .ppt/.pptx viewer for the shared FileViewer registry — converts the
- * already-fetched raw file to PDF server-side (LibreOffice, via the backend's
+ * .pptx viewer for the shared FileViewer registry — converts the
+ * already-fetched raw file to PDF server-side (the backend's
  * /api/office-conversion/pdf endpoint) and hands the result to the existing
  * PdfViewer.
  *
  * Why not parse the OOXML client-side and render it directly (the prior
  * approach): that means reimplementing pieces of PowerPoint's own layout
  * engine — placeholder inheritance, theme colors, custom freeform geometry,
- * picture recolor/crop effects — one gap at a time, and OOXML is too large a
- * spec to ever get pixel-exact that way. LibreOffice already implements the
- * full spec, so shelling out to it for the actual rendering (the same
- * approach Drive/Slack/Notion previews use) gets genuine fidelity instead of
- * an ever-growing list of approximations.
+ * picture recolor/crop effects — one gap at a time. The server's renderer is
+ * shared with search ingestion and checked against reference renders, so
+ * fixes land once for every surface.
  */
 const PptxFileViewer: React.FC<BaseViewerProps> = props => {
   const { source, fileName } = props;

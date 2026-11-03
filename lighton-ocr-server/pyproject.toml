@@ -95,8 +95,3 @@ combine-as-imports = true
   # Binding to all interfaces is intentional inside Docker.
   "S104",
 ]
-"src/renderer.py" = [
-  # LibreOffice is invoked with a fixed argv list; the input path is not
-  # shell-expanded.
-  "S603",
-]

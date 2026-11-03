@@ -111,12 +111,10 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     wrapperClass: 'h-full w-full overflow-auto',
     displayName: 'Word Document',
   },
+  // Legacy .ppt is not previewed; it falls through to "Preview not available".
   pptx: {
-    mimeTypes: [
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    ],
-    extensions: ['.pptx', '.ppt'],
+    mimeTypes: ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+    extensions: ['.pptx'],
     component: PptxFileViewer,
     wrapperClass: 'h-full w-full overflow-auto',
     displayName: 'PowerPoint Presentation',

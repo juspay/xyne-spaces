@@ -1,13 +1,10 @@
-"""Bounded rasterization of PDFs, Office documents, text files, and images."""
+"""Bounded rasterization of PDFs, text files, and images."""
 
 from __future__ import annotations
 
 import asyncio
 import io
 import os
-import shutil
-import subprocess
-import tempfile
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,14 +27,8 @@ SUPPORTED_IMAGE_SUFFIXES = {
     ".tif",
     ".tiff",
 }
-SUPPORTED_OFFICE_SUFFIXES = {".docx", ".pptx"}
 SUPPORTED_TEXT_SUFFIXES = {".txt"}
-SUPPORTED_SUFFIXES = (
-    SUPPORTED_PDF_SUFFIXES
-    | SUPPORTED_IMAGE_SUFFIXES
-    | SUPPORTED_OFFICE_SUFFIXES
-    | SUPPORTED_TEXT_SUFFIXES
-)
+SUPPORTED_SUFFIXES = SUPPORTED_PDF_SUFFIXES | SUPPORTED_IMAGE_SUFFIXES | SUPPORTED_TEXT_SUFFIXES
 
 
 def is_supported_upload(filename: str) -> bool:
@@ -53,7 +44,6 @@ async def stream_rendered_pages(
     pdf_render_dpi: int,
     max_pages: int,
     queue_size: int,
-    office_convert_timeout_seconds: float = 120.0,
     text_page_width: int = 1240,
     text_page_height: int = 1754,
     text_font_size: int = 28,
@@ -77,16 +67,6 @@ async def stream_rendered_pages(
                     pdf_render_dpi=pdf_render_dpi,
                     max_pages=max_pages,
                     stop_event=stop_event,
-                ):
-                    put("page", page)
-            elif suffix in SUPPORTED_OFFICE_SUFFIXES:
-                for page in _iter_office_pages(
-                    file_path,
-                    render_max_dim=render_max_dim,
-                    pdf_render_dpi=pdf_render_dpi,
-                    max_pages=max_pages,
-                    stop_event=stop_event,
-                    timeout_seconds=office_convert_timeout_seconds,
                 ):
                     put("page", page)
             elif suffix in SUPPORTED_TEXT_SUFFIXES:
@@ -160,54 +140,6 @@ def _iter_pdf_pages(
             yield RenderedPage(index + 1, img, img.width, img.height)
 
 
-def _iter_office_pages(
-    file_path: str,
-    *,
-    render_max_dim: int,
-    pdf_render_dpi: int,
-    max_pages: int,
-    stop_event: threading.Event,
-    timeout_seconds: float,
-) -> Iterator[RenderedPage]:
-    soffice = _find_soffice()
-    with tempfile.TemporaryDirectory(prefix="lighton-office-") as tmpdir:
-        cmd = [
-            soffice,
-            "--headless",
-            "--nologo",
-            "--nodefault",
-            "--nofirststartwizard",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            tmpdir,
-            file_path,
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=max(1.0, timeout_seconds),
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("LibreOffice conversion timed out") from exc
-
-        pdf_path = Path(tmpdir) / f"{Path(file_path).stem}.pdf"
-        if result.returncode != 0 or not pdf_path.is_file():
-            detail = (result.stderr or result.stdout or "unknown conversion error").strip()
-            raise RuntimeError(f"LibreOffice failed to rasterize office document: {detail}")
-
-        yield from _iter_pdf_pages(
-            str(pdf_path),
-            render_max_dim=render_max_dim,
-            pdf_render_dpi=pdf_render_dpi,
-            max_pages=max_pages,
-            stop_event=stop_event,
-        )
-
-
 def _iter_text_pages(
     file_path: str,
     *,
@@ -269,23 +201,6 @@ def _iter_image_pages(
                 break
             img = resize_max_dim(normalize_rgb(frame.copy()), render_max_dim)
             yield RenderedPage(index + 1, img, img.width, img.height)
-
-
-def _find_soffice() -> str:
-    configured = os.getenv("LIBREOFFICE_BIN", "").strip()
-    candidates = [
-        configured,
-        "soffice",
-        "libreoffice",
-        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-    ]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        resolved = shutil.which(candidate) if os.sep not in candidate else candidate
-        if resolved and Path(resolved).exists():
-            return resolved
-    raise RuntimeError("LibreOffice/soffice is required to rasterize .docx and .pptx files")
 
 
 def _load_text_font(font_size: int) -> ImageFont.ImageFont:

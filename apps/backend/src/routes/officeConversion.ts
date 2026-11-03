@@ -6,7 +6,7 @@ import { officeConversionLimiter } from "../middleware/rateLimiters"
 const router = express.Router()
 const officeConversionController = new OfficeConversionController()
 
-// Converts an uploaded office document (pptx, docx, ...) to PDF via LibreOffice.
+// Converts an uploaded office document (pptx, docx, ...) to PDF via Ream.
 router.post(
     "/pdf",
     officeConversionLimiter,

@@ -127,7 +127,6 @@ class Settings:
     jpeg_quality: int = min(95, max(50, _int_env("OCR_JPEG_QUALITY", 90)))
     max_pages: int = _int_env("OCR_MAX_PAGES", -1)
     upload_chunk_size: int = max(65536, _int_env("OCR_UPLOAD_CHUNK_SIZE", 1024 * 1024))
-    office_convert_timeout_seconds: float = _float_env("OCR_OFFICE_CONVERT_TIMEOUT_SECONDS", 120.0)
     text_page_width: int = max(512, _int_env("OCR_TEXT_PAGE_WIDTH", 1240))
     text_page_height: int = max(512, _int_env("OCR_TEXT_PAGE_HEIGHT", 1754))
     text_font_size: int = max(8, _int_env("OCR_TEXT_FONT_SIZE", 28))
