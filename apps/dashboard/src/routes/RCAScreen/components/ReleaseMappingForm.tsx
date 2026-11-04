@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useTicketSearchIds } from '../../../hooks/useTicketSearchIds';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -78,20 +79,16 @@ export const ReleaseMappingForm = ({
     { enabled: !!selectedReleaseId },
   );
 
+  const releaseSearchIds = useTicketSearchIds(debouncedReleaseSearch);
   const [releaseTicketsData] = useCachedQuery(
-    queries.releaseTicketsSearch({
-      search: debouncedReleaseSearch.trim() ? debouncedReleaseSearch.trim() : undefined,
-      limit: 10,
-    }),
+    queries.releaseTicketsSearch({ ticketIds: releaseSearchIds.ticketIds, limit: 10 }),
+    { enabled: !releaseSearchIds.isSearching },
   );
 
+  const rootCauseSearchIds = useTicketSearchIds(debouncedRootCauseTicketSearch);
   const [rootCauseTicketsData] = useCachedQuery(
-    queries.ticketsSearch({
-      search: debouncedRootCauseTicketSearch.trim()
-        ? debouncedRootCauseTicketSearch.trim()
-        : undefined,
-      limit: 10,
-    }),
+    queries.ticketsSearch({ ticketIds: rootCauseSearchIds.ticketIds, limit: 10 }),
+    { enabled: !rootCauseSearchIds.isSearching },
   );
 
   const releaseIds = useMemo(

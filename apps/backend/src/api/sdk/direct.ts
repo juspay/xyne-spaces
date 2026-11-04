@@ -50,7 +50,7 @@ import { radarRuleStore } from '@/services/radar/radarRuleStore';
 import { canReadTicket } from '@/services/subTicketLinkService';
 import { channelsDeskTicketsForThreads } from '@/channelsDesk/desk';
 import { cleanConditions, parsePageQuery } from '@/routes/radarExecution';
-import { searchHandler } from '@/services/vespaSearch';
+import { searchHandler, searchTicketIds } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
 import {
   // Disabled (Claw)
@@ -78,6 +78,7 @@ import { uploadMultiple, uploadSingle } from '@/middleware/upload';
 // import { config } from '@/config/env';
 import { SdkApiError } from './errors';
 import { handle } from './handler';
+import { callQuery } from './query';
 
 const channelController = new ChannelController();
 const conversationController = new ConversationController();
@@ -300,6 +301,43 @@ const notificationListQuery = z.object({
 //   limit: z.coerce.number().int().min(1).optional(),
 // });
 
+// Vespa ranks candidates; the catalog query keeps its own type filter and limit,
+// so it needs headroom to still fill a page.
+const TICKET_SEARCH_CANDIDATES = 100;
+
+const ticketSearchBody = z.object({
+  search: z.string().optional(),
+  limit: z.number().int().min(1).optional(),
+});
+
+/**
+ * A ticket search shaped as its catalog query: Vespa matches the text, the
+ * catalog query reads the rows, so the caller gets the same rows under the
+ * same ACL as before.
+ */
+function ticketSearchService(queryName: 'ticketsSearch' | 'releaseTicketsSearch'): Service {
+  return async (req) => {
+    const user = req.user!;
+    const { search, limit } = req.body as z.infer<typeof ticketSearchBody>;
+    const term = search?.trim();
+    const ticketIds = term
+      ? await searchTicketIds(term, user, TICKET_SEARCH_CANDIDATES)
+      : undefined;
+    const data = await callQuery(
+      queryName,
+      { ticketIds, limit },
+      {
+        userID: user.id,
+        workspaceId: user.workspaceId,
+        role: user.role,
+        orgRole: user.orgRole,
+        memberId: user.memberId,
+      },
+    );
+    return { data };
+  };
+}
+
 const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
@@ -325,6 +363,18 @@ const ROUTES: readonly DirectRoute[] = [
       if (!tickets) throw new SdkApiError('forbidden', 'One or more of these conversations are not yours to read.');
       return { tickets };
     },
+  },
+  {
+    method: 'post',
+    path: '/tickets/search',
+    body: ticketSearchBody,
+    service: ticketSearchService('ticketsSearch'),
+  },
+  {
+    method: 'post',
+    path: '/tickets/search/release',
+    body: ticketSearchBody,
+    service: ticketSearchService('releaseTicketsSearch'),
   },
   {
     method: 'post',
