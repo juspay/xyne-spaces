@@ -34,6 +34,7 @@ import {
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
 import { designShareUrl } from "./design-shares.js";
+import { deliverToJobThread } from "../lib/scheduled-job-card.js";
 import { buildScheduledJobApprovalFlow, withSpacesAppId } from "xyne-claw-shared";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
@@ -179,6 +180,11 @@ function isSessionLockedError(error?: string | null): boolean {
   return error === "session_locked" || error?.includes("session_locked") === true;
 }
 
+function nextFireDate(row: { type: string; nextRunAt: Date | null; cronExpression: string | null; status: string }): Date | null {
+  const next = nextFireText(row);
+  return next ? new Date(next) : null;
+}
+
 function nextFireText(row: { type: string; nextRunAt: Date | null; cronExpression: string | null; status: string }): string | null {
   if (row.status !== "active") return null;
   if (row.nextRunAt) return row.nextRunAt.toISOString();
@@ -206,6 +212,8 @@ async function postScheduledFailureNotice(row: {
   nextRunAt: Date | null;
   cronExpression: string | null;
   status: string;
+  label: string | null;
+  task: string;
 }, error: string | null | undefined): Promise<void> {
   if (row.replyMode === WHATSAPP_REPLY_MODE) {
     const next = nextFireText(row);
@@ -242,13 +250,17 @@ async function postScheduledFailureNotice(row: {
   const spacesAppUserId = agent.spacesAppUserId ?? "";
 
   if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
-    await spacesAppFetch("/chat/postMessage", {
-      channelId: row.targetChannelId ?? row.channelId!,
-      markdownText: message,
-      userId: spacesAppUserId,
-      workspaceId: effectiveWorkspaceId,
-      metadata: { contentFormat: "markdown" },
-    }, appToken);
+    await deliverToJobThread(
+      {
+        jobId: row.id,
+        channelId: row.targetChannelId ?? row.channelId!,
+        workspaceId: effectiveWorkspaceId,
+        spacesAppUserId,
+        appToken,
+      },
+      { label: row.label, task: row.task, nextRunAt: nextFireDate(row) },
+      { kind: "failure", error },
+    );
     return;
   }
 
@@ -1398,36 +1410,23 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     }
 
     if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
-      // Top-level channel post — no conversationId, new message in channel.
-      // Prefer the explicit `targetChannelId` override (set by the user in the
-      // Scheduled Jobs UI). Falls back to the originating channelId if not set.
-      // Always pass workspaceId — Spaces' postMessage requires it.
       const postChannelId = row.targetChannelId ?? row.channelId!;
-      if (payload.attachments?.length) {
-        const form = new FormData();
-        for (const att of payload.attachments) {
-          const buffer = Buffer.from(att.data, "base64");
-          const blob = new Blob([buffer], { type: att.mimeType });
-          form.append("files", blob, att.fileName);
-        }
-        form.append("channelId", postChannelId);
-        form.append("userId", spacesAppUserId);
-        form.append("workspaceId", effectiveWorkspaceId);
-        form.append("markdownText", resultText);
-        form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
-
-        await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
-      } else {
-        await spacesAppFetch("/chat/postMessage", {
+      await deliverToJobThread(
+        {
+          jobId: row.id,
           channelId: postChannelId,
-          markdownText: resultText,
-          userId: spacesAppUserId,
           workspaceId: effectiveWorkspaceId,
-          metadata: { contentFormat: "markdown" },
-        }, appToken);
-      }
-
-      log.info(`[scheduled-jobs/result] Posted result to channel ${postChannelId}${row.targetChannelId ? " (override)" : ""}`);
+          spacesAppUserId,
+          appToken,
+        },
+        { label: row.label, task: row.task, nextRunAt: nextFireDate(row) },
+        {
+          kind: "output",
+          markdownText: resultText,
+          ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+        },
+      );
+      log.info(`[scheduled-jobs/result] Posted result to job thread in channel ${postChannelId}${row.targetChannelId ? " (override)" : ""}`);
     } else if (row.channelId && row.conversationId) {
       // Reply in the original thread (default "thread" mode)
       if (payload.attachments?.length) {
