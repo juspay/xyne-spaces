@@ -25,7 +25,6 @@ import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
-  PublicEmailDomainError,
   isOrganizationPolicyError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
@@ -533,23 +532,9 @@ export class AuthV2Controller {
 
       let domainConflict = null;
       let domainConflictError = null;
-      let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        // Public email domains can never create enterprise workspaces — the only
-        // path forward for a workspace-less user without an invitation — so fail
-        // fast on them regardless of the entry flow. The
-        // remaining domain-conflict assert stays gated on the explicit
-        // enterprise intent.
-        try {
-          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
-        } catch (error) {
-          if (error instanceof PublicEmailDomainError) {
-            publicEmailError = error;
-          }
-        }
-
-        if (stateData.enterpriseLogin && !publicEmailError) {
+        if (stateData.enterpriseLogin) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
@@ -559,7 +544,7 @@ export class AuthV2Controller {
           }
         }
 
-        if (!domainConflictError && !publicEmailError) {
+        if (!domainConflictError) {
           domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
           domainConflictError = domainConflict
             ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -689,9 +674,6 @@ export class AuthV2Controller {
         params.set('domainConflictError', domainConflictError.message);
         params.set('enterpriseJoinOrgName', domainConflict.name);
         params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
-      }
-      if (publicEmailError) {
-        params.set('publicEmailDomainError', publicEmailError.message);
       }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);
@@ -970,22 +952,9 @@ export class AuthV2Controller {
       // and offers "create an organization" instead of the request-to-join UI.
       let domainConflict = null;
       let domainConflictError = null;
-      let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        // Public email domains can never create enterprise workspaces, so fail fast
-        // on them regardless of the entry flow (mirrors handleCallback). The
-        // remaining domain-conflict assert stays gated on the explicit
-        // enterprise intent.
-        try {
-          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
-        } catch (error) {
-          if (error instanceof PublicEmailDomainError) {
-            publicEmailError = error;
-          }
-        }
-
-        if (stateData.enterpriseLogin && !publicEmailError) {
+        if (stateData.enterpriseLogin) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
@@ -995,7 +964,7 @@ export class AuthV2Controller {
           }
         }
 
-        if (!domainConflictError && !publicEmailError) {
+        if (!domainConflictError) {
           domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
           domainConflictError = domainConflict
             ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -1133,7 +1102,6 @@ export class AuthV2Controller {
         ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
         ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
         ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
-        ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
       });
     } catch (error) {
       logger.error(`${tag()} Google OAuth login failed (platform=electron):`, error);
@@ -1335,22 +1303,19 @@ export class AuthV2Controller {
       // and offers "create an organization" instead of the request-to-join UI.
       let domainConflict = null;
       let domainConflictError = null;
-      let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
         if (enterpriseLogin) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
         }
 
-        if (!domainConflictError && !publicEmailError) {
+        if (!domainConflictError) {
           domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
           domainConflictError = domainConflict
             ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -1458,7 +1423,6 @@ export class AuthV2Controller {
           ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
           ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
           ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
-          ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
         });
         return;
       }
@@ -1477,9 +1441,6 @@ export class AuthV2Controller {
         params.set('domainConflictError', domainConflictError.message);
         params.set('enterpriseJoinOrgName', domainConflict.name);
         params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
-      }
-      if (publicEmailError) {
-        params.set('publicEmailDomainError', publicEmailError.message);
       }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);

@@ -60,7 +60,7 @@ export class WorkspaceJoinRequestService {
 
     const email = params.email;
     if (!organizationDomainService.shouldLookupDomain(email)) {
-      this.raise('Public email domains cannot join enterprise workspaces. Please use your work email.', 403);
+      this.raise('This email domain is not allowed to join enterprise workspaces.', 403);
     }
 
     const existingOrg = await organizationDomainService.findExistingOrgByEmailDomain(email);
