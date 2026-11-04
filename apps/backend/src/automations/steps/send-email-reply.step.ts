@@ -17,6 +17,19 @@ import { reattachTrailImages } from '@/utils/reattachTrailImages';
 /** A CC/BCC entry resolves to one string (maybe comma-separated) or a list of such strings. */
 const addressEntry = z.union([z.string().min(1), z.array(z.string())]);
 
+const EMAIL_PATTERN = /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/;
+
+function assertValidAddresses(addresses: string[], field: 'cc' | 'bcc'): void {
+  const invalid = addresses.filter(address => !EMAIL_PATTERN.test(address));
+  if (invalid.length > 0) {
+    throw new Error(
+      `[SEND_EMAIL_REPLY] ${field} resolved to ${invalid.length} invalid address(es): ${invalid
+        .slice(0, 3)
+        .join(', ')}`,
+    );
+  }
+}
+
 /** Flatten entries, split comma/semicolon-separated strings, trim, and drop blanks and case-insensitive duplicates. */
 function mergeAddresses(...lists: Array<ReadonlyArray<string | string[]> | undefined>): string[] {
   const seen = new Set<string>();
@@ -108,6 +121,8 @@ export class SendEmailReplyStep extends BaseActionStep<
     const configCc = config.cc as Array<string | string[]> | undefined;
     const configBcc = config.bcc as Array<string | string[]> | undefined;
     const defaultCc = type === 'REPLY_ALL' ? emails[emails.length - 1]?.cc : undefined;
+    assertValidAddresses(mergeAddresses(configCc), 'cc');
+    assertValidAddresses(mergeAddresses(configBcc), 'bcc');
     const cc = configCc?.length ? mergeAddresses(defaultCc, configCc) : undefined;
     const bcc = configBcc?.length ? mergeAddresses(configBcc) : undefined;
 
@@ -132,7 +147,13 @@ export class SendEmailReplyStep extends BaseActionStep<
           updatedBy: context.automation.createdById,
           workspaceId: context.automation.workspaceId,
           activityType: ActivityType.METADATA,
-          value: { field: 'emailReply', emailId: result.emailId, isAutomation: true },
+          value: {
+            field: 'emailReply',
+            emailId: result.emailId,
+            isAutomation: true,
+            ...(cc?.length ? { cc } : {}),
+            ...(bcc?.length ? { bcc } : {}),
+          },
         },
       }).catch(err => logger.warn(`[automations] SEND_EMAIL_REPLY audit write failed conv=${conversationId}:`, err));
     }
