@@ -109,7 +109,7 @@ The other scripts all take `--env` and `--env-dir`:
 | `subnet_cidr` | string | `10.10.0.0/20` | node subnet |
 | `pods_cidr` | string | `10.20.0.0/16` | secondary range for pods |
 | `services_cidr` | string | `10.30.0.0/20` | secondary range for services |
-| `private_service_cidr` | string | `10.40.0.0/16` | private services range for Cloud SQL and Memorystore |
+| `private_service_cidr` | string | `10.40.0.0/16` | private services range for Cloud SQL |
 | `enable_iap_ssh` | bool | `true` | firewall rule allowing SSH from IAP (`35.235.240.0/20`) |
 | `enable_flow_logs` | bool | `false` | VPC flow logs on the subnet |
 | `bastion_enabled` | bool | `false` | one VM with OS Login, IAP-only SSH, `gcloud`/`kubectl`/`helm` installed at boot |
@@ -162,15 +162,11 @@ The other scripts all take `--env` and `--env-dir`:
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `redis_mode` | string | `managed` | `managed` (Memorystore), `incluster`, `external` |
-| `redis_tier` | string | `STANDARD_HA` | `BASIC` or `STANDARD_HA` |
-| `redis_memory_size_gb` | number | `4` | |
-| `redis_version` | string | `REDIS_7_2` | |
-| `redis_tls` | bool | `false` | server TLS (`SERVER_AUTHENTICATION`); the CA is not distributed to the apps, keep false |
+| `redis_mode` | string | `managed` | `managed` (Memorystore for Valkey, service-account IAM auth), `incluster`, `external` |
 | `redis_maintenance_window` | object{day, hour, minutes} | Sunday 03:00 | |
 | `redis_configs` | map(string) | `{}` | Redis configuration parameters |
 | `external_redis` | object{host, port=6379, tls=false} | `{}` | for `external` mode |
-| `redis_auth` | string, sensitive | `""` | required for `incluster` and `external` with AUTH; ignored for `managed` (Memorystore generates the AUTH string) |
+| `redis_auth` | string, sensitive | `""` | required for `incluster` and `external` with AUTH; ignored for GCP `managed` (IAM auth) and Azure `managed` |
 
 ### Storage
 

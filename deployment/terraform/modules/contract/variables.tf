@@ -143,10 +143,11 @@ variable "managed_postgres" {
 
 variable "managed_redis" {
   type = object({
-    mode = string
-    host = string
-    port = number
-    tls  = bool
+    mode     = string
+    host     = string
+    port     = number
+    tls      = bool
+    iam_auth = optional(bool, false)
   })
   default = null
 }

@@ -283,6 +283,7 @@ AWS_SECRET_ACCESS_KEY:
 REDIS_HOST: {{ include "xyne-root.redisHost" .root | quote }}
 REDIS_PORT: {{ $r.port | default 6379 | toString | quote }}
 REDIS_TLS: {{ ternary "true" "false" ($r.tls | default false) | quote }}
+REDIS_IAM_AUTH: {{ ternary "true" "false" ($r.iamAuth | default false) | quote }}
 {{- end }}
 
 {{- define "xyne-root.publicUrl" -}}
@@ -578,7 +579,7 @@ pdb:
 
 {{- define "xyne-root.appValues.xyne-lighton-ocr" -}}
 {{- $root := .root }}
-{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" true "pool" "general") | fromYaml }}
+{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" true "pool" "general" "identity" "lighton") | fromYaml }}
 {{- $env := include "xyne-root.redisEnv" (dict "root" $root) | fromYaml }}
 {{- if (index $root.Values.apps "xyne-lighton-model").enabled }}
 {{- $_ := set $env "LIGHTON_URL" "http://xyne-lighton-model:8000/v1/chat/completions" }}

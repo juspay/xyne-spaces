@@ -454,7 +454,7 @@ $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
 # =============================================================================
 echo -e "${BLUE}Waiting for Redis...${NC}"
 for i in {1..30}; do
-    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T redis redis-cli ping > /dev/null 2>&1; then
+    if $COMPOSE_CMD -f "$COMPOSE_FILE" exec -T redis valkey-cli ping > /dev/null 2>&1; then
         echo -e "${GREEN}  Redis is ready${NC}"
         break
     fi
@@ -595,7 +595,7 @@ else
         $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T postgres psql -U xyne -d postgres -c "CREATE DATABASE xyne_dev_db OWNER xyne;" 2>/dev/null
 
         echo -e "${BLUE}  Flushing Redis (stale queue jobs reference the dropped database)...${NC}"
-        $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T redis redis-cli FLUSHALL >/dev/null 2>&1 || true
+        $COMPOSE_CMD -f "$REPO_ROOT/$COMPOSE_FILE" exec -T redis valkey-cli FLUSHALL >/dev/null 2>&1 || true
 
         # Push schema with force-reset (first time setup - ensures tables are created)
         echo -e "${BLUE}  Creating database schema...${NC}"
