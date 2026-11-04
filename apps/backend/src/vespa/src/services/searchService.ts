@@ -29,7 +29,6 @@ import { config as appConfig } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
-import { hydrateHitsFromDb } from '@/services/vespaSearch/hydrateHits';
 
 /**
  * Vespa document-summary class used when the caller does not ask for a specific one.
@@ -546,6 +545,8 @@ export class SearchService {
       const exactStartTime = Date.now();
       let response = await this.vespa.search<VespaSearchResponse>(payload, { privateQuery });
       // Vespa may hold hashed values (encryption gateway): refill with plaintext before anything reads or highlights it.
+      // Loaded lazily: a static import closes a cycle back to services/vespaSearch, which crashes the worker at startup.
+      const { hydrateHitsFromDb } = await import('@/services/vespaSearch/hydrateHits');
       await hydrateHitsFromDb(response, { query: searchQuery, mentionNames: mentionHighlights, addMissing: summaryClass === HYDRATE_SUMMARY });
       const exactDuration = Date.now() - exactStartTime;
 
