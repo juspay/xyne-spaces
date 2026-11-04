@@ -15,10 +15,8 @@ router.get('/:callId/my-tickets', transcriptionAgentController.inCallWorkspace(t
 // Search users by name (AI assistant invite tool)
 router.get('/:callId/search-users', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.searchUsers));
 
-// Fetch all enrolled voice signatures for real-time speaker identification
-router.get('/voiceprints', transcriptionAgentController.getVoiceprints);
-
-// Fetch all workspace user display names for STT keyword hints
-router.get('/user-names', transcriptionAgentController.getUserNames);
+// Disabled: not call-scoped, so the shared agent key could read every tenant's data.
+// router.get('/voiceprints', transcriptionAgentController.getVoiceprints);
+// router.get('/user-names', transcriptionAgentController.getUserNames);
 
 export default router;
