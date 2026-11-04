@@ -1740,9 +1740,6 @@ export const queries: AnyQueryRegistry = defineQueries({
         query = query.where((helpers) =>
           helpers.or(
             helpers.exists('ticket', (ticket) =>
-              ticket.where('title', 'ILIKE', `%${q}%`)
-            ),
-            helpers.exists('ticket', (ticket) =>
               ticket.where('xyneId', 'ILIKE', `%${q}%`)
             ),
             helpers.cmp('workflowName', 'ILIKE', `%${q}%`)
@@ -6310,21 +6307,16 @@ dmChannelsLatestMessagesPaginated: defineQuery(
 
   releaseTicketsSearch: defineQuery(
     z.object({
-      search: z.string().optional(),
+      // Matches from Vespa; omitted means the most recent tickets.
+      ticketIds: z.array(z.string()).optional(),
       limit: z.number().optional(),
     }),
-    ({ args: { search, limit } }) => {
+    ({ args: { ticketIds, limit } }) => {
       let query = zql.tickets
         .where('ticketType', BaseTicketType.Release)
         .orderBy('createdAt', 'desc');
-      if (search && search.trim()) {
-        const searchValue = `%${search.trim()}%`;
-        query = query.where(helpers =>
-          helpers.or(
-            helpers.cmp('xyneId', 'ILIKE', searchValue),
-            helpers.cmp('title', 'ILIKE', searchValue),
-          ),
-        );
+      if (ticketIds) {
+        query = query.where('id', 'IN', ticketIds);
       }
       return query.limit(limit ?? 10);
     },
@@ -6332,10 +6324,11 @@ dmChannelsLatestMessagesPaginated: defineQuery(
 
   ticketsSearch: defineQuery(
     z.object({
-      search: z.string().optional(),
+      // Matches from Vespa; omitted means the most recent tickets.
+      ticketIds: z.array(z.string()).optional(),
       limit: z.number().optional(),
     }),
-    ({ args: { search, limit } }) => {
+    ({ args: { ticketIds, limit } }) => {
       // Exclude Release and Support tickets from regular search
       // Release tickets are managed separately, Support tickets are handled by IT Support Workflow
       let query = zql.tickets
@@ -6346,14 +6339,8 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           ),
         )
         .orderBy('createdAt', 'desc');
-      if (search && search.trim()) {
-        const searchValue = `%${search.trim()}%`;
-        query = query.where(helpers =>
-          helpers.or(
-            helpers.cmp('xyneId', 'ILIKE', searchValue),
-            helpers.cmp('title', 'ILIKE', searchValue),
-          ),
-        );
+      if (ticketIds) {
+        query = query.where('id', 'IN', ticketIds);
       }
       return query.limit(limit ?? 10);
     },
