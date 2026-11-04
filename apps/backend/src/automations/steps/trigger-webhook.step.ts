@@ -8,6 +8,7 @@ import { isSensitiveHeader } from '../engine/webhook-step-encryption';
 import { buildWebhookHeaders, toWebhookFormBody } from '../engine/webhook-request';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const HttpMethod = z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -71,6 +72,27 @@ interface TriggerWebhookOutput extends Record<string, unknown> {
 
 const RESPONSE_LOG_LIMIT = 4 * 1024;
 
+function urlForLog(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return `${u.origin}${u.pathname}${u.search ? '?[REDACTED]' : ''}`;
+  } catch {
+    return '[invalid url]';
+  }
+}
+
+function ownHosts(): Set<string> {
+  const hosts = new Set<string>();
+  for (const raw of [config.backendUrl, config.frontendUrl]) {
+    try {
+      if (raw) hosts.add(new URL(raw).hostname.toLowerCase());
+    } catch {
+      // unset or malformed: nothing to add
+    }
+  }
+  return hosts;
+}
+
 export class TriggerWebhookStep extends BaseActionStep<
   typeof TriggerWebhookConfigSchema,
   TriggerWebhookOutput
@@ -88,10 +110,18 @@ export class TriggerWebhookStep extends BaseActionStep<
     cfg: z.infer<typeof TriggerWebhookConfigSchema>,
   ): Promise<TriggerWebhookOutput> {
     const { url, method, headers, encoding, body, timeoutMs } = cfg;
+    const target = new URL(url);
+    if (target.protocol !== 'https:' || isIP(target.hostname) !== 0) {
+      throw new Error('[TRIGGER_WEBHOOK] URL must be https with a domain name');
+    }
+    if (ownHosts().has(target.hostname.toLowerCase())) {
+      throw new Error('[TRIGGER_WEBHOOK] the URL points at this app itself, which is not allowed');
+    }
+    const logUrl = urlForLog(url);
 
     const init: RequestInit = {
       method,
-      headers: buildWebhookHeaders(headers, encoding),
+      headers: buildWebhookHeaders(headers, encoding, { decryptStored: false }),
       redirect: 'manual',
     };
 
@@ -116,7 +146,7 @@ export class TriggerWebhookStep extends BaseActionStep<
 
       if (status >= 300 && status < 400) {
         throw new Error(
-          `[TRIGGER_WEBHOOK] ${method} ${url} returned ${status} (redirect) — redirects are disabled for SSRF safety.`,
+          `[TRIGGER_WEBHOOK] ${method} ${logUrl} returned ${status} (redirect) — redirects are disabled for SSRF safety.`,
         );
       }
 
@@ -126,12 +156,12 @@ export class TriggerWebhookStep extends BaseActionStep<
         : text;
 
       logger.info(
-        `[automations] TRIGGER_WEBHOOK ${method} ${url} → ${status} (${responseBody.length}B)`,
+        `[automations] TRIGGER_WEBHOOK ${method} ${logUrl} → ${status} (${responseBody.length}B)`,
       );
 
       if (!ok) {
         throw new Error(
-          `[TRIGGER_WEBHOOK] ${method} ${url} returned ${status}: ${responseBody.slice(0, 200)}`,
+          `[TRIGGER_WEBHOOK] ${method} ${logUrl} returned ${status}: ${responseBody.slice(0, 200)}`,
         );
       }
 
@@ -148,7 +178,7 @@ export class TriggerWebhookStep extends BaseActionStep<
       return { status, ok, responseBody, responseJson };
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        throw new Error(`[TRIGGER_WEBHOOK] ${method} ${url} timed out after ${timeoutMs}ms`);
+        throw new Error(`[TRIGGER_WEBHOOK] ${method} ${logUrl} timed out after ${timeoutMs}ms`);
       }
       throw err;
     } finally {
@@ -157,16 +187,17 @@ export class TriggerWebhookStep extends BaseActionStep<
   }
 
   redactInput(input: Record<string, unknown>): Record<string, unknown> {
+    const withUrl = typeof input['url'] === 'string' ? { ...input, url: urlForLog(input['url']) } : input;
     const headers = input['headers'];
     if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
-      return input;
+      return withUrl;
     }
     const marked = input['secretHeaders'] as string[] | undefined;
     const redacted: Record<string, string> = {};
     for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
       redacted[k] = isSensitiveHeader(k, marked) ? '[REDACTED]' : String(v);
     }
-    return { ...input, headers: redacted };
+    return { ...withUrl, headers: redacted };
   }
 }
 

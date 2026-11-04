@@ -32,7 +32,7 @@ export class ApprovalError extends Error {
   }
 }
 
-async function assertIsAutomationsAdmin(
+export async function assertIsAutomationsAdmin(
   userId: string,
   opts: { isEnvAdmin?: boolean } = {},
 ): Promise<void> {
@@ -243,6 +243,9 @@ class ApprovalService {
       await assertIsAutomationsAdmin(actorUserId, opts);
     }
     const row = ensureAutomation(await repositories.workflows.findById(liveId), liveId);
+    if (nextStatus === AutomationStatus.ACTIVE && parseAutomationMetadata(row.metadata).adminDisabled) {
+      await assertIsAutomationsAdmin(actorUserId, opts);
+    }
 
     if (!isLiveStatus(row.status)) {
       throw new ApprovalError(

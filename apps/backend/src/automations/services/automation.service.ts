@@ -2,11 +2,11 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { AutomationStatus } from '../types/status';
 import type { AutomationConfig } from '../types/automation-config';
-import type { ValidationResult } from '../types/validation';
+import { ValidationIssueCode, type ValidationResult } from '../types/validation';
 import { ConfigValidator } from '../engine/config-validator';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
-import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
+import { encryptWebhookStepHeaders, WebhookSecretHeaderError } from '../engine/webhook-step-encryption';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
@@ -80,8 +80,17 @@ class AutomationService {
       `[AUTOMATION-SERVICE] activate id=${id} trigger=${config.trigger.type} steps=${config.steps.length}`,
     );
 
-    const headersEncrypted = encryptWebhookStepHeaders(config.steps);
-    const { drainInFlight: _drained, ...metadata } = parseAutomationMetadata(existing.metadata);
+    let headersEncrypted: boolean;
+    try {
+      headersEncrypted = encryptWebhookStepHeaders(config.steps, existing.automationSeriesId ?? existing.id);
+    } catch (err) {
+      if (!(err instanceof WebhookSecretHeaderError)) throw err;
+      return {
+        automation: workflowToAutomation(existing),
+        validation: { valid: false, issues: [{ path: 'steps', code: ValidationIssueCode.SHAPE, message: err.message }] },
+      };
+    }
+    const { drainInFlight: _drained, adminDisabled: _adminDisabled, ...metadata } = parseAutomationMetadata(existing.metadata);
     const updated = await repositories.workflows.update(id, {
       status: AutomationStatus.ACTIVE,
       eventType: triggerTypeToEventType(config.trigger.type),
@@ -110,6 +119,7 @@ class AutomationService {
       metadata: buildAutomationMetadata({
         ...parseAutomationMetadata(existing.metadata),
         drainInFlight: !cancelQueued,
+        adminDisabled: true,
       }),
       updatedAt: new Date(),
     });

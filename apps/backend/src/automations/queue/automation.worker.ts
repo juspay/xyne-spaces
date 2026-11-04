@@ -9,6 +9,7 @@ import { automationScheduleQueue } from './automation-schedule.queue';
 import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
+import { MAX_AUTOMATION_CHAIN } from '../util/automation-chain';
 import {
   isExecutableAutomationWorkflowType,
   mayDrainInFlight,
@@ -135,7 +136,7 @@ export class AutomationWorker {
 
     const stateForChain = await getAutomationPauseState(executionId);
     const upstreamChain = readAutomationMeta(stateForChain?.context ?? null).chain;
-    if (upstreamChain.includes(workflow.id)) {
+    if (upstreamChain.includes(workflow.id) || upstreamChain.length >= MAX_AUTOMATION_CHAIN) {
       await db.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },

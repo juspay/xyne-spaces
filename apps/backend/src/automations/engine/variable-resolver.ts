@@ -44,6 +44,7 @@ export class VariableResolver {
     if (value !== null && typeof value === 'object') {
       const resolved: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (FORBIDDEN_KEYS.has(k)) continue;
         resolved[k] = this.resolve(v, context);
       }
       return resolved;
@@ -81,7 +82,7 @@ export class VariableResolver {
 
       const refs = resolveEntityRefs(token.path, context);
       if (refs && refs.length > 0) {
-        result = stripTrailingVariableRefSpanOpen(result) + refs.map(spanForRef).join(' ');
+        result = result.slice(0, result.length - richSpanTailLength(result)) + refs.map(spanForRef).join(' ');
         stripNextSpanClose = true;
         continue;
       }
@@ -92,17 +93,21 @@ export class VariableResolver {
   }
 }
 
-const RICH_TEXT_SPAN_TAIL = /<span\b[^>]*\bdata-variable-ref\b[^>]*>[\s\u200B]*$/i;
 const SPAN_CLOSE_LEAD = /^[\s\u200B]*<\/span>/i;
-const LOOKS_LIKE_HTML = /<\/?[a-z][^>]*>/i;
+const LOOKS_LIKE_HTML = /<\/?[a-z][^<>]*>/i;
 const MARKED_OPTIONS = { async: false, gfm: true, breaks: true } as const;
 
 function isRichTextSlot(prev: { kind: string; text?: string } | undefined): boolean {
-  return prev?.kind === 'literal' && RICH_TEXT_SPAN_TAIL.test(prev.text ?? '');
+  return prev?.kind === 'literal' && richSpanTailLength(prev.text ?? '') > 0;
 }
 
-function stripTrailingVariableRefSpanOpen(text: string): string {
-  return text.replace(RICH_TEXT_SPAN_TAIL, '');
+function richSpanTailLength(text: string): number {
+  const start = text.toLowerCase().lastIndexOf('<span');
+  if (start < 0) return 0;
+  const tail = text.slice(start);
+  if (!/^<span\b[^<>]*>[\s\u200B]*$/i.test(tail)) return 0;
+  const openTag = tail.slice(0, tail.indexOf('>') + 1);
+  return /\sdata-variable-ref(?=[\s=>/])/i.test(openTag) ? tail.length : 0;
 }
 
 function stripLeadingSpanClose(text: string): string {

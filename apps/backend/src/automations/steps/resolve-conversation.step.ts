@@ -17,6 +17,7 @@ import { TICKET_COMMENTED_EVENT, ticketCommentedTrigger } from '../triggers/tick
 import { MESSAGE_RECEIVED_EVENT, messageReceivedTrigger } from '../triggers/message-received.trigger';
 import { CALL_EVENT, CALL_ENDED, CALL_STARTED, callTrigger } from '../triggers/call.trigger';
 import { TAG_GENERATED_EVENT, tagGeneratedTrigger } from '../triggers/tag-generated.trigger';
+import { authorCanSeeChannel } from '../util/author-access';
 
 // Each option resolves to exactly what that trigger hands downstream steps after hydration.
 const RESOLVABLE_TRIGGERS = {
@@ -75,6 +76,9 @@ export class ResolveConversationStep extends BaseActionStep<
     const conversation = await db.conversation.findUnique({ where: { conversationId } });
     if (!conversation || conversation.workspaceId !== context.automation.workspaceId) {
       throw new Error(`[RESOLVE_CONVERSATION] conversation ${conversationId} not found in this workspace`);
+    }
+    if (!(await authorCanSeeChannel(conversation.channelId, context.automation.createdById))) {
+      throw new Error(`[RESOLVE_CONVERSATION] conversation ${conversationId} is in a channel the automation author cannot see`);
     }
 
     const ticket = await db.ticket.findFirst({

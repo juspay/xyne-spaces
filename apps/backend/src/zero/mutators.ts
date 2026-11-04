@@ -1,5 +1,6 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
+import { buildAutomationMetadata, parseAutomationMetadata } from '../automations/types/workflow-adapter';
 import {
   ChannelRole,
   ChannelType,
@@ -18363,6 +18364,22 @@ export function createMutators(
           tx,
           args: { id, name, configJson, metadataJson, eventType, automationSeriesId, timestamp },
         }) => {
+          if (automationSeriesId !== undefined && automationSeriesId !== id) {
+            const lineage = await tx.run(
+              zql.workflows
+                .where('automationSeriesId', automationSeriesId)
+                .where('workspaceId', ctx.workspaceId)
+                .where('workflowType', 'Automations')
+                .one(),
+            );
+            if (!lineage) throw new Error(`Automation series "${automationSeriesId}" not found`);
+          }
+          const clientMetadata = parseAutomationMetadata(metadataJson);
+          const metadata = buildAutomationMetadata({
+            description: clientMetadata.description,
+            createdById: ctx.userID,
+            ...(clientMetadata.priority ? { priority: true } : {}),
+          });
           await tx.mutate.workflows.insert({
             id,
             workflowType: 'Automations',
@@ -18371,7 +18388,7 @@ export function createMutators(
             status: 'DRAFT',
             automationSeriesId: automationSeriesId ?? id,
             context: configJson,
-            metadata: metadataJson,
+            metadata: metadata,
             ticketId: null,
             workspaceId: ctx.workspaceId,
             configuration: null,
@@ -18391,6 +18408,7 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({
+          ctx,
           tx,
           args: { id, name, configJson, metadataJson, eventType, timestamp },
         }) => {
@@ -18403,12 +18421,23 @@ export function createMutators(
               `Automation "${id}" is ${existing.status}; only DRAFT proposals can be edited.`,
             );
           }
+          const existingMetadata = parseAutomationMetadata(existing.metadata);
+          if (existingMetadata.createdById !== ctx.userID) {
+            throw new Error(`Automation "${id}" can only be edited by its author`);
+          }
+          const metadata =
+            metadataJson !== undefined
+              ? buildAutomationMetadata({
+                  ...existingMetadata,
+                  description: parseAutomationMetadata(metadataJson).description,
+                })
+              : undefined;
 
           await tx.mutate.workflows.update({
             id,
             updatedAt: timestamp,
             ...(name !== undefined && { workflowName: name }),
-            ...(metadataJson !== undefined && { metadata: metadataJson }),
+            ...(metadata !== undefined && { metadata }),
             ...(configJson !== undefined && { context: configJson }),
             ...(configJson !== undefined && eventType !== undefined && { eventType }),
           });

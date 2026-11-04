@@ -47,6 +47,7 @@ interface AutomationMetadata {
   description: string | null;
   createdById: string;
   drainInFlight?: boolean;
+  adminDisabled?: boolean;
   /**
    * When on, this automation's runs skip ahead of other runs waiting in the queue.
    * It has no effect on scheduled runs, or on a run once it has passed a DELAY step:
@@ -70,6 +71,7 @@ export function parseAutomationMetadata(raw: string | null): AutomationMetadata 
       description: parsed.description ?? null,
       createdById: parsed.createdById ?? '',
       ...(parsed.drainInFlight ? { drainInFlight: true } : {}),
+      ...(parsed.adminDisabled ? { adminDisabled: true } : {}),
       ...(parsed.priority ? { priority: true } : {}),
     };
   } catch {

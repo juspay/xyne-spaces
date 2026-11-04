@@ -1,3 +1,4 @@
+import { authorCanSeeChannel } from '../util/author-access';
 import { z } from 'zod';
 import { MessageType, ProjectType, UserType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
@@ -239,6 +240,11 @@ export class SendMessageStep extends BaseActionStep<
       if (!channelInWorkspace) {
         throw new Error(
           `[SendMessageStep] Channel ${channelId} not found in workspace ${workspaceId}`
+        );
+      }
+      if (!(await authorCanSeeChannel(channelId, context.automation.createdById))) {
+        throw new Error(
+          `[SendMessageStep] Channel ${channelId} is private and the automation author is not a participant`
         );
       }
     }

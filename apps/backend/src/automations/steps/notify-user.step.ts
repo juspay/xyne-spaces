@@ -6,6 +6,7 @@ import { variableRef } from '../engine/variable-ref';
 import { notificationService } from '@/services/notificationService';
 import type { AutomationContext } from '../types/context';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { db } from '@/database/client';
 import { buildNotifyActionUrl, NOTIFY_LINK_TYPES, type NotifyLinkType } from './notify-action-url';
 
 const NotifyUserConfigSchema = z.object({
@@ -37,6 +38,13 @@ export class NotifyUserStep extends BaseActionStep<typeof NotifyUserConfigSchema
     config: z.infer<typeof NotifyUserConfigSchema>,
     context: AutomationContext,
   ): Promise<NotifyUserOutput> {
+    const recipient = await db.user.findFirst({
+      where: { id: config.userId as string, workspaceId: context.automation.workspaceId },
+      select: { id: true },
+    });
+    if (!recipient) {
+      throw new Error(`[NOTIFY_USER] user ${String(config.userId)} is not in this workspace`);
+    }
     const actionUrl = await buildNotifyActionUrl(
       context.automation.workspaceId,
       config.linkType as NotifyLinkType | undefined,

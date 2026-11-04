@@ -1,3 +1,4 @@
+import { assertAssignableUser, assertGroupInWorkspace, automationRequestUser } from '../util/author-access';
 import { z } from 'zod';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import type { Request, Response } from 'express';
@@ -26,7 +27,6 @@ const CreateTicketConfigSchema = z.object({
   userGroupId: variableRef(z.string()).optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
   status: z.nativeEnum(TicketStatusV2).optional(),
-  createdById: variableRef(z.string()).optional(),
 });
 
 const CreateTicketOutputSchema = z.object({
@@ -94,7 +94,7 @@ export class CreateTicketStep extends BaseActionStep<
     config: z.infer<typeof CreateTicketConfigSchema>,
     context: AutomationContext
   ): Promise<CreateTicketOutput> {
-    const createdBy = (config.createdById as string | undefined) ?? context.automation.createdById;
+    const createdBy = context.automation.createdById;
 
     const rawTitle = config.title as string | undefined;
     const rawDescription = config.description as string;
@@ -129,6 +129,12 @@ export class CreateTicketStep extends BaseActionStep<
       projectId: config.projectId as string,
       boardId: config.boardId as string,
     };
+    if (config.assigneeId !== undefined) {
+      await assertAssignableUser(config.assigneeId as string, context.automation.workspaceId, 'CREATE_TICKET');
+    }
+    if (config.userGroupId !== undefined) {
+      await assertGroupInWorkspace(config.userGroupId as string, context.automation.workspaceId, 'CREATE_TICKET');
+    }
     if (config.assigneeId !== undefined) reqBody.assignedTo = config.assigneeId;
     if (config.userGroupId !== undefined) reqBody.userGroupId = config.userGroupId;
     if (config.priority !== undefined) reqBody.priority = config.priority;
@@ -137,7 +143,7 @@ export class CreateTicketStep extends BaseActionStep<
     const fakeReq = {
       body: reqBody,
       headers: {},
-      user: { id: createdBy },
+      user: await automationRequestUser(createdBy, context.automation.workspaceId),
       files: {},
     } as unknown as Request;
 

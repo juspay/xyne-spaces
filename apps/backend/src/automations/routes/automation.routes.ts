@@ -6,6 +6,7 @@ import { ConditionOperator } from '../types/operators';
 import { automationService } from '../services/automation.service';
 import {
   issueWebhookSecret,
+  rotateWebhookSecret,
   webhookSecretExists,
 } from '../services/webhook-secret.service';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
@@ -22,6 +23,7 @@ import {
   workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
+  parseAutomationMetadata,
   triggerTypeToEventType,
   workflowToAutomation,
 } from '../types/workflow-adapter';
@@ -30,9 +32,10 @@ import {
   getExecutionState,
   stitchExecutionContextMany,
 } from '@/database/repositories/workflowExecutionStateUtils';
-import { approvalService, ApprovalError } from '../services/approval.service';
+import { approvalService, ApprovalError, assertIsAutomationsAdmin } from '../services/approval.service';
 import { notifyAdminsOfArchiveRequest } from '../services/approval-notifications';
-import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
+import { encryptWebhookStepHeaders, WebhookSecretHeaderError } from '../engine/webhook-step-encryption';
+import { createId } from '@paralleldrive/cuid2';
 import { uploadAutomationTemplates } from '@/middleware/upload';
 import { AppError } from '@/middleware/errorHandler';
 import {
@@ -110,6 +113,7 @@ function sendUnauthorized(res: Response): void {
 function prepareConfigForSave(
   config: AutomationConfig,
   res: Response,
+  seriesId: string,
 ): { config: AutomationConfig; context: string; eventType: ReturnType<typeof triggerTypeToEventType> } | null {
   const validation = automationService.validateConfig(config);
   if (!validation.valid) {
@@ -118,7 +122,15 @@ function prepareConfigForSave(
   }
 
   const configToSave = JSON.parse(JSON.stringify(config)) as AutomationConfig;
-  encryptWebhookStepHeaders(configToSave.steps);
+  try {
+    encryptWebhookStepHeaders(configToSave.steps, seriesId);
+  } catch (err) {
+    if (err instanceof WebhookSecretHeaderError) {
+      res.status(400).json({ success: false, error: err.message });
+      return null;
+    }
+    throw err;
+  }
   return {
     config: configToSave,
     context: JSON.stringify(configToSave),
@@ -504,10 +516,11 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const prepared = prepareConfigForSave(parsed.data.config, res);
+    const newId = createId();
+    const prepared = prepareConfigForSave(parsed.data.config, res, newId);
     if (!prepared) return;
 
-    const workflow = await postTx(prepared, auth, parsed);
+    const workflow = await postTx(prepared, auth, parsed, newId);
     res.status(201).json({
       success: true,
       data: { automation: workflowToAutomation(workflow) },
@@ -660,7 +673,7 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
     const existingAutomation = workflowToAutomation(existing);
     const prepared = parsed.data.config !== undefined
-      ? prepareConfigForSave(parsed.data.config, res)
+      ? prepareConfigForSave(parsed.data.config, res, existing.automationSeriesId ?? existing.id)
       : null;
     if (parsed.data.config !== undefined && !prepared) return;
 
@@ -940,7 +953,7 @@ function webhookEndpoint(): string {
 async function resolveWebhookAutomation(
   automationId: string,
   workspaceId: string,
-): Promise<{ seriesId: string } | { error: { status: number; message: string } }> {
+): Promise<{ seriesId: string ; createdById: string } | { error: { status: number; message: string } }> {
   // Scope by workspaceId so an authenticated user in one workspace cannot resolve
   // (and mint/read the webhook secret for) an automation owned by another workspace.
   const workflow = await db.workflow.findFirst({
@@ -953,7 +966,10 @@ async function resolveWebhookAutomation(
   if (!workflow) {
     return { error: { status: 404, message: 'Automation not found' } };
   }
-  return { seriesId: workflow.automationSeriesId ?? workflow.id };
+  return {
+    seriesId: workflow.automationSeriesId ?? workflow.id,
+    createdById: parseAutomationMetadata(workflow.metadata).createdById,
+  };
 }
 
 // Read-only: the token is shown only once at creation, so this returns just
@@ -995,7 +1011,22 @@ router.post(
       res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
       return;
     }
-    const secret = await issueWebhookSecret(resolved.seriesId);
+    if (req.user?.role === 'GUEST') {
+      res.status(403).json({ success: false, error: 'Forbidden' });
+      return;
+    }
+    if (resolved.createdById !== auth.userId) {
+      try {
+        await assertIsAutomationsAdmin(auth.userId);
+      } catch {
+        res.status(403).json({ success: false, error: 'Only the author or an automations admin can issue this URL' });
+        return;
+      }
+    }
+    const rotate = (req.body as { rotate?: unknown } | undefined)?.rotate === true;
+    const secret = rotate
+      ? await rotateWebhookSecret(resolved.seriesId)
+      : await issueWebhookSecret(resolved.seriesId);
     res.json({
       success: true,
       data: {

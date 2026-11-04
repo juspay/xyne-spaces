@@ -37,3 +37,13 @@ export async function storedSecretMatches(seriesId: string, secret: string): Pro
   const b = Buffer.from(stored, 'utf8');
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+
+export async function rotateWebhookSecret(seriesId: string): Promise<string> {
+  const secret = crypto.randomBytes(18).toString('base64url');
+  await db.workflowMapping.upsert({
+    where: mapKey(seriesId),
+    create: { entityType: ENTITY_TYPE, entityId: seriesId, entitySecret: encrypt(secret) },
+    update: { entitySecret: encrypt(secret) },
+  });
+  return secret;
+}

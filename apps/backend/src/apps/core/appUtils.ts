@@ -1,3 +1,4 @@
+import { isInstallWebhookHostAllowed } from './appUrlResolver';
 import { repositories } from '@/database/repositories';
 import { AuthProvider, UserType, OrgRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -158,6 +159,9 @@ export async function configureWebhook(appId: string, webhookUrl: string, worksp
 
     if (!installedApp) {
       throw new Error(`[CONFIGURE-WEBHOOK] Installed app with appId ${appId} not found in workspace ${workspaceId}`);
+    }
+    if (!(await isInstallWebhookHostAllowed(webhookUrl, installedApp.appId))) {
+      throw new Error('[CONFIGURE-WEBHOOK] This webhook host is reserved for the app it belongs to');
     }
 
     const updatedInstalledApp = await repositories.installedApps.update(

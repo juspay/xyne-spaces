@@ -44,6 +44,12 @@ blockedV6.addAddress('::1', 'ipv6');
 blockedV6.addSubnet('fc00::', 7, 'ipv6');
 blockedV6.addSubnet('fe80::', 10, 'ipv6');
 blockedV6.addSubnet('ff00::', 8, 'ipv6');
+blockedV6.addSubnet('64:ff9b::', 96, 'ipv6');
+blockedV6.addSubnet('64:ff9b:1::', 48, 'ipv6');
+blockedV6.addSubnet('2002::', 16, 'ipv6');
+blockedV6.addSubnet('::', 96, 'ipv6');
+blockedV6.addSubnet('2001:db8::', 32, 'ipv6');
+blockedV6.addSubnet('100::', 64, 'ipv6');
 
 function ipv4FromMapped(addr: string): string | null {
   const lower = addr.toLowerCase();

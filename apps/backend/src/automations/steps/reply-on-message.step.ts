@@ -1,3 +1,4 @@
+import { authorCanSeeChannel } from '../util/author-access';
 import { z } from 'zod';
 import { MessageType, UserType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
@@ -70,6 +71,17 @@ export class ReplyOnMessageStep extends BaseActionStep<
           `[ReplyOnMessageStep] Sender ${config.senderId} must be a bot, app or agent identity in workspace ${context.automation.workspaceId}. Automations cannot post as a human user; leave the sender empty to post as the Automations bot.`
         );
       }
+    }
+
+    const target = await db.conversation.findFirst({
+      where: { conversationId: config.conversationId as string, workspaceId: context.automation.workspaceId },
+      select: { channelId: true },
+    });
+    if (!target) {
+      throw new Error(`[ReplyOnMessageStep] conversation ${String(config.conversationId)} not found in this workspace`);
+    }
+    if (!(await authorCanSeeChannel(target.channelId, context.automation.createdById))) {
+      throw new Error(`[ReplyOnMessageStep] conversation is in a private channel the automation author is not in`);
     }
 
     const uploadedFiles = await uploadAgentAttachments({

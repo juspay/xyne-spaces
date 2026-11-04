@@ -1,3 +1,4 @@
+import { isInstallWebhookHostAllowed } from '../core/appUrlResolver';
 import { Request, Response } from 'express';
 import { AccessType } from '@xyne/shared';
 import { z } from 'zod';
@@ -340,6 +341,10 @@ export class AppController {
       });
       if (!install) {
         res.status(404).json({ error: 'Installed app not found in this workspace', code: 'INSTALLED_APP_NOT_FOUND' });
+        return;
+      }
+      if (webhookUrl && !(await isInstallWebhookHostAllowed(webhookUrl.trim(), install.appId))) {
+        res.status(400).json({ error: 'This webhook host is reserved for the app it belongs to', code: 'RESERVED_WEBHOOK_HOST' });
         return;
       }
 

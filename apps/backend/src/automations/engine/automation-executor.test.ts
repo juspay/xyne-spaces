@@ -13,6 +13,10 @@ jest.mock('../triggers/trigger-registry', () => ({
   triggerRegistry: { has: () => false, get: () => null },
 }));
 // marked ships ESM that jest's transform ignores — stub the two calls the resolver makes.
+jest.mock('../util/author-access', () => ({
+  authorCanSeeChannel: async () => true,
+  isActiveWorkspaceAuthor: async () => true,
+}));
 jest.mock('marked', () => ({
   marked: { parse: (t: string) => t, parseInline: (t: string) => t },
 }));

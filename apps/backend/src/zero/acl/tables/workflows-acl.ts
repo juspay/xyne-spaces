@@ -154,6 +154,8 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     const nextStatus = (args as { status?: string }).status;
     if (nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus)) {
       await this.requireAutomationsAdmin(tx);
+    } else if (nextStatus === 'ACTIVE' && parseAutomationMetadata(existing.metadata).adminDisabled) {
+      await this.requireAutomationsAdmin(tx);
     } else if (nextStatus && AUTHOR_OR_ADMIN_STATUSES.has(nextStatus)) {
       // Metadata may be missing/malformed/lacking createdById; treat any parse failure as
       // "not the author" and fall through to the admin requirement rather than throwing and

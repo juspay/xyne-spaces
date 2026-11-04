@@ -15,6 +15,9 @@ import { CONTROL_FLOW_STEP_TYPES, ControlFlowStepType } from '../types/known-typ
 import type { StepRegistry } from '../steps/step-registry';
 import { BaseActionStep, BaseControlFlowStep, StepKind } from '../steps/base-step';
 import { VariableResolver, stripNullForOptionalKeys } from './variable-resolver';
+import { openStepSecretHeaders } from './webhook-step-encryption';
+import { authorCanSeeChannel, isActiveWorkspaceAuthor } from '../util/author-access';
+import { VARIABLE_REF_REGEX } from '../types/automation-config';
 import { automationContextStorage } from './automation-context-storage';
 import {
   PauseStep,
@@ -243,6 +246,17 @@ export class AutomationExecutor {
     }
     const chain: readonly string[] = readAutomationMeta(pauseState.context).chain;
 
+    if (!(await isActiveWorkspaceAuthor(metadata.createdById, workflow.workspaceId))) {
+      await this.prisma.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: AutomationRunStatus.CANCELLED },
+      });
+      logger.warn(
+        `[automations] prepareRun: author is no longer an active member — automation=${workflow.id} run=${executionId} CANCELLED`,
+      );
+      return null;
+    }
+
     if (isResume) {
       const stepRows = await this.prisma.workflowStep.findMany({
         where: { workflowExecutionId: executionId },
@@ -291,6 +305,18 @@ export class AutomationExecutor {
       originalTriggerData,
       workflow.id,
     );
+
+    const triggerChannelId = triggerChannelIdOf(hydratedTriggerData);
+    if (triggerChannelId && !(await authorCanSeeChannel(triggerChannelId, metadata.createdById))) {
+      await this.prisma.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: AutomationRunStatus.SKIPPED },
+      });
+      logger.info(
+        `[automations] prepareRun: author cannot see channel ${triggerChannelId} — automation=${workflow.id} run=${executionId} skipping`,
+      );
+      return null;
+    }
 
     const filterConfig = (config.trigger.config ?? {}) as Record<string, unknown>;
     const filterMatch = triggerImpl
@@ -706,6 +732,13 @@ export class AutomationExecutor {
       stepImpl.configSchema,
     );
 
+    const placeholderPath = findPlaceholderShapedValue(resolvedConfig);
+    if (placeholderPath !== null) {
+      throw new Error(
+        `Step "${step.id}" (${step.type}): resolved value at "${placeholderPath}" is a {{...}} placeholder; payload data may not supply placeholders.`,
+      );
+    }
+
     const safeResult = stepImpl.configSchema.safeParse(resolvedConfig);
     if (!safeResult.success) {
       const issueList = safeResult.error.issues
@@ -721,6 +754,17 @@ export class AutomationExecutor {
       ? stepImpl.redactInput(resolvedInput)
       : resolvedInput;
     context.steps[step.id] = { type: step.type, input: persistedInput, output: {} };
+    const execInput =
+      step.type === 'TRIGGER_WEBHOOK'
+        ? {
+            ...resolvedInput,
+            headers: openStepSecretHeaders(
+              step.config as Record<string, unknown>,
+              resolvedInput['headers'] as Record<string, string> | undefined,
+              await this.seriesIdFor(context.automation.id),
+            ),
+          }
+        : resolvedInput;
 
     const actionImpl = stepImpl as BaseActionStep<typeof stepImpl.configSchema, Record<string, unknown>>;
     const t0 = Date.now();
@@ -733,8 +777,8 @@ export class AutomationExecutor {
         { ...parentStore!, stepName: callCtx.stepName },
         async () =>
           callCtx.isResuming
-            ? this.invokeResume(actionImpl, callCtx.runId, callCtx.stepName, resolvedInput, context)
-            : actionImpl.execute(resolvedInput, context),
+            ? this.invokeResume(actionImpl, callCtx.runId, callCtx.stepName, execInput, context)
+            : actionImpl.execute(execInput, context),
       );
       context.steps[step.id] = { type: step.type, input: persistedInput, output };
       logger.info(
@@ -754,4 +798,39 @@ export class AutomationExecutor {
     }
   }
 
+  private async seriesIdFor(automationId: string): Promise<string> {
+    const workflow = await repositories.workflows.findById(automationId);
+    return workflow?.automationSeriesId ?? automationId;
+  }
+}
+
+function findPlaceholderShapedValue(value: unknown, path = ''): string | null {
+  if (typeof value === 'string') return VARIABLE_REF_REGEX.test(value) ? path || '(root)' : null;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = findPlaceholderShapedValue(value[i], `${path}[${i}]`);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const hit = findPlaceholderShapedValue(v, path ? `${path}.${k}` : k);
+      if (hit !== null) return hit;
+    }
+  }
+  return null;
+}
+
+function triggerChannelIdOf(data: Record<string, unknown>): string | null {
+  const direct = data['channelId'];
+  if (typeof direct === 'string' && direct) return direct;
+  for (const key of ['ticket', 'message', 'email', 'conversation', 'channel']) {
+    const nested = data[key];
+    if (nested && typeof nested === 'object') {
+      const id = (nested as Record<string, unknown>)[key === 'channel' ? 'id' : 'channelId'];
+      if (typeof id === 'string' && id) return id;
+    }
+  }
+  return null;
 }
