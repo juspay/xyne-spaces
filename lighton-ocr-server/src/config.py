@@ -206,9 +206,12 @@ class Settings:
     runtime_config_key: str = _env("OCR_RUNTIME_CONFIG_KEY", "docling:runtime-config")
     runtime_config_poll_seconds: int = max(5, _int_env("OCR_RUNTIME_CONFIG_POLL_SECONDS", 300))
 
-    # Service-to-service auth. Callers send OCR_S2S_KEY in the x-s2s-key header.
-    # Unset = every route except /health returns 401 (fail closed).
+    # Service-to-service auth: callers send one of these in the x-s2s-key header.
+    # OCR_S2S_KEY is for services outside xyne-spaces; INTERNAL_S2S_KEY is the
+    # fallback xyne-spaces' backend and workers already send to internal services.
+    # Neither set = every route except /health returns 401 (fail closed).
     s2s_key: str = _env("OCR_S2S_KEY")
+    internal_s2s_key: str = _env("INTERNAL_S2S_KEY")
 
     @property
     def has_lighton_endpoint(self) -> bool:

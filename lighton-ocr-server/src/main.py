@@ -48,8 +48,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "[startup] lighton_url=%s lighton_model=%s",
         settings.lighton_url or "(not set)", settings.lighton_model,
     )
-    if not settings.s2s_key:
-        logger.error("[startup] OCR_S2S_KEY is not set: every route except /health will return 401")
+    if not settings.s2s_key and not settings.internal_s2s_key:
+        logger.error(
+            "[startup] neither OCR_S2S_KEY nor INTERNAL_S2S_KEY is set: "
+            "every route except /health will return 401"
+        )
     await start_runtime_config_poller()
     if settings.has_lighton_endpoint:
         lighton_client = LightOnClient(
