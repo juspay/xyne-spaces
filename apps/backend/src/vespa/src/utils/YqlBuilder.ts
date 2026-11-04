@@ -22,17 +22,6 @@ const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
-// Fields matched against the raw user query via userInput(@query), kept as one list so the
-// grammar annotation (see userInputClause) is defined once instead of per OR-clause.
-const LEXICAL_FUZZY_FIELDS = [
-  'text_fuzzy', 'username', 'mentionChannelName', 'title', 'description',
-  'title_fuzzy', 'description_fuzzy', 'initialMessage_fuzzy', 'eta', 'channelName',
-  'boardName', 'xyneId', 'tags', 'createdByName', 'assignedToName', 'closedByName',
-  'projectName', 'ticketMentions', 'threadMentions', 'threadSenders',
-  'parentTicketXyneId', 'childTicketXyneIds', 'stage', 'status', 'subject_fuzzy', 'chunks_fuzzy',
-  'ticketFormFieldValues',
-];
-
 // grammar:"tokenize" tokenizes the user query with syntax parsing off (weakAnd/internal/none),
 // so operator characters match as plain text. Pass a different grammar (e.g. 'grammar:"all"') to opt out.
 const userInputClause = (defaultIndex?: string, grammar = 'grammar:"tokenize"'): string => {
@@ -64,9 +53,8 @@ const lexicalClause = (query: string, params: VespaQueryParams): string => {
   return clauses.length === 1 ? clauses[0] : `weakAnd(${clauses.join(', ')})`;
 };
 
-// `unified` only. Each schema's `default` fieldset bundles body text plus 3-gram
-// "_fuzzy" fields, so searching it matches on body content and on substrings inside
-// hashes. These schemas are searched in the listed fields instead.
+// `unified` only. Each schema's `default` fieldset bundles body text, so searching it
+// matches on body content as well as names. These schemas are searched in the listed fields instead.
 const UNIFIED_FIELD_SCOPE: Record<string, string[]> = {
   [fileSchema]: ['fileName'],
   [ticketSchema]: ['title', 'xyneId'],
@@ -326,7 +314,6 @@ export class YqlBuilder {
     userId: string,
     mailFilters: MailFilters = {},
     callFilters: CallFilters = {},
-    useFuzzy: boolean = false,
     useSemanticAnyway: boolean = true,
     workspaceId?: string,
     sort?: string,
@@ -360,23 +347,6 @@ export class YqlBuilder {
         // searchrules.sr strips stopwords ("is", "the", ...) by default, which silently breaks a
         // phrase when a stopword sits mid-query. No nearestNeighbor / fuzzy — those broaden a match.
         whereConditions.push(userInputClause(undefined, 'grammar:"phrase"'));
-      } else if (useFuzzy) {
-        // Same user-query fields for both fuzzy branches; grammar:"tokenize" applied per clause.
-        const lexicalFieldClauses = LEXICAL_FUZZY_FIELDS.map((field) => userInputClause(field)).join('\n      or ');
-        if (useSemantic) {
-          // Hybrid: fuzzy lexical + semantic
-          whereConditions.push(`(
-      ${lexicalFieldClauses}
-      or ({targetHits:${safeLimit}} nearestNeighbor(text_embeddings, e))
-      or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
-      or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
-    )`);
-        } else {
-          // Lexical only: semantic disabled for this rank profile, or the query is too short.
-          whereConditions.push(`(
-      ${lexicalFieldClauses}
-    )`);
-        }
       } else if (isTranscriptOnly) {
         // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
         whereConditions.push(`(
@@ -1386,8 +1356,7 @@ export class YqlBuilder {
    * Standalone from the universal multi-source builder: apps have no per-user ACL
    * (visibility is gated by the XYNE-APPS resource permission at the route), so there
    * is no permGuard. Retrieval is purely lexical via userInput over the `default`
-   * fieldset (name, description, name_fuzzy, description_fuzzy, creatorName,
-   * creatorEmail) — this keeps the match set exact, fully paginatable, and noise-free
+   * fieldset (name, description, creatorName, creatorEmail, orgName) — this keeps the match set exact, fully paginatable, and noise-free
    * (so a "slack" search returns only apps that actually contain "slack").
    *
    * Embeddings are NOT used to expand the match set here (an `OR nearestNeighbor`

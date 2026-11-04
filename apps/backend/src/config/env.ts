@@ -489,7 +489,13 @@ const envSchema = Joi.object({
   // 8083, not 8080: y-sweet owns 8080, so docker-compose.dev.yml publishes Vespa's feed port on 8083.
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8083'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
+  // Bearer tokens of the encryption gateways behind VESPA_QUERY_URL / VESPA_FEED_URL (their AUTH_TOKEN_FILE).
+  // Empty: no Authorization header, for a Vespa reached directly.
+  VESPA_QUERY_TOKEN: Joi.string().min(32).allow('').default(''),
+  VESPA_FEED_TOKEN: Joi.string().min(32).allow('').default(''),
   VESPA_CONFIG_SERVER_URL: Joi.string().uri().default('http://127.0.0.1:19071'),
+  // When Vespa holds hashed values (encryption gateway), search hits are refilled from Postgres before they are shown.
+  VESPA_HYDRATE_RESULTS_FROM_DB: Joi.boolean().default(true),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(true),
@@ -1543,7 +1549,10 @@ export const config = {
     backfillAgeDays: envVars.VESPA_BACKFILL_AGE_DAYS as number,
     feedUrl: envVars.VESPA_FEED_URL as string,
     queryUrl: envVars.VESPA_QUERY_URL as string,
+    queryToken: envVars.VESPA_QUERY_TOKEN as string,
+    feedToken: envVars.VESPA_FEED_TOKEN as string,
     configServerUrl: envVars.VESPA_CONFIG_SERVER_URL as string,
+    hydrateResultsFromDb: envVars.VESPA_HYDRATE_RESULTS_FROM_DB as boolean,
     queueNames: envVars.VESPA_QUEUE_NAMES as string,
     fileQueueName: envVars.VESPA_FILE_QUEUE_NAME as string,
     workerQueueName: envVars.VESPA_WORKER_QUEUE_NAME as string,
