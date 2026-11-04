@@ -1,37 +1,15 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
-import { logger } from '@/utils/logger';
-import { superpositionClient } from '@/services/superpositionClient';
-
-/** Superposition flag: true reads the stored password hash from OrgMemberCredential, false from the old OrgMember column. */
-const READ_FROM_CREDENTIAL_TABLE_FLAG = 'read_password_hash_from_credential_table';
-
-async function shouldReadFromCredentialTable(): Promise<boolean> {
-  try {
-    return await superpositionClient.getBooleanValue(READ_FROM_CREDENTIAL_TABLE_FLAG, false, {});
-  } catch (error) {
-    logger.error(`[OrgMemberCredential] Failed to read ${READ_FROM_CREDENTIAL_TABLE_FLAG}, defaulting to OrgMember column:`, error);
-    return false;
-  }
-}
 
 /**
- * Returns the stored password hash for a member, or null when none is set.
- * Source is chosen by the superposition flag: new table when true, the old OrgMember column when false.
+ * Returns the stored password hash for a member from OrgMemberCredential, or null when none is set.
  */
 export async function getPasswordHash(memberId: string): Promise<string | null> {
-  if (await shouldReadFromCredentialTable()) {
-    const row = await db.orgMemberCredential.findUnique({
-      where: { memberId },
-      select: { passwordHash: true },
-    });
-    return row?.passwordHash ?? null;
-  }
-  const member = await db.orgMember.findUnique({
+  const row = await db.orgMemberCredential.findUnique({
     where: { memberId },
     select: { passwordHash: true },
   });
-  return member?.passwordHash ?? null;
+  return row?.passwordHash ?? null;
 }
 
 export interface SetPasswordHashInput {
@@ -41,8 +19,8 @@ export interface SetPasswordHashInput {
 }
 
 /**
- * Writes passwordHash to BOTH OrgMember (old column, kept until reads are switched over and it
- * is dropped — see [ticket/doc]) and OrgMemberCredential (new table, non_zero schema) so the
+ * Writes passwordHash to BOTH OrgMember (old column, no longer read; kept in sync until it is
+ * dropped) and OrgMemberCredential (new table, non_zero schema, the only read source) so the
  * two commit together or not at all.
  *
  * Goes through the normal ACL-wrapped client: callers keep the authorization they already had
