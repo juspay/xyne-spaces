@@ -436,8 +436,8 @@ async function ingestTicket(
 
   // Build description: add JIRA link if title was AI-generated (not fallback)
   let description = ticket.task_description || '';
-  if (titleText !== fallbackTitle) {
-    const jiraLink = `${description !== '' ? '\n\n\n' : ''}https://juspay.atlassian.net/browse/${ticket.jira_issue_id}`;
+  if (titleText !== fallbackTitle && config.jira.baseUrl) {
+    const jiraLink = `${description !== '' ? '\n\n\n' : ''}${config.jira.baseUrl.replace(/\/+$/, '')}/browse/${ticket.jira_issue_id}`;
     description = description ? `${description}${jiraLink}` : jiraLink.trim();
   }
 

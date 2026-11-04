@@ -115,10 +115,3 @@ export const DEFAULT_WORKSPACE_ID: string =
 // set VITE_SLACK_APP_INSTALL_URL in .env.local — the UI hides the link when unset.
 export const SLACK_APP_INSTALL_URL: string =
   (import.meta.env['VITE_SLACK_APP_INSTALL_URL'] as string) || '';
-
-// Contact addresses shown on the legal pages (Privacy Policy, Terms of Service).
-// Deployment-specific, so env-only; the pages leave the contact line out when unset.
-export const LEGAL_CONTACT_EMAIL: string =
-  (import.meta.env['VITE_LEGAL_CONTACT_EMAIL'] as string) || '';
-export const PRIVACY_CONTACT_EMAIL: string =
-  (import.meta.env['VITE_PRIVACY_CONTACT_EMAIL'] as string) || '';

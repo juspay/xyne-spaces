@@ -134,29 +134,29 @@ describe('parseBitbucketRepoUrl', () => {
 
 describe('parseGitHubRepoUrl', () => {
   it('parses an https github.com URL', () => {
-    expect(parseGitHubRepoUrl('https://github.com/juspay/xyne-spaces')).toEqual({
-      owner: 'juspay',
+    expect(parseGitHubRepoUrl('https://github.com/xyne/xyne-spaces')).toEqual({
+      owner: 'xyne',
       repo: 'xyne-spaces',
     });
   });
 
   it('strips a trailing .git', () => {
-    expect(parseGitHubRepoUrl('https://github.com/juspay/xyne-spaces.git')).toEqual({
-      owner: 'juspay',
+    expect(parseGitHubRepoUrl('https://github.com/xyne/xyne-spaces.git')).toEqual({
+      owner: 'xyne',
       repo: 'xyne-spaces',
     });
   });
 
   it('parses a scheme-less URL', () => {
-    expect(parseGitHubRepoUrl('github.com/juspay/xyne-spaces')).toEqual({
-      owner: 'juspay',
+    expect(parseGitHubRepoUrl('github.com/xyne/xyne-spaces')).toEqual({
+      owner: 'xyne',
       repo: 'xyne-spaces',
     });
   });
 
   it('parses a www.github.com URL', () => {
-    expect(parseGitHubRepoUrl('https://www.github.com/juspay/xyne-spaces')).toEqual({
-      owner: 'juspay',
+    expect(parseGitHubRepoUrl('https://www.github.com/xyne/xyne-spaces')).toEqual({
+      owner: 'xyne',
       repo: 'xyne-spaces',
     });
   });
@@ -169,15 +169,15 @@ describe('parseGitHubRepoUrl', () => {
   });
 
   it('parses scp-like SSH clone syntax', () => {
-    expect(parseGitHubRepoUrl('git@github.com:juspay/xyne-spaces.git')).toEqual({
-      owner: 'juspay',
+    expect(parseGitHubRepoUrl('git@github.com:xyne/xyne-spaces.git')).toEqual({
+      owner: 'xyne',
       repo: 'xyne-spaces',
     });
   });
 
   it('ignores extra path segments, query and fragment', () => {
-    expect(parseGitHubRepoUrl('https://github.com/juspay/xyne-spaces/tree/main?tab=readme#top')).toEqual({
-      owner: 'juspay',
+    expect(parseGitHubRepoUrl('https://github.com/xyne/xyne-spaces/tree/main?tab=readme#top')).toEqual({
+      owner: 'xyne',
       repo: 'xyne-spaces',
     });
   });

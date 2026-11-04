@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # phase1-pod-migrate.sh — Phase-1 org-only foundation: apply schema + migrate
-# current users into the default "Juspay" org. Safe to run inside a claw-auth
+# current users into the default org (DEFAULT_ORG_NAME). Safe to run inside a claw-auth
 # pod (it already has DATABASE_URL, node_modules, and `tsx`). IDEMPOTENT —
 # re-running is a no-op once every user has an orgId.
 #
@@ -10,7 +10,7 @@
 #                                users.orgId (NULLABLE). No data loss; does NOT
 #                                touch users.id or the email unique index.
 #   2. prisma generate         → refresh the client (no-op if already current).
-#   3. backfill-default-org.ts → create/reuse the "Juspay" org and set
+#   3. backfill-default-org.ts → create/reuse the default org and set
 #                                users.orgId + an OrgMember row for EVERY user.
 #                                DEFAULT_ADMIN_EMAIL (if set) becomes OWNER.
 #
@@ -51,8 +51,8 @@ fi
 echo "[phase1] 2/3 prisma generate…"
 npx --no-install prisma generate >/dev/null 2>&1 || echo "[phase1] (generate skipped — client already built into image)"
 
-# ── 3. Backfill current users → Juspay ─────────────────────────────────────
-echo "[phase1] 3/3 backfill users into the Juspay org…"
+# ── 3. Backfill current users → default org ────────────────────────────────
+echo "[phase1] 3/3 backfill users into the default org…"
 DEFAULT_ADMIN_EMAIL="$ADMIN_EMAIL" npx --no-install tsx scripts/backfill-default-org.ts
 
 echo "[phase1] Done. If the backfill reported 0 remaining nulls, you can ship the"

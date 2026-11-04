@@ -25,15 +25,12 @@ const PRODUCT_KEYTERMS = [
   'Xyne Scribe',
   'Xyne Search',
   'Xyne Calls',
-  'Juspay Euler',
   'Namma Cloud',
   'Xyne Chats',
   'Xyne Tickets',
-  'Juspay Hyperswitch',
   'Xyne Support',
   'Namma Yatri',
   'Xyne Spaces',
-  'Juspay',
   'Xyne Code',
   'Xyne Training',
   'Namma Bengaluru',
@@ -43,7 +40,6 @@ const PRODUCT_KEYTERMS = [
   'Namma Shuttle',
   'Xyne Agent',
   'Xyne Bot',
-  'Juspay Technologies',
   'Namma Switch',
 ];
 

@@ -26,12 +26,12 @@ import { createLogger } from "../logger.js";
 const log = createLogger("users-jit");
 
 /**
- * Phase-1 default org name. MUST stay in sync with
- * `scripts/backfill-default-org.ts` (same literal). New JIT-mirrored users are
+ * Phase-1 default org name (`DEFAULT_ORG_NAME`). MUST stay in sync with
+ * `scripts/backfill-default-org.ts` (same env + fallback). New JIT-mirrored users are
  * attached here so they gain org context immediately, without waiting for a
  * backfill re-run.
  */
-const DEFAULT_ORG_NAME = "Juspay";
+const DEFAULT_ORG_NAME = process.env["DEFAULT_ORG_NAME"]?.trim() || "Xyne";
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -256,7 +256,7 @@ async function linkSpacesIdentity(spacesUser: SpacesUserProfile, orgId: string, 
  *      being moved to `connected_surfaces`.
  *   3. `orgHint` — an explicit org (e.g. the invoked agent's org), used only
  *      when there is no workspace mapping and fail-closed policy is not active.
- *   4. Fallback — the default org (Juspay). Once a second tenant is live, set
+ *   4. Fallback — the default org (DEFAULT_ORG_NAME). Once a second tenant is live, set
  *      `JIT_UNMAPPED_WORKSPACE_POLICY=reject` to FAIL CLOSED for unmapped
  *      workspaces so a new Spaces tenant can't silently pollute the default org.
  *

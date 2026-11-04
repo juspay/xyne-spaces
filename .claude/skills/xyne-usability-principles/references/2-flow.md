@@ -5,7 +5,7 @@
 How a person moves from intent to outcome: how many steps it takes, whether
 they keep their place, whether they can always get back, and whether the
 product respects the decisions they have already made. This is where
-Juspay's stated principle "Master the flow" lives.
+Xyne's stated principle "Master the flow" lives.
 
 ## The two principles
 
@@ -87,7 +87,7 @@ the one habit they rely on everywhere.
 - Don't disable the main action; validate when the user submits.
 - The back button must always go back.
 - Let the user choose how a list is ordered.
-- Master the flow (Juspay stated principle).
+- Master the flow (Xyne stated principle).
 
 ## Key readings and what each teaches
 

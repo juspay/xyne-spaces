@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
 // import { AxiosError } from 'axios';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -27,7 +27,7 @@ import { getPendingSdkSso, clearPendingSdkSso } from '../../utils/pendingSdkSso'
  * - Background image with gradient overlay and fixed attachment
  * - Touch-friendly targets (min 44px height)
  * - Optimized text sizing for all screen sizes
- * - Uses Juspay Blend Design System
+ * - Uses Blend Design System
  * - Modern, minimalist design with Xyne branding
  * - Smooth transitions and hover states
  */
@@ -652,7 +652,7 @@ const AuthScreen = (): ReactElement | null => {
                             clearError();
                           }
                         }}
-                        placeholder='Juspay Inc'
+                        placeholder='Xyne Inc'
                         className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
                           isOrganizationNameTakenError
                             ? 'border-amber-400 focus:ring-amber-500'
@@ -944,27 +944,6 @@ const AuthScreen = (): ReactElement | null => {
                           >
                             {isLoading ? 'Please wait...' : 'Sign In'}
                           </button>
-                          <p className='text-xs text-muted-foreground text-center'>
-                            By signing in you are agreeing to the{' '}
-                            <Link
-                              to='/terms'
-                              className='underline underline-offset-2 hover:text-foreground'
-                              data-track-category='Auth'
-                              data-track-name='TermsOfServiceLink'
-                            >
-                              Terms of Service
-                            </Link>{' '}
-                            and{' '}
-                            <Link
-                              to='/privacy'
-                              className='underline underline-offset-2 hover:text-foreground'
-                              data-track-category='Auth'
-                              data-track-name='PrivacyPolicyLink'
-                            >
-                              Privacy Policy
-                            </Link>
-                            .
-                          </p>
                         </form>
                       )}
                     </div>

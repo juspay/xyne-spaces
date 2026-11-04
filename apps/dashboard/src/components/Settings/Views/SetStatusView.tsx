@@ -238,7 +238,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
 
       {/* Hardcoded suggestions */}
       <div className='space-y-2'>
-        <p className='text-sm font-medium text-foreground'>For Juspay</p>
+        <p className='text-sm font-medium text-foreground'>For Xyne</p>
         <div className='space-y-0.5'>
           {STATUS_SUGGESTIONS.map((suggestion, index) => (
             <button

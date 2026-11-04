@@ -114,7 +114,7 @@ const UNBOUND_EMAIL_MENTION_RE =
 
 // Dotted handle shorthand — e.g. `@bowmitha.c`, `@utkarsh.kumar`,
 // `@deepak.kushwaha`. This is the username form agents copy out of
-// Bitbucket/Jira/PR text; at Juspay it is exactly the email local-part. The
+// Bitbucket/Jira/PR text; at Xyne it is exactly the email local-part. The
 // name pattern above can't match it (lowercase, dots) and the email pattern
 // requires a full `@domain.tld`, so without this these mentions silently
 // stay plain text. Resolved via `byHandle` (email startsWith `${handle}@`).
