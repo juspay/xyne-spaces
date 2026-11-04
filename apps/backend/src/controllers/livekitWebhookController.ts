@@ -6,6 +6,7 @@ import { type Call } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { redisService } from '@/services/redisService';
 import { v4 as uuidv4 } from 'uuid';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { livekitWebhookACL } from './livekitWebhookACL';
@@ -529,6 +530,18 @@ export class LiveKitWebhookController {
         if (!result) return;
 
         call = result.call;
+
+        // Best-effort tidy-up: frees the pending-room marker initiateCall wrote
+        // (apps/backend/src/controllers/callController.ts) as soon as the real Call row
+        // exists, instead of leaving it to expire on its own TTL. Must match the key
+        // initiateCall builds from the same (channelId, conversationId) pair — uses
+        // existingConversationId (the value read from the incoming room metadata above),
+        // not the `conversationId` local below, which falls back to a freshly generated
+        // uuid when none was supplied and would never match the key initiateCall built.
+        const pendingRoomMarkerKeySuffix = existingConversationId
+          ? `${channelId}:${existingConversationId}`
+          : channelId;
+        await redisService.del(`call:pending-room:${pendingRoomMarkerKeySuffix}`).catch(() => {});
 
         // SDLC linking: the initiator validated this context; now that the call
         // and its conversation exist, record the entity mapping. Owner is a
