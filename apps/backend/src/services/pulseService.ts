@@ -35,7 +35,7 @@ interface PulseOrg {
 
 interface PulseProduct {
   id: string;         // lead/product ID
-  product?: string;   // product name e.g. "Juspay Safe"
+  product?: string;   // product name e.g. "Xyne Safe"
   stage?: string;     // e.g. "MERCHANT_CONTACTED"
   productId?: string; // fallback alias
 }
@@ -48,7 +48,7 @@ export interface PulseOrgContext {
 }
 
 /**
- * PulseService — integration with the Pulse (Juspay) external actionables system.
+ * PulseService — integration with the Pulse external actionables system.
  *
  * Sends meeting data (participants, summary, action items) to the Pulse S2S API.
  * All methods are no-ops when PULSE_ENABLED is false, so callers can

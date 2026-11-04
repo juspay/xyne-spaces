@@ -778,7 +778,7 @@ function SettingsStep({
             {({ isSelected }) => (
               <>
                 <Text className='text-[15px] font-medium text-bottomsheet-container-foreground'>
-                  Public - Anyone in Juspay
+                  Public - Anyone in Xyne
                 </Text>
                 <Radio>
                   <Radio.Indicator

@@ -1,10 +1,10 @@
 /**
- * BITBOT MCP server — proxies the Juspay PR analysis service. Single tool:
+ * BITBOT MCP server — proxies the PR analysis service. Single tool:
  *
  *   bulk_prs(repos, from_date, to_date, state)
  *     POST {BASE_URL}/api/prs/bulk
  *
- * Modelled after juspay-internal-tools-server.ts — same response truncation
+ * Modelled after the internal-tools server — same response truncation
  * guard, same error shape, stdio transport.
  *
  * No application-layer auth — pr-analysis gates access by NAT-IP allowlist
@@ -117,7 +117,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "array",
             description:
               "List of repos to query. Each entry must include both project_key " +
-              "(Bitbucket project, e.g. JBIZ / JUSPAY / EXC / IRIS / JUSAI) and " +
+              "(Bitbucket project, e.g. JBIZ / EXC / IRIS / JUSAI) and " +
               "repo_name (e.g. euler-api-txns).",
             items: {
               type: "object",

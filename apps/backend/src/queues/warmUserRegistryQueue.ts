@@ -36,7 +36,7 @@ const STT_HINT_NAMES_TTL_SECONDS = 26 * 60 * 60;
 export async function computeSttHintNames(): Promise<string[]> {
   const db = DatabaseClient.getInstance();
 
-  const [botUsers, activeJuspayUsers] = await Promise.all([
+  const [botUsers, activeOrgUsers] = await Promise.all([
     db.user.findMany({
       where: { userType: UserType.BOT },
       select: { name: true },
@@ -57,7 +57,7 @@ export async function computeSttHintNames(): Promise<string[]> {
 
   const seen = new Set<string>();
   const names: string[] = [];
-  for (const u of [...botUsers, ...activeJuspayUsers]) {
+  for (const u of [...botUsers, ...activeOrgUsers]) {
     const name = (u.name || '').trim();
     if (!name) continue;
     const key = name.toLowerCase();
@@ -67,7 +67,7 @@ export async function computeSttHintNames(): Promise<string[]> {
   }
 
   logger.info(
-    `${TAG} Computed ${names.length} STT hint names (bots=${botUsers.length}, activeJuspay=${activeJuspayUsers.length})`
+    `${TAG} Computed ${names.length} STT hint names (bots=${botUsers.length}, activeOrg=${activeOrgUsers.length})`
   );
   return names;
 }

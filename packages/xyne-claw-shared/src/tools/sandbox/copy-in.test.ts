@@ -153,7 +153,7 @@ describe("sandbox-copy-in path confinement (contextPath)", () => {
 
   it("passes confinement for a normal tool-results path, then fails only on the missing session", async () => {
     const out = await sandboxCopyIn.execute(
-      { sessionId: "no-such-session", contextPath: "tool-results/juspay_alerts-x.json" },
+      { sessionId: "no-such-session", contextPath: "tool-results/xyne_alerts-x.json" },
       ctx({ contextRoot: CTX_ROOT }),
     );
     expect(out).toContain("no-such-session");

@@ -1,15 +1,15 @@
 /**
  * Backfill — PHASE 2 (slice 1). Stamps every existing Agent / Skill /
- * SubagentDefinition with the default org ("Juspay"), so the follow-up
+ * SubagentDefinition with the default org (DEFAULT_ORG_NAME, "Xyne" by default), so the follow-up
  * migration can flip `orgId` to NOT NULL and swap the slug/name unique indexes
  * to composite ([orgId, slug]).
  *
  * Mirrors `scripts/backfill-default-org.ts`:
- *   - reuses the existing "Juspay" org (created by the phase-1 backfill),
+ *   - reuses the existing default org (created by the phase-1 backfill),
  *   - idempotent — only touches rows with `orgId IS NULL`,
  *   - a fully-backfilled DB is a no-op.
  *
- * Prerequisite: the phase-1 backfill has run (the Juspay org exists) AND the
+ * Prerequisite: the phase-1 backfill has run (the default org exists) AND the
  * phase-2 slice-1 migration is applied (the `orgId` columns exist).
  *
  * Usage:
@@ -20,7 +20,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const ORG_NAME = "Juspay";
+const ORG_NAME = process.env["DEFAULT_ORG_NAME"]?.trim() || "Xyne";
 
 async function main(): Promise<void> {
   console.log("[backfill:phase2] Starting…");

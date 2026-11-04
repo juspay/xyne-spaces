@@ -84,7 +84,7 @@ model User {
   proactivePrefs ProactivePrefs?
 
   /// Multi-tenancy (phase 1, org-only). Required: every user belongs to exactly
-  /// one org (the "Juspay" default until multi-org ships). Enforced NOT NULL by
+  /// one org (the DEFAULT_ORG_NAME default until multi-org ships). Enforced NOT NULL by
   /// migration `20260705170000_phase1_orgid_notnull` AFTER the backfill filled
   /// every row. Every user-creation path sets it at insert time (users-jit.ts,
   /// routes/users.ts). Does NOT change `User.id` (still the Spaces user id).
@@ -234,7 +234,7 @@ model TwinResponseFeedback {
   @@map("twin_response_feedback")
 }
 
-/// Top-level tenant. Phase 1 introduces exactly one org ("Juspay") that every
+/// Top-level tenant. Phase 1 introduces exactly one org (DEFAULT_ORG_NAME) that every
 /// existing user is backfilled into; multi-org comes later. Additive only —
 /// nothing about agent behavior or the Spaces integration depends on this yet.
 enum OrgRole {
@@ -1048,7 +1048,7 @@ model AgentProviderCredentials {
 model SharedProviderCredential {
   id              String                     @id @default(cuid())
   /// NULL = platform-wide credential (CLAW_ADMIN-only to create): bindable by
-  /// agents of ANY org — e.g. one Codex ChatGPT account serving both Juspay
+  /// agents of ANY org — e.g. one Codex ChatGPT account serving both Xyne
   /// and NY agents. Non-null = scoped to that org (owners can create/bind).
   orgId           String?
   provider        String /// "codex" | "claude" | "copilot" | "openrouter" | ...

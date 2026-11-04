@@ -1,7 +1,7 @@
 /**
  * Backfill — PHASE 1 (org-only foundation).
  *
- * Places every pre-tenancy user into the single default org ("Juspay") with
+ * Places every pre-tenancy user into the single default org (DEFAULT_ORG_NAME, "Xyne" by default) with
  * one OrgMember row each, so that after this phase every `users.orgId` is set
  * and the follow-up migration can flip the column to NOT NULL.
  *
@@ -14,7 +14,7 @@
  *   - We set `user.orgId` (we do NOT add workspaceId / orgMemberId / role to User).
  *
  * Idempotent: only touches users with `orgId IS NULL`; reuses an existing
- * "Juspay" org; upserts OrgMember on the (userId, orgId) unique key. A fresh,
+ * default org; upserts OrgMember on the (userId, orgId) unique key. A fresh,
  * fully-backfilled DB is a no-op.
  *
  * Usage:
@@ -26,7 +26,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const ORG_NAME = "Juspay";
+const ORG_NAME = process.env["DEFAULT_ORG_NAME"]?.trim() || "Xyne";
 
 async function main(): Promise<void> {
   console.log("[backfill:phase1] Starting…");

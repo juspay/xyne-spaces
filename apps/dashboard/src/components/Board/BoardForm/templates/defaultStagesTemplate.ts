@@ -29,7 +29,7 @@ const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
     defaultTicketStatusV2: TicketStatusV2.PAUSED,
   },
   {
-    name: 'ON_JUSPAY',
+    name: 'ON_XYNE',
     sequenceNumber: '6',
     defaultTicketStatusV2: TicketStatusV2.PAUSED,
   },

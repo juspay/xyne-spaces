@@ -4,15 +4,15 @@ const TOKEN = process.env["JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN"] ?? "";
 const BASE_URL = process.env["JUSPAY_INTERNAL_TOOLS_BASE_URL"] ?? "";
 
 /**
- * Connects directly to the juspay-internal-tools Python MCP server's /tools
+ * Connects directly to the internal-tools Python MCP server's /tools
  * HTTP endpoint via Streamable HTTP transport. Tools are fetched dynamically
  * from the real server — no hardcoded tool list.
  *
  * Authentication: x-api-key header carries the shared s2s token
  * (JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN), which must match SERVER_API_KEY
- * configured on juspay-internal-tools.
+ * configured on the internal-tools server.
  *
- * Tool filtering: the x-tools-needed header selects which categories juspay
+ * Tool filtering: the x-tools-needed header selects which categories the server
  * returns -- "curie" (Curie CRM: 7 read tools plus 2 write tools for
  * lead/org/ticket queries and ticket edits), "default" and "admin_config".
  *
@@ -21,7 +21,7 @@ const BASE_URL = process.env["JUSPAY_INTERNAL_TOOLS_BASE_URL"] ?? "";
  * be overridden by agent config) and refuses to sign an action for a tool that
  * is not. Names must be the RAW MCP tool names, not the prefixed runtime ones.
  */
-export const juspayInternalToolsAdapter: HttpMcpAdapter = {
+export const internalToolsAdapter: HttpMcpAdapter = {
   transport: "http",
   type: "juspay-internal-tools",
   // __list_tools__ performs a real listTools() call against the Python server,

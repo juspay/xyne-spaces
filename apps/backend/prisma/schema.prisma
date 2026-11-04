@@ -38,7 +38,7 @@ model Agent {
   updatedAt     DateTime @updatedAt
   createdAt     DateTime @default(now())
   temp          Float?   @default(0.7)
-  scope         String   @default("project") // juspay/team/project
+  scope         String   @default("project") // org/team/project
   scopeURI      String?
 
   // Relations

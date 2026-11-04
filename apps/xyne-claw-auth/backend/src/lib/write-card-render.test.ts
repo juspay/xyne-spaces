@@ -7,7 +7,7 @@ const { signAction, verifyActionSignature, writeActionPayload } = await import("
 const { buildWriteApprovalCardFlow, mintWriteCardAction, readPendingWriteAction } = await import("./write-card-render.js");
 
 const base = {
-  serverType: "juspay-dashboard-stream",
+  serverType: "xyne-dashboard-stream",
   tool: "create_payout_order",
   params: { amount: 1, customerId: "c1" },
   userId: "user-1",

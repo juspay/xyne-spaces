@@ -185,7 +185,7 @@ JENKINS_JOB_PATH - Path to job (e.g., /job/xyne-spaces)
 
 ---
 
-## JAF (Juspay Agent Framework)
+## JAF (agent framework)
 
 ### Purpose
 AI agent execution framework for intelligent automation.

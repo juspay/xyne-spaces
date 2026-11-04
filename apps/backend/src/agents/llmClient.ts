@@ -48,7 +48,7 @@ export async function resolveOrgLLMClient(_opts: {
 //   });
 // }
 
-// The JAF agent runtime (@juspay-jaf/jaf) was removed: it depends on zod v3 internals, which
+// The JAF agent runtime package was removed: it depends on zod v3 internals, which
 // blocks the zod 4 upgrade. The types below mirror the subset of JAF that the agents compile
 // against, and every runtime entry point throws, so the agents built on it fail with a clear
 // error until they are rebuilt on a new LLM client (see also llmClient.ts).

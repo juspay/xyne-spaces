@@ -9,7 +9,7 @@
  *   SOURCE_TYPE=zoho \
  *   DISPLAY_NAME="Zoho (Dashboard Team)" \
  *   CREDENTIALS='{"jwkSet":"...","apiKey":"...","apiUrl":"...","orgId":"..."}' \
- *   ORG_NAME=juspay \
+ *   ORG_NAME=xyne \
  *   CHANNEL_TITLE="Dashboard Support" \
  *   CHANNEL_DESCRIPTION="Support tickets from Dashboard team" \
  *   CHANNEL_TAGS="zoho,dashboard,support" \
@@ -133,7 +133,7 @@ function validateEnv() {
     console.error('  SOURCE_TYPE=zoho \\');
     console.error('  DISPLAY_NAME="Zoho (Dashboard Team)" \\');
     console.error('  CREDENTIALS=\'{"jwkSet":"...","apiKey":"...","apiUrl":"...","orgId":"..."}\' \\');
-    console.error('  ORG_NAME=juspay \\');
+    console.error('  ORG_NAME=xyne \\');
     console.error('  CHANNEL_TITLE="Dashboard Support" \\');
     console.error('  CHANNEL_DESCRIPTION="Support tickets from Dashboard" \\');
     console.error('  CHANNEL_TAGS="zoho,dashboard,support" \\');

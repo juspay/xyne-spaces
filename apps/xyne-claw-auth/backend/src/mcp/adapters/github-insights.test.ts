@@ -66,7 +66,7 @@ function star(login: string, daysAgo: number) {
   };
 }
 
-const REF = { base: 'https://api.github.com/repos/juspay/xyne-spaces' };
+const REF = { base: 'https://api.github.com/repos/xyne/xyne-spaces' };
 
 describe('tool definitions', () => {
   it('exposes all ten growth tools with owner/repo required where applicable', () => {
@@ -194,17 +194,17 @@ describe('handleListStargazers', () => {
       [/stargazers\?/, () => jsonRes([star('b', 40), star('a', 2)])],
     ]);
 
-    const result = await handleListStargazers(creds, { owner: 'juspay', repo: 'xyne-spaces' });
+    const result = await handleListStargazers(creds, { owner: 'xyne', repo: 'xyne-spaces' });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
 
-    expect(payload.repo).toBe('juspay/xyne-spaces');
+    expect(payload.repo).toBe('xyne/xyne-spaces');
     expect(payload.totalStars).toBe(203);
     expect(payload.count).toBe(2);
     expect(payload.complete).toBe(true);
     expect(payload.recent.last7Days).toBe(1);
     expect(payload.recent.last30Days).toBe(1);
     expect(payload.stargazers[0].login).toBe('a');
-    expect(result.citations?.[0]?.url).toBe('https://github.com/juspay/xyne-spaces/stargazers');
+    expect(result.citations?.[0]?.url).toBe('https://github.com/xyne/xyne-spaces/stargazers');
     // The citation token must stay on the headline so the JSON body parses.
     expect(result.content.startsWith('[clf-')).toBe(true);
   });
@@ -221,24 +221,24 @@ describe('handleListStargazers', () => {
             data: Object.fromEntries(
               logins.map((login, i) => [
                 `u${i}`,
-                { login, name: `Name ${i}`, company: i < 20 ? '@juspay' : 'Acme', location: 'Bengaluru', followers: { totalCount: i }, repositories: { totalCount: 3 }, createdAt: '2019-01-01T00:00:00Z' },
+                { login, name: `Name ${i}`, company: i < 20 ? '@xyne' : 'Acme', location: 'Bengaluru', followers: { totalCount: i }, repositories: { totalCount: 3 }, createdAt: '2019-01-01T00:00:00Z' },
               ]),
             ),
           }),
       ],
     ]);
 
-    const result = await handleListStargazers(creds, { owner: 'juspay', repo: 'xyne-spaces', enrich: true });
+    const result = await handleListStargazers(creds, { owner: 'xyne', repo: 'xyne-spaces', enrich: true });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
 
     expect(urlsOf(fetchMock).filter((u) => u.includes('/users/')).length).toBe(0);
     expect(urlsOf(fetchMock).filter((u) => u.includes('graphql')).length).toBe(1);
     expect(payload.enrichedVia).toBe('graphql');
     expect(payload.aggregates.profiled).toBe(30);
-    expect(payload.aggregates.topCompanies[0]).toEqual({ value: 'juspay', count: 20 });
+    expect(payload.aggregates.topCompanies[0]).toEqual({ value: 'xyne', count: 20 });
     // Newest star first: user29 is 1 day old, user0 is 30 days old.
     expect(payload.stargazers[0].login).toBe('user29');
-    expect(payload.stargazers.find((s: { login: string }) => s.login === 'user0').company).toBe('juspay');
+    expect(payload.stargazers.find((s: { login: string }) => s.login === 'user0').company).toBe('xyne');
   });
 
   it('surfaces a low rate-limit budget instead of silently burning the PAT', async () => {
@@ -246,19 +246,19 @@ describe('handleListStargazers', () => {
       [/stargazers\/count/, () => jsonRes({ count: 1 }, { headers: { 'x-ratelimit-remaining': '42', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': '1800000000' } })],
       [/stargazers\?/, () => jsonRes([star('a', 1)], { headers: { 'x-ratelimit-remaining': '41', 'x-ratelimit-limit': '5000' } })],
     ]);
-    const result = await handleListStargazers(creds, { owner: 'juspay', repo: 'xyne-spaces' });
+    const result = await handleListStargazers(creds, { owner: 'xyne', repo: 'xyne-spaces' });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(String(payload.rateLimit)).toContain('41/5000');
   });
 
   it('rejects a malformed since date rather than ignoring the filter', async () => {
     stubFetch([[/./, () => jsonRes({})]]);
-    await expect(handleListStargazers(creds, { owner: 'juspay', repo: 'xyne-spaces', since: 'last tuesday' })).rejects.toThrow(/not a parsable date/);
+    await expect(handleListStargazers(creds, { owner: 'xyne', repo: 'xyne-spaces', since: 'last tuesday' })).rejects.toThrow(/not a parsable date/);
   });
 
   it('maps a 401 to a re-connect instruction', async () => {
     stubFetch([[/./, () => jsonRes({ message: 'Bad credentials' }, { status: 401 })]]);
-    await expect(handleListStargazers(creds, { owner: 'juspay', repo: 'xyne-spaces' })).rejects.toThrow(/PAT is invalid, revoked or expired/);
+    await expect(handleListStargazers(creds, { owner: 'xyne', repo: 'xyne-spaces' })).rejects.toThrow(/PAT is invalid, revoked or expired/);
   });
 });
 
@@ -321,7 +321,7 @@ describe('handleStarHistory', () => {
       [/stargazers\/history/, () => jsonRes(weeks)],
     ]);
 
-    const result = await handleStarHistory(creds, { owner: 'juspay', repo: 'xyne-spaces', weeks: 8, format: 'series' });
+    const result = await handleStarHistory(creds, { owner: 'xyne', repo: 'xyne-spaces', weeks: 8, format: 'series' });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
 
     expect(payload.currentStars).toBe(120);
@@ -340,7 +340,7 @@ describe('handleStarHistory', () => {
       [/stargazers\/history/, () => jsonRes({ message: 'Not Found' }, { status: 404 })],
       [/stargazers\?/, () => jsonRes([star('a', 1), star('b', 2), star('c', 3)])],
     ]);
-    const result = await handleStarHistory(creds, { owner: 'juspay', repo: 'xyne-spaces' });
+    const result = await handleStarHistory(creds, { owner: 'xyne', repo: 'xyne-spaces' });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(payload.derived).toBe(true);
     expect(payload.summary.last7Days).toBe(3);
@@ -351,7 +351,7 @@ describe('handleStarHistory', () => {
 describe('handleRepoTraffic', () => {
   it('explains that traffic needs push access when GitHub answers 403', async () => {
     stubFetch([[/traffic/, () => jsonRes({ message: 'Must have push access to repository' }, { status: 403, headers: { 'x-ratelimit-remaining': '4999' } })]]);
-    await expect(handleRepoTraffic(creds, { owner: 'juspay', repo: 'xyne-spaces' })).rejects.toThrow(/requires PUSH access/);
+    await expect(handleRepoTraffic(creds, { owner: 'xyne', repo: 'xyne-spaces' })).rejects.toThrow(/requires PUSH access/);
   });
 
   it('summarises views, clones, referrers and paths', async () => {
@@ -359,9 +359,9 @@ describe('handleRepoTraffic', () => {
       [/traffic\/views/, () => jsonRes({ count: 900, uniques: 120, views: [{ timestamp: '2026-09-20T00:00:00Z', count: 90, uniques: 12 }] })],
       [/traffic\/clones/, () => jsonRes({ count: 40, uniques: 22, clones: [{ timestamp: '2026-09-20T00:00:00Z', count: 4, uniques: 2 }] })],
       [/popular\/referrers/, () => jsonRes([{ referrer: 'news.ycombinator.com', count: 300, uniques: 200 }])],
-      [/popular\/paths/, () => jsonRes([{ path: '/juspay/xyne-spaces', title: 'xyne', count: 500, uniques: 90 }])],
+      [/popular\/paths/, () => jsonRes([{ path: '/xyne/xyne-spaces', title: 'xyne', count: 500, uniques: 90 }])],
     ]);
-    const result = await handleRepoTraffic(creds, { owner: 'juspay', repo: 'xyne-spaces' });
+    const result = await handleRepoTraffic(creds, { owner: 'xyne', repo: 'xyne-spaces' });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(payload.views.total).toBe(900);
     expect(payload.clones.uniqueCloners).toBe(22);
@@ -384,7 +384,7 @@ describe('handleListForks', () => {
           ]),
       ],
     ]);
-    const result = await handleListForks(creds, { owner: 'juspay', repo: 'xyne-spaces' });
+    const result = await handleListForks(creds, { owner: 'xyne', repo: 'xyne-spaces' });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(payload.count).toBe(2);
     expect(payload.activeForks).toBe(1);
@@ -406,7 +406,7 @@ describe('handleReleaseDownloads', () => {
           ]),
       ],
     ]);
-    const result = await handleReleaseDownloads(creds, { owner: 'juspay', repo: 'xyne-spaces' });
+    const result = await handleReleaseDownloads(creds, { owner: 'xyne', repo: 'xyne-spaces' });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(payload.totalDownloads).toBe(210);
     expect(payload.latestRelease.tag).toBe('v2.0.0');
@@ -420,10 +420,10 @@ describe('handleRepoSnapshot', () => {
       [/search\/issues.*is%3Aissue/, () => jsonRes({ total_count: 12 })],
       [/search\/issues.*is%3Apr/, () => jsonRes({ total_count: 5 })],
       [
-        /repos\/juspay\/xyne-spaces$/,
+        /repos\/xyne\/xyne-spaces$/,
         () =>
           jsonRes({
-            full_name: 'juspay/xyne-spaces',
+            full_name: 'xyne/xyne-spaces',
             stargazers_count: 203,
             watchers_count: 203,
             subscribers_count: 18,
@@ -435,7 +435,7 @@ describe('handleRepoSnapshot', () => {
           }),
       ],
     ]);
-    const result = await handleRepoSnapshot(creds, { owner: 'juspay', repo: 'xyne-spaces', splitIssues: true });
+    const result = await handleRepoSnapshot(creds, { owner: 'xyne', repo: 'xyne-spaces', splitIssues: true });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(payload.counts.watchers).toBe(18);
     expect(payload.counts.openIssuesAndPRs).toBe(17);
@@ -450,7 +450,7 @@ describe('handleRepoActivity', () => {
       [/stats\/participation/, () => jsonRes({ all: Array(52).fill(10), owner: Array(52).fill(4) })],
       [/stats\/commit_activity/, () => jsonRes([{ week: Math.floor(Date.now() / 1000) - 604_800, total: 9, days: [1, 2, 3, 1, 1, 1, 0] }])],
     ]);
-    const result = await handleRepoActivity(creds, { owner: 'juspay', repo: 'xyne-spaces', weeks: 4 });
+    const result = await handleRepoActivity(creds, { owner: 'xyne', repo: 'xyne-spaces', weeks: 4 });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(payload.participation.totalCommits).toBe(40);
     expect(payload.participation.communityCommits).toBe(24);
@@ -460,10 +460,10 @@ describe('handleRepoActivity', () => {
   });
 
   it('refuses to read an org repo\'s all-zero owner series as "100% community"', async () => {
-    // Verified against juspay/xyne-spaces: GitHub reports owner=0 for all 52
+    // Verified against xyne/xyne-spaces: GitHub reports owner=0 for all 52
     // weeks on an org-owned repo, because the owner is the org account.
     stubFetch([[/stats\/participation/, () => jsonRes({ all: Array(52).fill(10), owner: Array(52).fill(0) })]]);
-    const result = await handleRepoActivity(creds, { owner: 'juspay', repo: 'xyne-spaces', metrics: ['participation'] });
+    const result = await handleRepoActivity(creds, { owner: 'xyne', repo: 'xyne-spaces', metrics: ['participation'] });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
     expect(payload.participation.ownerSplitMeaningful).toBe(false);
     expect(String(payload.participation.note)).toContain('ORG-owned');
@@ -476,7 +476,7 @@ describe('handleRepoActivity', () => {
     stubFetch([[/stats\//, () => new Response('', { status: 202 })]]);
     vi.useFakeTimers();
     try {
-      const pending = handleRepoActivity(creds, { owner: 'juspay', repo: 'xyne-spaces', metrics: ['participation'] });
+      const pending = handleRepoActivity(creds, { owner: 'xyne', repo: 'xyne-spaces', metrics: ['participation'] });
       await vi.runAllTimersAsync();
       const result = await pending;
       const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
@@ -500,7 +500,7 @@ describe('handleCommunityPulse', () => {
         () => jsonRes([{ number: 1, created_at: new Date(Date.now() - 2 * DAY).toISOString(), user: { login: 'outsider' } }, { number: 2, pull_request: {}, created_at: new Date().toISOString(), user: { login: 'x' } }]),
       ],
     ]);
-    const result = await handleCommunityPulse(creds, { owner: 'juspay', repo: 'xyne-spaces', days: 30, excludeLogins: ['maintainer'] });
+    const result = await handleCommunityPulse(creds, { owner: 'xyne', repo: 'xyne-spaces', days: 30, excludeLogins: ['maintainer'] });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
 
     expect(payload.opened.issues).toBe(7);
@@ -517,13 +517,13 @@ describe('handleCommunityPulse', () => {
 describe('handleCompareRepos', () => {
   it('isolates a failing repo instead of failing the whole comparison', async () => {
     stubFetch([
-      [/repos\/juspay\/xyne-spaces$/, () => jsonRes({ full_name: 'juspay/xyne-spaces', stargazers_count: 203, forks_count: 30, subscribers_count: 18 })],
+      [/repos\/xyne\/xyne-spaces$/, () => jsonRes({ full_name: 'xyne/xyne-spaces', stargazers_count: 203, forks_count: 30, subscribers_count: 18 })],
       [/repos\/ghost\/missing$/, () => jsonRes({ message: 'Not Found' }, { status: 404 })],
       [/stargazers\/history/, () => jsonRes([])],
     ]);
-    const result = await handleCompareRepos(creds, { repos: ['juspay/xyne-spaces', 'ghost/missing'] });
+    const result = await handleCompareRepos(creds, { repos: ['xyne/xyne-spaces', 'ghost/missing'] });
     const payload = JSON.parse(result.content.slice(result.content.indexOf('{')));
-    expect(payload.ranking[0].repo).toBe('juspay/xyne-spaces');
+    expect(payload.ranking[0].repo).toBe('xyne/xyne-spaces');
     expect(payload.ranking[0].stars).toBe(203);
     expect(payload.ranking[1].error).toContain('not found');
     expect(payload.succeeded).toBe(1);

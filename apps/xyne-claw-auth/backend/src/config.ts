@@ -370,15 +370,15 @@ export const CONFIG = {
      */
     orgContext:
       process.env["ENTITY_EXTRACTION_ORG_CONTEXT"] ??
-      "The data belongs to Juspay, a payments orchestration company. Juspay routes and " +
+      "The data belongs to Xyne, a payments orchestration company. Xyne routes and " +
         "processes online transactions for its merchant clients across many payment gateways, " +
-        "payment methods, card networks and banks. MERCHANTS are Juspay customers who use it to " +
+        "payment methods, card networks and banks. MERCHANTS are Xyne customers who use it to " +
         "accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI " +
-        "are external ecosystem entities. Juspay itself is the operator, NOT an external " +
-        "organisation — never classify Juspay (or its own products/teams) as ORGANISATION.",
+        "are external ecosystem entities. Xyne itself is the operator, NOT an external " +
+        "organisation — never classify Xyne (or its own products/teams) as ORGANISATION.",
   },
   /**
-   * BITBOT — Juspay PR-analysis service. The MCP adapter spawns a stdio
+   * BITBOT — PR-analysis service. The MCP adapter spawns a stdio
    * child (servers/bitbot-server.ts) that POSTs to {bitbotBaseUrl}/api/prs/bulk
    * to fetch PRs across Bitbucket repos. Access is gated by NAT-IP allowlist
    * on the pr-analysis side, so no token is required.
