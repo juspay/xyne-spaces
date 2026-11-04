@@ -3876,8 +3876,8 @@ export async function processTask(
     // .docx conversion still produced "I don't see any attachment".
     // Advertise the SAME sanitized path that writeWorkspaceTextFiles actually
     // wrote. sanitizeRelativePath replaces every char outside [a-zA-Z0-9._-]
-    // with "_", so "Juspay ecomm Issues Log.xlsx" lands at
-    // ".context/Juspay_ecomm_Issues_Log.xlsx.md". Previously we showed the agent
+    // with "_", so "Xyne ecomm Issues Log.xlsx" lands at
+    // ".context/Xyne_ecomm_Issues_Log.xlsx.md". Previously we showed the agent
     // the RAW filename (spaces/specials intact), so its first read hit a
     // nonexistent path and it had to guess the sanitization — which fails
     // outright for names with parens/&/commas/etc. Run the same sanitizer here

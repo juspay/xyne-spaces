@@ -12,8 +12,6 @@ import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
-import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
-import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
 import SdkSsoAuthorizeScreen from './SdkSsoAuthorizeScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
@@ -2119,14 +2117,6 @@ export const router = createBrowserRouter([
       {
         path: '/auth',
         element: <AuthScreen />,
-      },
-      {
-        path: '/terms',
-        element: <TermsOfServiceScreen />,
-      },
-      {
-        path: '/privacy',
-        element: <PrivacyPolicyScreen />,
       },
       {
         path: '/sdk-sso/authorize',

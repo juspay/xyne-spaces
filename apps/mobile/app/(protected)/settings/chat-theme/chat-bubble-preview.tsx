@@ -98,9 +98,9 @@ const metadataBlock = (
 
 const createLinkPreviewMd = (): string =>
   metadataBlock('link_preview', {
-    url: 'https://github.com/juspay/xyne-spaces/pull/1',
+    url: 'https://github.com/xyne/xyne-spaces/pull/1',
     title: 'Pull Request #1',
-    description: 'juspay/xyne-spaces',
+    description: 'xyne/xyne-spaces',
     siteName: 'GitHub',
   });
 
@@ -206,7 +206,7 @@ const PREVIEW_CONVERSATIONS: ConversationItem[] = ((): ConversationItem[] => {
         messageId: 'chat-theme-preview-current-link-message',
         conversationId: 'chat-theme-preview-current-link',
         senderId: CURRENT_USER_ID,
-        content: 'https://github.com/juspay/xyne-spaces/pull/1',
+        content: 'https://github.com/xyne/xyne-spaces/pull/1',
         createdAt: baseTime + 60_000,
         linkPreviewMd,
       }),

@@ -131,7 +131,7 @@ ENV NODE_ENV=production
 
 # Entrypoint is `node`, so this becomes: node --import tsx dist/index.js.
 # `tsc && tsc-alias --resolve-full-paths` makes OUR code plain-node-ready, but a
-# few deps (e.g. @juspay-jaf/jaf) ship ESM with extensionless imports that bare
+# few deps ship ESM with extensionless imports that bare
 # node ESM rejects; tsx is kept purely as the loader that resolves them. tsx is
 # a runtime dependency so it survives the --prod prune above; the heavy dev tree
 # (semantic-release/npm, eslint, test tooling) does not — that's the CVE win.

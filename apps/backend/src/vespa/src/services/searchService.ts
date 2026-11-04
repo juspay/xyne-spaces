@@ -149,7 +149,7 @@ export class SearchService {
    *
    * Hybrid lexical + (for queries > 3 chars) semantic. Matches on name,
    * description, creator, and owning org name (so a cross-org marketplace app is
-   * findable by its org, e.g. "Juspay" — mirroring the UI's "Created by" fallback).
+   * findable by its org, e.g. "Xyne" — mirroring the UI's "Created by" fallback).
    * No per-user ACL — visibility is gated by the XYNE-APPS resource permission at
    * the route. Install state is resolved from the DB (source of truth), scoped to
    * the caller's workspace via the install user's workspaceId.

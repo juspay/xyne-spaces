@@ -266,7 +266,7 @@ function StatusSuggestionLists({
       ) : null}
 
       <View>
-        <Text className='mb-2 text-sm font-semibold text-foreground'>For Juspay</Text>
+        <Text className='mb-2 text-sm font-semibold text-foreground'>For Xyne</Text>
         <View className='gap-1'>
           {STATUS_SUGGESTIONS.map(suggestion => (
             <Pressable

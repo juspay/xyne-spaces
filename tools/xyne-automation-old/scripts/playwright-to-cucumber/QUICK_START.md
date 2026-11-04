@@ -1,6 +1,6 @@
 # Quick Start Guide - Playwright to Cucumber Conversion
 
-This guide explains how to convert Playwright test files to Cucumber BDD format using Claude Code with Juspay Grid.
+This guide explains how to convert Playwright test files to Cucumber BDD format using Claude Code with Xyne Grid.
 
 ## 1. Prerequisites
 
@@ -38,7 +38,7 @@ cp .env.example .env
 # Test environment: local, test, sbx, or prod
 TEST_ENV=local
 
-# Juspay Grid API Configuration (required for conversion)
+# Xyne Grid API Configuration (required for conversion)
 JUSPAY_API_KEY=your_api_key_here
 
 # Optional service URLs
@@ -103,7 +103,7 @@ cat xyne-automation/llm_reports/dry_run/<file_name>_failed_dry_run_<timestamp>.t
 If you only want to convert Playwright specs without running tests, use `npm run codegen`. This command:
 
 - Verifies Claude Code installation (requires manual installation)
-- Uses Juspay Grid API (via Claude Code) to convert Playwright tests
+- Uses Xyne Grid API (via Claude Code) to convert Playwright tests
 - Generates feature files and step definitions
 - Places them in the correct directory structure
 

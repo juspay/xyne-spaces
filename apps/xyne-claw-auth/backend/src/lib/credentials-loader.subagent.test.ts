@@ -66,7 +66,7 @@ vi.mock("../db.js", () => ({
 
 import { loadEffectiveCredentials } from "./credentials-loader.js";
 
-const SERVER = "juspay-internal";
+const SERVER = "xyne-internal";
 const SUB_ID = "sub-1";
 
 beforeEach(() => {

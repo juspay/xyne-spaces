@@ -4788,7 +4788,7 @@ router.post(
         }
         const shared = await sharedProviderCredentialRepository.create({
           // platform:true (admin-only, checked above) → orgId NULL: bindable
-          // by agents of ANY org — e.g. one Codex account for Juspay + NY.
+          // by agents of ANY org — e.g. one Codex account for Xyne + NY.
           orgId: platform ? null : agent.orgId,
           provider,
           name: name?.trim() || `${provider} (shared from ${agent.slug})`,

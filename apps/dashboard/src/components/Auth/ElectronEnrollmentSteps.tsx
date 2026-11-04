@@ -20,7 +20,7 @@ export function ElectronEnrollmentSteps({
   const steps = [
     {
       title: 'Sign In',
-      description: 'Sign in with your Juspay Google account.',
+      description: 'Sign in with your Xyne Google account.',
     },
     {
       title: 'Device Enrollment',
@@ -121,15 +121,7 @@ export function ElectronEnrollmentSteps({
         )}
         <p>
           If it still doesn&apos;t work, please report it in the{' '}
-          <a
-            target='_blank'
-            rel='noreferrer'
-            href='https://juspay.slack.com/archives/C0A2BFNLBB8'
-            className='font-bold text-primary hover:text-primary/80 hover:underline'
-          >
-            #xyne-spaces-troubleshooting
-          </a>{' '}
-          Slack channel.
+          <strong>#xyne-spaces-troubleshooting</strong> Slack channel.
         </p>
       </div>
     </div>

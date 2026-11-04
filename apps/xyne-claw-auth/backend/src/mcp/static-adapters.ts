@@ -8,7 +8,7 @@ import { figmaAdapter } from "./adapters/figma.js";
 import { ardraFinopsAdapter } from "./adapters/ardra-finops.js";
 import { sequencethinkingAdapter } from "./adapters/sequentialthinking.js";
 import { githubAdapter } from "./adapters/github.js";
-import { juspayInternalToolsAdapter } from "./adapters/juspay-internal-tools.js";
+import { internalToolsAdapter } from "./adapters/internal-tools.js";
 import { xyneSpacesAppToolsAdapter } from "./adapters/xyne-spaces-app-tools.js";
 import { queryRoutingAdapter } from "./adapters/query-routing.js";
 import { hubspotAdapter } from "./adapters/hubspot.js";
@@ -81,7 +81,7 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   // existing connections keep working with their stored creds. Added after the
   // stdio-launchConfig lockdown left these connections unresolved (prod: 4 users).
   "github-mcp-npx": githubAdapter,
-  "juspay-internal-tools": juspayInternalToolsAdapter,
+  "juspay-internal-tools": internalToolsAdapter,
   "xyne-spaces-app-tools": xyneSpacesAppToolsAdapter,
   "query-routing": queryRoutingAdapter,
   hubspot: hubspotAdapter,

@@ -85,7 +85,7 @@ describe("executeApprovedWrite — MCP gateway tools", () => {
   beforeEach(() => {
     executeTool.mockReset();
     findUnique.mockClear();
-    process.env["ALLOWED_TENANTS"] = " , juspay-tenant ,other";
+    process.env["ALLOWED_TENANTS"] = " , xyne-tenant ,other";
   });
 
   it("runs a gateway write approved from a messenger with the approver's email and tenant", async () => {
@@ -95,7 +95,7 @@ describe("executeApprovedWrite — MCP gateway tools", () => {
 
     expect(outcome).toEqual({ ok: true, message: `Done — ${action.tool} ran.`, resultText: '{"updated":1}' });
     expect(findUnique).toHaveBeenCalledWith({ where: { id: "user-1" }, select: { email: true } });
-    expect(executeTool).toHaveBeenCalledWith("juspay-tenant", "sheetal@example.com", {
+    expect(executeTool).toHaveBeenCalledWith("xyne-tenant", "sheetal@example.com", {
       serviceName: "google-workspace",
       toolName: action.tool,
       arguments: action.params,
@@ -129,7 +129,7 @@ describe("executeApprovedWrite — MCP gateway tools", () => {
     delete process.env["ALLOWED_TENANTS"];
     await expect(executeApprovedWrite({ action: gatewayAction, approverUserId: "user-1" })).resolves.toMatchObject({ ok: false, reason: "unsupported" });
 
-    process.env["ALLOWED_TENANTS"] = "juspay-tenant";
+    process.env["ALLOWED_TENANTS"] = "xyne-tenant";
     findUnique.mockResolvedValueOnce(null);
     await expect(executeApprovedWrite({ action: gatewayAction, approverUserId: "user-1" })).resolves.toMatchObject({ ok: false, reason: "no-connection" });
     expect(executeTool).not.toHaveBeenCalled();
@@ -144,7 +144,7 @@ describe("executeApprovedWrite — MCP gateway tools", () => {
 
 describe("executeApprovedWrite — MCP connector write queued by a subagent", () => {
   const subagentAction = {
-    serverType: "juspay-dashboard-stream",
+    serverType: "xyne-dashboard-stream",
     tool: "create_payout_order",
     params: { amount: 1, customerId: "c1" },
     userId: "user-1",
@@ -177,14 +177,14 @@ describe("executeApprovedWrite — MCP connector write queued by a subagent", ()
     expect(payloads.every((p) => p["subagentId"] === "sub-payouts")).toBe(true);
     expect(loadApprovedWriteCredentials).toHaveBeenCalledWith({
       userId: "user-1",
-      serverType: "juspay-dashboard-stream",
+      serverType: "xyne-dashboard-stream",
       agentSlug: "ny-payments",
       spacesAppId: "app-1",
       subagentId: "sub-payouts",
     });
     expect(callTool).toHaveBeenCalledWith(
       "user-1",
-      "juspay-dashboard-stream",
+      "xyne-dashboard-stream",
       { apiKey: "KEY-A" },
       "create_payout_order",
       subagentAction.params,

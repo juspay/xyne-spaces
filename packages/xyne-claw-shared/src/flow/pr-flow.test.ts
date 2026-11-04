@@ -61,11 +61,11 @@ describe("buildPrFlow", () => {
 
   describe("screenId (one evolving card per PR)", () => {
     it("is stable across status transitions for the same identity", () => {
-      const identity = { repo: "juspay/xyne-spaces", number: 112 };
+      const identity = { repo: "xyne/xyne-spaces", number: 112 };
       const created = buildPrFlow({ ...base, status: "created" }, { identity });
       const merged = buildPrFlow({ ...base, status: "merged" }, { identity });
       expect(created.screenId).toBe(merged.screenId);
-      expect(created.screenId).toBe("agent-pr-github-juspay-xyne-spaces-112");
+      expect(created.screenId).toBe("agent-pr-github-xyne-xyne-spaces-112");
     });
 
     it("prefers an explicit opts.screenId over identity derivation", () => {
@@ -74,10 +74,10 @@ describe("buildPrFlow", () => {
     });
 
     it("falls back to a slug of the url when number is absent", () => {
-      const url = "https://github.com/juspay/xyne-spaces/pull/7";
+      const url = "https://github.com/xyne/xyne-spaces/pull/7";
       const flow = buildPrFlow({ ...base, url });
       expect(flow.screenId).toBe(prScreenId({ provider: "github", url }));
-      expect(flow.screenId).toBe("agent-pr-github-com-juspay-xyne-spaces-pull-7");
+      expect(flow.screenId).toBe("agent-pr-github-com-xyne-xyne-spaces-pull-7");
     });
 
     it("prScreenId is pure — same identity in, same id out", () => {

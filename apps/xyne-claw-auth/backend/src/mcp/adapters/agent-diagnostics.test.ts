@@ -22,12 +22,12 @@ const run = (over: Partial<Run>): Run => ({
 describe("classify", () => {
   it.each([
     ["session_locked", "session-lock"],
-    ["Tool Juspay_Alerts__alert_data({\"ts\": \"x\"})</arg_value> not found", "tool-call-format"],
+    ["Tool Xyne_Alerts__alert_data({\"ts\": \"x\"})</arg_value> not found", "tool-call-format"],
     ["Tool todo-write not found", "unknown-tool"],
     ["Validation failed for tool \"x\": - workspace: must have required properties workspace", "bad-arguments"],
     ["Invalid content_query regex: Invalid regular expression: /(?s).*/", "bad-arguments"],
     ["No connection found for user and server type: xyne-spaces", "missing-connection"],
-    ["Permission Denied: `juspay` forbids access via a personal access token (classic)", "credentials"],
+    ["Permission Denied: `xyne` forbids access via a personal access token (classic)", "credentials"],
     ["Bitbucket call failed (status=403): Permission denied: getting diff", "permissions"],
     ["File 'src/A.hs' not found in JBIZ/repo on branch 'main'", "wrong-path"],
     ["ENOENT: no such file or directory, access '/app/x'", "wrong-path"],

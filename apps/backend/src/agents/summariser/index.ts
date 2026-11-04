@@ -1,5 +1,5 @@
 /**
- * Thread Summarizer Agent using JAF (Juspay Agent Framework)
+ * Thread Summarizer Agent using JAF (agent framework)
  * 
  * This agent summarizes thread messages in Xyne Spaces conversations.
  * Supports both regular and streaming execution modes.

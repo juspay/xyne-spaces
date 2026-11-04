@@ -38,14 +38,14 @@ describe('upload-pr-attachment validation', () => {
     'rejects %s locally and points at a route that actually works',
     async (fileName) => {
       await expect(handleUploadPrAttachment(creds, {
-        owner: 'juspay', repo: 'xyne-spaces', fileData: 'AAAA', fileName,
+        owner: 'xyne', repo: 'xyne-spaces', fileData: 'AAAA', fileName,
       })).rejects.toThrow(/images and video only/i);
     },
   );
 
   it('rejects fileData that decodes to nothing', async () => {
     await expect(handleUploadPrAttachment(creds, {
-      owner: 'juspay', repo: 'xyne-spaces', fileData: '', fileName: 'shot.png',
+      owner: 'xyne', repo: 'xyne-spaces', fileData: '', fileName: 'shot.png',
     })).rejects.toThrow(/fileData/);
   });
 
@@ -54,21 +54,21 @@ describe('upload-pr-attachment validation', () => {
     vi.stubGlobal('fetch', fetchSpy);
     const big = Buffer.alloc(101 * 1024 * 1024).toString('base64');
     await expect(handleUploadPrAttachment(creds, {
-      owner: 'juspay', repo: 'xyne-spaces', fileData: big, fileName: 'long.mp4',
+      owner: 'xyne', repo: 'xyne-spaces', fileData: big, fileName: 'long.mp4',
     })).rejects.toThrow(/100 MB/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('rejects owner/repo values that would escape the API path', async () => {
     await expect(handleUploadPrAttachment(creds, {
-      owner: 'juspay/../evil', repo: 'xyne-spaces', fileData: 'AAAA', fileName: 'shot.png',
+      owner: 'xyne/../evil', repo: 'xyne-spaces', fileData: 'AAAA', fileName: 'shot.png',
     })).rejects.toThrow(/unsupported characters/);
   });
 
   it('explains a 404 as a push-access problem rather than leaking the status', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })));
     await expect(handleUploadPrAttachment(creds, {
-      owner: 'juspay', repo: 'xyne-spaces', fileData: 'AAAA', fileName: 'shot.png',
+      owner: 'xyne', repo: 'xyne-spaces', fileData: 'AAAA', fileName: 'shot.png',
     })).rejects.toThrow(/push access/);
   });
 });
@@ -86,7 +86,7 @@ describe('upload-pr-attachment happy path', () => {
     vi.stubGlobal('fetch', fetchSpy);
 
     const result = await handleUploadPrAttachment(creds, {
-      owner: 'juspay', repo: 'xyne-spaces', fileData: Buffer.from('video').toString('base64'), fileName: 'login.mp4',
+      owner: 'xyne', repo: 'xyne-spaces', fileData: Buffer.from('video').toString('base64'), fileName: 'login.mp4',
     });
 
     const uploadUrl = fetchSpy.mock.calls[1]![0] as string;
@@ -104,13 +104,13 @@ describe('upload-pr-attachment happy path', () => {
     vi.stubGlobal('fetch', fetchSpy);
 
     const result = await handleUploadPrAttachment(creds, {
-      owner: 'juspay', repo: 'xyne-spaces', fileData: Buffer.from('png').toString('base64'),
+      owner: 'xyne', repo: 'xyne-spaces', fileData: Buffer.from('png').toString('base64'),
       fileName: 'shot.png', prNumber: 81,
     });
 
-    expect(fetchSpy.mock.calls[2]![0]).toBe('https://api.github.com/repos/juspay/xyne-spaces/issues/81/comments');
+    expect(fetchSpy.mock.calls[2]![0]).toBe('https://api.github.com/repos/xyne/xyne-spaces/issues/81/comments');
     expect(result.content).toContain(`![shot.png](${assetUrl})`);
-    expect(result.citations?.[0]?.url).toBe('https://github.com/juspay/xyne-spaces/pull/81');
+    expect(result.citations?.[0]?.url).toBe('https://github.com/xyne/xyne-spaces/pull/81');
   });
 
   it('still returns the asset URL when the PR comment fails', async () => {
@@ -119,7 +119,7 @@ describe('upload-pr-attachment happy path', () => {
     vi.stubGlobal('fetch', fetchSpy);
 
     const result = await handleUploadPrAttachment(creds, {
-      owner: 'juspay', repo: 'xyne-spaces', fileData: Buffer.from('png').toString('base64'),
+      owner: 'xyne', repo: 'xyne-spaces', fileData: Buffer.from('png').toString('base64'),
       fileName: 'shot.png', prNumber: 81,
     });
 

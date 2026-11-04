@@ -175,12 +175,12 @@ Return structured findings with relevant identifiers (PR IDs, branch names, comm
     ],
     description:
       "Look up GitHub data — repositories, issues, pull requests, branches, commits, code search, file contents. " +
-      "Use the bitbucket subagent for internal Juspay repos; use THIS for open-source / external GitHub repos. " +
+      "Use the bitbucket subagent for internal Xyne repos; use THIS for open-source / external GitHub repos. " +
       "Example: 'Find open issues mentioning OAuth in openai/openai-node' or 'Get PR #1234 details from anthropics/anthropic-sdk-python' or 'Search code for `useEffect cleanup` in facebook/react'",
     systemPrompt: `You are a GitHub specialist. Use your tools to look up repositories, issues, pull requests, branches, commits, diffs, and code on github.com.
 
 ## Scope
-- **github.com only.** Internal Juspay repos live on Bitbucket Server — for those, the parent agent should use the \`bitbucket\` subagent, not this one. If you can't find a repo on github.com, say so explicitly — don't fabricate.
+- **github.com only.** Internal Xyne repos live on Bitbucket Server — for those, the parent agent should use the \`bitbucket\` subagent, not this one. If you can't find a repo on github.com, say so explicitly — don't fabricate.
 - The parent gives you a question; you return findings. You do NOT decide whether to take write actions — anything that mutates state (create_issue, create_pull_request, merge_pull_request, push_files, etc.) is gated by the parent's approval flow and only runs when the parent explicitly dispatches a write task.
 
 ## Tool guide
@@ -405,21 +405,21 @@ Return structured, concise findings carrying the source metadata above so the pa
     serverType: "google",
   },
 
-  // ── Juspay Dashboard (internal tools) ───────────────────────────
+  // ── Xyne Dashboard (internal tools) ─────────────────────────────
   {
     name: "juspay-dashboard",
     progressLabels: [
-      "🏦 Looking up Juspay dashboard...",
+      "🏦 Looking up Xyne dashboard...",
       "🧾 Fetching merchant workflow...",
       "💳 Reading product configuration...",
       "🔍 Tracing onboarding scenario...",
       "📊 Pulling Turing data...",
     ],
     description:
-      "Look up merchant workflow, onboarding progress, Stein features, and Curie CRM data (leads, orgs, integration tickets) from Juspay internal tools. " +
+      "Look up merchant workflow, onboarding progress, Stein features, and Curie CRM data (leads, orgs, integration tickets) from Xyne internal tools. " +
       "Use for questions about a specific merchant's setup, leads pipeline, onboarding status, or integration tickets. " +
       "Example: 'What is the EC_SDK onboarding flow for merchant magma_recharge?' or 'Fetch all leads in INTEGRATING stage'",
-    systemPrompt: `You are a Juspay internal data specialist. You have access to the following tools from juspay-internal-tools:
+    systemPrompt: `You are a Xyne internal data specialist. You have access to the following tools from the internal-tools server:
 
 ## Merchant & Workflow Tools
 - **fetch_merchant_flow** — Fetch a merchant's configured workflow. Requires: merchant_id, product_name, merchant_type, scenario. Ask if any are missing.
