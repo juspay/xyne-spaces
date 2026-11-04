@@ -14,6 +14,8 @@ import {
 
 export * from './types';
 
+import type { PollOption } from '../polls/types.js';
+
 import {
   AccessType,
   AgentProactivityMode,
@@ -964,6 +966,64 @@ export const messageTable = table('messages')
   })
   .primaryKey('messageId');
 
+export const pollTable = table('polls')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    createdBy: string(),
+    allowAudienceChoices: boolean(),
+    isAnonymous: boolean(),
+    resultVisibility: string(),
+    closesAt: number().optional(),
+    remindAt: number().optional(),
+    closedAt: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollQuestionTable = table("poll_questions")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    question: string(),
+    position: number(),
+    responseType: string(),
+    options: json<PollOption[]>(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const pollVoteTable = table('poll_votes')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    questionId: string(),
+    userId: string(),
+    optionIds: json<string[]>(),
+    textAnswer: string().optional(),
+    rankedOptionIds: json<string[]>().optional(),
+    rating: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const pollQuestionResultTable = table('poll_question_results')
+  .columns({
+    questionId: string(),
+    workspaceId: string(),
+    pollId: string(),
+    voterCount: number(),
+    optionCounts: json<Record<string, number>>(),
+    rankTotals: json<Record<string, number>>(),
+    ratingTotal: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('questionId');
+
 // Deliberately self-contained: the global artifact subscription must not relate
 // to `messages`, or every message delta in the workspace would flow through its
 // IVM pipeline. Each column below is either lifecycle state or the minimum
@@ -1048,6 +1108,7 @@ export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */
     conversationId: string().optional(),
     senderId: string(),
     content: string(),
+    pollDraft: json().optional(),
     hasAttachment: boolean(),
     scheduledFor: number(),
     status: enumeration<DelayedMessageStatus>(),
@@ -3718,6 +3779,52 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
   }),
 }));
 
+export const pollTableRelationships = relationships(pollTable, ({ one, many }) => ({
+  message: one({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
+  }),
+  questions: many({
+    sourceField: ['id'],
+    destField: ['pollId'],
+    destSchema: pollQuestionTable,
+  }),
+}));
+
+export const pollQuestionTableRelationships = relationships(
+  pollQuestionTable,
+  ({ one }) => ({
+    poll: one({
+      sourceField: ['pollId'],
+      destField: ['id'],
+      destSchema: pollTable,
+    }),
+  }),
+);
+
+export const pollVoteTableRelationships = relationships(
+  pollVoteTable,
+  ({ one }) => ({
+    poll: one({
+      sourceField: ['pollId'],
+      destField: ['id'],
+      destSchema: pollTable,
+    }),
+  }),
+);
+
+export const pollQuestionResultTableRelationships = relationships(
+  pollQuestionResultTable,
+  ({ one }) => ({
+    poll: one({
+      sourceField: ['pollId'],
+      destField: ['id'],
+      destSchema: pollTable,
+    }),
+  }),
+);
+
 export const messageArtifactTableRelationships = relationships(
   messageArtifactTable,
   ({ one, many }) => ({
@@ -5096,6 +5203,10 @@ export const schema = createSchema({
     conversationTable,
     conversationParticipantTable,
     messageTable,
+    pollTable,
+    pollQuestionTable,
+    pollVoteTable,
+    pollQuestionResultTable,
     messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
@@ -5235,6 +5346,10 @@ export const schema = createSchema({
     sdlcItemCommentTableRelationships,
     sdlcTrackTableRelationships,
     messageTableRelationships,
+    pollTableRelationships,
+    pollQuestionTableRelationships,
+    pollVoteTableRelationships,
+    pollQuestionResultTableRelationships,
     messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
@@ -5375,6 +5490,10 @@ export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
 export type Conversation = Row<typeof schema.tables.conversations>;
 export type Message = Row<typeof schema.tables.messages>;
+export type Poll = Row<typeof schema.tables.polls>;
+export type PollQuestion = Row<typeof schema.tables.poll_questions>;
+export type PollVote = Row<typeof schema.tables.poll_votes>;
+export type PollQuestionResult = Row<typeof schema.tables.poll_question_results>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;

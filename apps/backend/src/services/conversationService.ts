@@ -197,7 +197,7 @@ export class ConversationService {
     return isHistorical ? vespaBackfillQueue : vespaQueue;
   }
 
-  private async pushVespaJobForMessage(messageID: string, userId: string, workspaceId?: string, createdAt?: Date): Promise<void> {
+  async pushVespaJobForMessage(messageID: string, userId: string, workspaceId?: string, createdAt?: Date): Promise<void> {
     this.pickVespaQueue(createdAt)
       .addJob({
         schema: messageSchema,

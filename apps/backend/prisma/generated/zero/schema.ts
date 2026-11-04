@@ -1538,6 +1538,64 @@ export const messageTable = table("messages")
   })
   .primaryKey("messageId");
 
+export const pollTable = table("polls")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    createdBy: string(),
+    allowAudienceChoices: boolean(),
+    isAnonymous: boolean(),
+    resultVisibility: string(),
+    closesAt: number().optional(),
+    remindAt: number().optional(),
+    closedAt: number().optional(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollQuestionTable = table("poll_questions")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    question: string(),
+    position: number(),
+    responseType: string(),
+    options: json(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollVoteTable = table("poll_votes")
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    questionId: string(),
+    userId: string(),
+    optionIds: json(),
+    textAnswer: string().optional(),
+    rankedOptionIds: json().optional(),
+    rating: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const pollQuestionResultTable = table("poll_question_results")
+  .columns({
+    questionId: string(),
+    workspaceId: string(),
+    pollId: string(),
+    voterCount: number(),
+    optionCounts: json(),
+    rankTotals: json(),
+    ratingTotal: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("questionId");
+
 export const messageArtifactTable = table("message_artifacts")
   .columns({
     id: string(),
@@ -2871,6 +2929,7 @@ export const delayedMessageTable = table("delayed_messages")
     conversationId: string().optional(),
     senderId: string(),
     content: string(),
+    pollDraft: json().optional(),
     hasAttachment: boolean(),
     scheduledFor: number(),
     status: string(),
@@ -4713,6 +4772,78 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     sourceField: ["messageId"],
     destField: ["entityId"],
     destSchema: externalMessageTable,
+  }),
+  poll: one({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: pollTable,
+  })
+}));
+
+export const pollTableRelationships = relationships(pollTable, ({ one, many }) => ({
+  message: one({
+    sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: messageTable,
+  }),
+  questions: many({
+    sourceField: ["id"],
+    destField: ["pollId"],
+    destSchema: pollQuestionTable,
+  }),
+  votes: many({
+    sourceField: ["id"],
+    destField: ["pollId"],
+    destSchema: pollVoteTable,
+  }),
+  results: many({
+    sourceField: ["id"],
+    destField: ["pollId"],
+    destSchema: pollQuestionResultTable,
+  })
+}));
+
+export const pollQuestionTableRelationships = relationships(pollQuestionTable, ({ one, many }) => ({
+  poll: one({
+    sourceField: ["pollId"],
+    destField: ["id"],
+    destSchema: pollTable,
+  }),
+  votes: many({
+    sourceField: ["id"],
+    destField: ["questionId"],
+    destSchema: pollVoteTable,
+  }),
+  result: one({
+    sourceField: ["id"],
+    destField: ["questionId"],
+    destSchema: pollQuestionResultTable,
+  })
+}));
+
+export const pollVoteTableRelationships = relationships(pollVoteTable, ({ one }) => ({
+  poll: one({
+    sourceField: ["pollId"],
+    destField: ["id"],
+    destSchema: pollTable,
+  }),
+  question: one({
+    sourceField: ["questionId"],
+    destField: ["id"],
+    destSchema: pollQuestionTable,
+  })
+}));
+
+export const pollQuestionResultTableRelationships = relationships(pollQuestionResultTable, ({ one }) => ({
+  poll: one({
+    sourceField: ["pollId"],
+    destField: ["id"],
+    destSchema: pollTable,
+  }),
+  question: one({
+    sourceField: ["questionId"],
+    destField: ["id"],
+    destSchema: pollQuestionTable,
   })
 }));
 
@@ -5536,6 +5667,10 @@ export const schema = createSchema(
       classificationMappingTable,
       boardSlaPolicyTable,
       messageTable,
+      pollTable,
+      pollQuestionTable,
+      pollVoteTable,
+      pollQuestionResultTable,
       messageArtifactTable,
       messageAttachmentTable,
       reactionTable,
@@ -5711,6 +5846,10 @@ export const schema = createSchema(
       conversationLabelMappingTableRelationships,
       deskAutoLabelRuleReferenceTableRelationships,
       messageTableRelationships,
+      pollTableRelationships,
+      pollQuestionTableRelationships,
+      pollVoteTableRelationships,
+      pollQuestionResultTableRelationships,
       messageAttachmentTableRelationships,
       reactionTableRelationships,
       reactionCountTableRelationships,
@@ -5858,6 +5997,10 @@ export type EmailChannelPreference = Row<typeof schema.tables.email_channel_pref
 export type ClassificationMapping = Row<typeof schema.tables.classification_mappings>;
 export type BoardSlaPolicy = Row<typeof schema.tables.board_sla_policies>;
 export type Message = Row<typeof schema.tables.messages>;
+export type Poll = Row<typeof schema.tables.polls>;
+export type PollQuestion = Row<typeof schema.tables.poll_questions>;
+export type PollVote = Row<typeof schema.tables.poll_votes>;
+export type PollQuestionResult = Row<typeof schema.tables.poll_question_results>;
 export type MessageArtifact = Row<typeof schema.tables.message_artifacts>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type Reaction = Row<typeof schema.tables.reactions>;

@@ -13,7 +13,7 @@ import {
  * @property contentPreview - Truncated message content shown below the recipient name
  * @property timestamp - Formatted time string displayed on the right side
  * @property actions - Action buttons revealed on hover (e.g. edit, delete, send)
- * @property onClick - Click handler for the entire card
+ * @property onClick - Click handler for the entire card; without it the card is not interactive
  * @property className - Optional additional CSS classes
  * @property selected - Whether the card is in an active/selected state
  */
@@ -27,7 +27,7 @@ export interface MessageCardProps {
   /** Controls whether timestamp is in-row or floated top-right. */
   timestampLayout?: 'inline' | 'floating';
   actions: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
   className?: string;
   selected?: boolean;
   /** Inner row inside a grouped list (no outer border; subtle hover) */
@@ -74,11 +74,11 @@ export function MessageCard({
   return (
     <div
       aria-current={selected ? 'true' : undefined}
-      role='button'
-      tabIndex={0}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
       onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (onClick && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault();
           onClick();
         }
@@ -86,7 +86,8 @@ export function MessageCard({
       data-track-category={trackCategory}
       data-track-name={trackName}
       className={cn(
-        'group relative flex items-start gap-3 p-3 transition-all duration-200 cursor-pointer',
+        'group relative flex items-start gap-3 p-3 transition-all duration-200',
+        onClick && 'cursor-pointer',
         isListRow
           ? 'rounded-none border-0 bg-transparent hover:bg-muted/30'
           : 'rounded-md border bg-card border-border hover:border-border/80',

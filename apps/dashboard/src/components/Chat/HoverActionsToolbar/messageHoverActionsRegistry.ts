@@ -10,6 +10,8 @@ import type { HoverActionsToolbarProps } from './HoverActionsToolbar';
 export type MessageHoverToolbarActions = Omit<HoverActionsToolbarProps, 'isVisible'> & {
   /** Mirrors ChatBubble's `isMessageEditable` check (edit/delete shortcuts). */
   canEditMessage: boolean;
+  /** True when the menu shows Delete (also for polls, which cannot be edited). */
+  canDeleteMessage: boolean;
   /** Deleted messages disable pin/bookmark/copy-content shortcuts. */
   isMessageDeleted: boolean;
   /** Copies the raw message content (mod+shift+c shortcut). */
