@@ -1,6 +1,6 @@
 import '@/integrations/adapters/social-media';
 import { db } from '@/database/client';
-import { socialMediaService } from '@/integrations/social-media/socialMediaService';
+import { catchUpSocialMediaSource } from '@/bypassAcl/emailFetchServices';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { logger } from '@/utils/logger';
 
@@ -16,7 +16,7 @@ class FacebookCatchUpWorker {
   async run(): Promise<void> {
     const sources = await db.externalSource.findMany({
       where: { sourceType: ExternalSourcePlatform.FACEBOOK, isActive: true },
-      select: { id: true },
+      select: { id: true, workspaceId: true },
     });
     logger.info(`${TAG} Catching up ${sources.length} Facebook Page(s)`);
 
@@ -24,7 +24,7 @@ class FacebookCatchUpWorker {
     let failed = 0;
     for (const source of sources) {
       try {
-        added += (await socialMediaService.syncSource(source.id)).synced;
+        added += await catchUpSocialMediaSource(source.workspaceId, source.id);
       } catch (error) {
         failed++;
         logger.error(`${TAG} Catch-up failed for source ${source.id}`, { error });

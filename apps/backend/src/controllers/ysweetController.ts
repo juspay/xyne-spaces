@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
+import { resolveYSweetDocWorkspaceId } from '@/bypassAcl/ysweetServices';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { config } from '@/config/env';
+import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
 import { ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
@@ -310,6 +312,67 @@ export class YSweetController {
     } catch (error) {
       logger.error('Error in validateAccess:', error);
       res.status(500).json({ error: 'Failed to validate access' });
+    }
+  }
+
+  /**
+   * Called by the y-sweet server (not the browser) to get the per-doc customer-supplied
+   * encryption key (CSEK) it encrypts the doc's GCS object with. y-sweet never talks to the
+   * encryption service itself: a key is wrapped under the owning workspace's storage key, and
+   * y-sweet knows only the doc id — the doc-to-workspace mapping lives here.
+   *
+   * `wrappedKey` present: unwrap the key already in the object's metadata (read path, and any
+   * write to an object that is already encrypted). Absent: issue a fresh key for the doc, used
+   * on its first encrypted write.
+   *
+   * Keys are returned as base64 and must never be logged.
+   */
+  async getStorageKey(req: Request, res: Response): Promise<void> {
+    try {
+      const { docId, wrappedKey } = req.body;
+
+      if (!docId || typeof docId !== 'string') {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'docId is required and must be a string',
+        });
+        return;
+      }
+
+      if (wrappedKey !== undefined && (typeof wrappedKey !== 'string' || !wrappedKey)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'wrappedKey must be a non-empty string when provided',
+        });
+        return;
+      }
+
+      // No doc lookup on this path: an object can outlive its canvas row, and its key still
+      // has to be unwrappable so the doc stays readable.
+      if (typeof wrappedKey === 'string') {
+        const [key] = await getEncryptionProvider().unwrapStorageKeys([wrappedKey]);
+        if (!key) {
+          throw new Error(`Storage key for doc ${docId} could not be unwrapped`);
+        }
+        res.json({ key: key.toString('base64') });
+        return;
+      }
+
+      const workspaceId = await resolveYSweetDocWorkspaceId(docId);
+      if (!workspaceId) {
+        logger.warn('[YSweet] getStorageKey for unknown doc', { docId });
+        res.status(404).json({ error: 'Not found', message: 'Unknown docId' });
+        return;
+      }
+
+      const generated = await getEncryptionProvider().generateStorageKey({ workspaceId });
+      res.json({
+        key: generated.key.toString('base64'),
+        wrappedKey: generated.wrappedKey,
+      });
+    } catch (error) {
+      logger.error('Error in getStorageKey:', error);
+      res.status(500).json({ error: 'Failed to get storage key' });
     }
   }
 }

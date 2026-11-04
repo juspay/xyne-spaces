@@ -15,6 +15,7 @@ import {
   maybeNotifyCollectionIngestionCompleteByCollection,
 } from '@/services/collectionIngestionNotifier';
 import { config } from '@/config/env';
+import { runDriveImportJob } from '@/bypassAcl/collectionServices';
 
 /**
  * Background worker for Google Drive imports. The API request only lists the folder
@@ -103,7 +104,7 @@ export async function enqueueDriveImport(data: DriveImportJobData): Promise<void
 /** Register the processor. Call once at startup in the process that runs downloads. */
 export function startDriveImportWorker(): void {
   getQueue().process(1, async job => {
-    await processDriveImportJob(job.data);
+    await runDriveImportJob(job.data);
   });
   logger.info('[DRIVE_IMPORT] Worker started, ready to process jobs');
 }

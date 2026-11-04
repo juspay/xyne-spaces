@@ -6,6 +6,7 @@ import { storageService } from '../services/storage';
 import { AppError } from './errorHandler';
 import { config } from '@/config/env';
 import { db } from '../database/client';
+import { runInRequestContext } from '../database/tenant/context';
 import { AttachmentUploadStatus, isHeicBuffer } from '@xyne/shared';
 
 export const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024; // 1GB max file size
@@ -552,6 +553,14 @@ const officeConversionFileFilter: multer.Options['fileFilter'] = (_req, file, cb
   cb(null, true);
 };
 
+/** Multer calls storage engines from busboy's events, outside the request's tenant scope. */
+function inRequestContext(engine: multer.StorageEngine): multer.StorageEngine {
+  return {
+    _handleFile: (req, file, cb) => runInRequestContext(req, () => engine._handleFile(req, file, cb)),
+    _removeFile: (req, file, cb) => runInRequestContext(req, () => engine._removeFile(req, file, cb)),
+  };
+}
+
 // Generic streaming storage engine for message attachments.
 // Streams directly to object storage without buffering in memory.
 const streamingStorage: multer.StorageEngine = {
@@ -660,7 +669,7 @@ export const uploadConfig = multer({
 // Factory: creates a streaming Multer storage engine that pipes files directly to GCS.
 // scopeIdParam — the req.params key to use as the GCS scopeId (e.g. 'collectionId', 'itemId').
 function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEngine {
-  return {
+  return inRequestContext({
     _handleFile(req, file, cb) {
       const scopeId = req.params?.[scopeIdParam];
       if (!scopeId) {
@@ -695,7 +704,7 @@ function makeCollectionStreamingStorage(scopeIdParam: string): multer.StorageEng
         .then(() => cb(null))
         .catch((err) => cb(err instanceof Error ? err : new Error(String(err))));
     },
-  };
+  });
 }
 
 export const collectionUpload = multer({
@@ -720,7 +729,7 @@ export const officeConversionUpload = multer({
 
 const createUploadStreamConfig = (fileSizeBytes: number, maxFiles: number) =>
   multer({
-    storage: streamingStorage,
+    storage: inRequestContext(streamingStorage),
     fileFilter: uploadFileFilter,
     limits: {
       fileSize: fileSizeBytes,
