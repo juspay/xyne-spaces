@@ -4,6 +4,7 @@ import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { createSubTicket } from '@/services/subTicketService';
+import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 
 const CreateSubTicketConfigSchema = z.object({
@@ -42,11 +43,22 @@ export class CreateSubTicketStep extends BaseActionStep<
     config: z.infer<typeof CreateSubTicketConfigSchema>,
     context: AutomationContext,
   ): Promise<CreateSubTicketOutput> {
+    const assignedTo = (config.assignedTo as string | undefined) ?? null;
+    if (assignedTo) {
+      const assignee = await DatabaseClient.getInstance().user.findFirst({
+        where: { id: assignedTo, workspaceId: context.automation.workspaceId },
+        select: { id: true },
+      });
+      if (!assignee) {
+        throw new Error(`CREATE_SUB_TICKET: assignee ${assignedTo} is not a member of this workspace`);
+      }
+    }
+
     const result = await createSubTicket({
       parentTicketId: config.parentTicketId as string,
       title: config.title as string,
       description: (config.description as string | undefined) ?? null,
-      assignedTo: (config.assignedTo as string | undefined) ?? null,
+      assignedTo,
       createdBy: context.automation.createdById,
     });
 

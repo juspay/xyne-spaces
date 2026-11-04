@@ -1,6 +1,7 @@
 import { config as appConfig } from '@/config/env';
 import { createClient, type ClickHouseClient } from '@clickhouse/client';
 import { logger } from '@/utils/logger';
+import { pinnedAgentsFor } from '@/utils/ssrfGuard';
 import { ConnectorBase } from '../ConnectorBase';
 import { tableKey } from '../../../tableKeys';
 import { buildChAggregateScanSql, mapChAggregateScanRow } from './profileSql';
@@ -78,14 +79,23 @@ export class ClickHouseConnector extends ConnectorBase {
     if (url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
       throw new Error('Invalid ClickHouse host: URL must contain only host + port');
     }
+    const pinnedAgents = this.config.pinned
+      ? pinnedAgentsFor(
+          this.config.host,
+          this.config.pinned,
+          this.config.ca ? { ca: this.config.ca } : {},
+        )
+      : null;
     return createClient({
       url: url.toString(),
       username: this.config.user,
       password: this.config.password,
       database: this.config.database,
-      ...(this.config.ssl && this.config.ca
-        ? { tls: { ca_cert: Buffer.from(this.config.ca) } }
-        : {}),
+      ...(pinnedAgents
+        ? { http_agent: this.config.ssl ? pinnedAgents.httpsAgent : pinnedAgents.httpAgent }
+        : this.config.ssl && this.config.ca
+          ? { tls: { ca_cert: Buffer.from(this.config.ca) } }
+          : {}),
       request_timeout: appConfig.dashboard.chRequestTimeoutMs,
       clickhouse_settings: {
         max_execution_time: Math.floor(appConfig.dashboard.pgStatementTimeoutMs / 1000),

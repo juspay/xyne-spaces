@@ -35,6 +35,7 @@ class DelayedMessageWorker {
           backoff: { type: 'exponential', delay: 5000 },
         },
         settings: {
+          lockDuration: 120 * 1000,
           stalledInterval: 30 * 1000,
           maxStalledCount: 1,
         },
@@ -168,7 +169,7 @@ class DelayedMessageWorker {
   }
 
   private async processJob(job: Bull.Job<DelayedMessageJobData>): Promise<void> {
-    const { delayedMessageId, channelId, conversationId, senderId, content } = job.data;
+    const { delayedMessageId } = job.data;
 
     logger.info(
       `[DelayedMessageWorker] Processing job ${job.id} delayedMessageId=${delayedMessageId}`
@@ -180,10 +181,19 @@ class DelayedMessageWorker {
     type Preflight =
       | { kind: 'missing' }
       | { kind: 'terminal'; status: string }
-      | { kind: 'delivery_blocked'; failureReason: string; log: string }
-      | { kind: 'ready' };
+      | { kind: 'delivery_blocked'; failureReason: string; log: string; channelId: string; senderId: string }
+      | {
+          kind: 'ready';
+          row: {
+            channelId: string;
+            conversationId: string | null;
+            senderId: string;
+            content: string;
+            hasAttachment: boolean;
+          };
+        };
 
-    const preflight: Preflight = await processJobTx(prisma, delayedMessageId, channelId, senderId);
+    const preflight: Preflight = await processJobTx(prisma, delayedMessageId);
 
     if (preflight.kind === 'missing') {
       logger.warn(
@@ -204,11 +214,11 @@ class DelayedMessageWorker {
       await cleanupDelayedMessageAttachmentsPrisma(delayedMessageId);
       try {
         await activityService.createActivity({
-          userId: senderId,
+          userId: preflight.senderId,
           actorAction: 'delayed_message_failed',
           actionSource: 'delayed_message',
           actionSourceId: delayedMessageId,
-          channelId,
+          channelId: preflight.channelId,
           actorId: 'system',
           classification: ActivityClassification.FYI,
         });
@@ -227,11 +237,7 @@ class DelayedMessageWorker {
       // DM reopen, bot execution, search indexing, metadata sync, etc.
       const result = await deliverDelayedMessage({
         delayedMessageId,
-        channelId,
-        conversationId,
-        senderId,
-        content,
-        hasAttachment: job.data.hasAttachment,
+        ...preflight.row,
       });
 
       if (!result.success) {

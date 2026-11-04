@@ -1,5 +1,5 @@
 import { transaction } from '../base';
-export function processJobTx(prisma: any, delayedMessageId: string, channelId: string, senderId: string) {
+export function processJobTx(prisma: any, delayedMessageId: string) {
   return transaction(['Channel', 'ChannelParticipant', 'DelayedMessage'], 'processJob: delayed message claim plus channel and membership checks must commit atomically; tx is not ACL-wrapped', prisma, async (ptx: any) => {
     const msg = await ptx.delayedMessage.findUnique({ where: { id: delayedMessageId } });
     if (!msg) {
@@ -14,6 +14,9 @@ export function processJobTx(prisma: any, delayedMessageId: string, channelId: s
       data: { status: 'SENDING' },
     });
 
+    const channelId: string = msg.channelId;
+    const senderId: string = msg.senderId;
+
     const channel = await ptx.channel.findUnique({ where: { id: channelId } });
     if (!channel || channel.isArchived) {
       const failureReason = 'Channel deleted';
@@ -24,6 +27,8 @@ export function processJobTx(prisma: any, delayedMessageId: string, channelId: s
       return {
         kind: 'delivery_blocked' as const,
         failureReason,
+        channelId,
+        senderId,
         log: `[DelayedMessageWorker] Channel ${channelId} not found or archived – permanent failure for delayedMessageId=${delayedMessageId}`,
       };
     }
@@ -40,10 +45,21 @@ export function processJobTx(prisma: any, delayedMessageId: string, channelId: s
       return {
         kind: 'delivery_blocked' as const,
         failureReason,
+        channelId,
+        senderId,
         log: `[DelayedMessageWorker] Sender ${senderId} is no longer a member of channel ${channelId} – permanent failure for delayedMessageId=${delayedMessageId}`,
       };
     }
 
-    return { kind: 'ready' as const };
+    return {
+      kind: 'ready' as const,
+      row: {
+        channelId,
+        conversationId: (msg.conversationId ?? null) as string | null,
+        senderId,
+        content: msg.content as string,
+        hasAttachment: Boolean(msg.hasAttachment),
+      },
+    };
   });
 }

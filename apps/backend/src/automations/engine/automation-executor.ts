@@ -174,10 +174,17 @@ export class AutomationExecutor {
     prep: PreparedRun,
   ): Promise<unknown> {
     prep.ctx.__meta = { error: null, chain: prep.chain };
-    await this.prisma.workflowExecution.update({
-      where: { id: executionId },
+    const claimed = await this.prisma.workflowExecution.updateMany({
+      where: {
+        id: executionId,
+        status: { in: [AutomationRunStatus.PENDING, AutomationRunStatus.SCHEDULED, EXTERNAL_WAIT_STATUS] },
+      },
       data: { status: AutomationRunStatus.RUNNING },
     });
+    if (claimed.count === 0) {
+      logger.warn(`[automations] runExecution: row ${executionId} was already claimed — skipping`);
+      return undefined;
+    }
     await persistAutomationState(executionId, { context: JSON.stringify(prep.ctx) });
     logger.info(
       `[automations] run ${prep.label} runId=${executionId} automation=${workflow.id} startIndex=${prep.startIndex} steps=${config.steps.length}`,

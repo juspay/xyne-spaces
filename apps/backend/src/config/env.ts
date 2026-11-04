@@ -646,11 +646,6 @@ const envSchema = Joi.object({
   // 'shadow' records what archive inspection would refuse without blocking it;
   // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
   UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
-  // When true (default), the webhook SSRF guard allows private / internal
-  // destinations but still refuses loopback and link-local / cloud-metadata
-  // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
-  // are unaffected either way (always strict).
-  WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
   // Migration routes (/api/migration/* and the /migrate/api/migration/* alias):
   // Slack/Jira/WhatsApp/Confluence migration, cleanup, backfills. Off by default:
@@ -1493,9 +1488,6 @@ export const config = {
   },
   uploads: {
     archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
-  },
-  webhooks: {
-    allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
   },
   pyroscope: {
     enabled: envVars.PYROSCOPE_ENABLED as boolean,

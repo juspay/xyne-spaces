@@ -8,6 +8,7 @@ import type {
 } from '../types/automation-config';
 import {
   getVariableRefInnerSchema,
+  MAX_SCHEDULE_OFFSET_MINUTES,
   ScheduleOffsetSchema,
   scheduleOffsetMs,
 } from '../types/automation-config';
@@ -276,6 +277,15 @@ export class ConfigValidator {
           code: ValidationIssueCode.SHAPE,
           message:
             'Business hours need a working day and an end time after the start, and the wait must fit within 30 calendar days.',
+        });
+      }
+    } else if (schedule?.type === 'SCHEDULED') {
+      const offset = ScheduleOffsetSchema.safeParse(schedule.offset);
+      if (!offset.success || scheduleOffsetMs(offset.data) > MAX_SCHEDULE_OFFSET_MINUTES * 60_000) {
+        issues.push({
+          path: 'schedule.offset',
+          code: ValidationIssueCode.SHAPE,
+          message: 'The schedule offset must be at most 30 days.',
         });
       }
     }

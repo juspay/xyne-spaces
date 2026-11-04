@@ -85,7 +85,18 @@ export class EmailClassificationWorker {
   }
 
   async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>, workspaceId: string): Promise<void> {
-    const { ticketId, channelId, emailId, groupId, sourceChannelId } = job.data;
+    const { ticketId, channelId, emailId, sourceChannelId } = job.data;
+    const groupId = job.data.groupId
+      ? (await prisma.userGroup.findFirst({
+          where: { id: job.data.groupId, workspaceId },
+          select: { id: true },
+        }))?.id ?? null
+      : null;
+    if (job.data.groupId && !groupId) {
+      logger.warn(
+        `[EMAIL-CLASSIFICATION-WORKER] Group ${job.data.groupId} on job ${job.id} is not in workspace ${workspaceId} — ignoring it`,
+      );
+    }
     const systemActorId = await getAutomationsBotUserId(workspaceId);
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
     const runClassification = job.data.runClassification ?? true;

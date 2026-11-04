@@ -16,7 +16,7 @@ import {
   readAutomationMeta,
 } from '../types/workflow-adapter';
 import { getAutomationPauseState } from '@/database/repositories/workflowExecutionStateUtils';
-import { computeScheduleRunAt } from '../types/automation-config';
+import { computeScheduleRunAt, MAX_SCHEDULE_OFFSET_MINUTES } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
 
@@ -235,6 +235,16 @@ export class AutomationWorker {
         `[AUTOMATION-WORKER] schedule.runAt is in the past (delayMs=${delayMs}) — firing immediately for execution=${executionId}`,
       );
       return false;
+    }
+    if (delayMs > MAX_SCHEDULE_OFFSET_MINUTES * 60_000) {
+      logger.warn(
+        `[AUTOMATION-WORKER] schedule.runAt is more than 30 days out (delayMs=${delayMs}) — cancelling execution=${executionId}`,
+      );
+      await db.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: AutomationRunStatus.CANCELLED },
+      });
+      return true;
     }
 
     await db.workflowExecution.update({

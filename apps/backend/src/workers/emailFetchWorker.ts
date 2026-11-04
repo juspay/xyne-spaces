@@ -19,8 +19,15 @@ import { seedSyncCursor } from '@/services/syncCursorRecovery';
 import { toGooglePlayErrorResponse } from '@/integrations/adapters/social-media/google-play/client';
 import { db } from '@/database/client';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { isPlainAddress } from '@/services/dlResolver';
 
 const externalSourceRepo = new ExternalSourceRepository();
+
+const DL_MEMBER_SYNC_SOURCE = /^(google|microsoft)-dl-sync--/;
+
+function isDlMemberSyncSource(sourceName: string): boolean {
+  return DL_MEMBER_SYNC_SOURCE.test(sourceName);
+}
 
 class EmailFetchWorker {
   private isInitialized = false;
@@ -70,6 +77,10 @@ class EmailFetchWorker {
     job: Bull.Job<CursorCatchupJobData>,
   ): Promise<void> {
     const { sourceId, watchHistoryId, requesterUserId } = job.data;
+    if (!/^\d+$/.test(watchHistoryId)) {
+      logger.warn(`[EMAIL-FETCH-WORKER] Catchup: invalid watchHistoryId on job ${job.id} — skipping`);
+      return;
+    }
     const source = await externalSourceRepo.findById(sourceId);
     if (!source || !source.isActive) {
       logger.warn(`[EMAIL-FETCH-WORKER] Catchup: source ${sourceId} missing or inactive — skipping`);
@@ -142,6 +153,29 @@ class EmailFetchWorker {
       );
       return;
     }
+    if (source.workspaceId !== job.data.workspaceId) {
+      logger.warn(
+        `[EMAIL-FETCH-WORKER] Source ${sourceId} is not in workspace ${job.data.workspaceId} — skipping`,
+      );
+      return;
+    }
+    if (targetChannelId) {
+      const target = await db.channel.findUnique({
+        where: { id: targetChannelId },
+        select: { workspaceId: true },
+      });
+      if (!target || target.workspaceId !== source.workspaceId) {
+        logger.warn(
+          `[EMAIL-FETCH-WORKER] Target channel ${targetChannelId} is not in the source workspace — skipping`,
+        );
+        return;
+      }
+    }
+    if (dlEmail && !isPlainAddress(dlEmail)) {
+      logger.warn(`[EMAIL-FETCH-WORKER] Invalid DL address on job ${job.id} — skipping`);
+      return;
+    }
+    const isDlMemberSync = isDlMemberSyncSource(source.name);
 
     const adapter = adapterRegistry.getAdapter(source.sourceType);
     if (!adapter.refetch) {
@@ -162,12 +196,12 @@ class EmailFetchWorker {
         : undefined;
     let result: Awaited<ReturnType<NonNullable<typeof adapter.refetch>>>;
     try {
-      // Background job → open a tenant scope from the job's workspaceId so ingested
+      // Background job → open a tenant scope from the source's workspaceId so ingested
       // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
-      result = await refetchEmailSource(job.data.workspaceId, adapter, source, options);
+      result = await refetchEmailSource(source.workspaceId, adapter, source, options);
     } catch (error) {
-      if (job.data.isDlMemberSync && this.isFinalAttempt(job)) {
-        await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
+      if (isDlMemberSync && this.isFinalAttempt(job)) {
+        await this.cleanupDlMemberSyncSource(source.id, source.workspaceId);
       }
       throw error;
     }
@@ -178,8 +212,8 @@ class EmailFetchWorker {
 
     await this.notifySuccess(job.data, result, source.sourceType === 'ozonetel' ? 'call' : 'email');
 
-    if (job.data.isDlMemberSync) {
-      await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
+    if (isDlMemberSync) {
+      await this.cleanupDlMemberSyncSource(source.id, source.workspaceId);
     }
   }
 
@@ -208,12 +242,26 @@ class EmailFetchWorker {
     return job.attemptsMade + 1 >= maxAttempts;
   }
 
-  private async cleanupDlMemberSyncSource(
-    sourceRepo: ExternalSourceRepository,
-    sourceId: string,
-  ): Promise<void> {
+  private async requesterInWorkspace(data: { requesterUserId: string; workspaceId: string }): Promise<boolean> {
+    const user = await db.user.findFirst({
+      where: { id: data.requesterUserId, workspaceId: data.workspaceId },
+      select: { id: true },
+    });
+    if (!user) {
+      logger.warn('[EMAIL-FETCH-WORKER] Requester is not in the job workspace — skipping notification', {
+        requesterUserId: data.requesterUserId,
+        workspaceId: data.workspaceId,
+      });
+    }
+    return Boolean(user);
+  }
+
+  private async cleanupDlMemberSyncSource(sourceId: string, workspaceId: string): Promise<void> {
     try {
-      await sourceRepo.update(sourceId, { isActive: false, credentials: '' });
+      await db.externalSource.updateMany({
+        where: { id: sourceId, workspaceId },
+        data: { isActive: false, credentials: '' },
+      });
       logger.info('[EMAIL-FETCH-WORKER] Deactivated temporary DL member sync source', { sourceId });
     } catch (cleanupErr) {
       logger.warn('[EMAIL-FETCH-WORKER] Failed to deactivate DL sync source', {
@@ -228,6 +276,7 @@ class EmailFetchWorker {
     result: { processed: number; newTickets: number; skipped: number; errors?: string[]; partial?: boolean },
     noun: 'email' | 'call' = 'email',
   ): Promise<void> {
+    if (!(await this.requesterInWorkspace(data))) return;
     try {
       const newCount = result.newTickets;
       const skipped = result.skipped;
@@ -303,6 +352,7 @@ class EmailFetchWorker {
   }
 
   private async notifyFailure(data: EmailFetchJobData, err: Error): Promise<void> {
+    if (!(await this.requesterInWorkspace(data))) return;
     try {
       const raw = err?.message ?? String(err);
       const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);

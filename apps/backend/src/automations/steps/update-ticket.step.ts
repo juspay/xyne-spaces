@@ -45,7 +45,15 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     const updatedBy = context.automation.createdById;
 
     if (config.assignedTo !== undefined) {
-      await repositories.tickets.updateTicketAssignee(ticketId, config.assignedTo as string, updatedBy);
+      const assigneeId = config.assignedTo as string;
+      const assignee = await DatabaseClient.getInstance().user.findFirst({
+        where: { id: assigneeId, workspaceId: context.automation.workspaceId },
+        select: { id: true },
+      });
+      if (!assignee) {
+        throw new Error(`UPDATE_TICKET: assignee ${assigneeId} is not a member of this workspace`);
+      }
+      await repositories.tickets.updateTicketAssignee(ticketId, assigneeId, updatedBy);
     }
 
     if (config.stageName !== undefined) {

@@ -1,4 +1,5 @@
 import type { DataTypeCanonical, ColumnProfileResult } from '@/types/dataSource';
+import type { PinnedHost } from '@/utils/ssrfGuard';
 
 export type { ColumnProfileResult };
 
@@ -10,6 +11,8 @@ export interface ConnectionConfig {
   database: string;
   ssl?: boolean;
   ca?: string;
+  /** Addresses `host` resolved to when it was validated; connectors must connect only to these. */
+  pinned?: PinnedHost;
 }
 
 export interface DiscoveredTable {

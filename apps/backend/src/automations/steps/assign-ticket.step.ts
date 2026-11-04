@@ -39,6 +39,14 @@ export class AssignTicketStep extends BaseActionStep<typeof AssignTicketConfigSc
     const assigneeId = config.assigneeId as string;
     const prisma = DatabaseClient.getInstance();
 
+    const assignee = await prisma.user.findFirst({
+      where: { id: assigneeId, workspaceId: context.automation.workspaceId },
+      select: { id: true },
+    });
+    if (!assignee) {
+      throw new Error(`ASSIGN_TICKET: assignee ${assigneeId} is not a member of this workspace`);
+    }
+
     const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true } });
     await repositories.tickets.updateTicketAssignee(ticketId, assigneeId, context.automation.createdById);
 

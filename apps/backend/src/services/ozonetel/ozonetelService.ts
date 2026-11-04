@@ -33,6 +33,7 @@ async function sendJsonGetWithBody(
           ...headers,
           'Content-Length': Buffer.byteLength(payload).toString(),
         },
+        timeout: 30_000,
       },
       res => {
         const chunks: Buffer[] = [];
@@ -55,6 +56,7 @@ async function sendJsonGetWithBody(
     );
 
     req.on('error', reject);
+    req.on('timeout', () => req.destroy(new OzonetelError('Ozonetel request timed out')));
     req.write(payload);
     req.end();
   });

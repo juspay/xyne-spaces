@@ -173,6 +173,19 @@ describe('AutomationExecutor — pause and resume inside a control-flow branch',
           execution = { ...execution, ...data };
           return execution;
         },
+        updateMany: async ({
+          where,
+          data,
+        }: {
+          where: { id: string; status: { in: string[] } };
+          data: { status: string };
+        }) => {
+          if (where.id !== execution.id || !where.status.in.includes(execution.status)) {
+            return { count: 0 };
+          }
+          execution = { ...execution, ...data };
+          return { count: 1 };
+        },
       },
       workflowStep: {
         findMany: async () => Array.from(stepRows.values()),

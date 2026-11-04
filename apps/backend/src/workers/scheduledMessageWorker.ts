@@ -2,7 +2,7 @@ import Bull from 'bull';
 import { MessageType, AuthProvider, UserStatus, UserType, OrgRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
+import { escapeHtml } from '@/utils/htmlEscape';
 import { conversationService } from '@/services/conversationService';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import {
@@ -36,10 +36,8 @@ class ScheduledMessageWorker {
   }
 
   private async processJob(job: Bull.Job<ScheduledMessageJobData>): Promise<void> {
-    const { messageId, channelId } = job.data;
-    logger.info(
-      `[SCHEDULED-MESSAGE-WORKER] Processing job ${job.id} — message ${messageId} in channel ${channelId}`,
-    );
+    const { messageId } = job.data;
+    logger.info(`[SCHEDULED-MESSAGE-WORKER] Processing job ${job.id} — message ${messageId}`);
 
     // Guard: re-read isActive in case the message was deactivated/deleted
     // after the job was scheduled (handles soft-disable race condition)
@@ -57,8 +55,15 @@ class ScheduledMessageWorker {
       `[SCHEDULED-MESSAGE-WORKER] Message found: ${scheduledMessage.title}`,
     );
 
+    const channelId = scheduledMessage.channelId;
+    const channelWorkspaceId = scheduledMessage.workspaceId;
+    if (job.data.channelId !== channelId) {
+      logger.warn(
+        `[SCHEDULED-MESSAGE-WORKER] Job channel ${job.data.channelId} differs from row channel ${channelId} — using the row`,
+      );
+    }
+
     // Get or create the scheduler bot user
-    const channelWorkspaceId = await resolveWorkspaceIdFromModel(db, 'channel', { id: channelId });
 
     const botEmail = 'scheduler-bot@bot.xyne.ai';
     let botUser = await db.user.findFirst({ where: { email: botEmail, workspaceId: channelWorkspaceId } });
@@ -110,7 +115,7 @@ class ScheduledMessageWorker {
 
     // Format the message with HTML (title + content)
     // messageContent already contains rich text HTML from InputBox
-    const formattedMessage = `<p><strong>📅 ${scheduledMessage.title}</strong></p>${scheduledMessage.messageContent}`;
+    const formattedMessage = `<p><strong>📅 ${escapeHtml(scheduledMessage.title)}</strong></p>${scheduledMessage.messageContent}`;
 
     // Create a new conversation with the scheduled message
     const result = await conversationService.createConversationWithMessage({

@@ -8,6 +8,15 @@
 import { type MSCalEvent, type MSCalListResponse } from '@/services/microsoftCalendarCallStore';
 
 const GRAPH_SELECT = 'id,subject,bodyPreview,start,end,location,organizer,attendees,isAllDay,isCancelled,isOnlineMeeting,onlineMeetingUrl,onlineMeeting,webLink';
+const GRAPH_ORIGIN = 'https://graph.microsoft.com';
+
+function graphFetch(url: string, init: RequestInit): Promise<Response> {
+  const origin = new URL(url).origin;
+  if (origin !== GRAPH_ORIGIN) {
+    throw new Error(`Refusing to call non-Graph origin ${origin}`);
+  }
+  return fetch(url, init);
+}
 
 interface CalendarFetchResult<TEvent> {
   events: TEvent[];
@@ -63,7 +72,7 @@ export async function fetchMicrosoftEventsInRange(
   let truncated = false;
 
   while (url) {
-    const res = await fetch(url, {
+    const res = await graphFetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -95,7 +104,7 @@ export async function fetchMicrosoftDeltaChanges(
   deltaLink: string,
   maxEvents?: number,
 ): Promise<MicrosoftDeltaChangesResult> {
-  const res = await fetch(deltaLink, {
+  const res = await graphFetch(deltaLink, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Prefer: graphPreferHeader(maxEvents),
@@ -160,7 +169,7 @@ export async function fetchAllMicrosoftEventsForBaseline(
   let truncated = false;
 
   while (url) {
-    const res = await fetch(url, {
+    const res = await graphFetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         Prefer: graphPreferHeader(maxEvents),

@@ -6,6 +6,10 @@ import { db } from '@/database/client';
 
 export function executeTx(conversationId: string, channelId: string, labelName: string, createdById: string, config: { channelId: string; labelName: string; keepInInbox: boolean; conversationId: string; color?: string | undefined; labelId?: string | undefined; }, context: AutomationContext) {
   return transaction(['Channel', 'Conversation', 'ConversationLabel', 'ConversationLabelMapping', 'Ticket', 'TicketUserMailbox'], 'execute: conversation label apply and optional mailbox archive must commit atomically; tx is not ACL-wrapped', db, async tx => {
+    const channel = await tx.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } });
+    if (!channel || channel.workspaceId !== context.automation.workspaceId) {
+      throw new Error('APPLY_CONVERSATION_LABEL: channel is not in the automation workspace');
+    }
     const applied = await applyConversationLabel(
       {
         conversationId,
