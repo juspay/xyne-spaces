@@ -85,11 +85,6 @@ secretEnv:
   INTERNAL_S2S_KEY:
     name: xyne-backend-secrets
     key: INTERNAL_S2S_KEY
-  # Sent as x-s2s-key to the OCR service; must match its OCR_S2S_KEY.
-  OCR_S2S_KEY:
-    name: xyne-backend-secrets
-    key: OCR_S2S_KEY
-    optional: true
 
 envFromSecrets: []
 envFromConfigMaps: []

@@ -383,7 +383,6 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- $root := .root }}
 {{- $sec := dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true) }}
 {{- $_ := set $sec "GOOGLE_CLIENT_ID" (dict "name" "xyne-backend-secrets" "key" "GOOGLE_CLIENT_ID" "optional" true) }}
-{{- $_ := set $sec "OCR_S2S_KEY" (dict "name" "xyne-backend-secrets" "key" "OCR_S2S_KEY" "optional" true) }}
 {{- $_ := set $sec "GOOGLE_CLIENT_SECRET" (dict "name" "xyne-backend-secrets" "key" "GOOGLE_CLIENT_SECRET" "optional" true) }}
 {{- if .readReplica }}
 {{- $_ := set $sec "DATABASE_READ_REPLICA_POOL_URL" (dict "name" "xyne-backend-secrets" "key" "DATABASE_READ_REPLICA_POOL_URL" "optional" true) }}
@@ -586,7 +585,7 @@ pdb:
 {{- $_ := set $env "LIGHTON_TIMEOUT_SECONDS" "300" }}
 {{- end }}
 {{- $_ := set $v "env" $env }}
-{{- $_ := set $v "secretEnv" (dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true) "OCR_S2S_KEY" (dict "name" "xyne-backend-secrets" "key" "OCR_S2S_KEY" "optional" true)) }}
+{{- $_ := set $v "secretEnv" (dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true) "OCR_S2S_KEY" (dict "name" "xyne-backend-secrets" "key" "OCR_S2S_KEY" "optional" true) "INTERNAL_S2S_KEY" (dict "name" "xyne-backend-secrets" "key" "INTERNAL_S2S_KEY" "optional" true)) }}
 {{- toYaml $v }}
 {{- end }}
 

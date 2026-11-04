@@ -611,10 +611,6 @@ const envSchema = Joi.object({
   DOCLING_RUNTIME_CONFIG_POLL_MS: Joi.number().default(300000),
   // OCR wrapper service (submitter POSTs parts to /process_async here)
   DOCLING_SERVICE_URL: Joi.string().uri().default('http://localhost:8000'),
-  // Shared s2s key sent as x-s2s-key on every call to the LightOn OCR wrapper
-  // (/process_async and the /process sync fallback). Must match the wrapper's
-  // OCR_S2S_KEY; the wrapper rejects every request when its key is unset.
-  OCR_S2S_KEY: Joi.string().allow('').default(''),
   DOCLING_ASYNC_SUBMIT_RETRIES: Joi.number().default(5),
   DOCLING_ASYNC_SUBMIT_RETRY_DELAY_MS: Joi.number().default(1000),
   DOCLING_ASYNC_SUBMIT_TIMEOUT_MS: Joi.number().default(120000),
@@ -1347,7 +1343,6 @@ export const config = {
     debugProxyTimeoutMs: envVars.CLAW_DEBUG_PROXY_TIMEOUT_MS as string,
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
-  ocrS2sKey: envVars.OCR_S2S_KEY as string,
   internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
   userDeactivationServiceSecret: envVars.USER_DEACTIVATION_SERVICE_SECRET as string,
   mtlsService: {

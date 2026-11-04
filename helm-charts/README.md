@@ -159,7 +159,6 @@ JWT_SECRET="$(openssl rand -hex 32)"
 ZERO_AUTH_SECRET="$(openssl rand -hex 32)"
 ENCRYPTION_KEY="$(openssl rand -hex 32)"
 INTERNAL_S2S_KEY="$(openssl rand -hex 32)"
-OCR_S2S_KEY="$(openssl rand -hex 32)"
 ZERO_ADMIN_PASSWORD="$(openssl rand -hex 16)"
 REDIS_PASSWORD="$(openssl rand -hex 16)"
 ```
@@ -196,7 +195,6 @@ kubectl -n xyne create secret generic xyne-backend-secrets \
   --from-literal=ZERO_AUTH_SECRET="${ZERO_AUTH_SECRET}" \
   --from-literal=ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
   --from-literal=INTERNAL_S2S_KEY="${INTERNAL_S2S_KEY}" \
-  --from-literal=OCR_S2S_KEY="${OCR_S2S_KEY}" \
   --from-literal=Y_SWEET_SERVER_TOKEN="${Y_SWEET_SERVER_TOKEN}" \
   --from-literal=AWS_ACCESS_KEY_ID="<storage access key>" \
   --from-literal=AWS_SECRET_ACCESS_KEY="<storage secret key>" \
@@ -223,8 +221,8 @@ Which keys each chart reads by default, and which you add through your values:
 
 | Secret | Keys the chart references by default | Keys you add in values (this walkthrough) |
 |---|---|---|
-| `xyne-backend-secrets` (`xyne-backend`) | `DATABASE_URL`, `COMMON_DATABASE_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY` | `REDIS_PASSWORD`, `OCR_S2S_KEY`, `Y_SWEET_SERVER_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
-| `xyne-backend-secrets` (`xyne-worker`) | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY` | `REDIS_PASSWORD`, `OCR_S2S_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `xyne-backend-secrets` (`xyne-backend`) | `DATABASE_URL`, `COMMON_DATABASE_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY` | `REDIS_PASSWORD`, `Y_SWEET_SERVER_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| `xyne-backend-secrets` (`xyne-worker`) | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY` | `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-zero-secrets` | `ZERO_UPSTREAM_DB`, `ZERO_CVR_DB`, `ZERO_CHANGE_DB`, `ZERO_AUTH_SECRET`, `ZERO_ADMIN_PASSWORD` | - |
 | `xyne-ysweet-secrets` | none (the chart ships `secretEnv: {}`) | `Y_SWEET_AUTH`; with an `s3://` document store also `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-redis-auth` | `password` (through `auth.existingSecret` / `auth.existingSecretKey`) | - |
@@ -256,7 +254,8 @@ kubectl -n xyne create secret generic xyne-transcription-agent-secrets \
 kubectl -n xyne create secret generic xyne-lighton-ocr-secrets \
   --from-literal=LIGHTON_ACCESS_TOKEN="<ocr model endpoint token>" \
   --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}" \
-  --from-literal=OCR_S2S_KEY="${OCR_S2S_KEY}"
+  --from-literal=INTERNAL_S2S_KEY="${INTERNAL_S2S_KEY}" \
+  --from-literal=OCR_S2S_KEY="$(openssl rand -hex 32)"   # only for callers outside xyne-spaces
 ```
 
 | Secret | Required keys | Optional keys |
@@ -264,7 +263,7 @@ kubectl -n xyne create secret generic xyne-lighton-ocr-secrets \
 | `xyne-claw-secrets` | `XYNE_CLAW_S2S_KEY`, `LITELLM_API_KEY` | `INTERNAL_S2S_KEY`, `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-claw-auth-secrets` | `DATABASE_URL`, `ENCRYPTION_KEY` (64 hex), `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY` | `SPACES_DB_URL`, `REDIS_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-transcription-agent-secrets` | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TRANSCRIPTION_AGENT_API_KEY` | `REDIS_PASSWORD`, `AZURE_OPENAI_STT_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_TTS_API_KEY`, `DEEPGRAM_API_KEY`, `CHUTES_STT_API_KEY`, `GOOGLE_VOICE_CREDENTIALS_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `xyne-lighton-ocr-secrets` | `OCR_S2S_KEY` (same value as in `xyne-backend-secrets`; without it every OCR call gets 401) | `LIGHTON_ACCESS_TOKEN`, `REDIS_PASSWORD` |
+| `xyne-lighton-ocr-secrets` | `INTERNAL_S2S_KEY` (same value as in `xyne-backend-secrets`; the backend sends it as `x-s2s-key`, and without it every OCR call gets 401) | `OCR_S2S_KEY` (for callers outside xyne-spaces), `LIGHTON_ACCESS_TOKEN`, `REDIS_PASSWORD` |
 
 Anything else you need in a pod's environment goes through the same two keys on any chart:
 `secretEnv` (one variable from one Secret key) or `envFromSecrets` (every key of a Secret).

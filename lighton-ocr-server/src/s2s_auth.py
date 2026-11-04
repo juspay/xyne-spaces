@@ -1,12 +1,17 @@
 """Service-to-service authentication for the OCR wrapper.
 
-Callers (the xyne backend and workers) prove they are internal by sending the
-shared OCR_S2S_KEY in the ``x-s2s-key`` header, the same contract xyne-claw-auth
-uses for XYNE_CLAW_S2S_KEY. Only ``/health`` stays open, for the kubelet probes.
+Callers prove they are internal by sending a shared key in the ``x-s2s-key``
+header, the same header xyne-spaces uses for its other internal services. Two
+keys are accepted:
 
-The check fails closed: when OCR_S2S_KEY is unset every protected request is
-rejected, so a missing secret never leaves the service open. Every rejection is
-the same opaque 401, and the comparison is constant-time.
+- ``OCR_S2S_KEY``: the OCR service's own key, for services outside xyne-spaces.
+- ``INTERNAL_S2S_KEY``: the fallback. xyne-spaces' backend and workers send their
+  existing internal key, so they need no OCR-specific secret.
+
+Only ``/health`` stays open, for the kubelet probes and the load-balancer check.
+The check fails closed: a key that is unset is never accepted, so with neither
+set every protected request is rejected. Every rejection is the same opaque 401,
+and each comparison is constant-time.
 """
 
 from __future__ import annotations
@@ -28,9 +33,17 @@ def s2s_key_matches(provided: str | None, expected: str) -> bool:
     return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
 
 
+def accepted_keys() -> list[str]:
+    """OCR_S2S_KEY first, then the INTERNAL_S2S_KEY fallback; unset keys are skipped."""
+    return [key for key in (settings.s2s_key, settings.internal_s2s_key) if key]
+
+
 def require_s2s_key(
     x_s2s_key: Annotated[str | None, Header(alias=S2S_HEADER)] = None,
 ) -> None:
     """FastAPI dependency guarding every route except /health."""
-    if not s2s_key_matches(x_s2s_key, settings.s2s_key):
+    # Compare against every accepted key (no early exit), so the response time
+    # doesn't reveal which key, if any, matched.
+    matches = [s2s_key_matches(x_s2s_key, key) for key in accepted_keys()]
+    if not any(matches):
         raise HTTPException(status_code=401, detail="Unauthorized")
