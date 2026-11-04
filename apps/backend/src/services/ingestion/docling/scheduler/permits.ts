@@ -4,8 +4,9 @@
  *
  * Adapted from doclingScheduler/redis.ts (ioredis).
  */
-import Redis, { type RedisOptions } from 'ioredis'
+import type { Redis, RedisOptions } from 'ioredis'
 import { redisService } from '@/services/redisService'
+import { createRedisClient } from '@/services/redisFactory'
 import { config } from '@/config/env'
 
 const sched = () => config.doclingScheduler
@@ -13,7 +14,7 @@ const getClient = () => redisService.getClient()
 
 /** A dedicated connection for the blocking stream read (don't share it). */
 export const createBlockingRedisConnection = (): Redis =>
-  new Redis(redisService.getRedisConfig() as RedisOptions)
+  createRedisClient('docling-results', redisService.getRedisConfig() as RedisOptions)
 
 export interface DoclingResultEvent {
   id: string
