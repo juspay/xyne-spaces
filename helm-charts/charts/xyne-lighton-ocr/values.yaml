@@ -91,10 +91,15 @@ secretEnv:
     name: xyne-lighton-ocr-secrets
     key: REDIS_PASSWORD
     optional: true
-  # Every route except /health requires x-s2s-key to match this; unset = all 401.
+  # Every route except /health requires x-s2s-key to match OCR_S2S_KEY (services outside
+  # xyne-spaces) or INTERNAL_S2S_KEY (xyne-spaces' backend and workers). Neither set = all 401.
   OCR_S2S_KEY:
     name: xyne-lighton-ocr-secrets
     key: OCR_S2S_KEY
+    optional: true
+  INTERNAL_S2S_KEY:
+    name: xyne-lighton-ocr-secrets
+    key: INTERNAL_S2S_KEY
     optional: true
 
 envFromSecrets: []

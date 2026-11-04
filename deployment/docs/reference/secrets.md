@@ -69,9 +69,9 @@ The y-sweet tag is the `appVersion` of `helm-charts/charts/xyne-ysweet/Chart.yam
 | `zero_auth_secret` | 32+ | Zero client tokens; the backend and Zero share it | `xyne-backend-secrets`, `xyne-zero-secrets` |
 | `zero_admin_password` | 16+ | Zero's admin endpoints | `xyne-zero-secrets` |
 | `encryption_key` | exactly 64 hex | data the backend encrypts at rest | `xyne-backend-secrets` |
-| `internal_s2s_key` | 32+ | service-to-service calls | backend, claw and claw-auth Secrets |
+| `internal_s2s_key` | 32+ | service-to-service calls, including backend and workers to the OCR service | backend, claw and claw-auth Secrets; the OCR pod reads it from `xyne-backend-secrets` |
 | `claw_s2s_key` | 32+ | claw to claw-auth | claw and claw-auth Secrets |
-| `ocr_s2s_key` | 32+ | backend and workers to the OCR service (`x-s2s-key`) | `xyne-backend-secrets` as `OCR_S2S_KEY` |
+| `ocr_s2s_key` | optional, 32+ when set | services outside xyne-spaces calling the OCR service (`x-s2s-key`); xyne-spaces itself sends `internal_s2s_key` | `xyne-backend-secrets` as `OCR_S2S_KEY` (read only by the OCR pod) |
 | `claw_auth_encryption_key` | exactly 64 hex | credentials claw-auth stores | `xyne-claw-auth-secrets` |
 | `ysweet_auth`, `ysweet_server_token` | from the same `gen-auth` run | the y-sweet signing key and the token the backend presents | `xyne-ysweet-secrets`, `xyne-backend-secrets` |
 | `transcription_agent_api_key` | 32+ | backend to transcription agent | `xyne-transcription-agent-secrets` |
