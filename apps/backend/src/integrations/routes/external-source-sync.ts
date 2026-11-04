@@ -13,14 +13,15 @@ import { MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepo
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
 import { adapterRegistry } from '../core/adapterRegistry';
-import { ExternalSourcePlatform } from '../core/types';
+import { ExternalSourcePlatform, type ExternalSourceAdapter, type IngestionResult } from '../core/types';
 import { facebookPageIdsInPayload } from '../adapters/social-media/facebook/flow';
+import { syncMailboxSerially } from '../adapters/google/mailboxSync';
 import { logger } from '../../utils/logger';
 import { RawBodyRequest } from '@/types/express';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { authMiddleware } from '@/middleware/auth';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
@@ -138,6 +139,49 @@ async function assertChannelParticipant(channelId: string, userId: string): Prom
   throw new RouteError('Forbidden: only channel participants can fetch from this desk', 403);
 }
 
+/** One sync per Gmail mailbox at a time; each round reloads the source so it starts from the latest cursor. */
+async function ingestGmailMailbox(
+  workspaceId: string,
+  adapter: ExternalSourceAdapter,
+  sourceName: string,
+  payload: unknown,
+  source: ExternalSource,
+): Promise<IngestionResult[]> {
+  const results: IngestionResult[] = [];
+  await syncMailboxSerially(
+    source.id,
+    async () => {
+      const current = await new ExternalSourceRepository().findById(source.id);
+      if (!current?.isActive) return;
+      results.push(...(await ingestExternalSource(workspaceId, adapter, sourceName, payload, current)));
+    },
+    {
+      maxHoldMs: GMAIL_PUSH_MAX_HOLD_MS,
+      // The catch-up takes the lock on the worker and keeps going while pushes are pending.
+      onHoldLimit: async () => {
+        const watchHistoryId = gmailPushHistoryId(payload) ?? source.lastSyncCursor;
+        if (watchHistoryId) await enqueueCursorCatchup({ sourceId: source.id, watchHistoryId });
+      },
+    },
+  );
+  return results;
+}
+
+// A busy mailbox can keep one push syncing; past this the rest moves to the worker, well inside
+// Pub/Sub's 600 s push deadline.
+const GMAIL_PUSH_MAX_HOLD_MS = 2 * 60_000;
+
+function gmailPushHistoryId(payload: unknown): string | undefined {
+  try {
+    const data = (payload as { message?: { data?: unknown } } | null)?.message?.data;
+    if (typeof data !== 'string') return undefined;
+    const { historyId } = JSON.parse(Buffer.from(data, 'base64').toString('utf-8')) as { historyId?: unknown };
+    return historyId == null ? undefined : String(historyId);
+  } catch {
+    return undefined;
+  }
+}
+
 router.use(
   express.json({
     limit: '5mb',
@@ -216,7 +260,9 @@ router.post(
         });
         throw new Error(`External source ingest: no resolvable workspaceId for source ${source?.id ?? sourceName}`);
       }
-      const results = await ingestExternalSource(ingestWorkspaceId, adapter, sourceName, req.body, source);
+      const results = adapter.name === ExternalSourcePlatform.GOOGLE && source
+        ? await ingestGmailMailbox(ingestWorkspaceId, adapter, sourceName, req.body, source)
+        : await ingestExternalSource(ingestWorkspaceId, adapter, sourceName, req.body, source);
 
       // Meta can batch events for several Pages into one POST, but authenticate resolved only one
       // connected Page. The signature covers the whole body, so ingest the rest against their own sources;

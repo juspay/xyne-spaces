@@ -300,6 +300,15 @@ export class ExternalSourceCore {
     );
 
     if (existingExtMsg && !isDeskChannel) {
+      // Mail can't be edited: the same id again is a second delivery, so keep the first post, as desks do.
+      if (this.channelEmailAliasService.isChannelEmailSourceType(source.sourceType)) {
+        const existingMessage = await this.messageRepo.findById(existingExtMsg.messageId);
+        const conversationId = existingMessage?.conversationId ?? '';
+        if (adapter.postprocess) {
+          await adapter.postprocess({ conversationId, entityId: existingExtMsg.messageId, sourceId: source.id, normalizedData });
+        }
+        return { success: true, conversationId, entityId: existingExtMsg.messageId, action: 'duplicate', isNew: false };
+      }
       logger.info(`Duplicate message detected for ${normalizedData.externalId}`);
       return await this.handleUpdate(source, normalizedData, existingExtMsg, downloadedAttachments);
     }

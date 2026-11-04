@@ -8,12 +8,14 @@ import { notificationService } from '@/notification-service';
 import { activityService } from '@/services/activity/activityService';
 import {
   emailFetchQueue,
+  enqueueCursorCatchup,
   type EmailFetchJobData,
   type SocialMediaFetchJobData,
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
 import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '@/bypassAcl/emailFetchServices';
+import { syncMailboxSerially } from '@/integrations/adapters/google/mailboxSync';
 import { getHttpStatus } from '@/services/googleService';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 import { toGooglePlayErrorResponse } from '@/integrations/adapters/social-media/google-play/client';
@@ -21,6 +23,9 @@ import { db } from '@/database/client';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 const externalSourceRepo = new ExternalSourceRepository();
+// A catch-up that finds its mailbox busy is put back for later, for up to 10 minutes.
+const CATCHUP_BUSY_RETRY_DELAY_MS = 15_000;
+const CATCHUP_MAX_BUSY_RETRIES = 40;
 
 class EmailFetchWorker {
   private isInitialized = false;
@@ -69,7 +74,39 @@ class EmailFetchWorker {
   private async processCursorCatchup(
     job: Bull.Job<CursorCatchupJobData>,
   ): Promise<void> {
-    const { sourceId, watchHistoryId, requesterUserId } = job.data;
+    const { sourceId, busyRetries = 0 } = job.data;
+    // The webhook's mailbox lock, so a catch-up never syncs a mailbox while a push does. Later rounds
+    // are for pushes that landed meanwhile, which notify nobody, so only the first round notifies.
+    let firstRound = true;
+    const ran = await syncMailboxSerially(
+      sourceId,
+      () => {
+        const notify = firstRound;
+        firstRound = false;
+        return this.catchUpRound(job.data, notify);
+      },
+      { handOff: false },
+    );
+    if (ran) return;
+
+    if (busyRetries >= CATCHUP_MAX_BUSY_RETRIES) {
+      logger.warn(`[EMAIL-FETCH-WORKER] Catchup: mailbox stayed busy — dropping; the next push syncs what is left`, {
+        sourceId,
+        busyRetries,
+      });
+      return;
+    }
+    logger.info(`[EMAIL-FETCH-WORKER] Catchup: another sync holds the mailbox — retrying later`, {
+      sourceId,
+      busyRetries,
+      delayMs: CATCHUP_BUSY_RETRY_DELAY_MS,
+    });
+    await enqueueCursorCatchup({ ...job.data, busyRetries: busyRetries + 1 }, CATCHUP_BUSY_RETRY_DELAY_MS);
+  }
+
+  /** One catch-up round, from the cursor as it is now: a push or an earlier round may have moved it. */
+  private async catchUpRound(data: CursorCatchupJobData, notify: boolean): Promise<void> {
+    const { sourceId, watchHistoryId, requesterUserId } = data;
     const source = await externalSourceRepo.findById(sourceId);
     if (!source || !source.isActive) {
       logger.warn(`[EMAIL-FETCH-WORKER] Catchup: source ${sourceId} missing or inactive — skipping`);
@@ -104,7 +141,7 @@ class EmailFetchWorker {
         `[EMAIL-FETCH-WORKER] Catchup done — source ${source.name}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
       );
 
-      if (result.newTickets > 0 && requesterUserId && channelId) {
+      if (notify && result.newTickets > 0 && requesterUserId && channelId) {
         await this.notifySuccess(
           { sourceId, workspaceId, channelId, requesterUserId },
           result,
