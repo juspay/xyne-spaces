@@ -12214,9 +12214,6 @@ export const mutators = defineMutators({
           timestamp,
         },
       }) => {
-        // Organization creation is disabled for now.
-        const orgCreationDisabled: boolean = true;
-        if (orgCreationDisabled) throw new Error('Organization creation is disabled');
         // Insert organization
         await tx.mutate.organizations.insert({
           orgId,

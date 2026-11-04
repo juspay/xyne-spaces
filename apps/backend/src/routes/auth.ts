@@ -75,8 +75,7 @@ router.get('/permissions', authV2Middleware.authenticate, userManagementControll
 router.get('/roles', authV2Middleware.authenticate, userManagementController.getCurrentUserRoles);
 
 router.post('/login-workspace', authV2Controller.loginWorkspace);
-// Organization creation is disabled for now.
-// router.post('/create-org', authV2Controller.createOrg);
+router.post('/create-org', authV2Controller.createOrg);
 
 router.get('/workspaces', authV2Middleware.authenticate, authV2Controller.getWorkspaces);
 router.post('/switch-workspace', authV2Middleware.authenticate, authV2Controller.switchWorkspace);
