@@ -31,6 +31,14 @@ export function isEmailDomainAllowed(email: string | null | undefined): boolean 
 }
 
 /**
+ * Whether a domain is explicitly on the allowlist. Unlike isEmailDomainAllowed an empty list
+ * matches nothing, so a domain is only ever tied to an organization when it is listed.
+ */
+export function isDomainAllowlisted(domain: string | null | undefined): boolean {
+  return !!domain && config.allowedEmailDomains.includes(domain);
+}
+
+/**
  * Decides a Google/Microsoft sign-in. The domain is only proof of identity if the provider
  * verified the address, so an unverified email is refused — but only when the allowlist is on,
  * leaving deployments without one unchanged.

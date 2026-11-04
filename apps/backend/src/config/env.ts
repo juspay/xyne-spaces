@@ -10,7 +10,12 @@ const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
-  ALLOWED_EMAIL_DOMAINS: Joi.string().allow('').default(''),
+  // Required in production so the allowlist can never be switched off by a missing or blank value.
+  ALLOWED_EMAIL_DOMAINS: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().pattern(/[^,\s@]/).required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
   RESEARCH_AGENT_URL: Joi.string().default('http://localhost:8000'),
   // Python transcription agent (health server also exposes /embed-voice)
   PYTHON_AGENT_URL: Joi.string().default('http://localhost:8080'),

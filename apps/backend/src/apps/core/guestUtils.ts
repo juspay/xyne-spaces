@@ -4,6 +4,7 @@ import { ChannelScopeType, GuestEntity, UserStatus, WorkspaceRole } from '@xyne/
 import { applyGuestChanges, findOrgMembers, insertGuest, isOrgEmailTaken } from '@/bypassAcl/appGuestServices';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { isEmailDomainAllowed } from '@/services/emailDomainPolicy';
 import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { OrgMemberLimitError, organizationDomainService } from '@/services/organizationDomainService';
 import { logger } from '@/utils/logger';
@@ -133,6 +134,9 @@ export async function createGuest(
 ): Promise<GuestView> {
   const { workspaceId } = app;
   const email = normalizeEmail(input.email);
+  if (!isEmailDomainAllowed(email)) {
+    throw new GuestError(403, 'EMAIL_DOMAIN_NOT_ALLOWED', 'This email domain is not allowed.');
+  }
   const channelIds = [...new Set(input.channelIds)];
   await assertAppChannels(app, channelIds);
   await assertGrantable(channelIds);

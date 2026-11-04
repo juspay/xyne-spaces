@@ -16,7 +16,6 @@ import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { AuthProvider } from '@xyne/shared';
 import {
   OrganizationDomainConflictError,
-  PublicEmailDomainError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
 import { getProviderLoginDenial, isMicrosoftEmailVerified } from '@/services/emailDomainPolicy';
@@ -537,22 +536,9 @@ export class MicrosoftAuthController {
 
           let domainConflict = null;
           let domainConflictError = null;
-          let publicEmailError = null;
 
           if (!userExistsButRemoved) {
-            // Public email domains can never create enterprise workspaces, so fail
-            // fast on them regardless of the entry flow (mirrors Google's
-            // handleCallback). The remaining domain-conflict assert stays gated on
-            // the explicit enterprise intent.
-            try {
-              await organizationDomainService.assertNotPublicEmailDomain(microsoftUserData.email);
-            } catch (error) {
-              if (error instanceof PublicEmailDomainError) {
-                publicEmailError = error;
-              }
-            }
-
-            if (peekedState?.enterpriseLogin && !publicEmailError) {
+            if (peekedState?.enterpriseLogin) {
               try {
                 await organizationDomainService.assertCanCreateOrgForEmail(microsoftUserData.email);
               } catch (error) {
@@ -562,7 +548,7 @@ export class MicrosoftAuthController {
               }
             }
 
-            if (!domainConflictError && !publicEmailError) {
+            if (!domainConflictError) {
               domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(microsoftUserData.email);
               domainConflictError = domainConflict
                 ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -603,9 +589,6 @@ export class MicrosoftAuthController {
             params.set('domainConflictError', domainConflictError.message);
             params.set('enterpriseJoinOrgName', domainConflict.name);
             params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
-          }
-          if (publicEmailError) {
-            params.set('publicEmailDomainError', publicEmailError.message);
           }
 
           logger.info(
@@ -947,21 +930,8 @@ export class MicrosoftAuthController {
       // offers "create an organization" instead of the request-to-join UI.
       let domainConflict = null;
       let domainConflictError = null;
-      let publicEmailError = null;
 
-        // Public email domains can never create enterprise workspaces, so fail fast
-        // on them regardless of the entry flow (mirrors Google's
-        // exchangeElectronCode). The remaining domain-conflict assert stays gated
-        // on the explicit enterprise intent.
-        try {
-          await organizationDomainService.assertNotPublicEmailDomain(email);
-        } catch (error) {
-          if (error instanceof PublicEmailDomainError) {
-            publicEmailError = error;
-          }
-        }
-
-        if (stateData.enterpriseLogin && !publicEmailError) {
+        if (stateData.enterpriseLogin) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(email);
           } catch (error) {
@@ -971,7 +941,7 @@ export class MicrosoftAuthController {
           }
         }
 
-        if (!domainConflictError && !publicEmailError) {
+        if (!domainConflictError) {
           domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(email);
           domainConflictError = domainConflict
             ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -1008,7 +978,6 @@ export class MicrosoftAuthController {
           ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
           ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
           ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
-          ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
         });
         return;
       }
@@ -1523,8 +1492,7 @@ export class MicrosoftAuthController {
       let domainConflictError = null;
 
       // Native mobile carries no OAuth state, so there is no enterpriseLogin flag to gate the
-      // create-org assertion on; only the enterprise-workspace lookup applies here (and with no
-      // assertion there is no PublicEmailDomainError to report).
+      // create-org assertion on; only the enterprise-workspace lookup applies here.
       if (workspaces.length === 0 && !userExistsButRemoved) {
         domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(email);
         domainConflictError = domainConflict

@@ -84,6 +84,13 @@ class AuthV2Middleware {
         return false;
       }
 
+      if (!isEmailDomainAllowed(session.user.email)) {
+        logger.warn(`[AUTH] [Auto-Refresh] Session rejected (reason=email_domain_not_allowed)`, {
+          userId: session.user.id,
+        });
+        return false;
+      }
+
       // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
       // Disabled → the original inline check (status/expiry, leftAt, and the
       // old single-client Google + Microsoft provider verification) runs
