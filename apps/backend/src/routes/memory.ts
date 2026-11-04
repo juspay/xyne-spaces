@@ -95,7 +95,8 @@ router.delete('/:docId', authMiddleware.authenticate, memoryController.deleteMem
   * @access Private (requires authentication)
   * @body SessionRecordingPayload
   */
-router.post('/turn', authMiddleware.authenticate, memoryController.bufferSessionTurn);
+// Disabled: session recording is not in use.
+// router.post('/turn', authMiddleware.authenticate, memoryController.bufferSessionTurn);
 
   /**
   * @route POST /api/memory/index
