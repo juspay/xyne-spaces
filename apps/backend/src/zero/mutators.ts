@@ -1,5 +1,6 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
+import { parseAutomationMetadata, withAutomationCreator } from '../automations/types/workflow-adapter';
 import {
   ChannelRole,
   AgentProactivityMode,
@@ -18472,7 +18473,7 @@ export function createMutators(
             status: 'DRAFT',
             automationSeriesId: automationSeriesId ?? id,
             context: configJson,
-            metadata: metadataJson,
+            metadata: withAutomationCreator(metadataJson, ctx.userID),
             ticketId: null,
             workspaceId: ctx.workspaceId,
             configuration: null,
@@ -18492,6 +18493,7 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({
+          ctx,
           tx,
           args: { id, name, configJson, metadataJson, eventType, timestamp },
         }) => {
@@ -18504,12 +18506,13 @@ export function createMutators(
               `Automation "${id}" is ${existing.status}; only DRAFT proposals can be edited.`,
             );
           }
+          const author = parseAutomationMetadata(existing.metadata).createdById || ctx.userID;
 
           await tx.mutate.workflows.update({
             id,
             updatedAt: timestamp,
             ...(name !== undefined && { workflowName: name }),
-            ...(metadataJson !== undefined && { metadata: metadataJson }),
+            ...(metadataJson !== undefined && { metadata: withAutomationCreator(metadataJson, author) }),
             ...(configJson !== undefined && { context: configJson }),
             ...(configJson !== undefined && eventType !== undefined && { eventType }),
           });
