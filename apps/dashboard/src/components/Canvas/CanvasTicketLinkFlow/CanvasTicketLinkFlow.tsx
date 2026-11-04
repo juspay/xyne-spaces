@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useTicketSearchIds } from '../../../hooks/useTicketSearchIds';
 import { queries } from '../../../zero/queries';
 import { Dialog } from '../../ui/Dialog';
 import type { CanvasTicketAnchor } from '../useCanvasTicketEditorBridge';
@@ -28,13 +29,12 @@ export function CanvasTicketLinkFlow({
     if (!anchor) setSearch('');
   }, [anchor]);
 
-  const [tickets] = useCachedQuery(
-    queries.ticketsSearch({
-      search: debouncedSearch.trim() || undefined,
-      limit: TICKET_SEARCH_LIMIT,
-    }),
-    { enabled: !!anchor },
+  const { ticketIds, isSearching } = useTicketSearchIds(debouncedSearch, { enabled: !!anchor });
+  const [ticketRows] = useCachedQuery(
+    queries.ticketsSearch({ ticketIds, limit: TICKET_SEARCH_LIMIT }),
+    { enabled: !!anchor && !isSearching },
   );
+  const tickets = isSearching ? undefined : ticketRows;
 
   const rows = useMemo(() => tickets ?? [], [tickets]);
   if (!anchor) return null;
