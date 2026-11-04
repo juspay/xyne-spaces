@@ -875,13 +875,11 @@ export class UserService {
               role: OrgRole.OWNER,
             },
           });
-      if (orgMember.passwordHash) {
-        await this.prisma.orgMemberCredential.upsert({
-          where: { memberId: orgMember.memberId },
-          create: { memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: orgMember.passwordHash },
-          update: { passwordHash: orgMember.passwordHash },
-        });
-      }
+      // The password lives only in OrgMemberCredential; keep its orgId in step with the member's new org.
+      await this.prisma.orgMemberCredential.updateMany({
+        where: { memberId: orgMember.memberId },
+        data: { orgId: orgMember.orgId },
+      });
 
       if (existingOrgMember?.role === (OrgRole.COMMUNITY_MEMBER as any)) {
         await aiProvisioningService.resyncUserBudget(orgMember.memberId);

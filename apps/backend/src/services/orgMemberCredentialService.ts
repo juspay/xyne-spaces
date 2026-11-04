@@ -19,40 +19,28 @@ export interface SetPasswordHashInput {
 }
 
 /**
- * Writes passwordHash to BOTH OrgMember (old column, no longer read; kept in sync until it is
- * dropped) and OrgMemberCredential (new table, non_zero schema, the only read source) so the
- * two commit together or not at all.
+ * Writes passwordHash to OrgMemberCredential (non_zero schema), the only store for it. The old
+ * OrgMember.passwordHash column is no longer written or read.
  *
  * Goes through the normal ACL-wrapped client: callers keep the authorization they already had
  * (pre-auth flows run unscoped, change-password writes the caller's own row, the invite flow
  * runs under withWorkspaceScope).
  *
- * Pass `tx` when the caller already has an open interactive transaction; the writes then join
- * it instead of starting another.
+ * Pass `tx` when the caller already has an open interactive transaction; the write then joins
+ * it.
  */
 export async function setPasswordHash(
   input: SetPasswordHashInput,
   tx?: Prisma.TransactionClient,
 ): Promise<void> {
   const client = tx ?? db;
-  const updateOrgMember = client.orgMember.update({
-    where: { memberId: input.memberId },
-    data: { passwordHash: input.passwordHash },
-  });
-  const upsertCredential = client.orgMemberCredential.upsert({
+  await client.orgMemberCredential.upsert({
     where: { memberId: input.memberId },
     create: {
       memberId: input.memberId,
       orgId: input.orgId,
       passwordHash: input.passwordHash,
     },
-    update: { passwordHash: input.passwordHash },
+    update: { orgId: input.orgId, passwordHash: input.passwordHash },
   });
-
-  if (tx) {
-    await updateOrgMember;
-    await upsertCredential;
-    return;
-  }
-  await db.$transaction([updateOrgMember, upsertCredential]);
 }
