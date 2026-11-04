@@ -14,7 +14,8 @@ router.get('/pending-approvals', authMiddleware.authenticate, invitationControll
 router.post('/:id/approve', authMiddleware.authenticate, invitationController.approveInvitation);
 router.post('/:id/reject', authMiddleware.authenticate, invitationController.rejectInvitation);
 // Admin: provision a new org + workspace + owner invitation in one shot
-router.post('/provision-org', authMiddleware.authenticate, authMiddleware.requireAdminOrOwner, invitationController.provisionOrg,);
+// Organization creation is disabled for now.
+// router.post('/provision-org', authMiddleware.authenticate, authMiddleware.requireAdminOrOwner, invitationController.provisionOrg,);
 // Unified accept — handles OAuth or email+password
 router.post('/:id/accept', invitationController.acceptInvitation);
 
