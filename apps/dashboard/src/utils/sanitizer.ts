@@ -168,3 +168,26 @@ export const htmlToPlainText = (html: string): string => {
   sanitizeDomTree(doc.body);
   return (doc.body.textContent || '').trim();
 };
+
+/**
+ * Convert a stored HTML description into plain text suitable for a plain
+ * <textarea> editor: preserves line breaks (<br> and block-level element
+ * boundaries), decodes entities and drops tags. Returns the input unchanged
+ * when it contains no HTML, so plain descriptions are not touched.
+ */
+export const htmlToEditableText = (html: string): string => {
+  if (!html) return '';
+  const looksLikeHtml = /<\/?[a-z][^>]*>/i.test(html) || /&[a-zA-Z#0-9]+;/.test(html);
+  if (!looksLikeHtml) return html;
+
+  const withBreaks = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|li|tr|h[1-6]|blockquote|pre)>/gi, '\n');
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(withBreaks, 'text/html');
+  sanitizeDomTree(doc.body);
+  return (doc.body.textContent || '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
