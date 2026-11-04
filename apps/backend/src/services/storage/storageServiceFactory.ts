@@ -2,6 +2,7 @@ import { createStorageService, setStorageLogger, type StorageConfig, type Storag
 import { config } from '../../config/env';
 import { logger } from '../../utils/logger';
 import { withRetry } from '../../utils/retry';
+import { SafeStorageService } from './safeStorageService';
 
 setStorageLogger(logger);
 
@@ -41,6 +42,22 @@ function buildStorageConfig(): StorageConfig {
   };
 }
 
+/** Buckets whose objects get per-object CSEK encryption (GCS only). */
+function isEncryptedBucket(bucketName: string): boolean {
+  return bucketName === config.gcs.bucketName || bucketName === config.gcs.sessionRecordingBucketName;
+}
+
+function withEncryption(service: StorageService, bucketName: string): StorageService {
+  const { enableStorageEncryption, enableStorageDecryption } = config.enc;
+  if (storageProvider() !== 'gcs' || !isEncryptedBucket(bucketName)) return service;
+  if (!enableStorageEncryption && !enableStorageDecryption) return service;
+  return new SafeStorageService(service, {
+    encryptWrites: enableStorageEncryption,
+    // Objects this process encrypts must stay readable by it.
+    decryptReads: enableStorageEncryption || enableStorageDecryption,
+  });
+}
+
 const cache = new Map<string, StorageService>();
 let defaultService: StorageService | null = null;
 let initPromise: Promise<void> | null = null;
@@ -67,7 +84,7 @@ export async function initStorage(): Promise<void> {
 export function getStorageService(bucketName?: string | null): StorageService {
   if (!bucketName) {
     if (!defaultService) {
-      defaultService = createStorageService(buildStorageConfig());
+      defaultService = withEncryption(createStorageService(buildStorageConfig()), config.gcs.bucketName);
       logger.info(`[StorageServiceFactory] Created default ${config.fileStorage.provider} service`);
     }
     return defaultService;
@@ -75,7 +92,7 @@ export function getStorageService(bucketName?: string | null): StorageService {
 
   const key = `${config.fileStorage.provider}:${bucketName}`;
   if (!cache.has(key)) {
-    cache.set(key, createStorageService(buildStorageConfig(), bucketName));
+    cache.set(key, withEncryption(createStorageService(buildStorageConfig(), bucketName), bucketName));
     logger.info(`[StorageServiceFactory] Created ${config.fileStorage.provider} service for bucket: ${bucketName}`);
   }
   return cache.get(key)!;

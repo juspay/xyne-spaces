@@ -31,12 +31,44 @@ export interface StorageConfig {
   azure?: AzureStorageConfig;
 }
 
+/**
+ * GCS customer-supplied encryption key (CSEK) for one object. GCS keeps only the key's hash,
+ * so every later read, copy or move of the object must present the same key.
+ */
+export interface ObjectEncryption {
+  /** 32-byte AES-256 key. */
+  key: Buffer;
+  /** Written to the object's custom metadata, which stays readable without the key. */
+  customMetadata: Record<string, string>;
+}
+
+/** Key for reading, copying or moving an object written with `ObjectEncryption`. */
+export interface ObjectKeyOptions {
+  encryptionKey?: Buffer;
+}
+
 export interface UploadOptions {
   filename: string;
   contentType: string;
   metadata?: Record<string, string>;
   scopeType?: string;
   scopeId?: string;
+  encryption?: ObjectEncryption;
+}
+
+export interface UploadV2Options {
+  path: string;
+  contentType: string;
+  cacheControl?: string;
+  metadata?: Record<string, string>;
+  ifNotExists?: boolean;
+  timeoutMs?: number;
+  encryption?: ObjectEncryption;
+}
+
+export interface ReadStreamOptions extends ObjectKeyOptions {
+  start?: number;
+  end?: number;
 }
 
 export interface UploadResult {
@@ -64,6 +96,8 @@ export interface ObjectInfo {
   contentType?: string;
   etag?: string;
   lastModified?: Date;
+  /** The object's custom metadata. */
+  metadata?: Record<string, string>;
 }
 
 /** One object's metadata plus a readable stream of its content. */
@@ -90,25 +124,26 @@ export interface UploadToPathOptions {
   /** GCS only: resumable upload chunk size in bytes (multiple of 256 KiB). Bounds buffering and avoids
    *  single-request timeouts when the source stream is slow. No effect on S3 (already multipart). */
   chunkSize?: number;
+  encryption?: ObjectEncryption;
 }
 
 export interface StorageService {
   uploadFile(buffer: Buffer, options: UploadOptions): Promise<UploadResult>;
   uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult>;
-  uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean; timeoutMs?: number }): Promise<UploadResult>;
+  uploadFileV2(buffer: Buffer, options: UploadV2Options): Promise<UploadResult>;
   uploadStreamToPath(stream: NodeJS.ReadableStream, options: UploadToPathOptions): Promise<UploadResult>;
   deleteFile(filename: string): Promise<DeleteResult>;
   generateSignedUrl(filename: string, expirationHours?: number): Promise<string>;
   fileExists(filename: string): Promise<boolean>;
   getFileMetadata(filename: string): Promise<FileMetadata>;
-  getFileBuffer(path: string, maxRetries?: number): Promise<Buffer>;
-  downloadFile(remotePath: string, localPath: string): Promise<void>;
-  createReadStream(path: string, options?: { start?: number; end?: number }): Promise<NodeJS.ReadableStream>;
+  getFileBuffer(path: string, maxRetries?: number, options?: ObjectKeyOptions): Promise<Buffer>;
+  downloadFile(remotePath: string, localPath: string, options?: ObjectKeyOptions): Promise<void>;
+  createReadStream(path: string, options?: ReadStreamOptions): Promise<NodeJS.ReadableStream>;
   headObject(path: string): Promise<ObjectInfo | null>;
-  getObject(path: string): Promise<ObjectRead | null>;
+  getObject(path: string, options?: ObjectKeyOptions): Promise<ObjectRead | null>;
   listFiles(prefix: string): Promise<ListedFile[]>;
   listPrefixes(prefix: string): Promise<string[]>;
-  moveFile(sourcePath: string, destinationPath: string): Promise<void>;
+  moveFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void>;
   ensureBucketExists(): Promise<void>;
   checkBucketExists(): Promise<void>;
   buildStorageUri(path: string): string;
