@@ -43,7 +43,7 @@ By hand, the constraints are:
 
 ```bash
 openssl rand -base64 24 | tr -d '/+=' | cut -c1-24     # 16+ characters, RDS-safe (postgres_password, redis_auth, zero_admin_password)
-openssl rand -base64 48 | tr -d '/+=' | cut -c1-48     # 32+ characters (jwt_secret, zero_auth_secret, internal_s2s_key, claw_s2s_key, transcription_agent_api_key)
+openssl rand -base64 48 | tr -d '/+=' | cut -c1-48     # 32+ characters (jwt_secret, zero_auth_secret, internal_s2s_key, claw_s2s_key, ocr_s2s_key, transcription_agent_api_key)
 openssl rand -hex 32                                   # exactly 64 hex characters (encryption_key, claw_auth_encryption_key)
 docker run --rm ghcr.io/juspay/y-sweet:<tag> y-sweet gen-auth --json      # private_key -> ysweet_auth, server_token -> ysweet_server_token
 docker run --rm livekit/livekit-server:v1.9.1 generate-keys              # livekit_api_key, livekit_api_secret
@@ -69,8 +69,9 @@ The y-sweet tag is the `appVersion` of `helm-charts/charts/xyne-ysweet/Chart.yam
 | `zero_auth_secret` | 32+ | Zero client tokens; the backend and Zero share it | `xyne-backend-secrets`, `xyne-zero-secrets` |
 | `zero_admin_password` | 16+ | Zero's admin endpoints | `xyne-zero-secrets` |
 | `encryption_key` | exactly 64 hex | data the backend encrypts at rest | `xyne-backend-secrets` |
-| `internal_s2s_key` | 32+ | service-to-service calls | backend, claw and claw-auth Secrets |
+| `internal_s2s_key` | 32+ | service-to-service calls, including backend and workers to the OCR service | backend, claw and claw-auth Secrets; the OCR pod reads it from `xyne-backend-secrets` |
 | `claw_s2s_key` | 32+ | claw to claw-auth | claw and claw-auth Secrets |
+| `ocr_s2s_key` | optional, 32+ when set | services outside xyne-spaces calling the OCR service (`x-s2s-key`); xyne-spaces itself sends `internal_s2s_key` | `xyne-backend-secrets` as `OCR_S2S_KEY` (read only by the OCR pod) |
 | `claw_auth_encryption_key` | exactly 64 hex | credentials claw-auth stores | `xyne-claw-auth-secrets` |
 | `ysweet_auth`, `ysweet_server_token` | from the same `gen-auth` run | the y-sweet signing key and the token the backend presents | `xyne-ysweet-secrets`, `xyne-backend-secrets` |
 | `transcription_agent_api_key` | 32+ | backend to transcription agent | `xyne-transcription-agent-secrets` |
@@ -86,7 +87,7 @@ All in the install namespace, labelled `app.kubernetes.io/managed-by: terraform`
 
 | Secret | Keys | Created |
 |---|---|---|
-| `xyne-backend-secrets` | `DATABASE_URL`, `COMMON_DATABASE_URL`, `DATABASE_READ_REPLICA_POOL_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `REDIS_PASSWORD`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY`, `Y_SWEET_SERVER_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | always |
+| `xyne-backend-secrets` | `DATABASE_URL`, `COMMON_DATABASE_URL`, `DATABASE_READ_REPLICA_POOL_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `REDIS_PASSWORD`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY`, `OCR_S2S_KEY`, `Y_SWEET_SERVER_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | always |
 | `xyne-zero-secrets` | `ZERO_UPSTREAM_DB`, `ZERO_CVR_DB`, `ZERO_CHANGE_DB`, `ZERO_AUTH_SECRET`, `ZERO_ADMIN_PASSWORD` | always |
 | `xyne-claw-secrets` | `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY`, `LITELLM_API_KEY`, `HINDSIGHT_API_KEY`, `REDIS_PASSWORD` | always |
 | `xyne-claw-auth-secrets` | `DATABASE_URL`, `ENCRYPTION_KEY`, `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `REDIS_PASSWORD` | always |

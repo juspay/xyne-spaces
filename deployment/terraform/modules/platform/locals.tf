@@ -68,6 +68,7 @@ locals {
       ZERO_AUTH_SECRET               = var.app_secrets.zero_auth_secret
       ENCRYPTION_KEY                 = var.app_secrets.encryption_key
       INTERNAL_S2S_KEY               = var.app_secrets.internal_s2s_key
+      OCR_S2S_KEY                    = var.app_secrets.ocr_s2s_key
       Y_SWEET_SERVER_TOKEN           = var.app_secrets.ysweet_server_token
       GOOGLE_CLIENT_ID               = var.app_secrets.google_client_id
       GOOGLE_CLIENT_SECRET           = var.app_secrets.google_client_secret

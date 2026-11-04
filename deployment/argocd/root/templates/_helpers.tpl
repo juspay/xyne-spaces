@@ -585,7 +585,7 @@ pdb:
 {{- $_ := set $env "LIGHTON_TIMEOUT_SECONDS" "300" }}
 {{- end }}
 {{- $_ := set $v "env" $env }}
-{{- $_ := set $v "secretEnv" (dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true)) }}
+{{- $_ := set $v "secretEnv" (dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true) "OCR_S2S_KEY" (dict "name" "xyne-backend-secrets" "key" "OCR_S2S_KEY" "optional" true) "INTERNAL_S2S_KEY" (dict "name" "xyne-backend-secrets" "key" "INTERNAL_S2S_KEY" "optional" true)) }}
 {{- toYaml $v }}
 {{- end }}
 
