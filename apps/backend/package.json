@@ -135,7 +135,7 @@
     "node-html-markdown": "^2.0.0",
     "node-html-parser": "^6.1.13",
     "node-rsa": "^1.1.1",
-    "nodemailer": "^10.0.6",
+    "nodemailer": "^10.1.4",
     "p-limit": "^3.1.0",
     "partial-json": "^0.1.7",
     "pdf-lib": "^1.17.1",
