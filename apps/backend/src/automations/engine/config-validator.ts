@@ -14,7 +14,7 @@ import {
 import { BusinessHoursSchema, fitsWithinMaxWait } from '../util/business-hours';
 import { ControlFlowStepType } from '../types/known-types';
 import { ValidationIssueCode } from '../types/validation';
-import type { ValidationIssue, ValidationResult } from '../types/validation';
+import type { AccessContext, ValidationIssue, ValidationResult } from '../types/validation';
 import type { TriggerRegistry } from '../triggers/trigger-registry';
 import type { StepRegistry } from '../steps/step-registry';
 import { collectRefs, isPureRef } from '../util/variable-ref';
@@ -211,6 +211,76 @@ export class ConfigValidator {
     private readonly triggerRegistry: TriggerRegistry,
     private readonly stepRegistry: StepRegistry,
   ) {}
+
+  async validateAccess(
+    config: AutomationConfig,
+    access: AccessContext,
+  ): Promise<ValidationResult> {
+    const issues: ValidationIssue[] = [];
+
+    if (config.trigger && this.triggerRegistry.has(config.trigger.type)) {
+      const triggerImpl = this.triggerRegistry.get(config.trigger.type);
+      if (triggerImpl.validateAccess) {
+        const parsed = triggerImpl.configSchema.safeParse(config.trigger.config);
+        if (parsed.success) {
+          const found = await triggerImpl.validateAccess(parsed.data, access);
+          for (const issue of found) {
+            issues.push({ ...issue, path: `trigger.config.${issue.path}` });
+          }
+        }
+      }
+    }
+
+    await this.walkStepsForAccess(config.steps, 'steps', access, issues);
+    return { valid: issues.length === 0, issues };
+  }
+
+  private async walkStepsForAccess(
+    steps: AutomationStepConfig[] | undefined,
+    basePath: string,
+    access: AccessContext,
+    issues: ValidationIssue[],
+  ): Promise<void> {
+    if (!Array.isArray(steps)) return;
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i]!;
+      const stepPath = `${basePath}[${i}]`;
+
+      if (step.type === ControlFlowStepType.CONDITIONAL) {
+        const cfg = (step as ConditionalStepConfig).config;
+        await this.walkStepsForAccess(cfg.if_true, `${stepPath}.config.if_true`, access, issues);
+        await this.walkStepsForAccess(cfg.if_false, `${stepPath}.config.if_false`, access, issues);
+        continue;
+      }
+
+      if (step.type === ControlFlowStepType.SWITCH) {
+        const cfg = (step as SwitchStepConfig).config;
+        for (let c = 0; c < cfg.cases.length; c++) {
+          await this.walkStepsForAccess(
+            cfg.cases[c]!.steps,
+            `${stepPath}.config.cases[${c}].steps`,
+            access,
+            issues,
+          );
+        }
+        await this.walkStepsForAccess(cfg.default, `${stepPath}.config.default`, access, issues);
+        continue;
+      }
+
+      if (!this.stepRegistry.has(step.type)) continue;
+      const stepImpl = this.stepRegistry.get(step.type);
+      if (!stepImpl.validateAccess) continue;
+
+      const parsed = stepImpl.configSchema.safeParse(step.config);
+      if (!parsed.success) continue;
+
+      const found = await stepImpl.validateAccess(parsed.data, access);
+      for (const issue of found) {
+        issues.push({ ...issue, path: `${stepPath}.config.${issue.path}` });
+      }
+    }
+  }
 
   validate(config: AutomationConfig): ValidationResult {
     const issues: ValidationIssue[] = [];
