@@ -370,12 +370,9 @@ export const CONFIG = {
      */
     orgContext:
       process.env["ENTITY_EXTRACTION_ORG_CONTEXT"] ??
-      "The data belongs to Xyne, a payments orchestration company. Xyne routes and " +
-        "processes online transactions for its merchant clients across many payment gateways, " +
-        "payment methods, card networks and banks. MERCHANTS are Xyne customers who use it to " +
-        "accept payments. Payment gateways/PSPs, card networks, banks and regulators such as NPCI " +
-        "are external ecosystem entities. Xyne itself is the operator, NOT an external " +
-        "organisation — never classify Xyne (or its own products/teams) as ORGANISATION.",
+      "The data belongs to Xyne, the organisation that operates this workspace. Xyne itself is " +
+        "the operator, NOT an external organisation — never classify Xyne (or its own products/teams) " +
+        "as ORGANISATION.",
   },
   /**
    * BITBOT — PR-analysis service. The MCP adapter spawns a stdio
