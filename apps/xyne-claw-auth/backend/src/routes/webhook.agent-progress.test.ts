@@ -153,6 +153,14 @@ describe("/webhook/progress sandbox preview records sandbox ownership", () => {
     return webhook.slice(start, start + 6000);
   })();
 
+  it("dedupes per run + sandbox, not per run, so a second sandbox is still announced (XYNE-66338)", () => {
+    expect(previewBranch).toContain("const announceKey = `${sessionId}:${sandboxId}`;");
+    expect(previewBranch).toContain("announcedSandboxPreviews.has(announceKey)");
+    expect(previewBranch).toContain("rememberAnnouncedPreview(announceKey)");
+    expect(previewBranch).not.toContain("announcedSandboxPreviews.has(sessionId)");
+    expect(previewBranch.split("announcedSandboxPreviews.has(announceKey)").length - 1).toBe(2);
+  });
+
   it("writes the ConversationArtifact owner row the sandbox router's access check reads", () => {
     expect(previewBranch).toContain("ingestSandboxPreviewSignals(");
   });
@@ -223,7 +231,7 @@ describe("/webhook/progress sandbox preview failures are not silent (XYNE-66341)
   it("marks the run announced only after the session context resolves", () => {
     const resolve = previewBranch.indexOf("resolveSessionContext(");
     const noCtx = previewBranch.indexOf("if (!ctx) {");
-    const remember = previewBranch.indexOf("rememberAnnouncedPreview(sessionId)");
+    const remember = previewBranch.indexOf("rememberAnnouncedPreview(announceKey)");
     expect(resolve).toBeGreaterThan(-1);
     expect(remember).toBeGreaterThan(noCtx);
     expect(noCtx).toBeGreaterThan(resolve);
