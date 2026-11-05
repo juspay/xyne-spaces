@@ -661,6 +661,7 @@ const envSchema = Joi.object({
 
   // ── Keys previously read straight from process.env ──
   ENABLE_DEV_AUTH: Joi.boolean().empty('').default(false),
+  ENABLE_ORG_CREATION: Joi.boolean().empty('').default(false),
   ALLOWED_REDIRECT_ORIGINS: Joi.string().allow('').default(''),
   DEFAULT_ADMIN_EMAIL: Joi.string().allow('').default(''),
   TEST_AUTH_EMAIL: Joi.string().empty('').default('test-user@xyne-test.local'),
@@ -1499,6 +1500,7 @@ export const config = {
   deepResearchBaseUrl: envVars.DEEP_RESEARCH_BASE_URL as string,
   // ── Formerly read straight from process.env ──
   enableDevAuth: envVars.ENABLE_DEV_AUTH as boolean,
+  enableOrgCreation: envVars.ENABLE_ORG_CREATION as boolean,
   allowedRedirectOrigins: envVars.ALLOWED_REDIRECT_ORIGINS as string,
   defaultAdminEmail: envVars.DEFAULT_ADMIN_EMAIL as string,
   testAuth: {
