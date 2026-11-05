@@ -1,3 +1,4 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { authorCanSeeChannel } from '../util/author-access';
 import { db } from '@/database/client';
 import type { AutomationContext } from '../types/context';
@@ -59,7 +60,7 @@ export class CreateEmailDraftStep extends BaseActionStep<
     const draft = await repositories.emailDrafts.upsertForChannelConversation({
       channelId: config.channelId as string,
       conversationId: config.conversationId as string,
-      draftContent: config.draftContent as string,
+      draftContent: sanitizeMessageContent(config.draftContent as string),
     });
 
     return {

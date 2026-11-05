@@ -8,7 +8,7 @@ import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { TicketController } from '@/controllers/ticketController';
 import { logger } from '@/utils/logger';
-import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 import { generateTitle } from '@/services/agents/title-generator';
 
 const MAX_TITLE_LENGTH = 100;
@@ -102,7 +102,7 @@ export class CreateTicketStep extends BaseActionStep<
       throw new Error('[CREATE_TICKET] Description must be provided');
     }
 
-    const description = rawDescription;
+    const description = sanitizeMessageContent(rawDescription);
     const plainDescription = extractPlainTextFromHtml(description).trim();
 
     let title = rawTitle?.trim() ? extractPlainTextFromHtml(rawTitle).trim() : '';

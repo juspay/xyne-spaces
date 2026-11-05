@@ -1,3 +1,4 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
@@ -48,7 +49,7 @@ export class SendEmailToUserStep extends BaseActionStep<
   ): Promise<SendEmailToUserOutput> {
     const userId = config.userId as string;
     const subject = config.subject as string;
-    const body = config.body as string;
+    const body = sanitizeMessageContent(config.body as string);
     const workspaceId = context.automation.workspaceId;
 
     const user = await repositories.users.findById(userId);

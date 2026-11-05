@@ -236,10 +236,33 @@ function markdownToHtml(text: string): string {
     const html = text.includes('\n')
       ? marked.parse(text, MARKED_OPTIONS)
       : marked.parseInline(text, MARKED_OPTIONS);
-    return (html as string).trim();
+    return dropUnsafeUrls((html as string).trim());
   } catch {
     return text;
   }
+}
+
+const URL_ATTR = /\s(href|src)="([^"]*)"/gi;
+
+function decodeUrlForCheck(raw: string): string {
+  return raw
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&colon;/gi, ':')
+    .replace(/&tab;|&newline;/gi, '')
+    .replace(/&amp;/gi, '&')
+    .split('')
+    .filter(ch => ch.charCodeAt(0) > 0x20 && ch.charCodeAt(0) !== 0x7f)
+    .join('');
+}
+
+/** Markdown links and images may only point at http(s), mailto or relative URLs. */
+function dropUnsafeUrls(html: string): string {
+  return html.replace(URL_ATTR, (attr, _name: string, value: string) => {
+    const url = decodeUrlForCheck(value);
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1]?.toLowerCase();
+    return !scheme || scheme === 'http' || scheme === 'https' || scheme === 'mailto' ? attr : '';
+  });
 }
 
 function stringifyForTemplate(value: unknown): string {

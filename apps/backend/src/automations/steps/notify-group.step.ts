@@ -56,7 +56,7 @@ export class NotifyGroupStep extends BaseActionStep<
     );
 
     const group = await repositories.userGroups.findWithMappings(groupId);
-    if (!group) {
+    if (!group || group.workspaceId !== context.automation.workspaceId) {
       throw new Error(`[NOTIFY_GROUP] User group not found: ${groupId}`);
     }
     const memberIds = (group.userGroupMappings ?? [])

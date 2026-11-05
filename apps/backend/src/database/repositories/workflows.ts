@@ -197,10 +197,11 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
    * lineage points `automationSeriesId` at the root's `id`), so it has to be
    * matched by `id` explicitly or it silently drops out of its own history.
    */
-  async findByautomationSeriesId(automationSeriesId: string): Promise<Workflow[]> {
+  async findByautomationSeriesId(automationSeriesId: string, workspaceId: string): Promise<Workflow[]> {
     return await this.db.workflow.findMany({
       where: {
         workflowType: 'Automations',
+        workspaceId,
         OR: [{ automationSeriesId }, { id: automationSeriesId }],
       },
       orderBy: { createdAt: 'desc' },
@@ -250,10 +251,12 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
   async archivePriorLiveInLineage(
     automationSeriesId: string,
     keepId: string,
+    workspaceId: string,
   ): Promise<Workflow[]> {
     const prior = await this.db.workflow.findMany({
       where: {
         workflowType: 'Automations',
+        workspaceId,
         automationSeriesId,
         status: { in: ['ACTIVE', 'DISABLED'] },
         id: { not: keepId },

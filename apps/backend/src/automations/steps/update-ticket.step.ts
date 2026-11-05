@@ -1,3 +1,4 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { TicketStatusV2, TicketPriority, BoardType, ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
@@ -95,7 +96,7 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
 
     const fields: Parameters<typeof repositories.tickets.updateTicketFields>[1] = {};
     if (config.title !== undefined) fields.title = config.title as string;
-    if (config.description !== undefined) fields.description = config.description as string;
+    if (config.description !== undefined) fields.description = sanitizeMessageContent(config.description as string);
     if (config.priority !== undefined) {
       const normalized = (config.priority as string).toUpperCase();
       if (Object.values(TicketPriority).includes(normalized as TicketPriority)) {

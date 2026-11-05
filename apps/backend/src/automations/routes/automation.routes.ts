@@ -633,7 +633,7 @@ router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) 
     }
 
     const seriesId = workflow.automationSeriesId ?? workflow.id;
-    const versions = (await approvalService.listLineageVersions(seriesId)).filter(
+    const versions = (await approvalService.listLineageVersions(seriesId, auth.workspaceId)).filter(
       v => v.workspaceId === auth.workspaceId,
     );
     res.json({ success: true, data: versions, timestamp: new Date().toISOString() });

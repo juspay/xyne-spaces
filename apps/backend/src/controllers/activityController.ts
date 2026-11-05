@@ -28,7 +28,13 @@ export class ActivityController {
   async logActivity(req: Request, res: Response): Promise<void> {
     try {
       // req.body is already validated by middleware
-      const validated = req.body as ValidatedActivityPayload;
+      const body = req.body as ValidatedActivityPayload;
+      if (!req.user?.id) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      // Identity comes from the session, never from the request body.
+      const validated: ValidatedActivityPayload = { ...body, userId: req.user.id, userEmail: req.user.email ?? '' };
 
       // Fetch platform from UserSession.deviceInfo
       let platform: string | undefined;

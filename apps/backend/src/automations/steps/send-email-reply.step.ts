@@ -1,3 +1,4 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
@@ -58,7 +59,7 @@ export class SendEmailReplyStep extends BaseActionStep<
     context: AutomationContext,
   ): Promise<SendEmailReplyOutput> {
     const conversationId = config.conversationId as string;
-    const body = config.body as string;
+    const body = sanitizeMessageContent(config.body as string);
     const type = config.replyAll === true ? 'REPLY_ALL' : 'REPLY';
     const prisma = DatabaseClient.getInstance();
 

@@ -1,3 +1,4 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
@@ -57,7 +58,7 @@ export class CreateSubTicketStep extends BaseActionStep<
     const result = await createSubTicket({
       parentTicketId: config.parentTicketId as string,
       title: config.title as string,
-      description: (config.description as string | undefined) ?? null,
+      description: config.description ? sanitizeMessageContent(config.description as string) : null,
       assignedTo,
       createdBy: context.automation.createdById,
     });

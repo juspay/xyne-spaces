@@ -8,7 +8,7 @@ import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { TicketController } from '@/controllers/ticketController';
 import { logger } from '@/utils/logger';
-import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 
 const PromoteMessageToTicketConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
@@ -57,7 +57,7 @@ export class PromoteMessageToTicketStep extends BaseActionStep<
     const createdBy = context.automation.createdById;
     const rawTitle = config.title as string;
     const title = extractPlainTextFromHtml(rawTitle).trim() || rawTitle;
-    const description = (config.description as string | undefined) ?? title;
+    const description = sanitizeMessageContent((config.description as string | undefined) ?? title);
 
     // The channel is derived from the source conversation by the controller.
     const reqBody: Record<string, unknown> = {

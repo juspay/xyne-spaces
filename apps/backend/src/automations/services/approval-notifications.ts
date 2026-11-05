@@ -29,7 +29,7 @@ async function getApprovalBotUserId(workspaceId: string): Promise<string | null>
   }
 }
 
-async function listAutomationsAdminUserIds(): Promise<string[]> {
+async function listAutomationsAdminUserIds(workspaceId: string): Promise<string[]> {
   const resource = await repositories.resources.findByName(AUTOMATIONS_RESOURCE_NAME);
   if (!resource) {
     logger.warn(
@@ -40,11 +40,12 @@ async function listAutomationsAdminUserIds(): Promise<string[]> {
   const all = await repositories.resourceAccess.findByResource(resource.id);
   const userIds = new Set<string>();
   for (const access of all) {
+    if (access.workspaceId !== workspaceId) continue;
     if (access.accessType !== AccessType.ADMIN) continue;
     if (access.userId) userIds.add(access.userId);
     if (access.groupId) {
       const mappings = await repositories.userGroupMapping.findMany({
-        where: { userGroupId: access.groupId },
+        where: { userGroupId: access.groupId, workspaceId },
       });
       for (const m of mappings) userIds.add(m.userId);
     }
@@ -82,7 +83,7 @@ export async function notifyAdminsOfSubmission(
 ): Promise<void> {
   const botId = await getApprovalBotUserId(proposal.workspaceId);
   if (!botId) return;
-  const adminIds = await listAutomationsAdminUserIds();
+  const adminIds = await listAutomationsAdminUserIds(proposal.workspaceId);
   if (adminIds.length === 0) {
     logger.warn(
       `[approval-notifications] no AUTOMATIONS admins to notify for proposal ${proposal.id}`,
@@ -114,7 +115,7 @@ export async function notifyAdminsOfArchiveRequest(
 ): Promise<void> {
   const botId = await getApprovalBotUserId(automation.workspaceId);
   if (!botId) return;
-  const adminIds = await listAutomationsAdminUserIds();
+  const adminIds = await listAutomationsAdminUserIds(automation.workspaceId);
   if (adminIds.length === 0) {
     logger.warn(
       `[approval-notifications] no AUTOMATIONS admins to notify for archive request ${automation.id}`,

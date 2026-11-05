@@ -18367,14 +18367,19 @@ export function createMutators(
           args: { id, name, configJson, metadataJson, eventType, automationSeriesId, timestamp },
         }) => {
           if (automationSeriesId !== undefined && automationSeriesId !== id) {
-            const lineage = await tx.run(
-              zql.workflows
-                .where('automationSeriesId', automationSeriesId)
-                .where('workspaceId', ctx.workspaceId)
-                .where('workflowType', 'Automations')
-                .one(),
-            );
-            if (!lineage) throw new Error(`Automation series "${automationSeriesId}" not found`);
+            const inWorkspace = (row: { workspaceId: string; workflowType: string | null } | undefined) =>
+              !!row && row.workspaceId === ctx.workspaceId && row.workflowType === 'Automations';
+            const root = await tx.run(zql.workflows.where('id', automationSeriesId).one());
+            const member = inWorkspace(root)
+              ? root
+              : await tx.run(
+                  zql.workflows
+                    .where('automationSeriesId', automationSeriesId)
+                    .where('workspaceId', ctx.workspaceId)
+                    .where('workflowType', 'Automations')
+                    .one(),
+                );
+            if (!inWorkspace(member)) throw new Error(`Automation series "${automationSeriesId}" not found`);
           }
           const clientMetadata = parseAutomationMetadata(metadataJson);
           const metadata = buildAutomationMetadata({
