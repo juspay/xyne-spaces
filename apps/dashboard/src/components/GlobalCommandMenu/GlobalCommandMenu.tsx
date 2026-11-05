@@ -231,6 +231,9 @@ const GlobalCommandMenu = ({
       if (newOpen && !open) {
         setSessionOrigin(restoredOrigin ?? 'search');
         setOverPageDialog(overDialog);
+        if (restoredOrigin === 'findInChannel') {
+          setDeskMergeEnabled(location.pathname.split('/').includes('support'));
+        }
       }
       // Only Cmd+K consults the policy: a Back-restore must not bounce to full page, and mobile
       // (palette already full screen, no collapse there) and the results page never do. Over a

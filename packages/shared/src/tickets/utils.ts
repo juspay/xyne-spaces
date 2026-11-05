@@ -38,3 +38,8 @@ const LINKED_SUB_TICKET_NAMESPACE = 'edffd0e4-129b-4f8a-9f73-c1a077f74433';
  */
 export const linkedSubTicketId = (ticketId: string, mappedTicketId: string): string =>
   uuidv5(`linked-subticket:${ticketId}:${mappedTicketId}`, LINKED_SUB_TICKET_NAMESPACE);
+
+export const getTicketSourceKey = ({ channelId, metadata }: { channelId: string | null; metadata?: unknown }): string => {
+  const meta = metadata as { deskSource?: { installedAppId?: string }; slackChannelId?: string; source?: string } | null;
+  return meta?.deskSource?.installedAppId ?? meta?.slackChannelId ?? `${channelId}:${meta?.source ?? ''}`;
+};
