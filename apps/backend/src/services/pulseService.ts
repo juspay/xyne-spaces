@@ -35,7 +35,7 @@ interface PulseOrg {
 
 interface PulseProduct {
   id: string;         // lead/product ID
-  product?: string;   // product name e.g. "Xyne Safe"
+  product?: string;   // product name
   stage?: string;     // e.g. "MERCHANT_CONTACTED"
   productId?: string; // fallback alias
 }
