@@ -1,4 +1,4 @@
-import { Fragment, useId, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import {
   groupTurnParts,
@@ -264,7 +264,7 @@ function StepGroup({
               className='duration-200 animate-in fade-in-0 slide-in-from-top-1 motion-reduce:animate-none'
             >
               {step.type === 'reasoning' ? (
-                <ThinkingStep part={step} />
+                <ThinkingStep part={step} streaming={live && step === current && !step.endedAt} />
               ) : (
                 <ToolStep id={step.id} tree={tree} />
               )}
@@ -278,12 +278,34 @@ function StepGroup({
 
 /** A thinking step: its first line reads as the row; opening it un-truncates
  *  that line and reveals the rest, so nothing is shown twice. */
-function ThinkingStep({ part }: { part: AssistantReasoningPart }): ReactElement {
+function ThinkingStep({
+  part,
+  streaming = false,
+}: {
+  part: AssistantReasoningPart;
+  /** True while this step's text is still streaming in — the expanded pane
+   *  then pins to the newest line, same contract as the collapsed pane. */
+  streaming?: boolean;
+}): ReactElement {
   const [open, setOpen] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const stuckToBottom = useRef(true);
   const text = part.text.trim();
   const breakAt = text.indexOf('\n');
   const firstLine = breakAt === -1 ? text : text.slice(0, breakAt);
   const rest = breakAt === -1 ? '' : text.slice(breakAt + 1).trim();
+  const scrollToLatest = useCallback((behavior: ScrollBehavior) => {
+    const el = textRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+  // Opening the live step lands on the newest text, not the oldest.
+  useEffect(() => {
+    if (open && streaming) scrollToLatest('instant');
+  }, [open, streaming, scrollToLatest]);
+  // While streaming, follow the newest text unless the user scrolled up.
+  useEffect(() => {
+    if (streaming && stuckToBottom.current) scrollToLatest('smooth');
+  }, [rest, streaming, scrollToLatest]);
   const from = part.startedAt ? Date.parse(part.startedAt) : NaN;
   const to = part.endedAt ? Date.parse(part.endedAt) : NaN;
   const durationMs = Number.isFinite(from) && Number.isFinite(to) ? to - from : null;
@@ -322,7 +344,14 @@ function ThinkingStep({ part }: { part: AssistantReasoningPart }): ReactElement 
       </button>
       {rest && (
         <Reveal open={open}>
-          <p className='max-h-80 overflow-y-auto whitespace-pre-wrap break-words px-3 pb-2 text-xs leading-5 text-muted-foreground/70'>
+          <p
+            ref={textRef}
+            onScroll={e => {
+              const el = e.currentTarget;
+              stuckToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 28;
+            }}
+            className='max-h-80 overflow-y-auto whitespace-pre-wrap break-words px-3 pb-2 text-xs leading-5 text-muted-foreground/70'
+          >
             {rest}
           </p>
         </Reveal>
