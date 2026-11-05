@@ -150,6 +150,9 @@ variable "overlay_sources" {
     chart_version   = optional(string, "")
     namespace       = optional(string, "")
     helm_values     = optional(string, "")
+    # Helm value files, as paths inside repo_url, relative to path. Applied before
+    # helm_values, which outranks them.
+    value_files     = optional(list(string), [])
   }))
   default = []
 }
@@ -169,6 +172,7 @@ variable "app_secrets" {
     litellm_api_key             = optional(string, "")
     hindsight_api_key           = optional(string, "")
     hindsight_llm_api_key       = optional(string, "")
+    spaces_db_url               = optional(string, "")
     google_client_id            = optional(string, "")
     google_client_secret        = optional(string, "")
   })

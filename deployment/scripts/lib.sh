@@ -139,8 +139,8 @@ load_env() {
   . "$ENV_CONF"
   set +a
   case "${CLOUD:-}" in
-    gcp|aws|azure) ;;
-    *) die "CLOUD must be gcp, aws or azure in $ENV_CONF" ;;
+    gcp|aws|azure|onprem) ;;
+    *) die "CLOUD must be gcp, aws, azure or onprem in $ENV_CONF" ;;
   esac
   STATE_PREFIX="${STATE_PREFIX:-xyne}"
   INFRA_STACK="$STACKS_DIR/$CLOUD/01-infra"
@@ -167,6 +167,41 @@ load_env() {
       [ -n "${LOCATION:-}" ] || die "LOCATION is required in $ENV_CONF"
       export ARM_SUBSCRIPTION_ID="$SUBSCRIPTION_ID"
       ;;
+    onprem)
+      [ -n "${STATE_BUCKET:-}" ] || die "STATE_BUCKET is required in $ENV_CONF"
+      [ -n "${STATE_ENDPOINT:-}" ] || die "STATE_ENDPOINT is required in $ENV_CONF"
+      [ -n "${KUBECONFIG_PATH:-}" ] || die "KUBECONFIG_PATH is required in $ENV_CONF"
+      [ -f "$KUBECONFIG_PATH" ] || die "kubeconfig not found: $KUBECONFIG_PATH"
+      STATE_REGION="${STATE_REGION:-default}"
+      # The state bucket lives on the same S3-compatible store as the app
+      # buckets, and bootstrap_backend creates it with the aws CLI before any
+      # terraform runs. The CLI cannot read tfvars, so the credentials are
+      # lifted out of 01-infra.secrets.tfvars here. Anything already exported
+      # wins, so an operator can override without editing the file.
+      if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        AWS_ACCESS_KEY_ID="$(tfvar_value "$INFRA_SECRETS" access_key_id)"
+        if [ -n "$AWS_ACCESS_KEY_ID" ]; then
+          export AWS_ACCESS_KEY_ID
+        else
+          unset AWS_ACCESS_KEY_ID
+        fi
+      fi
+      if [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        AWS_SECRET_ACCESS_KEY="$(tfvar_value "$INFRA_SECRETS" secret_access_key)"
+        if [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+          export AWS_SECRET_ACCESS_KEY
+        else
+          unset AWS_SECRET_ACCESS_KEY
+        fi
+      fi
+      if [ "$DRY_RUN" != "1" ]; then
+        [ -n "${AWS_ACCESS_KEY_ID:-}" ] || die "no object-store credentials: set storage_credentials.access_key_id in $(basename "$INFRA_SECRETS"), or export AWS_ACCESS_KEY_ID"
+        [ -n "${AWS_SECRET_ACCESS_KEY:-}" ] || die "no object-store credentials: set storage_credentials.secret_access_key in $(basename "$INFRA_SECRETS"), or export AWS_SECRET_ACCESS_KEY"
+      fi
+      if [ -n "${STATE_CA_BUNDLE:-}" ]; then
+        export AWS_CA_BUNDLE="$STATE_CA_BUNDLE"
+      fi
+      ;;
   esac
 }
 
@@ -185,7 +220,7 @@ tf_capture() {
 state_key_for() {
   case "$CLOUD" in
     gcp) printf '%s/%s' "$STATE_PREFIX" "$1" ;;
-    aws|azure) printf '%s/%s/terraform.tfstate' "$STATE_PREFIX" "$1" ;;
+    aws|azure|onprem) printf '%s/%s/terraform.tfstate' "$STATE_PREFIX" "$1" ;;
   esac
 }
 
@@ -208,6 +243,9 @@ render_backend() {
     azure)
       sed -E "s|^([[:space:]]*resource_group_name[[:space:]]*=[[:space:]]*).*|\1\"$STATE_RESOURCE_GROUP\"|; s|^([[:space:]]*storage_account_name[[:space:]]*=[[:space:]]*).*|\1\"$STATE_STORAGE_ACCOUNT\"|; s|^([[:space:]]*container_name[[:space:]]*=[[:space:]]*).*|\1\"$STATE_CONTAINER\"|; s|^([[:space:]]*key[[:space:]]*=[[:space:]]*).*|\1\"$key\"|; s|^([[:space:]]*use_azuread_auth[[:space:]]*=[[:space:]]*).*|\1true\\
     subscription_id      = \"$SUBSCRIPTION_ID\"|" "$INFRA_STACK/backend.tf.example"
+      ;;
+    onprem)
+      sed -E "s|^([[:space:]]*bucket[[:space:]]*=[[:space:]]*).*|\1\"$STATE_BUCKET\"|; s|^([[:space:]]*key[[:space:]]*=[[:space:]]*).*|\1\"$key\"|; s|^([[:space:]]*region[[:space:]]*=[[:space:]]*).*|\1\"$STATE_REGION\"|; s|^([[:space:]]*endpoints[[:space:]]*=[[:space:]]*).*|\1{ s3 = \"$STATE_ENDPOINT\" }|" "$INFRA_STACK/backend.tf.example"
       ;;
   esac
 }
@@ -267,6 +305,22 @@ bootstrap_backend_azure() {
   fi
 }
 
+# Ceph RGW answers the core S3 API but not the AWS-only extras, so this skips
+# the public-access-block and bucket-encryption calls that bootstrap_backend_aws
+# makes. Versioning is supported and worth having on state.
+bootstrap_backend_onprem() {
+  local s3=(--endpoint-url "$STATE_ENDPOINT" --region "$STATE_REGION")
+  if [ "${STATE_INSECURE:-0}" = "1" ]; then
+    s3+=(--no-verify-ssl)
+  fi
+  if probe aws s3api head-bucket --bucket "$STATE_BUCKET" "${s3[@]}"; then
+    log "state bucket s3://$STATE_BUCKET exists on $STATE_ENDPOINT"
+  else
+    run aws s3api create-bucket --bucket "$STATE_BUCKET" "${s3[@]}"
+  fi
+  run aws s3api put-bucket-versioning --bucket "$STATE_BUCKET" "${s3[@]}" --versioning-configuration Status=Enabled
+}
+
 bootstrap_backend() {
   log "bootstrapping state backend ($CLOUD)"
   "bootstrap_backend_$CLOUD"
@@ -297,6 +351,12 @@ platform_var_args() {
     azure)
       PLATFORM_ARGS+=(-var "state_resource_group_name=$STATE_RESOURCE_GROUP" -var "state_storage_account_name=$STATE_STORAGE_ACCOUNT" -var "state_container_name=$STATE_CONTAINER" -var "state_key=$(state_key_for 01-infra)")
       ;;
+    onprem)
+      PLATFORM_ARGS+=(-var "state_bucket=$STATE_BUCKET" -var "state_key=$(state_key_for 01-infra)" -var "state_region=$STATE_REGION" -var "state_endpoint=$STATE_ENDPOINT" -var "kubeconfig=$KUBECONFIG_PATH")
+      if [ -n "${KUBE_CONTEXT:-}" ]; then
+        PLATFORM_ARGS+=(-var "kube_context=$KUBE_CONTEXT")
+      fi
+      ;;
   esac
 }
 
@@ -317,6 +377,12 @@ overlay_var_args() {
 
 fetch_kubeconfig() {
   local cluster name region rg
+  # On-prem has no API to mint credentials from; the operator supplies the file.
+  if [ "$CLOUD" = "onprem" ]; then
+    log "using existing kubeconfig $KUBECONFIG_PATH"
+    export KUBECONFIG="$KUBECONFIG_PATH"
+    return 0
+  fi
   cluster="$(tf_capture '{"name":"<cluster.name>","region":"<cluster.region>"}' "$INFRA_STACK" output -json cluster)"
   name="$(printf '%s' "$cluster" | jq -r .name)"
   region="$(printf '%s' "$cluster" | jq -r .region)"

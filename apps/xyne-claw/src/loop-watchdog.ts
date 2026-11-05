@@ -390,7 +390,7 @@ export function redisWorkerConfig(env: NodeJS.ProcessEnv = process.env): Watchdo
       host,
       port: Number(env["REDIS_PORT"] ?? 6379),
       ...(env["REDIS_PASSWORD"] ? { password: env["REDIS_PASSWORD"] } : {}),
-      ...(env["REDIS_TLS"] ? { tls: { rejectUnauthorized: false } } : {}),
+      ...(/^(1|true|yes)$/i.test(env["REDIS_TLS"] ?? "") ? { tls: { rejectUnauthorized: false } } : {}),
       connectTimeout: 3_000,
       maxRetriesPerRequest: 1,
     },
