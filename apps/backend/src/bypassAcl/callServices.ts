@@ -122,6 +122,33 @@ export async function setCallGoogleCalendarPushState(callId: string, state: Goog
   );
 }
 
+/**
+ * Pins the master key version of an encrypted call that has not been activated yet, the first
+ * time a key is handed out for it. Writes only when no version is stored, then reads the stored
+ * one back, so two pods racing (for example mid-rotation, with different current versions) both
+ * return the version that won and every joiner derives the same key.
+ */
+export async function pinCallEncryptionKeyVersion(callId: string, keyVersion: number): Promise<number | null> {
+  return rawQuery(
+    ['Call'],
+    'call e2ee: pin the master key version once, atomically, so every joiner derives the same key',
+    async () => {
+      const client = DatabaseClient.getInstance();
+      await client.$executeRaw`
+        UPDATE "calls"
+        SET "metadata" = jsonb_set("metadata", '{e2ee,keyVersion}', to_jsonb(${keyVersion}::int))
+        WHERE "id" = ${callId}
+          AND "metadata"->'e2ee'->>'enabled' = 'true'
+          AND "metadata"->'e2ee'->'keyVersion' IS NULL
+      `;
+      const rows = await client.$queryRaw<Array<{ keyVersion: number | null }>>`
+        SELECT ("metadata"->'e2ee'->>'keyVersion')::int AS "keyVersion" FROM "calls" WHERE "id" = ${callId}
+      `;
+      return rows[0]?.keyVersion ?? null;
+    },
+  );
+}
+
 /** Relocated from callRepository's setGoogleCalendarPushState (the clearing branch). */
 export async function clearCallGoogleCalendarPushState(callId: string): Promise<number> {
   return rawQuery(

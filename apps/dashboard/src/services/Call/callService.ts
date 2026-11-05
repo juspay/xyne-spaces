@@ -1,5 +1,5 @@
 import { apiInstance } from '../clients/apiClient';
-import type { SdlcCallLink } from '@xyne/shared';
+import type { CallEncryptionCredentials, SdlcCallLink } from '@xyne/shared';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
 import {
@@ -34,6 +34,8 @@ export interface InitiateCallResponse {
   scopeType?: string | null; // Channel scope type for CallKit filtering
   /** Host admission pending; no token issued. */
   pending?: boolean;
+  /** Present on end-to-end encrypted calls; the media key for this participant. */
+  encryption?: CallEncryptionCredentials;
 }
 
 export interface JoinCallRequest {
@@ -49,6 +51,8 @@ export interface JoinCallResponse {
   scopeType?: string | null; // Channel scope type for CallKit filtering
   /** Host admission pending; no token issued. */
   pending?: boolean;
+  /** Present on end-to-end encrypted calls; the media key for this participant. */
+  encryption?: CallEncryptionCredentials;
 }
 
 export interface ValidateRoomsRequest {
