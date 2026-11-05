@@ -3,7 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useQuery } from '@tanstack/react-query';
 import { ConnectionState } from 'livekit-client';
 import { RoomAudioRenderer } from '@livekit/components-react';
-import { CallType } from '@xyne/shared';
+import { CallType, type CallEncryptionCredentials } from '@xyne/shared';
 import { roomActor, type JoinMediaOverrides } from '@/machines/roomMachine';
 import { FullCallView } from '@/components/Call/CallViews/FullCallView';
 import { useHandRaise } from '@/components/Call/hooks/useHandRaise';
@@ -16,6 +16,8 @@ interface ExternalCallViewProps {
   externalId: string;
   callType: CallType;
   participantId: string;
+  /** Media key of an end-to-end encrypted call, from the join response. */
+  encryption?: CallEncryptionCredentials;
   /** Called when the external user disconnects (room goes idle) */
   onDisconnected: () => void;
   /** Mic / camera state and devices chosen in the lobby preview */
@@ -39,6 +41,7 @@ export function ExternalCallView({
   externalId,
   callType,
   participantId,
+  encryption,
   onDisconnected,
   joinMediaOverrides,
 }: ExternalCallViewProps) {
@@ -51,6 +54,7 @@ export function ExternalCallView({
         type: 'CONNECT',
         token,
         serverUrl,
+        encryption: encryption ?? null,
         callType,
         externalId,
         zero: null,

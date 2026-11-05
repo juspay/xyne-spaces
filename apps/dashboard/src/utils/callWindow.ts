@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { CallType, SdlcCallLink } from '@xyne/shared';
+import type { CallEncryptionCredentials, CallType, SdlcCallLink } from '@xyne/shared';
 import type { CallUrlOverrides } from './callUrlOverrides';
 import type { JoinMediaOverrides } from '../machines/roomMachine';
 import { isElectronApp, isSdlcWindow, isStandaloneWindow } from './electronApp';
@@ -38,6 +38,8 @@ export interface CallWindowParticipant {
 export interface CallWindowHandoff {
   token: string;
   serverUrl: string;
+  /** Media key of an end-to-end encrypted call. Rides the IPC handoff, never the window URL. */
+  encryption: CallEncryptionCredentials | null;
   callType: CallType;
   externalId: string;
   callId: string | null;

@@ -1,9 +1,14 @@
 import { AudioSession } from '@livekit/react-native';
 import { ConnectionState, Room, RoomEvent, Track, type LocalVideoTrack } from 'livekit-client';
 import { PermissionsAndroid, Platform, type Permission } from 'react-native';
-import { CallType } from '@xyne/shared';
+import { CallType, type CallEncryptionCredentials } from '@xyne/shared';
 
 import { isAiAgentIdentity } from '../components/call/callIdentity';
+import {
+  applyRoomEncryption,
+  attachRoomEncryption,
+  createRoomEncryptionOptions,
+} from '../utils/callEncryption';
 import { markCallTalkStart } from '../components/call/callTalkClock';
 import { resetAppleAudioOutput } from './Call/appleAudioOutput';
 import { voipForegroundServiceModule } from './VoIPForegroundServiceModule';
@@ -31,6 +36,8 @@ interface ConnectParams {
   callType: CallType;
   token: string;
   serverUrl: string;
+  /** Media key of an end-to-end encrypted call. */
+  encryption?: CallEncryptionCredentials;
   roomLink?: string;
   isHost?: boolean;
   initialMicrophoneEnabled?: boolean;
@@ -166,10 +173,13 @@ class CallRuntimeNativeService {
     this.error = null;
     this.notify();
 
+    const encryptionOptions = params.encryption ? createRoomEncryptionOptions() : null;
     const room = new Room({
       adaptiveStream: true,
       dynacast: true,
+      ...(encryptionOptions && { encryption: encryptionOptions }),
     });
+    if (encryptionOptions) attachRoomEncryption(room, encryptionOptions);
     this.room = room;
     this.bindRoomEvents(room);
     try {
@@ -193,6 +203,10 @@ class CallRuntimeNativeService {
         }
       }
       await this.startCallService('join');
+      // The key must be in the provider before the first frame goes out or comes in.
+      if (params.encryption) {
+        await applyRoomEncryption(room, params.encryption);
+      }
       await room.connect(params.serverUrl, params.token, { autoSubscribe: true });
       // eslint-disable-next-line no-console
       console.log('[XCALL][RT] LiveKit connected', {

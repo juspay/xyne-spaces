@@ -1,4 +1,4 @@
-import { CallType } from '@xyne/shared';
+import { CallType, type CallEncryptionCredentials } from '@xyne/shared';
 import { Event as LogEvent, noopLogger, type Logger } from '@xyne/shared/logger';
 
 let logger: Logger = noopLogger;
@@ -237,6 +237,8 @@ export interface SaveFilePayload {
 export interface LiveKitConnectPayload {
   token: string;
   serverUrl: string;
+  /** Media key of an end-to-end encrypted call; the native side loads it before connecting. */
+  encryption?: CallEncryptionCredentials;
   callType: CallType;
   externalId: string;
   roomLink?: string;

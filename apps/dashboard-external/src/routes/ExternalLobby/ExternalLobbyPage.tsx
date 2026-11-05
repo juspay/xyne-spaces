@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect, useMemo, useReducer } from 'r
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ban, PhoneOff, RotateCcw, SearchX } from 'lucide-react';
-import { CallType, InvitationResponse } from '@xyne/shared';
+import { CallType, InvitationResponse, type CallEncryptionCredentials } from '@xyne/shared';
 import { callLobbyService, type CallInfo } from '@/services/Call/callLobbyService';
 import type { JoinMediaOverrides } from '@/machines/roomMachine';
 import { ExternalCallView } from './ExternalCallView';
@@ -34,6 +34,7 @@ interface LobbyState {
   participantId?: string;
   token?: string;
   serverUrl?: string;
+  encryption?: CallEncryptionCredentials;
   externalId?: string;
   callType?: CallType;
   /** JOINING straight from the "you left" screen — no preview to show. */
@@ -54,6 +55,7 @@ type LobbyAction =
       type: 'SET_IN_CALL';
       token: string;
       serverUrl: string;
+      encryption?: CallEncryptionCredentials;
       externalId: string;
       callType: CallType;
       participantId: string;
@@ -120,6 +122,7 @@ function lobbyReducer(state: LobbyState, action: LobbyAction): LobbyState {
         stage: 'IN_CALL',
         token: action.token,
         serverUrl: action.serverUrl,
+        ...(action.encryption ? { encryption: action.encryption } : {}),
         externalId: action.externalId,
         callType: action.callType,
         participantId: action.participantId,
@@ -253,6 +256,7 @@ export function ExternalLobbyPage() {
         type: 'SET_IN_CALL',
         token: joinData.token,
         serverUrl: joinData.serverUrl,
+        ...(joinData.encryption ? { encryption: joinData.encryption } : {}),
         externalId: joinData.externalId,
         callType: joinData.callType,
         participantId: joinData.participantId,
@@ -421,6 +425,7 @@ export function ExternalLobbyPage() {
         externalId={state.externalId!}
         callType={state.callType || CallType.AUDIO}
         participantId={state.participantId!}
+        {...(state.encryption && { encryption: state.encryption })}
         onDisconnected={handleDisconnected}
         {...(callMediaOverrides && { joinMediaOverrides: callMediaOverrides })}
       />

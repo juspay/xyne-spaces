@@ -53,6 +53,8 @@ interface StatusPresentation {
 
 /** IN_PROGRESS folds into ACTIVE: both mean "happening now". */
 const STATUS_PRESENTATION: Record<CallStatus, StatusPresentation> = {
+  // Created but nobody has joined yet: not live, nothing to join into.
+  [CallStatus.PENDING]: { label: 'Starting', className: 'text-status-scheduled' },
   [CallStatus.ACTIVE]: { label: 'Live', className: 'text-status-success', live: true },
   [CallStatus.IN_PROGRESS]: { label: 'Live', className: 'text-status-success', live: true },
   [CallStatus.SCHEDULED]: { label: 'Scheduled', className: 'text-status-scheduled' },

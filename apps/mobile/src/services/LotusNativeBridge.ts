@@ -7,7 +7,7 @@
  */
 import { callRuntimeNativeService } from './CallRuntimeNativeService';
 import { callKitService } from './CallKitService';
-import { CallType } from '@xyne/shared';
+import { CallType, type CallEncryptionCredentials } from '@xyne/shared';
 import type { Participant } from 'livekit-client';
 import type { CallKitCallType } from './CallKit.types';
 
@@ -15,6 +15,8 @@ import type { CallKitCallType } from './CallKit.types';
 export interface LiveKitConnectPayload {
   token: string;
   serverUrl: string;
+  /** Media key of an end-to-end encrypted call; loaded before connecting. */
+  encryption?: CallEncryptionCredentials;
   callType: CallKitCallType;
   externalId: string;
   initialMicrophoneEnabled?: boolean;
@@ -138,6 +140,7 @@ class LotusNativeBridge {
       callType: CallType;
       token: string;
       serverUrl: string;
+      encryption?: CallEncryptionCredentials;
       isHost: boolean;
       initialMicrophoneEnabled?: boolean;
       initialCameraEnabled?: boolean;
@@ -147,6 +150,7 @@ class LotusNativeBridge {
       callType: payload.callType as CallType,
       token: payload.token,
       serverUrl: payload.serverUrl,
+      ...(payload.encryption ? { encryption: payload.encryption } : {}),
       isHost: true, // Will be determined by Zero data later
     };
 

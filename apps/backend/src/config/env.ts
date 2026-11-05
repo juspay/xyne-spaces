@@ -225,6 +225,40 @@ const envSchema = Joi.object({
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
+  // 32 random bytes, base64. Master secret that per-call end-to-end encryption keys
+  // are derived from (callEncryptionService). Required wherever LiveKit is configured:
+  // every AUDIO/VIDEO call is encrypted, so without it no call can be joined.
+  CALL_E2EE_MASTER_KEY: Joi.when('LIVEKIT_API_SECRET', {
+    is: Joi.string().min(1),
+    then: Joi.string().base64().required(),
+    otherwise: Joi.string().allow('').base64().default(''),
+  }),
+  // Version of CALL_E2EE_MASTER_KEY. Calls pin the version current when they activate.
+  CALL_E2EE_MASTER_KEY_VERSION: Joi.number().integer().min(1).default(1),
+  // Rotation: JSON object of version -> base64 master key for versions that calls still
+  // in progress were activated with, e.g. {"1":"<old key>"}. Remove a version once no
+  // call activated with it is live.
+  CALL_E2EE_PREVIOUS_MASTER_KEYS: Joi.string()
+    .allow('')
+    .default('')
+    .custom((value: string, helpers) => {
+      if (!value) return value;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      for (const [version, key] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!/^[1-9]\d*$/.test(version) || typeof key !== 'string' || !key) {
+          return helpers.message({ custom: `CALL_E2EE_PREVIOUS_MASTER_KEYS has an invalid entry for version "${version}"` });
+        }
+      }
+      return value;
+    }),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
@@ -1047,6 +1081,11 @@ export const config = {
     url: envVars.LIVEKIT_URL,
     clientUrl: envVars.LIVEKIT_CLIENT_URL,
     serverUrl: envVars.LIVEKIT_SERVER_URL,
+    e2eeMasterKey: envVars.CALL_E2EE_MASTER_KEY as string,
+    e2eeMasterKeyVersion: envVars.CALL_E2EE_MASTER_KEY_VERSION as number,
+    e2eePreviousMasterKeys: (envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS
+      ? JSON.parse(envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS as string)
+      : {}) as Record<string, string>,
   },
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,

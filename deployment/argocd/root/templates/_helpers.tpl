@@ -394,6 +394,11 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- if and $lk.enabled $lk.url }}
 {{- $_ := set $sec "LIVEKIT_API_KEY" (dict "name" "xyne-backend-secrets" "key" "LIVEKIT_API_KEY" "optional" true) }}
 {{- $_ := set $sec "LIVEKIT_API_SECRET" (dict "name" "xyne-backend-secrets" "key" "LIVEKIT_API_SECRET" "optional" true) }}
+{{- /* Required: the backend refuses to boot without it, so a missing key must fail at
+     CreateContainerConfigError (named, before any old pod is replaced), not crash-loop. */}}
+{{- $_ := set $sec "CALL_E2EE_MASTER_KEY" (dict "name" "xyne-backend-secrets" "key" "CALL_E2EE_MASTER_KEY" "optional" false) }}
+{{- $_ := set $sec "CALL_E2EE_MASTER_KEY_VERSION" (dict "name" "xyne-backend-secrets" "key" "CALL_E2EE_MASTER_KEY_VERSION" "optional" true) }}
+{{- $_ := set $sec "CALL_E2EE_PREVIOUS_MASTER_KEYS" (dict "name" "xyne-backend-secrets" "key" "CALL_E2EE_PREVIOUS_MASTER_KEYS" "optional" true) }}
 {{- end }}
 {{- $sec = mergeOverwrite $sec (include "xyne-root.storageSecretEnv" (dict "root" $root "secret" "xyne-backend-secrets") | fromYaml) }}
 {{- toYaml $sec }}

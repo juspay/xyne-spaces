@@ -34,7 +34,7 @@ locals {
     turn    = local.turn
     logging = local.logging
     room = {
-      auto_create       = true
+      auto_create       = false # the backend creates every room; a stale token must not revive a finished one
       empty_timeout     = 120
       departure_timeout = 10
       max_participants  = 500
