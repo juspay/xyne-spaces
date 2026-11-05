@@ -71,7 +71,7 @@ import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { resolveCallSttRouting } from '@/services/callSttRouting';
+import { resolveCallSttRouting, resolveRecreatedRoomSttRouting } from '@/services/callSttRouting';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 import { hideCallTx } from '@/bypassAcl/transactions/callController';
 
@@ -1042,10 +1042,20 @@ export class CallController {
 
         const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
-        // Prepare room metadata
+        // Prepare room metadata. A recreated room is a new room, so it needs the same STT routing
+        // initiateCall gives one, or the agent falls back to its own env default.
+        const sttRouting = await resolveRecreatedRoomSttRouting({
+          roomName: callId,
+          liveRoomMetadata: roomInfo?.metadata,
+          callMetadata: activeCall.metadata,
+          workspaceId: activeCall.workspaceId,
+        });
+
         const roomMetadata = JSON.stringify({
           channelId: channel.id,
           createdBy: activeCall.createdByUserId,
+          ...sttRouting,
+          ...(activeCall.callType && { callType: activeCall.callType }),
           ...(activeCall.status === CallStatus.SCHEDULED && { scheduledCallId: activeCall.id }),
           ...(joinAgentName && { agentName: joinAgentName }),
         });

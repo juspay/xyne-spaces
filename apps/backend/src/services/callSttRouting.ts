@@ -123,3 +123,31 @@ export async function resolveCallSttRouting(params: {
   const neurolinkUrl = await resolveNeuroLinkBaseUrl({ workspaceId: params.workspaceId });
   return neurolinkUrl ? { ...routing, neurolinkUrl } : routing;
 }
+
+/**
+ * Routing for a room being recreated (joinCall). The call's provider choice is carried over
+ * from the live room about to be deleted, else the call record, and the flags are read again
+ * as for any new room. No email: the joiner isn't the creator, and the result must not depend
+ * on whose join recreated the room.
+ */
+export async function resolveRecreatedRoomSttRouting(params: {
+  roomName: string;
+  liveRoomMetadata?: string;
+  callMetadata: unknown;
+  workspaceId?: string | null;
+}): Promise<CallSttRouting> {
+  let live: unknown;
+  try {
+    live = params.liveRoomMetadata ? JSON.parse(params.liveRoomMetadata)?.sttModel : undefined;
+  } catch (error) {
+    logger.warn(`[CallSttRouting] Unreadable live room metadata | room=${params.roomName}: ${error}`);
+  }
+  const persisted =
+    params.callMetadata && typeof params.callMetadata === 'object'
+      ? (params.callMetadata as { sttModel?: unknown }).sttModel
+      : undefined;
+  const requestedModel = [live, persisted].find(
+    (m): m is string => typeof m === 'string' && m !== ''
+  );
+  return resolveCallSttRouting({ requestedModel, workspaceId: params.workspaceId });
+}

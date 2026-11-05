@@ -413,7 +413,7 @@ export function activateScheduledCallTx(callParam: Call, workspaceId: string | u
   });
 }
 
-export function createCallWithParticipantsAndMessageTx(callId: string, roomName: string, wsId: string, createdBy: string, channelId: string, workspaceId: string | undefined, callType: CallType, roomLink: string, isHeadless: boolean, now: Date, callOrigin: CallOrigin | undefined, messageId: string, conversationId: string, artifactMessageId: string | undefined, agentName: string | undefined, dispatchStatus: string | undefined, self: CallRepository, channelParticipants: { userId: string; }[], joiningUserId: string) {
+export function createCallWithParticipantsAndMessageTx(callId: string, roomName: string, wsId: string, createdBy: string, channelId: string, workspaceId: string | undefined, callType: CallType, roomLink: string, isHeadless: boolean, now: Date, callOrigin: CallOrigin | undefined, messageId: string, conversationId: string, artifactMessageId: string | undefined, agentName: string | undefined, dispatchStatus: string | undefined, sttModel: string | undefined, self: CallRepository, channelParticipants: { userId: string; }[], joiningUserId: string) {
   return transaction(['Call', 'CallParticipant', 'ChannelStats', 'Conversation', 'Message', 'MessageArtifact', 'User'], 'createCallWithParticipantsAndMessage: call, participants, conversation, system message and channel stats must commit atomically; tx is not ACL-wrapped', DatabaseClient.getInstance(), async (tx) => {
     // Create the call record with ACTIVE status
     const call = await tx.call.create({
@@ -439,6 +439,7 @@ export function createCallWithParticipantsAndMessageTx(callId: string, roomName:
           ...(artifactMessageId && { artifactMessageId }),
           ...(agentName && { agentName }),
           ...(dispatchStatus && { dispatchStatus }),
+          ...(sttModel && { sttModel }),
         },
       },
     });
