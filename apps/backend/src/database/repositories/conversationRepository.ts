@@ -2,7 +2,7 @@ import { BaseRepository } from './base';
 import { Conversation } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { messageSchema } from '@/vespa/src/types';
+import { messageSchema, ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 
 export interface CreateConversationInput {
@@ -363,11 +363,11 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     return conversationChannelMap;
   }
 
-  async countHistoryPreview(channelId: string, createdAfter: Date | null): Promise<number> {
+  async countHistoryPreview(channelId: string, activeSince: Date | null): Promise<number> {
     return await this.db.conversation.count({
       where: {
         channelId,
-        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        ...(activeSince ? { lastActivityAt: { gte: activeSince } } : {}),
         OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
       }
     });
@@ -375,7 +375,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
 
   async getHistoryPreview(
     channelId: string,
-    createdAfter: Date | null,
+    activeSince: Date | null,
     limit: number
   ): Promise<
     Array<{
@@ -388,7 +388,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     const conversations = await this.db.conversation.findMany({
       where: {
         channelId,
-        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        ...(activeSince ? { lastActivityAt: { gte: activeSince } } : {}),
         OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
       },
       orderBy: { createdAt: 'asc' },
@@ -438,51 +438,63 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
   /**
    * Reparent a channel's conversations into another channel. Messages and attachments hang off
    * `conversationId` so they follow automatically; `conversationParticipant.channelId` is
-   * denormalized and has to be moved explicitly. Threads move whole, keyed on when the thread
-   * started — one opened before the cutoff stays put even if it has replies after it.
+   * denormalized and has to be moved explicitly. Threads move whole, keyed on their last
+   * activity — one opened before the cutoff moves with its full history if it was active after it.
    */
   async moveConversationsToChannel(
     sourceChannelId: string,
     targetChannelId: string,
-    createdAfter?: Date | null
+    activeSince?: Date | null
   ): Promise<{ moved: number; remaining: number }> {
     const conversations = await this.db.conversation.findMany({
       where: {
         channelId: sourceChannelId,
-        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+        ...(activeSince ? { lastActivityAt: { gte: activeSince } } : {}),
         OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
       },
       select: { conversationId: true }
     });
 
     if (conversations.length === 0) {
-      return {
-        moved: 0,
-        remaining: await this.db.conversation.count({ where: { channelId: sourceChannelId } })
-      };
+      return { moved: 0, remaining: await this.countMovable(sourceChannelId) };
     }
 
     const conversationIds = conversations.map(c => c.conversationId);
 
     let moved = 0;
+    const movedTicketIds: string[] = [];
     for (const chunk of chunkArray(conversationIds, MOVE_CHUNK_SIZE)) {
-      moved += await this.reparentChunk(chunk, sourceChannelId, targetChannelId);
+      const result = await this.reparentChunk(chunk, sourceChannelId, targetChannelId);
+      moved += result.moved;
+      movedTicketIds.push(...result.ticketIds);
     }
 
     await this.reindexMovedMessages(conversationIds);
+    await this.reindexMovedTickets(movedTicketIds);
 
-    const remaining = await this.db.conversation.count({
-      where: { channelId: sourceChannelId }
+    return { moved, remaining: await this.countMovable(sourceChannelId) };
+  }
+
+  private async countMovable(channelId: string): Promise<number> {
+    return await this.db.conversation.count({
+      where: {
+        channelId,
+        OR: [{ doNotPostToChannel: null }, { doNotPostToChannel: false }]
+      }
     });
-
-    return { moved, remaining };
   }
 
   private async reparentChunk(
     conversationIds: string[],
     sourceChannelId: string,
     targetChannelId: string
-  ): Promise<number> {
+  ): Promise<{ moved: number; ticketIds: string[] }> {
+    const tickets = await this.db.ticket.findMany({
+      where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+      select: { id: true }
+    });
+    const ticketIds = tickets.map(t => t.id);
+
     const [movedConversations] = await this.db.$transaction([
       this.db.conversation.updateMany({
         where: { conversationId: { in: conversationIds } },
@@ -537,6 +549,30 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         where: { conversationId: { in: conversationIds } },
         data: { channelId: targetChannelId }
       }),
+      this.db.radarPrLink.updateMany({
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.messageAttachment.updateMany({
+        where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.ticket.updateMany({
+        where: { id: { in: ticketIds } },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.ticketDescription.updateMany({
+        where: { ticketId: { in: ticketIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.ticketActivity.updateMany({
+        where: { ticketId: { in: ticketIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
+      this.db.ticketUserMailbox.updateMany({
+        where: { ticketId: { in: ticketIds }, channelId: sourceChannelId },
+        data: { channelId: targetChannelId }
+      }),
       // these point at a conversation that just left the channel
       this.db.channelParticipant.updateMany({
         where: { channelId: sourceChannelId, lastViewedConversationId: { in: conversationIds } },
@@ -550,7 +586,21 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
 
     // Note: the label-unread broadcast lives in the service layer (groupDmParticipantService), not here — a
     // repository must not depend on websocketService (that inverted dependency created a module-load cycle).
-    return movedConversations.count;
+    return { moved: movedConversations.count, ticketIds };
+  }
+
+  private async reindexMovedTickets(ticketIds: string[]): Promise<void> {
+    for (const batch of chunkArray(ticketIds, REINDEX_ENQUEUE_BATCH_SIZE)) {
+      await Promise.all(
+        batch.map(ticketId =>
+          vespaQueue
+            .addJob({ schema: ticketSchema, jobType: 'feed', docId: ticketId })
+            .catch(error =>
+              logger.error(`Failed to queue Vespa re-index for moved ticket ${ticketId}:`, error)
+            )
+        )
+      );
+    }
   }
 
   private async reindexMovedMessages(conversationIds: string[]): Promise<void> {

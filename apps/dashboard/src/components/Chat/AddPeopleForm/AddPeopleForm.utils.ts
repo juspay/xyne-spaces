@@ -12,10 +12,18 @@ export function toPreviewText(content?: string | null): string {
 
 export const HISTORY_SCOPE_OPTIONS: HistoryScopeOption[] = [
   { mode: 'none', label: "Don't include any conversation history" },
-  { mode: 'today', label: 'From today' },
+  { mode: 'today', label: 'Threads active since today' },
   { mode: 'beginning', label: 'From the beginning' },
-  { mode: 'custom', label: 'Custom', requiresDate: true },
+  { mode: 'custom', label: 'Threads active since a date', requiresDate: true },
 ];
+
+export function historyScopeOptionLabel(option: HistoryScopeOption, customDate: string): string {
+  if (option.mode !== 'custom' || !customDate) {
+    return option.label;
+  }
+  const parsed = parseInputDate(customDate);
+  return parsed ? `Threads active since ${formatDatePill(parsed)}` : option.label;
+}
 
 function startOfLocalDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());

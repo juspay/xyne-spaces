@@ -140,7 +140,7 @@ export class ChannelController {
       | 'participants_removed'
       | 'conversation_moved_source'
       | 'conversation_moved_target',
-    options: { movedEverything?: boolean; destinationChannelId?: string } = {}
+    options: { movedEverything?: boolean; destinationChannelId?: string; sourceChannelId?: string } = {}
   ): Promise<void> {
     try {
       const isMove =
@@ -177,7 +177,13 @@ export class ChannelController {
           : formattedUsers;
         systemContent = `${actor} moved ${howMany} the messages from this conversation to ${destination}`;
       } else if (operationType === 'conversation_moved_target') {
-        systemContent = `${actor} moved messages from a previous conversation into this one`;
+        const source = options.sourceChannelId
+          ? channelPill(
+              options.sourceChannelId,
+              newParticipants.map(p => p.userName).join(', ')
+            )
+          : 'a previous conversation';
+        systemContent = `${actor} moved messages from ${source} into this one. Threads that were not included stay there, visible to its members only`;
       } else {
         systemContent = `${formattedUsers} ${names.length === 1 ? 'was' : 'were'} ${addedOrRemovedText} by ${actor}`;
       }
@@ -2652,12 +2658,14 @@ export class ChannelController {
               authData,
               'participants_added'
             );
-          } else if (movedHistory) {
+          }
+          if (movedHistory) {
             await this.sendAddAndRemoveParticipantsSystemMessage(
               result.channelId,
-              [],
+              result.sourceMembers,
               authData,
-              'conversation_moved_target'
+              'conversation_moved_target',
+              { sourceChannelId: result.sourceChannelId }
             );
           }
           if (movedHistory) {
