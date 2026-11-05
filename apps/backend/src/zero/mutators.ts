@@ -16541,9 +16541,8 @@ export function createMutators(
           tx,
           args: { orgId, orgName, orgDescription, workspaceId, workspaceOrgId, memberId, timestamp },
         }) => {
-          // Organization creation is disabled for now.
-          const orgCreationDisabled: boolean = true;
-          if (orgCreationDisabled) throw new Error('Organization creation is disabled');
+          // Organization creation is off unless ENABLE_ORG_CREATION=true.
+          if (!config.enableOrgCreation) throw new Error('Organization creation is disabled');
           const admin = await tx.run(
             zql.users
               .where('id', authData.sub)
