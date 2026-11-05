@@ -18,6 +18,11 @@ import {
   prepareRenderedAutomationFiles,
   removeUnclaimedAutomationDeliveryFiles,
 } from '../services/automation-template.service';
+import {
+  fileAttachmentsField,
+  loadAttachmentFiles,
+  uploadAttachmentFiles,
+} from '../services/trigger-attachment.service';
 
 const MAX_SEND_MESSAGE_RECIPIENTS = 500;
 
@@ -28,11 +33,15 @@ const SendMessageConfigSchema = z
     senderId: variableRef(z.string().min(1)).optional(),
     content: variableRef(z.string().min(1)).optional(),
     attachments: z.array(AutomationTemplateAttachmentSchema).max(10).optional(),
+    fileAttachments: fileAttachmentsField,
   })
   .refine(
     (data) =>
       (typeof data.content === 'string' && data.content.trim().length > 0) ||
-      (data.attachments?.length ?? 0) > 0,
+      (data.attachments?.length ?? 0) > 0 ||
+      (Array.isArray(data.fileAttachments)
+        ? data.fileAttachments.length > 0
+        : data.fileAttachments !== undefined),
     {
       message: 'Message content or at least one attachment is required',
       path: ['content'],
@@ -145,6 +154,7 @@ export class SendMessageStep extends BaseActionStep<
       });
       let result: Awaited<ReturnType<typeof conversationService.createConversationWithMessage>>;
       try {
+        deliveryFiles.push(...(await uploadAttachmentFiles(forwardedFiles)));
         result = await conversationService.createConversationWithMessage({
           channelId,
           userId: senderId,
@@ -247,6 +257,7 @@ export class SendMessageStep extends BaseActionStep<
       attachments: config.attachments ?? [],
       context,
     });
+    const forwardedFiles = await loadAttachmentFiles(config.fileAttachments, workspaceId);
 
     // Post to channel if provided
     if (channelId) {

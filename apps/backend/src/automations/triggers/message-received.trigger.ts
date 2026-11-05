@@ -10,6 +10,10 @@ import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser
 import { toReadableMessageContent } from '@/utils/flowJson';
 import { stripHtml } from '@/agents/xyne-ai/tools/helpers';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
+import {
+  TriggerAttachmentSchema,
+  toTriggerAttachment,
+} from '../services/trigger-attachment.service';
 
 export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
 
@@ -64,6 +68,7 @@ export const MessageReceivedOutputSchema = z.object({
     conversationId: z.string(),
     channelId: z.string(),
     createdAt: z.coerce.date(),
+    attachments: z.array(TriggerAttachmentSchema),
   }),
   author: z
     .object({
@@ -352,9 +357,10 @@ async function hydrateMessageReceivedPayload(
 ): Promise<Record<string, unknown>> {
   const { messageId, conversationId, channelId, authorId } = payload;
 
-  const [messageRow, authorUser] = await Promise.all([
+  const [messageRow, authorUser, attachmentRows] = await Promise.all([
     db.message.findUnique({ where: { messageId } }).catch(() => null),
     repositories.users.findById(authorId).catch(() => null),
+    repositories.messageAttachments.findByMessageId(messageId).catch(() => []),
   ]);
 
   let mentionedUserIds: string[] = [];
@@ -416,6 +422,7 @@ async function hydrateMessageReceivedPayload(
       conversationId,
       channelId,
       createdAt: messageRow?.createdAt ?? new Date(),
+      attachments: attachmentRows.filter(a => !a.isDeleted).map(toTriggerAttachment),
     },
     author: authorUser
       ? {
