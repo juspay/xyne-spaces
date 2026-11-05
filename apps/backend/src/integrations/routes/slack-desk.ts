@@ -16,6 +16,7 @@ import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
 import { authorizeAppDeskManager } from '@/integrations/routes/app-desk';
+import { assertChannelMembership } from '@/utils/channelMembership';
 import {
   DESK_SOURCE_PREFIXES,
   buildSlackDeskSourceName,
@@ -135,6 +136,24 @@ router.post(
       const ids = Array.isArray(attachmentIds) ? attachmentIds : [];
       if ((!body || typeof body !== 'string' || body.trim().length === 0) && ids.length === 0) {
         res.status(400).json({ error: 'body or at least one attachment is required' });
+        return;
+      }
+
+      // Replies are sent as the caller's Slack identity, so require desk participation
+      // rather than relying on the tenant ACL's PUBLIC-channel read access.
+      const conversation = await db.conversation.findFirst({
+        where: { conversationId },
+        select: { channelId: true },
+      });
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+      const access = await assertChannelMembership(req, conversation.channelId);
+      if (!access.ok) {
+        res.status(access.status === 403 ? 403 : 404).json({
+          error: access.status === 403 ? access.error : 'Conversation not found',
+        });
         return;
       }
 

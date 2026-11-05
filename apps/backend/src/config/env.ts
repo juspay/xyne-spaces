@@ -675,6 +675,8 @@ const envSchema = Joi.object({
   GOOGLE_CLOUD_PROJECT_ID: Joi.string().allow('').default(''),
   GOOGLE_PUBSUB_TOPIC: Joi.string().allow('').default(''),
   GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_PUSH_SUBSCRIPTION: Joi.string().allow('').default(''),
   MICROSOFT_CLIENT_ID: Joi.string().allow('').default(''),
   MICROSOFT_CLIENT_SECRET: Joi.string().allow('').default(''),
   MICROSOFT_TENANT_ID: Joi.string().allow('').default(''),
@@ -1510,6 +1512,8 @@ export const config = {
     cloudProjectId: envVars.GOOGLE_CLOUD_PROJECT_ID as string,
     pubsubTopic: envVars.GOOGLE_PUBSUB_TOPIC as string,
     pubsubServiceAccountBase64: envVars.GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 as string,
+    pubsubPushServiceAccountEmail: envVars.GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL as string,
+    pubsubPushSubscription: envVars.GOOGLE_PUBSUB_PUSH_SUBSCRIPTION as string,
   },
   microsoft: {
     clientId: envVars.MICROSOFT_CLIENT_ID as string,

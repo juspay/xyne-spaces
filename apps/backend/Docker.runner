@@ -128,8 +128,9 @@ EXPOSE 3001
 ENV NODE_ENV=production
 
 # Entrypoint is `node`, so this becomes:
-#   node --enable-source-maps --import tsx dist/worker.js
-# mirrors the `start:worker` script (tsx --enable-source-maps dist/worker.js).
+#   node --enable-source-maps --import tsx dist/main-worker.js
+# mirrors the `start:worker` script (tsx --enable-source-maps dist/main-worker.js).
+# main-worker loads the KMS secrets before importing worker.js.
 # tsx is kept as the loader (a few deps ship ESM with extensionless imports that
 # bare node ESM rejects); it survives the --prod prune as a runtime dep.
-CMD ["--enable-source-maps", "--import", "tsx", "dist/worker.js"]
+CMD ["--enable-source-maps", "--import", "tsx", "dist/main-worker.js"]

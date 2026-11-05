@@ -30,7 +30,7 @@ export class GoogleAuthenticator extends BaseAuthenticator {
       }
 
       // 1. Verify OIDC JWT from Authorization header
-      const jwtError = await this.verifyJWT(headers);
+      const jwtError = await this.verifyJWT(headers, payload.subscription);
       if (jwtError) return this.fail(jwtError, { sourceName });
 
       // 2. Verify email matches credentials
@@ -50,7 +50,14 @@ export class GoogleAuthenticator extends BaseAuthenticator {
 
   private async verifyJWT(
     headers: Record<string, string | string[]>,
+    subscription: unknown,
   ): Promise<string | null> {
+    const { pubsubPushServiceAccountEmail, pubsubPushSubscription } = config.google;
+    if (!pubsubPushServiceAccountEmail || !pubsubPushSubscription) {
+      return 'Pub/Sub push service account / subscription not configured';
+    }
+    if (subscription !== pubsubPushSubscription) return 'Pub/Sub subscription mismatch';
+
     const authHeader = headers['authorization'];
     if (!authHeader) return 'Missing Authorization header';
 
@@ -66,9 +73,9 @@ export class GoogleAuthenticator extends BaseAuthenticator {
 
     try {
       const ticket = await this.oauth2Client.verifyIdToken({ idToken: bearer, audience: expectedAudience });
-      const email = ticket.getPayload()?.email;
-      if (!email || (!email.endsWith('@google.com') && !email.endsWith('.gserviceaccount.com'))) {
-        return `JWT not from Google service account: ${email}`;
+      const claims = ticket.getPayload();
+      if (claims?.email_verified !== true || claims.email !== pubsubPushServiceAccountEmail) {
+        return `JWT not from the configured push service account: ${claims?.email}`;
       }
     } catch (error) {
       return `JWT verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`;

@@ -910,6 +910,22 @@ router.get(
       return;
     }
 
+    // Trigger payloads and step data can hold inbound email bodies from desks/mailboxes the
+    // caller may not be able to open, so only the author and AUTOMATIONS admins see them.
+    const owner = await db.workflow.findFirst({
+      where: { id: execution.workflowId, workspaceId: auth.workspaceId },
+      select: { metadata: true },
+    });
+    let canSeeData = owner
+      ? parseAutomationMetadata(owner.metadata).createdById === auth.userId
+      : false;
+    if (!canSeeData) {
+      canSeeData = await assertIsAutomationsAdmin(auth.userId).then(
+        () => true,
+        () => false,
+      );
+    }
+
     const [state, pauseState, stepRows] = await Promise.all([
       getExecutionState(executionId),
       getAutomationPauseState(executionId),
@@ -922,13 +938,15 @@ router.get(
     res.json({
       success: true,
       data: {
-        run: workflowExecutionToRun(execution, state),
-        state: pauseState,
+        run: canSeeData
+          ? workflowExecutionToRun(execution, state)
+          : { ...workflowExecutionToRun(execution, state), triggerData: {}, context: {} },
+        state: canSeeData || !pauseState ? pauseState : { ...pauseState, context: null },
         steps: stepRows.map(r => ({
           id: r.id,
           stepName: r.stepName,
           status: r.status,
-          data: r.data ? safeParseJson(r.data) : null,
+          data: canSeeData && r.data ? safeParseJson(r.data) : null,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
         })),
