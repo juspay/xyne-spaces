@@ -394,7 +394,7 @@ async function spawnSession(
     // never values. Helps pinpoint stale-env vs missing-cred at runtime.
     // The child runs with cwd=/tmp (bb01cf92e6 — fixes permission-denied
     // attempts to write into the app dir). For TS-source MCPs (xyne-spaces,
-    // juspay-internal-tools, query-routing) the launch is
+    // internal-tools, query-routing) the launch is
     // `node --import tsx/esm <server.ts>`. Node's ESM resolver walks up from
     // cwd to find `node_modules/tsx`, which from /tmp/ never resolves and
     // the child crashes with `Cannot find package 'tsx' imported from /tmp/`.

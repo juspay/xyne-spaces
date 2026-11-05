@@ -541,8 +541,8 @@ const SERVERS = [
 
 async function main() {
   const defaultOrg = await prisma.organization.upsert({
-    where: { name: "Juspay" },
-    create: { name: "Juspay", createdBy: "seed" },
+    where: { name: "Xyne" },
+    create: { name: "Xyne", createdBy: "seed" },
     update: {},
   });
 

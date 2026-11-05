@@ -5,11 +5,11 @@ Source: CloudSEK XVigil event report, incidents XVA-26055902 / 26055899 / 260558
 | # | Report category | Reported value | Where in repo | Verdict | Reason / Fix |
 |---|---|---|---|---|---|
 | 1 | Repository | `juspay/xyne-spaces` is public | GitHub | **TP** | Accurate. Team decision whether to keep it public. Not a code fix. |
-| 2 | Internal subdomain | `bitbot.internal.svc.k8s.office.mum.juspay.net` | `apps/backend/src/migration/slack/slackJiraffeService.ts` | **TP — fixed** | Internal cluster hostname. Now read from new `BITBOT_BASE_URL` env var; throws if unset. Added to `apps/backend/.env.example`. |
-| 3 | Internal subdomain | `lightbox.sso.internal.svc.k8s.apoc.mum.juspay.net` | `apps/dashboard/src/utils/configs.ts` | **TP — fixed** | Unused `WEBSITES` list, no importers. File deleted. |
-| 4 | Internal subdomain | `lightbox.sso.internal.svc.k8s.apoc.mum.juspay.net` | `apps/xyne-claw-auth/backend/prisma/migrations/20260421180000_add_juspay_internal_tools_server/migration.sql` | **TP — fixed** | Applied migration edited in place; `url` set to empty (never read, the static adapter takes its URL from env). Developers must run `prisma migrate reset` on their local claw-auth DB once. Old value remains in git history. |
-| 5 | Internal subdomain | `juspay-internal-tools-ext.internal.svc.k8s.dozer.mum.juspay.net` | `apps/xyne-claw-auth/backend/src/mcp/adapters/juspay-internal-tools.ts` | **TP — fixed** | Hardcoded fallback removed; `JUSPAY_INTERNAL_TOOLS_BASE_URL` now required. Added with `JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN` to `apps/xyne-claw-auth/backend/.env.example`. |
-| 6 | Internal subdomain | `research-agent.internal.svc.k8s.office.mum.juspay.net` | `packages/xyne-claw-shared/src/tools/research-agent/tools.ts` (4 fallbacks + schema default/placeholder) | **TP — fixed** | Replaced with one `RESEARCH_AGENT_API_URL_DEFAULT` from the `RESEARCH_AGENT_API_URL` env var; neutral placeholder. |
+| 2 | Internal subdomain | `bitbot.<company-domain>` | `apps/backend/src/migration/slack/slackJiraffeService.ts` | **TP — fixed** | Internal cluster hostname. Now read from new `BITBOT_BASE_URL` env var; throws if unset. Added to `apps/backend/.env.example`. |
+| 3 | Internal subdomain | `lightbox.<company-domain>` | `apps/dashboard/src/utils/configs.ts` | **TP — fixed** | Unused `WEBSITES` list, no importers. File deleted. |
+| 4 | Internal subdomain | `lightbox.<company-domain>` | `apps/xyne-claw-auth/backend/prisma/migrations/20260421180000_add_juspay_internal_tools_server/migration.sql` | **TP — fixed** | Applied migration edited in place; `url` set to empty (never read, the static adapter takes its URL from env). Developers must run `prisma migrate reset` on their local claw-auth DB once. Old value remains in git history. |
+| 5 | Internal subdomain | `internal-tools-ext.<company-domain>` | `apps/xyne-claw-auth/backend/src/mcp/adapters/internal-tools.ts` | **TP — fixed** | Hardcoded fallback removed; `JUSPAY_INTERNAL_TOOLS_BASE_URL` now required. Added with `JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN` to `apps/xyne-claw-auth/backend/.env.example`. |
+| 6 | Internal subdomain | `research-agent.<company-domain>` | `packages/xyne-claw-shared/src/tools/research-agent/tools.ts` (4 fallbacks + schema default/placeholder) | **TP — fixed** | Replaced with one `RESEARCH_AGENT_API_URL_DEFAULT` from the `RESEARCH_AGENT_API_URL` env var; neutral placeholder. |
 | 7 | Password | `dev-admin-password` | `docker-compose.dev.yml`, `docker-compose.test.yml`, `project.nix`, `scripts/sandbox.sh` | FP | Zero-cache admin password for the local Docker stack. |
 | 8 | Password | `minioadmin` | `docker-compose.dev.yml`, `docker-compose.test.yml`, `apps/dashboard-edge/local/docker-compose.yml`, commented in `.env.example` / `.env.test` | FP | MinIO / RustFS vendor default for localhost object store. |
 | 9 | Password | `xyne123` | `docker-compose.dev.yml`, `apps/backend/.env.example`, `.env.test`, `apps/xyne-claw-auth/TESTING.md` | FP | Local Postgres container password (`localhost:5433`). |
@@ -26,18 +26,18 @@ Source: CloudSEK XVigil event report, incidents XVA-26055902 / 26055899 / 260558
 | 20 | workspaceid credential | `lastworkspace` | Git history only (removed in `18805afd1`) | FP | A `localStorage` key name. |
 | 21 | Username | `openai` / `OpenAI` | Provider identifiers throughout | FP | Name of an LLM provider. |
 | 22 | Username | `props[` | — | FP | Scanner artefact; a JavaScript fragment. |
-| 23 | Username | `xyne.spaces_juspay.in` | `apps/xyne-claw-auth/backend/.env.example` (`BITBUCKET_DASHBOARD_AUTHOR_USERNAME`) | FP — **removed by policy** | A username, not a secret. Replaced with a neutral placeholder anyway. |
+| 23 | Username | a bot username on the company domain | `apps/xyne-claw-auth/backend/.env.example` (`BITBUCKET_DASHBOARD_AUTHOR_USERNAME`) | FP — **removed by policy** | A username, not a secret. Replaced with a neutral placeholder anyway. |
 | 24 | Username | `usernames : [...])` | — | FP | Truncated scanner output, nothing behind it. |
-| 25 | Committer emails | `xyne.spaces@`, `kushagar.goel@`, `ganesh.pendem@`, `sithaarth.m@`, `mahek.agarwal@`, `mayank.bansal@juspay.in`, one GitHub no-reply | **Not in any tracked file.** GitHub commit author metadata only. | FP | Nothing to fix in code. Removable only by a full git history rewrite, and forks keep the old commits. |
-| 26 | Client email | `git@ssh.bitbucket.juspay.net` | `claw-deployments/*.yaml`, `packages/xyne-claw-shared/src/tools/sandbox/repo-configs.ts` | FP — **removed by policy** | SSH `user@host`, not an email. Host now comes from `BITBUCKET_SSH_HOST`; manifests skip the Bitbucket block when unset. |
-| 27 | Client email | `api@xyne.juspay.in`, `noreply@spaces.xyne.juspay.net` | `apps/backend/src/services/apiKeyService.ts`, `packages/xyne-claw-shared/src/tools/sandbox/tools.ts` | FP — **removed by policy** | Service identities, not people. Now `API_KEY_DEFAULT_USER_EMAIL` / `API_KEY_USER_EMAIL_DOMAIN` and `SANDBOX_GIT_COMMITTER_EMAIL`, no Juspay default. |
-| 28 | Client email | `ameer.noufil@juspay.com` | `tools/xyne-automation*/package.json` `author` | FP — **removed by policy** | Package author field. Email dropped. |
-| 29 | Domains | `spaces.xyne.juspay.net`, `app.spaces.*`, `auth.spaces.*`, `call.xyne.*`, `api.xyne.juspay.in`, `xyne.juspay.in`, `xyne.juspay.net`, `*.xyne.juspay.net`, `external.spaces.xyne.juspay.io`, `*.sandbox.*`, `genius.juspay.in`, `dashboard.expresscheckout.juspay.in`, `airborne.juspay.in`, `sandbox.expense.juspay.in`, `juspay.in/.io/.net` | 114 files, 352 lines across backend, dashboard, electron, mobile, claw packages, Dockerfiles, docs | FP — **removed by policy** | Public DNS names, not secrets, but repo policy is no company domains in code. Done: runtime values come from env with no Juspay default; tests and docs use the generic `example.org` scheme. See "Policy sweep" below. |
-| 30 | Domains | `grafana.spaces.xyne.juspay.net/xyne-mcp/*` | `.mcp.json` | FP — **removed by policy** | Authenticated dev-tooling endpoints. Replaced with `${XYNE_MCP_BASE_URL}` expansion, documented in `docs/setup/local-setup.md`. |
-| 31 | Domains | `bitbucket.juspay.net`, `ssh.bitbucket.juspay.net`, `jenkins.*.juspay.net`, `mirror.bitbucket.juspay.net`, `grid.ai.juspay.net`, `api.juspay.in`, `maven.juspay.in`, `pragati.internal.staging.mum.juspay.net` | `claw-deployments/*.yaml`, claw adapters, skills, `.env.example` files, sandbox repo configs | FP — **removed by policy** | Hostnames of authenticated services, not credentials. Moved to env / `example.net` placeholders. |
-| 32 | Brand match | `JUSPAY`, `Namma Yatri` | — | FP | Incidental mention; report's own triage marks repo irrelevant to that client. |
+| 25 | Committer emails | six employee/bot addresses on the company domain, one GitHub no-reply | **Not in any tracked file.** GitHub commit author metadata only. | FP | Nothing to fix in code. Removable only by a full git history rewrite, and forks keep the old commits. |
+| 26 | Client email | `git@<internal Bitbucket SSH host>` | `claw-deployments/*.yaml`, `packages/xyne-claw-shared/src/tools/sandbox/repo-configs.ts` | FP — **removed by policy** | SSH `user@host`, not an email. Host now comes from `BITBUCKET_SSH_HOST`; manifests skip the Bitbucket block when unset. |
+| 27 | Client email | two service addresses on company domains | `apps/backend/src/services/apiKeyService.ts`, `packages/xyne-claw-shared/src/tools/sandbox/tools.ts` | FP — **removed by policy** | Service identities, not people. Now `API_KEY_DEFAULT_USER_EMAIL` / `API_KEY_USER_EMAIL_DOMAIN` and `SANDBOX_GIT_COMMITTER_EMAIL`, no company default. |
+| 28 | Client email | an employee address on the company domain | `tools/xyne-automation*/package.json` `author` | FP — **removed by policy** | Package author field. Email dropped. |
+| 29 | Domains | `spaces.<company-domain>`, `app.spaces.*`, `auth.spaces.*`, `call.xyne.*`, `api.<company-domain>`, `xyne.<company-domain>`, `xyne.<company-domain>`, `*.<company-domain>`, `external.<company-domain>`, `*.sandbox.*`, `genius.<company-domain>`, `dashboard.<company-domain>`, `airborne.<company-domain>`, `sandbox.<company-domain>`, company apex domains | 114 files, 352 lines across backend, dashboard, electron, mobile, claw packages, Dockerfiles, docs | FP — **removed by policy** | Public DNS names, not secrets, but repo policy is no company domains in code. Done: runtime values come from env with no company default; tests and docs use the generic `example.org` scheme. See "Policy sweep" below. |
+| 30 | Domains | `grafana.<company-domain>/xyne-mcp/*` | `.mcp.json` | FP — **removed by policy** | Authenticated dev-tooling endpoints. Replaced with `${XYNE_MCP_BASE_URL}` expansion, documented in `docs/setup/local-setup.md`. |
+| 31 | Domains | `bitbucket.<company-domain>`, `ssh.<company-domain>`, `jenkins.<company-domain>`, `mirror.<company-domain>`, `grid.<company-domain>`, `api.<company-domain>`, `maven.<company-domain>`, `pragati.<company-domain>` | `claw-deployments/*.yaml`, claw adapters, skills, `.env.example` files, sandbox repo configs | FP — **removed by policy** | Hostnames of authenticated services, not credentials. Moved to env / `example.net` placeholders. |
+| 32 | Brand match | company brand name, `Namma Yatri` | — | FP | Incidental mention; report's own triage marks repo irrelevant to that client. |
 | 33 | Metadata | Languages: Python, TypeScript | GitHub | FP | Shown on any public repo's landing page. |
-| 34 | Metadata | Creator / created by: `juspay/xyne-spaces`, `juspay` | GitHub | FP | Repo name and owning org. |
+| 34 | Metadata | Creator / created by: the GitHub repo path and owning org | GitHub | FP | Repo name and owning org. |
 | 35 | Metadata | Source name: `github` | — | FP | Where the report pulled from. |
 | 36 | Unlabelled | `1DUvkMcCpPm6UfMPkeZyRH3rfODQe9F56` | Not in tree or git history | FP | Likely a CloudSEK internal document ID leaked into the report template. |
 | 37 | API keys / secret keys / PATs | None detected | — | Confirmed | Independent sweep for Anthropic, OpenAI, AWS, GitHub, Slack, Google key formats and PEM blocks found only test fixtures and UI placeholders. |
@@ -46,11 +46,11 @@ Source: CloudSEK XVigil event report, incidents XVA-26055902 / 26055899 / 260558
 
 **Before deploying #2, #5, #6:** set `BITBOT_BASE_URL`, `JUSPAY_INTERNAL_TOOLS_BASE_URL`, `RESEARCH_AGENT_API_URL` in every environment using those integrations, or they fail instead of silently reaching the old hosts.
 
-**Policy sweep (28 Oct 2026):** beyond the report's true positives, the team decided that no company domain or email address should appear anywhere in this public repo. Every `*.juspay.*` hostname and `@juspay.*` address in tracked files was replaced: runtime values come from environment variables with no Juspay default, tests and docs use `example.com`-style placeholders, applied Prisma migrations are edited in place (developers reset their local claw-auth DB once). Placeholders never mirror the real hostname layout: the deployment's own hosts are `example.org` (`app.example.org`, `auth.example.org`, `sandbox.example.org`, …); third parties stay `example.com` / `example.net`.
+**Policy sweep (28 Oct 2026):** beyond the report's true positives, the team decided that no company domain or email address should appear anywhere in this public repo. Every company-domain hostname and email address in tracked files was replaced: runtime values come from environment variables with no company default, tests and docs use `example.com`-style placeholders, applied Prisma migrations are edited in place (developers reset their local claw-auth DB once). Placeholders never mirror the real hostname layout: the deployment's own hosts are `example.org` (`app.example.org`, `auth.example.org`, `sandbox.example.org`, …); third parties stay `example.com` / `example.net`.
 
 ## Environment variables introduced by the sweep
 
-All default to empty. Where unset, the feature fails closed with a clear error instead of reaching a Juspay host.
+All default to empty. Where unset, the feature fails closed with a clear error instead of reaching a company host.
 
 Backend (`apps/backend/.env.example`)
 - `BITBOT_BASE_URL`
@@ -126,14 +126,14 @@ Dev tooling (`.mcp.json`, documented in `docs/setup/local-setup.md`)
 
 | Item | Where | Why untouched |
 |---|---|---|
-| `xyne.ai` addresses and hosts (`admin@xyne.ai` seeded login, `*@bot.xyne.ai` bot identities, `spaces.xyne.ai` community default) | seed scripts, README, bots, community mobile variant | The product's own open-source domain, not Juspay's. Removing it changes the documented local login and bot identities. |
+| `xyne.ai` addresses and hosts (`admin@xyne.ai` seeded login, `*@bot.xyne.ai` bot identities, `spaces.xyne.ai` community default) | seed scripts, README, bots, community mobile variant | The product's own open-source domain, not the company's. Removing it changes the documented local login and bot identities. |
 | `net.juspay.xynespaces*` | `apps/mobile` native code, plugins, scripts | Android/iOS bundle identifiers, not hostnames. Renaming re-identifies the apps in the stores, Firebase, App Groups and keychain. |
 | `spaces.example.com` / `xyne.example.com` in `deployment/` and `helm-charts/` | self-hosting docs, tfvars, values files | Pre-existing generic examples for self-hosters, present before this sweep. |
 | `@juspay/*` npm scopes, `@juspay/xyne-*-guardians` CODEOWNERS teams | package manifests, `.github/CODEOWNERS` | Package names and GitHub team handles, not domains or emails. |
 
 ## Production rollout
 
-The public repo is the source of truth for code. Production images are built by Jenkins in `juspay/xyne-spaces-private`, which overlays its private files onto the public repo at the ref in `public-source.json` and pushes to GCR through the public `Makefile`. GitHub Actions in the public repo only publishes the open-source images to ghcr, so it stays generic and was not changed.
+The public repo is the source of truth for code. Production images are built by Jenkins in the private overlay repo, which overlays its private files onto the public repo at the ref in `public-source.json` and pushes to GCR through the public `Makefile`. GitHub Actions in the public repo only publishes the open-source images to ghcr, so it stays generic and was not changed.
 
 | Component | Where the production values now live | Status |
 |---|---|---|
@@ -147,8 +147,8 @@ The public repo is the source of truth for code. Production images are built by 
 
 | Check | Result |
 |---|---|
-| Repo-wide grep for `juspay.(in\|io\|net\|com)` hostnames | 0 hits (lockfiles and this doc excluded) |
-| Repo-wide grep for `@…juspay` emails | 0 hits (only npm scopes and CODEOWNERS team handles remain) |
+| Repo-wide grep for company-domain hostnames | 0 hits (lockfiles and this doc excluded) |
+| Repo-wide grep for company-domain emails | 0 hits (only npm scopes and CODEOWNERS team handles remain) |
 | Placeholders mirroring the real hostname layout | 0 hits outside the pre-existing `deployment/` and `helm-charts/` self-hosting examples |
 | `pnpm install --frozen-lockfile` | OK (Node 22.23.4, pnpm 10.15.0) |
 | `apps/dashboard` `tsc --noEmit` | OK |

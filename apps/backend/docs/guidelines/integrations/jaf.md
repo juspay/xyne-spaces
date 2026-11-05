@@ -1,4 +1,4 @@
-# JAF (Juspay Agent Framework)
+# JAF (agent framework)
 
 AI agent execution framework for intelligent automation.
 

@@ -554,7 +554,7 @@ const PromoteToChannelSheetContent = ({
                         Public
                       </Text>
                       <Text className='text-[13px] text-bottomsheet-text-muted'>
-                        Anyone in Juspay can find and join
+                        Anyone in Xyne can find and join
                       </Text>
                     </View>
                     <Radio>

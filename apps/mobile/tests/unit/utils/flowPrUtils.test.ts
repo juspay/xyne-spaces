@@ -18,7 +18,7 @@ const samplePr: FlowComponentLike = {
     provider: 'github',
     title: 'fix: reduce profile screen status dot size on mobile',
     desc: '## What\nReduces the online-status dot size.',
-    url: 'https://github.com/juspay/xyne-spaces-private/pull/257',
+    url: 'https://github.com/xyne/xyne-spaces-private/pull/257',
   },
 };
 
@@ -30,7 +30,7 @@ describe('flowPrUtils', () => {
     assert.equal(viewModel.statusLabel, 'PR Created');
     assert.equal(viewModel.badgeTone, 'created');
     assert.equal(viewModel.openProviderLabel, 'Open in GitHub');
-    assert.equal(viewModel.url, 'https://github.com/juspay/xyne-spaces-private/pull/257');
+    assert.equal(viewModel.url, 'https://github.com/xyne/xyne-spaces-private/pull/257');
   });
 
   it('strips trailing backslash / %5C escape artifacts from PR urls', () => {
@@ -40,20 +40,20 @@ describe('flowPrUtils', () => {
         status: 'created',
         provider: 'github',
         title: 'fix: something',
-        url: 'https://github.com/juspay/xyne-spaces-private/pull/329\\',
-        detailsUrl: 'https://github.com/juspay/xyne-spaces-private/issues/12%5C ',
+        url: 'https://github.com/xyne/xyne-spaces-private/pull/329\\',
+        detailsUrl: 'https://github.com/xyne/xyne-spaces-private/issues/12%5C ',
       },
     });
     assert.ok(viewModel);
-    assert.equal(viewModel.url, 'https://github.com/juspay/xyne-spaces-private/pull/329');
-    assert.equal(viewModel.detailsUrl, 'https://github.com/juspay/xyne-spaces-private/issues/12');
+    assert.equal(viewModel.url, 'https://github.com/xyne/xyne-spaces-private/pull/329');
+    assert.equal(viewModel.detailsUrl, 'https://github.com/xyne/xyne-spaces-private/issues/12');
     assert.ok(!viewModel.url?.includes('%5C'));
     assert.ok(!viewModel.url?.endsWith('\\'));
   });
 
   it('keeps already-clean PR urls untouched', () => {
     const viewModel = createPrCardViewModel(samplePr);
-    assert.equal(viewModel?.url, 'https://github.com/juspay/xyne-spaces-private/pull/257');
+    assert.equal(viewModel?.url, 'https://github.com/xyne/xyne-spaces-private/pull/257');
   });
 
   it('rejects missing title or status', () => {

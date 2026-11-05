@@ -1,5 +1,5 @@
 /**
- * Ticket Cleaning + Cluster Theme Agent using JAF (Juspay Agent Framework)
+ * Ticket Cleaning + Cluster Theme Agent using JAF (agent framework)
  *
  * - Cleans ticket descriptions for embeddings and clustering.
  * - Generates cluster themes for Product Insights.

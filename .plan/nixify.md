@@ -29,7 +29,7 @@ reference, and the list may only shrink.[^gate]
 
 *Nothing downloads at startup anymore, and the toolchain is pinned.*
 
-- Y-Sweet is built from Juspay's fork, not curled at runtime[^ysweet]
+- Y-Sweet is built from our fork, not curled at runtime[^ysweet]
 - Transcription runs from a locked Python environment, not `pip install`[^python]
 - Zero runs from the workspace and reads its secret at runtime[^zero]
 - Node 22, pnpm 10.15.0, Postgres 17 pinned; the shell has every tool CI needs[^toolchain]

@@ -46,7 +46,7 @@ const sampleFlow = (): FlowDefinitionLike => ({
             id: 'repo-target',
             question: 'Which repository should the agent target (if any)?',
             type: 'open_ended',
-            placeholder: 'e.g., juspay/xyne-spaces',
+            placeholder: 'e.g., xyne/xyne-spaces',
             required: false,
           },
         ],

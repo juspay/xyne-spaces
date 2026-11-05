@@ -1,5 +1,5 @@
 /**
- * Description Generator Agent using JAF (Juspay Agent Framework)
+ * Description Generator Agent using JAF (agent framework)
  *
  * Mirrors title-generator.ts. Produces a clean, structured ticket description
  * from raw context (email body, chat transcript, user note).

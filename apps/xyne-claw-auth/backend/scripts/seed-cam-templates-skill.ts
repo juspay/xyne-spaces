@@ -142,11 +142,11 @@ async function main(): Promise<void> {
     throw new Error(`AGENT_SLUG "${agentSlug}" exists in multiple orgs. Set ORG_ID and re-run.`);
   }
   const fallbackOrg = matchingAgents.length === 0
-    ? await prisma.organization.findFirst({ where: { name: "Juspay" }, select: { id: true } })
+    ? await prisma.organization.findFirst({ where: { name: process.env["DEFAULT_ORG_NAME"]?.trim() || "Xyne" }, select: { id: true } })
     : null;
   const orgId = orgIdFromEnv ?? matchingAgents[0]?.orgId ?? fallbackOrg?.id;
   if (!orgId) {
-    throw new Error("Cannot seed skill without an org. Set ORG_ID, or create the Juspay organization first.");
+    throw new Error("Cannot seed skill without an org. Set ORG_ID, or create the default organization first.");
   }
 
   const files = await walkFiles(absRoot);

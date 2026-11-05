@@ -25,7 +25,7 @@ This single command does **everything** automatically:
 
 - **macOS or Linux**
 - **Git** (to clone the repo)
-- **JUSPAY Grid API Key** — get it from [llm.example.com](https://llm.example.com)
+- **LLM gateway API key** — get it from [llm.example.com](https://llm.example.com)
 
 ---
 
@@ -42,7 +42,7 @@ export ANTHROPIC_MODEL="kimi-latest"
 export ANTHROPIC_SMALL_FAST_MODEL="open-fast"
 export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS="1"
 
-# Google Vertex disabled (routed through Juspay Grid instead)
+# Google Vertex disabled (routed through the LLM gateway instead)
 export CLAUDE_CODE_USE_VERTEX=""
 export GOOGLE_APPLICATION_CREDENTIALS=""
 export GOOGLE_CLOUD_PROJECT=""
@@ -126,7 +126,7 @@ npx playwright install chromium
 
 ### Google Vertex / Authentication errors in Jenkins
 
-The error `Unexpected token '_', "_timestamp"... is not valid JSON` means `GOOGLE_APPLICATION_CREDENTIALS` points to an invalid file (likely an ADC token cache, not a service account JSON). The setup script clears all Vertex-related env vars since Claude routes through Juspay Grid instead.
+The error `Unexpected token '_', "_timestamp"... is not valid JSON` means `GOOGLE_APPLICATION_CREDENTIALS` points to an invalid file (likely an ADC token cache, not a service account JSON). The setup script clears all Vertex-related env vars since Claude routes through the LLM gateway instead.
 
 ### Re-run setup at any time
 

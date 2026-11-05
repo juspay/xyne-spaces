@@ -47,7 +47,7 @@ export const GITHUB_CUSTOM_TOOLS: McpToolInfo[] = [
     inputSchema: {
       type: "object",
       properties: {
-        owner: { type: "string", description: "Repository owner / org (e.g. juspay)" },
+        owner: { type: "string", description: "Repository owner / org (e.g. xyne)" },
         repo: { type: "string", description: "Repository name (e.g. xyne-spaces)" },
         fileData: { type: "string", description: "Base64-encoded file bytes. Use the bytes from sandbox-pw-screenshot's [ATTACHMENT:...] payload or sandbox-read-file's [INSPECT:...] payload." },
         fileName: { type: "string", description: "Filename for the upload, e.g. login-flow.mp4. The extension sets the content type." },
