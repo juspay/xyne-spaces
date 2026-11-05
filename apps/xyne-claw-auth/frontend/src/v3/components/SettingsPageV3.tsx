@@ -1011,7 +1011,7 @@ function GenericProviderConfigForm({
           label={isOauth ? (isClaude ? "OAuth Token" : "ChatGPT OAuth Token") : "API Key"}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder={hasKey ? "••••••••" : isLitellm ? "XYNE_GRID_API_KEY" : "sk-…"}
+          placeholder={hasKey ? "••••••••" : isLitellm ? "LITELLM_API_KEY" : "sk-…"}
           hint={hasKey ? "Leave blank to keep current" : undefined}
         />
       )}

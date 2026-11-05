@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Test Automation Script - Converts Playwright spec files to Cucumber tests
-# using Claude Code with Xyne Grid
+# using Claude Code with the LLM gateway
 
 set -e
 
@@ -101,7 +101,7 @@ fi
 
 echo ""
 echo "=========================================="
-echo "  Configuring Claude with Xyne Grid"
+echo "  Configuring Claude with the LLM gateway"
 echo "=========================================="
 echo ""
 
@@ -112,7 +112,7 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +o allexport
 fi
 
-# Claude Code - Xyne Grid configuration
+# Claude Code - LLM gateway configuration
 # Set your API key in .env file as JUSPAY_API_KEY=your_api_key (do NOT include 'Bearer') or export as environment variable
 if [ -z "$JUSPAY_API_KEY" ]; then
     echo -e "${RED}Error: JUSPAY_API_KEY is not set.${NC}"
@@ -125,7 +125,7 @@ export JUSPAY_API_KEY="Bearer $JUSPAY_API_KEY"
 export MODEL="kimi-latest"
 
 echo -e "${GREEN}✓ Configured with model: ${MODEL}${NC}"
-echo -e "${GREEN}✓ Using Xyne Grid API${NC}"
+echo -e "${GREEN}✓ Using the LLM gateway API${NC}"
 echo ""
 
 # Parse arguments to check for dry-run report flag and retry folder
