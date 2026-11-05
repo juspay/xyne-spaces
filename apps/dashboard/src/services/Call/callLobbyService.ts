@@ -1,5 +1,5 @@
 import { CallType, InvitationResponse } from '@xyne/shared';
-import type { CallChatMessage } from '@xyne/shared';
+import type { CallChatMessage, CallEncryptionCredentials } from '@xyne/shared';
 import axios from 'axios';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 import { refreshSessionOnce } from '../clients/sessionRefresh';
@@ -62,6 +62,8 @@ export interface ExternalJoinResponse {
   externalId: string;
   callType: CallType;
   participantId: string;
+  /** Present on end-to-end encrypted calls; the media key for this guest. */
+  encryption?: CallEncryptionCredentials;
 }
 
 export type InternalCallRouteResolution =

@@ -6,6 +6,7 @@ import { readWorkspaceJwt } from '@/services/accessTokenService';
 import { config } from '@/config/env';
 
 const JOINABLE_CALL_STATUSES = new Set<CallStatus>([
+  CallStatus.PENDING,
   CallStatus.SCHEDULED,
   CallStatus.ACTIVE,
   CallStatus.IN_PROGRESS,
