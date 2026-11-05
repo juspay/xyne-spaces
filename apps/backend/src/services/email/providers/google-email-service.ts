@@ -14,7 +14,7 @@ export class GoogleEmailService extends BaseEmailService {
   }
 
   private initializeTransporter(): void {
-    const { clientId, clientSecret, refreshToken, fromEmail } = config.email;
+    const { clientId, clientSecret, refreshToken, fromEmail, proxyUrl } = config.email;
 
     if (!clientId || !clientSecret || !refreshToken || !fromEmail) {
       logger.warn(
@@ -36,10 +36,15 @@ export class GoogleEmailService extends BaseEmailService {
           clientSecret,
           refreshToken,
         },
+        // SMTP over an HTTP CONNECT tunnel when EMAIL_PROXY_URL is set; TLS is
+        // still end-to-end with smtp.gmail.com, the proxy only sees host:port.
+        ...(proxyUrl ? { proxy: proxyUrl } : {}),
       });
 
       this.isConfigured = true;
-      logger.info(`[GoogleEmailService] Configured to send from: ${fromEmail}`);
+      logger.info(
+        `[GoogleEmailService] Configured to send from: ${fromEmail}${proxyUrl ? ' (via SMTP proxy)' : ''}`,
+      );
     } catch (error) {
       logger.error('[GoogleEmailService] Failed to initialize transporter:', error);
       this.isConfigured = false;
