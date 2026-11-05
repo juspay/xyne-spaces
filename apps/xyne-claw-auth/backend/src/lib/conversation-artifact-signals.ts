@@ -1,6 +1,7 @@
 import { createLogger } from "./../logger.js";
 import {
   detectLinkProvider,
+  markSandboxArtifactsStale,
   normalizeExternalUrl,
   recordConversationArtifact,
   type ArtifactRefService,
@@ -131,6 +132,23 @@ function firstUrl(records: Record<string, unknown>[]): string | null {
 }
 
 /**
+ * XYNE-66339: the sandbox a successful `sandbox-destroy` ended, or null. The
+ * result is JSON text `{ sessionId, sandboxId, destroyed }`, arriving bare or
+ * as MCP content parts. `sandboxId` is the session actually torn down; older
+ * xyne-claw builds only send `sessionId`.
+ */
+function destroyedSandboxId(result: unknown): string | null {
+  const content = asRecord(result)?.["content"] ?? result;
+  for (const part of Array.isArray(content) ? content : [result]) {
+    const record = asRecord(part && typeof part === "object" && "text" in part ? (part as { text: unknown }).text : part);
+    if (record?.["destroyed"] !== true) continue;
+    const id = record["sandboxId"] ?? record["sessionId"];
+    return typeof id === "string" && id.trim() ? id.trim() : null;
+  }
+  return null;
+}
+
+/**
  * Best-effort artifact write. Never throws, but reports whether a row was
  * actually written: `recordConversationArtifact` can also return `null`
  * without throwing (no org for the user, bad kind, oversized refId), and
@@ -157,6 +175,12 @@ export async function ingestArtifactSignals(input: IngestArtifactSignalsInput): 
   try {
     const { toolName, toolResult, conversationId, userId } = input;
     if (!conversationId || !userId || !toolName) return;
+
+    if (toolName === "sandbox-destroy") {
+      const sandboxId = destroyedSandboxId(toolResult);
+      if (sandboxId) await markSandboxArtifactsStale([sandboxId]);
+      return;
+    }
 
     const records = candidateRecords(toolResult);
     if (records.length === 0) return;
