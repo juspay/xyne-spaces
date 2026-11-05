@@ -3,6 +3,7 @@ import type { StepType } from '../types/step-types';
 import type { AutomationContext } from '../types/context';
 import type { AutomationStepConfig } from '../types/automation-config';
 import type { BranchKey } from '../engine/pause-step';
+import type { AccessContext, ValidationIssue } from '../types/validation';
 import { StepCategory } from '../types/categories';
 
 export interface ControlFlowExecutionContext {
@@ -34,6 +35,11 @@ export abstract class BaseStep<
   validate(config: unknown): z.infer<TConfig> {
     return this.configSchema.parse(config);
   }
+
+  validateAccess?(
+    config: z.infer<TConfig>,
+    access: AccessContext,
+  ): Promise<ValidationIssue[]>;
 
   redactInput?(input: Record<string, unknown>): Record<string, unknown>;
 

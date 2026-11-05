@@ -37,7 +37,7 @@ export function archivePersonalTx(self: DeskLabelRulesService, automationId: str
 export function createRuleTx(self: DeskLabelRulesService, payload: { channelId: string; labelName: string; color?: string | undefined; labelId?: string | undefined; name?: string | undefined; emailFilters?: { fromEmails?: string[] | undefined; fromDomains?: string[] | undefined; toEmails?: string[] | undefined; subjectContains?: string[] | undefined; bodyContains?: string[] | undefined; matchCase?: boolean | undefined; excludedFromEmails?: string[] | undefined; excludedFromDomains?: string[] | undefined; excludedToEmails?: string[] | undefined; excludedSubjectContains?: string[] | undefined; excludedBodyContains?: string[] | undefined; onlyNewThreads?: boolean | undefined; hasAttachments?: boolean | undefined; onlyReplies?: boolean | undefined; } | undefined; keepInInbox?: boolean | undefined; applyToExisting?: boolean | undefined; }, auth: { userId: string; workspaceId: string; }, emailFilters: Record<string, unknown>, filterFingerprint: string, name: string): DeskLabelRulesCreateResult | PromiseLike<DeskLabelRulesCreateResult> {
   return transaction(['Channel', 'ConversationLabel', 'DeskAutoLabelRuleReference', 'Workflow'], 'createRule: label resolve plus workflow and rule-reference inserts must commit atomically; tx is not ACL-wrapped', db, async tx => {
     const label = await resolveOrCreateLabel(tx, payload, auth);
-    const config = self.buildValidatedRuleConfig({
+    const config = await self.buildValidatedRuleConfig({
       channelId: payload.channelId,
       emailFilters,
       label,

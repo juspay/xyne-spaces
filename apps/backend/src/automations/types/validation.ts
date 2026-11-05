@@ -5,6 +5,13 @@ export enum ValidationIssueCode {
   UNKNOWN_REFERENCE = 'unknownReference',
   FORWARD_REFERENCE = 'forwardReference',
   TYPE_MISMATCH = 'typeMismatch',
+  ACCESS_DENIED = 'accessDenied',
+}
+
+export interface AccessContext {
+  userId: string;
+  workspaceId: string;
+  role?: string;
 }
 
 export const ValidationIssueCodeSchema = z.nativeEnum(ValidationIssueCode);
