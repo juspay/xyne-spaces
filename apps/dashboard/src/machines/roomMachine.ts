@@ -69,6 +69,7 @@ import {
   shouldConfirmTranscriptionAgentLeft,
 } from '../utils/livekitAgent';
 import { logger, Event } from '../utils/logger';
+import { createEncryptionErrorReporter } from '../utils/callEncryptionErrors';
 import { getCallJoinSettings } from '../hooks/useCallJoinSettings';
 import {
   cancelPreparedCallWindow,
@@ -654,17 +655,23 @@ export const roomMachine = setup({
 
         // A participant whose frames cannot be decrypted is silence and black video,
         // not an error dialog from LiveKit; surface it so the user knows to rejoin.
-        room.on(LiveKitRoomEvent.EncryptionError, (error: Error) => {
-          logger.error(Event.LIVEKIT_ROOM_EVENT, {
-            callId,
-            eventName: 'encryption_error',
-            error: error.message,
-          });
-          toast.error('Could not decrypt this call', {
-            id: `encryption-error-${callId}`,
-            description: 'Media from a participant could not be decrypted. Try rejoining the call.',
-          });
+        // Start-up missing-key glitches are logged but only toasted if they persist.
+        const encryptionErrors = createEncryptionErrorReporter({
+          log: fields => logger.error(Event.LIVEKIT_ROOM_EVENT, { callId, ...fields }),
+          notify: () =>
+            toast.error('Could not decrypt this call', {
+              id: `encryption-error-${callId}`,
+              description:
+                'Media from a participant could not be decrypted. Try rejoining the call.',
+            }),
         });
+        room.on(
+          LiveKitRoomEvent.EncryptionError,
+          (error: Error, participant?: { identity: string }) => {
+            encryptionErrors.report(error, participant?.identity);
+          },
+        );
+        room.once(LiveKitRoomEvent.Disconnected, () => encryptionErrors.dispose());
 
         room.on(LiveKitRoomEvent.Reconnecting, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Reconnecting });
