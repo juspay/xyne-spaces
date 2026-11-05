@@ -1,5 +1,6 @@
 import type { DisplaySearchResult } from '../../types/search';
 import type { ContextSelections } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
+import type { MentionRow } from '../MentionMenu/MentionMenu.utils';
 import type { ContextRef, PickedContext, TriggerChar } from './Composer.types';
 
 // ── Triggers ────────────────────────────────────────────────────────────────
@@ -166,6 +167,26 @@ export function pickFromChannel(
     mention: displayName,
     isPrivate: (channel.visibility ?? '').toUpperCase() === 'PRIVATE',
   };
+}
+
+/**
+ * What the composer attaches for a row of the @ menu. Null for a row that is
+ * not context: only a person is, never a group or @channel/@here.
+ */
+export function rowToPick(row: MentionRow): PickedContext | null {
+  switch (row.type) {
+    case 'person': {
+      const { person } = row;
+      if (person.isSpecial || person.type !== 'user' || !person.name) return null;
+      return { kind: 'person', id: person.id, label: person.name, mention: person.name };
+    }
+    case 'channel':
+      return pickFromChannel(row.channel, row.displayName);
+    case 'result':
+      return pickFromResult(row.result);
+    case 'app':
+      return { kind: 'app', id: row.app.id, label: row.app.title, mention: row.app.title };
+  }
 }
 
 /**

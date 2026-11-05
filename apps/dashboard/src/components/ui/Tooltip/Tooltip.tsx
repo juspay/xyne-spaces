@@ -16,6 +16,8 @@ export interface TooltipProps extends React.ComponentProps<typeof TooltipPrimiti
   collisionPadding?: React.ComponentProps<typeof TooltipPrimitive.Content>['collisionPadding'];
   sticky?: React.ComponentProps<typeof TooltipPrimitive.Content>['sticky'];
   hideWhenDetached?: boolean;
+  /** Escape while the tooltip is the top layer (it takes the key before a menu around it). */
+  onEscapeKeyDown?: React.ComponentProps<typeof TooltipPrimitive.Content>['onEscapeKeyDown'];
   showArrow?: boolean;
   className?: string;
   providerProps?: Omit<
@@ -150,6 +152,7 @@ export const Tooltip = ({
   collisionPadding = 0,
   sticky = 'partial',
   hideWhenDetached,
+  onEscapeKeyDown,
   showArrow = true,
   className,
   providerProps: _providerProps,
@@ -181,6 +184,7 @@ export const Tooltip = ({
           collisionPadding={collisionPadding}
           sticky={sticky}
           {...(hideWhenDetached !== undefined && { hideWhenDetached })}
+          {...(onEscapeKeyDown && { onEscapeKeyDown })}
           className={cn(
             'bg-foreground text-background',
             'animate-in fade-in-0 zoom-in-95',
