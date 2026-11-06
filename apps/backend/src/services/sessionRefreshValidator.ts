@@ -3,7 +3,7 @@ import axios from 'axios';
 import { AuthProvider } from '@xyne/shared';
 import { config } from '../config/env';
 import { logger } from '../utils/logger';
-import { UserSessionService } from '../services/userSessionService';
+import { UserSessionService, isSdkSsoSession } from '../services/userSessionService';
 import { accountDeactivationService } from '../services/accountDeactivationService';
 import {
   GOOGLE_CLIENTS,
@@ -170,6 +170,12 @@ async function isMicrosoftUserRevoked(session: LoadedSession): Promise<boolean> 
  * ourselves) and sessions without a refresh token have nothing external to check.
  */
 async function isProviderRevoked(session: LoadedSession): Promise<boolean> {
+  // An SDK SSO session holds a refresh token we issued. Sent to Google it would
+  // come back invalid_grant and deactivate a healthy user. A user the provider
+  // has revoked is still cut off: the check on their browser session revokes
+  // every session they have, this one included.
+  if (isSdkSsoSession(session)) return false;
+
   const provider = session.user.authProvider;
 
   if (provider === AuthProvider.GOOGLE && session.refreshToken) {
