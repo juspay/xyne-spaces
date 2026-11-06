@@ -16,7 +16,7 @@ import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
-import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
+// import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { verifyTranscriptionAgent } from '@/middleware/transcriptionAgentAuth';
 import { requireYSweetServerToken } from '@/middleware/ysweetServerAuth';
 import { DatabaseClient } from '@/database/client';
@@ -240,7 +240,7 @@ import merchantRoutes from '@/routes/merchants';
 import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
-import sdlcClawRoutes from '@/routes/sdlcClaw';
+// import sdlcClawRoutes from '@/routes/sdlcClaw';
 // Disabled (Claw)
 // import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 // import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
@@ -738,7 +738,7 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
-    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    // this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
     this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
     // Board routes (auth and ACL required)
