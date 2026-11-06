@@ -8,9 +8,9 @@
 Your organization's context layer, with collaborative apps built around it.<br>
 Real-time, permission-aware and built for agents.
 
-<a href="https://github.com/juspay/xyne-spaces/stargazers"><img src="https://img.shields.io/github/stars/juspay/xyne-spaces?style=flat&logo=github&label=stars&color=ff4f4f" alt="GitHub stars"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-ff4f4f" alt="License: Apache 2.0"></a>
-<a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-ff4f4f" alt="PRs welcome"></a>
+<a href="https://github.com/juspay/xyne-spaces/stargazers"><img src="https://img.shields.io/github/stars/juspay/xyne-spaces?style=flat&logo=github&label=stars&color=4a78a8" alt="GitHub stars"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-4a78a8" alt="License: Apache 2.0"></a>
+<a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-4a78a8" alt="PRs welcome"></a>
 [![Xyne Spaces: spaces.xyne.ai](docs/assets/spaces-badge.svg)](https://spaces.xyne.ai/community)
 
 <a href="https://trendshift.io/repositories/178755?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-178755" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/178755/daily?language=TypeScript" alt="juspay%2Fxyne-spaces | Trendshift" width="250" height="55"/></a>
