@@ -1509,9 +1509,6 @@ importers:
       '@types/node':
         specifier: ^24.3.1
         version: 24.13.3
-      archiver:
-        specifier: ^7.0.0
-        version: 7.0.1
       electron-log:
         specifier: ^5.4.3
         version: 5.4.4
@@ -1537,12 +1534,6 @@ importers:
         specifier: 11.1.1
         version: 11.1.1
     devDependencies:
-      '@types/archiver':
-        specifier: ^7.0.0
-        version: 7.0.0
-      '@types/express':
-        specifier: 4.17.25
-        version: 4.17.25
       '@types/extract-zip':
         specifier: ^2.0.0
         version: 2.0.3
@@ -1582,9 +1573,6 @@ importers:
       eslint:
         specifier: ^8.57.0
         version: 8.57.1
-      express:
-        specifier: ^4.21.0
-        version: 4.22.2
       nodemon:
         specifier: ^3.1.11
         version: 3.1.14

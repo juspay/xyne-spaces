@@ -292,7 +292,9 @@ depend on what the defaults happen to be:
   - the WebSocket at `<base path>/sync/v51/connect`
   - `/health`, `/metrics` and `/stats`
 
-  Keep `/metrics` and `/stats` private.
+  Keep `/metrics` and `/stats` private. When enabled, both require
+  `Authorization: Bearer <STREAMGRES_ADMIN_TOKEN>`, and refuse every request
+  if no token is set.
 - **Health.** `GET /health` (also `/healthz`, `/readyz`, and each of them
   under the base path) returns `503` until the server is ready. That means
   the change feed has passed the first read snapshot, and the warm start, if

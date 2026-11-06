@@ -89,7 +89,6 @@ const envSchema = Joi.object({
   MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   MIGRATION_INGEST_CONTROL: Joi.boolean().default(false), // kill-switch: gates the start/stop-ingestion routes (and the dashboard button). Off = ingestion queue can't be toggled.
   MIGRATION_APP_CREATOR_EMAIL: Joi.string().allow('').default(''), // existing user's email to own bot/app rows created during migration (alert/webhook channels)
-  GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
@@ -888,7 +887,6 @@ export const config = {
     projectId: envVars.GCS_PROJECT_ID,
     bucketName: envVars.GCS_BUCKET_NAME,
     migrationBucketName: envVars.MIGRATION_GCS_BUCKET,
-    bundleBucketName: envVars.GCS_BUNDLE_BUCKET_NAME,
     canvasBucketName: envVars.GCS_CANVAS_BUCKET_NAME,
     docsBucketName: envVars.GCS_DOCS_BUCKET_NAME,
     sessionRecordingBucketName: envVars.GCS_SESSION_RECORDING_BUCKET_NAME,

@@ -169,17 +169,6 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
 // Microsoft Graph Webhook
 // ============================================================================
 
-router.get('/microsoft-calendar', (req: Request, res: Response) => {
-  const validationToken = req.query.validationToken as string;
-
-  if (validationToken) {
-    logger.info(`${MICROSOFT_TAG} Webhook validation (GET)`);
-    res.status(200).type('text/plain').send(validationToken);
-  } else {
-    res.status(400).send('Missing validationToken');
-  }
-});
-
 router.post('/microsoft-calendar', async (req: Request, res: Response) => {
   try {
     const validationToken = req.query.validationToken as string;
