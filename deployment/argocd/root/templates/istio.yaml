@@ -3,8 +3,7 @@
 {{- $repo := "https://istio-release.storage.googleapis.com/charts" }}
 {{- $ingress := .Values.infra.ingress }}
 {{- $baseValues := include "xyne-root.merge" (dict "base" (dict "defaultRevision" "default") "layers" (list $istio.values.base)) | fromYaml }}
-{{- $accessLogFormat := `[%START_TIME%] "%REQ(:METHOD)% %REQ_WITHOUT_QUERY(X-ENVOY-ORIGINAL-PATH?:PATH)% %PROTOCOL%" %RESPONSE_CODE% %RESPONSE_FLAGS% %RESPONSE_CODE_DETAILS% %CONNECTION_TERMINATION_DETAILS% "%UPSTREAM_TRANSPORT_FAILURE_REASON%" %BYTES_RECEIVED% %BYTES_SENT% %DURATION% %RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)% "%REQ(X-FORWARDED-FOR)%" "%REQ(USER-AGENT)%" "%REQ(X-REQUEST-ID)%" "%REQ(:AUTHORITY)%" "%UPSTREAM_HOST%" %UPSTREAM_CLUSTER_RAW% %UPSTREAM_LOCAL_ADDRESS% %DOWNSTREAM_LOCAL_ADDRESS% %DOWNSTREAM_REMOTE_ADDRESS% %REQUESTED_SERVER_NAME% %ROUTE_NAME%` }}
-{{- $istiodValues := include "xyne-root.merge" (dict "base" (dict "meshConfig" (dict "accessLogFile" "/dev/stdout" "accessLogFormat" $accessLogFormat)) "layers" (list $istio.values.istiod)) | fromYaml }}
+{{- $istiodValues := include "xyne-root.merge" (dict "base" (dict "meshConfig" (dict "accessLogFile" "/dev/stdout")) "layers" (list $istio.values.istiod)) | fromYaml }}
 {{- $serviceAnnotations := deepCopy ($ingress.lbAnnotations | default dict) }}
 {{- $ed := .Values.addons.externalDns }}
 {{- $edIdentity := (.Values.infra.identities | default dict).externalDns | default dict }}
