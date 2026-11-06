@@ -7,6 +7,11 @@ import '../types/express';
 import { UserSessionService } from '../services/userSessionService';
 import { authSessionService } from '../services/authSessionService';
 import { config } from '@/config/env';
+import {
+  EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+  EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+  isEmailDomainAllowed,
+} from '@/services/emailDomainPolicy';
 import { db } from '@/database/client';
 import { AuthProvider } from '@xyne/shared';
 import { isRefreshAllowed } from '../services/sessionRefreshValidator';
@@ -75,6 +80,13 @@ class AuthV2Middleware {
         logger.warn(`[AUTH] [Auto-Refresh] Session check failed: Session or user not found`, {
           sessionFound: !!session,
           userFound: !!session?.user,
+        });
+        return false;
+      }
+
+      if (!isEmailDomainAllowed(session.user.email)) {
+        logger.warn(`[AUTH] [Auto-Refresh] Session rejected (reason=email_domain_not_allowed)`, {
+          userId: session.user.id,
         });
         return false;
       }
@@ -414,6 +426,17 @@ class AuthV2Middleware {
               ]);
               
               if (user) {
+                if (!isEmailDomainAllowed(user.email)) {
+                  logger.warn(`[AUTH] ${logPrefix} Request rejected (reason=email_domain_not_allowed)`, {
+                    userId: user.id,
+                  });
+                  res.status(401).json({
+                    error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+                    message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+                  });
+                  return;
+                }
+
                 if (user.leftAt) {
                   logger.warn(`[AUTH] ${logPrefix} User has been removed from workspace: ${user.email}`, {
                     tokenSource,

@@ -14,13 +14,18 @@ import { WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import '../types/express';
 import { config } from '@/config/env';
 import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
+import {
+  EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+  EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+  getProviderLoginDenial,
+  isEmailDomainAllowed,
+} from '@/services/emailDomainPolicy';
 import { DatabaseClient } from '@/database/client';
 import { switchWorkspaceData, ensureSelfDmForUserData, getWorkspaceLandingChannelData } from '@/bypassAcl/authServices';
 import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
-  PublicEmailDomainError,
   isOrganizationPolicyError,
   organizationDomainService,
 } from '@/services/organizationDomainService';
@@ -476,6 +481,15 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
+      const loginDenial = getProviderLoginDenial(googleUserData.email, payload.email_verified === true);
+      if (loginDenial) {
+        logger.warn(`${tag()} Google login rejected (reason=${loginDenial.error})`);
+        const frontendUrl = stateData.redirectTo ?? getFrontendUrl(req);
+        const params = new URLSearchParams({ error: loginDenial.error, message: loginDenial.message });
+        res.redirect(`${frontendUrl}?${params.toString()}`);
+        return;
+      }
+
       logger.info(`${tag()} Google auth success for: ${googleUserData.email}`);
 
       await migrateLegacyIdentity({
@@ -519,23 +533,9 @@ export class AuthV2Controller {
 
       let domainConflict = null;
       let domainConflictError = null;
-      let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        // Public email domains can never create enterprise workspaces — the only
-        // path forward for a workspace-less user without an invitation — so fail
-        // fast on them regardless of the entry flow. The
-        // remaining domain-conflict assert stays gated on the explicit
-        // enterprise intent.
-        try {
-          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
-        } catch (error) {
-          if (error instanceof PublicEmailDomainError) {
-            publicEmailError = error;
-          }
-        }
-
-        if (stateData.enterpriseLogin && !publicEmailError) {
+        if (stateData.enterpriseLogin) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
@@ -545,7 +545,7 @@ export class AuthV2Controller {
           }
         }
 
-        if (!domainConflictError && !publicEmailError) {
+        if (!domainConflictError) {
           domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
           domainConflictError = domainConflict
             ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -676,9 +676,6 @@ export class AuthV2Controller {
         params.set('enterpriseJoinOrgName', domainConflict.name);
         params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
       }
-      if (publicEmailError) {
-        params.set('publicEmailDomainError', publicEmailError.message);
-      }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);
       return;
@@ -725,6 +722,15 @@ export class AuthV2Controller {
       }
 
       logger.info(`[${requestId}] Session found for user: ${session.user.email}`);
+
+      if (!isEmailDomainAllowed(session.user.email)) {
+        logger.warn(`[${requestId}] Session refresh rejected (reason=email_domain_not_allowed)`);
+        res.status(401).json({
+          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+        });
+        return;
+      }
 
       // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
       // Disabled → the original inline check (session status + expiry only) runs
@@ -912,6 +918,13 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
+      const loginDenial = getProviderLoginDenial(googleUserData.email, payload.email_verified === true);
+      if (loginDenial) {
+        logger.warn(`${tag()} Google login rejected (reason=${loginDenial.error})`);
+        res.status(403).json({ success: false, ...loginDenial });
+        return;
+      }
+
       logger.info(`${tag()} Google auth success for: ${googleUserData.email}`);
 
       await migrateLegacyIdentity({
@@ -946,22 +959,9 @@ export class AuthV2Controller {
       // and offers "create an organization" instead of the request-to-join UI.
       let domainConflict = null;
       let domainConflictError = null;
-      let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        // Public email domains can never create enterprise workspaces, so fail fast
-        // on them regardless of the entry flow (mirrors handleCallback). The
-        // remaining domain-conflict assert stays gated on the explicit
-        // enterprise intent.
-        try {
-          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
-        } catch (error) {
-          if (error instanceof PublicEmailDomainError) {
-            publicEmailError = error;
-          }
-        }
-
-        if (stateData.enterpriseLogin && !publicEmailError) {
+        if (stateData.enterpriseLogin) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
@@ -971,7 +971,7 @@ export class AuthV2Controller {
           }
         }
 
-        if (!domainConflictError && !publicEmailError) {
+        if (!domainConflictError) {
           domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
           domainConflictError = domainConflict
             ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -1115,7 +1115,6 @@ export class AuthV2Controller {
         ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
         ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
         ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
-        ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
       });
     } catch (error) {
       logger.error(`${tag()} Google OAuth login failed (platform=electron):`, error);
@@ -1277,6 +1276,13 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
+      const loginDenial = getProviderLoginDenial(googleUserData.email, payload.email_verified === true);
+      if (loginDenial) {
+        logger.warn(`${tag()} Google login rejected (reason=${loginDenial.error})`);
+        sendError(loginDenial.error, loginDenial.message, 403);
+        return;
+      }
+
       logger.info(`${tag()} Google auth success for: ${googleUserData.email}`);
 
       await migrateLegacyIdentity({
@@ -1310,22 +1316,19 @@ export class AuthV2Controller {
       // and offers "create an organization" instead of the request-to-join UI.
       let domainConflict = null;
       let domainConflictError = null;
-      let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
         if (enterpriseLogin) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
         }
 
-        if (!domainConflictError && !publicEmailError) {
+        if (!domainConflictError) {
           domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(googleUserData.email);
           domainConflictError = domainConflict
             ? new OrganizationDomainConflictError(domainConflict.domain, domainConflict)
@@ -1439,7 +1442,6 @@ export class AuthV2Controller {
           ...(domainConflictError ? { domainConflictError: domainConflictError.message } : {}),
           ...(domainConflict ? { enterpriseJoinOrgName: domainConflict.name } : {}),
           ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
-          ...(publicEmailError ? { publicEmailDomainError: publicEmailError.message } : {}),
         });
         return;
       }
@@ -1458,9 +1460,6 @@ export class AuthV2Controller {
         params.set('domainConflictError', domainConflictError.message);
         params.set('enterpriseJoinOrgName', domainConflict.name);
         params.set('enterpriseJoinWorkspaces', JSON.stringify(domainConflict.workspaces));
-      }
-      if (publicEmailError) {
-        params.set('publicEmailDomainError', publicEmailError.message);
       }
 
       res.redirect(`${frontendUrl}?${params.toString()}`);
@@ -1618,6 +1617,15 @@ export class AuthV2Controller {
           return;
         }
         
+        if (!isEmailDomainAllowed(session.user.email)) {
+          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=email_domain_not_allowed)`);
+          res.status(401).json({
+            error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+            message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+          });
+          return;
+        }
+
         oauthUserData = {
           email: session.user.email,
           name: session.user.name || '',
@@ -2519,6 +2527,8 @@ export class AuthV2Controller {
         tokenKey?: string;
       };
       if (!decoded?.email) throw new Error('Invalid JWT payload');
+      // A pending-auth cookie issued before the allowlist changed must not finish a sign-in.
+      if (!isEmailDomainAllowed(decoded.email)) return null;
 
       let redisTokens: {
         refreshToken?: string | null;

@@ -4,6 +4,7 @@ import { OrgRole, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { loadGuestTokenRows } from '@/bypassAcl/appGuestServices';
 import type { AuthenticatedUser } from '@/types/express';
 import { config } from '@/config/env';
+import { isEmailDomainAllowed } from '@/services/emailDomainPolicy';
 
 /**
  * The Spaces token an app gets for one of its guests. Its own audience keeps it off every route but
@@ -77,6 +78,9 @@ export async function resolveGuestToken(token: string): Promise<AuthenticatedUse
   }
   if (user.status !== UserStatus.ACTIVE || user.leftAt || member.leftAt) {
     throw new GuestTokenError('This user is deactivated.', 'user_deactivated');
+  }
+  if (!isEmailDomainAllowed(user.email)) {
+    throw new GuestTokenError('This email domain is not allowed.', 'email_domain_not_allowed');
   }
 
   return {
