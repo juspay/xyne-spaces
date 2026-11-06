@@ -14,6 +14,7 @@ import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue'
 import { GoogleCalendarWatchService } from '@/services/googleCalendarWatchService';
 import { MicrosoftCalendarSubscriptionService } from '@/services/microsoftCalendarSubscriptionService';
 import { redisService } from '@/services/redisService';
+import { logUrl } from '@/utils/logUrl';
 
 const router = Router();
 const GOOGLE_TAG = '[CALENDAR_SYNC][GOOGLE][WEBHOOK]';
@@ -51,7 +52,7 @@ router.post('/google-calendar', async (req: Request, res: Response) => {
       hasChannelToken: Boolean(req.headers['x-goog-channel-token']),
     },
     body: req.body,
-    url: req.originalUrl,
+    url: logUrl(req.originalUrl),
     method: req.method,
   });
 

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '@/utils/logger';
+import { logUrl } from '@/utils/logUrl';
 import { ApiResponse } from '@/types/express';
 import type { ZodError } from 'zod';
 
@@ -52,7 +53,7 @@ export const errorHandler = (
     error: isBodyParseError ? undefined : err,
     stack: isBodyParseError ? undefined : originalStack,
     wrapperStack: isBodyParseError || err instanceof AppError ? undefined : appError.stack,
-    url: req.url,
+    url: logUrl(req.originalUrl),
     method: req.method,
     ip: req.ip,
     userAgent: req.get('User-Agent'),
