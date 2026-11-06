@@ -39,7 +39,6 @@ const envSchema = Joi.object({
   LOG_FLUENT_ENABLED: Joi.boolean().default(false),
   LOG_FLUENT_HOST: Joi.string().default('localhost'),
   LOG_FLUENT_PORT: Joi.number().default(24224),
-  LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
   // Common DB (separate instance for cross-cutting shared state, e.g. entity sequences)
@@ -805,7 +804,6 @@ export const config = {
       host: envVars.LOG_FLUENT_HOST,
       port: envVars.LOG_FLUENT_PORT,
     },
-    logUserSessionChanges: envVars.LOG_USER_SESSION_CHANGES,
   },
   database: {
     url: envVars.DATABASE_URL,

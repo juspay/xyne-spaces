@@ -11,6 +11,7 @@ import {
   isHexToken,
   isSafeInAppPath,
 } from '../utils/validation';
+import { stripUrlQuery } from '../utils/log-url';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -76,7 +77,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
   app.on('open-url', (event, url) => {
     event.preventDefault();
     Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, { 
-      url,
+      url: stripUrlQuery(url),
       origin: 'open-url'
     });
     void handleDeepLink(url);
@@ -100,7 +101,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
     const url = commandLine.find(arg => arg.startsWith(`${config.DEEP_LINK_PROTOCOL}://`));
     if (url) {
       Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, { 
-        url,
+        url: stripUrlQuery(url),
         origin: 'second-instance'
       });
       void handleDeepLink(url);
@@ -112,7 +113,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
     const url = process.argv.find(arg => arg.startsWith(`${config.DEEP_LINK_PROTOCOL}://`));
     if (url){
       Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, { 
-        url,
+        url: stripUrlQuery(url),
         origin: 'windows-startup'
       });
       void handleDeepLink(url);
@@ -126,7 +127,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
  * Handles incoming deep links
  */
 async function handleDeepLink(url: string): Promise<void> {
-  log.info('Handling deep link URL:', url);
+  log.info('Handling deep link URL:', stripUrlQuery(url));
 
   // Ensure app is ready and services (like mTLS) are initialized
   await app.whenReady();
@@ -149,7 +150,7 @@ async function handleDeepLink(url: string): Promise<void> {
         });
       }
 
-      log.info('[DeepLinks] Auth callback received:', { code: !!code, state: !!state, invitationId });
+      log.info('[DeepLinks] Auth callback received:', { code: !!code, state: !!state, invitationId: !!invitationId });
 
       if (!code || !state) return;
 
@@ -184,7 +185,7 @@ async function handleDeepLink(url: string): Promise<void> {
         });
       }
 
-      log.info('[DeepLinks] Invite deep link received:', { workspaceId, invitationId });
+      log.info('[DeepLinks] Invite deep link received:', { workspaceId, invitationId: !!invitationId });
 
       // Wait for mainWindow to be available (app might be launching)
         const waitForWindow = async (): Promise<BrowserWindow | null> => {
@@ -217,12 +218,12 @@ async function handleDeepLink(url: string): Promise<void> {
           expirationDate: Math.floor(Date.now() / 1000) + 600, // 10 minutes
         };
         Logger.info(ElectronEvent.SET_PENDING_INVITATION_COOKIE, {
-          invitationId,
+          invitationId: !!invitationId,
         });
 
         try {
           await session.defaultSession.cookies.set(cookie);
-          log.info('[DeepLinks] Set pending_invitation_id cookie successfully:', cookie);
+          log.info('[DeepLinks] Set pending_invitation_id cookie successfully');
           
           // Verify the cookie was set
           const cookies = await session.defaultSession.cookies.get({
@@ -230,7 +231,6 @@ async function handleDeepLink(url: string): Promise<void> {
             name: 'pending_invitation_id'
           });
           log.info('[DeepLinks] Verified cookies:', cookies.map(c => c.name));
-          log.info('[DeepLinks] Cookie details:', cookies)
         } catch (cookieError) {
           log.error('[DeepLinks] Failed to set cookie:', cookieError);
         }
@@ -306,7 +306,7 @@ async function handleDeepLink(url: string): Promise<void> {
 
 function exchangeAuthCode(code: string, state: string, invitationId: string | null): Promise<void> {
   Logger.info(EnrollmentEvent.AUTH_EXCHANGE_START);
-  log.info('[exchangeAuthCode] Starting with invitationId:', invitationId);
+  log.info('[exchangeAuthCode] Starting', { invitationId: !!invitationId });
   
   return new Promise(async (resolve) => {    
     const url = `${config.BACKEND_URL}/api/auth/exchange-electron`;
@@ -347,7 +347,7 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
             // which sets JWT cookies; the subsequent full-page reload completes auth normally.
             if (responseBody.hasInvitation) {
               const invitePath = `/invite?loginComplete=true&invitationId=${encodeURIComponent(responseBody.invitationId)}&loggedInEmail=${encodeURIComponent(responseBody.loggedInEmail)}`;
-              log.info('[exchangeAuthCode] Invitation flow — navigating renderer to:', invitePath);
+              log.info('[exchangeAuthCode] Invitation flow — navigating renderer to:', stripUrlQuery(invitePath));
               // Use executeJavaScript to set window.location.href directly.
               // We cannot use 'navigate-to' IPC here because NotificationHandler (which handles it)
               // is only mounted inside ProtectedRoute and is unavailable during 'authenticating' state.
@@ -420,7 +420,7 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
 }
 
 function exchangeMTLSAuthCode(code: string, state: string, invitationId: string | null): Promise<void> {
-  log.info('Exchanging MTLS auth code:', { code: !!code, state: !!state, invitationId });
+  log.info('Exchanging MTLS auth code:', { code: !!code, state: !!state, invitationId: !!invitationId });
   Logger.info(EnrollmentEvent.AUTH_EXCHANGE_START, {
     type: 'mtls',
   });
@@ -454,7 +454,7 @@ function exchangeMTLSAuthCode(code: string, state: string, invitationId: string 
           // in-app accept page (same as regular auth flow)
           if (responseBody.hasInvitation) {
             const invitePath = `/invite?loginComplete=true&invitationId=${encodeURIComponent(responseBody.invitationId)}&loggedInEmail=${encodeURIComponent(responseBody.loggedInEmail)}`;
-            log.info('[exchangeMTLSAuthCode] Invitation flow — navigating renderer to:', invitePath);
+            log.info('[exchangeMTLSAuthCode] Invitation flow — navigating renderer to:', stripUrlQuery(invitePath));
             mainWindow?.show();
             mainWindow?.webContents.executeJavaScript(
               `window.location.href = ${JSON.stringify(invitePath)}`

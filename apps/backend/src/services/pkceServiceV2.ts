@@ -26,7 +26,7 @@ class PKCEService {
       codeVerifier
     );
 
-    logger.info(`PKCE verifier stored for state: ${state}`);
+    logger.info('PKCE verifier stored');
   }
 
   async getAndDeleteVerifier(state: string): Promise<string | null> {
@@ -38,7 +38,7 @@ class PKCEService {
 
     if (verifier) {
       await client.del(key);
-      logger.info(`PKCE verifier retrieved and deleted for state: ${state}`);
+      logger.info('PKCE verifier retrieved and deleted');
     }
 
     return verifier;
@@ -48,7 +48,7 @@ class PKCEService {
     const storedVerifier = await this.getAndDeleteVerifier(state);
 
     if (!storedVerifier) {
-      logger.warn(`PKCE verifier not found for state: ${state}`);
+      logger.warn('PKCE verifier not found');
       return false;
     }
 
@@ -58,9 +58,9 @@ class PKCEService {
     const isValid = expectedChallenge === providedChallenge;
 
     if (isValid) {
-      logger.info(`PKCE challenge verified for state: ${state}`);
+      logger.info('PKCE challenge verified');
     } else {
-      logger.warn(`PKCE challenge verification failed for state: ${state}`);
+      logger.warn('PKCE challenge verification failed');
     }
 
     return isValid;

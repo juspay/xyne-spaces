@@ -9,10 +9,10 @@ import morgan from 'morgan';
 
 import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
+import { logUrl } from '@/utils/logUrl';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
 import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
-import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
@@ -308,9 +308,8 @@ export class App {
 
     // Logging
     if (config.env !== 'test') {
-      morgan.token('url', req =>
-        redactSensitiveUrl((req as { originalUrl?: string; url?: string }).originalUrl ?? (req as { url?: string }).url),
-      );
+      morgan.token('url', (req) => logUrl((req as express.Request).originalUrl || req.url));
+      morgan.token('referrer', (req) => logUrl((req.headers.referer || req.headers.referrer) as string | undefined) || undefined);
       this.app.use(morgan('combined', { stream }));
     }
     this.app.use(requestLogger);

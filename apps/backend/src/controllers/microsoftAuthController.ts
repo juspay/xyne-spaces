@@ -293,7 +293,7 @@ export class MicrosoftAuthController {
             flowId = peekedState.flowId ?? `${resolvedPlatform}-login`;
           }
         }
-        logger.info(`${tag()} Microsoft OAuth state validated (platform=${resolvedPlatform}, stateFound=${!!peekedState}, invitationId=${peekedState?.invitationId || 'none'})`);
+        logger.info(`${tag()} Microsoft OAuth state validated (platform=${resolvedPlatform}, stateFound=${!!peekedState}, hasInvitation=${!!peekedState?.invitationId})`);
 
         if (resolvedPlatform === 'mobile') {
           logger.warn(`${tag()} Rejected stored platform=mobile state on Microsoft callback`);
@@ -347,7 +347,7 @@ export class MicrosoftAuthController {
             launchParams.set('invitationId', peekedState.invitationId);
           }
           const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
-          logger.info(`${tag()} Microsoft OAuth login handed off to Electron (outcome=electron_handoff) — redirecting to launch page: ${launchUrl}`);
+          logger.info(`${tag()} Microsoft OAuth login handed off to Electron (outcome=electron_handoff) — redirecting to launch page: ${frontendUrl}/launch`);
           res.redirect(launchUrl);
           return;
         }
@@ -515,7 +515,7 @@ export class MicrosoftAuthController {
 
           const frontendUrl = peekedState?.redirectTo ?? getFrontendUrl(req);
           logger.info(
-            `${tag()} Microsoft OAuth login succeeded (platform=${resolvedPlatform}, outcome=pending_invitation, invitationId=${pendingInvitationId})`,
+            `${tag()} Microsoft OAuth login succeeded (platform=${resolvedPlatform}, outcome=pending_invitation)`,
           );
           res.clearCookie('pending_invitation_id', { path: '/' });
           const inviteParams = new URLSearchParams({
@@ -988,7 +988,7 @@ export class MicrosoftAuthController {
       const effectiveInvitationId = stateData.invitationId || bodyInvitationId;
       logger.info(`${tag()} Invitation check: effectiveInvitationId=${effectiveInvitationId || 'none'} → path=${effectiveInvitationId ? 'INVITATION' : 'WORKSPACE_LOGIN'}`);
       if (effectiveInvitationId) {
-        logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=pending_invitation, invitationId=${effectiveInvitationId})`);
+        logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=pending_invitation)`);
         // Use sameSite: 'lax' for Electron invitation flow - cookies need to be sent
         // from the renderer (localhost:5173) to backend (localhost:3001)
         const tokenKey = await this.storePendingOAuthTokens(

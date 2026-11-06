@@ -91,7 +91,7 @@ const hydrateNativeSession = async (sessionId: string | null | undefined): Promi
     message: String('[AUTH] Native session injected via cookie, attempting /auth/me fetch'),
     context: [
       {
-        sessionId,
+        hasSessionId: true,
       },
     ],
   });

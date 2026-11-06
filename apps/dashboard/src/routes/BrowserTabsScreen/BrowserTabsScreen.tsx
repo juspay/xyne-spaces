@@ -28,7 +28,7 @@ import { BrowserHintBar } from '../../components/BrowserPanel/BrowserHintBar';
 import { useLinkOpenHintDismissed } from '../../hooks/useLinkOpenHintDismissed';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useScope, useShortcutById } from '../../shortcuts';
-import { hostOf } from '../../utils/browserAddress';
+import { hostOf, stripUrlQuery } from '../../utils/browserAddress';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -384,7 +384,10 @@ function BrowserTabsView({
     .map(tab => ({ key: tab.id, url: tab.url, title: tabName(tab), favicon: tab.favicon ?? '' }));
 
   const closePanel = (): void => {
-    logger.info(Event.BROWSER_PANEL_CLOSED, { url: activeTab?.url, tabCount: tabs.length });
+    logger.info(Event.BROWSER_PANEL_CLOSED, {
+      url: stripUrlQuery(activeTab?.url ?? ''),
+      tabCount: tabs.length,
+    });
     browserPanelActor.send({ type: 'CLOSE' });
   };
   const toggleFullScreen = (): void => {
@@ -399,7 +402,7 @@ function BrowserTabsView({
       eventCategory: TRACK,
       eventName: 'MinimizeToDocked',
       eventLabel: 'Minimize from fullscreen to panel',
-      contextMetadata: { tabs: tabs.map(tab => ({ id: tab.id, url: tab.url })) },
+      contextMetadata: { tabs: tabs.map(tab => ({ id: tab.id, url: stripUrlQuery(tab.url) })) },
     });
   };
 

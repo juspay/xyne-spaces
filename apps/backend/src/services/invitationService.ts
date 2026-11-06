@@ -279,7 +279,7 @@ export class InvitationService {
       },
     });
 
-    logger.info(`[InvitationService] Created invitation with id=${invitation.id}, invitationId=${invitationLinkId} for ${email}`);
+    logger.info(`[InvitationService] Created invitation with id=${invitation.id} for ${email}`);
 
     // Direct admin invite: create the org member now (idempotent) so the invite
     // email + temp password can go out immediately instead of queueing for approval.
@@ -684,7 +684,7 @@ export class InvitationService {
       where: { invitationId: invitationId },
     });
 
-    logger.info(`[DEBUG] [acceptInvitation] Looking up invitationId=${invitationId} → found=${!!invitation}`);
+    logger.info(`[DEBUG] [acceptInvitation] Looking up invitation → found=${!!invitation}${invitation ? ` id=${invitation.id}` : ''}`);
 
     if (!invitation) {
       throw new Error('Invitation not found');
@@ -692,7 +692,7 @@ export class InvitationService {
 
     // Check if invitation is expired
     if (invitation.expiredAt && invitation.expiredAt < new Date()) {
-      logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitationId} expired at ${invitation.expiredAt.toISOString()}`);
+      logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitation.id} expired at ${invitation.expiredAt.toISOString()}`);
       throw new Error('Invitation has expired');
     }
 
@@ -703,7 +703,7 @@ export class InvitationService {
     }
 
     if (invitation.acceptedAt) {
-      logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitationId} was already accepted at ${invitation.acceptedAt.toISOString()}`);
+      logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitation.id} was already accepted at ${invitation.acceptedAt.toISOString()}`);
       throw new Error('Invitation has already been accepted');
     }
 
