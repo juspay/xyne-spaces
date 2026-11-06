@@ -9,7 +9,7 @@ import { pkceServiceV2 } from '../services/pkceServiceV2';
 import '../types/express';
 import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken } from '@/utils/pendingAuthToken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { AuthProvider } from '@xyne/shared';
@@ -502,7 +502,6 @@ export class MicrosoftAuthController {
             signMicrosoftInvitationPendingAuthToken(
               microsoftUserData,
               tokenKey,
-              config.jwt.secret,
             ),
             {
               httpOnly: true,
@@ -560,14 +559,14 @@ export class MicrosoftAuthController {
             accessToken,
             accessTokenExpiry,
           );
-          res.cookie('google_access_token', jwt.sign({
+          res.cookie('google_access_token', signPendingAuthToken({
             providerUserId: microsoftUserData.providerUserId,
             email: microsoftUserData.email,
             name: microsoftUserData.name,
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
             tokenKey,
-          }, config.jwt.secret, { expiresIn: '10m' }), {
+          }), {
             httpOnly: true,
             secure: isProduction,
             sameSite: 'lax' as const,
@@ -636,14 +635,14 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie('google_access_token', signPendingAuthToken({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,
           name: microsoftUserData.name,
           picture: microsoftUserData.picture,
           provider: AuthProvider.MICROSOFT,
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
         });
@@ -952,14 +951,14 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie('google_access_token', signPendingAuthToken({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -996,14 +995,14 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie('google_access_token', signPendingAuthToken({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -1122,14 +1121,14 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie('google_access_token', signPendingAuthToken({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -1159,14 +1158,14 @@ export class MicrosoftAuthController {
         accessToken,
         accessTokenExpiry,
       );
-      res.cookie('google_access_token', jwt.sign({
+      res.cookie('google_access_token', signPendingAuthToken({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'lax' as const,
@@ -1373,14 +1372,14 @@ export class MicrosoftAuthController {
         accessToken,
         mobileAccessTokenExpiry,
       );
-      res.cookie('google_access_token', jwt.sign({
+      res.cookie('google_access_token', signPendingAuthToken({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });

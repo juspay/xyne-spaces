@@ -41,13 +41,6 @@ class AuthV2Middleware {
    * Helper to get global session ID (not workspace-scoped)
    */
   private getSessionId(req: Request): string | undefined {
-    // Header-based session ID (API clients / old dashboards that can't set cookies)
-    const headerSessionId = req.headers['x-session-id'] as string | undefined;
-    if (headerSessionId) {
-      return headerSessionId;
-    }
-
-    // Backward compat: user_session_id cookie (for old dashboard versions)
     return req.cookies?.user_session_id;
   }
 
@@ -87,6 +80,10 @@ class AuthV2Middleware {
         logger.warn(`[AUTH] [Auto-Refresh] Session rejected (reason=email_domain_not_allowed)`, {
           userId: session.user.id,
         });
+        return false;
+      }
+
+      if (await this.userSessionService.revokeIfIdle(session)) {
         return false;
       }
 

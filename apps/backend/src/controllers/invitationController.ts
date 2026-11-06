@@ -3,7 +3,7 @@
  * Handles HTTP requests for invitation operations
  */
 
-import jwt from 'jsonwebtoken';
+import { verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
@@ -249,12 +249,7 @@ export class InvitationController {
   private readPendingAuthEmail(req: Request): string | null {
     const raw = req.cookies?.google_access_token as string | undefined;
     if (!raw) return null;
-    try {
-      const decoded = jwt.verify(raw, config.jwt.secret) as { email?: string };
-      return decoded.email ?? null;
-    } catch {
-      return null;
-    }
+    return verifyPendingAuthToken(raw)?.email ?? null;
   }
 
   /**
@@ -387,17 +382,8 @@ export class InvitationController {
       let provider: string;
 
       try {
-        const decoded = jwt.verify(pendingAuthRaw, config.jwt.secret) as {
-          email?: string;
-          name?: string;
-          providerUserId?: string;
-          picture?: string;
-          googleId?: string;
-          provider?: string;
-          refreshToken?: string | null;
-          accessToken?: string | null;
-        };
-        if (!decoded.email) throw new Error('Invalid JWT payload');
+        const decoded = verifyPendingAuthToken(pendingAuthRaw);
+        if (!decoded?.email) throw new Error('Invalid JWT payload');
 
 
         oauthUser = {

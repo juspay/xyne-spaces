@@ -110,7 +110,7 @@ class CallInviteRoutingService {
   /**
    * The login session, which is what actually keeps a user signed in.
    *
-   * `xyne_ws_<id>_token` lives JWT_EXPIRATION_SECONDS (a day by default);
+   * `xyne_ws_<id>_token` lives JWT_EXPIRATION_SECONDS (an hour by default);
    * `user_session_id` lives a year, and every authenticated route quietly mints
    * a fresh access token from it (authV2Middleware.attemptRefresh). This route
    * is public, so nothing runs in front of it to do that — reading the access
@@ -121,9 +121,7 @@ class CallInviteRoutingService {
    * authenticated request, and refreshes the cookie itself.
    */
   private async claimFromSession(req: Request): Promise<CallInviteClaim | null> {
-    const sessionId =
-      (req.headers['x-session-id'] as string | undefined) ||
-      (req.cookies?.user_session_id as string | undefined);
+    const sessionId = req.cookies?.user_session_id as string | undefined;
     if (!sessionId) {
       return null;
     }

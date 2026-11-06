@@ -442,7 +442,9 @@ export class UserService {
   /**
    * Get user by ID with org member data
    */
-  async getUserById(userId: string): Promise<(User & { orgMember: { memberId: string; role: string } }) | null> {
+  async getUserById(
+    userId: string,
+  ): Promise<(User & { orgMember: { memberId: string; role: string; leftAt: Date | null } }) | null> {
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
@@ -458,6 +460,7 @@ export class UserService {
         select: {
           memberId: true,
           role: true,
+          leftAt: true,
         },
       });
 

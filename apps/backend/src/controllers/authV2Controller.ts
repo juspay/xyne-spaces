@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken, verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
@@ -558,14 +558,14 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      res.cookie('google_access_token', jwt.sign({
+      res.cookie('google_access_token', signPendingAuthToken({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -711,8 +711,8 @@ export class AuthV2Controller {
 
       const session = await this.userSessionService.getSessionById(sessionId);
 
-      if (!session || !session.user) {
-        logger.warn(`[${requestId}] Session not found in database`);
+      if (!session || !session.user || (await this.userSessionService.revokeIfIdle(session))) {
+        logger.warn(`[${requestId}] Session not found in database or idle`);
         res.status(401).json({
           error: 'Invalid session',
           message: 'Session not found or expired',
@@ -985,14 +985,14 @@ export class AuthV2Controller {
           access_token,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie('google_access_token', signPendingAuthToken({
           googleId: googleUserData.googleId,
           email: googleUserData.email,
           name: googleUserData.name,
           picture: googleUserData.picture,
           provider: AuthProvider.GOOGLE,
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'strict' as const,
@@ -1076,14 +1076,14 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      res.cookie('google_access_token', jwt.sign({
+      res.cookie('google_access_token', signPendingAuthToken({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -1338,14 +1338,14 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      res.cookie('google_access_token', jwt.sign({
+      res.cookie('google_access_token', signPendingAuthToken({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), cookieOptions);
+      }), cookieOptions);
       logger.info(`${tag()} Stored pending auth data for workspace selection`);
 
       /**
@@ -1551,17 +1551,11 @@ export class AuthV2Controller {
       let pendingAccessTokenExpiry: Date | undefined;
       let pendingTokenKey: string | undefined;
 
-      if (pendingAuthCookie) {
-        const parsed = await this.parsePendingAuthCookie(pendingAuthCookie);
-        if (!parsed) {
-          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=invalid_pending_auth)`);
-          res.status(401).json({
-            error: 'Invalid auth data',
-            message: 'Pending auth data is corrupted or expired'
-          });
-          return;
-        }
+      // v1 refresh still writes session JWTs into this cookie; those fail pending-auth verification
+      // and fall through to the session branch instead of rejecting the login.
+      const parsed = pendingAuthCookie ? await this.parsePendingAuthCookie(pendingAuthCookie) : null;
 
+      if (parsed) {
         const hasProviderIdentity = !!(parsed.oauthUserData.providerUserId || parsed.oauthUserData.googleId);
         if (hasProviderIdentity) {
           oauthUserData = parsed.oauthUserData;
@@ -1586,7 +1580,13 @@ export class AuthV2Controller {
         logger.info(`[LOGIN-WORKSPACE] No pending auth cookie, but session ${existingSessionId} found - using auto-login flow (platform=${platform})`);
 
         const session = await this.userSessionService.getSessionById(existingSessionId);
-        if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
+        if (
+          !session ||
+          !session.user ||
+          session.status !== 'ACTIVE' ||
+          new Date() > session.refreshTokenExpiry ||
+          (await this.userSessionService.revokeIfIdle(session))
+        ) {
           logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=session_invalid)`);
           res.status(401).json({
             error: 'Invalid session',
@@ -1615,18 +1615,19 @@ export class AuthV2Controller {
         pendingAccessToken = session.accessToken || undefined;
         pendingAccessTokenExpiry = session.accessTokenExpiry || undefined;
       } else {
-        logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=no_auth)`);
+        const reason = pendingAuthCookie ? 'invalid_pending_auth' : 'no_auth';
+        logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=${reason})`);
         res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Pending auth data not found or expired'
+          error: pendingAuthCookie ? 'Invalid auth data' : 'Unauthorized',
+          message: pendingAuthCookie ? 'Pending auth data is corrupted or expired' : 'Pending auth data not found or expired'
         });
         return;
       }
 
-      // Reaching here without a pending-auth cookie means the existingSessionId
+      // Reaching here without valid pending auth means the existingSessionId
       // branch above ran (the only other non-early-return path) — the user was
       // already signed in and this is a workspace pick, not a fresh sign-in.
-      const isAutoLogin = !pendingAuthCookie;
+      const isAutoLogin = !parsed;
 
       if (!oauthUserData?.email) {
         logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=missing_user_data)`);
@@ -2450,18 +2451,7 @@ export class AuthV2Controller {
     pendingTokenKey: string | undefined;
   } | null> {
     try {
-      const decoded = jwt.verify(cookie, config.jwt.secret) as {
-        googleId?: string;
-        providerUserId?: string;
-        email?: string;
-        name?: string;
-        picture?: string;
-        provider?: string;
-        refreshToken?: string | null;
-        accessToken?: string | null;
-        accessTokenExpiry?: string | null;
-        tokenKey?: string;
-      };
+      const decoded = verifyPendingAuthToken(cookie);
       if (!decoded?.email) throw new Error('Invalid JWT payload');
       // A pending-auth cookie issued before the allowlist changed must not finish a sign-in.
       if (!isEmailDomainAllowed(decoded.email)) return null;
