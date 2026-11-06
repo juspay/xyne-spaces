@@ -1,4 +1,4 @@
-import { sanitizeMessageContent } from '@/utils/contentUtils';
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
@@ -55,9 +55,14 @@ export class CreateSubTicketStep extends BaseActionStep<
       }
     }
 
+    const title = extractPlainTextFromHtml(config.title as string).trim();
+    if (!title) {
+      throw new Error('CREATE_SUB_TICKET: title must contain text');
+    }
+
     const result = await createSubTicket({
       parentTicketId: config.parentTicketId as string,
-      title: config.title as string,
+      title,
       description: config.description ? sanitizeMessageContent(config.description as string) : null,
       assignedTo,
       createdBy: context.automation.createdById,
