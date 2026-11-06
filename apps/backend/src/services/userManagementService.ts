@@ -1,7 +1,7 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
 import { getStorageService } from './storage';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
@@ -27,6 +27,15 @@ import {
 } from '../types/database';
 import { v4 as uuidv4 } from 'uuid';
 import { revokeGuestEntityAccessTx } from '@/bypassAcl/transactions/userManagementService';
+
+const DIRECTORY_USER_SELECT = {
+  id: true,
+  name: true,
+  picture: true,
+  status: true,
+} satisfies Prisma.UserSelect;
+
+export type DirectoryUser = Prisma.UserGetPayload<{ select: typeof DIRECTORY_USER_SELECT }>;
 
 /**
  * User Management Service
@@ -244,128 +253,23 @@ export class UserManagementService {
   }
 
   /**
-   * Get all users with their group information and pagination support
+   * Paginated workspace directory. Selects only the fields a directory listing needs, so
+   * email, provider identity, metadata, role and group memberships are never read.
    */
-  async getAllUsersWithMappings(options?: PaginationOptions): Promise<PaginatedResult<UserWithMappings> | UserWithMappings[]> {
+  async listDirectoryUsers(options: PaginationOptions): Promise<PaginatedResult<DirectoryUser>> {
     try {
-      if (!options) {
-        // Return all users without pagination
-        const users = await this.prisma.user.findMany({
-          orderBy: {
-            createdAt: 'desc'
-          }
-        });
-
-        if (users.length === 0) {
-          return [];
-        }
-
-        const userIds = users.map(u => u.id);
-
-        // Fetch all mappings for these users in one query
-        const mappings = await this.prisma.userGroupMapping.findMany({
-          where: { userId: { in: userIds } }
-        });
-
-        const groupIds = [...new Set(mappings.map(m => m.userGroupId))];
-
-        // Fetch all relevant groups in one query
-        const groups = groupIds.length > 0
-          ? await this.prisma.userGroup.findMany({ where: { id: { in: groupIds } } })
-          : [];
-
-        const groupMap = new Map(groups.map(g => [g.id, g]));
-
-        // Build a map of mappings per user for efficient lookup
-        const mappingsByUser = new Map();
-        mappings.forEach(mapping => {
-          const userMappings = mappingsByUser.get(mapping.userId) || [];
-          userMappings.push({
-            ...mapping,
-            userGroup: groupMap.get(mapping.userGroupId) || null
-          });
-          mappingsByUser.set(mapping.userId, userMappings);
-        });
-
-        // Combine user data with their mappings
-        const usersWithMappings = users.map(user => ({
-          ...user,
-          userGroupMappings: mappingsByUser.get(user.id) || []
-        }));
-
-        return usersWithMappings as UserWithMappings[];
-      }
-
       const { page, pageSize } = options;
-      const offset = (page - 1) * pageSize;
-
-      // Get total count for pagination
-      const totalCount = await this.prisma.user.count();
-
-      // Get users with pagination
-      const users = await this.prisma.user.findMany({
-        skip: offset,
+      const total = await this.prisma.user.count();
+      const data = await this.prisma.user.findMany({
+        skip: (page - 1) * pageSize,
         take: pageSize,
-        orderBy: {
-          createdAt: 'desc'
-        }
+        orderBy: { createdAt: 'desc' },
+        select: DIRECTORY_USER_SELECT,
       });
-
-      if (users.length === 0) {
-        return {
-          data: [],
-          pagination: { page, pageSize, total: totalCount, totalPages: 0 }
-        };
-      }
-
-      const userIds = users.map(u => u.id);
-
-      // Fetch all mappings for these users in one query
-      const mappings = await this.prisma.userGroupMapping.findMany({
-        where: { userId: { in: userIds } }
-      });
-
-      const groupIds = [...new Set(mappings.map(m => m.userGroupId))];
-
-      // Fetch all relevant groups in one query
-      const groups = groupIds.length > 0
-        ? await this.prisma.userGroup.findMany({ where: { id: { in: groupIds } } })
-        : [];
-
-      const groupMap = new Map(groups.map(g => [g.id, g]));
-
-      // Build a map of mappings per user for efficient lookup
-      const mappingsByUser = new Map();
-      mappings.forEach(mapping => {
-        const userMappings = mappingsByUser.get(mapping.userId) || [];
-        userMappings.push({
-          ...mapping,
-          userGroup: groupMap.get(mapping.userGroupId) || null
-        });
-        mappingsByUser.set(mapping.userId, userMappings);
-      });
-
-      // Combine user data with their mappings
-      const usersWithMappings = users.map(user => ({
-        ...user,
-        userGroupMappings: mappingsByUser.get(user.id) || []
-      }));
-
-      // Calculate pagination info
-      const totalPages = Math.ceil(totalCount / pageSize);
-
-      return {
-        data: usersWithMappings as UserWithMappings[],
-        pagination: {
-          page,
-          pageSize,
-          total: totalCount,
-          totalPages
-        }
-      };
+      return { data, pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } };
     } catch (error) {
-      logger.error('Error getting all users with groups:', error);
-      throw new Error('Failed to get users with groups');
+      logger.error('Error listing directory users:', error);
+      throw new Error('Failed to list users');
     }
   }
 
