@@ -109,6 +109,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
   // Retry logic state
   const retryCountRef = useRef(0);
   const resetTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const reAuthRetryCountRef = useRef(0);
+  const reAuthRetryTimerRef = useRef<NodeJS.Timeout | null>(null);
   const previousStateRef = useRef<string>('');
   const MAX_RETRIES = 4;
 
@@ -133,6 +135,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
     if (isRefreshing.current) {
       return;
     }
+    if (reAuthRetryTimerRef.current) {
+      clearTimeout(reAuthRetryTimerRef.current);
+      reAuthRetryTimerRef.current = null;
+    }
 
     isRefreshing.current = true;
     try {
@@ -141,9 +147,26 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
       // The shared single-flight refresh (also used by the 401 interceptors), so a
       // Zero re-auth racing with an API 401 makes one /auth/refresh-session call.
       const outcome = await refreshSessionOnce();
-      if (outcome !== 'ok') {
-        throw new Error(`Session refresh ${outcome}`);
+      if (outcome === 'transient') {
+        // Network error or 5xx: the session may still be alive, so keep it and retry.
+        // Zero stays in needs-auth and does not call handleReAuth again on its own.
+        const delay = getRetryDelay(reAuthRetryCountRef.current);
+        reAuthRetryCountRef.current += 1;
+        logger.warn(LoggerEvent.AUTH_REFRESH_FAILED, {
+          trigger: 'ZERO_SYNC_AUTH_INVALIDATED',
+          error_message: 'Session refresh transient',
+          retry_in_ms: delay,
+        });
+        reAuthRetryTimerRef.current = setTimeout(() => {
+          reAuthRetryTimerRef.current = null;
+          void handleReAuth();
+        }, delay);
+        return;
       }
+      if (outcome === 'dead') {
+        throw new Error('Session refresh dead');
+      }
+      reAuthRetryCountRef.current = 0;
 
       const refreshLatency = Date.now() - refreshStartTime;
 
@@ -198,9 +221,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
       // Clear all cookies and auth tokens (handles Electron + Web)
       clearAuthTokens();
 
-      // Force hard reload to reset all state
-      window.location.href = '/auth';
-      window.location.reload();
+      // Full navigation to reset all state
+      window.location.replace('/auth');
     } finally {
       isRefreshing.current = false;
     }
@@ -322,6 +344,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
     return () => {
       if (resetTimerRef.current) {
         clearTimeout(resetTimerRef.current);
+      }
+      if (reAuthRetryTimerRef.current) {
+        clearTimeout(reAuthRetryTimerRef.current);
+        reAuthRetryTimerRef.current = null;
       }
     };
   }, [state.name]);

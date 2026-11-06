@@ -294,8 +294,7 @@ apiConfig.interceptors.response.use(
 
       clearAuthTokens();
 
-      window.location.href = '/auth';
-      window.location.reload();
+      window.location.replace('/auth');
 
       return Promise.reject(new Error('Session refresh failed - please re-authenticate'));
     } else if (!axiosError.response) {
