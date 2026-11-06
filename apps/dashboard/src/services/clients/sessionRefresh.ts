@@ -96,10 +96,18 @@ export const ensureFreshSession = async (): Promise<void> => {
   await refreshSessionOnce();
 };
 
+// The JWT lives 15 min (JWT_EXPIRATION_SECONDS). An open but idle tab makes no
+// apiInstance request, so a timer keeps it fresh too: cookie-only media loads and
+// the Electron main process (which reads the same cookie jar for agent calls) would
+// otherwise hold an expired JWT. Hidden-tab throttling still fires at least once a
+// minute, inside the 2-min skew.
+const PROACTIVE_REFRESH_INTERVAL_MS = 60 * 1000;
+
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void ensureFreshSession();
   });
+  window.setInterval(() => void ensureFreshSession(), PROACTIVE_REFRESH_INTERVAL_MS);
 }
 
 // ── Transport helpers ────────────────────────────────────────────────────────

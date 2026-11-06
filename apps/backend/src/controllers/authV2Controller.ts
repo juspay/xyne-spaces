@@ -2106,7 +2106,7 @@ export class AuthV2Controller {
     pendingTokenKey: string | undefined;
   } | null> {
     try {
-      const decoded = jwt.verify(cookie, config.jwt.secret) as {
+      const decoded = jwt.verify(cookie, config.jwt.secret, { algorithms: ['HS256'] }) as {
         googleId?: string;
         providerUserId?: string;
         email?: string;

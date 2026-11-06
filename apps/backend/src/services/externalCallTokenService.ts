@@ -46,6 +46,7 @@ class ExternalCallTokenService {
   verify(token: string): ExternalCallTokenPayload | null {
     try {
       return jwt.verify(token, this.secret, {
+        algorithms: ['HS256'],
         issuer: ISSUER,
         audience: AUDIENCE,
       }) as ExternalCallTokenPayload;

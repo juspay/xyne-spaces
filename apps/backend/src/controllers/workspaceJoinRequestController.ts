@@ -144,7 +144,7 @@ export class WorkspaceJoinRequestController {
     const pendingAuthCookie = req.cookies?.[PENDING_AUTH_COOKIE];
     if (pendingAuthCookie) {
       try {
-        const decoded = jwt.verify(pendingAuthCookie, config.jwt.secret) as { email?: string };
+        const decoded = jwt.verify(pendingAuthCookie, config.jwt.secret, { algorithms: ['HS256'] }) as { email?: string };
         return decoded.email || null;
       } catch (_error) {
         return null;

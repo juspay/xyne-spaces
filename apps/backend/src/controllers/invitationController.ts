@@ -364,7 +364,7 @@ export class InvitationController {
       let provider: string;
 
       try {
-        const decoded = jwt.verify(pendingAuthRaw, config.jwt.secret) as {
+        const decoded = jwt.verify(pendingAuthRaw, config.jwt.secret, { algorithms: ['HS256'] }) as {
           email?: string;
           name?: string;
           providerUserId?: string;

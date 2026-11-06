@@ -91,6 +91,7 @@ export class JwtService {
   verifyToken(token: string): JwtPayload {
     try {
       const decoded = jwt.verify(token, this.secret, {
+        algorithms: ['HS256'],
         issuer: this.issuer,
         audience: this.audience,
       }) as JwtPayload;
