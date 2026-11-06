@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { logger as baseLogger, loggerContext, type LogContext } from '@/utils/logger';
 import { jwtService, type JwtPayload } from '../services/jwtService';
 import { workspaceTokenCookieName, LAST_WORKSPACE_COOKIE } from '../services/accessTokenService';
+import { authSessionService } from '../services/authSessionService';
 import { decryptRequestBodyMiddleware } from './decryptionMiddleware';
 import { db } from '@/database/client';
 import '../types/express';
@@ -69,6 +70,12 @@ export class AuthMiddleware {
           workspaceId,
         });
         this.reject(res, 'TOKEN_INVALID', 'Token payload is invalid');
+        return;
+      }
+
+      if (payload.sid && (await authSessionService.isSessionRevoked(payload.sid))) {
+        logger.warn(`${logPrefix} Token belongs to a logged-out session`, { tokenPreview, sid: payload.sid });
+        this.reject(res, 'TOKEN_INVALID', 'Session has been logged out');
         return;
       }
 
