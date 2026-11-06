@@ -11,7 +11,7 @@ Real-time, permission-aware and built for agents.
 <a href="https://github.com/juspay/xyne-spaces/stargazers"><img src="https://img.shields.io/github/stars/juspay/xyne-spaces?style=flat&logo=github&label=stars&color=EEEEEE" alt="GitHub stars"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-EEEEEE" alt="License: Apache 2.0"></a>
 <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-EEEEEE" alt="PRs welcome"></a>
-[![Xyne Spaces: spaces.xyne.ai](docs/assets/spaces-badge.svg)](https://spaces.xyne.ai/community)
+[![Xyne Spaces: spaces.xyne.ai](docs/assets/spaces-readme-badge.svg)](https://spaces.xyne.ai/community)
 
 <a href="https://trendshift.io/repositories/178755?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-178755" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/178755/daily?language=TypeScript" alt="juspay%2Fxyne-spaces | Trendshift" width="250" height="55"/></a>
 
