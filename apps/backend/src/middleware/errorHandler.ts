@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '@/utils/logger';
-import { redactSensitiveUrl } from '@/utils/redact';
 import { ApiResponse } from '@/types/express';
 import type { ZodError } from 'zod';
 
@@ -53,7 +52,7 @@ export const errorHandler = (
     error: isBodyParseError ? undefined : err,
     stack: isBodyParseError ? undefined : originalStack,
     wrapperStack: isBodyParseError || err instanceof AppError ? undefined : appError.stack,
-    url: redactSensitiveUrl(req.url),
+    url: req.url,
     method: req.method,
     ip: req.ip,
     userAgent: req.get('User-Agent'),
@@ -71,7 +70,7 @@ export const errorHandler = (
 export const notFoundHandler = (req: Request, res: Response): void => {
   const response: ApiResponse = {
     success: false,
-    error: `Route ${redactSensitiveUrl(req.originalUrl)} not found`,
+    error: `Route ${req.originalUrl} not found`,
     timestamp: new Date().toISOString(),
   };
 

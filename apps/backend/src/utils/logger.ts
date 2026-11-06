@@ -115,82 +115,18 @@ export function describeRejection(reason: unknown): Record<string, unknown> {
   };
 }
 
-// Compared lowercase, without `_`/`-`. String and object values under these keys are
-// replaced at any depth; booleans and numbers (e.g. presence flags) are kept.
-const SENSITIVE_KEYS = new Set([
-  'password',
-  'passwd',
-  'secret',
-  'clientsecret',
-  'signingsecret',
-  'token',
-  'accesstoken',
-  'refreshtoken',
-  'idtoken',
-  'sessiontoken',
-  'fcmtoken',
-  'voiptoken',
-  'pushtoken',
-  'apikey',
-  'xapikey',
-  's2skey',
-  'xs2skey',
-  'authorization',
-  'cookie',
-  'cookies',
-  'setcookie',
-  'privatekey',
-]);
-const MAX_REDACT_DEPTH = 8;
-
-const isSensitiveKey = (key: string): boolean => SENSITIVE_KEYS.has(key.toLowerCase().replace(/[_-]/g, ''));
-
-const isRedactableValue = (value: unknown): boolean =>
-  typeof value === 'string' || (typeof value === 'object' && value !== null);
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (typeof value !== 'object' || value === null) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-};
-
-function redactNested(value: unknown, depth: number, seen: WeakSet<object>): unknown {
-  if (value instanceof Error) return serializeError(value);
-  if (!Array.isArray(value) && !isPlainObject(value)) return value;
-  if (seen.has(value)) return '[Circular]';
-  if (depth >= MAX_REDACT_DEPTH) return '[Truncated]';
-  seen.add(value);
-
-  const result = Array.isArray(value)
-    ? value.map((item) => redactNested(item, depth + 1, seen))
-    : Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [
-          key,
-          isSensitiveKey(key) && isRedactableValue(item) ? REDACTED : redactNested(item, depth + 1, seen),
-        ]),
-      );
-  seen.delete(value);
-  return result;
-}
-
 const normalizeErrors = winston.format((info) => {
   const infoRecord = info as Record<string, unknown>;
-  if (typeof infoRecord.message === 'string') {
-    infoRecord.message = redact(infoRecord.message);
-  }
   if (typeof infoRecord.stack === 'string') {
     infoRecord.stack = redact(limitLibraryStackFrames(infoRecord.stack));
   }
 
   for (const key of Object.keys(info)) {
-    if (key === 'message' || key === 'stack') continue;
     const value = infoRecord[key];
     if (value instanceof Error) {
       infoRecord[key] = serializeError(value);
-    } else if (ERROR_PAYLOAD_KEYS.has(key) || (isSensitiveKey(key) && isRedactableValue(value))) {
+    } else if (ERROR_PAYLOAD_KEYS.has(key)) {
       infoRecord[key] = REDACTED;
-    } else {
-      infoRecord[key] = redactNested(value, 0, new WeakSet());
     }
   }
   return info;
