@@ -1,21 +1,23 @@
 import rateLimit, { ipKeyGenerator, RateLimitRequestHandler } from 'express-rate-limit';
 
-/**
- * General rate limiter for all API endpoints
- * Applied to: /api/auth/*, /api/tickets/*, /api/public/users/*, and all other API routes
- * Combines API key, auth, and general API protection
- */
-export const generalLimiter: RateLimitRequestHandler = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 100, // General limit for all API requests
-  message: {
-    success: false,
-    error: 'Too many requests from this IP. Please try again later.',
-    timestamp: new Date().toISOString(),
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// General per-IP API rate limiting lives in infra (Cloud Armor), not in the app.
+// Never mounted; kept commented out for reference.
+// /**
+//  * General rate limiter for all API endpoints
+//  * Applied to: /api/auth/*, /api/tickets/*, /api/public/users/*, and all other API routes
+//  * Combines API key, auth, and general API protection
+//  */
+// export const generalLimiter: RateLimitRequestHandler = rateLimit({
+//   windowMs: 5 * 60 * 1000, // 5 minutes
+//   max: 100, // General limit for all API requests
+//   message: {
+//     success: false,
+//     error: 'Too many requests from this IP. Please try again later.',
+//     timestamp: new Date().toISOString(),
+//   },
+//   standardHeaders: true,
+//   legacyHeaders: false,
+// });
 
 /** Per-user limiter for office-document-to-PDF conversion: each request can spawn a LibreOffice process, so this caps request rate on top of the in-process concurrency cap in officeConversionService. */
 export const officeConversionLimiter: RateLimitRequestHandler = rateLimit({

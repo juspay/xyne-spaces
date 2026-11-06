@@ -3452,6 +3452,7 @@ export const mutators = defineMutators({
             ext = rawName.substring(lastDotIdx);
             nameWithoutExt = rawName.substring(0, lastDotIdx);
           }
+          ext = ext.replace(/[^a-zA-Z0-9._-]/g, '_');
 
           const maxBaseLength = Math.max(1, 255 - ext.length);
 

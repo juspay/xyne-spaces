@@ -4,7 +4,7 @@ import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { decrypt } from './encryptionService';
-import fetch from 'node-fetch';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { UploadedFileResult } from '@/services/fileUploadService';
@@ -74,7 +74,22 @@ export interface DownloadAttachmentsOptions {
  */
 interface AuthHandler {
   getHeaders(credentials: any): Record<string, string>;
+  /** Whether the source's credential may be sent to this host. */
+  isCredentialHost(host: string): boolean;
 }
+
+const isHostOrSubdomainOf = (host: string, domains: readonly string[]): boolean => {
+  const lower = host.toLowerCase();
+  return domains.some(domain => lower === domain || lower.endsWith(`.${domain}`));
+};
+
+// Zoho data centres we use (US .com, India .in) and their API counterparts.
+const ZOHO_DOMAINS = ['zoho.com', 'zohoapis.com', 'zoho.in', 'zohoapis.in'];
+const SLACK_DOMAINS = ['slack.com'];
+
+// Attachment downloads follow redirects themselves so each hop is re-checked and the
+// credential is dropped as soon as a hop leaves the provider's own hosts.
+const MAX_ATTACHMENT_REDIRECTS = 5;
 
 class ZohoAuthHandler implements AuthHandler {
   getHeaders(credentials: any): Record<string, string> {
@@ -97,6 +112,10 @@ class ZohoAuthHandler implements AuthHandler {
 
     return headers;
   }
+
+  isCredentialHost(host: string): boolean {
+    return isHostOrSubdomainOf(host, ZOHO_DOMAINS);
+  }
 }
 
 class SlackAuthHandler implements AuthHandler {
@@ -113,6 +132,10 @@ class SlackAuthHandler implements AuthHandler {
       'User-Agent': 'Xyne-Spaces-Backend/1.0'
     };
   }
+
+  isCredentialHost(host: string): boolean {
+    return isHostOrSubdomainOf(host, SLACK_DOMAINS);
+  }
 }
 
 class DefaultAuthHandler implements AuthHandler {
@@ -121,6 +144,10 @@ class DefaultAuthHandler implements AuthHandler {
     return {
       'User-Agent': 'Xyne-Spaces-Backend/1.0'
     };
+  }
+
+  isCredentialHost(_host: string): boolean {
+    return false;
   }
 }
 
@@ -176,15 +203,16 @@ export class ExternalAttachmentService {
     // Auth headers are only needed when at least one attachment will be
     // URL-fetched. Skip the decrypt+handler dance if every entry already
     // carries its bytes.
+    const authHandler = this.getAuthHandler(source.sourceType);
     let authHeaders: Record<string, string> = {};
     if (attachments.some(a => !a.buffer && a.fileUrl)) {
       try {
         // If overrideToken is provided, use it directly (e.g., Slack user token for DMs) as user token will only have access to private dm's attachment's
         if (options.overrideToken) {
-          authHeaders = this.getAuthHandler(source.sourceType).getHeaders({ botToken: options.overrideToken });
+          authHeaders = authHandler.getHeaders({ botToken: options.overrideToken });
         } else {
           const credentials = JSON.parse(decrypt(source.credentials));
-          authHeaders = this.getAuthHandler(source.sourceType).getHeaders(credentials);
+          authHeaders = authHandler.getHeaders(credentials);
         }
       } catch (error) {
         logger.error(`Failed to decrypt credentials for source: ${sourceName}`, error);
@@ -192,7 +220,7 @@ export class ExternalAttachmentService {
       }
     }
 
-    return this.downloadAttachments(attachments, authHeaders, {
+    return this.downloadAttachments(attachments, authHeaders, authHandler, {
       ...options,
       scopeType: options.scopeType || 'EXTERNAL_MESSAGE',
       scopeId: options.scopeId || source.sourceType,
@@ -205,10 +233,11 @@ export class ExternalAttachmentService {
   private async downloadAttachments(
     attachments: ExternalAttachment[],
     headers: Record<string, string>,
+    authHandler: AuthHandler,
     options: DownloadAttachmentsOptions
   ): Promise<DownloadedAttachment[]> {
     const downloadPromises = attachments.map(attachment =>
-      this.downloadSingleAttachment(attachment, headers, options)
+      this.downloadSingleAttachment(attachment, headers, authHandler, options)
     );
 
     // Use Promise.allSettled to handle partial failures
@@ -242,6 +271,7 @@ export class ExternalAttachmentService {
   private async downloadSingleAttachment(
     attachment: ExternalAttachment,
     authHeaders: Record<string, string>,
+    authHandler: AuthHandler,
     options: DownloadAttachmentsOptions
   ): Promise<DownloadedAttachment | null> {
     const {
@@ -305,9 +335,20 @@ export class ExternalAttachmentService {
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
-      let response;
+      const publicHeaders = ExternalAttachmentService.authHandlers['default'].getHeaders({});
+      let response: Response;
       try {
-        response = await fetch(fileUrl, { method: 'GET', headers: authHeaders, signal: controller.signal });
+        let url = fileUrl;
+        for (let hop = 0; ; hop++) {
+          // The source's credential goes only to the provider's own hosts; a link or a
+          // redirect anywhere else is fetched without it.
+          const headers = authHandler.isCredentialHost(new URL(url).hostname) ? authHeaders : publicHeaders;
+          response = await safeWebhookFetch(url, { method: 'GET', headers, signal: controller.signal });
+          const location = response.headers.get('location');
+          if (response.status < 300 || response.status >= 400 || !location) break;
+          if (hop >= MAX_ATTACHMENT_REDIRECTS) throw new Error(`Too many redirects downloading ${fileName}`);
+          url = new URL(location, url).toString();
+        }
       } finally {
         clearTimeout(timeoutId);
       }
@@ -317,7 +358,7 @@ export class ExternalAttachmentService {
       if (contentLength && parseInt(contentLength) > maxFileSize) {
         throw new Error(`File too large: ${contentLength} bytes (max: ${maxFileSize})`);
       }
-      buffer = await response.buffer();
+      buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.length > maxFileSize) {
         throw new Error(`File too large: ${buffer.length} bytes (max: ${maxFileSize})`);
       }

@@ -130,8 +130,8 @@ export class UserManagementController {
       const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
 
       // Validate pagination parameters
-      if (limit < 1 || limit > 2000) {
-        res.status(400).json({ error: 'Limit must be between 1 and 2000' });
+      if (limit < 1 || limit > 400) {
+        res.status(400).json({ error: 'Limit must be between 1 and 400' });
         return;
       }
 
@@ -140,68 +140,12 @@ export class UserManagementController {
         return;
       }
 
-      // Use the dedicated method that includes group information
-      const resultWithMappings = await userManagementService.getAllUsersWithMappings({
+      // Directory fields only (id, name, picture, status), selected in the query itself.
+      const result = await userManagementService.listDirectoryUsers({
         page: Math.floor(offset / limit) + 1,
         pageSize: limit
       });
-
-      if ('data' in resultWithMappings) {
-        // Paginated result
-        const response = {
-          data: resultWithMappings.data.map(user => ({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            status: user.status,
-            userGroups: user.userGroupMappings.reduce((acc, mapping) => {
-              if (mapping.userGroup) {
-                acc.push({
-                  id: mapping.userGroup.id,
-                  name: mapping.userGroup.name,
-                  alias: mapping.userGroup.alias,
-                  description: mapping.userGroup.description
-                });
-              }
-              return acc;
-            }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt
-          })),
-          pagination: resultWithMappings.pagination
-        };
-        res.status(200).json(response);
-      } else {
-        // Non-paginated result
-        const response = {
-          data: resultWithMappings.map(user => ({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            status: user.status,
-            userGroups: user.userGroupMappings.reduce((acc, mapping) => {
-              if (mapping.userGroup) {
-                acc.push({
-                  id: mapping.userGroup.id,
-                  name: mapping.userGroup.name,
-                  alias: mapping.userGroup.alias,
-                  description: mapping.userGroup.description
-                });
-              }
-              return acc;
-            }, [] as Array<{ id: string; name: string; alias: string | null; description: string | null }>),
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt
-          })),
-          pagination: {
-            page: 1,
-            pageSize: resultWithMappings.length,
-            total: resultWithMappings.length,
-            totalPages: 1,
-          }
-        };
-        res.status(200).json(response);
-      }
+      res.status(200).json(result);
     } catch (error) {
       logger.error('Error getting all users:', error);
       res.status(500).json({ error: 'Internal server error' });

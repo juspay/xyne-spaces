@@ -36,6 +36,10 @@ export class OfficeConversionController {
                 res.status(504).json({ error: "Conversion timed out", code: "TIMEOUT" })
                 return
             }
+            if (error instanceof OfficeConversionError && error.code === "UNSUPPORTED_FORMAT") {
+                res.status(415).json({ error: error.message, code: "UNSUPPORTED_FORMAT" })
+                return
+            }
             logger.error("[OfficeConversion] Conversion failed", error)
             res.status(500).json({ error: "Failed to convert file", code: "CONVERSION_FAILED" })
         }

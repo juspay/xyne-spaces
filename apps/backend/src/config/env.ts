@@ -516,6 +516,9 @@ const envSchema = Joi.object({
   // Comma-separated host suffixes refused for outbound external fetches (e.g. link
   // preview). Include the leading dot, e.g. ".internal.example.net,.svc.cluster.local".
   SSRF_BLOCKED_HOST_SUFFIXES: Joi.string().allow('').default(''),
+  // Egress proxy (Squid) every deployed stack routes outbound internet calls through.
+  // safeWebhookFetch sends through it when set; empty = direct, pinned connection (local dev).
+  HTTPS_PROXY: Joi.string().allow('').default(''),
   // Optional forward-proxy for the link-preview outbound fetch. When set, the preview
   // fetch is routed through it instead of connecting directly. Empty = direct (default).
   LINK_PREVIEW_EGRESS_PROXY_URL: Joi.string().allow('').default(''),
@@ -1383,6 +1386,7 @@ export const config = {
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
+    egressProxyUrl: (envVars.HTTPS_PROXY as string).trim(),
   },
   linkPreview: {
     // Optional forward-proxy for the link-preview fetch.

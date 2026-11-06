@@ -17,6 +17,7 @@ import { mutationSyncProcessor } from '../../mutation-sync/processor';
 import { collectMutationSyncPreviousValue } from '../../mutation-sync/config';
 import type { MutationSyncOperation } from '../../mutation-sync/types';
 import { wrapTransactionWithEncryption } from '../../encryption-interceptor';
+import { sanitizeMutationArgs } from '../../content-sanitization';
 import {
   collectZeroAuditOperation,
   type AuditJobsAccumulator,
@@ -106,8 +107,11 @@ function wrapMutateWithACL(
             return originalOp;
           }
 
-          return async function (this: unknown, args: unknown) {
+          return async function (this: unknown, rawArgs: unknown) {
             let previousValue: unknown = undefined;
+
+            // 0. Sanitize content before ACL, audit, Vespa and storage all see it
+            const args = sanitizeMutationArgs(tableName, operation, rawArgs);
 
             // 1. ACL Check (throws if unauthorized)
             const acl = await ACLFactory.getACL(tableName as TableName, ctx);
