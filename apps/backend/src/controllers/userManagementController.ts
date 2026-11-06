@@ -130,8 +130,8 @@ export class UserManagementController {
       const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
 
       // Validate pagination parameters
-      if (limit < 1 || limit > 2000) {
-        res.status(400).json({ error: 'Limit must be between 1 and 2000' });
+      if (limit < 1 || limit > 400) {
+        res.status(400).json({ error: 'Limit must be between 1 and 400' });
         return;
       }
 
