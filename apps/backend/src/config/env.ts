@@ -68,9 +68,10 @@ const envSchema = Joi.object({
   // Empty = connect to smtp.gmail.com directly (default).
   EMAIL_PROXY_URL: Joi.string().uri({ scheme: ['http'] }).allow('').default(''),
   JWT_SECRET: Joi.string().allow('').default(''),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
+  JWT_EXPIRATION_SECONDS: Joi.number().default(3600), // 1 hour in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
+  SESSION_IDLE_DAYS: Joi.number().integer().min(1).default(30), // A session not refreshed for this many days is revoked on its next use
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3', 'azure').default('gcs'),
   // AWS S3 Configuration
@@ -1250,6 +1251,7 @@ export const config = {
   },
   session: {
     expiryDays: envVars.SESSION_EXPIRY_DAYS,
+    idleDays: envVars.SESSION_IDLE_DAYS,
   },
   pendingOAuthTokens: {
     redisKeyPrefix: 'pendingauth:oauth:',

@@ -16,6 +16,27 @@ import {
 } from '@/services/emailDomainPolicy';
 import { isRefreshAllowed } from '../services/sessionRefreshValidator';
 
+/** Rejects (403) when an explicit x-workspace-id header names a different workspace than the token. */
+function rejectWorkspaceMismatch(req: Request, res: Response, tokenWorkspaceId: string, userId: string): boolean {
+  const headerWorkspaceId = req.headers['x-workspace-id'];
+  if (typeof headerWorkspaceId !== 'string' || !headerWorkspaceId || headerWorkspaceId === tokenWorkspaceId) {
+    return false;
+  }
+  logger.warn(`[AUTH] Request rejected (reason=workspace_mismatch)`, {
+    userId,
+    headerWorkspaceId,
+    tokenWorkspaceId,
+    path: req.path,
+    userAgent: req.headers['user-agent'],
+  });
+  res.status(403).json({
+    error: 'Workspace mismatch',
+    code: 'WORKSPACE_MISMATCH',
+    message: 'The token does not belong to the requested workspace',
+  });
+  return true;
+}
+
 export class AuthMiddleware {
   // private googleClient?: OAuth2Client;
   private userService?: UserService;
@@ -422,6 +443,24 @@ export class AuthMiddleware {
         return;
       }
 
+      if (user.leftAt) {
+        logger.warn(`[AUTH] Request rejected (reason=user_left_workspace)`, { userId: user.id });
+        res.status(401).json({
+          error: 'User removed from workspace',
+          message: 'You have been removed from this workspace',
+        });
+        return;
+      }
+
+      if (user.orgMember.leftAt) {
+        logger.warn(`[AUTH] Request rejected (reason=user_left_organization)`, { userId: user.id });
+        res.status(401).json({
+          error: 'User removed from organization',
+          message: 'You have been removed from this organization',
+        });
+        return;
+      }
+
       /**
        * BACKWARD COMPATIBILITY SUPPORT
        *
@@ -464,6 +503,10 @@ export class AuthMiddleware {
         return;
       }
       // END BACKWARD COMPAT
+
+      if (rejectWorkspaceMismatch(req, res, effectiveWorkspaceId, user.id)) {
+        return;
+      }
 
       // Attach user to request object
       req.user = {
@@ -542,6 +585,10 @@ export class AuthMiddleware {
           userFound: !!session?.user,
         });
         return { success: false, error: 'Invalid session' };
+      }
+
+      if (await this.userSessionService.revokeIfIdle(session)) {
+        return { success: false, error: 'Session expired' };
       }
 
       // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
@@ -784,6 +831,28 @@ export class AuthMiddleware {
           error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
           message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
         });
+        return;
+      }
+
+      if (user.leftAt) {
+        logger.warn(`[AUTH] Zero auth rejected (reason=user_left_workspace)`, { userId: user.id });
+        res.status(401).json({
+          error: 'User removed from workspace',
+          message: 'You have been removed from this workspace',
+        });
+        return;
+      }
+
+      if (user.orgMember.leftAt) {
+        logger.warn(`[AUTH] Zero auth rejected (reason=user_left_organization)`, { userId: user.id });
+        res.status(401).json({
+          error: 'User removed from organization',
+          message: 'You have been removed from this organization',
+        });
+        return;
+      }
+
+      if (rejectWorkspaceMismatch(req, res, user.workspaceId, user.id)) {
         return;
       }
 

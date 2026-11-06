@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { AuthProvider } from '@xyne/shared';
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken } from '@/utils/pendingAuthToken';
 import { Request, Response } from 'express';
 import { UserSessionService } from '../services/userSessionService';
 import { UserService } from '../services/userService';
@@ -245,18 +245,14 @@ export class EmailAuthController {
 
         res.cookie(
           'google_access_token',
-          jwt.sign(
-            {
-              email: normalizedEmail,
-              name: userName,
-              providerUserId: `email-${normalizedEmail}`,
-              provider: 'EMAIL',
-              refreshToken: null,
-              accessToken: null,
-            },
-            config.jwt.secret,
-            { expiresIn: '10m' },
-          ),
+          signPendingAuthToken({
+            email: normalizedEmail,
+            name: userName,
+            providerUserId: `email-${normalizedEmail}`,
+            provider: 'EMAIL',
+            refreshToken: null,
+            accessToken: null,
+          }),
           {
             ...cookieBase,
             maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -280,18 +276,14 @@ export class EmailAuthController {
 
       res.cookie(
         'google_access_token',
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-          },
-          config.jwt.secret,
-          { expiresIn: '10m' },
-        ),
+        signPendingAuthToken({
+          email: normalizedEmail,
+          name: userName,
+          providerUserId: `email-${normalizedEmail}`,
+          provider: 'EMAIL',
+          refreshToken: null,
+          accessToken: null,
+        }),
         {
           ...cookieBase,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window

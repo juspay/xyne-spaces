@@ -1,7 +1,9 @@
+import { randomBytes } from 'crypto';
 import { PrismaClient, UserSession } from '@prisma/client';
 import { AuthProvider, Platform, SessionStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
+import { config } from '@/config/env';
 import { userActivityTrackingService } from './userActivityTrackingService';
 import { syncContactsGrantForUser } from './userContactsService';
 
@@ -12,6 +14,7 @@ export type LogoutReason =
   | 'PASSWORD_RESET'
   | 'PROVIDER_REVOKED'
   | 'TOKEN_EXPIRED'
+  | 'SESSION_IDLE'
   | 'TEST_CLEANUP';
 
 // How the session was minted — stored as the AUTH/LOGIN activity event's
@@ -124,6 +127,7 @@ export class UserSessionService {
       }
       const session = await this.prisma.userSession.create({
         data: {
+          id: randomBytes(32).toString('base64url'), // the id is the session cookie value, so it must be unguessable
           userId: sessionData.userId,
           workspaceId: sessionUser.workspaceId,
           refreshToken: sessionData.refreshToken,
@@ -285,6 +289,19 @@ export class UserSessionService {
       logger.error('Error updating session activity:', error);
       throw new Error('Failed to update session activity');
     }
+  }
+
+  /** Revokes an ACTIVE session unused for SESSION_IDLE_DAYS; true when it did. */
+  async revokeIfIdle(session: { id: string; status: string; lastActivity: Date }): Promise<boolean> {
+    if (session.status !== SessionStatus.ACTIVE) return false;
+    const idleMs = config.session.idleDays * 24 * 60 * 60 * 1000;
+    if (Date.now() - session.lastActivity.getTime() <= idleMs) return false;
+    logger.warn('[AUTH] Session revoked (reason=session_idle)', {
+      lastActivity: session.lastActivity.toISOString(),
+      idleDays: config.session.idleDays,
+    });
+    await this.revokeSession(session.id, 'SESSION_IDLE');
+    return true;
   }
 
   /**
