@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { OrgRole, WorkspaceRole } from '@xyne/shared';
+import { OrgRole, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { createHash } from 'crypto';
 // import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../utils/logger';
@@ -443,8 +443,8 @@ export class AuthMiddleware {
         return;
       }
 
-      if (user.leftAt) {
-        logger.warn(`[AUTH] Request rejected (reason=user_left_workspace)`, { userId: user.id });
+      if (user.leftAt || user.status === UserStatus.INACTIVE) {
+        logger.warn(`[AUTH] Request rejected (reason=${user.leftAt ? 'user_left_workspace' : 'user_inactive'})`, { userId: user.id });
         res.status(401).json({
           error: 'User removed from workspace',
           message: 'You have been removed from this workspace',
@@ -834,8 +834,8 @@ export class AuthMiddleware {
         return;
       }
 
-      if (user.leftAt) {
-        logger.warn(`[AUTH] Zero auth rejected (reason=user_left_workspace)`, { userId: user.id });
+      if (user.leftAt || user.status === UserStatus.INACTIVE) {
+        logger.warn(`[AUTH] Zero auth rejected (reason=${user.leftAt ? 'user_left_workspace' : 'user_inactive'})`, { userId: user.id });
         res.status(401).json({
           error: 'User removed from workspace',
           message: 'You have been removed from this workspace',
