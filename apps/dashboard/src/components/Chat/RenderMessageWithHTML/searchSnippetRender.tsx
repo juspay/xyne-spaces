@@ -101,7 +101,9 @@ export const getSmartSnippet = (html: string, limit: number): string => {
     range.setEnd(endWord.node, endWord.endOffset);
 
     const fragment = range.cloneContents();
-    const div = document.createElement('div');
+    // Build in the parsed document, not the live one: adopting <img> nodes into
+    // `document` starts their load and runs any onerror handler.
+    const div = doc.createElement('div');
     div.appendChild(fragment);
 
     let resultHtml = div.innerHTML;

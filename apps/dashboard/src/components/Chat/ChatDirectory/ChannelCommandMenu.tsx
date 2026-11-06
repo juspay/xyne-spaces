@@ -136,6 +136,7 @@ import type { SlashSelectionType } from '../../../types/slashCommandEvents';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
+import { htmlToPlainText } from '../../../utils/sanitizer';
 import SearchResultItem from './SearchResultItem';
 import SearchSectionSkeleton, { type SkeletonVariant } from './SearchSectionSkeleton';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
@@ -193,9 +194,7 @@ const dateOptionHint = (value: string): string | null => {
 type TabDefinition = { id: TabType; label: string; icon?: ReactElement };
 
 function stripHtmlTags(html: string): string {
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  return div.textContent || html;
+  return htmlToPlainText(html) || html;
 }
 /**
  * Bring a clicked tab to the middle of its own strip — and nothing else.

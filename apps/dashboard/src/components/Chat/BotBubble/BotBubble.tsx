@@ -34,12 +34,6 @@ interface BotBubbleProps {
   }) => void;
 }
 
-const stripHtml = (html: string): string => {
-  const tmp = document.createElement('DIV');
-  tmp.innerHTML = html;
-  return tmp.textContent || tmp.innerText || '';
-};
-
 type TicketCardSummaryFromMd = NonNullable<ReturnType<typeof parseTicketMd>>;
 
 type TicketCardTarget = {
@@ -253,7 +247,7 @@ const TicketCreateModeWithChannel: React.FC<{
     const body = new DOMParser().parseFromString(messageContent, 'text/html').body;
     const title = discussionTitleOfBody(body);
     if (title) body.firstElementChild?.remove();
-    return { title, description: stripHtml(body.innerHTML) };
+    return { title, description: body.textContent ?? '' };
   }, [messageContent]);
 
   if (!channel) return null;
