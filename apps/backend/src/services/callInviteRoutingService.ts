@@ -1,9 +1,8 @@
 import type { Request, Response } from 'express';
-import { CallStatus, SessionStatus } from '@xyne/shared';
+import { CallStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { jwtService } from '@/services/jwtService';
-import { logger } from '@/utils/logger';
+import { readWorkspaceJwt } from '@/services/accessTokenService';
 import { config } from '@/config/env';
 
 const JOINABLE_CALL_STATUSES = new Set<CallStatus>([
@@ -14,6 +13,8 @@ const JOINABLE_CALL_STATUSES = new Set<CallStatus>([
 
 export type InternalCallRouteResolution =
   | { result: 'internal'; workspaceId: string }
+  /** The call workspace's JWT cookie is present but expired: refresh via /auth/refresh-session and probe again. */
+  | { result: 'needs-refresh' }
   | { result: 'external' };
 
 /**
@@ -44,10 +45,15 @@ class CallInviteRoutingService {
 
     const callWorkspaceId = routing.workspaceId;
 
-    // The access token first, the login session behind it — the same two
-    // credentials, in the same order, that every authenticated route accepts.
-    const claim =
-      this.claimFromWorkspaceToken(req, callWorkspaceId) ?? (await this.claimFromSession(req));
+    // The workspace access token is the only credential sent here: the refresh
+    // token (`xs`) travels solely to /auth/refresh-session. An expired token is
+    // reported as such so the client refreshes and probes again, instead of a
+    // signed-in member landing in the guest lobby for not having opened Spaces
+    // since yesterday.
+    const claim = this.claimFromWorkspaceToken(req, callWorkspaceId);
+    if (claim === 'expired') {
+      return { result: 'needs-refresh' };
+    }
     if (!claim) {
       return { result: 'external' };
     }
@@ -89,65 +95,20 @@ class CallInviteRoutingService {
     return { result: 'internal', workspaceId: callWorkspaceId };
   }
 
-  /** The workspace-scoped access token for the call's own workspace. */
-  private claimFromWorkspaceToken(req: Request, callWorkspaceId: string): CallInviteClaim | null {
-    const token = req.cookies?.[`xyne_ws_${callWorkspaceId}_token`] as string | undefined;
-    if (!token) {
+  /** The workspace-scoped access token for the call's own workspace; `'expired'` when present but past its exp. */
+  private claimFromWorkspaceToken(req: Request, callWorkspaceId: string): CallInviteClaim | 'expired' | null {
+    const read = readWorkspaceJwt(req, callWorkspaceId);
+    if (read.status === 'expired') {
+      return 'expired';
+    }
+    if (read.status !== 'valid') {
       return null;
     }
-
-    try {
-      const payload = jwtService.verifyToken(token);
-      if (payload.workspaceId !== callWorkspaceId || !payload.sub || !payload.memberId) {
-        return null;
-      }
-      return { userId: payload.sub, memberId: payload.memberId };
-    } catch {
+    const { payload } = read;
+    if (payload.workspaceId !== callWorkspaceId || !payload.sub || !payload.memberId) {
       return null;
     }
-  }
-
-  /**
-   * The login session, which is what actually keeps a user signed in.
-   *
-   * `xyne_ws_<id>_token` lives JWT_EXPIRATION_SECONDS (a day by default);
-   * `user_session_id` lives a year, and every authenticated route quietly mints
-   * a fresh access token from it (authV2Middleware.attemptRefresh). This route
-   * is public, so nothing runs in front of it to do that — reading the access
-   * token alone sent signed-in members to the guest lobby for the sole reason
-   * that they had not opened Spaces since yesterday.
-   *
-   * Nothing is minted here either: the dashboard load this routes to is an
-   * authenticated request, and refreshes the cookie itself.
-   */
-  private async claimFromSession(req: Request): Promise<CallInviteClaim | null> {
-    const sessionId =
-      (req.headers['x-session-id'] as string | undefined) ||
-      (req.cookies?.user_session_id as string | undefined);
-    if (!sessionId) {
-      return null;
-    }
-
-    try {
-      const session = await db.userSession.findUnique({
-        where: { id: sessionId },
-        select: {
-          status: true,
-          refreshTokenExpiry: true,
-          user: { select: { id: true, orgMemberId: true } },
-        },
-      });
-      if (!session?.user?.id || !session.user.orgMemberId) {
-        return null;
-      }
-      if (session.status !== SessionStatus.ACTIVE || new Date() >= session.refreshTokenExpiry) {
-        return null;
-      }
-      return { userId: session.user.id, memberId: session.user.orgMemberId };
-    } catch (err) {
-      logger.warn(`[call-invite-routing] session lookup failed | error=${err}`);
-      return null;
-    }
+    return { userId: payload.sub, memberId: payload.memberId };
   }
 }
 

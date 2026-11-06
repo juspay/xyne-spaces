@@ -10,10 +10,11 @@
  * dashboard runs on, so `/api/sdk` authenticates it with the ordinary
  * `authMiddleware` — there is no SDK-specific credential on ordinary calls.
  *
- * A client that asks for one at init also gets a refresh token, backed by a
- * `UserSession` of its own that lives as long as a browser login. `refresh` trades it for a new JWT
- * and a new refresh token (rotation); see `refresh` for reuse detection and the
- * grace window that lets several local processes share one sign-in.
+ * A client that asks for one at init also gets a refresh token, backed by an
+ * `auth_sessions` row of its own (platform `sdk`) that lives as long as a browser
+ * login. `refresh` trades it for a new JWT and a new refresh token (rotation);
+ * see `refresh` for reuse detection and the grace window that lets several
+ * local processes share one sign-in.
  *
  * The weakness of this flow is phishing (RFC 8628 §5.4): anyone can start a
  * request and send the approval link to someone else. The defence is the user
@@ -22,20 +23,26 @@
  * can check the request is their own.
  *
  * Device-flow state is stored in Redis with a 5-minute TTL; the refresh
- * session is an ordinary `UserSession` row.
+ * session is an `auth_sessions` row.
  */
 
 import crypto from 'crypto';
-import { SessionStatus, UserStatus } from '@xyne/shared';
+import { Platform, UserStatus } from '@xyne/shared';
 import { redisService } from './redisService';
-import { jwtService } from './jwtService';
-import { isRefreshAllowed } from './sessionRefreshValidator';
-import { SDK_SSO_REFRESH_TOKEN_PREFIX, UserSessionService } from './userSessionService';
+import { authSessionService, AuthSessionRevokeReason, AuthSessionStatus } from './authSessionService';
+import { mintAccessToken } from './accessTokenService';
+import { userActivityTrackingService } from './userActivityTrackingService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 
-const userSessionService = new UserSessionService();
+/**
+ * Marks an auth session minted by Xyne SSO for the Spaces SDK, MCP or CLI. Its
+ * `refreshToken` is this prefix plus the SHA-256 of a refresh token we issued
+ * (the browser flow stores a bare SHA-256 of the `xs` cookie), so the two can
+ * never collide and a browser `xs` can never be presented as an SDK token.
+ */
+export const SDK_SSO_REFRESH_TOKEN_PREFIX = 'sdk_sso:';
 
 /** TTL for device authorization requests (5 minutes) */
 const DEVICE_AUTH_TTL_SECONDS = 300;
@@ -184,7 +191,7 @@ function hashRefreshToken(refreshToken: string): string {
   return crypto.createHash('sha256').update(refreshToken).digest('hex');
 }
 
-/** What `UserSession.refreshToken` holds for a refresh token: never the token itself. */
+/** What `auth_sessions.refreshToken` holds for an SDK refresh token: never the token itself. */
 function storedRefreshToken(hash: string): string {
   return `${SDK_SSO_REFRESH_TOKEN_PREFIX}${hash}`;
 }
@@ -383,28 +390,46 @@ class SdkSsoService {
   }
 
   /**
-   * Start the `UserSession` a refresh token renews, for a session just handed
-   * out by `pollForAuthorization`. It lasts as long as a browser login.
+   * Start the auth session a refresh token renews, for a session just handed
+   * out by `pollForAuthorization`. It lasts as long as a browser login. One row
+   * per approved device flow: the device key is unique to this sign-in.
    */
   async startRefreshSession(
     session: SdkSsoSession,
     origin: DeviceAuthOrigin,
   ): Promise<SdkSsoRefreshGrant> {
+    const user = await db.user.findUnique({
+      where: { id: session.userId },
+      select: { orgMemberId: true, orgMember: { select: { orgId: true } } },
+    });
+    if (!user?.orgMember) {
+      throw new Error(`SDK SSO: user ${session.userId} has no org membership`);
+    }
+
     const refreshToken = newRefreshToken();
     const refreshTokenExpiry = new Date();
     refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
-    await userSessionService.createSession({
-      userId: session.userId,
-      refreshToken: storedRefreshToken(hashRefreshToken(refreshToken)),
+    const { sessionId } = await authSessionService.createExternalSession({
+      orgMemberId: user.orgMemberId,
+      orgId: user.orgMember.orgId,
+      deviceKey: `sdk-${crypto.randomUUID()}`,
+      platform: 'sdk',
+      refreshTokenHash: storedRefreshToken(hashRefreshToken(refreshToken)),
       refreshTokenExpiry,
-      deviceInfo: JSON.stringify({
+      deviceInfo: {
         client: 'xyne-sso',
         userAgent: origin.userAgent?.slice(0, MAX_USER_AGENT_LENGTH) ?? null,
+        ip: origin.ip,
         timestamp: new Date().toISOString(),
-      }),
-      ipAddress: origin.ip ?? undefined,
-      loginMethod: 'SDK_SSO',
+      },
+      workspaceId: session.workspaceId,
+    });
+
+    void userActivityTrackingService.trackLogin(session.userId, {
+      sessionId,
+      method: 'SDK_SSO',
+      platform: Platform.WEB,
     });
 
     return { refreshToken, refreshExpiresAt: refreshTokenExpiry.getTime() };
@@ -430,9 +455,9 @@ class SdkSsoService {
     const settled = await this.awaitRotation(rotatedKey);
     if (settled) return settled;
 
-    const session = await db.userSession.findUnique({
+    const session = await db.authSession.findUnique({
       where: { refreshToken: storedRefreshToken(hash) },
-      include: { user: { include: { orgMember: true } } },
+      select: { id: true, orgMemberId: true, status: true, refreshTokenExpiry: true },
     });
 
     if (!session) {
@@ -446,12 +471,34 @@ class SdkSsoService {
         logger.warn('[SDK-SSO] Spent refresh token reused; revoking its session', {
           sessionId: spentSessionId,
         });
-        await userSessionService.revokeSession(spentSessionId, 'REFRESH_TOKEN_REUSED');
+        await authSessionService.revokeById(spentSessionId, AuthSessionRevokeReason.REFRESH_TOKEN_REUSED);
       }
       return { status: 'invalid' };
     }
 
-    if (!(await isRefreshAllowed(session)) || session.user.status !== UserStatus.ACTIVE) {
+    // Session live, member still in the org, and the user row the SDK session
+    // was approved for (its workspace) still active.
+    if (session.status !== AuthSessionStatus.ACTIVE || session.refreshTokenExpiry <= new Date()) {
+      return { status: 'invalid' };
+    }
+    const workspaceId = await authSessionService.lastWorkspaceId(session.id);
+    const user = workspaceId
+      ? await db.user.findFirst({
+          where: { orgMemberId: session.orgMemberId, workspaceId },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            picture: true,
+            workspaceId: true,
+            orgMemberId: true,
+            status: true,
+            leftAt: true,
+            orgMember: { select: { leftAt: true } },
+          },
+        })
+      : null;
+    if (!user || user.status !== UserStatus.ACTIVE || user.leftAt || !user.orgMember || user.orgMember.leftAt) {
       return { status: 'invalid' };
     }
 
@@ -465,34 +512,27 @@ class SdkSsoService {
     if (!claimed) return (await this.awaitRotation(rotatedKey)) ?? { status: 'busy' };
 
     const nextRefreshToken = newRefreshToken();
-    const rotated = await db.userSession.updateMany({
-      where: { id: session.id, refreshToken: storedRefreshToken(hash), status: SessionStatus.ACTIVE },
-      data: {
-        refreshToken: storedRefreshToken(hashRefreshToken(nextRefreshToken)),
-        lastActivity: new Date(),
-      },
-    });
-    if (rotated.count !== 1) {
+    const rotated = await authSessionService.rotateTokenHash(
+      session.id,
+      storedRefreshToken(hash),
+      storedRefreshToken(hashRefreshToken(nextRefreshToken)),
+    );
+    if (!rotated) {
       await redisService.del(rotatedKey);
       return { status: 'invalid' };
     }
 
-    const user = session.user;
-    const token = jwtService.generateToken({
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-      picture: user.picture || undefined,
-      workspaceId: user.workspaceId,
-      memberId: user.orgMemberId,
+    const minted = mintAccessToken({
+      user,
+      sessionId: session.id,
+      refreshTokenExpiry: session.refreshTokenExpiry,
     });
-    const exp = jwtService.decodeToken(token)?.exp;
 
     const refreshed: SdkSsoRefreshedSession = {
       userId: user.id,
       workspaceId: user.workspaceId,
-      token,
-      expiresAt: exp ? exp * 1000 : Date.now() + config.jwt.expirationSeconds * 1000,
+      token: minted.token,
+      expiresAt: Date.now() + minted.lifetimeSeconds * 1000,
       refreshToken: nextRefreshToken,
       refreshExpiresAt: session.refreshTokenExpiry.getTime(),
     };
@@ -534,13 +574,13 @@ class SdkSsoService {
    */
   async revokeRefreshToken(refreshToken: string): Promise<void> {
     const hash = hashRefreshToken(refreshToken);
-    const session = await db.userSession.findUnique({
+    const session = await db.authSession.findUnique({
       where: { refreshToken: storedRefreshToken(hash) },
       select: { id: true },
     });
     const sessionId = session?.id ?? (await redisService.get(`${SPENT_KEY_PREFIX}${hash}`));
     if (!sessionId) return;
-    await userSessionService.revokeSession(sessionId, 'USER_LOGOUT');
+    await authSessionService.revokeById(sessionId, AuthSessionRevokeReason.LOGOUT);
     await redisService.del(`${ROTATED_KEY_PREFIX}${hash}`);
   }
 }

@@ -21,7 +21,7 @@
  */
 
 import express, { Request, Response } from 'express';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
@@ -103,7 +103,7 @@ async function findActiveSourceForChannel(
  */
 router.get(
   '/:channelId/dl-member-sync-status',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
     const userId = req.user!.id;
@@ -153,7 +153,7 @@ router.get(
  */
 router.post(
   '/:channelId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
     const userId = req.user!.id;
@@ -227,7 +227,7 @@ router.post(
  */
 router.post(
   '/:channelId/reconnect-init',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
     const userId = req.user!.id;
@@ -336,7 +336,7 @@ router.post(
  */
 router.post(
   '/:channelId/dl-member-sync-init',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const { channelId } = req.params;
     const userId = req.user!.id;

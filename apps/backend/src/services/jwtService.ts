@@ -9,6 +9,12 @@ export interface JwtPayload {
   picture?: string;
   workspaceId: string;
   memberId: string;
+  /**
+   * auth_sessions.id the token was minted under; encryption, push tokens and activity key on it.
+   * Absent only on the JWT handed to an SDK at device-flow approval (routes/sdk-sso.ts), which
+   * has no auth session of its own until the SDK's first refresh.
+   */
+  sid?: string;
   providerUserId?: string;
   provider?: string;
   iat?: number;
@@ -61,6 +67,7 @@ export class JwtService {
           picture: payload.picture,
           workspaceId: payload.workspaceId,
           memberId: payload.memberId,
+          sid: payload.sid,
           providerUserId: payload.providerUserId,
           provider: payload.provider,
         },
@@ -86,6 +93,7 @@ export class JwtService {
   verifyToken(token: string): JwtPayload {
     try {
       const decoded = jwt.verify(token, this.secret, {
+        algorithms: ['HS256'],
         issuer: this.issuer,
         audience: this.audience,
       }) as JwtPayload;

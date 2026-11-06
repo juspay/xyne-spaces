@@ -10,7 +10,7 @@
 import express, { Request, Response } from 'express';
 import { SlackDeskTriggerMode } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
@@ -37,7 +37,7 @@ router.use(express.json());
  */
 router.get(
   '/channels',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -126,7 +126,7 @@ router.get(
  */
 router.post(
   '/:conversationId/reply',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { conversationId } = req.params;
@@ -179,7 +179,7 @@ router.post(
  */
 router.post(
   '/:channelId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   validateZod(z.object({ slackChannelId: z.string().trim().min(1).optional() })),
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -239,7 +239,7 @@ interface SlackUserItem {
 
 router.get(
   '/users',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -312,7 +312,7 @@ router.get(
 
 router.get(
   '/channels/:channelId/slack',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
@@ -348,7 +348,7 @@ router.get(
 
 router.patch(
   '/channels/:channelId/slack/trigger-mode',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   validateZod(z.object({ triggerMode: z.nativeEnum(SlackDeskTriggerMode) })),
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -373,7 +373,7 @@ router.patch(
 
 router.post(
   '/channels/:channelId/slack',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   validateZod(z.object({ slackChannelId: z.string().trim().min(1) })),
   async (req: Request, res: Response): Promise<void> => {
     try {

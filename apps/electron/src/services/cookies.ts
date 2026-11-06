@@ -81,9 +81,12 @@ export async function setCookiesFromHeaders(
     const [name, ...valueParts] = nameValue.split('=');
     const value = valueParts.join('=');
 
-    // Parse cookie attributes (Max-Age, Expires)
+    // Parse cookie attributes (Max-Age, Expires, Path)
     let maxAge: number | null = null;
     let expires: string | null = null;
+    // Path is load-bearing: the refresh token (`xs`) is scoped to /api/auth/refresh-session so it
+    // is never sent on ordinary API calls. Dropping it would widen it to the whole origin.
+    let path: string | undefined;
 
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i].trim();
@@ -98,6 +101,8 @@ export async function setCookiesFromHeaders(
         }
       } else if (normalizedAttrName === 'expires') {
         expires = attrValue;
+      } else if (normalizedAttrName === 'path' && attrValue.startsWith('/')) {
+        path = attrValue;
       }
     }
 
@@ -126,6 +131,7 @@ export async function setCookiesFromHeaders(
       httpOnly: true,
       secure: true,
       sameSite: 'no_restriction',
+      ...(path !== undefined && { path }),
       ...(expirationDate !== undefined && { expirationDate }),
     }).catch((error) => {
       Logger.logError('cookies.set.failed', error, { cookie_name: name });

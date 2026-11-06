@@ -2,15 +2,14 @@ import { Request, Response } from 'express';
 import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
-import { UserSessionService } from '../services/userSessionService';
-import { authSessionService } from '../services/authSessionService';
+import { MissingDeviceKeyError } from '../services/authSessionService';
+import { completeLogin, respondDeviceKeyRequired } from '../services/loginCompletionService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 
 import '../types/express';
-import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken } from '@/utils/pendingAuthToken';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { AuthProvider } from '@xyne/shared';
@@ -24,6 +23,7 @@ import { signMicrosoftInvitationPendingAuthToken } from '@/utils/microsoftPendin
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
 import { setOnboardingCookie } from '@/utils/onboardingCookie';
+import { PENDING_AUTH_COOKIE } from '@/services/accessTokenService';
 
 const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
 const workspaceOutcome = (count: number): string =>
@@ -32,7 +32,6 @@ const workspaceOutcome = (count: number): string =>
 export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
   private userService: UserService | undefined;
-  private userSessionService: UserSessionService | undefined;
   private clientId: string | undefined;
   private tenantId: string = '';
   private msJwks!: ReturnType<typeof createRemoteJWKSet>;
@@ -95,7 +94,6 @@ export class MicrosoftAuthController {
     this.clientId = clientId;
     this.tenantId = tenantId ?? '';
     this.userService = new UserService();
-    this.userSessionService = new UserSessionService();
     const jwksTenant = tenantId ?? 'common';
     this.msJwks = createRemoteJWKSet(
       new URL(`https://login.microsoftonline.com/${jwksTenant}/discovery/v2.0/keys`)
@@ -174,8 +172,25 @@ export class MicrosoftAuthController {
         const platform: 'electron' | 'web' = platformQuery === 'electron' ? 'electron' : 'web';
         logger.info(`${tag()} Platform detected: ${platform}`);
 
-        const codeVerifier = pkceServiceV2.generateCodeVerifier();
-        const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
+        // Electron holds its own verifier and sends only the challenge; the server stores none.
+        let codeVerifier: string | undefined;
+        let codeChallenge: string;
+        if (platform === 'electron') {
+          const clientChallenge = req.query.code_challenge;
+          if (!pkceServiceV2.isValidCodeChallenge(clientChallenge)) {
+            logger.warn(`${tag()} Electron login without a valid code_challenge - rejecting`);
+            res.status(400).json({
+              success: false,
+              error: 'invalid_request',
+              message: 'Electron login requires a code_challenge',
+            });
+            return;
+          }
+          codeChallenge = clientChallenge;
+        } else {
+          codeVerifier = pkceServiceV2.generateCodeVerifier();
+          codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
+        }
 
         let validatedRedirectTo: string | undefined;
         const redirectToParam = req.query['redirect_to'] as string | undefined;
@@ -211,7 +226,7 @@ export class MicrosoftAuthController {
           flowId,
         );
 
-        await pkceServiceV2.storeVerifier(state, codeVerifier);
+        if (codeVerifier) await pkceServiceV2.storeVerifier(state, codeVerifier);
 
         // The callback echoes this state back via the HttpOnly cookie. sameSite=lax lets the
         // cookie ride Microsoft's top-level callback redirect. Mirrors the Google flow; only
@@ -281,7 +296,7 @@ export class MicrosoftAuthController {
     const tag = (): string => authTag(flowId);
 
     try {
-      if (this.oauthClient && this.userService && this.userSessionService) {
+      if (this.oauthClient && this.userService) {
         const { code, state, error } = req.query;
 
         logger.info(`${tag()} Microsoft OAuth callback received`);
@@ -499,11 +514,10 @@ export class MicrosoftAuthController {
             accessTokenExpiry,
           );
           res.cookie(
-            'google_access_token',
+            PENDING_AUTH_COOKIE,
             signMicrosoftInvitationPendingAuthToken(
               microsoftUserData,
               tokenKey,
-              config.jwt.secret,
             ),
             {
               httpOnly: true,
@@ -561,14 +575,14 @@ export class MicrosoftAuthController {
             accessToken,
             accessTokenExpiry,
           );
-          res.cookie('google_access_token', jwt.sign({
+          res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
             providerUserId: microsoftUserData.providerUserId,
             email: microsoftUserData.email,
             name: microsoftUserData.name,
             picture: microsoftUserData.picture,
             provider: AuthProvider.MICROSOFT,
             tokenKey,
-          }, config.jwt.secret, { expiresIn: '10m' }), {
+          }), {
             httpOnly: true,
             secure: isProduction,
             sameSite: 'lax' as const,
@@ -614,16 +628,6 @@ export class MicrosoftAuthController {
           `${tag()} User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
         );
 
-        // Generate custom JWT token
-        const customToken = jwtService.generateToken({
-          sub: user.id,
-          email: user.email,
-          name: user.name,
-          picture: user.picture ?? undefined,
-          workspaceId: user.workspaceId,
-          memberId: user.orgMemberId,
-        });
-
         const cookieOptions = {
           httpOnly: true,
           secure: isProduction,
@@ -637,14 +641,14 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
           providerUserId: microsoftUserData.providerUserId,
           email: microsoftUserData.email,
           name: microsoftUserData.name,
           picture: microsoftUserData.picture,
           provider: AuthProvider.MICROSOFT,
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           ...cookieOptions,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
         });
@@ -661,49 +665,9 @@ export class MicrosoftAuthController {
 
         if (workspaces.length === 1) {
           const workspaceId = workspaces[0]!.id;
-          let sessionId: string | null = null;
-          try {
-            const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-            const session = await this.userSessionService.createSession({
-              userId: user.id,
-              refreshToken: refreshToken || randomUUID(),
-              refreshTokenExpiry,
-              accessToken,
-              accessTokenExpiry,
-              deviceInfo: JSON.stringify({
-                userAgent: req.headers['user-agent'],
-                acceptLanguage: req.headers['accept-language'],
-                timestamp: new Date().toISOString(),
-              }),
-              ipAddress: req.ip || req.socket.remoteAddress || undefined,
-            });
-            sessionId = session.id;
-            logger.info(`${tag()} Session created`);
-          } catch (sessionError) {
-            logger.error(`${tag()} Error creating user session:`, sessionError);
-          }
-
-          res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
-            ...cookieOptions,
-            maxAge: config.jwt.expirationSeconds * 1000,
-          });
-          res.cookie('xyne_last_workspace', workspaceId, {
-            ...cookieOptions,
-            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-          });
-          if (sessionId) {
-            res.cookie('user_session_id', sessionId, {
-              ...cookieOptions,
-              maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-            });
-          }
-          setOnboardingCookie(res, isNewUser, {
-            secure: isProduction,
-            sameSite: 'lax' as const,
-            maxAge: 24 * 60 * 60 * 1000,
-          });
-
+          // The callback is a top-level redirect from Microsoft: no x-device-id header, so no
+          // auth session can be issued here. The pending cookie (set above) carries the
+          // identity and the frontend completes the login through POST /auth/login-workspace.
           params.set('autoLoginWorkspace', workspaceId);
           logger.info(`${tag()} Microsoft OAuth login succeeded (platform=web, outcome=single_workspace, count=1)`);
           res.redirect(`${frontendUrl}?${params.toString()}`);
@@ -757,7 +721,7 @@ export class MicrosoftAuthController {
     const tag = (): string => authTag(flowId);
 
     try {
-      if (!this.oauthClient || !this.userService || !this.userSessionService) {
+      if (!this.oauthClient || !this.userService) {
         logger.error(`${tag()} Microsoft OAuth not configured`);
         res.status(500).json({
           success: false,
@@ -819,9 +783,9 @@ export class MicrosoftAuthController {
         return;
       }
 
-      const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state);
-      if (!codeVerifier) {
-        logger.error(`${tag()} PKCE verifier not found`);
+      const codeVerifier: unknown = req.body?.codeVerifier;
+      if (!stateData.codeChallenge || !pkceServiceV2.matchesChallenge(codeVerifier, stateData.codeChallenge)) {
+        logger.error(`${tag()} PKCE verifier missing or does not match the login's code_challenge`);
         res.status(401).json({
           success: false,
           error: 'pkce_failed',
@@ -919,9 +883,9 @@ export class MicrosoftAuthController {
       const isProduction = config.env === 'production';
 
       // If user has no workspaces and is not invited (not in org_members), redirect to no-access.
-      // Still set google_access_token so that AuthScreen's isCreatingOrg + pendingInvitationId
+      // Still set xyne_pending_auth so that AuthScreen's isCreatingOrg + pendingInvitationId
       // path can redirect to /invite and acceptInvitation will have the identity cookie.
-      // This mirrors Google's exchangeElectronCode which always sets google_access_token (line 842).
+      // This mirrors Google's exchangeElectronCode which always sets xyne_pending_auth (line 842).
       if (workspaces.length === 0 && !userExistsButRemoved && !stateData.invitationId && !bodyInvitationId) {
         logger.info(`${tag()} Microsoft OAuth login succeeded (platform=electron, outcome=no_workspace, count=0) — no workspaces/invitation, returning no-access`);
 
@@ -953,21 +917,21 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
           path: '/',
           maxAge: 10 * 60 * 1000,
         });
-        logger.info(`${tag()} google_access_token set for potential invite redirect (sameSite=lax, maxAge=10min)`);
+        logger.info(`${tag()} xyne_pending_auth set for potential invite redirect (sameSite=lax, maxAge=10min)`);
         res.status(200).json({
           success: true,
           workspaces: [],
@@ -982,7 +946,7 @@ export class MicrosoftAuthController {
         return;
       }
 
-      // If an invitation is pending: set google_access_token so the Electron renderer can later
+      // If an invitation is pending: set xyne_pending_auth so the Electron renderer can later
       // call acceptInvitation + loginWorkspace, then return a hasInvitation signal. The renderer
       // will navigate to /invite?loginComplete=true inside the app — no browser involvement.
       // Combine state and body invitation IDs (same as Google flow)
@@ -997,21 +961,21 @@ export class MicrosoftAuthController {
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
           path: '/',
           maxAge: 10 * 60 * 1000,
         });
-        logger.info(`${tag()} google_access_token set for invitation (provider=microsoft, hasRefreshToken=${!!(token.refresh_token)}, sameSite=lax, maxAge=10min)`);
+        logger.info(`${tag()} xyne_pending_auth set for invitation (provider=microsoft, hasRefreshToken=${!!(token.refresh_token)}, sameSite=lax, maxAge=10min)`);
         res.status(200).json({
           success: true,
           hasInvitation: true,
@@ -1048,95 +1012,40 @@ export class MicrosoftAuthController {
           `${tag()} User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
         );
 
-        const customToken = jwtService.generateToken({
-          sub: user.id,
-          email: user.email,
-          name: user.name,
-          picture: user.picture ?? undefined,
-          workspaceId: user.workspaceId,
-          memberId: user.orgMemberId,
-        });
-
-        // Always create a session (fall back to a generated refresh token if Microsoft omitted one)
-        // so user_session_id is always issued.
-        let sessionId: string | null = null;
         const refreshToken = token.refresh_token as string | undefined;
 
+        // Auth session (xs) + JWT cookies. The exchange comes from the Electron main process;
+        // without x-device-id the auto-login is skipped and the renderer completes the login
+        // through /auth/login-workspace using the pending cookie set below.
         try {
-          const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-          const session = await this.userSessionService.createSession({
-            userId: user.id,
-            refreshToken: refreshToken || randomUUID(),
-            refreshTokenExpiry,
-            accessToken,
-            accessTokenExpiry,
-            deviceInfo: JSON.stringify({
-              userAgent: req.headers['user-agent'],
-              acceptLanguage: req.headers['accept-language'],
-              timestamp: new Date().toISOString(),
-              platform: 'electron',
-            }),
-            ipAddress: req.ip || req.socket.remoteAddress || undefined,
+          await completeLogin(req, res, {
+            user: { ...user, workspaceId },
+            loginMethod: AuthProvider.MICROSOFT,
+            providerTokens: { refreshToken, accessToken, accessTokenExpiry },
           });
-
-          sessionId = session.id;
-          logger.info(`${tag()} Session created`);
-        } catch (sessionError) {
-          logger.error(`${tag()} Error creating user session:`, sessionError);
-          // Continue without session creation - not critical for login
-        }
-
-        const cookieOptions = {
-          httpOnly: true,
-          secure: isProduction,
-          sameSite: 'strict' as const,
-          path: '/',
-        };
-
-        res.cookie('xyne_last_workspace', workspaceId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
-        res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
-          ...cookieOptions,
-          maxAge: config.jwt.expirationSeconds * 1000,
-        });
-
-        if (sessionId) {
-          res.cookie('user_session_id', sessionId, {
-            ...cookieOptions,
-            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+          setOnboardingCookie(res, isNewUser, {
+            secure: isProduction,
+            sameSite: 'strict' as const,
+            maxAge: 24 * 60 * 60 * 1000,
           });
+        } catch (error) {
+          if (!(error instanceof MissingDeviceKeyError)) throw error;
+          logger.warn(`${tag()} Electron exchange without x-device-id - deferring login to login-workspace`);
         }
-
-        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
-        await authSessionService.issueOnLogin(req, res, {
-          orgMemberId: user.orgMemberId,
-          workspaceId: user.workspaceId ?? undefined,
-        });
-
-        setOnboardingCookie(res, isNewUser, {
-          secure: isProduction,
-          sameSite: 'strict' as const,
-          maxAge: 24 * 60 * 60 * 1000,
-        });
 
         const tokenKey = await this.storePendingOAuthTokens(
           refreshToken,
           accessToken,
           accessTokenExpiry,
         );
-        res.cookie('google_access_token', jwt.sign({
+        res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
           providerUserId: profile.id,
           email,
           name: profile.displayName,
           picture: undefined,
           provider: 'microsoft',
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax' as const,
@@ -1158,22 +1067,22 @@ export class MicrosoftAuthController {
         return;
       }
 
-      // MULTIPLE workspaces (or removed user) → SELECTION (Path B): pending cookie ONLY. No session
-      // and no user_session_id here — the renderer shows the picker and loginWorkspace mints the 3
+      // MULTIPLE workspaces (or removed user) → SELECTION (Path B): pending cookie ONLY. No auth
+      // session here — the renderer shows the picker and loginWorkspace issues xs + the JWT
       // cookies. Mirrors Google's exchangeElectronCode multi branch (no user creation either).
       const tokenKey = await this.storePendingOAuthTokens(
         token.refresh_token as string | undefined,
         accessToken,
         accessTokenExpiry,
       );
-      res.cookie('google_access_token', jwt.sign({
+      res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'lax' as const,
@@ -1191,6 +1100,7 @@ export class MicrosoftAuthController {
         userExistsButRemoved: workspaces.length === 0,
       });
     } catch (error) {
+      if (respondDeviceKeyRequired(res, error)) return;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`${tag()} Microsoft OAuth login failed (platform=electron): ${errorMessage}`);
       res.status(500).json({
@@ -1219,7 +1129,7 @@ export class MicrosoftAuthController {
 
     try {
       logger.info(`${tag()} Microsoft OAuth callback received (mobile exchange, native)`);
-      if (!this.oauthClient || !this.userService || !this.userSessionService) {
+      if (!this.oauthClient || !this.userService) {
         logger.error(`${tag()} Microsoft OAuth not configured`);
         res.status(500).json({
           success: false,
@@ -1380,14 +1290,14 @@ export class MicrosoftAuthController {
         accessToken,
         mobileAccessTokenExpiry,
       );
-      res.cookie('google_access_token', jwt.sign({
+      res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
         providerUserId: profile.id,
         email,
         name: profile.displayName,
         picture: undefined,
         provider: 'microsoft',
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         ...cookieOptions,
         maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });
@@ -1406,58 +1316,11 @@ export class MicrosoftAuthController {
         }, workspaceId);
         await this.userService.ensureUserPresence(user.id, user.workspaceId);
 
-        const customToken = jwtService.generateToken({
-          sub: user.id,
-          email: user.email,
-          name: user.name,
-          picture: user.picture ?? undefined,
-          workspaceId: user.workspaceId,
-          memberId: user.orgMemberId,
-        });
-        
-        let sessionId: string | null = null;
-        try {
-          const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-          const session = await this.userSessionService.createSession({
-            userId: user.id,
-            refreshToken: refreshToken || randomUUID(),
-            refreshTokenExpiry,
-            accessToken,
-            accessTokenExpiry: mobileAccessTokenExpiry,
-            deviceInfo: JSON.stringify({
-              userAgent: req.headers['user-agent'],
-              acceptLanguage: req.headers['accept-language'],
-              timestamp: new Date().toISOString(),
-              platform: 'mobile',
-            }),
-            ipAddress: req.ip || req.socket.remoteAddress || undefined,
-          });
-          sessionId = session.id;
-          logger.info(`${tag()} Session created`);
-        } catch (sessionError) {
-          logger.error(`${tag()} Error creating user session:`, sessionError);
-        }
-
-        res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
-          ...cookieOptions,
-          maxAge: config.jwt.expirationSeconds * 1000,
-        });
-        res.cookie('xyne_last_workspace', workspaceId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        if (sessionId) {
-          res.cookie('user_session_id', sessionId, {
-            ...cookieOptions,
-            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-          });
-        }
-
-        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
-        await authSessionService.issueOnLogin(req, res, {
-          orgMemberId: user.orgMemberId,
-          workspaceId: user.workspaceId ?? undefined,
+        const { sessionId } = await completeLogin(req, res, {
+          user: { ...user, workspaceId },
+          loginMethod: AuthProvider.MICROSOFT,
+          providerTokens: { refreshToken, accessToken, accessTokenExpiry: mobileAccessTokenExpiry },
+          cookieOptions: { sameSite: 'lax' },
         });
 
         setOnboardingCookie(res, isNewUser, {
@@ -1512,6 +1375,7 @@ export class MicrosoftAuthController {
         ...(domainConflict ? { enterpriseJoinWorkspaces: JSON.stringify(domainConflict.workspaces) } : {}),
       });
     } catch (error) {
+      if (respondDeviceKeyRequired(res, error)) return;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`${tag()} Microsoft OAuth login failed (platform=mobile): ${errorMessage}`);
       res.status(500).json({

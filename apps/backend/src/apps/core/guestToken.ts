@@ -50,7 +50,7 @@ export function isGuestToken(token: string): boolean {
 export async function resolveGuestToken(token: string): Promise<AuthenticatedUser> {
   let claims: GuestTokenClaims;
   try {
-    claims = jwt.verify(token, secret(), { audience: AUDIENCE, issuer: ISSUER }) as GuestTokenClaims;
+    claims = jwt.verify(token, secret(), { algorithms: ['HS256'], audience: AUDIENCE, issuer: ISSUER }) as GuestTokenClaims;
   } catch (err) {
     if (err instanceof jwt.TokenExpiredError) throw new GuestTokenError('The Spaces token has expired.', 'token_expired');
     throw new GuestTokenError('The Spaces token is invalid.', 'token_invalid');

@@ -1,6 +1,6 @@
 import express from 'express';
 import { AuthV2Controller } from '../controllers/authV2Controller';
-import { authV2Middleware } from '../middleware/authV2Middleware';
+import { authMiddleware } from '../middleware/auth';
 import { userManagementController } from '../controllers/userManagementController';
 import { channelService } from '../services/channelService';
 import { canCreateWorkspace } from '../middleware/workspaceAuth';
@@ -20,11 +20,11 @@ router.post('/exchange-electron', authV2Controller.dispatchElectronExchange);
 
 router.get('/refresh-session', authV2Controller.refreshSession);
 
-router.post('/logout', authV2Middleware.authenticate, authV2Controller.logout);
+router.post('/logout', authMiddleware.authenticate, authV2Controller.logout);
 
-router.get('/logout', authV2Middleware.authenticate, authV2Controller.logout);
+router.get('/logout', authMiddleware.authenticate, authV2Controller.logout);
 
-router.get('/me', authV2Middleware.authenticate, (req, res) => {
+router.get('/me', authMiddleware.authenticate, (req, res) => {
   return res.json({
     success: true,
     user: {
@@ -41,7 +41,7 @@ router.get('/me', authV2Middleware.authenticate, (req, res) => {
   });
 });
 
-router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
+router.get('/validate', authMiddleware.authenticate, async (req, res) => {
   // [DEBUG] Log if there's a pending invitation cookie — if so, user is already logged in
   // but has an unprocessed invitation. This is the root cause of landing on wrong workspace.
   const pendingInvitation = req.cookies?.pending_invitation_id;
@@ -69,18 +69,20 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
     },
     selfDmChannelId,
     landingChannelId: workspace?.landingChannelId ?? null,
+    // The dashboard refreshes shortly before this so cookie-only loads (images, video, PDF) never 401.
+    accessTokenExpiresAt: req.user!.tokenExpiresAt ?? null,
   });
 });
 
-router.get('/permissions', authV2Middleware.authenticate, userManagementController.getCurrentUserPermissions);
-router.get('/roles', authV2Middleware.authenticate, userManagementController.getCurrentUserRoles);
+router.get('/permissions', authMiddleware.authenticate, userManagementController.getCurrentUserPermissions);
+router.get('/roles', authMiddleware.authenticate, userManagementController.getCurrentUserRoles);
 
 router.post('/login-workspace', authV2Controller.loginWorkspace);
 router.post('/create-org', requireOrgCreationEnabled, authV2Controller.createOrg);
 
-router.get('/workspaces', authV2Middleware.authenticate, authV2Controller.getWorkspaces);
-router.post('/switch-workspace', authV2Middleware.authenticate, authV2Controller.switchWorkspace);
+router.get('/workspaces', authMiddleware.authenticate, authV2Controller.getWorkspaces);
+router.post('/switch-workspace', authMiddleware.authenticate, authV2Controller.switchWorkspace);
 // router.post('/create-workspace-pending', authV2Controller.createWorkspaceWithPendingAuth);
-router.post('/create-workspace', authV2Middleware.authenticate, canCreateWorkspace, authV2Controller.createWorkspaceAuth);
+router.post('/create-workspace', authMiddleware.authenticate, canCreateWorkspace, authV2Controller.createWorkspaceAuth);
 
 export default router;

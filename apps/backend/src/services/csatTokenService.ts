@@ -30,7 +30,7 @@ class CsatTokenService {
   /** True if the token is valid and was issued for this exact ticket. */
   verify(ticketId: string, token: string): boolean {
     try {
-      const decoded = jwt.verify(token, this.secret, { issuer: ISSUER, audience: AUDIENCE }) as { ticketId: string };
+      const decoded = jwt.verify(token, this.secret, { algorithms: ['HS256'], issuer: ISSUER, audience: AUDIENCE }) as { ticketId: string };
       return decoded.ticketId === ticketId;
     } catch (err) {
       logger.debug(`[csat-token] verify failed | error=${err}`);

@@ -157,7 +157,6 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     Cookies.remove('user_data');
     Cookies.remove('user_name');
     Cookies.remove('user_email');
-    Cookies.remove('user_session_id');
     clearDynamicHeaders();
     // The device key (`xd`) must survive logout.
     preserveWebDeviceKey(() => localStorage.clear());

@@ -148,7 +148,7 @@ export const AcceptInvitation = (): ReactElement => {
     setState({ status: 'accepting' });
     try {
       // Step 1: Accept invitation — creates workspace user, marks invitation accepted
-      // Backend reads google_access_token cookie for identity (does NOT clear it)
+      // Backend reads xyne_pending_auth cookie for identity (does NOT clear it)
       const acceptResponse = await axios.post<AcceptResponse>(
         `${API_BASE_URL}/invitations/${invitationId}/accept`,
         {},
@@ -157,7 +157,7 @@ export const AcceptInvitation = (): ReactElement => {
 
       const { workspaceId, redirectPath } = acceptResponse.data;
 
-      // Step 2: Login to workspace — issues JWT cookie, clears google_access_token cookie
+      // Step 2: Login to workspace — issues JWT cookie, clears xyne_pending_auth cookie
       const loginResponse = await axios.post<LoginWorkspaceResponse>(
         `${API_BASE_URL}/auth/login-workspace`,
         { workspaceId },
