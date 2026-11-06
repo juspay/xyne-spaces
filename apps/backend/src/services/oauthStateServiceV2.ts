@@ -56,7 +56,7 @@ class OAuthStateService {
       JSON.stringify(stateData)
     );
 
-    logger.info(`OAuth state created: ${state} (platform: ${platform})`);
+    logger.info(`OAuth state created (platform: ${platform})`);
     return state;
   }
 
@@ -68,7 +68,7 @@ class OAuthStateService {
     const data = await client.get(key);
 
     if (!data) {
-      logger.warn(`OAuth state not found or expired: ${state}`);
+      logger.warn('OAuth state not found or expired');
       return null;
     }
 
@@ -77,7 +77,7 @@ class OAuthStateService {
     }
 
     const stateData = JSON.parse(data) as OAuthState;
-    logger.info(`OAuth state validated: ${state} (platform: ${stateData.platform}, deleted: ${deleteAfterValidation})`);
+    logger.info(`OAuth state validated (platform: ${stateData.platform}, deleted: ${deleteAfterValidation})`);
     return stateData;
   }
 
@@ -86,7 +86,7 @@ class OAuthStateService {
     const client = redisService.getClient();
     const key = `${this.STATE_PREFIX}${state}`;
     await client.del(key);
-    logger.info(`OAuth state deleted: ${state}`);
+    logger.info('OAuth state deleted');
   }
 
   async markCodeAsUsed(code: string): Promise<void> {
@@ -99,7 +99,7 @@ class OAuthStateService {
       'used'
     );
 
-    logger.info(`OAuth code marked as used: ${code.substring(0, 10)}...`);
+    logger.info('OAuth code marked as used');
   }
 
   async isCodeUsed(code: string): Promise<boolean> {

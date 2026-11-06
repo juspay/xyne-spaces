@@ -212,7 +212,7 @@ apiConfig.interceptors.response.use(
     logger.debug(Logger.Event.API_ERROR_INTERCEPTOR_CAUGHT, {
       message: axiosError.message,
       code: axiosError.code,
-      url: axiosError.config?.url,
+      url: axiosError.config?.url ? sanitizeUrl(axiosError.config.url) : undefined,
     });
 
     const config = axiosError.config as InternalAxiosRequestConfig & {

@@ -29,6 +29,10 @@ CLAW_PREVIEW_NAMESPACE = os.environ.get("CLAW_PREVIEW_NAMESPACE", "xyne-apps")
 CLAW_PREVIEW_DEFAULT_PORT = 6080
 
 
+def _without_query(url: str) -> str:
+    return url.split("?", 1)[0]
+
+
 def _get_proxy_timeout() -> float:
     raw = os.environ.get("PROXY_TIMEOUT_SECONDS")
     if raw is None:
@@ -110,7 +114,7 @@ async def proxy_claw_preview_http(request: Request, sandbox_path: str):
         )
     )
 
-    print(f"[claw-preview] '{sandbox_id}' -> {target_url}")
+    print(f"[claw-preview] '{sandbox_id}' -> {_without_query(target_url)}")
 
     try:
         headers = {k: v for (k, v) in request.headers.items() if k.lower() != 'host'}
@@ -131,7 +135,7 @@ async def proxy_claw_preview_http(request: Request, sandbox_path: str):
             headers=resp.headers,
         )
     except httpx.ConnectError as e:
-        print(f"ERROR: claw-preview connect to {target_url} failed: {e}")
+        print(f"ERROR: claw-preview connect to {_without_query(target_url)} failed: {e}")
         raise HTTPException(
             status_code=502, detail=f"Could not reach sandbox {sandbox_id}",
         )
@@ -163,7 +167,7 @@ async def proxy_claw_preview_ws(websocket: WebSocket, sandbox_path: str):
         upstream_path += f"?{websocket.url.query}"
     target = f"ws://{target_host}:{port}{upstream_path}"
 
-    print(f"[claw-preview WS] '{sandbox_id}' -> {target}")
+    print(f"[claw-preview WS] '{sandbox_id}' -> {_without_query(target)}")
     await websocket.accept()
 
     skip = {b"host", b"connection", b"upgrade", b"origin",
@@ -253,7 +257,7 @@ async def proxy_request(request: Request, full_path: str):
         request.url.replace(scheme="http", hostname=target_host, port=port)
     )
 
-    print(f"Proxying request for sandbox '{sandbox_id}' to URL: {target_url}")
+    print(f"Proxying request for sandbox '{sandbox_id}' to URL: {_without_query(target_url)}")
 
     try:
         headers = {key: value for (key, value) in request.headers.items() if key.lower() != 'host'}
@@ -327,11 +331,11 @@ async def proxy_request(request: Request, full_path: str):
             headers=resp.headers,
         )
     except httpx.ConnectError as e:
-        print(f"ERROR: Connection to sandbox at {target_url} failed. Error: {e}")
+        print(f"ERROR: Connection to sandbox at {_without_query(target_url)} failed. Error: {e}")
         raise HTTPException(
             status_code=502, detail=f"Could not connect to the backend sandbox: {sandbox_id}")
     except Exception as e:
-        print(f"An unexpected error occurred for {target_url}: {type(e).__name__}: {e}")
+        print(f"An unexpected error occurred for {_without_query(target_url)}: {type(e).__name__}: {e}")
         traceback.print_exc()
         raise HTTPException(
             status_code=500, detail=f"An internal error occurred in the proxy: {type(e).__name__}: {e}")
@@ -363,7 +367,7 @@ async def proxy_websocket(websocket: WebSocket, full_path: str):
         path += f"?{websocket.url.query}"
     target = f"ws://{target_host}:{port}{path}"
 
-    print(f"WS proxy '{sandbox_id}' -> {target}")
+    print(f"WS proxy '{sandbox_id}' -> {_without_query(target)}")
     await websocket.accept()
 
     # Strip hop-by-hop, WS-handshake, and Origin headers; the websockets

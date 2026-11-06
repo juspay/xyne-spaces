@@ -3,7 +3,6 @@ import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { retryForever } from '@/utils/retry';
 import { installPrismaRetryMiddleware } from './retryMiddleware';
-import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { encryptionExtension } from '@/database/prisma-encryption-extension';
 import { auditExtension } from '@/database/audit-extension';
 import { getEncryptionProvider } from '@/services/encryption/provider';
@@ -63,11 +62,6 @@ export class DatabaseClient {
           },
         },
       });
-
-      // TEMPORARY: UserSession change logging for debugging - remove after issue resolved
-      if (config.logging.logUserSessionChanges) {
-        setupUserSessionLogging(DatabaseClient.instance, true);
-      }
 
       setupEnumTextValidation(DatabaseClient.instance);
       setupMessageMetadataSync(DatabaseClient.instance);

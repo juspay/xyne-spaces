@@ -23,6 +23,8 @@ import {   parseGcpPayload } from './gcpWebhookParser';
 import { parseHubspotPayload } from './hubspotWebhookParser';
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
+
+const loggableParams = ({ secret: _secret, ...params }: Request['params']) => params;
 type IncomingWebhookType = AppIncomingWebhookType;
 type IncomingWebhookAction = AppIncomingWebhookAction;
 type StoredIncomingWebhook = Prisma.AppIncomingWebhookGetPayload<{}>;
@@ -154,7 +156,7 @@ class IncomingWebhookController {
     const paramsResult = IncomingWebhookParamsSchema.safeParse(req.params);
     if (!paramsResult.success) {
       logger.warn('[Incoming-Webhook] Invalid incoming webhook params', {
-        params: req.params,
+        params: loggableParams(req.params),
         issues: paramsResult.error.issues,
         expectedType,
       });
@@ -253,7 +255,7 @@ class IncomingWebhookController {
       await processSlackIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling incoming webhook', {
-        params: req.params,
+        params: loggableParams(req.params),
         error,
       });
       res.status(500).send('rollup_error');
@@ -271,7 +273,7 @@ class IncomingWebhookController {
       await processSentinelIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling SentinelOne webhook', {
-        params: req.params,
+        params: loggableParams(req.params),
         error,
       });
       res.status(500).send('rollup_error');
@@ -302,7 +304,7 @@ class IncomingWebhookController {
       await processAmazonSnsIncoming(context, res, envelope);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Amazon SNS webhook', {
-        params: req.params,
+        params: loggableParams(req.params),
         error,
       });
       res.status(500).send('rollup_error');
@@ -333,7 +335,7 @@ class IncomingWebhookController {
       await processPingdomIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Pingdom webhook', {
-        params: req.params,
+        params: loggableParams(req.params),
         error,
       });
       res.status(500).send('rollup_error');
@@ -365,7 +367,7 @@ class IncomingWebhookController {
       await processGcpIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling GCP Monitoring webhook', {
-        params: req.params,
+        params: loggableParams(req.params),
         error,
       });
       res.status(500).send('rollup_error');
@@ -413,14 +415,14 @@ class IncomingWebhookController {
       } catch (error) {
         // The 200 is already on the wire, so this can only be logged.
         logger.error('[Incoming-Webhook] Error processing HubSpot batch after ack', {
-          params: req.params,
+          params: loggableParams(req.params),
           eventCount: events.length,
           error,
         });
       }
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling HubSpot webhook', {
-        params: req.params,
+        params: loggableParams(req.params),
         error,
       });
       if (!res.headersSent) {
@@ -569,7 +571,7 @@ class IncomingWebhookController {
       const paramsResult = InstalledAppParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
         logger.warn('[Incoming-Webhook] Invalid list webhooks params', {
-          params: req.params,
+          params: loggableParams(req.params),
           issues: paramsResult.error.issues,
         });
         res.status(400).json({ error: 'Validation error', details: paramsResult.error.issues });
@@ -670,7 +672,7 @@ class IncomingWebhookController {
       const paramsResult = WebhookParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
         logger.warn('[Incoming-Webhook] Invalid update webhook params', {
-          params: req.params,
+          params: loggableParams(req.params),
           userId: req.user?.id,
           issues: paramsResult.error.issues,
         });
@@ -734,7 +736,7 @@ class IncomingWebhookController {
       const paramsResult = WebhookParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
         logger.warn('[Incoming-Webhook] Invalid revoke webhook params', {
-          params: req.params,
+          params: loggableParams(req.params),
           userId: req.user?.id,
           issues: paramsResult.error.issues,
         });

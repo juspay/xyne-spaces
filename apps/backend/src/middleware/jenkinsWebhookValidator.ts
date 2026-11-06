@@ -29,12 +29,11 @@ class JenkinsWebhookMiddleware {
 
       const signature = req.headers['x-jenkins-signature'];
       logger.info('[Webhook-Validator] Jenkins webhook received');
-      logger.info('[Webhook-Validator] Signature header:', signature);
+      logger.info('[Webhook-Validator] Signature header present:', !!signature);
       logger.info('[Webhook-Validator] Body type:', typeof req.body);
       logger.info('[Webhook-Validator] Body is Buffer:', req.body instanceof Buffer);
       if (req.body instanceof Buffer) {
         logger.info('[Webhook-Validator] Body length:', req.body.length);
-        logger.info('[Webhook-Validator] Body preview:', req.body.toString('utf8').substring(0, 100));
       }
 
       if (!signature || typeof signature !== 'string') {

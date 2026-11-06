@@ -236,21 +236,12 @@ class FcmPushService {
   }
 
   async registerToken(userId: string, payload: MobilePushRegistration): Promise<void> {
-    const fcmTokenPreview = payload.fcmToken
-      ? `${payload.fcmToken.slice(0, 10)}...${payload.fcmToken.slice(-8)}`
-      : null;
-    const voipTokenPreview = payload.voipToken
-      ? `${payload.voipToken.slice(0, 10)}...${payload.voipToken.slice(-8)}`
-      : null;
-
     logger.info('[FCM] registerToken step=enter', {
       userId,
       platform: payload.platform ?? null,
       deviceId: payload.deviceId ?? null,
       fcmTokenPresent: !!payload.fcmToken,
-      fcmTokenPreview,
       voipTokenPresent: !!payload.voipToken,
-      voipTokenPreview,
     });
 
     if (!payload.fcmToken) {
@@ -264,7 +255,6 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=find_session', {
       userId,
-      fcmTokenPreview,
     });
     const sessionEntry = await db.userSession.findFirst({
       where: { id: payload.sessionId, userId },
@@ -279,8 +269,6 @@ class FcmPushService {
     if (!sessionEntry) {
       logger.warn('[FCM] registerToken step=session_not_found', {
         userId,
-        fcmTokenPreview,
-        voipTokenPreview,
       });
       return;
     }
@@ -293,8 +281,6 @@ class FcmPushService {
         userId,
         sessionStatus: sessionEntry.status,
         refreshTokenExpiry: sessionEntry.refreshTokenExpiry.toISOString(),
-        fcmTokenPreview,
-        voipTokenPreview,
       });
       return;
     }
@@ -309,18 +295,9 @@ class FcmPushService {
       ? this.composeStoredToken(payload.platform, payload.voipToken)
       : null;
 
-    const composedTokenPreview = `${composedToken.slice(0, 10)}...${composedToken.slice(-8)}`;
-    const composedVoipTokenPreview = composedVoipToken
-      ? `${composedVoipToken.slice(0, 10)}...${composedVoipToken.slice(-8)}`
-      : null;
-
     logger.info('[FCM] registerToken step=compose_tokens', {
       userId,
       platform: payload.platform ?? null,
-      fcmTokenPreview,
-      composedTokenPreview,
-      voipTokenPreview,
-      composedVoipTokenPreview,
     });
 
     const nextDeviceId = payload.deviceId ?? sessionEntry.deviceId ?? null;
@@ -343,8 +320,6 @@ class FcmPushService {
     logger.info('[FCM] registerToken step=update_target_session', {
       userId,
       nextDeviceId,
-      composedTokenPreview,
-      composedVoipTokenPreview,
     });
     await db.userSession.update({
       where: { id: sessionEntry.id },
@@ -362,7 +337,6 @@ class FcmPushService {
     if (composedVoipToken) {
       logger.info('[FCM] registerToken step=add_duplicate_condition_voip', {
         userId,
-        composedVoipTokenPreview,
       });
       duplicateConditions.push({ voipToken: composedVoipToken });
     }
@@ -371,8 +345,6 @@ class FcmPushService {
       userId,
       duplicateConditionCount: duplicateConditions.length,
       nextDeviceId,
-      composedTokenPreview,
-      composedVoipTokenPreview,
     });
     const duplicateCleanupResult = await db.userSession.updateMany({
       where: {
@@ -392,8 +364,6 @@ class FcmPushService {
       nextDeviceId,
       duplicateConditionCount: duplicateConditions.length,
       duplicateCleanupCount: duplicateCleanupResult.count,
-      composedTokenPreview,
-      composedVoipTokenPreview,
     });
   }
 
@@ -633,7 +603,6 @@ class FcmPushService {
         type: payload.type,
         platform: platform ?? 'unknown',
         appVersion,
-        tokenSuffix: token.slice(-6),
         dataBytes,
         totalMessageBytes: Buffer.byteLength(JSON.stringify(requestBody), 'utf8'),
         fcmDataLimitBytes: FCM_DATA_HARD_LIMIT,

@@ -194,7 +194,10 @@ router.post(
         // and skip — the user must revoke from account.microsoft.com to
         // invalidate the refresh token outside our DB.
       } catch (err) {
-        logger.warn(`${TAG} Best-effort token revoke failed`, err);
+        logger.warn(
+          `${TAG} Best-effort token revoke failed`,
+          err instanceof SyntaxError ? { error: 'Stored credentials are not valid JSON' } : err,
+        );
       }
 
       await db.externalSource.update({

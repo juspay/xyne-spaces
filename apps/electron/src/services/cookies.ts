@@ -101,7 +101,7 @@ export async function setCookiesFromHeaders(
       }
     }
 
-    log.info(`Setting cookie: ${name}=${value}, Max-Age=${maxAge}, Expires=${expires}`);
+    log.info(`Setting cookie: ${name}, Max-Age=${maxAge}, Expires=${expires}`);
     // Calculate expirationDate
     let expirationDate: number | undefined;
 

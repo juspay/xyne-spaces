@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '@/utils/logger';
-import { redactSensitiveUrl } from '@/utils/redact';
+import { logUrl } from '@/utils/logUrl';
 import { ApiResponse } from '@/types/express';
 import type { ZodError } from 'zod';
 
@@ -45,13 +45,15 @@ export const errorHandler = (
     error = new AppError(message, statusCode);
   }
   const appError = error as AppError;
+  // Body-parser error messages and stacks quote the raw request body.
+  const isBodyParseError = err instanceof SyntaxError && 'body' in (err as object);
   logger.error({
-    message: appError.message,
+    message: isBodyParseError ? 'Malformed JSON request body' : appError.message,
     statusCode: appError.statusCode,
-    error: err,
-    stack: originalStack,
-    wrapperStack: err instanceof AppError ? undefined : appError.stack,
-    url: redactSensitiveUrl(req.url),
+    error: isBodyParseError ? undefined : err,
+    stack: isBodyParseError ? undefined : originalStack,
+    wrapperStack: isBodyParseError || err instanceof AppError ? undefined : appError.stack,
+    url: logUrl(req.originalUrl),
     method: req.method,
     ip: req.ip,
     userAgent: req.get('User-Agent'),
@@ -69,7 +71,7 @@ export const errorHandler = (
 export const notFoundHandler = (req: Request, res: Response): void => {
   const response: ApiResponse = {
     success: false,
-    error: `Route ${redactSensitiveUrl(req.originalUrl)} not found`,
+    error: `Route ${req.originalUrl} not found`,
     timestamp: new Date().toISOString(),
   };
 

@@ -250,7 +250,7 @@ export class EmailAuthController {
           },
         );
 
-        logger.info(`${tag()} Email login succeeded (outcome=pending_invitation, invitationId=${pendingInvitation.invitationId})`);
+        logger.info(`${tag()} Email login succeeded (outcome=pending_invitation)`);
         res.status(200).json({
           success: true,
           invitationPending: true,

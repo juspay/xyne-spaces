@@ -29,7 +29,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 import * as net from "node:net";
 
-import { createLogger } from "./logger.js";
+import { createLogger, redactUrlQuery } from "./logger.js";
 const log = createLogger("copilot-proxy");
 
 const TARGET_HOST = "api.githubcopilot.com";
@@ -82,7 +82,7 @@ async function startCopilotProxy(githubToken: string): Promise<{
     req.on("end", () => {
       const rawBody = Buffer.concat(chunks);
       const xInitiator = getXInitiator(rawBody);
-      log.info(`[copilot-proxy] ${req.method} ${req.url} requestSize=${rawBody.length} bytes (x-initiator=${xInitiator})`);
+      log.info(`[copilot-proxy] ${req.method} ${redactUrlQuery(req.url ?? "")} requestSize=${rawBody.length} bytes (x-initiator=${xInitiator})`);
 
       const outHeaders: Record<string, string | string[]> = {
         ...(req.headers as Record<string, string | string[]>),
@@ -107,7 +107,7 @@ async function startCopilotProxy(githubToken: string): Promise<{
             proxyRes.on("end", () => {
               const errBody = Buffer.concat(errChunks);
               const status = proxyRes.statusCode ?? 502;
-              log.error(`[copilot-proxy] ${req.method} ${req.url} → ${status} body=${errBody.toString().slice(0, 500)}`);
+              log.error(`[copilot-proxy] ${req.method} ${redactUrlQuery(req.url ?? "")} → ${status} body=${errBody.toString().slice(0, 500)}`);
               // Copilot returns 429 with an opaque body ("quota exceeded") when
               // the user's subscription is out of quota. The downstream
               // quota-fallback (run.ts) classifies by string-matching the SDK
@@ -138,7 +138,7 @@ async function startCopilotProxy(githubToken: string): Promise<{
               res.end(errBody);
             });
           } else {
-            log.info(`[copilot-proxy] ${req.method} ${req.url} → ${proxyRes.statusCode} (x-initiator=${xInitiator})`);
+            log.info(`[copilot-proxy] ${req.method} ${redactUrlQuery(req.url ?? "")} → ${proxyRes.statusCode} (x-initiator=${xInitiator})`);
             res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
             proxyRes.pipe(res, { end: true });
           }

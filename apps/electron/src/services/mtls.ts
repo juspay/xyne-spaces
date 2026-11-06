@@ -6,6 +6,7 @@ import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import { config } from '../app/config';
+import { stripUrlQuery } from '../utils/log-url';
 
 export function normalizeCertificateRequestHostname(target: string): string | null {
     const value = target.trim();
@@ -68,19 +69,19 @@ export async function setupMTLS() {
     // Certificate Selection Handler for mTLS (app-level)
     // This handles client certificate selection for requests from webContents
     app.on('certificate-error', (_event, _webContents, url, error, _certificate, callback) => {
-        Logger.logError(EnrollmentEvent.SSL_ERROR, error, { url });
+        Logger.logError(EnrollmentEvent.SSL_ERROR, error, { url: stripUrlQuery(url) });
         callback(false);
     });
 
     app.on('select-client-certificate', (event, _webContents, url, list, callback) => {
-        log.info(`[mTLS] Server requested client certificate for ${url}`);
+        log.info(`[mTLS] Server requested client certificate for ${stripUrlQuery(url)}`);
 
         // Only present the device identity certificate to allowlisted Xyne hosts.
         const allowlist = allowedMtlsHosts();
         const requestHost = normalizeCertificateRequestHostname(url);
         if (!requestHost || !allowlist.has(requestHost)) {
-            log.warn(`[mTLS] Refusing client certificate to non-allowlisted host: ${requestHost || url}`);
-            Logger.warn(EnrollmentEvent.CERTIFICATE_INVALID, { url, error: 'host_not_allowlisted' });
+            log.warn(`[mTLS] Refusing client certificate to non-allowlisted host: ${requestHost || stripUrlQuery(url)}`);
+            Logger.warn(EnrollmentEvent.CERTIFICATE_INVALID, { url: stripUrlQuery(url), error: 'host_not_allowlisted' });
             event.preventDefault();
             callback(undefined); // present NO certificate to foreign hosts
             return;

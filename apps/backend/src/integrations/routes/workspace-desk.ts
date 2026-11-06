@@ -127,7 +127,10 @@ router.post(
         }
         // Microsoft delegated tokens: no provider revoke endpoint.
       } catch (err) {
-        logger.warn(`${TAG} Best-effort token revoke failed`, err);
+        logger.warn(
+          `${TAG} Best-effort token revoke failed`,
+          err instanceof SyntaxError ? { error: 'Stored credentials are not valid JSON' } : err,
+        );
       }
 
       await db.externalSource.update({
