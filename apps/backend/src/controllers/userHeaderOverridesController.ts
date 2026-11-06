@@ -10,16 +10,11 @@ type ClientEvent = (typeof CLIENT_EVENTS)[number];
 const MAX_TOTAL_SIZE = 4096;
 const DEFAULT_LOADING_SECONDS = 3;
 
-const BLOCKED_HEADERS = new Set([
-  'authorization',
-  'cookie',
-  'host',
-  'x-workspace-id',
-  'x-user-id',
-  'x-user-name',
-  'x-user-email',
-  'x-session-id',
-]);
+// Clients apply these as request headers and as cookies on the app's domain, so only the
+// routing override the edge and CAC act on is accepted: x-route-env picks a dashboard-edge
+// lane and the CAC environment.
+const ALLOWED_HEADERS = new Set(['x-route-env']);
+const ALLOWED_VALUE = /^[a-z0-9-]{1,32}$/;
 
 function validateUserIds(userIds: unknown): string | null {
   if (!Array.isArray(userIds) || userIds.length === 0 || !userIds.every(id => typeof id === 'string')) {
@@ -54,8 +49,11 @@ function validateHeaders(headers: unknown): { normalized?: Record<string, string
       return { error: `Value for header ${rawName} must be a string` };
     }
     const name = rawName.toLowerCase();
-    if (BLOCKED_HEADERS.has(name)) {
+    if (!ALLOWED_HEADERS.has(name)) {
       return { error: `Header not allowed: ${rawName}` };
+    }
+    if (!ALLOWED_VALUE.test(value)) {
+      return { error: `Value for header ${rawName} must match ${ALLOWED_VALUE}` };
     }
     totalSize += name.length + value.length;
     normalized[name] = value;
@@ -239,7 +237,13 @@ export const getMyHeaderOverrides = async (req: Request, res: Response): Promise
       res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    const headers = await redisService.getUserHeaderOverrides(userId);
+    const stored = await redisService.getUserHeaderOverrides(userId);
+    // Overrides saved before the allowlist existed are not handed back.
+    const headers = Object.fromEntries(
+      Object.entries(stored ?? {}).filter(
+        ([name, value]) => ALLOWED_HEADERS.has(name.toLowerCase()) && typeof value === 'string' && ALLOWED_VALUE.test(value),
+      ),
+    );
     res.json(headers);
   } catch (error) {
     logger.error('[CLIENT-EVENT] Failed to get own header overrides:', error);

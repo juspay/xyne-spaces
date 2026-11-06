@@ -1,4 +1,5 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
+import { toSafeAppUrl } from '../../utils/safeNavUrl';
 import React, { useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -139,8 +140,10 @@ export const SosAlertBanner: React.FC = () => {
   // workspace flips the session cookie, so it needs a hard reload.
   const view = useCallback(
     async (alert: SosAlert): Promise<void> => {
-      const resolvedUrl =
-        alert.actionUrl || (alert.workspaceId ? `/${alert.workspaceId}/chat` : '/chat');
+      const resolvedUrl = toSafeAppUrl(
+        alert.actionUrl,
+        alert.workspaceId ? `/${alert.workspaceId}/chat` : '/chat',
+      );
 
       if (alert.workspaceId && alert.workspaceId !== activeWorkspaceId) {
         if (!(await confirmInterrupt('workspaceSwitch'))) return;

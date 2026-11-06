@@ -229,16 +229,16 @@ const CsvViewer = ({ text }: { text: string }): ReactElement => {
 };
 
 const IosPdfViewer = ({ uri }: { uri: string }): ReactElement => {
-  const readAccessDir = uri.slice(0, uri.lastIndexOf('/') + 1);
-
   return (
     <WebView
       // Keep the transport whitelist broad because react-native-webview opens
       // excluded URLs through the OS before invoking the policy callback.
       originWhitelist={['*']}
       source={{ uri }}
+      // PDFs render natively; no script runs, and only this file is readable.
+      javaScriptEnabled={false}
       allowFileAccess
-      allowingReadAccessToURL={readAccessDir}
+      allowingReadAccessToURL={uri}
       onShouldStartLoadWithRequest={({ url }) => isAllowedPdfNavigation(url, uri)}
       style={{ flex: 1, backgroundColor: '#111315' }}
     />

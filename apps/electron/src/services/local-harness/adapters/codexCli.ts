@@ -68,7 +68,9 @@ export class CodexCliAdapter implements HarnessAdapter {
 
     const writable = !!((envelope.localSandbox && !envelope.localSandbox.container) || envelope.workspace);
     const attached = await buildAttachmentPrompt(ctx.attachmentPaths ?? []);
-    const shellEnabled = writable || attached.needsFileTools;
+    // Codex's read-only sandbox does not confine reads, so a shell in a read-only run could read
+    // the whole disk. Non-inlineable attachments are reported as unreadable instead.
+    const shellEnabled = writable;
 
     const prompt = [
       envelope.context ? `<context>\n${envelope.context}\n</context>` : '',

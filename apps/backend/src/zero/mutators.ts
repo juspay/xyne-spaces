@@ -1,5 +1,6 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
+import { toDisplayFilename } from '@/utils/filename';
 import { buildAutomationMetadata, parseAutomationMetadata } from '../automations/types/workflow-adapter';
 import {
   ChannelRole,
@@ -12281,7 +12282,7 @@ export function createMutators(
           }
           await tx.mutate.message_attachments.update({
             id: args.itemId,
-            originalFilename: withKeptExtension(attachment.originalFilename, args.name),
+            originalFilename: toDisplayFilename(withKeptExtension(attachment.originalFilename, args.name)),
           });
         },
       ),

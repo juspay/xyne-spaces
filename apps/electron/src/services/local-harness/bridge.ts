@@ -1,5 +1,6 @@
 import { promises as fsp } from 'fs';
-import { basename, dirname, join, resolve, sep } from 'path';
+import { basename, dirname, join } from 'path';
+import { safeChildPath, safePathSegment } from '../../utils/safePath';
 import { hostname } from 'os';
 import { app, net, safeStorage } from 'electron';
 import Store from 'electron-store';
@@ -749,10 +750,10 @@ export class LocalHarnessBridge {
         // Both halves of the name come off the wire, so they are reduced to a
         // safe charset and the result is then proved to resolve inside `dir`
         // before anything is written.
-        const safeName = basename(attachment.fileName).replace(/[^a-zA-Z0-9._-]/g, '_') || 'file';
-        const safeId = basename(attachment.id).replace(/[^a-zA-Z0-9._-]/g, '_') || 'id';
-        const target = resolve(dir, `${safeId}-${safeName}`);
-        if (target !== join(dir, `${safeId}-${safeName}`) || !target.startsWith(`${dir}${sep}`)) {
+        const safeName = safePathSegment(attachment.fileName, 'file').replace(/ /g, '_');
+        const safeId = safePathSegment(attachment.id, 'id').replace(/ /g, '_');
+        const target = safeChildPath(dir, `${safeId}-${safeName}`);
+        if (!target) {
           log.warn(`[LocalHarness] attachment ${attachment.id} resolved outside the run dir`);
           continue;
         }

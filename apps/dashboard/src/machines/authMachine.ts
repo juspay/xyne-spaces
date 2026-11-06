@@ -16,6 +16,7 @@ import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
 import { dropAllDatabases } from '@rocicorp/zero';
 import { getPendingSdkSso, takePendingSdkSso } from '../utils/pendingSdkSso';
 import { markOrgCreator } from '../utils/onboardingOrgCreator';
+import { clearDynamicHeaders } from '../services/clients/dynamicHeaders';
 
 export interface User {
   id: string;
@@ -1099,6 +1100,7 @@ export const authMachine = createMachine(
 
         await dropAllDatabases();
         await indexedDBService.dropAllUserDatabases();
+        clearDynamicHeaders();
       }),
       processOAuthCallback: fromPromise(async () => {
         const urlParams = new URLSearchParams(window.location.search);

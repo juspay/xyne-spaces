@@ -5,10 +5,18 @@ const STORAGE_KEY = 'xyne_dynamic_headers';
 
 export const DYNAMIC_HEADERS_CHANGED_EVENT = 'xyne:dynamic-headers-changed';
 
+// The only override the edge and backend act on: x-route-env picks a dashboard-edge lane
+// (header or cookie) and the CAC environment. Anything else the server sends is ignored, so
+// a pushed map can never replace identity headers or plant other cookies.
+const ALLOWED_HEADERS = new Set(['x-route-env']);
+const ALLOWED_VALUE = /^[a-z0-9-]{1,32}$/;
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+
 function sanitize(headers: Record<string, unknown> | null | undefined): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const [name, value] of Object.entries(headers ?? {})) {
-    if (typeof value === 'string') {
+  for (const [rawName, value] of Object.entries(headers ?? {})) {
+    const name = rawName.toLowerCase();
+    if (ALLOWED_HEADERS.has(name) && typeof value === 'string' && ALLOWED_VALUE.test(value)) {
       result[name] = value;
     }
   }
@@ -63,8 +71,9 @@ function commonCookieDomain(): string | null {
     if (!rest.every(labels => labels[i] === first[i])) break;
     common.push(first[i]);
   }
-  if (common.length === 0) return null;
-  if (common.length === 1 && common[0] !== 'localhost') return null;
+  if (common.length === 1 && common[0] === 'localhost') return 'localhost';
+  // Never a bare registrable domain (e.g. juspay.net): the cookie would reach every sibling app.
+  if (common.length < 3) return null;
   return common.reverse().join('.');
 }
 
@@ -84,7 +93,7 @@ function syncCookies(previous: Record<string, string>, next: Record<string, stri
     }
   }
   for (const [name, value] of Object.entries(next)) {
-    writeCookie(name, value, 60 * 60 * 24 * 365);
+    writeCookie(name, value, COOKIE_MAX_AGE_SECONDS);
   }
 }
 
@@ -140,5 +149,30 @@ export async function performHardReload(): Promise<void> {
   window.location.reload();
 }
 
+/** Drops every dynamic header and its cookie. Called on logout and session clear. */
+export function clearDynamicHeaders(): void {
+  const previous = getDynamicHeaders();
+  syncAxiosDefaults(previous, {});
+  syncCookies(previous, {});
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+// Earlier builds applied any server-sent name and kept it as a 1-year cookie; expire those.
+function expireLegacyCookies(): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const stored = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    for (const name of Object.keys(stored)) {
+      if (!ALLOWED_HEADERS.has(name.toLowerCase()) && /^[A-Za-z0-9_-]{1,64}$/.test(name)) {
+        writeCookie(name, '', 0);
+      }
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(getDynamicHeaders()));
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+expireLegacyCookies();
 syncAxiosDefaults({}, getDynamicHeaders());
 syncCookies({}, getDynamicHeaders());

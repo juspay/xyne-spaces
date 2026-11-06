@@ -10,7 +10,7 @@ import {
   safeRecordMetric,
   clearAuthTokenTotal,
 } from '../otel';
-import { getDynamicHeaders } from './dynamicHeaders';
+import { clearDynamicHeaders, getDynamicHeaders } from './dynamicHeaders';
 import { stateMachineActor } from '../../machines/stateMachine';
 import {
   encryptionRequestInterceptor,
@@ -372,6 +372,7 @@ export function clearAuthTokens(): void {
     document.cookie = 'user_name=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
     document.cookie = 'user_data=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
   }
+  clearDynamicHeaders();
   logger.info(Logger.Event.CLEAR_AUTH_TOKEN_CALLED);
   // The composer's saved related-context chips quote other people's messages; a
   // session that ends this way (a 401, say) must not leave them behind.

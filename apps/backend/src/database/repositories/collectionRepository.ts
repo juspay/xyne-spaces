@@ -1,3 +1,4 @@
+import { toDisplayFilename } from '@/utils/filename';
 import { PrismaClient, Collection, CollectionItem, MessageAttachment } from '@prisma/client';
 import { IngestionStatus, CollectionRole, AttachmentEntityType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
@@ -256,7 +257,7 @@ export class CollectionRepository {
                 entityId: item.id,
                 workspaceId: data.workspaceId,
                 storageProvider: 'GCS',
-                originalFilename: data.name,
+                originalFilename: toDisplayFilename(data.name),
                 mimetype: data.mimeType,
                 size: data.fileSize,
                 url: data.storageKey,

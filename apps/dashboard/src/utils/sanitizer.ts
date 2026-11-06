@@ -131,25 +131,23 @@ const sanitizeAttributes = (el: HTMLElement): void => {
   });
 };
 
+const DROPPED_TAGS = new Set(['script', 'style', 'template', 'iframe', 'object', 'embed']);
+
+// Works on a snapshot of the elements: unwrapping a node while walking a live TreeWalker
+// ended the walk and left every later element unsanitised.
 export const sanitizeDomTree = (root: HTMLElement): void => {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-  let node = walker.nextNode() as Element | null;
-
-  while (node) {
+  for (const node of Array.from(root.querySelectorAll('*'))) {
+    if (!root.contains(node)) continue;
     const tag = node.tagName.toLowerCase();
-
-    if (!ALLOWED_TAGS.has(tag)) {
-      const parent = node.parentNode;
-      if (parent) {
-        while (node.firstChild) parent.insertBefore(node.firstChild, node);
-        parent.removeChild(node);
-      }
-      node = walker.nextNode() as Element | null;
+    if (DROPPED_TAGS.has(tag)) {
+      node.remove();
       continue;
     }
-
+    if (!ALLOWED_TAGS.has(tag)) {
+      node.replaceWith(...Array.from(node.childNodes));
+      continue;
+    }
     sanitizeAttributes(node as HTMLElement);
-    node = walker.nextNode() as Element | null;
   }
 };
 

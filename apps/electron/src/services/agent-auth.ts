@@ -7,6 +7,7 @@ import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 import * as fs from 'fs';
 import * as path from 'path';
+import { safeChildPath, safePathSegment } from '../utils/safePath';
 import { resolvePeerProcess, describePeer, PeerProcess } from './peer-process';
 import { showAgentConsentWindow } from './agent-consent-window';
 
@@ -1072,7 +1073,11 @@ class AgentAuthService {
       }
 
       // 4. Create download directory on desktop
-      const downloadDir = path.join(app.getPath('desktop'), 'xyne-attachments', actualMessageId);
+      const downloadDir = path.join(
+        app.getPath('desktop'),
+        'xyne-attachments',
+        safePathSegment(actualMessageId, 'message'),
+      );
       await fs.promises.mkdir(downloadDir, { recursive: true });
       log.info(`[AgentAuth] Created download directory: ${downloadDir}`);
 
@@ -1080,11 +1085,17 @@ class AgentAuthService {
       const downloadedFiles: Array<{ filename: string; path: string; size: number }> = [];
       for (const attachment of attachments) {
         try {
-          const filename = attachment.originalFilename || `attachment_${attachment.id}`;
-          const filePath = path.join(downloadDir, filename);
+          // The stored filename comes from other users and external senders, so it is reduced
+          // to a single safe segment and must resolve inside downloadDir.
+          const filename = safePathSegment(attachment.originalFilename, `attachment_${attachment.id}`);
+          const filePath = safeChildPath(downloadDir, filename);
+          if (!filePath) {
+            log.warn(`[AgentAuth] Skipping attachment ${attachment.id}: name resolves outside the download folder`);
+            continue;
+          }
 
           // Download attachment using the attachment download endpoint
-          const downloadUrl = `${config.BACKEND_URL}/api/attachments/${attachment.id}/download`;
+          const downloadUrl = `${config.BACKEND_URL}/api/attachments/${encodeURIComponent(String(attachment.id))}/download`;
           log.info(`[AgentAuth] Downloading attachment: ${filename} from ${downloadUrl}`);
 
           await this.downloadAttachmentToFile(downloadUrl, filePath, accessToken);

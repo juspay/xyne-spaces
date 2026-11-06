@@ -40,3 +40,22 @@ export function decodeUploadFilename(originalname: string | undefined): string {
   }
   return repairMojibakeFilename(originalname);
 }
+
+/**
+ * A user-visible filename that is safe to store and to reuse as a path segment: only the
+ * last path component is kept, control characters are removed and leading dots stripped.
+ * Unicode and spaces are kept, since the name is shown to people.
+ */
+export function toDisplayFilename(raw: string | null | undefined, fallback = 'file'): string {
+  const lastSegment = String(raw ?? '').split(/[/\\]/).pop() ?? '';
+  const cleaned = Array.from(lastSegment)
+    .filter(ch => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join('')
+    .replace(/^[.\s]+/, '')
+    .trim()
+    .slice(0, 255);
+  return cleaned || fallback;
+}

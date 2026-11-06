@@ -10,14 +10,14 @@ import { Button } from '../ui/Button';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { useSummaryCache } from '../../hooks/useSummaryQuery';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
-import { sanitizeHtmlString } from '../../utils/sanitizer';
+import DOMPurify from 'dompurify';
 import { ChannelScopeType } from '@xyne/shared';
 
-// AI keypoints are markdown; convert **bold** → <strong>, then run through the
-// shared allowlist sanitizer so any HTML smuggled into the (prompt-injection-
+// AI keypoints are markdown; convert **bold** → <strong>, then run through
+// DOMPurify with only <strong> allowed, so any HTML smuggled into the (prompt-injection-
 // reachable) summary can't run via the dangerouslySetInnerHTML below.
 export const sanitizeBoldMarkdown = (text: string): string =>
-  sanitizeHtmlString(text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'));
+  DOMPurify.sanitize(text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'), { ALLOWED_TAGS: ['strong'] });
 
 // ============================================================================
 // Type Definitions

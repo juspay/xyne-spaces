@@ -1,3 +1,4 @@
+import { toDisplayFilename } from '@/utils/filename';
 import { storageService, getStorageService } from './storage/index';
 import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
@@ -250,7 +251,8 @@ export class ExternalAttachmentService {
       scopeId = 'unknown'
     } = options;
 
-    const { fileName, fileUrl, mimeType: expectedMimeType, size: expectedSize } = attachment;
+    const { fileUrl, mimeType: expectedMimeType, size: expectedSize } = attachment;
+    const fileName = toDisplayFilename(attachment.fileName, 'attachment');
 
     // Bytes already in our storage (self-serve migration): stream straight to the final
     // location — no fetch/token, never lands whole in the pod's heap.

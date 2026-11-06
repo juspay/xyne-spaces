@@ -6,6 +6,7 @@ import { ArrowRight, Building2, Loader2, LogOut, Users } from 'lucide-react';
 import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import type { Workspace } from '../../machines/authMachine';
+import { clearDynamicHeaders } from '../../services/clients/dynamicHeaders';
 // import { WorkspaceType } from '@xyne/shared';
 
 interface WorkspaceWithMeta extends Workspace {
@@ -156,6 +157,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     Cookies.remove('user_name');
     Cookies.remove('user_email');
     Cookies.remove('user_session_id');
+    clearDynamicHeaders();
     localStorage.clear();
     logout();
     window.location.href = '/auth';

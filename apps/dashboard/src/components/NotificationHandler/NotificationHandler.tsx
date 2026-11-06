@@ -1,4 +1,5 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
+import { toSafeAppUrl } from '../../utils/safeNavUrl';
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import axios from 'axios';
 import { websocketService } from '../../services/clients/socketClient';
@@ -150,7 +151,10 @@ export const NotificationHandler: React.FC = () => {
   // Same-workspace clicks stay in the SPA.
   const handleNotificationClick = useCallback(
     async (actionUrl: string | undefined, targetWorkspaceId: string | undefined): Promise<void> => {
-      const resolvedUrl = actionUrl || (targetWorkspaceId ? `/${targetWorkspaceId}/chat` : '/chat');
+      const resolvedUrl = toSafeAppUrl(
+        actionUrl,
+        targetWorkspaceId ? `/${targetWorkspaceId}/chat` : '/chat',
+      );
       const currentWorkspaceId = activeWorkspaceIdRef.current;
 
       if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {
