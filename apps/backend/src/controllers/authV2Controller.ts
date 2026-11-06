@@ -235,8 +235,21 @@ export class AuthV2Controller {
       const isNy = req.query.isNy === 'true';
       const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
-      const codeVerifier = pkceServiceV2.generateCodeVerifier();
-      const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
+      // Electron holds its own verifier and sends only the challenge; the server stores none.
+      let codeVerifier: string | undefined;
+      let codeChallenge: string;
+      if (platform === 'electron') {
+        const clientChallenge = req.query.code_challenge;
+        if (!pkceServiceV2.isValidCodeChallenge(clientChallenge)) {
+          logger.warn(`${authTag(flowId)} Electron login without a valid code_challenge - rejecting`);
+          res.status(400).json({ error: 'invalid_request', message: 'Electron login requires a code_challenge' });
+          return;
+        }
+        codeChallenge = clientChallenge;
+      } else {
+        codeVerifier = pkceServiceV2.generateCodeVerifier();
+        codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
+      }
 
       let validatedRedirectTo: string | undefined;
       const redirectToParam = req.query['redirect_to'] as string | undefined;
@@ -270,7 +283,7 @@ export class AuthV2Controller {
         flowId,
       );
 
-      await pkceServiceV2.storeVerifier(state, codeVerifier);
+      if (codeVerifier) await pkceServiceV2.storeVerifier(state, codeVerifier);
 
       const redirectUri = this.getGoogleRedirectUri(req);
 
@@ -757,12 +770,12 @@ export class AuthV2Controller {
         return;
       }
 
-      const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state);
-      if (!codeVerifier) {
-        logger.error(`${tag()} PKCE verifier not found`);
+      const codeVerifier: unknown = req.body?.codeVerifier;
+      if (!stateData.codeChallenge || !pkceServiceV2.matchesChallenge(codeVerifier, stateData.codeChallenge)) {
+        logger.error(`${tag()} PKCE verifier missing or does not match the login's code_challenge`);
         res.status(401).json({
           error: 'PKCE verification failed',
-          message: 'Code verifier not found or expired',
+          message: 'Code verifier missing or invalid',
         });
         return;
       }

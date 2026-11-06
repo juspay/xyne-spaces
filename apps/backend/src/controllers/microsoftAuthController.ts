@@ -172,8 +172,25 @@ export class MicrosoftAuthController {
         const platform: 'electron' | 'web' = platformQuery === 'electron' ? 'electron' : 'web';
         logger.info(`${tag()} Platform detected: ${platform}`);
 
-        const codeVerifier = pkceServiceV2.generateCodeVerifier();
-        const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
+        // Electron holds its own verifier and sends only the challenge; the server stores none.
+        let codeVerifier: string | undefined;
+        let codeChallenge: string;
+        if (platform === 'electron') {
+          const clientChallenge = req.query.code_challenge;
+          if (!pkceServiceV2.isValidCodeChallenge(clientChallenge)) {
+            logger.warn(`${tag()} Electron login without a valid code_challenge - rejecting`);
+            res.status(400).json({
+              success: false,
+              error: 'invalid_request',
+              message: 'Electron login requires a code_challenge',
+            });
+            return;
+          }
+          codeChallenge = clientChallenge;
+        } else {
+          codeVerifier = pkceServiceV2.generateCodeVerifier();
+          codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
+        }
 
         let validatedRedirectTo: string | undefined;
         const redirectToParam = req.query['redirect_to'] as string | undefined;
@@ -209,7 +226,7 @@ export class MicrosoftAuthController {
           flowId,
         );
 
-        await pkceServiceV2.storeVerifier(state, codeVerifier);
+        if (codeVerifier) await pkceServiceV2.storeVerifier(state, codeVerifier);
 
         // The callback echoes this state back via the HttpOnly cookie. sameSite=lax lets the
         // cookie ride Microsoft's top-level callback redirect. Mirrors the Google flow; only
@@ -776,9 +793,9 @@ export class MicrosoftAuthController {
         return;
       }
 
-      const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state);
-      if (!codeVerifier) {
-        logger.error(`${tag()} PKCE verifier not found`);
+      const codeVerifier: unknown = req.body?.codeVerifier;
+      if (!stateData.codeChallenge || !pkceServiceV2.matchesChallenge(codeVerifier, stateData.codeChallenge)) {
+        logger.error(`${tag()} PKCE verifier missing or does not match the login's code_challenge`);
         res.status(401).json({
           success: false,
           error: 'pkce_failed',

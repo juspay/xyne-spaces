@@ -16,6 +16,19 @@ class PKCEService {
       .digest('base64url');
   }
 
+  /** RFC 7636 S256 challenge: 43 base64url characters. */
+  isValidCodeChallenge(challenge: unknown): challenge is string {
+    return typeof challenge === 'string' && /^[A-Za-z0-9_-]{43}$/.test(challenge);
+  }
+
+  /** True when a client-held RFC 7636 verifier hashes to the challenge stored with the OAuth state. */
+  matchesChallenge(verifier: unknown, challenge: string): verifier is string {
+    if (typeof verifier !== 'string' || !/^[A-Za-z0-9\-._~]{43,128}$/.test(verifier)) return false;
+    const computed = Buffer.from(this.generateCodeChallenge(verifier));
+    const expected = Buffer.from(challenge);
+    return computed.length === expected.length && crypto.timingSafeEqual(computed, expected);
+  }
+
   async storeVerifier(state: string, codeVerifier: string): Promise<void> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
