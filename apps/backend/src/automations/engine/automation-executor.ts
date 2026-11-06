@@ -307,7 +307,10 @@ export class AutomationExecutor {
     );
 
     const triggerChannelId = triggerChannelIdOf(hydratedTriggerData);
-    if (triggerChannelId && !(await authorCanSeeChannel(triggerChannelId, metadata.createdById))) {
+    if (
+      triggerChannelId &&
+      !(await authorCanSeeChannel(triggerChannelId, metadata.createdById, workflow.workspaceId))
+    ) {
       await this.prisma.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.SKIPPED },

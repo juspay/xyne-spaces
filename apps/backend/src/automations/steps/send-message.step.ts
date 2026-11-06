@@ -242,7 +242,7 @@ export class SendMessageStep extends BaseActionStep<
           `[SendMessageStep] Channel ${channelId} not found in workspace ${workspaceId}`
         );
       }
-      if (!(await authorCanSeeChannel(channelId, context.automation.createdById))) {
+      if (!(await authorCanSeeChannel(channelId, context.automation.createdById, workspaceId))) {
         throw new Error(
           `[SendMessageStep] Channel ${channelId} is private and the automation author is not a participant`
         );

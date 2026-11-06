@@ -77,7 +77,13 @@ export class ResolveConversationStep extends BaseActionStep<
     if (!conversation || conversation.workspaceId !== context.automation.workspaceId) {
       throw new Error(`[RESOLVE_CONVERSATION] conversation ${conversationId} not found in this workspace`);
     }
-    if (!(await authorCanSeeChannel(conversation.channelId, context.automation.createdById))) {
+    if (
+      !(await authorCanSeeChannel(
+        conversation.channelId,
+        context.automation.createdById,
+        context.automation.workspaceId,
+      ))
+    ) {
       throw new Error(`[RESOLVE_CONVERSATION] conversation ${conversationId} is in a channel the automation author cannot see`);
     }
 

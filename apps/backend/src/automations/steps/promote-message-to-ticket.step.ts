@@ -55,8 +55,10 @@ export class PromoteMessageToTicketStep extends BaseActionStep<
     context: AutomationContext,
   ): Promise<PromoteMessageToTicketOutput> {
     const createdBy = context.automation.createdById;
-    const rawTitle = config.title as string;
-    const title = extractPlainTextFromHtml(rawTitle).trim() || rawTitle;
+    const title = extractPlainTextFromHtml(config.title as string).trim();
+    if (!title) {
+      throw new Error('[PROMOTE_MESSAGE_TO_TICKET] Title must contain text');
+    }
     const description = sanitizeMessageContent((config.description as string | undefined) ?? title);
 
     // The channel is derived from the source conversation by the controller.

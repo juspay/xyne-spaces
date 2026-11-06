@@ -235,6 +235,9 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
         'workflows',
       );
     }
+    if (parseAutomationMetadata(existing.metadata).createdById !== this.ctx.userID) {
+      await this.requireAutomationsAdmin(tx);
+    }
   }
 
   async canUpsert(

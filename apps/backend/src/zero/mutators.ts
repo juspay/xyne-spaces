@@ -18650,9 +18650,15 @@ export function createMutators(
               `Automation "${id}" is ${existing.status}; only LIVE rows can be disabled.`,
             );
           }
+          // adminDisabled must commit with the status flip, else a non-admin can re-activate
+          // before (or after a failure of) the async toggleLive below.
           await tx.mutate.workflows.update({
             id,
             status: 'DISABLED',
+            metadata: buildAutomationMetadata({
+              ...parseAutomationMetadata(existing.metadata),
+              adminDisabled: true,
+            }),
             updatedAt: timestamp,
           });
           logger.info(`[Mutator] automations.disable OPTIMISTIC id=${id} status=DISABLED`);

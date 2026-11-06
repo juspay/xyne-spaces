@@ -17,9 +17,13 @@ export async function isActiveWorkspaceAuthor(authorId: string, workspaceId: str
  * Private channels and DMs are visible to an automation only when its author is a
  * participant. Public channels are visible to every member of the workspace.
  */
-export async function authorCanSeeChannel(channelId: string, authorId: string): Promise<boolean> {
-  const channel = await db.channel.findUnique({
-    where: { id: channelId },
+export async function authorCanSeeChannel(
+  channelId: string,
+  authorId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  const channel = await db.channel.findFirst({
+    where: { id: channelId, workspaceId },
     select: { visibility: true, scopeType: true },
   });
   if (!channel) return false;

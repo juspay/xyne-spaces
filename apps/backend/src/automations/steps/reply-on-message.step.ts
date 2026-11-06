@@ -80,7 +80,13 @@ export class ReplyOnMessageStep extends BaseActionStep<
     if (!target) {
       throw new Error(`[ReplyOnMessageStep] conversation ${String(config.conversationId)} not found in this workspace`);
     }
-    if (!(await authorCanSeeChannel(target.channelId, context.automation.createdById))) {
+    if (
+      !(await authorCanSeeChannel(
+        target.channelId,
+        context.automation.createdById,
+        context.automation.workspaceId,
+      ))
+    ) {
       throw new Error(`[ReplyOnMessageStep] conversation is in a private channel the automation author is not in`);
     }
 
