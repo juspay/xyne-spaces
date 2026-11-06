@@ -17,7 +17,9 @@ import { ChannelScopeType } from '@xyne/shared';
 // DOMPurify with only <strong> allowed, so any HTML smuggled into the (prompt-injection-
 // reachable) summary can't run via the dangerouslySetInnerHTML below.
 export const sanitizeBoldMarkdown = (text: string): string =>
-  DOMPurify.sanitize(text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'), { ALLOWED_TAGS: ['strong'] });
+  DOMPurify.sanitize(text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'), {
+    ALLOWED_TAGS: ['strong'],
+  });
 
 // ============================================================================
 // Type Definitions

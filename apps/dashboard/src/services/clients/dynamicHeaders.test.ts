@@ -2,7 +2,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import axios from 'axios';
 
-vi.mock('../../config', () => ({ API_BASE_URL: 'http://localhost/api', VITE_ZERO_SERVER: 'http://localhost' }));
+vi.mock('../../config', () => ({
+  API_BASE_URL: 'http://localhost/api',
+  VITE_ZERO_SERVER: 'http://localhost',
+}));
 vi.mock('./socketClient', () => ({ websocketService: { forceReconnect: vi.fn() } }));
 vi.mock('../../machines/stateMachine', () => ({ stateMachineActor: { send: vi.fn() } }));
 
@@ -34,7 +37,10 @@ describe('dynamicHeaders', () => {
   });
 
   it('drops legacy stored names on load and clears everything on logout', async () => {
-    localStorage.setItem('xyne_dynamic_headers', JSON.stringify({ 'x-route-env': 'playground', 'x-session-id': 'old' }));
+    localStorage.setItem(
+      'xyne_dynamic_headers',
+      JSON.stringify({ 'x-route-env': 'playground', 'x-session-id': 'old' }),
+    );
     const mod = await import('./dynamicHeaders');
     expect(mod.getDynamicHeaders()).toEqual({ 'x-route-env': 'playground' });
     mod.clearDynamicHeaders();
