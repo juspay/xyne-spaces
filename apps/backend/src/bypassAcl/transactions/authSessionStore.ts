@@ -89,19 +89,19 @@ export interface RevokeActiveAuthSessionsInput {
   revokeReason: string;
 }
 
-/** Revoke every ACTIVE session matching `where` plus its workspace access rows; returns the count. */
+/** Revoke every ACTIVE session matching `where` plus its workspace access rows; returns the revoked ids. */
 async function revokeMatchingAuthSessions(
   tx: Prisma.TransactionClient,
   where: Prisma.AuthSessionWhereInput,
   activeStatus: AuthSessionStatus,
   revokedStatus: AuthSessionStatus,
   revokeReason: string,
-): Promise<number> {
+): Promise<string[]> {
   const active = await tx.authSession.findMany({
     where: { ...where, status: activeStatus },
     select: { id: true },
   });
-  if (active.length === 0) return 0;
+  if (active.length === 0) return [];
   const ids = active.map(row => row.id);
   await tx.authSession.updateMany({
     where: { id: { in: ids } },
@@ -111,12 +111,12 @@ async function revokeMatchingAuthSessions(
     where: { authSessionId: { in: ids }, status: activeStatus },
     data: { status: revokedStatus },
   });
-  return ids.length;
+  return ids;
 }
 
 /**
  * Revoke the device's active auth session(s) and their workspace access rows atomically.
- * Matches by session id, presented xs hash and/or (orgMemberId, deviceKey). Returns the revoked count.
+ * Matches by session id, presented xs hash and/or (orgMemberId, deviceKey). Returns the revoked ids.
  */
 export function revokeActiveAuthSessionsTx(input: RevokeActiveAuthSessionsInput) {
   const matchers = [
@@ -129,13 +129,13 @@ export function revokeActiveAuthSessionsTx(input: RevokeActiveAuthSessionsInput)
     'logout: revoking the device\'s auth session and its workspace access rows must commit atomically; tx is not ACL-wrapped',
     db,
     async tx => {
-      if (matchers.length === 0) return 0;
+      if (matchers.length === 0) return [];
       return revokeMatchingAuthSessions(tx, { OR: matchers }, input.activeStatus, input.revokedStatus, input.revokeReason);
     },
   );
 }
 
-/** Revoke every active auth session of an org member (password change/reset, deactivation). Returns the count. */
+/** Revoke every active auth session of an org member (password change/reset, deactivation). Returns the revoked ids. */
 export function revokeAuthSessionsForOrgMemberTx(
   orgMemberId: string,
   activeStatus: AuthSessionStatus,
@@ -150,7 +150,7 @@ export function revokeAuthSessionsForOrgMemberTx(
   );
 }
 
-/** Revoke one auth session by id if still active. Returns 1 or 0. */
+/** Revoke one auth session by id if still active. Returns the revoked ids (at most one). */
 export function revokeAuthSessionByIdTx(
   id: string,
   activeStatus: AuthSessionStatus,

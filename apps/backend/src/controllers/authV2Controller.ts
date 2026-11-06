@@ -1487,6 +1487,18 @@ export class AuthV2Controller {
           });
           return;
         }
+        const signedInMember = await this.prisma.orgMember.findUnique({
+          where: { memberId: jwtRead.payload.memberId },
+          select: { leftAt: true },
+        });
+        if (!signedInMember || signedInMember.leftAt) {
+          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=${signedInMember ? 'org_member_left' : 'org_member_missing'})`);
+          res.status(401).json({
+            error: 'User removed from organization',
+            message: 'You have been removed from this organization',
+          });
+          return;
+        }
         logger.info(`[LOGIN-WORKSPACE] No pending auth cookie, but a signed-in member - using auto-login flow (platform=${platform})`);
 
         const identity = await this.prisma.user.findFirst({

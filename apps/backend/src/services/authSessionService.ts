@@ -311,16 +311,18 @@ export class AuthSessionService {
 
   /** Sign an org member out of every device (password change/reset, deactivation). Returns the revoked count. */
   async revokeAllForOrgMember(orgMemberId: string, reason: AuthSessionRevokeReason): Promise<number> {
-    const revoked = await revokeAuthSessionsForOrgMemberTx(orgMemberId, AuthSessionStatus.ACTIVE, AuthSessionStatus.REVOKED, reason);
-    logger.info('[AUTH-SESSION] Revoked all auth sessions for org member', { orgMemberId, reason, revoked });
-    return revoked;
+    const revokedIds = await revokeAuthSessionsForOrgMemberTx(orgMemberId, AuthSessionStatus.ACTIVE, AuthSessionStatus.REVOKED, reason);
+    await this.markSessionsRevoked(revokedIds);
+    logger.info('[AUTH-SESSION] Revoked all auth sessions for org member', { orgMemberId, reason, revoked: revokedIds.length });
+    return revokedIds.length;
   }
 
   /** Revoke one auth session by id. Returns true when a row was revoked. */
   async revokeById(id: string, reason: AuthSessionRevokeReason): Promise<boolean> {
-    const revoked = await revokeAuthSessionByIdTx(id, AuthSessionStatus.ACTIVE, AuthSessionStatus.REVOKED, reason);
-    logger.info('[AUTH-SESSION] Revoked auth session by id', { authSessionId: id, reason, revoked });
-    return revoked > 0;
+    const revokedIds = await revokeAuthSessionByIdTx(id, AuthSessionStatus.ACTIVE, AuthSessionStatus.REVOKED, reason);
+    await this.markSessionsRevoked(revokedIds);
+    logger.info('[AUTH-SESSION] Revoked auth session by id', { authSessionId: id, reason, revoked: revokedIds.length });
+    return revokedIds.length > 0;
   }
 
   /**
@@ -367,6 +369,7 @@ export class AuthSessionService {
   async revokeOnLogout(req: Request, res: Response, identity: { orgMemberId?: string; sessionId?: string }): Promise<void> {
     const presented = getPresentedRefreshToken(req);
     const deviceKey = getDeviceKey(req);
+    const revokedIds: string[] = [];
     try {
       const revoked = await revokeActiveAuthSessionsTx({
         id: identity.sessionId,
@@ -377,8 +380,9 @@ export class AuthSessionService {
         revokedStatus: AuthSessionStatus.REVOKED,
         revokeReason: AuthSessionRevokeReason.LOGOUT,
       });
+      revokedIds.push(...revoked);
       logger.info('[AUTH-SESSION] Revoked auth session(s) on logout', {
-        revoked,
+        revoked: revoked.length,
         orgMemberId: identity.orgMemberId,
         sessionId: identity.sessionId,
         deviceKey,
@@ -391,14 +395,19 @@ export class AuthSessionService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    if (identity.sessionId) {
-      await this.markSessionRevoked(identity.sessionId);
+    if (identity.sessionId && !revokedIds.includes(identity.sessionId)) {
+      revokedIds.push(identity.sessionId);
     }
+    await this.markSessionsRevoked(revokedIds);
     res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
   }
 
-  /** Deny access JWTs carrying this sid until the longest-lived one has expired. Never throws. */
-  async markSessionRevoked(sessionId: string): Promise<void> {
+  /** Deny access JWTs carrying these sids until the longest-lived one has expired. Never throws. */
+  private async markSessionsRevoked(sessionIds: string[]): Promise<void> {
+    await Promise.all(sessionIds.map(sessionId => this.markSessionRevoked(sessionId)));
+  }
+
+  private async markSessionRevoked(sessionId: string): Promise<void> {
     try {
       await redisService.set(`${REVOKED_SESSION_KEY_PREFIX}${sessionId}`, '1', config.jwt.expirationSeconds);
     } catch (error) {
