@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, loggerContext, LogContext } from '@/utils/logger';
 import { CustomRequest } from '@/types/express';
+import { logUrl } from '@/utils/logUrl';
 
 
 export const requestLogger = (req: CustomRequest, res: Response, next: NextFunction): void => {
@@ -23,7 +24,7 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
     logger.info('Request start', {
       type: 'REQUEST_START',
       method: req.method,
-      url: req.url,
+      url: logUrl(req.originalUrl),
       ip: req.ip,
       userAgent: req.get('User-Agent'),
     });
@@ -33,7 +34,7 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
       logger.info('Request end', {
         type: 'REQUEST_END',
         method: req.method,
-        url: req.url,
+        url: logUrl(req.originalUrl),
         statusCode: res.statusCode,
         duration: `${duration}ms`,
         contentLength: res.get('Content-Length') || 0,
