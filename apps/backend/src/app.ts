@@ -12,7 +12,6 @@ import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
 import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
-import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
@@ -314,14 +313,6 @@ export class App {
 
     // Logging
     if (config.env !== 'test') {
-      morgan.token('url', req =>
-        redactSensitiveUrl((req as { originalUrl?: string; url?: string }).originalUrl ?? (req as { url?: string }).url),
-      );
-      morgan.token('referrer', req => {
-        const { referer, referrer } = (req as { headers: Record<string, string | string[] | undefined> }).headers;
-        const value = referer ?? referrer;
-        return value ? redactSensitiveUrl(Array.isArray(value) ? value[0] : value) : undefined;
-      });
       this.app.use(morgan('combined', { stream }));
     }
     this.app.use(requestLogger);
