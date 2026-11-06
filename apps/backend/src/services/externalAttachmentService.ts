@@ -82,13 +82,8 @@ const isHostOrSubdomainOf = (host: string, domains: readonly string[]): boolean 
   return domains.some(domain => lower === domain || lower.endsWith(`.${domain}`));
 };
 
-// Zoho's data-centre domains (zoho.com, .eu, .in, ...) and their API counterparts.
-const ZOHO_DC_SUFFIXES = ['com', 'eu', 'in', 'com.au', 'jp', 'uk', 'sa', 'com.cn'];
-const ZOHO_DOMAINS = [
-  ...ZOHO_DC_SUFFIXES.flatMap(suffix => [`zoho.${suffix}`, `zohoapis.${suffix}`]),
-  'zohocloud.ca',
-  'zohoapis.ca',
-];
+// Zoho data centres we use (US .com, India .in) and their API counterparts.
+const ZOHO_DOMAINS = ['zoho.com', 'zohoapis.com', 'zoho.in', 'zohoapis.in'];
 const SLACK_DOMAINS = ['slack.com'];
 
 // Attachment downloads follow redirects themselves so each hop is re-checked and the
