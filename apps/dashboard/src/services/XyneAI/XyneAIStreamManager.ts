@@ -52,7 +52,12 @@ import {
 } from './XyneAIStreamStorage';
 import { toast } from 'sonner';
 import XyneAIStreamWorker from './xyneAIStream.worker?worker';
-import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStream.worker';
+import type {
+  WorkerIncomingMessage,
+  WorkerOutgoingMessage,
+  WorkerStartStreamMessage,
+} from './xyneAIStream.worker';
+import { refreshSessionOnce } from '../clients/sessionRefresh';
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
 import { fetchV2ConversationMessages } from './XyneAISessionsV2Service';
 import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
@@ -294,6 +299,12 @@ class XyneAIStreamManager {
   // Used to detect silently-dropped connections after Android backgrounding.
   private workerActiveStreams: Set<string> = new Set();
 
+  // The last START_STREAM sent per stream, so a stream the backend rejected with 401
+  // (expired JWT cookie) can be re-sent once after /auth/refresh-session. The worker's
+  // fetch is outside window.fetch's refresh wrapper, hence this hop through the manager.
+  private lastStartMessages: Map<string, WorkerStartStreamMessage> = new Map();
+  private streamsRetriedAfterRefresh: Set<string> = new Set();
+
   // Map to track raw content, tool outputs, and local message IDs for each stream
   private streamDataMap: Map<
     string,
@@ -382,7 +393,7 @@ class XyneAIStreamManager {
       });
 
       // Re-send START_STREAM to worker with a fresh request
-      const message: WorkerIncomingMessage = {
+      const message: WorkerStartStreamMessage = {
         type: 'START_STREAM',
         payload: {
           streamId: state.streamId,
@@ -411,8 +422,37 @@ class XyneAIStreamManager {
           },
         },
       };
-      this.worker.postMessage(message);
+      this.postStartStream(message);
     }
+  }
+
+  /** Send START_STREAM, remembering it so a 401 can re-send it after a session refresh. */
+  private postStartStream(message: WorkerStartStreamMessage): void {
+    this.lastStartMessages.set(message.payload.streamId, message);
+    this.worker.postMessage(message);
+  }
+
+  /**
+   * The backend answered the stream request with 401 (expired JWT cookie): refresh the
+   * session once and re-send the same request. A second 401, or a dead session, surfaces
+   * as a normal stream error.
+   */
+  private async handleWorkerStreamUnauthorized(streamId: string): Promise<void> {
+    const start = this.lastStartMessages.get(streamId);
+    const canRetry = !!start && !this.streamsRetriedAfterRefresh.has(streamId);
+    if (canRetry) {
+      this.streamsRetriedAfterRefresh.add(streamId);
+      if ((await refreshSessionOnce()) === 'ok') {
+        logger.info(LogEvent.INFO, {
+          type: 'migrated_console_info',
+          message: String('[XyneAIStreamManager] Session refreshed — re-sending stream request'),
+          context: [streamId],
+        });
+        this.worker.postMessage(start);
+        return;
+      }
+    }
+    this.handleWorkerStreamError(streamId, 'Unauthorized');
   }
 
   /**
@@ -464,6 +504,11 @@ class XyneAIStreamManager {
       case 'STREAM_ERROR':
         this.workerActiveStreams.delete(payload.streamId);
         this.handleWorkerStreamError(payload.streamId, payload.error);
+        break;
+
+      case 'STREAM_UNAUTHORIZED':
+        this.workerActiveStreams.delete(payload.streamId);
+        void this.handleWorkerStreamUnauthorized(payload.streamId);
         break;
 
       case 'WORKER_LOG_ERROR':
@@ -598,6 +643,8 @@ class XyneAIStreamManager {
     this.pendingTextPartsMap.delete(streamId);
     this.workerActiveStreams.delete(streamId);
     this.liveViewerStreams.delete(streamId);
+    this.lastStartMessages.delete(streamId);
+    this.streamsRetriedAfterRefresh.delete(streamId);
     const rafId = this.rafIdMap.get(streamId);
     if (rafId !== undefined) {
       cancelAnimationFrame(rafId);
@@ -1248,7 +1295,7 @@ class XyneAIStreamManager {
         : undefined);
 
     // Send message to worker to start streaming
-    const message: WorkerIncomingMessage = {
+    const message: WorkerStartStreamMessage = {
       type: 'START_STREAM',
       payload: {
         streamId,
@@ -1325,7 +1372,7 @@ class XyneAIStreamManager {
       },
     };
 
-    this.worker.postMessage(message);
+    this.postStartStream(message);
 
     // Note: The worker will handle the streaming and send messages back
     // which will be processed by handleWorkerMessage

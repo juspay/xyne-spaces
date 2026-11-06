@@ -10,7 +10,6 @@ import { google } from 'googleapis';
 import { logger } from '@/utils/logger';
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '../core/types';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import { BACKFILL_ADMIN_RESOURCE } from '@/middleware/backfillAdminAuth';
@@ -383,7 +382,7 @@ async function createGoogleRecordingDocAuthUrl(
   });
 }
 
-router.post('/connect/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/connect/init', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   try {
     const { name, description, visibility, projectId, assigneeUserGroupId, boardId } = req.body;
@@ -418,7 +417,7 @@ router.post('/connect/init', authV2Middleware.authenticate, async (req: Request,
 
 // GET /api/integrations/google/connect
 // Initiates Google OAuth flow for email channel creation (mirrors Microsoft /connect)
-router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/connect', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   try {
@@ -459,7 +458,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
   }
 });
 
-router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/connect/workspace/init', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   try {
     const authUrl = await createGoogleWorkspaceConnectAuthUrl(
@@ -484,7 +483,7 @@ router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req
 // DL desks ride on. No channel/preference is created — only an ExternalSource scoped
 // to the workspace (channelId: null, workspaceId set). Only one shared mailbox per
 // workspace is permitted (enforced by ExternalSource.workspaceId @unique).
-router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/connect/workspace', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   try {
@@ -514,7 +513,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
   }
 });
 
-router.post('/connect/channel-email-workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/connect/channel-email-workspace/init', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   const returnPath = sanitizeReturnPath(req.body.returnPath);
   try {
@@ -536,7 +535,7 @@ router.post('/connect/channel-email-workspace/init', authV2Middleware.authentica
   }
 });
 
-router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/connect/channel-email-workspace', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   const returnPath = sanitizeReturnPath(req.query.returnPath);
@@ -580,7 +579,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
 
 router.post(
   '/connect/recording-email/init',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const returnPath = sanitizeReturnPath(req.body.returnPath);
     const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
@@ -611,7 +610,7 @@ router.post(
 
 router.post(
   '/connect/recording-doc/init',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const returnPath = sanitizeReturnPath(req.body.returnPath);
     const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';

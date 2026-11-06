@@ -325,7 +325,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // The in-memory log buffer would be lost in the teardown ahead.
         logger.pushlogs();
         localStorage.removeItem('user_id');
-        authActor.send({ type: 'LOGOUT' });
+        // The session already 401'd, so the /auth/logout POST would fail too.
+        authActor.send({ type: 'LOGOUT', skipApi: true });
       },
     );
 

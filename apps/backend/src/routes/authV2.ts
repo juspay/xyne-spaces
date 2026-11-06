@@ -2,7 +2,7 @@ import express from 'express';
 import { AuthV2Controller } from '../controllers/authV2Controller';
 import { MicrosoftAuthController } from '../controllers/microsoftAuthController';
 import { EmailAuthController } from '../controllers/emailAuthController';
-import { authV2Middleware } from '../middleware/authV2Middleware';
+import { authMiddleware } from '../middleware/auth';
 import { config } from '@/config/env';
 
 const router = express.Router();
@@ -32,7 +32,6 @@ router.post('/exchange-electron', authV2Controller.exchangeElectronCode);
 
 router.post('/exchange-mobile', authV2Controller.exchangeMobileCode);
 
-router.get('/refresh-session', authV2Controller.refreshSession);
 
 router.post('/email/login', emailAuthController.login);
 
@@ -40,11 +39,11 @@ router.post('/email/forgot-password', emailAuthController.requestResetCode);
 
 router.post('/email/reset-password', emailAuthController.resetPassword);
 
-router.post('/email/change-password', authV2Middleware.authenticate, emailAuthController.changePassword);
+router.post('/email/change-password', authMiddleware.authenticate, emailAuthController.changePassword);
 
-router.post('/logout', authV2Middleware.authenticate, authV2Controller.logout);
+router.post('/logout', authMiddleware.authenticate, authV2Controller.logout);
 
-router.get('/me', authV2Middleware.authenticate, (req, res) => {
+router.get('/me', authMiddleware.authenticate, (req, res) => {
   return res.json({
     success: true,
     user: {
@@ -61,7 +60,7 @@ router.get('/me', authV2Middleware.authenticate, (req, res) => {
   });
 });
 
-router.get('/validate', authV2Middleware.authenticate, (req, res) => {
+router.get('/validate', authMiddleware.authenticate, (req, res) => {
   return res.json({
     success: true,
     user: {
@@ -75,6 +74,7 @@ router.get('/validate', authV2Middleware.authenticate, (req, res) => {
       memberId: req.user!.memberId,
       authProvider: req.user!.authProvider,
     },
+    accessTokenExpiresAt: req.user!.tokenExpiresAt ?? null,
   });
 });
 

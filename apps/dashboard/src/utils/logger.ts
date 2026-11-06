@@ -8,6 +8,15 @@ import {
   isLocalhost,
   ENABLE_REMOTE_LOGGING,
 } from '../config';
+import axios from 'axios';
+import {
+  claimAxiosRetry,
+  isBackendUrl,
+  isRefreshSessionUrl,
+  refreshSessionOnce,
+  resolveAxiosUrl,
+  type RetryableRequestConfig,
+} from '../services/clients/sessionRefresh';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -544,6 +553,34 @@ export class Logger implements LoggerConfig {
 
 let loggerInstance: Logger | null = null;
 
+/**
+ * Persistent web device key, stored in localStorage under `xd`.
+ * Must survive logout — storage-clearing flows have to restore it
+ * (see preserveWebDeviceKey).
+ */
+export const WEB_DEVICE_KEY_STORAGE_KEY = 'xd';
+
+export const getWebDeviceKey = (): string => {
+  try {
+    const existing = localStorage.getItem(WEB_DEVICE_KEY_STORAGE_KEY);
+    if (existing) return existing;
+    const deviceKey = uuidv4();
+    localStorage.setItem(WEB_DEVICE_KEY_STORAGE_KEY, deviceKey);
+    return deviceKey;
+  } catch {
+    return uuidv4();
+  }
+};
+
+/** Run a storage-clearing action without losing the persistent device key. */
+export const preserveWebDeviceKey = (clearAction: () => void): void => {
+  const deviceKey = localStorage.getItem(WEB_DEVICE_KEY_STORAGE_KEY);
+  clearAction();
+  if (deviceKey) {
+    localStorage.setItem(WEB_DEVICE_KEY_STORAGE_KEY, deviceKey);
+  }
+};
+
 const getClientSessionId = async (): Promise<string | null> => {
   try {
     if (window.electronAPI?.getClientSessionId) {
@@ -561,7 +598,7 @@ export const getLogger = async (): Promise<Logger> => {
   if (!loggerInstance) {
     const clientSessionId = await getClientSessionId();
     loggerInstance = new Logger({
-      clientSessionId: clientSessionId ?? uuidv4(),
+      clientSessionId: clientSessionId ?? getWebDeviceKey(),
       platform_name: detectPlatform(),
     });
     window.addEventListener('beforeunload', () => {
@@ -576,6 +613,61 @@ export const getLogger = async (): Promise<Logger> => {
 
 export const logger = await getLogger();
 setReactNativeBridgeLogger(logger);
+
+// Every request to our own backend carries the persistent device key, whatever the
+// transport: bare `axios` (bypasses apiInstance's interceptor) and `fetch`. Matching is
+// by resolved URL prefix so third-party requests (presigned uploads, CDNs) never get it.
+//
+// The same two hooks also do the session refresh for those transports: a 401 from our
+// backend → one shared /auth/refresh-session call → the request is sent again once. The
+// backend never refreshes on its own, so without this every bare-axios / fetch call would
+// fail after the JWT cookie expired. (apiInstance has the same logic in its own
+// interceptor.) A refresh that fails leaves the 401 to the caller; nothing here logs out.
+const DEVICE_KEY_HEADER = 'x-device-id';
+
+axios.interceptors.request.use(config => {
+  const deviceKey = logger.clientSessionId;
+  const url = resolveAxiosUrl(config);
+  if (deviceKey && isBackendUrl(url) && !config.headers[DEVICE_KEY_HEADER]) {
+    config.headers[DEVICE_KEY_HEADER] = deviceKey;
+  }
+  return config;
+});
+
+axios.interceptors.response.use(
+  response => response,
+  async (error: unknown) => {
+    if (!axios.isAxiosError(error)) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    const config = error.config as (typeof error.config & RetryableRequestConfig) | undefined;
+    if (!claimAxiosRetry(error.response?.status, config) || !config) return Promise.reject(error);
+    if ((await refreshSessionOnce()) !== 'ok') return Promise.reject(error);
+    return axios(config);
+  },
+);
+
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = input instanceof Request ? input.url : String(input);
+  if (!isBackendUrl(url)) return nativeFetch(input, init);
+
+  const deviceKey = logger.clientSessionId;
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  if (deviceKey && !headers.has(DEVICE_KEY_HEADER)) headers.set(DEVICE_KEY_HEADER, deviceKey);
+
+  // A Request body can be read once; keep a clone so the request can be re-sent after a
+  // refresh. (A ReadableStream body in `init` cannot be replayed; those requests get no retry.)
+  const retryInput = input instanceof Request ? input.clone() : input;
+  const response = await nativeFetch(input, { ...init, headers });
+  if (response.status !== 401 || isRefreshSessionUrl(url) || init?.body instanceof ReadableStream) {
+    return response;
+  }
+  if ((await refreshSessionOnce()) !== 'ok') return response;
+  return nativeFetch(retryInput, { ...init, headers });
+};
 
 export const cleanupLogger = (): void => {
   if (loggerInstance) {

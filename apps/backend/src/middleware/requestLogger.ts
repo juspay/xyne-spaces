@@ -6,12 +6,17 @@ import { CustomRequest } from '@/types/express';
 
 
 export const requestLogger = (req: CustomRequest, res: Response, next: NextFunction): void => {
+  // x-device-id is the persistent device key (renamed from x-client-session-id);
+  // the legacy header is still honoured while old clients roll over.
+  const deviceId = (req.headers['x-device-id'] as string) || undefined;
+  const legacyClientSessionId = (req.headers['x-client-session-id'] as string) || undefined;
+
   const context: LogContext = {
     requestId: (req.headers['x-request-id'] as string) || uuidv4(),
     zeroClientId: (req.headers['x-client-id'] as string) || undefined,
     zeroClientGroupId: (req.headers['x-zero-client-group-id'] as string) || req.get('x-zero-client-group-id') || undefined,
     emailId: req.headers['x-user-email'] as string,
-    clientSessionId: req.headers['x-client-session-id'] as string || undefined,
+    clientSessionId: deviceId || legacyClientSessionId,
     appVersion: (req.headers['x-app-version'] as string) || undefined,
   };
   req.requestId = context.requestId;
@@ -27,6 +32,9 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
       url: redactSensitiveUrl(req.url),
       ip: req.ip,
       userAgent: req.get('User-Agent'),
+      clientPlatform: (req.headers['x-platform'] as string) || undefined,
+      deviceIdPresent: !!deviceId,
+      legacyClientSessionIdPresent: !!legacyClientSessionId,
     });
 
     res.on('finish', () => {

@@ -2,6 +2,7 @@ import { app, net, session, BrowserWindow, IncomingMessage } from 'electron';
 import path from 'path';
 import { config } from '../app/config';
 import { setCookiesFromHeaders } from './cookies';
+import { getLoginCodeVerifier } from './oauth-pkce';
 import { forwardAuthEventToClawOverlay } from './claw-overlay-window';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
@@ -408,7 +409,7 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
         resolve();
       });
 
-      request.write(JSON.stringify({ code, state, invitationId }));
+      request.write(JSON.stringify({ code, state, invitationId, codeVerifier: getLoginCodeVerifier() }));
       request.end();
       
     } catch (error) {
@@ -505,7 +506,7 @@ function exchangeMTLSAuthCode(code: string, state: string, invitationId: string 
         type: 'mtls',
       });
     });
-    request.write(JSON.stringify({ code, state, invitationId }));
+    request.write(JSON.stringify({ code, state, invitationId, codeVerifier: getLoginCodeVerifier() }));
     request.end();
   });
 }

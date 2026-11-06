@@ -2,7 +2,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosE
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { API_BASE_URL, isExternalApp } from '../../config';
-import { logger, Logger } from '../../utils/logger';
+import { logger, Logger, getWebDeviceKey, WEB_DEVICE_KEY_STORAGE_KEY } from '../../utils/logger';
 import {
   httpRequestDuration,
   httpRequestTotal,
@@ -11,6 +11,14 @@ import {
   clearAuthTokenTotal,
 } from '../otel';
 import { clearDynamicHeaders, getDynamicHeaders } from './dynamicHeaders';
+import {
+  claimAxiosRetry,
+  clearAccessTokenExpiry,
+  ensureFreshSession,
+  isRefreshSessionUrl,
+  refreshSessionOnce,
+  type RetryableRequestConfig,
+} from './sessionRefresh';
 import { stateMachineActor } from '../../machines/stateMachine';
 import {
   encryptionRequestInterceptor,
@@ -42,21 +50,9 @@ function sanitizeUrl(url: string): string {
   );
 }
 
-// Single-flight refresh: concurrent 401s share one /auth/refresh-session call.
-// Plain axios (not apiInstance) so the refresh's own 401 never re-enters this interceptor.
-type RefreshOutcome = 'ok' | 'dead' | 'transient';
-let refreshInFlight: Promise<RefreshOutcome> | null = null;
-const refreshSessionOnce = (): Promise<RefreshOutcome> =>
-  (refreshInFlight ??= axios
-    .get(`${BASE_URL}/auth/refresh-session`, { withCredentials: true })
-    .then((): RefreshOutcome => 'ok')
-    .catch(
-      (e): RefreshOutcome =>
-        axios.isAxiosError(e) && e.response?.status === 401 ? 'dead' : 'transient',
-    )
-    .finally((): void => {
-      refreshInFlight = null;
-    }));
+// Session refresh (401 → /auth/refresh-session once → retry) is shared with the bare-axios
+// and fetch transports: see services/clients/sessionRefresh.ts. This instance adds one thing
+// on top — a refresh that reports the session dead logs the user out.
 
 // Logout runs once even when many requests 401 together.
 let loggingOut = false;
@@ -72,9 +68,13 @@ apiConfig.interceptors.request.use(encryptionRequestInterceptor);
 
 // Add a request interceptor
 apiConfig.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  async (config: InternalAxiosRequestConfig) => {
     // Tokens are now in HTTP-only cookies and sent automatically by the browser
     // No need to manually set Authorization header - backend reads from cookie
+
+    // Refresh ahead of the JWT's expiry (no-op unless it is about to expire), so most
+    // requests never see a 401 at all and cookie-only loads keep working.
+    if (!isRefreshSessionUrl(config.url)) await ensureFreshSession();
 
     const requestId = uuidv4();
 
@@ -120,9 +120,19 @@ apiConfig.interceptors.request.use(
       if (userEmail) {
         config.headers['x-user-email'] = userEmail;
       }
-      const clientSessionId = logger.clientSessionId;
+      // The persistent device key must exist in localStorage (`xd`) before any API
+      // call: seed it from the logger's id (Electron/native id when available) so a
+      // cleared storage mid-session is restored and header + storage always agree.
+      const clientSessionId = logger.clientSessionId || getWebDeviceKey();
       if (clientSessionId) {
-        config.headers['x-client-session-id'] = clientSessionId;
+        try {
+          if (!localStorage.getItem(WEB_DEVICE_KEY_STORAGE_KEY)) {
+            localStorage.setItem(WEB_DEVICE_KEY_STORAGE_KEY, clientSessionId);
+          }
+        } catch {
+          /* Storage unavailable — the header still carries the id. */
+        }
+        config.headers['x-device-id'] = clientSessionId;
       }
       for (const [name, value] of Object.entries(getDynamicHeaders())) {
         config.headers[name] = value;
@@ -248,12 +258,11 @@ apiConfig.interceptors.response.use(
     // External guests have no session to lose, so a 401 must not log them out of the call.
     if (axiosError.response?.status === 401 && !isExternalApp) {
       const originalConfig = axiosError.config as
-        | (InternalAxiosRequestConfig & { _retry?: boolean })
+        | (InternalAxiosRequestConfig & RetryableRequestConfig)
         | undefined;
-      const isRefreshCall = !!originalConfig?.url?.includes('/auth/refresh-session');
+      const isRefreshCall = isRefreshSessionUrl(originalConfig?.url);
 
-      if (originalConfig && !isRefreshCall && originalConfig._retry !== true) {
-        originalConfig._retry = true;
+      if (claimAxiosRetry(401, originalConfig) && originalConfig) {
         const outcome = await refreshSessionOnce();
         if (outcome === 'ok') {
           logger.info(Logger.Event.AUTH_REFRESH_SUCCESS, {
@@ -285,8 +294,7 @@ apiConfig.interceptors.response.use(
 
       clearAuthTokens();
 
-      window.location.href = '/auth';
-      window.location.reload();
+      window.location.replace('/auth');
 
       return Promise.reject(new Error('Session refresh failed - please re-authenticate'));
     } else if (!axiosError.response) {
@@ -374,6 +382,7 @@ export function clearAuthTokens(): void {
   }
   clearDynamicHeaders();
   logger.info(Logger.Event.CLEAR_AUTH_TOKEN_CALLED);
+  clearAccessTokenExpiry();
   // The composer's saved related-context chips quote other people's messages; a
   // session that ends this way (a 401, say) must not leave them behind.
   stateMachineActor.send({ type: 'CLEAR_RELATED_CONTEXT' });
