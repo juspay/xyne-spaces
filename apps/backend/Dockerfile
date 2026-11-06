@@ -91,28 +91,13 @@ RUN pnpm --filter xyne-spaces-backend --prod --legacy deploy /app && \
 # work. For a one-off debug session swap this tag to :debug-nonroot (adds a
 # busybox shell) and rebuild — never ship :debug to prod.
 #
-# Includes by default: Node 22 runtime, glibc, libssl3 (Prisma targets
-# debian-openssl-3.0.x — see prisma/schema.prisma), CA certs, /tmp, and a
+# Includes by default: Node 22 runtime, glibc, libssl3t64 (Prisma targets
+# debian-openssl-3.0.x, ABI-compatible with openssl 3.5), CA certs, /tmp, and a
 # built-in `nonroot` user (UID 65532). Entrypoint is `node`.
-# Patched OpenSSL from Debian bookworm. The distroless base ships libssl3 3.0.18
-# (openssl CVEs) and Google hasn't rebuilt it yet; bookworm has 3.0.22-1~deb12u2.
-# Same soname (libssl.so.3) + a patch-level bump = ABI-compatible, so Node and
-# the Prisma query engine pick up the patched libs. Clears the libssl3 CRITICAL
-# + HIGHs. Drop this stage once distroless publishes a patched digest.
-FROM debian:12-slim AS libssl
-RUN apt-get update && apt-get install -y --no-install-recommends libssl3 && \
-    awk 'BEGIN{RS="";ORS="\n\n"} /^Package: libssl3\n/{print}' /var/lib/dpkg/status > /libssl3.status && \
-    rm -rf /var/lib/apt/lists/*
-
-FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runner
+# Debian 13 distroless: ships openssl 3.5.7 and glibc 2.41 with Debian's current
+# security fixes, so no hand-patched libssl overlay is needed. Pinned by digest.
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:10747a1323be68f206aed893599d43e6697ad67257e7c42703553f99fbce3d33 AS runner
 WORKDIR /app
-
-# Overlay the patched OpenSSL shared libs onto the distroless base.
-COPY --from=libssl /usr/lib/x86_64-linux-gnu/libssl.so.3 /usr/lib/x86_64-linux-gnu/libssl.so.3
-COPY --from=libssl /usr/lib/x86_64-linux-gnu/libcrypto.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.3
-# Update the dpkg metadata the scanners read so it reflects the patched version
-# (the base's status.d still says 3.0.18; the binaries above are now 3.0.22).
-COPY --from=libssl /libssl3.status /var/lib/dpkg/status.d/libssl3
 
 # The prod-slim `pnpm deploy` tree from the builder: a flat, prod-only
 # node_modules + dist + both Prisma clients — no dev tree, no .pnpm store.
