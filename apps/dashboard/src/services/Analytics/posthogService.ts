@@ -1,4 +1,5 @@
-import posthog from 'posthog-js';
+import posthog, { type CaptureResult, type Properties } from 'posthog-js';
+import { stripUrlQuery } from '../../utils/browserAddress';
 
 interface PosthogUser {
   id: string;
@@ -19,6 +20,39 @@ interface EventProperties {
     | string[]
     | number[];
 }
+
+const URL_PROPERTIES = [
+  '$current_url',
+  '$referrer',
+  '$initial_current_url',
+  '$initial_referrer',
+  '$prev_pageview_pathname',
+];
+
+const stripUrlProperties = (properties: Properties): Properties => {
+  const stripped = { ...properties };
+  for (const key of URL_PROPERTIES) {
+    const value: unknown = stripped[key];
+    if (typeof value === 'string') {
+      stripped[key] = stripUrlQuery(value);
+    }
+  }
+  return stripped;
+};
+
+const stripUrlQueries = (event: CaptureResult | null): CaptureResult | null => {
+  if (!event) {
+    return event;
+  }
+  const stripped: CaptureResult = { ...event, properties: stripUrlProperties(event.properties) };
+  if (event.$set) {
+    stripped.$set = stripUrlProperties(event.$set);
+  }
+  if (event.$set_once) {
+    stripped.$set_once = stripUrlProperties(event.$set_once);
+  }
+  return stripped;
+};
 
 /**
  * PostHogService
@@ -123,6 +157,7 @@ class PostHogService {
         // payloads as SQL injection and 403s the whole app for that browser.
         // localStorage keeps persistence without ever sending state over HTTP.
         persistence: 'localStorage',
+        before_send: stripUrlQueries,
         // Record the full session so the journey can be replayed.
         disable_session_recording: false,
         session_recording: {

@@ -9,6 +9,7 @@ import { keepDownloads } from '../InAppBrowser';
 import { browserPages } from '../../routes/BrowserTabsScreen/browserPages';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { logger, Event } from '../../utils/logger';
+import { stripUrlQuery } from '../../utils/browserAddress';
 
 export function BrowserPanelHandler(): null {
   const location = useLocation();
@@ -49,7 +50,7 @@ export function BrowserPanelHandler(): null {
 
         xyneAIActor.send({ type: 'CLOSE' });
 
-        logger.info(Event.BROWSER_LINK_CLICK, { url, openedIn: 'in-app' });
+        logger.info(Event.BROWSER_LINK_CLICK, { url: stripUrlQuery(url), openedIn: 'in-app' });
 
         if (browserPanelState === 'open' || isOnBrowserRoute) {
           browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
@@ -71,7 +72,7 @@ export function BrowserPanelHandler(): null {
     if (!api?.onLinkOpenedExternal) return;
 
     const cleanup = api.onLinkOpenedExternal((url: string) => {
-      logger.info(Event.BROWSER_LINK_CLICK, { url, openedIn: 'external' });
+      logger.info(Event.BROWSER_LINK_CLICK, { url: stripUrlQuery(url), openedIn: 'external' });
     });
 
     return cleanup;

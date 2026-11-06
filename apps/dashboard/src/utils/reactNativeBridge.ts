@@ -433,6 +433,21 @@ const safeParse = (data: unknown): Record<string, unknown> | null => {
   return null;
 };
 
+const CREDENTIAL_PAYLOAD_KEYS = ['token', 'voipToken', 'sessionId'];
+
+const redactPayload = (payload: unknown): unknown => {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return payload ?? null;
+  }
+  const redacted: Record<string, unknown> = { ...payload };
+  for (const key of CREDENTIAL_PAYLOAD_KEYS) {
+    if (key in redacted) {
+      redacted[key] = '[REDACTED]';
+    }
+  }
+  return redacted;
+};
+
 class ReactNativeBridge {
   private initialized = false;
   private listeners = new Map<
@@ -468,7 +483,7 @@ class ReactNativeBridge {
     logger.info(LogEvent.INFO, {
       type: 'migrated_console_info',
       message: String('[RN Bridge] <='),
-      context: [message.type, message.payload ?? null],
+      context: [message.type, redactPayload(message.payload)],
     });
 
     if (message.type === NativeInboundMessageType.NATIVE_READY) {
@@ -557,7 +572,7 @@ class ReactNativeBridge {
       logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[RN Bridge] =>'),
-        context: [type, payload ?? null],
+        context: [type, redactPayload(payload)],
       });
       bridge.postMessage(JSON.stringify(envelope));
       return true;

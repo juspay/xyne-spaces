@@ -45,9 +45,9 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
   // [DEBUG] Log if there's a pending invitation cookie — if so, user is already logged in
   // but has an unprocessed invitation. This is the root cause of landing on wrong workspace.
   const pendingInvitation = req.cookies?.pending_invitation_id;
-  logger.info(`[DEBUG] [/validate] user=${req.user!.id} email=${req.user!.email} workspaceId=${(req.user as any).workspaceId ?? 'unknown'} pending_invitation_id=${pendingInvitation ?? 'NONE'}`);
+  logger.info(`[DEBUG] [/validate] user=${req.user!.id} email=${req.user!.email} workspaceId=${(req.user as any).workspaceId ?? 'unknown'} hasPendingInvitation=${!!pendingInvitation}`);
   if (pendingInvitation) {
-    logger.warn(`[DEBUG] [/validate] ⚠️ User already has a session but pending_invitation_id cookie exists (${pendingInvitation}). OAuth callback will be skipped — invitation will NOT be auto-accepted via callback flow.`);
+    logger.warn(`[DEBUG] [/validate] ⚠️ User already has a session but pending_invitation_id cookie exists. OAuth callback will be skipped — invitation will NOT be auto-accepted via callback flow.`);
   }
   const selfDmChannelId = await channelService.getSelfDmId(req.user!.id);
   const workspace = await prisma.workspace.findUnique({

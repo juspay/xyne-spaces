@@ -248,8 +248,6 @@ class AuthV2Middleware {
         memberId: session.user.orgMemberId,
       });
 
-      const tokenPreview = `${customToken.slice(0, 8)}...${customToken.slice(-6)}`;
-
       // Update session activity
       await this.userSessionService.updateSession(session.id, {
         lastActivity: new Date(),
@@ -297,7 +295,6 @@ class AuthV2Middleware {
         userId: session.user.id,
         googleId: session.user.providerUserId,
         email: session.user.email,
-        tokenPreview,
         workspaceId: session.user.workspaceId,
       });
       next();
@@ -327,14 +324,12 @@ class AuthV2Middleware {
           : req.headers.authorization?.startsWith('Bearer ')
             ? 'authorization_header'
             : 'none';
-      const tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
       logger.info(`[AUTH] ${logPrefix} Step 1: Token extraction result: ${!!token}`, {
         method: req.method,
         path: req.path,
         workspaceId,
         tokenSource,
         tokenPresent: !!token,
-        tokenPreview,
       });
       
       let tokenIsValid = false;
@@ -362,7 +357,6 @@ class AuthV2Middleware {
                 logger.info(`[AUTH] ${logPrefix} LEGACY JWT FORMAT - User ${decoded.sub} using pre-workspace client`, {
                   userId: decoded.sub,
                   tokenSource,
-                  tokenPreview,
                 });
 
                 const legacyUser = await db.user.findUnique({
@@ -378,7 +372,6 @@ class AuthV2Middleware {
               if (!effectiveWorkspaceId || !effectiveMemberId) {
                 logger.warn(`[AUTH] ${logPrefix} No workspace context resolved for user ${decoded.sub}`, {
                   tokenSource,
-                  tokenPreview,
                   effectiveWorkspaceId,
                   effectiveMemberId,
                 });
@@ -425,7 +418,6 @@ class AuthV2Middleware {
                 if (user.leftAt) {
                   logger.warn(`[AUTH] ${logPrefix} User has been removed from workspace: ${user.email}`, {
                     tokenSource,
-                    tokenPreview,
                     userId: user.id,
                     leftAt: user.leftAt,
                   });
@@ -439,7 +431,6 @@ class AuthV2Middleware {
                 if (orgMember?.leftAt) {
                   logger.warn(`[AUTH] ${logPrefix} User has been removed from organization: ${user.email}`, {
                     tokenSource,
-                    tokenPreview,
                     userId: user.id,
                     orgMemberLeftAt: orgMember.leftAt,
                   });
@@ -468,7 +459,6 @@ class AuthV2Middleware {
                 };
                 logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email}`, {
                   tokenSource,
-                  tokenPreview,
                   tokenSub: decoded.sub,
                   userId: user.id,
                   googleId: user.providerUserId,
@@ -481,7 +471,6 @@ class AuthV2Middleware {
               } else {
                 logger.warn(`[AUTH] ${logPrefix} Token valid, but user not found in DB: ${decoded.sub}`, {
                   tokenSource,
-                  tokenPreview,
                   tokenSub: decoded.sub,
                 });
               }
@@ -492,12 +481,10 @@ class AuthV2Middleware {
            if (isExpired) {
               logger.info(`[AUTH] ${logPrefix} Token expired. Falling back to refresh.`, {
                 tokenSource,
-                tokenPreview,
               });
            } else {
               logger.warn(`[AUTH] ${logPrefix} Token invalid. Falling back to refresh. Error: ${err instanceof Error ? err.message : String(err)}`, {
                 tokenSource,
-                tokenPreview,
                 error: err instanceof Error ? err.message : String(err),
               });
            }
@@ -513,7 +500,6 @@ class AuthV2Middleware {
       if (!tokenIsValid) {
         logger.info(`[AUTH] ${logPrefix} Step 2: Attempting session refresh`, {
           tokenSource,
-          tokenPreview,
         });
         
       // Only attempt if we have a session cookie
@@ -526,13 +512,11 @@ class AuthV2Middleware {
           } else {
             logger.info(`[AUTH] ${logPrefix} Refresh attempt failed.`, {
               tokenSource,
-              tokenPreview,
             });
          }
       } else {
         logger.info(`[AUTH] ${logPrefix} No workspace session cookie present.`, {
           tokenSource,
-          tokenPreview,
         });
       }
       }
@@ -540,7 +524,6 @@ class AuthV2Middleware {
       // 3. Final Failure
       logger.warn(`[AUTH] ${logPrefix} Authentication FAILED. No valid token and no valid session.`, {
         tokenSource,
-        tokenPreview,
       });
       res.status(401).json({
         error: 'No session found',

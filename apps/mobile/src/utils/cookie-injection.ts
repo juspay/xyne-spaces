@@ -142,7 +142,7 @@ async function injectCookiesFromResponseUnsafe(
       const persisted = await CookieManager.setFromResponse(origin, normalized);
       console.log('[CookieInjection] Cookie persisted:', !!persisted, 'for', origin);
       if (!persisted) {
-        console.warn('[CookieInjection] Failed to persist cookie:', cookieHeader.slice(0, 50));
+        console.warn('[CookieInjection] Failed to persist cookie:', cookieHeader.split('=')[0]);
       }
     } catch (err) {
       console.warn('[CookieInjection] Error persisting cookie:', err);

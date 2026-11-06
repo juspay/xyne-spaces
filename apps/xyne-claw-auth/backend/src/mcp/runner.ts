@@ -18,7 +18,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 
-import { createLogger } from "../logger.js";
+import { createLogger, redactUrlQuery } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 const log = createLogger("runner");
 
@@ -385,7 +385,7 @@ async function spawnSession(
         headers,
       },
     });
-    log.info(`[mcp/runner] spawning HTTP session for ${key} url=${url}`);
+    log.info(`[mcp/runner] spawning HTTP session for ${key} url=${redactUrlQuery(url)}`);
   } else {
     // Local MCP server — spawn child process over stdio
     const { cmd, args, env } = definition.buildStdioCommand(credentials);
