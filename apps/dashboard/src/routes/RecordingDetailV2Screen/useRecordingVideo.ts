@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { UseAudioPlaybackReturn } from '../../components/ui/AudioPlayer/useAudioPlayback';
+import {
+  downloadRecording,
+  RecordingUnavailableError,
+} from '../../components/ui/AudioPlayer/playbackStart';
 
 export type RecordingVideoSource =
   | { status: 'loading' }
@@ -55,13 +59,15 @@ const useDownloadedVideo = (
 
     const controller = new AbortController();
     setVideo({ status: 'loading' });
-    load(controller.signal)
+    downloadRecording(load, controller)
       .then(blob => {
         const file = new File([blob], `${name}.mp4`, { type: blob.type || 'video/mp4' });
         setVideo({ status: 'ready', kind: 'file', file });
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setVideo({ status: 'failed' });
+      .catch((err: unknown) => {
+        const isUnmountAbort =
+          controller.signal.aborted && !(err instanceof RecordingUnavailableError);
+        if (!isUnmountAbort) setVideo({ status: 'failed' });
       });
 
     return (): void => controller.abort();
