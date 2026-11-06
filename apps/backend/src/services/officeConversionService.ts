@@ -193,10 +193,63 @@ async function stripExternalReferences(
     return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" })
 }
 
+// soffice picks an import filter from the file's content, not its name, so an
+// HTML/SVG/Flat-ODF file named .docx is opened as HTML/SVG/ODF — formats that
+// carry external references outside any zip, past stripExternalReferences.
+// The format is therefore decided here from the bytes and pinned with
+// --infilter, which makes soffice refuse anything that is not really that
+// format. Filter names: help.libreoffice.org "File Conversion Filter Names".
+interface InputFormat {
+    ext: string
+    filter: string
+}
+
+// Matched against the main document part's content type in [Content_Types].xml;
+// embedded parts (a chart's workbook inside a pptx) carry other content types.
+const OOXML_FORMATS: Array<{ mainPart: RegExp; format: InputFormat }> = [
+    {
+        mainPart: /wordprocessingml\.(document|template)\.main\+xml/,
+        format: { ext: ".docx", filter: "MS Word 2007 XML" },
+    },
+    {
+        mainPart: /presentationml\.(presentation|slideshow|template)\.main\+xml/,
+        format: { ext: ".pptx", filter: "Impress MS PowerPoint 2007 XML" },
+    },
+    {
+        mainPart: /spreadsheetml\.(sheet|template)\.main\+xml/,
+        format: { ext: ".xlsx", filter: "Calc MS Excel 2007 XML" },
+    },
+]
+
+// Legacy binaries share one container (OLE compound file), so the extension
+// picks the application; the signature proves it is that container at all.
+const LEGACY_FORMATS: Record<string, InputFormat> = {
+    ".doc": { ext: ".doc", filter: "MS Word 97" },
+    ".ppt": { ext: ".ppt", filter: "MS PowerPoint 97" },
+    ".xls": { ext: ".xls", filter: "MS Excel 97" },
+}
+const COMPOUND_FILE_SIGNATURE = Buffer.from("d0cf11e0a1b11ae1", "hex")
+
+async function resolveInputFormat(buffer: Buffer, originalFilename: string): Promise<InputFormat> {
+    if (buffer.subarray(0, COMPOUND_FILE_SIGNATURE.length).equals(COMPOUND_FILE_SIGNATURE)) {
+        const legacy = LEGACY_FORMATS[path.extname(originalFilename).toLowerCase()]
+        if (legacy) return legacy
+    } else {
+        const zip = await JSZip.loadAsync(buffer).catch(() => null)
+        if (zip) {
+            assertZipWithinLimits(zip, `office conversion ${originalFilename}`)
+            const contentTypes = await zip.file("[Content_Types].xml")?.async("text")
+            const match = contentTypes && OOXML_FORMATS.find(({ mainPart }) => mainPart.test(contentTypes))
+            if (match) return match.format
+        }
+    }
+    throw new OfficeConversionError("Not a Word, PowerPoint or Excel document", "UNSUPPORTED_FORMAT")
+}
+
 export class OfficeConversionError extends Error {
     constructor(
         message: string,
-        public readonly code: "SOFFICE_NOT_FOUND" | "TIMEOUT" | "CONVERSION_FAILED",
+        public readonly code: "SOFFICE_NOT_FOUND" | "TIMEOUT" | "CONVERSION_FAILED" | "UNSUPPORTED_FORMAT",
     ) {
         super(message)
         this.name = "OfficeConversionError"
@@ -254,15 +307,13 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
         return gcsHit
     }
 
+    // The on-disk extension comes from the detected format, never from the
+    // attacker-controlled upload name.
+    const format = await resolveInputFormat(buffer, originalFilename)
+
     const workDir = await mkdtemp(path.join(tmpdir(), "office-convert-"))
     const profileDir = path.join(workDir, "profile")
-    // originalFilename is attacker-controlled (the client-supplied upload
-    // name); only accept a plain alphanumeric extension so nothing in it
-    // (path separators, "..", null bytes, ...) can influence where
-    // inputPath actually lands on disk.
-    const rawExt = path.extname(originalFilename)
-    const ext = /^\.[a-zA-Z0-9]{1,10}$/.test(rawExt) ? rawExt : ".bin"
-    const inputPath = path.join(workDir, `input${ext}`)
+    const inputPath = path.join(workDir, `input${format.ext}`)
     const outputPath = path.join(workDir, "input.pdf")
 
     try {
@@ -275,6 +326,7 @@ export async function convertToPdf(buffer: Buffer, originalFilename: string): Pr
                 "--headless",
                 "--norestore",
                 `-env:UserInstallation=file://${profileDir}`,
+                `--infilter=${format.filter}`,
                 "--convert-to",
                 "pdf",
                 "--outdir",
