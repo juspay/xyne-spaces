@@ -15,6 +15,10 @@ import type {
 import { VcsProviderError } from './types';
 import { defaultGitRunner, listFirstParentHistoryWithGit, type GitRunner } from './gitHistory';
 import { repositoryHost } from './repositoryHost';
+import { assertHostIsExternal, safeWebhookFetch, SsrfBlockedError } from '@/utils/ssrfGuard';
+
+const hostNotAllowedError = (): VcsProviderError =>
+  new VcsProviderError('BITBUCKET_HOST_NOT_ALLOWED', 'This Bitbucket host is not reachable from Xyne Spaces', 400);
 
 const SEGMENT = /^[A-Za-z0-9_.-]+$/;
 // Draft pull requests arrived in Bitbucket Data Center 8.18.
@@ -382,6 +386,14 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
     repository: ParsedRepository,
     branch: string
   ): Promise<FirstParentHistory> {
+    // git reaches the host through HTTPS_PROXY (Squid); this check also covers a direct
+    // connection and fails fast with a clear error.
+    try {
+      await assertHostIsExternal(this.host);
+    } catch (error) {
+      if (!(error instanceof SsrfBlockedError)) throw error;
+      throw hostNotAllowedError();
+    }
     return listFirstParentHistoryWithGit(this.git, {
       cloneUrl: repository.cloneUrl,
       branch,
@@ -465,7 +477,8 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
   ): Promise<{ data: T; response: Response }> {
     let response: Response;
     try {
-      response = await fetch(`https://${this.host}${path}`, {
+      // The host is admin-entered, so it gets the same guard as any URL we don't control.
+      response = await safeWebhookFetch(`https://${this.host}${path}`, {
         ...init,
         headers: {
           Accept: 'application/json',
@@ -477,7 +490,10 @@ export class BitbucketServerVcsAdapter implements VcsProviderAdapter {
         },
         signal: AbortSignal.timeout(20_000),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof SsrfBlockedError) {
+        throw hostNotAllowedError();
+      }
       throw new VcsProviderError(
         'BITBUCKET_UNAVAILABLE',
         'Bitbucket is temporarily unavailable',

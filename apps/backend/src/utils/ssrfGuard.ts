@@ -3,7 +3,7 @@ import { promises as dns } from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import { BlockList, isIP } from 'node:net';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent, ProxyAgent, fetch as undiciFetch } from 'undici';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
@@ -268,13 +268,22 @@ export function pinnedDispatcherFor(hostname: string, pinned: PinnedHost): Agent
   });
 }
 
+let egressProxyAgent: ProxyAgent | undefined;
+
 /**
- * Validate an outbound webhook URL and fetch it pinned to the addresses that passed,
- * so a second DNS answer cannot swing the connection between the check and the request
- * (rebinding). The fetch() counterpart to how LinkPreviewService uses
- * resolveExternalHostPinned + pinnedAgentsFor. Webhooks are external-only.
- * Callers MUST still pass `redirect: 'manual'` — a 3xx target is a fresh URL this has
- * not validated. Throws SsrfBlockedError on a blocked destination.
+ * Validate an outbound URL to a host we don't control and fetch it safely. Throws
+ * SsrfBlockedError on a blocked destination. Redirects are never followed (a 3xx
+ * target is a fresh URL this has not validated): the 3xx response is returned as is.
+ *
+ * With an egress proxy configured (Squid, in every deployed stack) the request goes
+ * through it. A dispatcher passed to fetch() bypasses NODE_USE_ENV_PROXY, so routing
+ * through the proxy has to be explicit here, and the network blocks direct egress.
+ * Squid resolves the name itself and refuses private / metadata addresses, so it is
+ * what holds the connection to a public address; the check here fails fast and
+ * covers anything the proxy would not see.
+ *
+ * Without a proxy (local dev) the connection is pinned to the addresses that passed,
+ * so a second DNS answer cannot swing it between the check and the request (rebinding).
  */
 export async function safeWebhookFetch(rawUrl: string, init: RequestInit = {}): Promise<Response> {
   let parsed: URL;
@@ -283,13 +292,22 @@ export async function safeWebhookFetch(rawUrl: string, init: RequestInit = {}): 
   } catch {
     throw new SsrfBlockedError(rawUrl, null, 'invalid URL');
   }
-  const pinned = await resolveExternalHostPinned(parsed.hostname, isAllowPrivate() && config.env === 'development');
-  // A fresh dispatcher per request — never shared, so a pinned socket is never
-  // reused under a later verdict; its idle socket is dropped on keep-alive timeout.
-  const dispatcher = pinned
-    ? pinnedDispatcherFor(parsed.hostname, pinned)
-    : new Agent({ keepAliveTimeout: 1000 });
-  return (await undiciFetch(rawUrl, { ...init, dispatcher } as never)) as unknown as Response;
+  const allowPrivate = isAllowPrivate() && config.env === 'development';
+
+  let dispatcher: Agent | ProxyAgent;
+  if (config.ssrf.egressProxyUrl) {
+    await assertHostIsExternal(parsed.hostname, allowPrivate);
+    egressProxyAgent ??= new ProxyAgent(config.ssrf.egressProxyUrl);
+    dispatcher = egressProxyAgent;
+  } else {
+    const pinned = await resolveExternalHostPinned(parsed.hostname, allowPrivate);
+    // A fresh dispatcher per request — never shared, so a pinned socket is never
+    // reused under a later verdict; its idle socket is dropped on keep-alive timeout.
+    dispatcher = pinned
+      ? pinnedDispatcherFor(parsed.hostname, pinned)
+      : new Agent({ keepAliveTimeout: 1000 });
+  }
+  return (await undiciFetch(rawUrl, { ...init, redirect: 'manual', dispatcher } as never)) as unknown as Response;
 }
 
 /**
