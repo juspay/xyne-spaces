@@ -8,12 +8,14 @@ Authentication and authorization using JWT tokens and ACL. Located in `src/middl
 
 | Method | Middleware | Use Case |
 |--------|------------|----------|
-| **Google / Microsoft / Email login** | `authMiddleware.authenticate`, `authV2Middleware.authenticate` | User login; JWT cookie per workspace |
-| **Zero Auth** | `authMiddleware.authenticateZero` | Zero sync endpoints |
+| **Google / Microsoft / Email login** | `authMiddleware.authenticate` | Every user route, Zero included; JWT cookie per workspace |
 
 No middleware ever refreshes a token. An expired or missing JWT is a `401` with a `code`
 (`TOKEN_MISSING`, `TOKEN_EXPIRED`, `TOKEN_INVALID`); the client calls `GET /api/auth/refresh-session`
 and retries.
+
+The JWT is read only from the `xyne_ws_<workspaceId>_token` cookie; an `Authorization` header is never
+accepted as a user credential. Every request re-checks the user (`status`, `leftAt`) and the org member (`leftAt`).
 
 ---
 
@@ -28,10 +30,6 @@ For admin-only endpoints:
 1. `authMiddleware.authenticate` - Validates user identity
 2. `authMiddleware.requireAdmin` - Checks admin role
 3. Route handler
-
-For Zero endpoints:
-1. `authMiddleware.authenticateZero` - Token validation
-2. Route handler
 
 ---
 
@@ -91,7 +89,7 @@ zero-cache forwards the browser cookies.
 3. If invalid/expired, returns 401 (no retry)
 4. Zero reports `needs-auth`; the dashboard calls `/auth/refresh-session` and reconnects
 
-**Location:** `src/middleware/auth.ts` - `authenticateZero` method
+**Location:** `src/middleware/auth.ts` - `authenticate`
 
 ---
 
@@ -159,8 +157,7 @@ remain only until a later cleanup.
 
 | File | Purpose |
 |------|---------|
-| `src/middleware/auth.ts` | Main auth middleware (authenticate, authenticateZero, requireAdmin) |
-| `src/middleware/authV2Middleware.ts` | Auth for `/api/auth` and `/api/v2/auth` routes |
+| `src/middleware/auth.ts` | The auth middleware (authenticate, requireAdmin, requireAdminOrOwner) |
 | `src/middleware/decryptionMiddleware.ts` | Session-key request decryption (run by the auth middlewares) / response encryption |
 | `src/middleware/acl.ts` | ACL middleware (checkAccess, optionalCheckAccess, skipACL) |
 | `src/middleware/authorize.ts` | Legacy resource-based authorization |
@@ -193,6 +190,5 @@ remain only until a later cleanup.
 - Minting a JWT anywhere other than `accessTokenService` / `completeLogin` / `refreshSession`
 - Storing tokens in localStorage (XSS vulnerable)
 - Skipping ACL for sensitive resources
-- Using dev mode headers in production
 - Not validating token expiry before operations
 - Creating custom auth middleware instead of using existing ones

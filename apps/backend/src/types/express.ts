@@ -51,9 +51,9 @@ export interface AuthenticatedUser {
   orgRole: string;
   memberId: string;
   authProvider?: string;
-  /** auth_sessions.id from the JWT `sid` claim; absent for API-key users. */
+  /** auth_sessions.id from the JWT `sid` claim. */
   sid?: string;
-  /** JWT `exp` in epoch ms; the dashboard refreshes shortly before it. Absent for API-key users. */
+  /** JWT `exp` in epoch ms; the dashboard refreshes shortly before it. */
   tokenExpiresAt?: number;
 }
 
