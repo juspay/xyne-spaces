@@ -1,4 +1,4 @@
-import { sanitizeMessageContent } from '@/utils/contentUtils';
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { TicketStatusV2, TicketPriority, BoardType, ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
@@ -95,7 +95,13 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     }
 
     const fields: Parameters<typeof repositories.tickets.updateTicketFields>[1] = {};
-    if (config.title !== undefined) fields.title = config.title as string;
+    if (config.title !== undefined) {
+      const title = extractPlainTextFromHtml(config.title as string).trim();
+      if (!title) {
+        throw new Error('UPDATE_TICKET: title must contain text');
+      }
+      fields.title = title;
+    }
     if (config.description !== undefined) fields.description = sanitizeMessageContent(config.description as string);
     if (config.priority !== undefined) {
       const normalized = (config.priority as string).toUpperCase();

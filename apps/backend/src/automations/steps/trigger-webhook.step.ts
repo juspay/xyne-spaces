@@ -81,6 +81,14 @@ function urlForLog(raw: string): string {
   }
 }
 
+function safeDecodePath(pathname: string): string {
+  try {
+    return decodeURIComponent(pathname).toLowerCase();
+  } catch {
+    return pathname.toLowerCase();
+  }
+}
+
 function ownHosts(): Set<string> {
   const hosts = new Set<string>();
   for (const raw of [config.backendUrl, config.frontendUrl]) {
@@ -116,6 +124,11 @@ export class TriggerWebhookStep extends BaseActionStep<
     }
     if (ownHosts().has(target.hostname.toLowerCase())) {
       throw new Error('[TRIGGER_WEBHOOK] the URL points at this app itself, which is not allowed');
+    }
+    // Inbound webhooks start a fresh run chain, so a step calling one (on any hostname that
+    // reaches this backend) would sidestep MAX_AUTOMATION_CHAIN.
+    if (safeDecodePath(target.pathname).includes('/automation-webhooks/')) {
+      throw new Error('[TRIGGER_WEBHOOK] calling an automation webhook URL is not allowed');
     }
     const logUrl = urlForLog(url);
 

@@ -47,7 +47,7 @@ export class NotifyGroupStep extends BaseActionStep<
     context: AutomationContext,
   ): Promise<NotifyGroupOutput> {
     const groupId = config.groupId as string;
-    const title = config.title as string;
+    const title = extractPlainTextFromHtml(config.title as string);
     const message = extractPlainTextFromHtml(config.message as string);
     const actionUrl = await buildNotifyActionUrl(
       context.automation.workspaceId,

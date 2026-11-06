@@ -242,10 +242,13 @@ class ApprovalService {
         'invalid-arg',
       );
     }
-    if (nextStatus === AutomationStatus.DISABLED) {
+    const row = ensureAutomation(await repositories.workflows.findById(liveId), liveId);
+    // An author may disable their own automation; that is not an admin kill-switch.
+    const authorDisable =
+      nextStatus === AutomationStatus.DISABLED && proposerOf(row) === actorUserId;
+    if (nextStatus === AutomationStatus.DISABLED && !authorDisable) {
       await assertIsAutomationsAdmin(actorUserId, opts);
     }
-    const row = ensureAutomation(await repositories.workflows.findById(liveId), liveId);
     if (nextStatus === AutomationStatus.ACTIVE && parseAutomationMetadata(row.metadata).adminDisabled) {
       await assertIsAutomationsAdmin(actorUserId, opts);
     }
@@ -268,7 +271,11 @@ class ApprovalService {
       );
       return automation;
     }
-    const automation = await automationService.disable(liveId, opts.cancelQueued ?? true);
+    const automation = await automationService.disable(
+      liveId,
+      opts.cancelQueued ?? true,
+      !authorDisable,
+    );
     logger.info(
       `[approval] toggleLive DISABLED id=${liveId} actorUserId=${actorUserId} cancelQueued=${opts.cancelQueued ?? true}`,
     );

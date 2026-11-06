@@ -54,7 +54,13 @@ export class CreateEmailDraftStep extends BaseActionStep<
     if (!conversation) {
       throw new Error('[CREATE_EMAIL_DRAFT] conversation is not in that channel in this workspace');
     }
-    if (!(await authorCanSeeChannel(conversation.channelId, context.automation.createdById))) {
+    if (
+      !(await authorCanSeeChannel(
+        conversation.channelId,
+        context.automation.createdById,
+        context.automation.workspaceId,
+      ))
+    ) {
       throw new Error('[CREATE_EMAIL_DRAFT] channel is private and the automation author is not a participant');
     }
     const draft = await repositories.emailDrafts.upsertForChannelConversation({

@@ -52,7 +52,7 @@ export class NotifyUserStep extends BaseActionStep<typeof NotifyUserConfigSchema
     );
     const result = await notificationService.createNotification(config.userId as string, {
       type: NotificationType.MENTION,
-      title: config.title as string,
+      title: extractPlainTextFromHtml(config.title as string),
       message: extractPlainTextFromHtml(config.message as string),
       ...(actionUrl ? { actionUrl } : {}),
     });

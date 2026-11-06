@@ -105,7 +105,7 @@ class AutomationService {
     return { automation: workflowToAutomation(updated), validation };
   }
 
-  async disable(id: string, cancelQueued = true): Promise<AutomationView> {
+  async disable(id: string, cancelQueued = true, adminDisabled = true): Promise<AutomationView> {
     const t0 = Date.now();
     logger.info(`[AUTOMATION-SERVICE] disable START id=${id} cancelQueued=${cancelQueued}`);
     const existing = await repositories.workflows.findById(id);
@@ -119,7 +119,7 @@ class AutomationService {
       metadata: buildAutomationMetadata({
         ...parseAutomationMetadata(existing.metadata),
         drainInFlight: !cancelQueued,
-        adminDisabled: true,
+        ...(adminDisabled && { adminDisabled: true }),
       }),
       updatedAt: new Date(),
     });

@@ -873,13 +873,16 @@ router.get(
     const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
 
     const stitched = await stitchExecutionContextMany(page);
+    const canSeeData = await canSeeRunData(auth.userId, workflow.metadata);
 
     res.json({
       success: true,
       data: {
-        runs: stitched.map(row =>
-          workflowExecutionToRunSummary(row, { context: row.context }),
-        ),
+        runs: stitched.map(row => ({
+          ...workflowExecutionToRunSummary(row, { context: row.context }),
+          // Step error strings can echo inbound content, so they follow the run-detail gate.
+          ...(canSeeData ? {} : { error: null }),
+        })),
         nextCursor,
       },
       timestamp: new Date().toISOString(),
@@ -916,15 +919,7 @@ router.get(
       where: { id: execution.workflowId, workspaceId: auth.workspaceId },
       select: { metadata: true },
     });
-    let canSeeData = owner
-      ? parseAutomationMetadata(owner.metadata).createdById === auth.userId
-      : false;
-    if (!canSeeData) {
-      canSeeData = await assertIsAutomationsAdmin(auth.userId).then(
-        () => true,
-        () => false,
-      );
-    }
+    const canSeeData = await canSeeRunData(auth.userId, owner?.metadata);
 
     const [state, pauseState, stepRows] = await Promise.all([
       getExecutionState(executionId),
@@ -940,7 +935,12 @@ router.get(
       data: {
         run: canSeeData
           ? workflowExecutionToRun(execution, state)
-          : { ...workflowExecutionToRun(execution, state), triggerData: {}, context: {} },
+          : {
+              ...workflowExecutionToRun(execution, state),
+              error: null,
+              triggerData: {},
+              context: {},
+            },
         state: canSeeData || !pauseState ? pauseState : { ...pauseState, context: null },
         steps: stepRows.map(r => ({
           id: r.id,
@@ -955,6 +955,23 @@ router.get(
     });
   },
 );
+
+/** Run data (trigger payloads, step data, errors) is visible to the author and AUTOMATIONS admins. */
+async function canSeeRunData(
+  userId: string,
+  ownerMetadata: string | null | undefined,
+): Promise<boolean> {
+  if (
+    ownerMetadata !== undefined &&
+    parseAutomationMetadata(ownerMetadata).createdById === userId
+  ) {
+    return true;
+  }
+  return assertIsAutomationsAdmin(userId).then(
+    () => true,
+    () => false,
+  );
+}
 
 function safeParseJson(s: string): unknown {
   try {
