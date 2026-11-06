@@ -75,6 +75,12 @@ schemas embed with `embed hf-embedder`, which goes to `/v1/embeddings`; the `emb
 goes to `/v1/embeddings/file`, which the proxy can send to a separate embedder
 (`UPSTREAM_FILE_EMBEDDINGS_URL`).
 
+Both components send `Authorization: Bearer <key>` (`api-key-secret-ref` `teiProxyS2sKey`, read
+from `VESPA_SECRET_TEI_PROXY_S2S_KEY` on the feed and search pods), and the proxy rejects every
+route except `/health` without it. The key is `TEI_PROXY_S2S_KEY` in `xyne-vespa-secrets`
+(Terraform `app_secrets.tei_proxy_s2s_key`). The Vespa pods don't restart on their own when the
+Secret changes: after rotating the key, restart `vespa-feed`, `vespa-search` and `tei-batch-proxy`.
+
 ## The application package
 
 Vespa needs its schemas and topology uploaded to the config server before feed and search can

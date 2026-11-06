@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const http = require("http");
 
 const PORT = Number(process.env.PORT || 8080);
@@ -14,6 +15,11 @@ const RETRY_BASE_MS = Number(process.env.RETRY_BASE_MS || 1000);
 const TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 1800000);
 const BODY_LIMIT = Number(process.env.PROXY_PAYLOAD_LIMIT_BYTES || 200000000);
 const LOG_LEVEL = (process.env.LOG_LEVEL || "info").toLowerCase();
+// Service-to-service key. Every route except /health requires
+// `Authorization: Bearer <TEI_PROXY_S2S_KEY>`. Vespa's openai-embedder sends exactly
+// that header from its `api-key-secret-ref` (self-hosted Vespa reads the secret from
+// the VESPA_SECRET_TEI_PROXY_S2S_KEY env var). Unset = every request is rejected.
+const S2S_KEY = (process.env.TEI_PROXY_S2S_KEY || "").trim();
 
 // ── Structured JSON logging (one object per line, Loki/Grafana-friendly) ──
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
@@ -26,6 +32,16 @@ function log(level, msg, fields) {
 }
 
 let REQ_SEQ = 0;
+
+// Constant-time check of `Authorization: Bearer <key>`; false when either side is empty.
+function isAuthorized(req) {
+  if (!S2S_KEY) return false;
+  const header = req.headers.authorization;
+  if (typeof header !== "string" || !header.startsWith("Bearer ")) return false;
+  const provided = Buffer.from(header.slice("Bearer ".length).trim(), "utf8");
+  const expected = Buffer.from(S2S_KEY, "utf8");
+  return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,7 +65,7 @@ function readBody(req) {
   });
 }
 
-async function fetchWithRetry(upstreamUrl, payload, authHeader, ctx = {}) {
+async function fetchWithRetry(upstreamUrl, payload, ctx = {}) {
   let lastText = "";
   const inputCount = Array.isArray(payload.input) ? payload.input.length : 1;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -58,8 +74,9 @@ async function fetchWithRetry(upstreamUrl, payload, authHeader, ctx = {}) {
     const started = Date.now();
 
     try {
+      // The inbound Authorization header carries this proxy's own s2s key, so it is
+      // never forwarded to TEI.
       const headers = { "content-type": "application/json" };
-      if (authHeader) headers.authorization = authHeader;
 
       log("debug", "upstream: request", { ...ctx, attempt, inputCount, url: upstreamUrl });
       const res = await fetch(upstreamUrl, {
@@ -175,7 +192,6 @@ async function handleEmbeddings(req, res, reqId, t0, kind, upstreamUrl) {
     concurrency: CONCURRENCY,
   });
 
-  const authHeader = req.headers.authorization;
   const batchResponses = await mapWithConcurrency(batches, async (batch, batchIndex) => {
     const bStart = Date.now();
     log("debug", "embeddings: batch start", {
@@ -183,7 +199,7 @@ async function handleEmbeddings(req, res, reqId, t0, kind, upstreamUrl) {
     });
 
     const body = { ...payload, input: batch.input };
-    const upstream = await fetchWithRetry(upstreamUrl, body, authHeader, { reqId, kind, ...meta, batch: batchIndex, of: batches.length });
+    const upstream = await fetchWithRetry(upstreamUrl, body, { reqId, kind, ...meta, batch: batchIndex, of: batches.length });
 
     const data = (upstream.data || []).map((item, idx) => ({
       ...item,
@@ -242,6 +258,18 @@ const server = http.createServer(async (req, res) => {
 
   const reqId = `r${++REQ_SEQ}`;
   const t0 = Date.now();
+
+  if (!isAuthorized(req)) {
+    log("warn", "unauthorized", {
+      reqId, method: req.method, url: req.url,
+      remote: req.socket && req.socket.remoteAddress,
+      authHeaderPresent: Boolean(req.headers.authorization),
+    });
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "unauthorized" }));
+    return;
+  }
+
   try {
     // feed-cluster component "embed-file" -> the `file` document type -> env1.
     if (req.method === "POST" && req.url === "/v1/embeddings/file") {
@@ -283,5 +311,9 @@ server.listen(PORT, "0.0.0.0", () => {
     timeoutMs: TIMEOUT_MS,
     bodyLimitBytes: BODY_LIMIT,
     logLevel: LOG_LEVEL,
+    s2sKeyConfigured: Boolean(S2S_KEY),
   });
+  if (!S2S_KEY) {
+    log("error", "TEI_PROXY_S2S_KEY is not set: every route except /health will return 401");
+  }
 });

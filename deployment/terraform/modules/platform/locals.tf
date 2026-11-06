@@ -50,6 +50,7 @@ locals {
     local.postgres_incluster ? ["xyne-pg-app"] : [],
     local.redis_incluster ? ["xyne-redis-auth"] : [],
     local.storage_incluster ? ["xyne-minio-root"] : [],
+    var.enable_vespa ? ["xyne-vespa-secrets"] : [],
   )
 
   secret_types = {
@@ -115,6 +116,10 @@ locals {
     }
     "xyne-redis-auth" = {
       password = local.redis_auth
+    }
+    # Vespa feed/query pods (as VESPA_SECRET_TEI_PROXY_S2S_KEY) and tei-batch-proxy share it.
+    "xyne-vespa-secrets" = {
+      TEI_PROXY_S2S_KEY = var.app_secrets.tei_proxy_s2s_key
     }
     "xyne-minio-root" = {
       rootUser     = local.storage_access_key

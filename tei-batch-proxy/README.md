@@ -34,8 +34,20 @@ It keeps the **same model and dimension** (bge-base, 768-dim), so **no re-index*
 | `REQUEST_TIMEOUT_MS` | `1800000` | Per-upstream-request timeout (30 min) |
 | `PROXY_PAYLOAD_LIMIT_BYTES` | `200000000` | Max inbound body size (200 MB) |
 | `PORT` | `8080` | Listen port |
+| `TEI_PROXY_S2S_KEY` | unset | Shared key. Every route except `/health` requires `Authorization: Bearer <key>`; unset = every request gets `401` |
 
 Routes: `POST /v1/embeddings` (proxied), `GET /health`.
+
+## Authentication
+
+Every route except `GET /health` (left open for the kubelet probes) requires
+`Authorization: Bearer <TEI_PROXY_S2S_KEY>`, compared in constant time; anything else is `401`.
+The caller is Vespa's `openai-embedder`, which can only send that one header: both components
+set `<api-key-secret-ref>teiProxyS2sKey</api-key-secret-ref>`, and self-hosted Vespa resolves
+that ref from the env var `VESPA_SECRET_TEI_PROXY_S2S_KEY` on the feed and query pods (it
+fails to start the embedders if the variable is missing). Both sides read the same key,
+`TEI_PROXY_S2S_KEY` in the `xyne-vespa-secrets` Secret. The proxy never forwards the inbound
+`Authorization` header to TEI.
 
 `POST /v1/embeddings/file` does the same against `UPSTREAM_FILE_EMBEDDINGS_URL`
 (defaults to `UPSTREAM_EMBEDDINGS_URL`), so file chunks can go to a separate embedder.
@@ -66,9 +78,10 @@ such as the backend:
 
 ```bash
 kubectl -n <namespace> exec deploy/xyne-backend -c xyne-backend -- node -e '
-fetch("http://tei-batch-proxy:8080/v1/embeddings",{method:"POST",headers:{"content-type":"application/json"},
+fetch("http://tei-batch-proxy:8080/v1/embeddings",{method:"POST",headers:{"content-type":"application/json",
+  authorization:"Bearer <TEI_PROXY_S2S_KEY>"},
   body:JSON.stringify({model:"BAAI/bge-base-en-v1.5",input:["hello"]})})
 .then(async r=>{const d=await r.json();console.log(r.status,d.data?.[0]?.embedding?.length)})'
 ```
 
-`200 768` means the proxy reaches TEI.
+`200 768` means the proxy reaches TEI; `401` means the key is missing or wrong.
