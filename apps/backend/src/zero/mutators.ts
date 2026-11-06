@@ -18651,13 +18651,15 @@ export function createMutators(
             );
           }
           // adminDisabled must commit with the status flip, else a non-admin can re-activate
-          // before (or after a failure of) the async toggleLive below.
+          // before (or after a failure of) the async toggleLive below. An author turning off
+          // their own automation is not an admin kill-switch, so they can turn it back on.
+          const existingMetadata = parseAutomationMetadata(existing.metadata);
           await tx.mutate.workflows.update({
             id,
             status: 'DISABLED',
             metadata: buildAutomationMetadata({
-              ...parseAutomationMetadata(existing.metadata),
-              adminDisabled: true,
+              ...existingMetadata,
+              ...(existingMetadata.createdById !== authData.sub && { adminDisabled: true }),
             }),
             updatedAt: timestamp,
           });

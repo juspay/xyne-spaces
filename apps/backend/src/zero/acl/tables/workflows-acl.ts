@@ -179,7 +179,12 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     ) {
       throw new MutationACLError('Automation update failed: only the author can edit a draft', 'workflows');
     }
-    if (nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus)) {
+    // The author may turn off their own live automation; every other DISABLED move is admin-only.
+    const isAuthorDisable =
+      nextStatus === 'DISABLED' &&
+      existing.status === 'ACTIVE' &&
+      parseAutomationMetadata(existing.metadata).createdById === this.ctx.userID;
+    if (nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus) && !isAuthorDisable) {
       await this.requireAutomationsAdmin(tx);
       if (
         nextStatus === 'DISABLED' &&
