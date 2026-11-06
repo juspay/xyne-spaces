@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken, verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { authSessionService, MissingDeviceKeyError } from '../services/authSessionService';
@@ -549,14 +549,14 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      res.cookie(PENDING_AUTH_COOKIE, jwt.sign({
+      res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -908,14 +908,14 @@ export class AuthV2Controller {
           access_token,
           accessTokenExpiry,
         );
-        res.cookie(PENDING_AUTH_COOKIE, jwt.sign({
+        res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
           googleId: googleUserData.googleId,
           email: googleUserData.email,
           name: googleUserData.name,
           picture: googleUserData.picture,
           provider: AuthProvider.GOOGLE,
           tokenKey,
-        }, config.jwt.secret, { expiresIn: '10m' }), {
+        }), {
           httpOnly: true,
           secure: isProduction,
           sameSite: 'strict' as const,
@@ -986,14 +986,14 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      res.cookie(PENDING_AUTH_COOKIE, jwt.sign({
+      res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), {
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
@@ -1245,14 +1245,14 @@ export class AuthV2Controller {
         access_token,
         accessTokenExpiry,
       );
-      res.cookie(PENDING_AUTH_COOKIE, jwt.sign({
+      res.cookie(PENDING_AUTH_COOKIE, signPendingAuthToken({
         googleId: googleUserData.googleId,
         email: googleUserData.email,
         name: googleUserData.name,
         picture: googleUserData.picture,
         provider: AuthProvider.GOOGLE,
         tokenKey,
-      }, config.jwt.secret, { expiresIn: '10m' }), cookieOptions);
+      }), cookieOptions);
       logger.info(`${tag()} Stored pending auth data for workspace selection`);
 
       /**
@@ -2119,18 +2119,7 @@ export class AuthV2Controller {
     pendingTokenKey: string | undefined;
   } | null> {
     try {
-      const decoded = jwt.verify(cookie, config.jwt.secret, { algorithms: ['HS256'] }) as {
-        googleId?: string;
-        providerUserId?: string;
-        email?: string;
-        name?: string;
-        picture?: string;
-        provider?: string;
-        refreshToken?: string | null;
-        accessToken?: string | null;
-        accessTokenExpiry?: string | null;
-        tokenKey?: string;
-      };
+      const decoded = verifyPendingAuthToken(cookie);
       if (!decoded?.email) throw new Error('Invalid JWT payload');
 
       let redisTokens: {

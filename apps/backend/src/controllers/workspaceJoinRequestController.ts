@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
+import { verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import {
   WorkspaceJoinRequestAction,
   type WorkspaceJoinRequestAction as WorkspaceJoinRequestActionType,
@@ -7,7 +7,6 @@ import {
 } from '@xyne/shared';
 import { workspaceJoinRequestService } from '@/services/workspaceJoinRequestService';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { PENDING_AUTH_COOKIE, readWorkspaceJwt } from '@/services/accessTokenService';
 
 export class WorkspaceJoinRequestController {
@@ -142,14 +141,8 @@ export class WorkspaceJoinRequestController {
 
   private async resolveRequesterEmail(req: Request): Promise<string | null> {
     const pendingAuthCookie = req.cookies?.[PENDING_AUTH_COOKIE];
-    if (pendingAuthCookie) {
-      try {
-        const decoded = jwt.verify(pendingAuthCookie, config.jwt.secret, { algorithms: ['HS256'] }) as { email?: string };
-        return decoded.email || null;
-      } catch (_error) {
-        return null;
-      }
-    }
+    const pendingEmail = pendingAuthCookie ? verifyPendingAuthToken(pendingAuthCookie)?.email : undefined;
+    if (pendingEmail) return pendingEmail;
 
     // Already signed in: the workspace JWT cookie identifies the member (xs is only sent to
     // /auth/refresh-session). An expired JWT reads as not signed in; the client refreshes on 401.

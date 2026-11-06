@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { AuthProvider } from '@xyne/shared';
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken } from '@/utils/pendingAuthToken';
 import { Request, Response } from 'express';
 import { authSessionService, AuthSessionRevokeReason } from '../services/authSessionService';
 import { completeLogin, respondDeviceKeyRequired } from '../services/loginCompletionService';
@@ -34,6 +34,15 @@ const LOGIN_MAX_FAILED_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_SECONDS = 5 * 60;
 const LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS = 5 * 60;
 const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
+const MAX_RESET_CODE_ATTEMPTS = 3;
+const MAX_RESET_CODES_PER_DAY = 5;
+
+const resetCodeMatches = (expected: string, presented: unknown): boolean => {
+  if (typeof presented !== 'string') return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(presented);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
 
 export class EmailAuthController {
   private userService: UserService;
@@ -96,27 +105,35 @@ export class EmailAuthController {
         return;
       }
 
+      const lockOut = async (): Promise<void> => {
+        await redisService.set(loginLockKey, '1', LOGIN_LOCKOUT_SECONDS);
+        logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
+        res.setHeader('Retry-After', LOGIN_LOCKOUT_SECONDS.toString());
+        res.status(429).json({
+          error: 'Rate limited',
+          message: 'Too many failed login attempts. Please try again later.',
+        });
+      };
+
+      // Count the attempt before checking the password: INCR is atomic, so a burst of
+      // concurrent guesses can't all pass the lock check above before the counter moves.
+      // A successful login clears it below.
+      const redis = redisService.getClient();
+      const attempts = await redis.incr(loginAttemptKey);
+      if (attempts === 1) {
+        await redis.expire(loginAttemptKey, LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS);
+      }
+      if (attempts > LOGIN_MAX_FAILED_ATTEMPTS) {
+        await lockOut();
+        return;
+      }
+
       // Every failed attempt — unknown email, no password set, or wrong password —
       // ends here, so the attempt counter, the lockout and the response are identical
       // whichever it was, keeping registered and unregistered emails indistinguishable.
       const rejectLogin = async (): Promise<void> => {
-        const redis = redisService.getClient();
-        const failedAttempts = await redis.incr(loginAttemptKey);
-        if (failedAttempts === 1) {
-          await redis.expire(loginAttemptKey, LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS);
-        }
-
-        if (failedAttempts >= LOGIN_MAX_FAILED_ATTEMPTS) {
-          await Promise.all([
-            redisService.set(loginLockKey, '1', LOGIN_LOCKOUT_SECONDS),
-            redisService.del(loginAttemptKey),
-          ]);
-          logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
-          res.setHeader('Retry-After', LOGIN_LOCKOUT_SECONDS.toString());
-          res.status(429).json({
-            error: 'Rate limited',
-            message: 'Too many failed login attempts. Please try again later.',
-          });
+        if (attempts >= LOGIN_MAX_FAILED_ATTEMPTS) {
+          await lockOut();
           return;
         }
 
@@ -230,18 +247,14 @@ export class EmailAuthController {
 
         res.cookie(
           PENDING_AUTH_COOKIE,
-          jwt.sign(
-            {
-              email: normalizedEmail,
-              name: userName,
-              providerUserId: `email-${normalizedEmail}`,
-              provider: 'EMAIL',
-              refreshToken: null,
-              accessToken: null,
-            },
-            config.jwt.secret,
-            { expiresIn: '10m' },
-          ),
+          signPendingAuthToken({
+            email: normalizedEmail,
+            name: userName,
+            providerUserId: `email-${normalizedEmail}`,
+            provider: 'EMAIL',
+            refreshToken: null,
+            accessToken: null,
+          }),
           {
             ...cookieBase,
             maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -265,18 +278,14 @@ export class EmailAuthController {
 
       res.cookie(
         PENDING_AUTH_COOKIE,
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-          },
-          config.jwt.secret,
-          { expiresIn: '10m' },
-        ),
+        signPendingAuthToken({
+          email: normalizedEmail,
+          name: userName,
+          providerUserId: `email-${normalizedEmail}`,
+          provider: 'EMAIL',
+          refreshToken: null,
+          accessToken: null,
+        }),
         {
           ...cookieBase,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -437,6 +446,19 @@ export class EmailAuthController {
         return;
       }
 
+      // Each new code resets the attempt counter, so cap how many codes an account gets per day.
+      const dailyKey = `pwdreset:daily:${normalizedEmail}`;
+      const redis = redisService.getClient();
+      const codesToday = await redis.incr(dailyKey);
+      if (codesToday === 1) {
+        await redis.expire(dailyKey, 24 * 60 * 60);
+      }
+      if (codesToday > MAX_RESET_CODES_PER_DAY) {
+        logger.warn('[AUTH] Password reset code request rejected (reason=daily_cap)');
+        res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
+        return;
+      }
+
       // Generate 6-digit code
       const code = generateSixDigitCode();
       const attemptsKey = `pwdreset:attempts:${normalizedEmail}`;
@@ -509,7 +531,20 @@ export class EmailAuthController {
       const redisKey = `pwdreset:code:${normalizedEmail}`;
       const attemptsKey = `pwdreset:attempts:${normalizedEmail}`;
 
-      // Retrieve and verify code from Redis
+      // Count the attempt before reading the code: INCR is atomic, so concurrent guesses can't
+      // all compare before the cap applies. The counter is left to expire on exhaustion (not
+      // deleted), or in-flight requests would start a fresh count.
+      const redis = redisService.getClient();
+      const attempts = await redis.incr(attemptsKey);
+      if (attempts === 1) {
+        await redis.expire(attemptsKey, 15 * 60);
+      }
+      if (attempts > MAX_RESET_CODE_ATTEMPTS) {
+        await redisService.del(redisKey);
+        res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
+        return;
+      }
+
       const raw = await redisService.get(redisKey);
       if (!raw) {
         res.status(400).json({ error: 'Invalid or expired code' });
@@ -524,18 +559,9 @@ export class EmailAuthController {
         return;
       }
 
-      if (payload.code !== code) {
-        const redis = redisService.getClient();
-        const attempts = await redis.incr(attemptsKey);
-        if (attempts === 1) {
-          await redis.expire(attemptsKey, 15 * 60);
-        }
-
-        if (attempts >= 3) {
-          await Promise.all([
-            redisService.del(redisKey),
-            redisService.del(attemptsKey),
-          ]);
+      if (!resetCodeMatches(payload.code, code)) {
+        if (attempts >= MAX_RESET_CODE_ATTEMPTS) {
+          await redisService.del(redisKey);
           res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
           return;
         }
