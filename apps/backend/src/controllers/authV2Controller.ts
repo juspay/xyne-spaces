@@ -1479,6 +1479,15 @@ export class AuthV2Controller {
           });
           return;
         }
+        if (jwtRead.payload.sid && (await authSessionService.isSessionRevoked(jwtRead.payload.sid))) {
+          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=session_logged_out)`);
+          res.status(401).json({
+            error: 'Unauthorized',
+            code: 'TOKEN_INVALID',
+            message: 'Session has been logged out',
+          });
+          return;
+        }
         logger.info(`[LOGIN-WORKSPACE] No pending auth cookie, but a signed-in member - using auto-login flow (platform=${platform})`);
 
         const identity = await this.prisma.user.findFirst({
