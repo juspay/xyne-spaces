@@ -19,3 +19,14 @@ export {
   redactUrlQuery,
 } from "xyne-claw-shared";
 export type { LogContext, Logger } from "xyne-claw-shared";
+
+import { redactUrlQuery } from "xyne-claw-shared";
+
+// Connect and hosted-file links carry a bearer token as a path segment:
+// /surfaces/<channel>/connect/<token>[/done] and /surfaces/<channel>/files/<token>.
+const TOKEN_PATH = /(\/surfaces\/[^/?#]+\/(?:connect|files)\/)[^/?#]+/;
+
+/** Request URL safe for logs: query values and link tokens masked. */
+export function logUrl(url: string): string {
+  return redactUrlQuery(url).replace(TOKEN_PATH, "$1[REDACTED]");
+}
