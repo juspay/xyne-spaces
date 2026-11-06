@@ -63,6 +63,10 @@ const envSchema = Joi.object({
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default('Xyne Spaces'),
+  // Optional HTTP CONNECT proxy for the SMTP connection (e.g. http://proxy.internal:3128).
+  // nodemailer opens raw sockets and ignores HTTPS_PROXY, so it needs this set explicitly.
+  // Empty = connect to smtp.gmail.com directly (default).
+  EMAIL_PROXY_URL: Joi.string().uri({ scheme: ['http'] }).allow('').default(''),
   JWT_SECRET: Joi.string().allow('').default(''),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
@@ -1335,6 +1339,7 @@ export const config = {
     refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,
     fromEmail: envVars.EMAIL_FROM as string,
     fromName: envVars.EMAIL_FROM_NAME as string,
+    proxyUrl: (envVars.EMAIL_PROXY_URL as string).trim(),
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
