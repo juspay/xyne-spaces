@@ -13,7 +13,7 @@
 import express, { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import crypto from 'crypto';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { encrypt, decrypt } from '@/services/encryptionService';
@@ -39,7 +39,7 @@ type SlackUserOAuthState = {
  */
 router.get(
   '/connect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;
@@ -227,7 +227,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
  */
 router.get(
   '/status',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;
@@ -259,7 +259,7 @@ router.get(
  */
 router.delete(
   '/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;

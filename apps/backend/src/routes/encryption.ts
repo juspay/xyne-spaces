@@ -1,14 +1,16 @@
 import { Router, type Request, type Response } from 'express';
-import { SessionStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { getEncryptionProvider } from '@/services/encryption';
+import { AuthSessionStatus } from '@/services/authSessionService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
 const prisma = DatabaseClient.getInstance();
 
+// Client encryption keys are scoped to the auth session (JWT `sid`): one key per device
+// sign-in, shared across the workspaces that sign-in enters.
 router.get('/public-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
+  const sessionId = req.user?.sid;
   if (!req.user || !sessionId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
@@ -23,7 +25,7 @@ router.get('/public-key', async (req: Request, res: Response) => {
 });
 
 router.post('/register-client-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
+  const sessionId = req.user?.sid;
   if (!req.user || !sessionId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
@@ -38,11 +40,11 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
   let orgId: string;
   try {
     const [session, workspace] = await prisma.$transaction([
-      prisma.userSession.findFirst({
+      prisma.authSession.findFirst({
         where: {
           id: sessionId,
-          userId: req.user.id,
-          status: SessionStatus.ACTIVE,
+          orgMemberId: req.user.memberId,
+          status: AuthSessionStatus.ACTIVE,
           refreshTokenExpiry: { gt: new Date() },
         },
         select: { id: true },

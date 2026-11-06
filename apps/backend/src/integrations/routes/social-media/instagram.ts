@@ -1,7 +1,7 @@
 import express, { type Request, type Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ChannelType } from '@xyne/shared';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { createMetaDeskTx, addMetaSourcesToChannelTx } from '@/bypassAcl/transactions/metaDesk';
 import { decrypt, encrypt } from '@/services/encryptionService';
@@ -50,7 +50,7 @@ function redirectToDesk(
 // Initiates Instagram Business Login with instagram_business_basic,instagram_business_manage_messages
 router.post(
   '/instagram/oauth/start',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const parsed = oauthDeskStartSchema.safeParse(req.body);
@@ -101,7 +101,7 @@ router.post(
 // Looks up the channel's existing settings so the user doesn't have to re-enter them.
 router.post(
   '/:channelId/instagram/reconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
@@ -172,7 +172,7 @@ router.post(
 // Re-uses the same OAuth flow; callback creates only ExternalSource (no new Channel row).
 router.post(
   '/:channelId/instagram/add-account',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
@@ -534,7 +534,7 @@ router.get(
 // Mirrors the Google Play per-app disconnect pattern.
 router.post(
   '/:channelId/instagram/:sourceId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId, sourceId } = req.params;
@@ -583,7 +583,7 @@ router.post(
 // Re-enables a previously disconnected Instagram account.
 router.post(
   '/:channelId/instagram/:sourceId/reconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId, sourceId } = req.params;
@@ -650,7 +650,7 @@ router.post(
 // POST /:channelId/instagram/disconnect
 router.post(
   '/:channelId/instagram/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -775,7 +775,7 @@ router.post(
 // Returns previous tickets from the same Instagram/Facebook customer (identified by IGSID/PSID) in this channel.
 router.get(
   '/:channelId/customer-history',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;

@@ -30,7 +30,6 @@ import ticketRoutes from '@/routes/tickets';
 // import toolRoutes from '@/routes/tools';
 // import agentToolsMappingRoutes from '@/routes/agent-tools-mappings';
 import analyticsRoutes from '@/routes/analytics';
-import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
 import secretsVaultRoutes from '@/routes/secretsVault';
@@ -233,7 +232,7 @@ import { appRoutes } from '@/apps';
 // import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
 // import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
-import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
+import { encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
@@ -367,7 +366,8 @@ export class App {
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-    this.app.use(decryptRequestBodyMiddleware);
+    // Request-body decryption needs the auth session (JWT sid), so the auth middlewares run
+    // it after authenticating instead of it being mounted here.
     this.app.use(encryptResponseBodyMiddleware);
 
     // Public SDK API. Uses the same cookie-based auth as the dashboard via
@@ -537,7 +537,7 @@ export class App {
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
-    this.app.use('/api/zero', zeroRoutes); // Zero sync routes (uses authenticateZero middleware in route file)
+    this.app.use('/api/zero', zeroRoutes);
     this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
     this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
 
@@ -727,9 +727,6 @@ export class App {
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
     this.app.use('/api/search-feedback', authMiddleware.authenticate, searchFeedbackRoutes); // Search feedback routes (POST /api/search-feedback)
 
-    // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
-    this.app.use('/api/admin/api-keys', apiKeyRoutes);
-
     // User management routes - admin operations with ACL protection
     this.app.use(
       '/api/user-management',
@@ -858,11 +855,6 @@ export class App {
     // Disabled (LLM)
     // this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
 
-    // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
-    this.app.use('/api/admin/api-keys', apiKeyRoutes);
-
-    // API Key test route
-    this.app.use('/api/test/api-key', apiKeyRoutes);
     // User management routes - /users endpoint without ACL, others with ACL
     const userManagementController = UserManagementController.getInstance();
     this.app.get(

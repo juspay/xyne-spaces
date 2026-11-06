@@ -14,7 +14,6 @@ Services contain the core business logic. Located in `src/services/`.
 | `userSessionService.ts` | Session management, session tracking |
 | `userStatusService.ts` | Online/offline/away status management |
 | `jwtService.ts` | JWT token generation and validation with configurable expiry |
-| `apiKeyService.ts` | API key generation, validation, and management |
 | `aclService.ts` | Access control lists, permission checking by resource/action |
 | `aclAuditService.ts` | ACL audit logging for compliance |
 | `userAssignmentStateService.ts` | Track user assignment states |

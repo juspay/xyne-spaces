@@ -6,6 +6,7 @@ import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isTestEnv } from '../config';
 import { logger, Event as LoggerEvent } from '../utils/logger';
+import { noteAccessTokenExpiry } from '../services/clients/sessionRefresh';
 
 import { clearAllSessionKeys } from '../services/sessionKeyStore';
 import { indexedDBService } from '../services/indexedDBService';
@@ -88,6 +89,8 @@ interface ValidateSessionResponse {
   user: User & { workspaceId?: string };
   selfDmChannelId?: string | null;
   landingChannelId?: string | null;
+  /** JWT expiry (epoch ms); the dashboard refreshes shortly before it. */
+  accessTokenExpiresAt?: number | null;
 }
 
 interface ApiErrorResponse {
@@ -1073,10 +1076,11 @@ export const authMachine = createMachine(
     },
     actors: {
       performLogout: fromPromise(async ({ input }: { input: { skipApi?: boolean } }) => {
-        // A 401 here is itself a signal: cookies were already gone before this
-        // POST — the signature of an externally-triggered (phantom) logout
-        // rather than a user-initiated one. Force-flush: the log buffer is
-        // in-memory only and the page is about to be torn down.
+        // A 401 that survives the default-axios refresh-and-retry (utils/logger.ts)
+        // is itself a signal: the session was already gone before this POST — the
+        // signature of an externally-triggered (phantom) logout rather than a
+        // user-initiated one. Force-flush: the log buffer is in-memory only and
+        // the page is about to be torn down.
         logger.info(LoggerEvent.LOGOUT_STARTED, { skipApi: input?.skipApi === true });
         logger.pushlogs();
         // A logout triggered by a 401 skips the POST: the session is already
@@ -1185,7 +1189,9 @@ export const authMachine = createMachine(
             isNewUser?: boolean;
             selfDmChannelId?: string;
             landingChannelId?: string | null;
+            accessTokenExpiresAt?: number;
           };
+          noteAccessTokenExpiry(data.accessTokenExpiresAt);
           if (data.user) {
             return {
               user: data.user,
@@ -1272,7 +1278,8 @@ export const authMachine = createMachine(
           if (userEmail) {
             headers['x-user-email'] = userEmail;
           }
-          // Note: Using direct axios call instead of apiInstance
+          // Note: Using direct axios call instead of apiInstance. The default-axios
+          // interceptor (utils/logger.ts) handles 401 → refresh → retry for it.
           const response = await axios.get(`${API_BASE_URL}/auth/validate`, {
             withCredentials: true,
             headers: {
@@ -1283,6 +1290,7 @@ export const authMachine = createMachine(
           });
 
           const data = response.data as ValidateSessionResponse;
+          noteAccessTokenExpiry(data.accessTokenExpiresAt);
 
           // Check for is_new_user cookie during session validation
           const isNewUserCookie = Cookies.get('is_new_user');

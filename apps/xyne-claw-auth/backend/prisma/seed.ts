@@ -5,10 +5,6 @@ import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { SDLC_AGENT_SLUG, getAllCustomTools } from "xyne-claw-shared";
 import { sdlcAgentDesiredState } from "../src/lib/sdlc-agent-sync.js";
-import {
-  WORKFLOW_TOOL_NAMES,
-  WORKFLOW_WRITE_TOOL_NAMES,
-} from "../src/mcp/servers/xyne-workflows-tools.js";
 
 const prisma = new PrismaClient();
 
@@ -140,14 +136,6 @@ const SERVERS = [
     description: "Dedicated dynamic-dashboard tools for the dashboard-ai agent (pinned; not user-connectable).",
     credentialForm: { fields: [] },
     writeToolPolicy: { mode: "allowlist", tools: [] },
-  },
-  {
-    type: "xyne-workflows",
-    name: "Xyne Workflows",
-    url: "",
-    description: "Workflow authoring and run tools for Ask AI (pinned; not user-connectable).",
-    credentialForm: { fields: [] },
-    writeToolPolicy: { mode: "allowlist", tools: [...WORKFLOW_WRITE_TOOL_NAMES] },
   },
   {
     type: "xyne-spaces-app-tools",
@@ -986,7 +974,6 @@ You:
             "spaces-create-canvas",
             "spaces-edit-canvas",
             "spaces-sdlc-write-artifact",
-            ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
@@ -997,10 +984,7 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask",
-          "xyne-workflows__workflow_create": "allow",
-          "xyne-workflows__workflow_update": "allow",
-          "xyne-workflows__workflow_run": "allow"
+          "xyne-spaces__spaces-edit-canvas": "ask"
         },
         // Deterministic skill injection. Skills otherwise load via pi's
         // progressive disclosure (only the 1-line <available_skills> description
@@ -1075,7 +1059,6 @@ You:
             "spaces-create-canvas",
             "spaces-edit-canvas",
             "spaces-sdlc-write-artifact",
-            ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
         },
@@ -1086,10 +1069,7 @@ You:
           "xyne-spaces__spaces-schedule-call": "ask",
           "xyne-spaces__user-send-message": "ask",
           "xyne-spaces__spaces-create-canvas": "ask",
-          "xyne-spaces__spaces-edit-canvas": "ask",
-          "xyne-workflows__workflow_create": "allow",
-          "xyne-workflows__workflow_update": "allow",
-          "xyne-workflows__workflow_run": "allow"
+          "xyne-spaces__spaces-edit-canvas": "ask"
         },
         // Deterministic skill injection — see the matching block in `create`
         // for the full rationale and the toolName/skillSlug/when conventions.
@@ -2587,59 +2567,6 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
     }
   } else {
     console.warn("[seed] Skipped dashboard-ai pin: ENCRYPTION_KEY not set");
-  }
-
-  const workflowsCredsPayload = encryptCreds({});
-  if (workflowsCredsPayload) {
-    const workflowsServerRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-workflows" } });
-    if (workflowsServerRow) {
-      await prisma.agentMcpConnection.upsert({
-        where: {
-          agentId_mcpServerId_slug: {
-            agentId: askAIAgent.id,
-            mcpServerId: workflowsServerRow.id,
-            slug: "default",
-          },
-        },
-        create: {
-          agentId: askAIAgent.id,
-          mcpServerId: workflowsServerRow.id,
-          slug: "default",
-          encryptedCreds: workflowsCredsPayload.encryptedCreds,
-          iv: workflowsCredsPayload.iv,
-          authTag: workflowsCredsPayload.authTag,
-        },
-        update: {},
-      });
-      console.log("[seed] Pinned xyne-workflows MCP server to ask-ai");
-      // xyne-workflows is registered as pinned / not user-connectable, so it
-      // only reaches a session through an AgentMcpConnection row. The SDLC
-      // agent is granted the workflow tools in its generated profile, so it
-      // needs the same pin or those grants resolve to a server it cannot see.
-      await prisma.agentMcpConnection.upsert({
-        where: {
-          agentId_mcpServerId_slug: {
-            agentId: sdlcAgent.id,
-            mcpServerId: workflowsServerRow.id,
-            slug: "default",
-          },
-        },
-        create: {
-          agentId: sdlcAgent.id,
-          mcpServerId: workflowsServerRow.id,
-          slug: "default",
-          encryptedCreds: workflowsCredsPayload.encryptedCreds,
-          iv: workflowsCredsPayload.iv,
-          authTag: workflowsCredsPayload.authTag,
-        },
-        update: {},
-      });
-      console.log("[seed] Pinned xyne-workflows MCP server to sdlc-agent");
-    } else {
-      console.warn("[seed] Skipped workflows pins: xyne-workflows server row not found");
-    }
-  } else {
-    console.warn("[seed] Skipped workflows pins: ENCRYPTION_KEY not set");
   }
 
   // ── Claw concierge agent ─────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken } from './pendingAuthToken';
 
 export interface MicrosoftPendingAuthIdentity {
   providerUserId: string;
@@ -14,15 +14,10 @@ export interface MicrosoftPendingAuthIdentity {
 export function signMicrosoftInvitationPendingAuthToken(
   identity: MicrosoftPendingAuthIdentity,
   tokenKey: string,
-  jwtSecret: string
 ): string {
-  return jwt.sign(
-    {
-      ...identity,
-      provider: 'MICROSOFT',
-      tokenKey,
-    },
-    jwtSecret,
-    { expiresIn: '10m' }
-  );
+  return signPendingAuthToken({
+    ...identity,
+    provider: 'MICROSOFT',
+    tokenKey,
+  });
 }

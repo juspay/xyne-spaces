@@ -29,6 +29,11 @@ function hasEncryptedFields(obj: unknown): boolean {
   return false;
 }
 
+/**
+ * Decrypt `ENC:v1|sess|…` fields with the caller's session key. The key is scoped to the
+ * auth session (JWT `sid`), so this runs after authentication: the auth middlewares call
+ * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
+ */
 export async function decryptRequestBodyMiddleware(
   req: Request,
   _res: Response,
@@ -45,7 +50,7 @@ export async function decryptRequestBodyMiddleware(
       return next();
     }
 
-    const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
+    const sessionId = req.user?.sid;
 
     if (!sessionId) {
       logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
@@ -90,6 +95,10 @@ export async function decryptRequestBodyMiddleware(
   next();
 }
 
+/**
+ * Encrypt JSON responses for the caller's session key. Mounted globally: `res.json` runs
+ * after the route's auth middleware, so `req.user.sid` is already resolved by then.
+ */
 export function encryptResponseBodyMiddleware(
   req: Request,
   res: Response,
@@ -98,7 +107,7 @@ export function encryptResponseBodyMiddleware(
   const originalJson = res.json.bind(res);
 
   res.json = ((body?: unknown): Response => {
-    const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
+    const sessionId = req.user?.sid;
     if (!sessionId || !body || typeof body !== 'object') {
       return originalJson(body);
     }

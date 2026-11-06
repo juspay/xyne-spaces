@@ -141,10 +141,23 @@ export interface WorkerLogErrorMessage {
   };
 }
 
+/**
+ * The backend answered 401: the workspace JWT cookie has expired. The worker cannot
+ * refresh it (window.fetch's refresh wrapper does not reach workers), so the manager
+ * calls /auth/refresh-session and re-sends START_STREAM.
+ */
+export interface WorkerStreamUnauthorizedMessage {
+  type: 'STREAM_UNAUTHORIZED';
+  payload: {
+    streamId: string;
+  };
+}
+
 export type WorkerOutgoingMessage =
   | WorkerStreamChunkMessage
   | WorkerStreamCompleteMessage
   | WorkerStreamErrorMessage
+  | WorkerStreamUnauthorizedMessage
   | WorkerLogErrorMessage;
 
 // Track active streams
@@ -264,6 +277,15 @@ async function executeStream(
       }),
       signal: abortController.signal,
     });
+
+    if (response.status === 401) {
+      const unauthorized: WorkerStreamUnauthorizedMessage = {
+        type: 'STREAM_UNAUTHORIZED',
+        payload: { streamId },
+      };
+      self.postMessage(unauthorized);
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);

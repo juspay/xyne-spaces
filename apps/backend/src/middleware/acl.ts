@@ -52,22 +52,6 @@ export class ACLMiddleware {
     }
 
     try {
-      // Handle virtual environment API key user
-      if (req.user.isApiKeyUser && req.user.id === 'env-api-user') {
-        // Return a virtual user object for environment API key
-        return {
-          success: true,
-          user: {
-            id: 'env-api-user',
-            email: req.user.email,
-            name: req.user.name,
-            userGroupId: null, // No user group for virtual user
-            isVirtualUser: true, // Flag to indicate this is virtual
-            role: req.user.role
-          }
-        };
-      }
-
       // Get user from database using the authenticated user's ID
       const user = await repositories.users.findById(req.user.id);
       if (!user) {
@@ -120,26 +104,19 @@ export class ACLMiddleware {
       };
 
       // Check access permissions (use originalUrl to get full path including /api prefix)
-      // Skip ACL check for admin users (virtual or real from environment API key)
-      if ((user.isVirtualUser && user.role === 'admin') || 
-          (req.user?.isApiKeyUser && req.user?.role === 'admin')) {
-        logger.info(`Skipping ACL check for admin user: ${user.id} (${user.isVirtualUser ? 'virtual' : 'environment API key'})`);
-      } else {
-        // Check access permissions (use originalUrl to get full path including /api prefix)
-        const accessResult = await aclService.checkAccess(
-          user.id,
-          req.method,
-          req.originalUrl.split('?')[0] // Remove query parameters
-        );
-        
-        if (!accessResult.hasAccess) {
-          logger.warn(`ACL denied access for user ${user.id} (${user.email}): ${accessResult.reason}`);
-          res.status(403).json({
-            error: 'Unauthorized',
-            message: accessResult.reason || 'Insufficient permissions'
-          });
-          return;
-        }
+      const accessResult = await aclService.checkAccess(
+        user.id,
+        req.method,
+        req.originalUrl.split('?')[0] // Remove query parameters
+      );
+
+      if (!accessResult.hasAccess) {
+        logger.warn(`ACL denied access for user ${user.id} (${user.email}): ${accessResult.reason}`);
+        res.status(403).json({
+          error: 'Unauthorized',
+          message: accessResult.reason || 'Insufficient permissions'
+        });
+        return;
       }
 
       const duration = Date.now() - startTime;

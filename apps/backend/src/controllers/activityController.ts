@@ -2,26 +2,20 @@ import { Request, Response } from 'express';
 import { ValidatedActivityPayload } from '@/validators/activityValidator';
 import { ActivityLogEntry } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { UserSessionService } from '@/services/userSessionService';
+import { authSessionService } from '@/services/authSessionService';
 import { activityService } from '@/services/activity/activityService';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { resolveModule } from '@/services/hyperAnalytics/moduleRoutes';
 
 export class ActivityController {
-  private userSessionService: UserSessionService;
-
-  constructor() {
-    this.userSessionService = new UserSessionService();
-  }
-
   /**
    * POST /api/activity/log
    * Receives activity log from frontend and logs to stdout
-   * 
+   *
    * Note: Validation is handled by validateZod middleware in the route.
    * By the time we reach here, req.body is already validated.
-   * 
-   * 1. Enriches payload with server-side data (including platform from UserSession.deviceInfo)
+   *
+   * 1. Enriches payload with server-side data (including platform from the auth session)
    * 2. Logs to stdout as JSON
    * 3. Returns success response
    */
@@ -30,19 +24,13 @@ export class ActivityController {
       // req.body is already validated by middleware
       const validated = req.body as ValidatedActivityPayload;
 
-      // Fetch platform from UserSession.deviceInfo
+      // Platform of the device this sign-in belongs to (web | electron | android | ios)
       let platform: string | undefined;
-      const sessionId = req.authenticatedSessionId;
+      const sessionId = req.user?.sid;
       if (sessionId) {
         try {
-          const session = await this.userSessionService.getSessionById(sessionId);
-          if (session?.deviceInfo) {
-            // deviceInfo is stored as JSON string, parse and extract platform
-            const deviceInfoObj = typeof session.deviceInfo === 'string' 
-              ? JSON.parse(session.deviceInfo) 
-              : session.deviceInfo;
-            platform = deviceInfoObj?.platform;
-          }
+          const session = await authSessionService.findById(sessionId);
+          platform = session?.platform;
         } catch (err) {
           logger.warn('Failed to fetch platform from session', { error: err });
         }
@@ -60,7 +48,7 @@ export class ActivityController {
         ...logEntry
       });
 
-    
+
       if (validated.triggerEvent === 'page_change') {
         try {
           // page arrives workspace-prefixed (`/${workspaceId}${path}`). Only
@@ -83,7 +71,7 @@ export class ActivityController {
 
       res.status(200).json({ success: true });
       logger.debug('ACTIVITY_TRACE [Backend-Controller]: Response sent (200 OK) ✓');
-      
+
     } catch (error) {
       // Unexpected error (logging failure, etc.)
       logger.error('Unexpected error in activity logging', {

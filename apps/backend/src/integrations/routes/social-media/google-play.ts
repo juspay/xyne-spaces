@@ -5,7 +5,7 @@ import {
   ChannelType,
 } from '@xyne/shared';
 import { z } from 'zod';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { encrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
@@ -96,7 +96,7 @@ function sendAccessError(
 
 router.post(
   '/google-play/connect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     let credentials: GooglePlayCredentials | undefined;
     try {
@@ -197,7 +197,7 @@ router.post(
 
 router.post(
   '/:channelId/google-play/apps',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     let credentials: GooglePlayCredentials | undefined;
     try {
@@ -320,7 +320,7 @@ router.post(
 
 router.post(
   '/:channelId/google-play/credentials',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     let credentials: GooglePlayCredentials | undefined;
     try {
@@ -383,7 +383,7 @@ router.post(
 
 router.post(
   '/:channelId/google-play/apps/:sourceId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -425,7 +425,7 @@ router.post(
 
 router.post(
   '/:channelId/google-play/apps/:sourceId/reconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     let credentials: GooglePlayCredentials | undefined;
     try {

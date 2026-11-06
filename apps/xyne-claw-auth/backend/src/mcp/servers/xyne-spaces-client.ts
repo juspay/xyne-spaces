@@ -67,17 +67,26 @@ function sanitizeForLog(value: unknown): string {
   return String(value).replace(/\n|\r/g, " ");
 }
 
-// Extract Spaces userId from the JWT token's `sub` claim (user tokens)
-// or `userId` claim (app tokens)
-function extractUserIdFromToken(token: string): string {
+function readTokenClaims(token: string): Record<string, unknown> {
   try {
     const parts = token.split(".");
-    if (!parts[1]) return "";
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
-    return payload.sub ?? payload.userId ?? "";
+    if (!parts[1]) return {};
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString()) as Record<string, unknown>;
   } catch {
-    return "";
+    return {};
   }
+}
+
+// Spaces userId from the JWT `sub` claim (user tokens) or `userId` claim (app tokens).
+function extractUserIdFromToken(token: string): string {
+  const claims = readTokenClaims(token);
+  return String(claims.sub ?? claims.userId ?? "");
+}
+
+// The user JWT cookie is named after the workspace the token was minted for.
+function userTokenCookie(token: string): string | null {
+  const workspaceId = readTokenClaims(token).workspaceId;
+  return typeof workspaceId === "string" && workspaceId ? `xyne_ws_${workspaceId}_token=${token}` : null;
 }
 
 const DEFAULT_TOKEN = process.env["XYNE_SPACES_TOKEN"] ?? "";
@@ -98,29 +107,18 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
     throw new Error("Spaces auth token is missing for this request.");
   }
 
-  // Spaces' auth middleware reads session ID from multiple cookie names
-  // depending on which middleware variant is mounted:
-  //   - `auth.ts` (legacy):           reads `xyne_session`
-  //   - `auth.ts` (newer refresh path): reads `user_session_id` ← REQUIRED for
-  //     proactive token refresh. Without this, when our token is within ~60s
-  //     of expiring (always true in tight TTL setups), the middleware tries
-  //     to refresh, fails because the cookie is missing, and returns 401
-  //     ("Token expired and no session provided for refresh"). Sending it
-  //     unconditionally is harmless on other paths.
-  //   - `authV2Middleware.ts`:        reads `x-session-id` header or
-  //                                   `user_session_id` cookie.
-  // Workspace id (legacy: `xyne_last_workspace` cookie, authV2: `x-workspace-id`
-  // header) is sent through both channels for the same reason.
+  // Spaces reads the user JWT only from the `xyne_ws_<workspaceId>_token` cookie.
   const cookieParts: string[] = [];
   if (sessionId) {
     cookieParts.push(`xyne_session=${sessionId}`);
     cookieParts.push(`user_session_id=${sessionId}`);
   }
   if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  const tokenCookie = token ? userTokenCookie(token) : null;
+  if (tokenCookie) cookieParts.push(tokenCookie);
   const cookieHeader = cookieParts.join("; ");
 
   const headers: Record<string, string> = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     "Content-Type": "application/json",
     ...(sessionId ? { "x-session-id": sessionId } : {}),
     ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
@@ -217,12 +215,13 @@ export async function spacesFetchBuffer(
     cookieParts.push(`user_session_id=${sessionId}`);
   }
   if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  const tokenCookie = token ? userTokenCookie(token) : null;
+  if (tokenCookie) cookieParts.push(tokenCookie);
   const cookieHeader = cookieParts.join("; ");
 
   const url = new URL(path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${token}`,
       ...(sessionId ? { "x-session-id": sessionId } : {}),
       ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
       ...(cookieHeader ? { Cookie: cookieHeader } : {}),
@@ -253,12 +252,13 @@ export async function spacesFetchText(path: string, auth?: SpacesAuthContext): P
     cookieParts.push(`user_session_id=${sessionId}`);
   }
   if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  const tokenCookie = token ? userTokenCookie(token) : null;
+  if (tokenCookie) cookieParts.push(tokenCookie);
   const cookieHeader = cookieParts.join("; ");
 
   const url = new URL(path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${token}`,
       ...(sessionId ? { "x-session-id": sessionId } : {}),
       ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
       ...(cookieHeader ? { Cookie: cookieHeader } : {}),

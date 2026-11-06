@@ -26,7 +26,7 @@ import { z } from 'zod';
 import { UserStatus } from '@xyne/shared';
 import { sdkSsoService } from '@/services/sdkSsoService';
 import { jwtService } from '@/services/jwtService';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { sdkSsoInitLimiter, sdkSsoPollLimiter, sdkSsoRefreshLimiter } from '@/middleware/rateLimiters';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -273,7 +273,7 @@ router.post('/logout', sdkSsoRefreshLimiter, async (req: Request, res: Response)
  * Get the status of a device authorization request.
  * Requires user session - used by the consent page to display request info.
  */
-router.get('/status', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.get('/status', authMiddleware.authenticate, async (req: Request, res: Response) => {
   try {
     const { userCode } = statusRequestSchema.parse(req.query);
 
@@ -321,7 +321,7 @@ router.get('/status', authV2Middleware.authenticate, async (req: Request, res: R
  * Approve or deny the authorization request.
  * Requires user session - called by the consent page after user decision.
  */
-router.post('/approve', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.post('/approve', authMiddleware.authenticate, async (req: Request, res: Response) => {
   try {
     const { userCode, approved } = approveRequestSchema.parse(req.body);
     const user = req.user!;

@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { AppPermissionStatus, AppPermissionType, ChannelRole, ChannelType, isDeskChannelType } from '@xyne/shared';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { appDeskService } from '@/services/appDeskService';
@@ -88,7 +88,7 @@ async function findDeskWritableInstall(
   return { ok: true, installedApp };
 }
 
-router.get('/apps', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/apps', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const workspaceId = req.user!.workspaceId!;
 
@@ -136,7 +136,7 @@ router.get('/apps', authV2Middleware.authenticate, async (req: Request, res: Res
 });
 
 
-router.post('/:conversationId/reply', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/:conversationId/reply', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const { conversationId } = req.params;
     const { body, attachmentIds } = req.body as { body?: string; attachmentIds?: string[] };
@@ -222,7 +222,7 @@ async function listConnectedApps(channelId: string): Promise<ConnectedAppEntry[]
 
 router.get(
   '/channels/:channelId/apps',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
@@ -245,7 +245,7 @@ const ConnectAppBodySchema = z.object({
 
 router.post(
   '/channels/:channelId/apps',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   validateZod(ConnectAppBodySchema),
   async (req: Request, res: Response): Promise<void> => {
     try {
@@ -315,7 +315,7 @@ router.post(
 
 router.delete(
   '/channels/:channelId/apps/:installedAppId',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId, installedAppId } = req.params;
@@ -387,7 +387,7 @@ async function assertLegacySingleAppDesk(
 /** @deprecated Use DELETE /channels/:channelId/apps/:installedAppId — see note above. */
 router.post(
   '/:channelId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
@@ -421,7 +421,7 @@ router.post(
 /** @deprecated Use POST /channels/:channelId/apps — see note above. */
 router.post(
   '/:channelId/reconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
