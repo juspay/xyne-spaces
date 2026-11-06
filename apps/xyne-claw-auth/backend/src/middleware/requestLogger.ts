@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { randomUUID } from "node:crypto";
-import { logger, loggerContext, type LogContext } from "../logger.js";
+import { logger, loggerContext, redactUrlQuery, type LogContext } from "../logger.js";
 
 /**
  * Endpoints that are machine-to-machine and fire many times a second, where the
@@ -47,7 +47,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       component: "http",
       event: "request_start",
       method: req.method,
-      url: req.url,
+      url: redactUrlQuery(req.url),
       ip: req.ip,
     });
 
@@ -56,7 +56,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
         component: "http",
         event: "request_end",
         method: req.method,
-        url: req.url,
+        url: redactUrlQuery(req.url),
         statusCode: res.statusCode,
         durationMs: Date.now() - startedAt,
       });

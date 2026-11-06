@@ -13,8 +13,8 @@ export class MobilePushChannel {
       platform,
       notificationId: payload.notificationId,
       type: payload.type,
-      voipToken: voipToken?.substring(0, 6),
-      token: token?.substring(0, 6),
+      hasVoipToken: !!voipToken,
+      hasToken: !!token,
       appVersion: appVersion,
     });
 

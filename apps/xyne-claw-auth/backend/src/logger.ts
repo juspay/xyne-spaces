@@ -16,5 +16,6 @@ export {
   createTraceId,
   withLogContext,
   setLogContext,
+  redactUrlQuery,
 } from "xyne-claw-shared";
 export type { LogContext, Logger } from "xyne-claw-shared";

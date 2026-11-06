@@ -48,7 +48,6 @@ export class AuthMiddleware {
         this.reject(res, 'TOKEN_MISSING', 'Session token is missing');
         return;
       }
-      const tokenPreview = `${token.slice(0, 8)}...${token.slice(-6)}`;
 
       let payload: JwtPayload;
       try {
@@ -56,7 +55,6 @@ export class AuthMiddleware {
       } catch (err) {
         const code = classifyTokenError(err);
         logger.info(`${logPrefix} Token rejected: ${code}`, {
-          tokenPreview,
           error: err instanceof Error ? err.message : String(err),
         });
         this.reject(res, code, code === 'TOKEN_EXPIRED' ? 'Token expired; refresh the session' : 'Token verification failed');
@@ -65,7 +63,6 @@ export class AuthMiddleware {
 
       if (!payload.sub || !payload.workspaceId || !payload.memberId || payload.workspaceId !== workspaceId) {
         logger.warn(`${logPrefix} Token claims do not match the request`, {
-          tokenPreview,
           tokenWorkspaceId: payload.workspaceId,
           workspaceId,
         });
@@ -74,7 +71,7 @@ export class AuthMiddleware {
       }
 
       if (payload.sid && (await authSessionService.isSessionRevoked(payload.sid))) {
-        logger.warn(`${logPrefix} Token belongs to a logged-out session`, { tokenPreview, sid: payload.sid });
+        logger.warn(`${logPrefix} Token belongs to a logged-out session`);
         this.reject(res, 'TOKEN_INVALID', 'Session has been logged out');
         return;
       }
@@ -103,7 +100,7 @@ export class AuthMiddleware {
       ]);
 
       if (!user || !orgMember || user.workspaceId !== payload.workspaceId || user.orgMemberId !== payload.memberId) {
-        logger.warn(`${logPrefix} Token valid, but user or org member not found`, { tokenPreview, tokenSub: payload.sub });
+        logger.warn(`${logPrefix} Token valid, but user or org member not found`, { tokenSub: payload.sub });
         this.reject(res, 'TOKEN_INVALID', 'User associated with this token no longer exists');
         return;
       }
@@ -161,7 +158,7 @@ export class AuthMiddleware {
 
       const context: LogContext = { ...loggerContext.getStore(), emailId: user.email };
       await loggerContext.run(context, async () => {
-        logger.info(`${logPrefix} Authenticated user: ${user.email} (${user.id})`, { tokenPreview });
+        logger.info(`${logPrefix} Authenticated user: ${user.email} (${user.id})`);
         // Session-key decryption of the body runs here, after req.user.sid is known.
         await decryptRequestBodyMiddleware(req, res, next);
       });

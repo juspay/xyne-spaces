@@ -13,6 +13,7 @@ import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
 import { callInvitePath } from '../utils/validation';
+import { stripUrlQuery } from '../utils/log-url';
 import {
   configureIncomingCallWindow,
   incomingCallWindowOptions,
@@ -246,7 +247,7 @@ function applyWindowPolicy(win: BrowserWindow): void {
 
       if (isAppWindowUrl(url) && appWindows.size >= MAX_APP_WINDOWS) {
         win.webContents.send('app-window-limit-reached', MAX_APP_WINDOWS);
-        log.info(`[WindowManager] app window limit (${MAX_APP_WINDOWS}) reached; denying ${url}`);
+        log.info(`[WindowManager] app window limit (${MAX_APP_WINDOWS}) reached; denying ${stripUrlQuery(url)}`);
         return { action: 'deny' };
       }
 
@@ -292,7 +293,7 @@ function applyWindowPolicy(win: BrowserWindow): void {
       };
 
     } catch (error) {
-      log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
+      log.warn('Failed to parse URL in setWindowOpenHandler:', stripUrlQuery(details.url), error);
       return { action: 'deny' };
     }
 });
@@ -667,7 +668,7 @@ export async function loadUrl(window: BrowserWindow, url: string, counter?: Coun
   for (let attempt = 1; attempt <= LOAD_URL_MAX_RETRIES; attempt++) {
     try {
       await window.loadURL(url);
-      Logger.info(EnrollmentEvent.LOAD_URL, { url, attempts: attempt });
+      Logger.info(EnrollmentEvent.LOAD_URL, { url: stripUrlQuery(url), attempts: attempt });
       safeRecordMetric(() => {
         counter?.add(1, { success: 'true', buildVersion: app.getVersion() });
       });
@@ -676,13 +677,13 @@ export async function loadUrl(window: BrowserWindow, url: string, counter?: Coun
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (attempt < LOAD_URL_MAX_RETRIES) {
-        Logger.info(EnrollmentEvent.LOAD_URL_RETRY, { url, retry_attempt: attempt, error: lastError });
+        Logger.info(EnrollmentEvent.LOAD_URL_RETRY, { url: stripUrlQuery(url), retry_attempt: attempt, error: lastError });
         await new Promise(resolve => setTimeout(resolve, LOAD_URL_RETRY_DELAY_MS));
       }
     }
   }
 
-  Logger.logError(EnrollmentEvent.URL_LOAD_FAILED, lastError!, { url, total_attempts: LOAD_URL_MAX_RETRIES });
+  Logger.logError(EnrollmentEvent.URL_LOAD_FAILED, lastError!, { url: stripUrlQuery(url), total_attempts: LOAD_URL_MAX_RETRIES });
   safeRecordMetric(() => {
     counter?.add(1, { success: 'false', error: 'url_load_error', buildVersion: app.getVersion() });
   });

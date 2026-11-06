@@ -1,5 +1,5 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { createLogger } from "../logger.js";
+import { createLogger, redactUrlQuery } from "../logger.js";
 import { errMsg } from "./errors.js";
 
 export { errMsg };
@@ -54,6 +54,6 @@ export function errorMiddleware(err: unknown, req: Request, res: Response, next:
     });
     return;
   }
-  log.error(`[unhandled] ${req.method} ${req.originalUrl}: ${errMsg(err)}`, err instanceof Error ? err.stack : undefined);
+  log.error(`[unhandled] ${req.method} ${redactUrlQuery(req.originalUrl)}: ${errMsg(err)}`, err instanceof Error ? err.stack : undefined);
   res.status(500).json({ success: false, error: "Internal server error" });
 }

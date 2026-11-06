@@ -349,7 +349,7 @@ export class SlackController {
 	});
 
 	chatPostMessage = wrapSlackHandler(async (req: Request, res: Response) => {
-		logger.info("[SLACK-POST-MESSAGE] Received request", { body: req.body, query: req.query, headers: req.headers });
+		logger.info("[SLACK-POST-MESSAGE] Received request", { body: req.body, query: req.query });
 		const parsed = PostMessageSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
@@ -875,7 +875,7 @@ export class SlackController {
 	});
 
 	filesUpload = wrapSlackHandler(async (req: Request, res: Response) => {
-		logger.info("[SLACK-FILES-UPLOAD] Received request", { body: req.body, query: req.query, headers: req.headers });
+		logger.info("[SLACK-FILES-UPLOAD] Received request", { body: req.body, query: req.query });
 		const parsed = FilesUploadSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
