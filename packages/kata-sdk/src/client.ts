@@ -181,10 +181,22 @@ export class KataClient {
         claimName,
       );
     } catch (err) {
-      const status = err as { statusCode?: number; response?: { statusCode?: number } };
+      const status = err as {
+        statusCode?: number;
+        response?: { statusCode?: number };
+        body?: { message?: unknown; reason?: unknown; code?: unknown };
+      };
       const code = status.statusCode ?? status.response?.statusCode;
       if (code === 404) return;
-      console.error(`Failed to delete orphaned SandboxClaim ${claimName} in ${namespace} after provisioning error:`, err);
+      const body = status.body && typeof status.body === "object" ? status.body : undefined;
+      console.error(
+        `Failed to delete orphaned SandboxClaim ${claimName} in ${namespace} after provisioning error:`,
+        {
+          message: err instanceof Error ? err.message : String(err),
+          statusCode: code,
+          ...(body ? { reason: body.reason, bodyMessage: body.message, bodyCode: body.code } : {}),
+        },
+      );
     }
   }
 

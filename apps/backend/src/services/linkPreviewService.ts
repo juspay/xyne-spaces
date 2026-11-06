@@ -178,7 +178,7 @@ export class LinkPreviewService {
         protocol,
       };
     } catch {
-      logger.warn(`Invalid LINK_PREVIEW_EGRESS_PROXY_URL; ignoring and connecting directly: ${raw}`);
+      logger.warn('Invalid LINK_PREVIEW_EGRESS_PROXY_URL; ignoring and connecting directly');
       return undefined;
     }
   }

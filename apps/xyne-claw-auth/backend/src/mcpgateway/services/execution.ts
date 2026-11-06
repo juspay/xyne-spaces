@@ -8,6 +8,7 @@ import * as registryDb from "../db/registry.js";
 import * as tokenCache from "../cache/token-cache.js";
 import { signGatewayJwt } from "../crypto/jwt.js";
 import { httpRequest, HttpRequestError } from "./http-client.js";
+import { redactUrlQuery } from "../../logger.js";
 import type {
   Service,
   Tool,
@@ -82,7 +83,7 @@ async function fetchAuthToken(
   // Call token endpoint with JWT for verification
   const tokenUrl = `${backendUrl}${tokenEndpointUrl}`;
   
-  console.log(`[auth] Fetching new token from ${tokenUrl} for service=${serviceName}`);
+  console.log(`[auth] Fetching new token from ${redactUrlQuery(tokenUrl)} for service=${serviceName}`);
 
   const tokenRequestHeaders: Record<string, string> = {
     "Content-Type": "application/json",

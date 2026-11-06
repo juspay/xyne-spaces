@@ -237,26 +237,21 @@ export class AuthMiddleware {
       // Try to get token from Authorization header first, then from workspace-specific cookie
       let token: string | undefined;
       let tokenSource: 'authorization_header' | 'workspace_cookie' | 'session_refresh' | 'none' = 'none';
-      let tokenPreview: string | undefined;
 
       if (authHeader && authHeader.startsWith('Bearer ')) {
         token = authHeader.split(' ')[1];
         tokenSource = 'authorization_header';
-        tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
         logger.info(`[AUTH] Token extracted from Authorization header`, {
           tokenSource,
           tokenPresent: !!token,
-          tokenPreview,
         });
       } else if (workspaceToken) {
         token = workspaceToken;
         tokenSource = 'workspace_cookie';
-        tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
         logger.info(`[AUTH] Token extracted from workspace cookie [workspaceId=${workspaceId}]`, {
           tokenSource,
           workspaceId,
           tokenPresent: !!token,
-          tokenPreview,
         });
       }
 
@@ -277,7 +272,6 @@ export class AuthMiddleware {
           if (refreshResult.success && refreshResult.customToken) {
             token = refreshResult.customToken;
             tokenSource = 'session_refresh';
-            tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
 
             // Set new token in workspace-specific cookie
             const isProduction = config.env === 'production';
@@ -301,7 +295,6 @@ export class AuthMiddleware {
             logger.info(`[AUTH] Token successfully created via session refresh`, {
               tokenSource,
               tokenPresent: !!token,
-              tokenPreview,
             });
           } else {
             throw new Error('Session refresh failed');
@@ -348,7 +341,6 @@ export class AuthMiddleware {
           // Less than 5 minutes
           logger.info(`[AUTH] Token is about to expire in ${timeUntilExpiry}s, considering refresh`, {
             tokenSource,
-            tokenPreview,
             tokenSub: payload?.sub,
             tokenExp: payload?.exp,
           });
@@ -359,7 +351,6 @@ export class AuthMiddleware {
           `[AUTH] JWT token verification failed`,
           {
             tokenSource,
-            tokenPreview,
             error: verifyError instanceof Error ? verifyError.message : 'Unknown error',
           }
         );
@@ -370,7 +361,6 @@ export class AuthMiddleware {
       if (isTokenExpired && workspaceSession) {
         logger.info(`[AUTH] Attempting to refresh token using session ID`, {
           tokenSource,
-          tokenPreview,
           tokenSub: payload?.sub,
         });
 
@@ -405,9 +395,6 @@ export class AuthMiddleware {
             logger.info(`[AUTH] Token successfully refreshed via session and cookie updated`, {
               tokenSource: 'session_refresh',
               tokenPresent: true,
-              tokenPreview: refreshResult.customToken
-                ? `${refreshResult.customToken.slice(0, 8)}...${refreshResult.customToken.slice(-6)}`
-                : undefined,
               tokenSub: payload?.sub,
             });
           } else {
@@ -416,7 +403,6 @@ export class AuthMiddleware {
         } catch (refreshError) {
           logger.error(`[AUTH] Failed to refresh token:`, {
             tokenSource,
-            tokenPreview,
             error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
             stack: refreshError instanceof Error ? refreshError.stack : undefined,
           });
@@ -438,7 +424,6 @@ export class AuthMiddleware {
       if (!payload) {
         logger.warn(`[AUTH] JWT payload missing after verification`, {
           tokenSource,
-          tokenPreview,
         });
         res.status(401).json({
           error: 'Invalid token',
@@ -451,7 +436,6 @@ export class AuthMiddleware {
       // Since we're using our own JWT, we can directly get user from database using the sub (user ID)
       logger.info(`[AUTH] Looking up user from verified token payload`, {
         tokenSource,
-        tokenPreview,
         tokenSub: payload.sub,
         tokenEmail: payload.email,
       });
@@ -460,7 +444,6 @@ export class AuthMiddleware {
       if (!user) {
         logger.warn(`[AUTH] User not found for verified token payload`, {
           tokenSource,
-          tokenPreview,
           tokenSub: payload.sub,
         });
         res.status(401).json({
@@ -489,7 +472,6 @@ export class AuthMiddleware {
         logger.info(`[AUTH] LEGACY JWT FORMAT - User ${payload.sub} using pre-workspace client`, {
           userId: payload.sub,
           tokenSource,
-          tokenPreview,
         });
 
         // Use user's workspace and orgMember from DB (already fetched at line 456)
@@ -501,7 +483,6 @@ export class AuthMiddleware {
       if (!effectiveWorkspaceId || !effectiveMemberId) {
         logger.warn(`[AUTH] No workspace context resolved for user ${payload.sub}`, {
           tokenSource,
-          tokenPreview,
           effectiveWorkspaceId,
           effectiveMemberId,
         });
@@ -530,7 +511,6 @@ export class AuthMiddleware {
 
       logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id})`, {
         tokenSource,
-        tokenPreview,
         tokenSub: payload.sub,
         userId: user.id,
         googleId: user.providerUserId,

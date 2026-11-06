@@ -212,7 +212,7 @@ import {
   parseTaskCommand,
   resolveTaskCommandMode,
 } from "../task-commands.js";
-import { createLogger } from "../logger.js";
+import { createLogger, redactUrlQuery } from "../logger.js";
 import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
 import { buildXorDecideTool } from "../xor-decide-tool.js";
 import {
@@ -5528,7 +5528,7 @@ function buildLateFollowUpCallbackUrl(callbackUrl: string): string | undefined {
     url.pathname = `${pathname}/follow-ups`;
     return url.toString();
   } catch {
-    clog.warn(`[follow-ups] invalid late callback URL: ${callbackUrl}`);
+    clog.warn(`[follow-ups] invalid late callback URL: ${redactUrlQuery(callbackUrl)}`);
     return undefined;
   }
 }

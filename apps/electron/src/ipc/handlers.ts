@@ -32,6 +32,7 @@ import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
 import ElectronEvent from '../services/logger/electron-events';
 import { normalizeExternalUrl } from '../utils/validation';
+import { stripUrlQuery } from '../utils/log-url';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
@@ -288,7 +289,7 @@ export function setupIpcHandlers(): void {
     }
     const safeUrl = normalizeExternalUrl(newUrl);
     if (!safeUrl) {
-      Logger.error(ElectronEvent.OPEN_EXTERNAL_BLOCKED, { url: newUrl });
+      Logger.error(ElectronEvent.OPEN_EXTERNAL_BLOCKED, { url: stripUrlQuery(newUrl) });
       return;
     }
     void shell.openExternal(safeUrl);

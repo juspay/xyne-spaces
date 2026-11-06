@@ -11,7 +11,7 @@ import { useSelector } from '@xstate/react';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
 import { useActivityTracking } from '../../hooks/useActivityTracking';
 import { isElectronApp } from '../../utils/electronApp';
-import { hostOf } from '../../utils/browserAddress';
+import { hostOf, stripUrlQuery } from '../../utils/browserAddress';
 import {
   BrowserWebview,
   LinkPreview,
@@ -222,8 +222,8 @@ export function BrowserPageLayer(): ReactElement | null {
         track({
           eventCategory: TRACK,
           eventName: 'INTERNAL_NAVIGATION',
-          eventLabel: url,
-          contextMetadata: { tabId, url },
+          eventLabel: stripUrlQuery(url),
+          contextMetadata: { tabId, url: stripUrlQuery(url) },
         });
       }
     }

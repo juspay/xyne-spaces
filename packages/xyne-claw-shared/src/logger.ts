@@ -82,7 +82,41 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/(\bapi[_-]?key\b["'\s]*[:=]\s*["']?)([A-Za-z0-9_\-]{12,})/gi, "$1<redacted>"],
   [/\bsk-[A-Za-z0-9]{16,}\b/g, "sk-<redacted>"],
   [/(\b[Bb]earer\s+)[A-Za-z0-9._\-]{16,}/g, "$1<redacted>"],
+  [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[REDACTED_JWT]"],
 ];
+
+// Compared after lower-casing and stripping `_` / `-`.
+const SECRET_KEYS = new Set([
+  "password",
+  "passwd",
+  "secret",
+  "clientsecret",
+  "token",
+  "accesstoken",
+  "refreshtoken",
+  "idtoken",
+  "apikey",
+  "xapikey",
+  "authorization",
+  "cookie",
+  "cookies",
+  "setcookie",
+  "privatekey",
+  "signingsecret",
+  "sessiontoken",
+]);
+
+// HTTP-client errors (axios, gaxios, @kubernetes/client-node) carry the full
+// request incl. auth headers under these keys; winston spreads a sole Error
+// meta's own props onto the top level of the info object.
+const DROPPED_TOP_LEVEL_KEYS = new Set(["config", "request", "response", "headers"]);
+
+const MAX_REDACT_DEPTH = 10;
+const REDACTED = "[REDACTED]";
+
+function isSecretKey(key: string): boolean {
+  return SECRET_KEYS.has(key.toLowerCase().replace(/[_-]/g, ""));
+}
 
 function redactString(s: string): string {
   let out = s;
@@ -90,25 +124,71 @@ function redactString(s: string): string {
   return out;
 }
 
-function redactValue(v: unknown): unknown {
-  if (typeof v === "string") return redactString(v);
-  if (Array.isArray(v)) return v.map(redactValue);
-  if (v && typeof v === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = redactValue(val);
-    return out;
-  }
-  return v;
+/** Replaces every query parameter value (and drops any fragment / userinfo) in a URL or path. */
+export function redactUrlQuery(url: string): string {
+  const withoutFragment = url.split("#")[0] ?? "";
+  const withoutUserinfo = withoutFragment.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?@]*@/i, `$1${REDACTED}@`);
+  const q = withoutUserinfo.indexOf("?");
+  if (q === -1) return withoutUserinfo;
+  const query = withoutUserinfo
+    .slice(q + 1)
+    .split("&")
+    .map((pair) => {
+      const eq = pair.indexOf("=");
+      return eq === -1 ? pair : `${pair.slice(0, eq)}=${REDACTED}`;
+    })
+    .join("&");
+  return `${withoutUserinfo.slice(0, q)}?${query}`;
 }
 
-const redactSecrets = winston.format((info) => {
-  if (typeof info.message === "string") info.message = redactString(info.message);
-  for (const key of Object.keys(info)) {
+export function redactValue(v: unknown, depth = 0, ancestors: WeakSet<object> = new WeakSet()): unknown {
+  if (typeof v === "string") return redactString(v);
+  if (!v || typeof v !== "object") return v;
+  if (v instanceof Error) {
+    return {
+      name: v.name,
+      message: redactString(v.message),
+      stack: v.stack === undefined ? undefined : redactString(v.stack),
+    };
+  }
+  if (ancestors.has(v)) return "[Circular]";
+  if (depth >= MAX_REDACT_DEPTH) return "[Truncated]";
+  ancestors.add(v);
+  let out: unknown;
+  if (Array.isArray(v)) {
+    out = v.map((item) => redactValue(item, depth + 1, ancestors));
+  } else {
+    const obj: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      obj[k] =
+        isSecretKey(k) && (typeof val === "string" || (val && typeof val === "object"))
+          ? REDACTED
+          : redactValue(val, depth + 1, ancestors);
+    }
+    out = obj;
+  }
+  ancestors.delete(v);
+  return out;
+}
+
+export function redactLogInfo<T extends object>(info: T): T {
+  const fields = info as Record<string, unknown>;
+  if (typeof fields.message === "string") fields.message = redactString(fields.message);
+  for (const key of Object.keys(fields)) {
     if (key === "message" || key === "level" || key === "timestamp") continue;
-    (info as Record<string, unknown>)[key] = redactValue((info as Record<string, unknown>)[key]);
+    const val = fields[key];
+    if (DROPPED_TOP_LEVEL_KEYS.has(key) && val && typeof val === "object") {
+      fields[key] = REDACTED;
+    } else if (isSecretKey(key) && (typeof val === "string" || (val && typeof val === "object"))) {
+      fields[key] = REDACTED;
+    } else {
+      fields[key] = redactValue(val);
+    }
   }
   return info;
-});
+}
+
+const redactSecrets = winston.format((info) => redactLogInfo(info));
 
 const productionFormat = winston.format.combine(
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),

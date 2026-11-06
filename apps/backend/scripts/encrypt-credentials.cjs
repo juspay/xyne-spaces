@@ -103,23 +103,6 @@ function main() {
     process.exit(1);
   }
 
-  // Validate if it's valid JSON (optional - just for display)
-  let isJson = false;
-  try {
-    JSON.parse(dataToEncrypt);
-    isJson = true;
-  } catch (e) {
-    // Not JSON, that's fine - encrypt as plain text
-  }
-
-  console.log('Original Data:');
-  if (isJson) {
-    console.log(JSON.stringify(JSON.parse(dataToEncrypt), null, 2));
-  } else {
-    console.log(dataToEncrypt);
-  }
-  console.log();
-
   // Encrypt
   const encrypted = encrypt(dataToEncrypt, encryptionKey);
   console.log('Encrypted (IV:ciphertext):');
@@ -128,14 +111,6 @@ function main() {
 
   // Decrypt to verify
   const decrypted = decrypt(encrypted, encryptionKey);
-  console.log('Decrypted (verification):');
-  if (isJson) {
-    console.log(JSON.stringify(JSON.parse(decrypted), null, 2));
-  } else {
-    console.log(decrypted);
-  }
-  console.log();
-
   // Verify match
   if (decrypted === dataToEncrypt) {
     console.log('✓ Encryption/Decryption verified successfully!');

@@ -45,12 +45,14 @@ export const errorHandler = (
     error = new AppError(message, statusCode);
   }
   const appError = error as AppError;
+  // Body-parser error messages and stacks quote the raw request body.
+  const isBodyParseError = err instanceof SyntaxError && 'body' in (err as object);
   logger.error({
-    message: appError.message,
+    message: isBodyParseError ? 'Malformed JSON request body' : appError.message,
     statusCode: appError.statusCode,
-    error: err,
-    stack: originalStack,
-    wrapperStack: err instanceof AppError ? undefined : appError.stack,
+    error: isBodyParseError ? undefined : err,
+    stack: isBodyParseError ? undefined : originalStack,
+    wrapperStack: isBodyParseError || err instanceof AppError ? undefined : appError.stack,
     url: redactSensitiveUrl(req.url),
     method: req.method,
     ip: req.ip,
