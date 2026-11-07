@@ -58,7 +58,7 @@ fn run(state: Arc<AppState>, interval: Duration) {
         stats.publish_thread_core_cpu(attributed.thread_cores);
         stats.publish_thread_core(attributed.placement);
         stats.publish_thread_migrations(attributed.migrations);
-        if ticks % 6 == 0 {
+        if ticks.is_multiple_of(6) {
             let (message, fields) = stats.summary_line(&previous, last_summary.elapsed());
             crate::log::event(Level::Info, message, fields);
             previous = stats.snapshot();
