@@ -25,6 +25,8 @@ pub struct Config {
     /// user and password in the URL. This direct connection is used for
     /// catalog/replication/snapshot minting.
     pub dsn: String,
+    /// `STREAMGRES_MASTER_PG_DSN`: writable primary used for startup setup.
+    pub master_dsn: String,
     /// `STREAMGRES_READ_PG_DSN`: optional read endpoint, such as PgBouncer.
     /// Defaults to `dsn`; it must reach the same database as the direct DSN
     /// because reads import snapshots minted through the direct connection.
@@ -41,15 +43,11 @@ pub struct Config {
     /// because that is where `inactive_since` is available.
     pub slot_cleanup_age: Duration,
     /// `STREAMGRES_PUBLICATION`: the publication the change feed streams;
-    /// it must exist before the server starts.
+    /// startup creates it when absent and validates it when present.
     pub publication: String,
-    /// `STREAMGRES_DDL_TRIGGER`: the event trigger on `ddl_command_end`
-    /// through which the server hears of schema changes, zero-cache's
-    /// (`<app>_ddl_end_<shard>`, so `zero_ddl_end_0`); the server refuses
-    /// to start without it.
+    /// The event trigger on `ddl_command_end`, derived from app ID and shard.
     pub ddl_trigger: String,
-    /// `STREAMGRES_DDL_PREFIX`: the prefix of that trigger's logical
-    /// messages (`<app>/<shard>/ddl`, so `zero/0/ddl`).
+    /// The logical message prefix, derived from app ID and shard.
     pub ddl_prefix: String,
     /// `STREAMGRES_SNAPSHOT_ROTATION_MS`: how often a fresh exported
     /// snapshot (a temporary replication slot) is minted for reads (1000).
@@ -130,7 +128,7 @@ pub struct Config {
     /// told to start over (262144; 0 keeps none).
     pub group_log_bytes: usize,
     /// `STREAMGRES_MAX_MESSAGE_BYTES`: the largest inbound WebSocket message
-    /// accepted (16 MiB).
+    /// accepted (16 MiB). Must be a positive number of bytes.
     pub max_message_bytes: usize,
     /// `STREAMGRES_BYTES_PER_PART`: how many bytes of serialized row
     /// operations one poke part carries at most (768000, i.e. 750 KiB).
@@ -226,6 +224,8 @@ impl Config {
         };
         let dsn = first(&["STREAMGRES_PG_DSN", "ZERO_UPSTREAM_DB"])
             .ok_or("STREAMGRES_PG_DSN (or ZERO_UPSTREAM_DB) must name the database")?;
+        let master_dsn = first(&["STREAMGRES_MASTER_PG_DSN"])
+            .ok_or("STREAMGRES_MASTER_PG_DSN must name the writable primary database")?;
         let read_dsn = first(&["STREAMGRES_READ_PG_DSN"]).unwrap_or_else(|| dsn.clone());
         let query_url = first(&["STREAMGRES_QUERY_URL", "ZERO_QUERY_URL"])
             .ok_or("STREAMGRES_QUERY_URL (or ZERO_QUERY_URL) must name the query endpoint")?;
@@ -239,10 +239,8 @@ impl Config {
                 .map_err(|_| format!("STREAMGRES_SHARD must be a number, got `{text}`"))?,
             None => 0,
         };
-        let ddl_trigger = first(&["STREAMGRES_DDL_TRIGGER"])
-            .unwrap_or_else(|| format!("{app_id}_ddl_end_{shard}"));
-        let ddl_prefix =
-            first(&["STREAMGRES_DDL_PREFIX"]).unwrap_or_else(|| format!("{app_id}/{shard}/ddl"));
+        let ddl_trigger = format!("{app_id}_ddl_end_{shard}");
+        let ddl_prefix = format!("{app_id}/{shard}/ddl");
         let schemas = match first(&["STREAMGRES_SCHEMAS"]) {
             Some(text) => text
                 .split(',')
@@ -317,6 +315,7 @@ impl Config {
             bind: first(&["STREAMGRES_ADDR"]).unwrap_or_else(|| "0.0.0.0:4848".to_owned()),
             base_path,
             dsn,
+            master_dsn,
             read_dsn,
             schemas,
             slot: threads::slot_name(),
@@ -384,9 +383,15 @@ impl Config {
                 None => 256 * 1024,
             },
             max_message_bytes: match first(&["STREAMGRES_MAX_MESSAGE_BYTES"]) {
-                Some(text) => text.parse().map_err(|_| {
-                    format!("STREAMGRES_MAX_MESSAGE_BYTES must be a number, got `{text}`")
-                })?,
+                Some(text) => text
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|bytes| *bytes > 0)
+                    .ok_or_else(|| {
+                        format!(
+                            "STREAMGRES_MAX_MESSAGE_BYTES must be a positive number of bytes, got `{text}`"
+                        )
+                    })?,
                 None => 16 * 1024 * 1024,
             },
             bytes_per_part: match first(&["STREAMGRES_BYTES_PER_PART"]) {
@@ -510,6 +515,7 @@ mod tests {
     fn config(vars: &[(&str, &str)]) -> Result<Config, String> {
         Config::from_lookup(|name| match name {
             "STREAMGRES_PG_DSN" => Some("postgresql://u:p@db/app".to_owned()),
+            "STREAMGRES_MASTER_PG_DSN" => Some("postgresql://admin:p@db/app".to_owned()),
             "STREAMGRES_QUERY_URL" => Some("http://app/query".to_owned()),
             "STREAMGRES_MUTATE_URL" => Some("http://app/push".to_owned()),
             _ => vars
@@ -517,6 +523,18 @@ mod tests {
                 .find(|(key, _)| *key == name)
                 .map(|(_, value)| (*value).to_owned()),
         })
+    }
+
+    #[test]
+    fn primary_database_is_required() {
+        let error = Config::from_lookup(|name| match name {
+            "STREAMGRES_PG_DSN" => Some("postgresql://db/app".to_owned()),
+            "STREAMGRES_QUERY_URL" => Some("http://app/query".to_owned()),
+            "STREAMGRES_MUTATE_URL" => Some("http://app/push".to_owned()),
+            _ => None,
+        })
+        .unwrap_err();
+        assert!(error.contains("STREAMGRES_MASTER_PG_DSN"));
     }
 
     /// The DDL trigger and its message prefix follow zero-cache's naming
@@ -611,20 +629,14 @@ mod tests {
     }
 
     #[test]
-    fn the_ddl_trigger_follows_the_app_and_shard() {
+    fn ddl_trigger_and_prefix_follow_the_app_and_shard() {
         let config = config(&[]).unwrap();
         assert_eq!(config.ddl_trigger, "zero_ddl_end_0");
         assert_eq!(config.ddl_prefix, "zero/0/ddl");
         let config = config_with(&[("STREAMGRES_APP_ID", "zero02"), ("STREAMGRES_SHARD", "3")]);
         assert_eq!(config.ddl_trigger, "zero02_ddl_end_3");
         assert_eq!(config.ddl_prefix, "zero02/3/ddl");
-        let config = config_with(&[
-            ("STREAMGRES_DDL_TRIGGER", "my_trigger"),
-            ("STREAMGRES_DDL_PREFIX", "mine/ddl"),
-        ]);
-        assert_eq!(config.ddl_trigger, "my_trigger");
-        assert_eq!(config.ddl_prefix, "mine/ddl");
-        assert_eq!(config.engine_settings().ddl_trigger, "my_trigger");
+        assert_eq!(config.engine_settings().ddl_trigger, "zero02_ddl_end_3");
     }
 
     /// [`config`], expected to parse.
@@ -666,6 +678,13 @@ mod tests {
                 retries: 5,
             }
         );
+    }
+
+    /// Zero disables the message size cap, so it is refused.
+    #[test]
+    fn zero_max_message_bytes_is_refused() {
+        let error = config(&[("STREAMGRES_MAX_MESSAGE_BYTES", "0")]).unwrap_err();
+        assert!(error.contains("STREAMGRES_MAX_MESSAGE_BYTES"), "{error}");
     }
 
     /// A value that is not a number is refused by the variable's name.
