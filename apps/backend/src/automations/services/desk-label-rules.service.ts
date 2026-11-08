@@ -144,8 +144,8 @@ function buildRuleConfig(params: {
   };
 }
 
-function ensureConfigValid(config: AutomationConfig): void {
-  const validation = automationService.validateConfig(config);
+async function ensureConfigValid(config: AutomationConfig): Promise<void> {
+  const validation = await automationService.validateConfig(config);
   if (!validation.valid) {
     const summary = validation.issues
       .slice(0, 3)
@@ -231,14 +231,14 @@ function fingerprintEmailReceivedFilters(filters: Record<string, unknown>): stri
 }
 
 export class DeskLabelRulesService {
-  buildValidatedRuleConfig(params: {
+  async buildValidatedRuleConfig(params: {
     channelId: string;
     emailFilters: Record<string, unknown>;
     label: ResolvedConversationLabel;
     keepInInbox?: boolean | undefined;
-  }): AutomationConfig {
+  }): Promise<AutomationConfig> {
     const config = buildRuleConfig(params);
-    ensureConfigValid(config);
+    await ensureConfigValid(config);
     return config;
   }
 
@@ -286,7 +286,7 @@ export class DeskLabelRulesService {
 
       const label = await this.findExistingLabelForDuplicate(payload, auth);
       if (label) {
-        const config = this.buildValidatedRuleConfig({
+        const config = await this.buildValidatedRuleConfig({
           channelId: payload.channelId,
           emailFilters,
           label,

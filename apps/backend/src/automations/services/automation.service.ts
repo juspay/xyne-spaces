@@ -2,7 +2,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { AutomationStatus } from '../types/status';
 import type { AutomationConfig } from '../types/automation-config';
-import type { ValidationResult } from '../types/validation';
+import type { AccessContext, ValidationResult } from '../types/validation';
 import { ConfigValidator } from '../engine/config-validator';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
@@ -38,12 +38,23 @@ class AutomationService {
     return automation;
   }
 
-  validateConfig(config: AutomationConfig): ValidationResult {
+  async validateConfig(
+    config: AutomationConfig,
+    access?: AccessContext,
+  ): Promise<ValidationResult> {
     const result = validator.validate(config);
+    if (!result.valid || !access) {
+      logger.info(
+        `[automations] Validated config (valid=${result.valid}, issues=${result.issues.length})`,
+      );
+      return result;
+    }
+
+    const accessResult = await validator.validateAccess(config, access);
     logger.info(
-      `[automations] Validated config (valid=${result.valid}, issues=${result.issues.length})`,
+      `[automations] Validated config (valid=${accessResult.valid}, issues=${accessResult.issues.length}, accessChecked=true)`,
     );
-    return result;
+    return accessResult;
   }
 
   async activate(id: string): Promise<{ automation: AutomationView; validation: ValidationResult }> {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { TriggerType } from '../types/trigger-types';
+import type { AccessContext, ValidationIssue } from '../types/validation';
 import { TriggerCategory } from '../types/categories';
 
 /** Filter verdict; `failed` names the filter that rejected, for the skip log. */
@@ -22,6 +23,11 @@ export abstract class BaseTrigger<TConfig extends z.ZodSchema> {
   validate(config: unknown): z.infer<TConfig> {
     return this.configSchema.parse(config);
   }
+
+  validateAccess?(
+    config: z.infer<TConfig>,
+    access: AccessContext,
+  ): Promise<ValidationIssue[]>;
 
   hydratePayload?(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 
