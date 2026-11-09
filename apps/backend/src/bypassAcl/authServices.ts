@@ -1,12 +1,10 @@
 import { UserService } from '@/services/userService';
-import { UserSessionService } from '@/services/userSessionService';
 import { channelService } from '@/services/channelService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { asSystem, asService } from './base';
 
 const userService = new UserService();
-const userSessionService = new UserSessionService();
 const prisma = DatabaseClient.getInstance();
 
 /**
@@ -51,11 +49,39 @@ export function getWorkspaceLandingChannelData(workspaceId: string): Promise<{ l
   );
 }
 
+/** The `users` row a refresh re-mints a JWT for: the org member's identity in one workspace. */
+export interface RefreshTargetUser {
+  id: string;
+  email: string;
+  name: string;
+  picture: string | null;
+  workspaceId: string;
+  orgMemberId: string;
+  status: string;
+  leftAt: Date | null;
+}
+
+/**
+ * `/auth/refresh-session` runs with no ambient tenant context (the only credential is the
+ * `xs` cookie, already resolved to an org member by authSessionService.validateRefresh), so
+ * the workspace-user lookup is keyed off that verified orgMemberId and runs as system.
+ * Returns null when the member has no user in the workspace; the caller checks status/leftAt.
+ */
+export function getRefreshTargetUserData(orgMemberId: string, workspaceId: string): Promise<RefreshTargetUser | null> {
+  return asSystem(
+    ['User'],
+    'refresh-session: workspace-user lookup keyed off the xs-verified orgMemberId; no ambient tenant context on a public auth route',
+    () => prisma.user.findFirst({
+      where: { orgMemberId, workspaceId },
+      select: { id: true, email: true, name: true, picture: true, workspaceId: true, orgMemberId: true, status: true, leftAt: true },
+    }),
+  );
+}
+
 export interface SwitchWorkspaceData {
   targetUser: NonNullable<Awaited<ReturnType<UserService['findUserByEmail']>>>;
   selfDmChannelId: string | null;
   workspace: { landingChannelId: string | null } | null;
-  currentSession: Awaited<ReturnType<UserSessionService['getSessionById']>>;
 }
 
 /**
@@ -67,21 +93,14 @@ export interface SwitchWorkspaceData {
  * attacker-supplied — this can only ever act on the caller's own identity in the target
  * workspace. Returns null when the target user has no access to the workspace (403 case) — the
  * caller decides how to respond, this only resolves data.
- *
- * The session lookup lives in here too, not back in the controller: UserSession.workspaceId is
- * stamped once at login and never updated, while a session is deliberately reused across
- * workspace switches — so by the second switch the ambient (old) workspace no longer matches the
- * session row's workspaceId and an ACL-scoped lookup would wrongly come back null.
  */
 export function switchWorkspaceData(
   currentUserEmail: string,
   workspaceId: string,
-  sessionId: string | undefined,
 ): Promise<SwitchWorkspaceData | null> {
   return asSystem(
-    ['User', 'Channel', 'ChannelParticipant', 'Workspace', 'UserSession'],
-    'switch-workspace: acts on target workspace, keyed off caller-verified email only; ' +
-      'session lookup included since UserSession.workspaceId is stale for a reused session',
+    ['User', 'Channel', 'ChannelParticipant', 'Workspace'],
+    'switch-workspace: acts on target workspace, keyed off caller-verified email only',
     async () => {
       const targetUser = await userService.findUserByEmail(currentUserEmail, workspaceId);
       if (!targetUser) return null;
@@ -94,9 +113,7 @@ export function switchWorkspaceData(
         select: { landingChannelId: true },
       });
 
-      const currentSession = sessionId ? await userSessionService.getSessionById(sessionId) : null;
-
-      return { targetUser, selfDmChannelId, workspace, currentSession };
+      return { targetUser, selfDmChannelId, workspace };
     },
   );
 }

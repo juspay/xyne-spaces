@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from 'express';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
@@ -45,7 +45,7 @@ router.use(facebookRoutes);
 
 router.post(
   '/:conversationId/reply',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -97,7 +97,7 @@ router.post(
 // the refetch button for those channels so this path is never reached for them.
 router.post(
   '/:channelId/sync',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -172,7 +172,7 @@ router.post(
 // POST /:channelId/disconnect — deactivate all sources on a channel
 router.post(
   '/:channelId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;

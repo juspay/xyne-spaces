@@ -16,7 +16,7 @@ const AUTO_DISMISS_MS = 15_000;
 
 async function isUserLoggedIn(): Promise<boolean> {
   const cookies = await session.defaultSession.cookies.get({});
-  return cookies.some((c) => c.name === 'google_access_token' && c.value);
+  return cookies.some((c) => c.name === 'xyne_pending_auth' && c.value);
 }
 
 export async function showMeetingPopup(meetingData: { app: string; startedAt: string }): Promise<void> {

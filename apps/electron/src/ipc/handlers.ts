@@ -61,6 +61,7 @@ import { browserSettingsService, BrowserSettings } from '../services/browser-set
 import { errorReportRecorder } from '../services/error-report-recorder';
 import { localHarnessBridge, LOCAL_HARNESS_PROVIDERS, type LocalHarnessProvider } from '../services/local-harness';
 import { setAppScheme } from '../services/webview-theme';
+import { withLoginCodeChallenge } from '../services/oauth-pkce';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -286,6 +287,7 @@ export function setupIpcHandlers(): void {
       const separator = newUrl.includes("?") ? "&" : "?";
       newUrl = `${newUrl}${separator}isNy=true`;
     }
+    newUrl = withLoginCodeChallenge(newUrl);
     const safeUrl = normalizeExternalUrl(newUrl);
     if (!safeUrl) {
       Logger.error(ElectronEvent.OPEN_EXTERNAL_BLOCKED, { url: newUrl });

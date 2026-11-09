@@ -3,7 +3,7 @@
  * Handles HTTP requests for invitation operations
  */
 
-import jwt from 'jsonwebtoken';
+import { verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
@@ -70,6 +70,7 @@ export async function buildInvitationLink(params: {
 import { createId } from '@paralleldrive/cuid2';
 import { provisionOrgTx } from '@/bypassAcl/transactions/invitationController';
 import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
+import { PENDING_AUTH_COOKIE } from '@/services/accessTokenService';
 
 export class InvitationController {
   /**
@@ -351,9 +352,9 @@ export class InvitationController {
         return;
       }
 
-      // Read identity from the httpOnly google_access_token cookie.
+      // Read identity from the httpOnly xyne_pending_auth cookie.
       // Supports both signed-JWT (new email/OAuth flows) and legacy JSON shapes.
-      const pendingAuthRaw = req.cookies?.google_access_token as string | undefined;
+      const pendingAuthRaw = req.cookies?.[PENDING_AUTH_COOKIE] as string | undefined;
       if (!pendingAuthRaw) {
         res.status(401).json({ error: 'Not authenticated. Please login first.' });
         return;
@@ -363,17 +364,8 @@ export class InvitationController {
       let provider: string;
 
       try {
-        const decoded = jwt.verify(pendingAuthRaw, config.jwt.secret) as {
-          email?: string;
-          name?: string;
-          providerUserId?: string;
-          picture?: string;
-          googleId?: string;
-          provider?: string;
-          refreshToken?: string | null;
-          accessToken?: string | null;
-        };
-        if (!decoded.email) throw new Error('Invalid JWT payload');
+        const decoded = verifyPendingAuthToken(pendingAuthRaw);
+        if (!decoded?.email) throw new Error('Invalid JWT payload');
 
 
         oauthUser = {

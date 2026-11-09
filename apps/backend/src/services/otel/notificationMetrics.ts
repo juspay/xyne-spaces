@@ -99,3 +99,26 @@ export function getNotificationFcmPayloadTruncated(): Counter {
   }
   return _notificationFcmPayloadTruncated;
 }
+
+// Mobile push session source: outcome of the push-target lookup on the org-scoped auth_sessions
+// for a delivery. method is always 'new' (auth_sessions; the legacy user_sessions store is no
+// longer read). reason=none when targets were found, else why the lookup came up empty:
+//   no_org_member | no_auth_session | no_mobile_session | no_fcm_token
+export type PushSessionSourceMethod = 'new';
+export type PushSessionFallbackReason =
+  | 'none'
+  | 'no_org_member'
+  | 'no_auth_session'
+  | 'no_mobile_session'
+  | 'no_fcm_token';
+
+let _notificationPushSessionSource: Counter | null = null;
+export function getNotificationPushSessionSource(): Counter {
+  if (!_notificationPushSessionSource) {
+    _notificationPushSessionSource = getMeter().createCounter('notification_push_session_source_total', {
+      description: 'Mobile push target lookups on auth_sessions by outcome (reason=none when targets were found)',
+      unit: '1',
+    });
+  }
+  return _notificationPushSessionSource;
+}
