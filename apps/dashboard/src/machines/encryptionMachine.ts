@@ -1,9 +1,9 @@
 import { createMachine, createActor, assign } from 'xstate';
 import type { EncryptionConfig } from '@xyne/shared/hooks';
+import type { TransitKeyring } from '@xyne/shared';
 
 export interface EncryptionState {
-  key: CryptoKey | null;
-  sessionFingerprint: string | null;
+  keyring: TransitKeyring | null;
   encryptedFields: Record<string, { fields: string[]; enforceClientEncryption: boolean }>;
   clientEncryptionEnabled: boolean;
   apiClientEncryptionEnabled: boolean;
@@ -17,14 +17,12 @@ type EncryptionEvent =
   | {
       type: 'INIT';
       config: EncryptionConfig;
-      sessionFingerprint: string | null;
-      key: CryptoKey | null;
+      keyring: TransitKeyring | null;
     }
   | { type: 'RESET' };
 
 const INITIAL_STATE: EncryptionState = {
-  key: null,
-  sessionFingerprint: null,
+  keyring: null,
   encryptedFields: {},
   clientEncryptionEnabled: false,
   apiClientEncryptionEnabled: false,
@@ -47,8 +45,7 @@ const encryptionMachine = createMachine({
           target: 'ready',
           actions: assign({
             state: ({ event }) => ({
-              key: event.key,
-              sessionFingerprint: event.sessionFingerprint,
+              keyring: event.keyring,
               encryptedFields: event.config.encryptedFields,
               clientEncryptionEnabled: event.config.clientEncryptionEnabled,
               apiClientEncryptionEnabled: event.config.apiClientEncryptionEnabled,

@@ -3,7 +3,7 @@ import { useEncryptionBootstrap } from '@xyne/shared/hooks';
 import { encryptionActor } from '../machines/encryptionMachine.js';
 
 export function EncryptionInit(): null {
-  const { config, key, sessionFingerprint, isReady } = useEncryptionBootstrap();
+  const { config, keyring, isReady } = useEncryptionBootstrap();
   const hasInitialized = useRef(false);
 
   useEffect(() => {
@@ -12,8 +12,8 @@ export function EncryptionInit(): null {
     }
 
     hasInitialized.current = true;
-    encryptionActor.send({ type: 'INIT', config, sessionFingerprint, key });
-  }, [config, key, sessionFingerprint, isReady]);
+    encryptionActor.send({ type: 'INIT', config, keyring });
+  }, [config, keyring, isReady]);
 
   return null;
 }

@@ -88,6 +88,7 @@ import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
 import userHeaderOverridesRoutes from '@/routes/userHeaderOverrides';
 import encryptionRoutes from '@/routes/encryption';
+import transitRoutes from '@/routes/transit';
 import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
 import draftAttachmentRoutes from '@/routes/draftAttachments';
@@ -534,6 +535,7 @@ export class App {
     this.app.use('/api/zero', zeroRoutes);
     this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
     this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
+    this.app.use('/api/transit', authMiddleware.authenticate, transitRoutes);
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 

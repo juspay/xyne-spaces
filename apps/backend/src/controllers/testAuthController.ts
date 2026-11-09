@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { AccessType, AuthProvider, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { getEncryptionProvider } from '@/services/encryption';
 import { config } from '@/config/env';
 import { UserService } from '@/services/userService';
 import { authSessionService, AuthSessionRevokeReason } from '@/services/authSessionService';
@@ -418,16 +417,13 @@ export class TestAuthController {
       logger.info(`[${requestId}] Test logout initiated`);
 
       // Mirror the real logout: revoke the auth session (from the JWT's sid; xs is only sent
-      // to /auth/refresh-session) + its encryption key and clear the cookies, otherwise the
-      // browser keeps a valid xs and re-login sees stale data.
+      // to /auth/refresh-session) and clear the cookies, otherwise the browser keeps a valid
+      // xs and re-login sees stale data.
       const jwtRead = readWorkspaceJwt(req);
       const sessionId = jwtRead.status === 'valid' ? jwtRead.payload.sid : undefined;
       if (sessionId) {
         await authSessionService.revokeById(sessionId, AuthSessionRevokeReason.TEST_CLEANUP).catch((err: unknown) =>
           logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
-        );
-        await getEncryptionProvider().revokeSessionKey(sessionId).catch((err: unknown) =>
-          logger.warn(`[${requestId}] Session key revoke failed: ${err instanceof Error ? err.message : String(err)}`)
         );
       }
       await authSessionService.revokeOnLogout(req, res, { sessionId });

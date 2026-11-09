@@ -3,22 +3,24 @@ import type { EncryptedTableConfig } from '@xyne/shared';
 export type EncryptedFieldConfig = EncryptedTableConfig;
 
 export type ClientEncryptionConfig = {
-  publicKey: string;
   encryptedFields: Record<string, EncryptedFieldConfig>;
   clientEncryptionEnabled: boolean;
   apiClientEncryptionEnabled: boolean;
 };
 
-export type RegisterSessionKeyInput = {
-  wrappedKey: string;
-  sessionId: string;
-  userId: string;
-  orgId: string;
+export type TransitHandshakeInput = {
+  /** What the transit key is derived for: the auth session id (JWT `sid`). */
+  subject: string;
+  /** Client's ephemeral P-256 public key, base64 uncompressed point. */
+  publicKey: string;
+  epoch?: number;
 };
 
-export type RegisterSessionKeyResult = {
-  ok: boolean;
-  sessionFingerprint: string;
+export type TransitHandshakeResult = {
+  publicKey: string;
+  wrappedKey: string;
+  epoch: number;
+  epochSeconds: number;
 };
 
 export type EncryptBatchItem = {
@@ -53,14 +55,13 @@ export type StorageObjectKey = {
 };
 
 export interface EncryptionProvider {
-  getPublicConfig(): Promise<ClientEncryptionConfig>;
+  getClientConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
-  registerSessionKey(input: RegisterSessionKeyInput): Promise<RegisterSessionKeyResult>;
-  revokeSessionKey(sessionId: string): Promise<void>;
+  transitHandshake(input: TransitHandshakeInput): Promise<TransitHandshakeResult>;
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
   decryptBatch(values: string[]): Promise<string[]>;
-  encryptResponse<T>(body: T, sessionId: string): Promise<T>;
-  decryptRequest<T>(body: T, sessionId: string): Promise<T>;
+  encryptResponse<T>(body: T, subject: string): Promise<T>;
+  decryptRequest<T>(body: T, subject: string): Promise<T>;
   initializeOrg(orgId: string): Promise<void>;
   provisionEntity(input: ProvisionEntityInput): Promise<void>;
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;

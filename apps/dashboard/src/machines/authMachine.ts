@@ -8,7 +8,6 @@ import { API_BASE_URL, isTestEnv } from '../config';
 import { logger, Event as LoggerEvent } from '../utils/logger';
 import { noteAccessTokenExpiry } from '../services/clients/sessionRefresh';
 
-import { clearAllSessionKeys } from '../services/sessionKeyStore';
 import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
 import { stateMachineActor } from './stateMachine';
@@ -931,7 +930,6 @@ export const authMachine = createMachine(
         decryptionCache.clear();
         resetEncryption();
         resetGlobalEncryptionBootstrap();
-        void clearAllSessionKeys();
         // The composer's saved related-context chips quote other people's messages.
         stateMachineActor.send({ type: 'CLEAR_RELATED_CONTEXT' });
       },
