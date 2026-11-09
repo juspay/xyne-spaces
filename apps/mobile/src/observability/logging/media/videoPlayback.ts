@@ -30,6 +30,8 @@ export type VideoPlaybackSubject = Readonly<{
   mimetype: string | null;
   originalFilename?: string | null | undefined;
   sizeBytes?: number | null | undefined;
+  /** Which server rendition is playing (`compat` = H.264 SDR fallback). Defaults to `original`. */
+  variant?: 'original' | 'compat' | undefined;
 }>;
 
 /** Subset of expo-video's `VideoTrack` captured on `sourceLoad`. */
@@ -50,6 +52,7 @@ export type VideoTrackFields = Readonly<{
 
 export type VideoPlaybackReadyFields = Readonly<{
   surface: VideoPlaybackSurface;
+  variant: 'original' | 'compat';
   attachmentId: string | null;
   mimetype: string | null;
   fileExtension: string | null;
@@ -61,6 +64,7 @@ export type VideoPlaybackReadyFields = Readonly<{
 
 export type VideoPlaybackFailedFields = Readonly<{
   surface: VideoPlaybackSurface;
+  variant: 'original' | 'compat';
   stage: VideoPlaybackFailureStage;
   attachmentId: string | null;
   mimetype: string | null;
@@ -236,6 +240,7 @@ export function buildVideoPlaybackReady(input: {
   const duration = input.durationMs;
   return {
     surface: input.surface,
+    variant: input.subject.variant ?? 'original',
     attachmentId: input.subject.attachmentId,
     mimetype: input.subject.mimetype,
     fileExtension: getVideoFileExtension(input.subject),
@@ -262,6 +267,7 @@ export function buildVideoPlaybackFailed(input: {
   const errorMessage = toVideoErrorMessage(input.error);
   return {
     surface: input.surface,
+    variant: input.subject.variant ?? 'original',
     stage: input.stage,
     attachmentId: input.subject.attachmentId,
     mimetype: input.subject.mimetype,

@@ -179,7 +179,7 @@ describe('proxy recovery wiring (source contracts)', () => {
 
   it('re-issues stream URLs when the proxy is replaced', () => {
     assert.match(videoHook, /useSyncExternalStore\(subscribeProxyEpoch, getProxyEpoch/);
-    assert.match(videoHook, /\[attachmentId, token, enabled, proxyEpoch\]/);
+    assert.match(videoHook, /\[attachmentId, token, enabled, variant, proxyEpoch\]/);
   });
 
   it('exposes checkHealth and restart across the native bridge', () => {

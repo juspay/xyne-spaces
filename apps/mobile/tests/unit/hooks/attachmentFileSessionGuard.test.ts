@@ -8,6 +8,10 @@ const hookSource = readFileSync(
   'utf8',
 );
 const videoSource = readFileSync(resolve(process.cwd(), 'src/hooks/useMtlsVideoStream.ts'), 'utf8');
+const policySource = readFileSync(
+  resolve(process.cwd(), 'src/hooks/attachmentCachePolicy.ts'),
+  'utf8',
+);
 
 describe('attachment file session guards', () => {
   it('scopes downloads and in-flight requests to the current auth session', () => {
@@ -30,7 +34,10 @@ describe('attachment file session guards', () => {
   });
 
   it('leaves video streaming on its existing generation guard', () => {
-    assert.match(videoSource, /buildAttachmentResourceUrl\(API_BASE_URL, attachmentId, 'stream'\)/);
+    // The URL goes through buildAttachmentStreamUrl, which wraps
+    // buildAttachmentResourceUrl(..., 'stream') and only appends ?variant=compat.
+    assert.match(videoSource, /buildAttachmentStreamUrl\(API_BASE_URL, attachmentId, variant\)/);
+    assert.match(policySource, /buildAttachmentResourceUrl\(apiBaseUrl, attachmentId, 'stream'\)/);
     assert.match(
       videoSource,
       /if \(!mounted \|\| getAuthSessionGeneration\(\) !== sessionGeneration\) return/,
