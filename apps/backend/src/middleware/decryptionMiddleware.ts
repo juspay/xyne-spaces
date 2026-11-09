@@ -10,7 +10,7 @@ function sanitizeForLog(value: unknown): string {
 
 function hasEncryptedFields(obj: unknown): boolean {
   if (typeof obj === 'string') {
-    return obj.startsWith('ENC:v1|sess|');
+    return obj.startsWith('ENC:v1|tk-');
   }
 
   if (Array.isArray(obj)) {
@@ -30,9 +30,9 @@ function hasEncryptedFields(obj: unknown): boolean {
 }
 
 /**
- * Decrypt `ENC:v1|sess|…` fields with the caller's session key. The key is scoped to the
- * auth session (JWT `sid`), so this runs after authentication: the auth middlewares call
- * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
+ * Decrypt `ENC:v1|tk-<epoch>|…` fields with the caller's transit key. The key is derived
+ * from the auth session (JWT `sid`), so this runs after authentication: the auth middlewares
+ * call it in place of `next()` once `req.user` is set, rather than it being mounted globally.
  */
 export async function decryptRequestBodyMiddleware(
   req: Request,
@@ -96,7 +96,7 @@ export async function decryptRequestBodyMiddleware(
 }
 
 /**
- * Encrypt JSON responses for the caller's session key. Mounted globally: `res.json` runs
+ * Encrypt JSON responses under the caller's transit key. Mounted globally: `res.json` runs
  * after the route's auth middleware, so `req.user.sid` is already resolved by then.
  */
 export function encryptResponseBodyMiddleware(
