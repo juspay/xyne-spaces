@@ -397,7 +397,7 @@ export class AuthV2Controller {
           launchParams.set('invitationId', stateData.invitationId);
         }
         const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
-        logger.info(`${tag()} Google OAuth login handed off to Electron (outcome=electron_handoff) — redirecting to launch page: ${launchUrl}`);
+        logger.info(`${tag()} Google OAuth login handed off to Electron (outcome=electron_handoff) — redirecting to launch page: ${frontendUrl}/launch`);
         res.redirect(launchUrl);
         return;
       }
@@ -582,7 +582,7 @@ export class AuthV2Controller {
       // subsequent re-login (e.g. after workspace switch) from re-triggering this flow with
       // an already-accepted invitation.
       if (pendingInvitationId) {
-        logger.info(`${tag()} Google OAuth login succeeded (platform=web, outcome=pending_invitation, invitationId=${pendingInvitationId})`);
+        logger.info(`${tag()} Google OAuth login succeeded (platform=web, outcome=pending_invitation)`);
         res.clearCookie('pending_invitation_id', { path: '/' });
         const inviteParams = new URLSearchParams({
           loginComplete: 'true',
@@ -986,7 +986,7 @@ export class AuthV2Controller {
       // will navigate to /invite?loginComplete=true inside the app — no browser involvement.
       const effectiveInvitationId = stateData.invitationId || invitationId;
       if (effectiveInvitationId) {
-        logger.info(`${tag()} Google OAuth login succeeded (platform=electron, outcome=pending_invitation, invitationId=${effectiveInvitationId})`);
+        logger.info(`${tag()} Google OAuth login succeeded (platform=electron, outcome=pending_invitation)`);
         const tokenKey = await this.storePendingOAuthTokens(
           refresh_token,
           access_token,
@@ -1606,7 +1606,7 @@ export class AuthV2Controller {
          * AUTO-LOGIN FLOW: Use existing session (cookies already set)
          * This happens when user is auto-logged in to single workspace
          */
-        logger.info(`[LOGIN-WORKSPACE] No pending auth cookie, but session ${existingSessionId} found - using auto-login flow (platform=${platform})`);
+        logger.info(`[LOGIN-WORKSPACE] No pending auth cookie, but existing session found - using auto-login flow (platform=${platform})`);
 
         const session = await this.userSessionService.getSessionById(existingSessionId);
         if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
@@ -2072,7 +2072,7 @@ export class AuthV2Controller {
         // extended on switch, so the cookies must reflect its remaining life,
         // never a fresh now+expiryDays (which would outlive the DB record).
         sessionRefreshExpiry = currentSession.refreshTokenExpiry;
-        logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
+        logger.info('[SWITCH-WORKSPACE] Reusing existing session');
       }
 
       if (!validSessionId) {
