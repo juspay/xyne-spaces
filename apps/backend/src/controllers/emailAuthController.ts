@@ -35,9 +35,34 @@ interface ResetCodePayload {
   code: string;
 }
 
-const LOGIN_MAX_FAILED_ATTEMPTS = 5;
-const LOGIN_LOCKOUT_SECONDS = 5 * 60;
-const LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS = 5 * 60;
+interface LoginLimit {
+  scope: 'email' | 'global';
+  lockKey: string;
+  attemptKey: string;
+  maxFailedAttempts: number;
+  windowSeconds: number;
+  lockoutSeconds: number;
+}
+
+// Per-email stops guessing one account; the global limit stops spraying a few passwords across every account.
+const loginLimits = (normalizedEmail: string): LoginLimit[] => [
+  {
+    scope: 'email',
+    lockKey: `emaillogin:lock:${normalizedEmail}`,
+    attemptKey: `emaillogin:attempts:${normalizedEmail}`,
+    maxFailedAttempts: 5,
+    windowSeconds: 5 * 60,
+    lockoutSeconds: 5 * 60,
+  },
+  {
+    scope: 'global',
+    lockKey: 'emaillogin:lock:global',
+    attemptKey: 'emaillogin:attempts:global',
+    maxFailedAttempts: 20,
+    windowSeconds: 60 * 60,
+    lockoutSeconds: 60 * 60,
+  },
+];
 const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
 const MAX_RESET_CODE_ATTEMPTS = 3;
 const MAX_RESET_CODES_PER_DAY = 5;
@@ -101,44 +126,50 @@ export class EmailAuthController {
         return;
       }
 
-      const loginLockKey = `emaillogin:lock:${normalizedEmail}`;
-      const loginAttemptKey = `emaillogin:attempts:${normalizedEmail}`;
+      const redis = redisService.getClient();
+      const limits = loginLimits(normalizedEmail);
+      const [emailLimit, globalLimit] = limits;
 
-      const existingLock = await redisService.get(loginLockKey);
-      if (existingLock) {
-        const retryAfterSeconds = Math.max(await redisService.getClient().ttl(loginLockKey), 0);
+      const rateLimited = (scope: LoginLimit['scope'], retryAfterSeconds: number): void => {
         if (retryAfterSeconds > 0) {
           res.setHeader('Retry-After', retryAfterSeconds.toString());
         }
-
-        logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
-        res.status(429).json({
-          error: 'Rate limited',
-          message: 'Too many failed login attempts. Please try again later.',
-        });
-        return;
-      }
-
-      const lockOut = async (): Promise<void> => {
-        await redisService.set(loginLockKey, '1', LOGIN_LOCKOUT_SECONDS);
-        logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
-        res.setHeader('Retry-After', LOGIN_LOCKOUT_SECONDS.toString());
+        logger.warn(`${tag()} Email login rejected (reason=rate_limited, scope=${scope})`);
         res.status(429).json({
           error: 'Rate limited',
           message: 'Too many failed login attempts. Please try again later.',
         });
       };
 
+      for (const limit of limits) {
+        if (await redisService.get(limit.lockKey)) {
+          rateLimited(limit.scope, Math.max(await redis.ttl(limit.lockKey), 0));
+          return;
+        }
+      }
+
+      // Locks every limit that has reached its max; returns false when none has.
+      const lockOutReached = async (atOrAbove: (attempts: number, max: number) => boolean): Promise<boolean> => {
+        const reached = limits.filter((limit, i) => atOrAbove(attempts[i], limit.maxFailedAttempts));
+        if (reached.length === 0) return false;
+        await Promise.all(reached.map(limit => redisService.set(limit.lockKey, '1', limit.lockoutSeconds)));
+        rateLimited(reached[0].scope, Math.max(...reached.map(limit => limit.lockoutSeconds)));
+        return true;
+      };
+
       // Count the attempt before checking the password: INCR is atomic, so a burst of
       // concurrent guesses can't all pass the lock check above before the counter moves.
-      // A successful login clears it below.
-      const redis = redisService.getClient();
-      const attempts = await redis.incr(loginAttemptKey);
-      if (attempts === 1) {
-        await redis.expire(loginAttemptKey, LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS);
-      }
-      if (attempts > LOGIN_MAX_FAILED_ATTEMPTS) {
-        await lockOut();
+      // A successful login takes it back off below.
+      const attempts = await Promise.all(
+        limits.map(async limit => {
+          const count = await redis.incr(limit.attemptKey);
+          if (count === 1) {
+            await redis.expire(limit.attemptKey, limit.windowSeconds);
+          }
+          return count;
+        }),
+      );
+      if (await lockOutReached((count, max) => count > max)) {
         return;
       }
 
@@ -146,8 +177,7 @@ export class EmailAuthController {
       // ends here, so the attempt counter, the lockout and the response are identical
       // whichever it was, keeping registered and unregistered emails indistinguishable.
       const rejectLogin = async (): Promise<void> => {
-        if (attempts >= LOGIN_MAX_FAILED_ATTEMPTS) {
-          await lockOut();
+        if (await lockOutReached((count, max) => count >= max)) {
           return;
         }
 
@@ -204,11 +234,13 @@ export class EmailAuthController {
 
       logger.info(`${tag()} Email auth success for: ${normalizedEmail}`);
 
-      // Password is correct — immediately clear rate-limit state so a
-      // subsequent network/DB failure doesn't leave the user locked out.
+      // Password is correct — clear this email's state so a later network/DB failure doesn't
+      // leave the user locked out. The global counter only drops this attempt: one
+      // user's success must not wipe failures others have racked up.
       await Promise.all([
-        redisService.del(loginAttemptKey),
-        redisService.del(loginLockKey),
+        redisService.del(emailLimit.attemptKey),
+        redisService.del(emailLimit.lockKey),
+        redis.decr(globalLimit.attemptKey),
       ]);
 
       // 3. Find user's active workspace(s)
