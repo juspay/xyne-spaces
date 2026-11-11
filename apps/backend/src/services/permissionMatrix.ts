@@ -34,7 +34,8 @@ export type ResourceName =
   | 'TICKET-MIGRATION'
   | 'CONFLUENCE-MIGRATION'
   | 'VESPA'
-  | 'SDLC';
+  | 'SDLC'
+  | 'SECRETS';
 
 export interface PermissionEntry {
   resourceName: ResourceName;
@@ -46,7 +47,7 @@ export interface PermissionEntry {
  * Replaces the 3 divergent helpers: DEFAULT_USER_RESOURCES (8 WRITE),
  * grantDefaultResources (4 WRITE), grantWorkspaceOwnerResources (21 ADMIN).
  *
- * MEMBER: 13 WRITE | ADMIN: 21 ADMIN | OWNER: 21 ADMIN | GUEST: 3 WRITE + 2 READ
+ * MEMBER: 13 WRITE | ADMIN: 22 ADMIN | OWNER: 22 ADMIN | GUEST: 3 WRITE + 2 READ
  *
  * Typed as Record<WorkspaceRole, readonly PermissionEntry[]> so that:
  *   1. Every WorkspaceRole must have an entry (exhaustiveness).
@@ -105,6 +106,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
     { resourceName: 'VESPA', accessType: AccessType.ADMIN },
     { resourceName: 'SDLC', accessType: AccessType.ADMIN },
+    { resourceName: 'SECRETS', accessType: AccessType.ADMIN },
   ],
   OWNER: [
     { resourceName: 'TICKETS', accessType: AccessType.ADMIN },
@@ -129,6 +131,7 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'XYNE-APPS', accessType: AccessType.ADMIN },
     { resourceName: 'VESPA', accessType: AccessType.ADMIN },
     { resourceName: 'SDLC', accessType: AccessType.ADMIN },
+    { resourceName: 'SECRETS', accessType: AccessType.ADMIN },
   ],
   GUEST: [
     { resourceName: 'TICKETS', accessType: AccessType.WRITE },
