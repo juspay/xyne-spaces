@@ -654,9 +654,19 @@ export class AuthV2Controller {
     try {
       logger.info(`[${requestId}] Refresh session endpoint called`);
 
-      const session = await authSessionService.validateRefresh(req);
-      if (!session) {
-        logger.warn(`[${requestId}] Refresh rejected: xs cookie missing, unknown, revoked or expired`);
+      // Validates the xs cookie, rotates it (single use) and sets the replacement cookie.
+      const refresh = await authSessionService.consumeRefresh(req, res);
+      if (refresh.status === 'busy') {
+        logger.warn(`[${requestId}] Refresh deferred: a concurrent refresh of the same xs is still running`);
+        res.status(503).set('Retry-After', '1').json({
+          error: 'Session refresh in progress',
+          code: 'REFRESH_BUSY',
+          message: 'Please retry shortly',
+        });
+        return;
+      }
+      if (refresh.status !== 'ok') {
+        logger.warn(`[${requestId}] Refresh rejected: xs cookie missing, unknown, revoked, expired or reused`);
         res.status(401).json({
           error: 'Session expired',
           code: 'REFRESH_INVALID',
@@ -664,6 +674,7 @@ export class AuthV2Controller {
         });
         return;
       }
+      const { session } = refresh;
 
       const lastWorkspaceCookie = req.cookies?.[LAST_WORKSPACE_COOKIE];
       const workspaceId =
