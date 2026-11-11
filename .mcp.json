@@ -12,8 +12,8 @@
       "url": "${XYNE_MCP_BASE_URL}/xyne-mcp/metrics/mcp"
     },
     "xyne-spaces": {
-      "command": "node",
-      "args": ["packages/xyne-spaces-mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "@xyne/spaces-mcp@latest"]
     },
     "xyne-claw": {
       "command": "node",
