@@ -63,7 +63,7 @@ export interface RefreshTargetUser {
 
 /**
  * `/auth/refresh-session` runs with no ambient tenant context (the only credential is the
- * `xs` cookie, already resolved to an org member by authSessionService.validateRefresh), so
+ * `xs` cookie, already resolved to an org member by authSessionService.consumeRefresh), so
  * the workspace-user lookup is keyed off that verified orgMemberId and runs as system.
  * Returns null when the member has no user in the workspace; the caller checks status/leftAt.
  */

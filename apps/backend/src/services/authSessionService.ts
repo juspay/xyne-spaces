@@ -11,6 +11,7 @@ import {
   rotateAuthSessionTokenTx,
 } from '@/bypassAcl/transactions/authSessionStore';
 import { redisService } from '@/services/redisService';
+import { RefreshTokenRotator, type RotationResult } from '@/services/refreshTokenRotation';
 import { logger as baseLogger } from '../utils/logger';
 
 const logger = baseLogger.child({ module: 'AuthSessionService' });
@@ -32,6 +33,9 @@ export const AUTH_SESSION_COOKIE = 'xs';
  * workspace JWT cookie; on 401 the client hits this path and retries.
  */
 export const AUTH_SESSION_COOKIE_PATH = '/api/auth/refresh-session';
+
+/** Redis namespace of the `xs` rotation records (see refreshTokenRotation.ts). */
+const XS_ROTATION_KEY_PREFIX = 'auth:xs:';
 
 /** Stored as plain strings in auth_sessions / auth_session_workspace_access (values are load-bearing: the partial unique index filters on 'ACTIVE'). */
 export enum AuthSessionStatus {
@@ -87,6 +91,20 @@ export interface RefreshableAuthSession {
     leftAt: Date | null;
   };
 }
+
+/** What a rotation hands out: the raw replacement `xs` and the session it renews. */
+interface RotatedXs {
+  sessionId: string;
+  token: string;
+}
+
+export type RefreshConsumption =
+  /** The session is live; the replacement `xs` cookie is already set on the response. */
+  | { status: 'ok'; session: RefreshableAuthSession }
+  /** Missing, unknown, revoked, expired or reused: the client has to sign in again. */
+  | { status: 'invalid' }
+  /** A concurrent refresh of the same `xs` did not finish in time: the client retries. */
+  | { status: 'busy' };
 
 export interface ExternalAuthSessionInput {
   orgMemberId: string;
@@ -155,6 +173,11 @@ const mintToken = (): { token: string; tokenHash: string } => {
 };
 
 export class AuthSessionService {
+  private readonly xsRotator = new RefreshTokenRotator<RotatedXs>({
+    keyPrefix: XS_ROTATION_KEY_PREFIX,
+    graceSeconds: config.session.refreshRotation.graceSeconds,
+  });
+
   // Native mobile cookies follow the existing mobile-exchange convention
   // (sameSite none + secure); everything else matches the login-workspace cookies.
   // Path-scoped so the refresh token never travels on ordinary API calls.
@@ -237,24 +260,103 @@ export class AuthSessionService {
   }
 
   /**
-   * Refresh: resolve the presented `xs` cookie to its active, unexpired auth session and
-   * the org member who owns it. Null when the cookie is missing, unknown, revoked, expired,
-   * or the member has left the org — the caller answers 401 and the client re-logs in.
+   * Refresh: resolve the presented `xs` cookie to its active, unexpired auth session, replace
+   * the token (single use) and set the replacement cookie on the response. The session comes
+   * back with the org member who owns it; `invalid` when the cookie is missing, unknown,
+   * revoked, expired, the member has left the org, or the token is a spent one presented
+   * again after the grace window (that session is revoked, so both holders are signed out).
+   *
+   * Rotation needs Redis to settle concurrent refreshes; when it is unavailable the refresh
+   * fails open and only mints the JWT, like the pre-rotation behaviour. Same when
+   * AUTH_REFRESH_ROTATION_ENABLED is off.
    */
-  async validateRefresh(req: Request): Promise<RefreshableAuthSession | null> {
+  async consumeRefresh(req: Request, res: Response): Promise<RefreshConsumption> {
     const presented = getPresentedRefreshToken(req);
-    if (!presented) return null;
+    if (!presented) return { status: 'invalid' };
+    const presentedHash = hashToken(presented);
 
-    const session = await db.authSession.findFirst({
-      where: {
-        refreshToken: hashToken(presented),
-        status: AuthSessionStatus.ACTIVE,
-        refreshTokenExpiry: { gt: new Date() },
-      },
-      select: { id: true, orgMemberId: true, orgId: true, deviceKey: true, platform: true, refreshTokenExpiry: true },
+    if (!config.session.refreshRotation.enabled) return this.refreshWithoutRotation(presentedHash);
+
+    let rotation: RotationResult<RotatedXs>;
+    try {
+      rotation = await this.xsRotator.rotate(presentedHash, {
+        lookup: () => this.findActiveByTokenHash(presentedHash),
+        commit: async active => {
+          const next = mintToken();
+          const rotated = await this.rotateTokenHash(active.id, presentedHash, next.tokenHash);
+          return rotated ? { sessionId: active.id, token: next.token } : null;
+        },
+      });
+    } catch (error) {
+      logger.error('[AUTH-SESSION] xs rotation unavailable; refreshing without rotating', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.refreshWithoutRotation(presentedHash);
+    }
+
+    switch (rotation.status) {
+      case 'rotated':
+      case 'replayed': {
+        const session = await this.findRefreshableById(rotation.value.sessionId);
+        if (!session) return { status: 'invalid' };
+        this.setAuthSessionCookie(req, res, rotation.value.token, session.refreshTokenExpiry);
+        if (rotation.status === 'rotated') {
+          logger.info('[AUTH-SESSION] Rotated xs on refresh', { authSessionId: session.id, deviceKey: session.deviceKey });
+        }
+        return { status: 'ok', session };
+      }
+      case 'reused': {
+        logger.warn('[AUTH-SESSION] Spent xs presented again after the grace window; revoking its session', {
+          authSessionId: rotation.sessionId,
+          platform: resolveDevicePlatform(req),
+        });
+        await this.revokeById(rotation.sessionId, AuthSessionRevokeReason.REFRESH_TOKEN_REUSED);
+        res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
+        return { status: 'invalid' };
+      }
+      case 'invalid':
+        return { status: 'invalid' };
+      case 'busy':
+        return { status: 'busy' };
+    }
+  }
+
+  /** Pre-rotation refresh: the presented `xs` stays valid and no cookie is set. */
+  private async refreshWithoutRotation(presentedHash: string): Promise<RefreshConsumption> {
+    const active = await this.findActiveByTokenHash(presentedHash);
+    const session = active && (await this.withOrgMember(active));
+    return session ? { status: 'ok', session } : { status: 'invalid' };
+  }
+
+  private static readonly refreshableSelect = {
+    id: true,
+    orgMemberId: true,
+    orgId: true,
+    deviceKey: true,
+    platform: true,
+    refreshTokenExpiry: true,
+  } as const;
+
+  /** ACTIVE, unexpired session holding this token hash, or null. */
+  private findActiveByTokenHash(tokenHash: string) {
+    return db.authSession.findFirst({
+      where: { refreshToken: tokenHash, status: AuthSessionStatus.ACTIVE, refreshTokenExpiry: { gt: new Date() } },
+      select: AuthSessionService.refreshableSelect,
     });
-    if (!session) return null;
+  }
 
+  /** ACTIVE, unexpired session by id with its org member, or null (also when the member left). */
+  private async findRefreshableById(id: string): Promise<RefreshableAuthSession | null> {
+    const active = await db.authSession.findFirst({
+      where: { id, status: AuthSessionStatus.ACTIVE, refreshTokenExpiry: { gt: new Date() } },
+      select: AuthSessionService.refreshableSelect,
+    });
+    return active && this.withOrgMember(active);
+  }
+
+  private async withOrgMember(
+    session: Omit<RefreshableAuthSession, 'orgMember'>,
+  ): Promise<RefreshableAuthSession | null> {
     const orgMember = await db.orgMember.findUnique({
       where: { memberId: session.orgMemberId },
       select: { memberId: true, email: true, role: true, leftAt: true },
@@ -266,7 +368,6 @@ export class AuthSessionService {
       });
       return null;
     }
-
     return { ...session, orgMember };
   }
 

@@ -29,6 +29,7 @@
 import crypto from 'crypto';
 import { Platform, UserStatus } from '@xyne/shared';
 import { redisService } from './redisService';
+import { RefreshTokenRotator } from './refreshTokenRotation';
 import { authSessionService, AuthSessionRevokeReason, AuthSessionStatus } from './authSessionService';
 import { mintAccessToken } from './accessTokenService';
 import { userActivityTrackingService } from './userActivityTrackingService';
@@ -61,22 +62,14 @@ const USER_CODE_KEY_PREFIX = 'sdk:sso:usercode:';
 const USER_CODE_ALPHABET = 'BCDFGHJKMNPQRSTVWXZ';
 const USER_CODE_LENGTH = 8;
 
-/** Prefix for a rotated refresh token's grace record (see `refresh`). */
-const ROTATED_KEY_PREFIX = 'sdk:sso:rotated:';
-
-/** Prefix for a spent refresh token, kept to detect reuse (see `refresh`). */
-const SPENT_KEY_PREFIX = 'sdk:sso:spent:';
-
 /**
- * How long a refresh token that has just been rotated still answers, with the
- * pair it was rotated to. Covers two local processes sharing one sign-in that
- * refresh at the same moment.
+ * Refresh tokens are single use (see refreshTokenRotation.ts). The grace window covers two
+ * local processes sharing one sign-in that refresh at the same moment.
  */
-const ROTATION_GRACE_SECONDS = 30;
-
-/** How long a refresh waits for a concurrent one with the same token to finish. */
-const ROTATION_WAIT_MS = 5_000;
-const ROTATION_POLL_MS = 100;
+const refreshTokenRotator = new RefreshTokenRotator<SdkSsoRefreshedSession>({
+  keyPrefix: 'sdk:sso:',
+  graceSeconds: 30,
+});
 
 /** Longest user-agent kept for display on the consent page. */
 const MAX_USER_AGENT_LENGTH = 300;
@@ -198,10 +191,6 @@ function storedRefreshToken(hash: string): string {
 
 function newRefreshToken(): string {
   return crypto.randomBytes(32).toString('base64url');
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function generateUserCode(): string {
@@ -438,134 +427,92 @@ class SdkSsoService {
   /**
    * Trade a refresh token for a new session JWT and a new refresh token.
    *
-   * Rotation, with two guards:
-   * - Reuse detection. A spent token presented again, after the grace window,
-   *   means two parties hold it, so the session is revoked and both must sign
-   *   in again.
-   * - A grace window. For `ROTATION_GRACE_SECONDS` after a rotation the old
-   *   token answers with the pair it was rotated to, so local processes sharing
-   *   one sign-in that refresh at the same moment all land on the same pair.
-   *   Two refreshes racing on the same token are settled by a SET NX on the
-   *   grace key: one rotates, the other waits for its result.
+   * Rotation, grace window and reuse detection are the shared `RefreshTokenRotator`
+   * protocol: a spent token presented again after the grace window means two parties
+   * hold it, so its session is revoked and both must sign in again.
    */
   async refresh(refreshToken: string): Promise<SdkSsoRefreshResult> {
     const hash = hashRefreshToken(refreshToken);
-    const rotatedKey = `${ROTATED_KEY_PREFIX}${hash}`;
 
-    const settled = await this.awaitRotation(rotatedKey);
-    if (settled) return settled;
-
-    const session = await db.authSession.findUnique({
-      where: { refreshToken: storedRefreshToken(hash) },
-      select: { id: true, orgMemberId: true, status: true, refreshTokenExpiry: true },
-    });
-
-    if (!session) {
-      // Checked again: a concurrent rotation may have claimed the token
-      // between the first check and the lookup.
-      const late = await this.awaitRotation(rotatedKey);
-      if (late) return late;
-
-      const spentSessionId = await redisService.get(`${SPENT_KEY_PREFIX}${hash}`);
-      if (spentSessionId) {
-        logger.warn('[SDK-SSO] Spent refresh token reused; revoking its session', {
-          sessionId: spentSessionId,
-        });
-        await authSessionService.revokeById(spentSessionId, AuthSessionRevokeReason.REFRESH_TOKEN_REUSED);
-      }
-      return { status: 'invalid' };
-    }
-
-    // Session live, member still in the org, and the user row the SDK session
-    // was approved for (its workspace) still active.
-    if (session.status !== AuthSessionStatus.ACTIVE || session.refreshTokenExpiry <= new Date()) {
-      return { status: 'invalid' };
-    }
-    const workspaceId = await authSessionService.lastWorkspaceId(session.id);
-    const user = workspaceId
-      ? await db.user.findFirst({
-          where: { orgMemberId: session.orgMemberId, workspaceId },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            picture: true,
-            workspaceId: true,
-            orgMemberId: true,
-            status: true,
-            leftAt: true,
-            orgMember: { select: { leftAt: true } },
+    const rotation = await refreshTokenRotator.rotate(hash, {
+      lookup: () =>
+        db.authSession.findFirst({
+          where: {
+            refreshToken: storedRefreshToken(hash),
+            status: AuthSessionStatus.ACTIVE,
+            refreshTokenExpiry: { gt: new Date() },
           },
-        })
-      : null;
-    if (!user || user.status !== UserStatus.ACTIVE || user.leftAt || !user.orgMember || user.orgMember.leftAt) {
-      return { status: 'invalid' };
-    }
+          select: { id: true, orgMemberId: true, refreshTokenExpiry: true },
+        }),
+      commit: async (session) => {
+        const user = await this.refreshableUser(session);
+        if (!user) return null;
 
-    // Claim the rotation; a concurrent refresh that loses waits for the winner.
-    const claimed = await redisService.set(
-      rotatedKey,
-      JSON.stringify({ pending: true }),
-      ROTATION_GRACE_SECONDS,
-      true,
-    );
-    if (!claimed) return (await this.awaitRotation(rotatedKey)) ?? { status: 'busy' };
+        const nextRefreshToken = newRefreshToken();
+        const rotated = await authSessionService.rotateTokenHash(
+          session.id,
+          storedRefreshToken(hash),
+          storedRefreshToken(hashRefreshToken(nextRefreshToken)),
+        );
+        if (!rotated) return null;
 
-    const nextRefreshToken = newRefreshToken();
-    const rotated = await authSessionService.rotateTokenHash(
-      session.id,
-      storedRefreshToken(hash),
-      storedRefreshToken(hashRefreshToken(nextRefreshToken)),
-    );
-    if (!rotated) {
-      await redisService.del(rotatedKey);
-      return { status: 'invalid' };
-    }
-
-    const minted = mintAccessToken({
-      user,
-      sessionId: session.id,
-      refreshTokenExpiry: session.refreshTokenExpiry,
+        const minted = mintAccessToken({
+          user,
+          sessionId: session.id,
+          refreshTokenExpiry: session.refreshTokenExpiry,
+        });
+        logger.info('[SDK-SSO] Refresh token rotated', { sessionId: session.id, userId: user.id });
+        return {
+          userId: user.id,
+          workspaceId: user.workspaceId,
+          token: minted.token,
+          expiresAt: Date.now() + minted.lifetimeSeconds * 1000,
+          refreshToken: nextRefreshToken,
+          refreshExpiresAt: session.refreshTokenExpiry.getTime(),
+        };
+      },
     });
 
-    const refreshed: SdkSsoRefreshedSession = {
-      userId: user.id,
-      workspaceId: user.workspaceId,
-      token: minted.token,
-      expiresAt: Date.now() + minted.lifetimeSeconds * 1000,
-      refreshToken: nextRefreshToken,
-      refreshExpiresAt: session.refreshTokenExpiry.getTime(),
-    };
-
-    await redisService.set(rotatedKey, JSON.stringify({ session: refreshed }), ROTATION_GRACE_SECONDS);
-    const remainingSeconds = Math.ceil((session.refreshTokenExpiry.getTime() - Date.now()) / 1000);
-    if (remainingSeconds > 0) {
-      await redisService.set(`${SPENT_KEY_PREFIX}${hash}`, session.id, remainingSeconds);
+    switch (rotation.status) {
+      case 'rotated':
+      case 'replayed':
+        return { status: 'refreshed', session: rotation.value };
+      case 'reused':
+        logger.warn('[SDK-SSO] Spent refresh token reused; revoking its session', { sessionId: rotation.sessionId });
+        await authSessionService.revokeById(rotation.sessionId, AuthSessionRevokeReason.REFRESH_TOKEN_REUSED);
+        return { status: 'invalid' };
+      case 'invalid':
+        return { status: 'invalid' };
+      case 'busy':
+        return { status: 'busy' };
     }
-
-    logger.info('[SDK-SSO] Refresh token rotated', { sessionId: session.id, userId: user.id });
-    return { status: 'refreshed', session: refreshed };
   }
 
   /**
-   * The outcome of a rotation of this token that is under way or just happened:
-   * the pair it was rotated to, `busy` if it does not finish in time, or null
-   * if there is none.
+   * The user row an SDK session was approved for (its last workspace), when the member is
+   * still in the org and the user is still active there; null otherwise.
    */
-  private async awaitRotation(rotatedKey: string): Promise<SdkSsoRefreshResult | null> {
-    const deadline = Date.now() + ROTATION_WAIT_MS;
-    for (;;) {
-      const raw = await redisService.get(rotatedKey);
-      if (!raw) return null;
-      try {
-        const record = JSON.parse(raw) as { pending?: boolean; session?: SdkSsoRefreshedSession };
-        if (record.session) return { status: 'refreshed', session: record.session };
-      } catch {
-        return null;
-      }
-      if (Date.now() >= deadline) return { status: 'busy' };
-      await sleep(ROTATION_POLL_MS);
+  private async refreshableUser(session: { id: string; orgMemberId: string }) {
+    const workspaceId = await authSessionService.lastWorkspaceId(session.id);
+    if (!workspaceId) return null;
+    const user = await db.user.findFirst({
+      where: { orgMemberId: session.orgMemberId, workspaceId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        picture: true,
+        workspaceId: true,
+        orgMemberId: true,
+        status: true,
+        leftAt: true,
+        orgMember: { select: { leftAt: true } },
+      },
+    });
+    if (!user || user.status !== UserStatus.ACTIVE || user.leftAt || !user.orgMember || user.orgMember.leftAt) {
+      return null;
     }
+    return user;
   }
 
   /**
@@ -578,10 +525,10 @@ class SdkSsoService {
       where: { refreshToken: storedRefreshToken(hash) },
       select: { id: true },
     });
-    const sessionId = session?.id ?? (await redisService.get(`${SPENT_KEY_PREFIX}${hash}`));
+    const sessionId = session?.id ?? (await refreshTokenRotator.spentSessionId(hash));
     if (!sessionId) return;
     await authSessionService.revokeById(sessionId, AuthSessionRevokeReason.LOGOUT);
-    await redisService.del(`${ROTATED_KEY_PREFIX}${hash}`);
+    await refreshTokenRotator.forget(hash);
   }
 }
 

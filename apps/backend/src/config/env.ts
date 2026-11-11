@@ -71,6 +71,11 @@ const envSchema = Joi.object({
   JWT_EXPIRATION_SECONDS: Joi.number().default(900), // 15 minutes; clients renew via /auth/refresh-session
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
+  // Refresh-token rotation on /auth/refresh-session: every refresh replaces the xs cookie. Off = the
+  // pre-rotation behaviour (same xs for the whole session); flip to false to disable without a deploy.
+  AUTH_REFRESH_ROTATION_ENABLED: Joi.boolean().default(true),
+  // How long a just-replaced xs still answers with its replacement (tabs refreshing at the same moment).
+  AUTH_REFRESH_ROTATION_GRACE_SECONDS: Joi.number().integer().min(1).default(60),
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3', 'azure').default('gcs'),
   // AWS S3 Configuration
@@ -1253,6 +1258,10 @@ export const config = {
   },
   session: {
     expiryDays: envVars.SESSION_EXPIRY_DAYS,
+    refreshRotation: {
+      enabled: envVars.AUTH_REFRESH_ROTATION_ENABLED as boolean,
+      graceSeconds: envVars.AUTH_REFRESH_ROTATION_GRACE_SECONDS as number,
+    },
   },
   pendingOAuthTokens: {
     redisKeyPrefix: 'pendingauth:oauth:',
