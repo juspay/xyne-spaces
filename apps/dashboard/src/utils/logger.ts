@@ -7,6 +7,7 @@ import {
   MAX_RETRIES,
   isLocalhost,
   ENABLE_REMOTE_LOGGING,
+  isExternalApp,
 } from '../config';
 import axios from 'axios';
 import {
@@ -622,8 +623,20 @@ setReactNativeBridgeLogger(logger);
 // backend → one shared /auth/refresh-session call → the request is sent again once. The
 // backend never refreshes on its own, so without this every bare-axios / fetch call would
 // fail after the JWT cookie expired. (apiInstance has the same logic in its own
-// interceptor.) A refresh that fails leaves the 401 to the caller; nothing here logs out.
+// interceptor.) A refresh that itself gets a 401 means the session is dead: the user is
+// sent to /auth the same way apiInstance's interceptor does it.
 const DEVICE_KEY_HEADER = 'x-device-id';
+
+let redirectingToAuth = false;
+async function redirectToAuthOnDeadSession(): Promise<void> {
+  // External guests have no session to lose.
+  if (isExternalApp || redirectingToAuth) return;
+  redirectingToAuth = true;
+  // dynamic import: apiClient statically imports this module
+  const { clearAuthTokens } = await import('../services/clients/apiClient');
+  clearAuthTokens();
+  window.location.replace('/auth');
+}
 
 axios.interceptors.request.use(config => {
   const deviceKey = logger.clientSessionId;
@@ -642,7 +655,9 @@ axios.interceptors.response.use(
     }
     const config = error.config as (typeof error.config & RetryableRequestConfig) | undefined;
     if (!claimAxiosRetry(error.response?.status, config) || !config) return Promise.reject(error);
-    if ((await refreshSessionOnce()) !== 'ok') return Promise.reject(error);
+    const outcome = await refreshSessionOnce();
+    if (outcome === 'dead') void redirectToAuthOnDeadSession();
+    if (outcome !== 'ok') return Promise.reject(error);
     return axios(config);
   },
 );
@@ -665,7 +680,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   if (response.status !== 401 || isRefreshSessionUrl(url) || init?.body instanceof ReadableStream) {
     return response;
   }
-  if ((await refreshSessionOnce()) !== 'ok') return response;
+  const outcome = await refreshSessionOnce();
+  if (outcome === 'dead') void redirectToAuthOnDeadSession();
+  if (outcome !== 'ok') return response;
   return nativeFetch(retryInput, { ...init, headers });
 };
 
