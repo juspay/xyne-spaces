@@ -188,6 +188,8 @@ import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
+import { callEncryptionService } from '@/services/callEncryptionService';
+import type { CallEncryptionState } from '@/database/repositories/callRepository';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -5017,6 +5019,8 @@ export function createMutators(
         }),
         async ({ tx, args: { channelId, callType, targetUserIds, externalId, roomLink, timestamp, callId, creatorParticipantId, targetParticipantIds = {} } }) => {
           const now = timestamp;
+          // Written ACTIVE straight away, so the key version is pinned here too.
+          const e2ee = callEncryptionService.stateAtActivation(callEncryptionService.stateForNewCall({ callType }));
 
           // Create system message for the call (will be shown as overlay while active)
           const { messageId: systemMessageId, conversationId } = await sendCallSystemMessage(tx, {
@@ -5050,6 +5054,7 @@ export function createMutators(
             metadata: {
               systemMessageId,
               conversationId,
+              ...(e2ee && { e2ee }),
             },
           });
 
@@ -5144,7 +5149,9 @@ export function createMutators(
 
           // If call is SCHEDULED, create system message and mark as ACTIVE
           if (call.status === CallStatus.SCHEDULED) {
-            const callMetadata = call.metadata as { systemMessageId?: string; conversationId?: string } | null;
+            const callMetadata = call.metadata as { systemMessageId?: string; conversationId?: string; e2ee?: CallEncryptionState } | null;
+            // Activation pins the key version; a rejoin keeps the one its first session used.
+            const e2ee = callEncryptionService.stateAtActivation(callMetadata?.e2ee);
 
             // Only create system message if conversationId doesn't exist
             if (!callMetadata?.conversationId) {
@@ -5160,9 +5167,12 @@ export function createMutators(
                 startedAt: now,
                 lastActivityAt: now,
                 updatedAt: now,
+                // Merge, so encryption state and calendar fields survive activation.
                 metadata: {
+                  ...((call.metadata as Record<string, unknown> | null) ?? {}),
                   systemMessageId: result.messageId,
                   conversationId: result.conversationId,
+                  ...(e2ee && { e2ee }),
                 },
               });
             } else {
@@ -5177,6 +5187,9 @@ export function createMutators(
                 startedAt: call.endedAt ? call.startedAt : now,
                 lastActivityAt: now,
                 updatedAt: now,
+                ...(e2ee && e2ee !== callMetadata?.e2ee && {
+                  metadata: { ...((call.metadata as Record<string, unknown> | null) ?? {}), e2ee },
+                }),
               });
             }
           }
