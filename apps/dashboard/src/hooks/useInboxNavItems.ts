@@ -1,8 +1,4 @@
-import {
-  createElement,
-  useMemo,
-  type ReactElement,
-} from 'react';
+import { createElement, useMemo, type ReactElement } from 'react';
 import type { PikaIconProps } from '@xyne/icons';
 import {
   CHAT_NAV_ITEMS,
@@ -10,12 +6,7 @@ import {
   type PikaIcon,
 } from '../components/AppSidebar/navigationConfig';
 import { AppIcon } from '../components/AppIcon/AppIcon';
-import {
-  inboxItemsStore,
-  useAppSnapshots,
-  appIdOf,
-  appItemId,
-} from './barItems';
+import { inboxItemsStore, useAppSnapshots, appIdOf, appItemId } from './barItems';
 import { useDisabledToolbarPaths } from './useDisabledToolbarPaths';
 
 /** Where an Inbox app entry opens: the chat panel, directory still alongside. */
@@ -65,10 +56,5 @@ export const useInboxNavItems = (radarEnabled: boolean): ChatNavItem[] => {
       items.push(item);
     }
     return items;
-  }, [
-    ids,
-    snapshots,
-    radarEnabled,
-    disabledToolbarPaths,
-  ]);
+  }, [ids, snapshots, radarEnabled, disabledToolbarPaths]);
 };

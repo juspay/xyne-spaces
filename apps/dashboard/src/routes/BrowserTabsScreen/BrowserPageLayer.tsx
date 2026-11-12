@@ -259,7 +259,6 @@ export function BrowserPageLayer(): ReactElement | null {
             shown={tab.id === shownId}
             audible={!tab.muted}
             plain={false}
-            plain
             register={view => browserPages.setView(tab.id, view)}
             onLive={change => {
               browserPages.setLive(tab.id, change);

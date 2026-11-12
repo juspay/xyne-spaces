@@ -106,15 +106,6 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
   // Shares the Knowledge lookup's query key, so this resolves from cache, not a refetch.
   const { data: draftAgent } = useClawAgentDetail(autoDraftAgentSlug ?? undefined);
   const { data: deskReportAgent } = useClawAgentDetail(deskReportAgentSlug ?? undefined);
-  const { data: knowledgeAgent, isError: isKnowledgeAgentError } = useClawAgentDetail(
-    (false as boolean) ? knowledgeAgentSlug : undefined,
-  );
-  const { data: draftAgent } = useClawAgentDetail(
-    (false as boolean) ? (autoDraftAgentSlug ?? undefined) : undefined,
-  );
-  const { data: deskReportAgent } = useClawAgentDetail(
-    (false as boolean) ? (deskReportAgentSlug ?? undefined) : undefined,
-  );
   const draftAgents = withSelectedAgent(clawAgents, draftAgent);
   const reportAgents = withSelectedAgent(clawAgents, deskReportAgent);
 

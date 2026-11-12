@@ -383,47 +383,47 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     const conversationId = conversation?.conversationId || message.conversationId;
     if (!conversationId) return;
 
-  //   // Extract plain text from message content
-  //   let previewText = '';
-  //   const content = message.content;
+    // Extract plain text from message content
+    let previewText = '';
+    const content = message.content;
 
-  //   if (content && typeof content === 'string') {
-  //     const parser = new DOMParser();
-  //     const doc = parser.parseFromString(content, 'text/html');
-  //     const textContent = doc.body.textContent || '';
-  //     previewText = textContent.trim().substring(0, 100);
-  //   }
+    if (content && typeof content === 'string') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content, 'text/html');
+      const textContent = doc.body.textContent || '';
+      previewText = textContent.trim().substring(0, 100);
+    }
 
-  //   // Get attachment IDs from the message (if any)
-  //   const attachmentIds = message.attachments?.map((att: { id: string }) => att.id) || [];
+    // Get attachment IDs from the message (if any)
+    const attachmentIds = message.attachments?.map((att: { id: string }) => att.id) || [];
 
-  //   // If no text content but has attachments, show "Attachment"
-  //   if (!previewText && attachmentIds.length > 0) {
-  //     previewText =
-  //       attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
-  //   }
+    // If no text content but has attachments, show "Attachment"
+    if (!previewText && attachmentIds.length > 0) {
+      previewText =
+        attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
+    }
 
-  //   const threadInfo: ThreadInfo = {
-  //     conversationId,
-  //     channelId,
-  //     senderName: sender?.name || 'Unknown',
-  //     previewText,
-  //     ...(message.senderId && { senderId: message.senderId }),
-  //     ...(message.messageId && { messageId: message.messageId }),
-  //     isThreadMessage: context === 'thread',
-  //     ...(attachmentIds.length > 0 && { attachmentIds }),
-  //   };
+    const threadInfo: ThreadInfo = {
+      conversationId,
+      channelId,
+      senderName: sender?.name || 'Unknown',
+      previewText,
+      ...(message.senderId && { senderId: message.senderId }),
+      ...(message.messageId && { messageId: message.messageId }),
+      isThreadMessage: context === 'thread',
+      ...(attachmentIds.length > 0 && { attachmentIds }),
+    };
 
-  //   // Open XyneAI with thread context but always start a fresh chat
-  //   // This shows the thread header but doesn't load old conversation
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'message_bubble',
-  //     channelId,
-  //     threadInfo,
-  //     startFreshChat: true,
-  //   });
-  // };
+    // Open XyneAI with thread context but always start a fresh chat
+    // This shows the thread header but doesn't load old conversation
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'message_bubble',
+      channelId,
+      threadInfo,
+      startFreshChat: true,
+    });
+  };
 
   const handleEditInCanvas = (): void => {
     try {

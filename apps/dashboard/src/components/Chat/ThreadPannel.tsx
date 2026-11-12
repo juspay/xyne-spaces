@@ -120,10 +120,8 @@ import type {
 import { getDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
-import type { ThreadInfo } from '../../machines/xyneAIMachine';
 import { setThreadLastRead } from '../../machines/stateMachine';
 import { useSelf, useUser } from '../../hooks/useUsers';
-import { useSelf } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
@@ -529,7 +527,7 @@ export const ThreadMessages = ({
     for (const m of messages) map.set(m.messageId, m);
     return map;
   }, [messages]);
-  
+
   const resolveTwinSource = useCallback(
     (draft: TwinReplyDraftView): TwinSourceInfo => {
       const srcId = draft.sourceMessageId;
@@ -569,7 +567,7 @@ export const ThreadMessages = ({
     },
     [messagesById, derivedConversationId],
   );
-  
+
   const renderTwinDock = (attached: boolean) =>
     assist.available ? (
       <ThreadAssistDock
@@ -790,25 +788,25 @@ export const ThreadMessages = ({
   const threadInfo: ThreadInfo | null = useMemo(() => {
     if (!derivedConversationId || !initialMessage) return null;
 
-  //   const senderName: string = String(initialMessageSender?.name || 'Unknown');
-  //   const contentStr: string =
-  //     typeof initialMessage.content === 'string' ? initialMessage.content : '';
-  //   // Message content is stored as HTML — slicing it raw leaks tags (and can cut
-  //   // mid-tag) into the Ask AI context pill label.
-  //   const previewText: string = htmlToPlainText(contentStr).slice(0, 100);
+    const senderName: string = String(initialMessageSender?.name || 'Unknown');
+    const contentStr: string =
+      typeof initialMessage.content === 'string' ? initialMessage.content : '';
+    // Message content is stored as HTML — slicing it raw leaks tags (and can cut
+    // mid-tag) into the Ask AI context pill label.
+    const previewText: string = htmlToPlainText(contentStr).slice(0, 100);
 
-  //   return {
-  //     conversationId: derivedConversationId,
-  //     ...(derivedChannelId && { channelId: derivedChannelId }),
-  //     senderName,
-  //     previewText,
-  //     ...(initialMessage.senderId && { senderId: initialMessage.senderId }),
-  //     ...(initialMessage.messageId && { messageId: initialMessage.messageId }),
-  //     // Opened from the thread panel header — the context is the thread itself,
-  //     // so the pill should navigate back into it.
-  //     isThreadMessage: true,
-  //   };
-  // }, [derivedConversationId, derivedChannelId, initialMessage, initialMessageSender]);
+    return {
+      conversationId: derivedConversationId,
+      ...(derivedChannelId && { channelId: derivedChannelId }),
+      senderName,
+      previewText,
+      ...(initialMessage.senderId && { senderId: initialMessage.senderId }),
+      ...(initialMessage.messageId && { messageId: initialMessage.messageId }),
+      // Opened from the thread panel header — the context is the thread itself,
+      // so the pill should navigate back into it.
+      isThreadMessage: true,
+    };
+  }, [derivedConversationId, derivedChannelId, initialMessage, initialMessageSender]);
 
   // Check if any message has a ticketId in metadata
   const hasTicketInMessages = useMemo(() => {
@@ -1282,10 +1280,9 @@ export const ThreadMessages = ({
                   twinEdit={twinEditSession}
                 />
               </div>
+            ) : previewCardMode && assist.hasReply ? (
+              <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
             ) : (
-              previewCardMode && assist.hasReply ? (
-                <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
-              ) : (
               <JoinChannel
                 channelId={derivedChannelId}
                 {...(channel?.name && { channelTitle: channel.name })}
@@ -1945,10 +1942,9 @@ export const ThreadMessages = ({
                         twinEdit={twinEditSession}
                       />
                     </div>
+                  ) : previewCardMode && assist.hasReply ? (
+                    <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                   ) : (
-                    previewCardMode && assist.hasReply ? (
-                      <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
-                    ) : (
                     <JoinChannel
                       channelId={derivedChannelId}
                       {...(channel?.name && { channelTitle: channel.name })}
@@ -2145,10 +2141,9 @@ export const ThreadMessages = ({
                       twinEdit={twinEditSession}
                     />
                   </div>
+                ) : previewCardMode && assist.hasReply ? (
+                  <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
                 ) : (
-                  previewCardMode && assist.hasReply ? (
-                    <div className='px-4 pb-4 bg-background'>{twinDockCard}</div>
-                  ) : (
                   <JoinChannel
                     channelId={derivedChannelId}
                     {...(channel?.name && { channelTitle: channel.name })}

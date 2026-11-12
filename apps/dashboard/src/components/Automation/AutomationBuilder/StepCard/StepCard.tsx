@@ -202,8 +202,7 @@ export function StepCard({
                   variableSources={variableSources}
                   readOnly={readOnly}
                 />
-              ) :
-              step.type === 'RUN_AGENT' ? (
+              ) : step.type === 'RUN_AGENT' ? (
                 <RunAgentStepForm
                   value={step.config}
                   onChange={onConfigChange}
@@ -212,8 +211,7 @@ export function StepCard({
                   variableSources={variableSources}
                   readOnly={readOnly}
                 />
-              ) :
-              step.type === 'SEND_MESSAGE' ? (
+              ) : step.type === 'SEND_MESSAGE' ? (
                 <SendMessageStepForm
                   stepId={step.id}
                   value={step.config}

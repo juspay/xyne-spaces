@@ -17,10 +17,7 @@ import { Plus } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import { SortableBarRow } from './SortableBarRow';
-import {
-  AppPickerDialog,
-  type BarBuiltIn,
-} from '../../BarCustomize';
+import { AppPickerDialog, type BarBuiltIn } from '../../BarCustomize';
 import type { AppPublishOptions } from '../../BarCustomize/useChannelAppPublishing';
 import {
   type BarItemsStore,

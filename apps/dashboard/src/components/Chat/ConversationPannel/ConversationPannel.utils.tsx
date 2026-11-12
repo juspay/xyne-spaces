@@ -164,14 +164,7 @@ export const useConversationTabs = (channelId: string, channel?: ChannelTabsSour
     }
     // `messages` is locked in every channel store, so it is always among `ids`.
     return tabs;
-  }, [
-    customizable,
-    builtInTabs,
-    ids,
-    snapshots,
-    ticketsAllowed,
-    publishedIds,
-  ]);
+  }, [customizable, builtInTabs, ids, snapshots, ticketsAllowed, publishedIds]);
 
   return useMemo(
     () => ({
