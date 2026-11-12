@@ -52,7 +52,7 @@ export const AuthSessionRevokeReason = {
   PASSWORD_RESET: 'password_reset',
   ACCOUNT_DEACTIVATED: 'account_deactivated',
   TEST_CLEANUP: 'test_cleanup',
-  /** SDK SSO: a rotated refresh token was presented again after its grace window. */
+  /** A rotated refresh token was presented again after its grace window. */
   REFRESH_TOKEN_REUSED: 'refresh_token_reused',
   /** Refresh denied: the member is no longer an active user of the workspace being refreshed. */
   WORKSPACE_ACCESS_LOST: 'workspace_access_lost',
@@ -318,7 +318,7 @@ export class AuthSessionService {
           platform: resolveDevicePlatform(req),
         });
         await this.revokeById(rotation.sessionId, AuthSessionRevokeReason.REFRESH_TOKEN_REUSED);
-        res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
+        this.clearAuthSessionCookie(req, res);
         return { status: 'invalid' };
       }
       case 'invalid':
