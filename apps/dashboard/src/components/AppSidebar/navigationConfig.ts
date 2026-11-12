@@ -19,6 +19,7 @@ import {
   QuestionMarkCircle,
   BuildingApartmentTwo,
   LightningThunderElectricOn,
+  GitBranch,
   LayoutGridTwoVertical,
   type PikaIconProps,
   // Disabled (LLM)
@@ -289,6 +290,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     label: 'Automations',
     description: 'Automation rules, runs and approvals',
     icon: LightningThunderElectricOn,
+    popout: true,
+  },
+  {
+    path: '/workflows',
+    label: 'Workflows',
+    description: 'Workflows, their runs and variables',
+    icon: GitBranch,
     popout: true,
   },
   // Administration (the /organisations module) holds Workspace Management,

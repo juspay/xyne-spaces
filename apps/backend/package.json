@@ -88,11 +88,13 @@
     "@types/node-rsa": "^1.1.4",
     "@types/unzipper": "^0.10.11",
     "@types/yauzl": "^2.10.3",
+    "@xyne/connector-sdk": "0.1.4",
     "@xyne/cache": "workspace:*",
     "@xyne/secrets-vault": "workspace:*",
     "@xyne/shared": "workspace:*",
     "@xyne/storage": "workspace:*",
     "@xyne/vespa-ts": "1.6.0",
+    "@xyne/workflow-sdk": "3.2.62",
     "@y-sweet/sdk": "^0.9.1",
     "archiver": "^7.0.1",
     "axios": "1.18.1",
@@ -166,6 +168,7 @@
     "yauzl": "^3.2.1",
     "yjs": "^13.6.27",
     "zod": "^4.3.6",
+    "zod-v3": "npm:zod@3.25.76",
     "tsx": "^4.20.6"
   },
   "devDependencies": {

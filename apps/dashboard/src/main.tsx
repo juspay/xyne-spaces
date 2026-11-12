@@ -1,6 +1,8 @@
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './global.css';
+import '@xyne/workflow-ui/styles.css';
+import './styles/workflow-ui-theme.css';
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReporting } from './bootstrap/errorReporting';
 import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';
