@@ -41,7 +41,8 @@ import SecretsScreen from './SecretsScreen/SecretsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
-import { SdlcWindowHost } from './SdlcScreen/SdlcWindow';
+import SdlcScreen from './SdlcScreen/SdlcScreen';
+import SdlcWindow, { SdlcWindowHost } from './SdlcScreen/SdlcWindow';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -59,7 +60,6 @@ import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostR
 import AppSidebar from '../components/AppSidebar/AppSidebar';
 import { SiteMap } from '../components/AppSidebar/SiteMap';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
-import { ReactElement, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
@@ -271,43 +271,43 @@ function CallRouteHandler(): ReactElement | null {
 
 /** Auto-triggers AI onboarding after the existing 6-step onboarding completes, or resumes on refresh */
 const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null => {
-const { startOnboarding } = useAIOnboarding();
+  const { startOnboarding } = useAIOnboarding();
 
-// useEffect(() => {
-// if (isOnboarding) return;
-// if (isAIOnboardingCompleted()) {
-// // Clean up stale active flag if onboarding was already completed
-// if (isAIOnboardingActive()) {
-// localStorage.removeItem('xyne-ai-onboarding-active');
-// }
-// return;
-// }
+  useEffect(() => {
+    if (isOnboarding) return;
+    if (isAIOnboardingCompleted()) {
+      // Clean up stale active flag if onboarding was already completed
+      if (isAIOnboardingActive()) {
+        localStorage.removeItem('xyne-ai-onboarding-active');
+      }
+      return;
+    }
 
-// // First-time trigger: pending flag set by OnboardingScreen on completion
-// if (isAIOnboardingPending()) {
-// clearAIOnboardingPending();
-// startOnboarding('auto', true);
-// return;
-// }
+    // First-time trigger: pending flag set by OnboardingScreen on completion
+    if (isAIOnboardingPending()) {
+      clearAIOnboardingPending();
+      startOnboarding('auto', true);
+      return;
+    }
 
-// // Resume after refresh: load existing conversation, don't start fresh
-// if (isAIOnboardingActive()) {
-// startOnboarding('auto', false);
-// }
-// }, [isOnboarding, startOnboarding]);
+    // Resume after refresh: load existing conversation, don't start fresh
+    if (isAIOnboardingActive()) {
+      startOnboarding('auto', false);
+    }
+  }, [isOnboarding, startOnboarding]);
 
-// return null;
-// };
+  return null;
+};
 
-// /** Elevate Ask AI panel only during AI onboarding so it stacks above the overlay; otherwise leave z-index default (e.g. for @/# mention popovers). */
-// const XyneAISidebarZIndexShell = ({ children }: { children: ReactNode }): ReactElement => {
-// const { state: aiOnboarding } = useAIOnboarding();
-// return (
-// <div className={aiOnboarding.isActive ? 'h-full relative z-[56]' : 'h-full relative'}>
-// {children}
-// </div>
-// );
-// };
+/** Elevate Ask AI panel only during AI onboarding so it stacks above the overlay; otherwise leave z-index default (e.g. for @/# mention popovers). */
+const XyneAISidebarZIndexShell = ({ children }: { children: ReactNode }): ReactElement => {
+  const { state: aiOnboarding } = useAIOnboarding();
+  return (
+    <div className={aiOnboarding.isActive ? 'h-full relative z-[56]' : 'h-full relative'}>
+      {children}
+    </div>
+  );
+};
 
 const XYNE_AI_PANEL_MIN_SIZE = 42;
 const XYNE_AI_PANEL_DEFAULT_SIZE = 35;
@@ -348,7 +348,7 @@ const AppRoot = (): ReactElement => {
   const [pendingRecordingFilePath, setPendingRecordingFilePath] = useState<string | null>(null);
   const [isXyneDebuggerOpen, setIsXyneDebuggerOpen] = useState(false);
   const [hasXyneAIStreaming, setHasXyneAIStreaming] = useState(() =>
-  xyneAIStreamManager.hasStreamingSidebarStreams(),
+    xyneAIStreamManager.hasStreamingSidebarStreams(),
   );
 
   const { startRecording } = useScreenRecorder((file: File, filePath: string) => {
@@ -404,11 +404,11 @@ const AppRoot = (): ReactElement => {
   );
 
   useEffect(() => {
-  const syncStreaming = (): void => {
-  setHasXyneAIStreaming(xyneAIStreamManager.hasStreamingSidebarStreams());
-  };
-  syncStreaming();
-  return xyneAIStreamManager.subscribe(syncStreaming);
+    const syncStreaming = (): void => {
+      setHasXyneAIStreaming(xyneAIStreamManager.hasStreamingSidebarStreams());
+    };
+    syncStreaming();
+    return xyneAIStreamManager.subscribe(syncStreaming);
   }, []);
 
   // "View" on a background Ask AI completion toast. The stream manager lives
@@ -474,8 +474,8 @@ const AppRoot = (): ReactElement => {
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
   const xyneAIInitialContextSelections = useSelector(
-  xyneAIActor,
-  state => state.context.initialContextSelections,
+    xyneAIActor,
+    state => state.context.initialContextSelections,
   );
   const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
   const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
@@ -489,8 +489,8 @@ const AppRoot = (): ReactElement => {
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
   const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
   const xyneAIAutoSendWebSearch = useSelector(
-  xyneAIActor,
-  state => state.context.autoSendWebSearch,
+    xyneAIActor,
+    state => state.context.autoSendWebSearch,
   );
   const isCalendarOpen = useSelector(xyneCalendarActor, state => state.matches('open'));
   const { isMobile } = usePlatform();
@@ -573,38 +573,38 @@ const AppRoot = (): ReactElement => {
 
   const renderPanels: SidebarPanelDescriptor[] = [
     {
-    id: 'xyneai',
-    isActive: showXyneAIPanel,
-    size: {
-    default: XYNE_AI_PANEL_DEFAULT_SIZE,
-    min: isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25,
-    max: isXyneDebuggerOpen ? 55 : 50,
-    },
-    panelRef: xyneAIRightPanelRef,
-    content: (
-    <XyneAISidebarZIndexShell>
-    <XyneAISidebar
-    channelId={xyneAIChannelId}
-    threadInfo={xyneAIThreadInfo}
-    startFreshChat={xyneAIStartFreshChat}
-    canvasInfo={xyneAICanvasInfo}
-    initialContextSelections={xyneAIInitialContextSelections}
-    contextOpenNonce={xyneAIContextOpenNonce}
-    kbCollectionId={xyneAIKbCollectionId ?? ''}
-    kbChannelId={xyneAIKbChannelId ?? ''}
-    kbDocId={xyneAIKbDocId ?? ''}
-    kbDocName={xyneAIKbDocName ?? ''}
-    kbFolderId={xyneAIKbFolderId ?? ''}
-    kbFolderName={xyneAIKbFolderName ?? ''}
-    kbOpenNonce={xyneAIKbOpenNonce}
-    researchContext={xyneAIResearchContext}
-    initialQuery={xyneAIInitialQuery ?? undefined}
-    autoSendNonce={xyneAIAutoSendNonce}
-    autoSendWebSearch={xyneAIAutoSendWebSearch}
-    onDebuggerOpenChange={setIsXyneDebuggerOpen}
-    />
-    </XyneAISidebarZIndexShell>
-    ),
+      id: 'xyneai',
+      isActive: showXyneAIPanel,
+      size: {
+        default: XYNE_AI_PANEL_DEFAULT_SIZE,
+        min: isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25,
+        max: isXyneDebuggerOpen ? 55 : 50,
+      },
+      panelRef: xyneAIRightPanelRef,
+      content: (
+        <XyneAISidebarZIndexShell>
+          <XyneAISidebar
+            channelId={xyneAIChannelId}
+            threadInfo={xyneAIThreadInfo}
+            startFreshChat={xyneAIStartFreshChat}
+            canvasInfo={xyneAICanvasInfo}
+            initialContextSelections={xyneAIInitialContextSelections}
+            contextOpenNonce={xyneAIContextOpenNonce}
+            kbCollectionId={xyneAIKbCollectionId ?? ''}
+            kbChannelId={xyneAIKbChannelId ?? ''}
+            kbDocId={xyneAIKbDocId ?? ''}
+            kbDocName={xyneAIKbDocName ?? ''}
+            kbFolderId={xyneAIKbFolderId ?? ''}
+            kbFolderName={xyneAIKbFolderName ?? ''}
+            kbOpenNonce={xyneAIKbOpenNonce}
+            researchContext={xyneAIResearchContext}
+            initialQuery={xyneAIInitialQuery ?? undefined}
+            autoSendNonce={xyneAIAutoSendNonce}
+            autoSendWebSearch={xyneAIAutoSendWebSearch}
+            onDebuggerOpenChange={setIsXyneDebuggerOpen}
+          />
+        </XyneAISidebarZIndexShell>
+      ),
     },
     {
       id: 'calendar',
@@ -795,41 +795,41 @@ const AppRoot = (): ReactElement => {
                             </main>
                           </Panel>
                           {showWindowXyneAI && (
-                              <>
-                                <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
-                                  <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
-                                </Separator>
-                                <Panel
+                            <>
+                              <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                                <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+                              </Separator>
+                              <Panel
                                 id='chromeless-xyneai'
-                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
                                 minSize={isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'}
-                                >
-                                  <XyneAISidebarZIndexShell>
-                                    <XyneAISidebar
-                                      channelId={xyneAIChannelId}
-                                      threadInfo={xyneAIThreadInfo}
-                                      startFreshChat={xyneAIStartFreshChat}
-                                      canvasInfo={xyneAICanvasInfo}
-                                      initialContextSelections={xyneAIInitialContextSelections}
-                                      contextOpenNonce={xyneAIContextOpenNonce}
-                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                      kbChannelId={xyneAIKbChannelId ?? ''}
-                                      kbDocId={xyneAIKbDocId ?? ''}
-                                      kbDocName={xyneAIKbDocName ?? ''}
-                                      kbFolderId={xyneAIKbFolderId ?? ''}
-                                      kbFolderName={xyneAIKbFolderName ?? ''}
-                                      kbOpenNonce={xyneAIKbOpenNonce}
-                                      researchContext={xyneAIResearchContext}
-                                      initialQuery={xyneAIInitialQuery ?? undefined}
-                                      autoSendNonce={xyneAIAutoSendNonce}
-                                      autoSendWebSearch={xyneAIAutoSendWebSearch}
-                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                                    />
-                                  </XyneAISidebarZIndexShell>
-                                </Panel>
-                              </>
-                            )}
+                              >
+                                <XyneAISidebarZIndexShell>
+                                  <XyneAISidebar
+                                    channelId={xyneAIChannelId}
+                                    threadInfo={xyneAIThreadInfo}
+                                    startFreshChat={xyneAIStartFreshChat}
+                                    canvasInfo={xyneAICanvasInfo}
+                                    initialContextSelections={xyneAIInitialContextSelections}
+                                    contextOpenNonce={xyneAIContextOpenNonce}
+                                    kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                    kbChannelId={xyneAIKbChannelId ?? ''}
+                                    kbDocId={xyneAIKbDocId ?? ''}
+                                    kbDocName={xyneAIKbDocName ?? ''}
+                                    kbFolderId={xyneAIKbFolderId ?? ''}
+                                    kbFolderName={xyneAIKbFolderName ?? ''}
+                                    kbOpenNonce={xyneAIKbOpenNonce}
+                                    researchContext={xyneAIResearchContext}
+                                    initialQuery={xyneAIInitialQuery ?? undefined}
+                                    autoSendNonce={xyneAIAutoSendNonce}
+                                    autoSendWebSearch={xyneAIAutoSendWebSearch}
+                                    onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                  />
+                                </XyneAISidebarZIndexShell>
+                              </Panel>
+                            </>
+                          )}
                         </ResizableGroup>
                       </div>
                     ) : isOnboarding ? (
@@ -932,11 +932,7 @@ const AppRoot = (): ReactElement => {
                         {/* The browser's pages: here, where they never move, so
                               docking or undocking the browser doesn't reload them. */}
                         <BrowserPageLayer />
-                        <GlobalCommandMenu
-                          aiOverview
-                          ticketScreenScope
-                          fullPageSearch
-                        />
+                        <GlobalCommandMenu aiOverview ticketScreenScope fullPageSearch />
                         <ShortcutsHelpModal
                           isOpen={isShortcutsModalOpen}
                           onClose={() => setIsShortcutsModalOpen(false)}
@@ -967,7 +963,45 @@ const AppRoot = (): ReactElement => {
                     />
 
                     {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
-                        <div className='hidden' aria-hidden='true'>
+                      <div className='hidden' aria-hidden='true'>
+                        <XyneAISidebar
+                          channelId={xyneAIChannelId}
+                          threadInfo={xyneAIThreadInfo}
+                          startFreshChat={xyneAIStartFreshChat}
+                          canvasInfo={xyneAICanvasInfo}
+                          initialContextSelections={xyneAIInitialContextSelections}
+                          contextOpenNonce={xyneAIContextOpenNonce}
+                          kbCollectionId={xyneAIKbCollectionId ?? ''}
+                          kbChannelId={xyneAIKbChannelId ?? ''}
+                          kbDocId={xyneAIKbDocId ?? ''}
+                          kbDocName={xyneAIKbDocName ?? ''}
+                          kbFolderId={xyneAIKbFolderId ?? ''}
+                          kbFolderName={xyneAIKbFolderName ?? ''}
+                          kbOpenNonce={xyneAIKbOpenNonce}
+                          researchContext={xyneAIResearchContext}
+                          initialQuery={xyneAIInitialQuery ?? undefined}
+                          autoSendNonce={xyneAIAutoSendNonce}
+                          autoSendWebSearch={xyneAIAutoSendWebSearch}
+                          onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                          visible={false}
+                        />
+                      </div>
+                    )}
+                    {/* XyneAI Mobile Drawer */}
+                    {isMobile &&
+                      !isInPanelWebview &&
+                      !isOnAIChatExperiencePage &&
+                      !isOnStreamsPage && (
+                        <Drawer
+                          open={isXyneAIDrawerOpen}
+                          onOpenChange={open => {
+                            // Don't allow closing during AI onboarding
+                            if (!open && isAIOnboardingActive()) return;
+                            xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                          }}
+                          title='Xyne AI'
+                          description='Ask questions about your channel'
+                        >
                           <XyneAISidebar
                             channelId={xyneAIChannelId}
                             threadInfo={xyneAIThreadInfo}
@@ -987,47 +1021,9 @@ const AppRoot = (): ReactElement => {
                             autoSendNonce={xyneAIAutoSendNonce}
                             autoSendWebSearch={xyneAIAutoSendWebSearch}
                             onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                            visible={false}
                           />
-                        </div>
+                        </Drawer>
                       )}
-                    {/* XyneAI Mobile Drawer */}
-                    {isMobile &&
-                        !isInPanelWebview &&
-                        !isOnAIChatExperiencePage &&
-                        !isOnStreamsPage && (
-                          <Drawer
-                            open={isXyneAIDrawerOpen}
-                            onOpenChange={open => {
-                              // Don't allow closing during AI onboarding
-                              if (!open && isAIOnboardingActive()) return;
-                              xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
-                            }}
-                            title='Xyne AI'
-                            description='Ask questions about your channel'
-                          >
-                            <XyneAISidebar
-                              channelId={xyneAIChannelId}
-                              threadInfo={xyneAIThreadInfo}
-                              startFreshChat={xyneAIStartFreshChat}
-                              canvasInfo={xyneAICanvasInfo}
-                              initialContextSelections={xyneAIInitialContextSelections}
-                              contextOpenNonce={xyneAIContextOpenNonce}
-                              kbCollectionId={xyneAIKbCollectionId ?? ''}
-                              kbChannelId={xyneAIKbChannelId ?? ''}
-                              kbDocId={xyneAIKbDocId ?? ''}
-                              kbDocName={xyneAIKbDocName ?? ''}
-                              kbFolderId={xyneAIKbFolderId ?? ''}
-                              kbFolderName={xyneAIKbFolderName ?? ''}
-                              kbOpenNonce={xyneAIKbOpenNonce}
-                              researchContext={xyneAIResearchContext}
-                              initialQuery={xyneAIInitialQuery ?? undefined}
-                              autoSendNonce={xyneAIAutoSendNonce}
-                              autoSendWebSearch={xyneAIAutoSendWebSearch}
-                              onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                            />
-                          </Drawer>
-                        )}
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
               </AIOnboardingProvider>
@@ -1041,14 +1037,14 @@ const AppRoot = (): ReactElement => {
 
 export const router = createBrowserRouter([
   {
-  element: <ProtectedRoute />,
-  errorElement: <RouterErrorFallback />,
-  children: [
-  {
-  path: '/newWindow/claw',
-  element: <ClawOverlay />,
-  },
-  ],
+    element: <ProtectedRoute />,
+    errorElement: <RouterErrorFallback />,
+    children: [
+      {
+        path: '/newWindow/claw',
+        element: <ClawOverlay />,
+      },
+    ],
   },
   {
     element: <SplashScreen />,
@@ -1071,11 +1067,11 @@ export const router = createBrowserRouter([
                 element: <HomeScreen />,
               },
               {
-              // A saved artifact app on its own, opened from the toolbar.
-              // Outside the /ai subtree on purpose: a workspace that has
-              // disabled Xyne AI from the rail can still keep apps there.
-              path: 'app/:appId',
-              element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
+                // A saved artifact app on its own, opened from the toolbar.
+                // Outside the /ai subtree on purpose: a workspace that has
+                // disabled Xyne AI from the rail can still keep apps there.
+                path: 'app/:appId',
+                element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
               },
               {
                 // Standalone migration/insights URLs from before these were
@@ -1096,88 +1092,88 @@ export const router = createBrowserRouter([
                 element: <Navigate to='..' replace />,
               },
               {
-              path: 'ai',
-              element: (
-              <ToolbarProtectedRoute path='/ai'>
-              <Outlet />
-              </ToolbarProtectedRoute>
-              ),
-              children: [
-              { index: true, element: <Navigate to='chat/new' replace /> },
-              // ONE route, with `new` as an ordinary value of :sessionId.
-              //
-              // Declaring `chat/new` separately looks harmless but makes two
-              // DISTINCT routes out of the same component, so moving between
-              // them unmounts and remounts AIScreen — wiping activeSessionId,
-              // chatKey and showChatView. The remount re-seeds from
-              // sessionStorage, which can still hold the previous thread, so
-              // the URL effect navigates back to it and remounts again: the
-              // screen visibly bounces between routes on every thread switch.
-              // With a single route, changing the param re-renders in place.
-              { path: 'chat/:sessionId', element: <AIScreen /> },
-              { path: 'daily-brief', element: <AIDailyBriefScreen /> },
-              { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
-              { path: 'library', element: <AILibraryScreen /> },
-              {
-              path: 'environments',
-              element: (
-              <RequireClawAdmin orSdlcAdmin>
-              <AIEnvironmentsScreen />
-              </RequireClawAdmin>
-              ),
-              },
-              { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
-              { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
-              {
-              path: 'admin',
-              element: (
-              <RequireClawAdmin>
-              <AIAdminScreen />
-              </RequireClawAdmin>
-              ),
-              },
-              { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
-              { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
-              { path: 'library/skill/create', element: <AISkillCreateScreen /> },
-              { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
-              { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
-              { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
-              { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
-              { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
-              { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
-              { path: 'library/developers/:tool', element: <AIDeveloperToolDetailScreen /> },
-              { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
-              {
-              path: 'knowledge',
-              element: <AIKnowledgeScreen />,
-              children: [
-              { index: true, element: <KnowledgeBaseV2Screen /> },
-              {
-              // Mirrors /knowledge-base's own file-viewer route so
-              // opening a file from here stays under /ai/knowledge
-              // instead of hopping to the standalone KB screen.
-              path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
-              element: <FileViewerLayout />,
-              },
-              ],
-              },
-              {
-              path: 'organization',
-              element: (
-              <RequireOrgManager>
-              <AIOrganizationScreen />
-              </RequireOrgManager>
-              ),
-              },
-              { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
-              {
-              element: <AISectionLayout />,
-              children: [
-              { path: 'metrics', element: <ClawMetricsScreen /> },
-              { path: 'settings', element: <ClawSettingsScreen /> },
-              ],
-              },
-              ],
+                path: 'ai',
+                element: (
+                  <ToolbarProtectedRoute path='/ai'>
+                    <Outlet />
+                  </ToolbarProtectedRoute>
+                ),
+                children: [
+                  { index: true, element: <Navigate to='chat/new' replace /> },
+                  // ONE route, with `new` as an ordinary value of :sessionId.
+                  //
+                  // Declaring `chat/new` separately looks harmless but makes two
+                  // DISTINCT routes out of the same component, so moving between
+                  // them unmounts and remounts AIScreen — wiping activeSessionId,
+                  // chatKey and showChatView. The remount re-seeds from
+                  // sessionStorage, which can still hold the previous thread, so
+                  // the URL effect navigates back to it and remounts again: the
+                  // screen visibly bounces between routes on every thread switch.
+                  // With a single route, changing the param re-renders in place.
+                  { path: 'chat/:sessionId', element: <AIScreen /> },
+                  { path: 'daily-brief', element: <AIDailyBriefScreen /> },
+                  { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
+                  { path: 'library', element: <AILibraryScreen /> },
+                  {
+                    path: 'environments',
+                    element: (
+                      <RequireClawAdmin orSdlcAdmin>
+                        <AIEnvironmentsScreen />
+                      </RequireClawAdmin>
+                    ),
+                  },
+                  { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
+                  { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
+                  {
+                    path: 'admin',
+                    element: (
+                      <RequireClawAdmin>
+                        <AIAdminScreen />
+                      </RequireClawAdmin>
+                    ),
+                  },
+                  { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                  { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
+                  { path: 'library/skill/create', element: <AISkillCreateScreen /> },
+                  { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },
+                  { path: 'library/agent/:slug', element: <AIAgentDetailScreen /> },
+                  { path: 'library/subagent/:name/edit', element: <AISubagentEditScreen /> },
+                  { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
+                  { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
+                  { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+                  { path: 'library/developers/:tool', element: <AIDeveloperToolDetailScreen /> },
+                  { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
+                  {
+                    path: 'knowledge',
+                    element: <AIKnowledgeScreen />,
+                    children: [
+                      { index: true, element: <KnowledgeBaseV2Screen /> },
+                      {
+                        // Mirrors /knowledge-base's own file-viewer route so
+                        // opening a file from here stays under /ai/knowledge
+                        // instead of hopping to the standalone KB screen.
+                        path: ':projectId/:channelId/:collectionId/:folderId/:fileId',
+                        element: <FileViewerLayout />,
+                      },
+                    ],
+                  },
+                  {
+                    path: 'organization',
+                    element: (
+                      <RequireOrgManager>
+                        <AIOrganizationScreen />
+                      </RequireOrgManager>
+                    ),
+                  },
+                  { path: 'digital-twin', element: <AIDigitalTwinScreen /> },
+                  {
+                    element: <AISectionLayout />,
+                    children: [
+                      { path: 'metrics', element: <ClawMetricsScreen /> },
+                      { path: 'settings', element: <ClawSettingsScreen /> },
+                    ],
+                  },
+                ],
               },
               {
                 path: 'onboarding',
@@ -1297,10 +1293,10 @@ export const router = createBrowserRouter([
                       // An artifact app added to the Inbox menubar, shown in
                       // the chat panel with the directory still alongside.
                       {
-                      path: 'app/:appId',
-                      element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
+                        path: 'app/:appId',
+                        element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
                       },
-                      Channel routes (must come after specific routes)
+                      // Channel routes (must come after specific routes)
                       {
                         path: ':channelId',
                         element: <ChatView />,
@@ -1562,6 +1558,38 @@ export const router = createBrowserRouter([
                     element: <TicketView />,
                   },
                 ],
+              },
+              {
+                path: 'sdlc',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'sdlc/:channelId',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'sdlc/:channelId/:section',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'sdlc/:channelId/tickets/:ticketId',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <TicketView />
+                  </ResourceProtectedRoute>
+                ),
               },
               // Disabled (LLM)
               // {
@@ -1891,12 +1919,12 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-              path: 'apps-marketplace',
-              element: (
-              <ToolbarProtectedRoute path='/apps-marketplace'>
-              <AppsMarketplaceScreen />
-              </ToolbarProtectedRoute>
-              ),
+                path: 'apps-marketplace',
+                element: (
+                  <ToolbarProtectedRoute path='/apps-marketplace'>
+                    <AppsMarketplaceScreen />
+                  </ToolbarProtectedRoute>
+                ),
               },
               {
                 path: 'resource-access',
@@ -2035,6 +2063,12 @@ export const router = createBrowserRouter([
             element: <ThreadMessages />,
           },
         ],
+      },
+      {
+        // Names the window and redirects to the hub's own route, which renders
+        // there without the app's chrome (see isSdlcWindow).
+        path: '/newWindow/sdlc/:workspaceId/:channelId/:section',
+        element: <SdlcWindow />,
       },
       {
         path: '/newWindow/chat/canvas',

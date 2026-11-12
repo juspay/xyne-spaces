@@ -1,8 +1,10 @@
 import { logger } from '@/utils/logger';
 import { Call } from '@prisma/client';
-import { CallStatus, CallOrigin } from '@xyne/shared';
-import { livekitService } from '@/services/liveKitService';
+import { CallStatus, CallOrigin, CallType } from '@xyne/shared';
+import { isHumanParticipant, livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
+import { PENDING_CALL_TTL_MS } from '@/database/repositories/callRepository';
+import { callActivationService } from '@/services/callActivationService';
 import { recurringCallService } from '@/services/recurringCallService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
@@ -22,6 +24,8 @@ const SUMMARY_SWEEP_BATCH_SIZE = 50;
 
 const ACTIVE_CALL_BATCH_SIZE = 100;
 const STALE_SCHEDULED_BATCH_SIZE = 100;
+/** Grace for participant_joined to arrive before an occupied PENDING room is activated from here. */
+const PENDING_ACTIVATION_RETRY_AGE_MS = 60 * 1000;
 const STRANDED_PARTICIPANT_BATCH_SIZE = 100;
 const IN_CALL_SWEEP_BATCH_SIZE = 500;
 
@@ -98,6 +102,7 @@ export class CallValidationWorker {
       await Promise.all([
         this.validateLiveActiveCalls(),
         this.cleanupStaleScheduledCalls(),
+        this.cleanupStalePendingCalls(),
         this.failStalePendingSummaries(),
         this.clearStaleInCallUsers(),
         this.markStrandedParticipantsAsLeft(),
@@ -170,6 +175,77 @@ export class CallValidationWorker {
       }
     } catch (error) {
       logger.error('[CallValidationWorker] Error cleaning up stale scheduled calls:', error);
+    }
+  }
+
+  /**
+   * A PENDING row is normally activated by the first participant_joined or cancelled
+   * by room_finished. Two things can leave it behind: the activation failed (or the
+   * webhook never arrived) while people are in the room, or nobody ever joined and
+   * room_finished was lost. The first is retried from the stored intent once the row
+   * is a minute old; the second is cancelled after PENDING_CALL_TTL_MS. A room with a
+   * person in it is never cancelled: a real call must not end up CANCELLED with its
+   * participants, conversation and history missing.
+   *
+   * Only people count. numParticipants includes agents and egress, and an agent
+   * dispatched at room creation sits in the room before anyone joins; activating on
+   * that would ring the invitees for a call nobody is in.
+   */
+  private async cleanupStalePendingCalls(): Promise<void> {
+    try {
+      const now = Date.now();
+      const retryBefore = new Date(now - PENDING_ACTIVATION_RETRY_AGE_MS);
+      const cancelBefore = new Date(now - PENDING_CALL_TTL_MS);
+      const staleCalls = await repositories.calls.findStalePendingCalls(STALE_SCHEDULED_BATCH_SIZE, retryBefore);
+      if (staleCalls.length === 0) return;
+
+      const roomInfos = await livekitService.listRooms(staleCalls.map(call => call.externalId));
+      const nonEmptyRooms = new Set(
+        roomInfos.filter(room => room.numParticipants > 0).map(room => room.name as string),
+      );
+
+      for (const call of staleCalls) {
+        if (nonEmptyRooms.has(call.externalId)) {
+          let joinerId: string | undefined;
+          try {
+            const participants = await livekitService.listParticipantsOrThrow(call.externalId);
+            joinerId = participants.find(isHumanParticipant)?.identity;
+          } catch (error) {
+            // Unknown occupancy: neither activate nor cancel; the next sweep looks again.
+            logger.error(`[CallValidationWorker] Failed to list participants for pending call ${call.externalId}:`, error);
+            continue;
+          }
+          if (joinerId) {
+            // Note-taker recordings activate through noteTakerCallRepository, not the
+            // channel-call path; leave an occupied one for its own webhook.
+            if (call.callType !== CallType.HEADLESS) {
+              await this.retryPendingActivation(call, joinerId);
+            }
+            continue;
+          }
+          // Only agents or egress: nobody has joined, so treat it like an empty room.
+        }
+        if (call.createdAt >= cancelBefore) continue;
+        const cancelled = await repositories.calls.cancelPendingCall(call.id, new Date());
+        if (cancelled) {
+          logger.info(`[CallValidationWorker] Cancelled stale pending call ${call.externalId}`);
+        }
+      }
+    } catch (error) {
+      logger.error('[CallValidationWorker] Error cleaning up stale pending calls:', error);
+    }
+  }
+
+  /** A person is in the room but its participant_joined never activated the row: do it now. */
+  private async retryPendingActivation(call: Call, joiningUserId: string): Promise<void> {
+    try {
+      logger.warn(`[CallValidationWorker] pending_call_activation_retry | room=${call.externalId}, joiner=${joiningUserId}`);
+      const activated = await callActivationService.activatePendingCall(call, joiningUserId);
+      if (activated) {
+        logger.info(`[CallValidationWorker] Activated pending call ${call.externalId} from its stored intent`);
+      }
+    } catch (error) {
+      logger.error(`[CallValidationWorker] Failed to retry activation for pending call ${call.externalId}:`, error);
     }
   }
 

@@ -3,13 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Panel, ResizableGroup, Separator } from '../ui/Resizable/Resizable';
-import {
-  LayoutDashboard,
-  MoreVertical,
-  Plus,
-  Share,
-  Sparkles,
-} from 'lucide-react';
+import { LayoutDashboard, MoreVertical, Plus, Share, Sparkles } from 'lucide-react';
 import { DashboardRole } from '@xyne/shared';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { listDataSources } from '../../services/DynamicDashboard/dataSourcesService';

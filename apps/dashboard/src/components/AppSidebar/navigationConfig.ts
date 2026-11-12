@@ -19,6 +19,7 @@ import {
   QuestionMarkCircle,
   BuildingApartmentTwo,
   LightningThunderElectricOn,
+  Atom,
   LayoutGridTwoVertical,
   type PikaIconProps,
   // Disabled (LLM)
@@ -32,8 +33,7 @@ import {
   // ListAiGenerated,
   KeySlant,
 } from '@xyne/icons';
-import { AudioLines, Radar, Store } from 'lucide-react';
-import { AudioLines } from 'lucide-react';
+import { AudioLines, Store } from 'lucide-react';
 
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
@@ -55,7 +55,7 @@ const AudioWaveIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactEle
 // createElement(Radar, props);
 
 const StoreNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
-createElement(Store, props);
+  createElement(Store, props);
 
 export type ChatNavKey =
   | 'new-message'
@@ -190,23 +190,23 @@ export interface NavigationItem {
 // strokeWidth/...) are dropped: this glyph has no stroke/variant concept and
 // renders identically regardless of active state, unlike every other item.
 const XyneAINavIcon: PikaIcon = ({ size, color }) =>
-createElement(XyneAISidebarIcon, {
-// exactOptionalPropertyTypes rejects an explicit `undefined` for an
-// optional prop — omit the key entirely instead of assigning it.
-...(typeof size === 'number' ? { size } : {}),
-...(color !== undefined ? { color } : {}),
-});
+  createElement(XyneAISidebarIcon, {
+    // exactOptionalPropertyTypes rejects an explicit `undefined` for an
+    // optional prop — omit the key entirely instead of assigning it.
+    ...(typeof size === 'number' ? { size } : {}),
+    ...(color !== undefined ? { color } : {}),
+  });
 
 // Items are listed toolbar-first: the default toolbar paths come first in the
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
   {
-  path: '/ai',
-  label: 'Xyne AI',
-  description: 'Also called Ask AI: AI chats, agents and knowledge',
-  icon: XyneAINavIcon,
-  popout: true,
+    path: '/ai',
+    label: 'Xyne AI',
+    description: 'Also called Ask AI: AI chats, agents and knowledge',
+    icon: XyneAINavIcon,
+    popout: true,
   },
   {
     path: '/chat/dir',
@@ -230,11 +230,11 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   {
-  path: '/apps-marketplace',
-  label: 'Apps Marketplace',
-  description: 'Apps built on Xyne data, and creating your own',
-  icon: StoreNavIcon,
-  popout: true,
+    path: '/apps-marketplace',
+    label: 'Apps Marketplace',
+    description: 'Apps built on Xyne data, and creating your own',
+    icon: StoreNavIcon,
+    popout: true,
   },
   {
     path: '/streams',
@@ -262,6 +262,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     label: 'Tickets',
     description: 'Ticket boards, views and my tickets',
     icon: TicketToken,
+    popout: true,
+  },
+  {
+    path: '/sdlc',
+    label: 'SDLC',
+    description: 'Development hubs: tracks, wikis and repositories',
+    icon: Atom,
     popout: true,
   },
   {
@@ -442,6 +449,7 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/calls',
   '/recordings',
   '/projects',
+  '/sdlc',
   '/support',
   '/chat/activity',
   '/apps-marketplace',

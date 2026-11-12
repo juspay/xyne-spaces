@@ -309,6 +309,7 @@ services:
       - REDIS_PORT=6379
       - LIVEKIT_API_KEY=localdevkey
       - LIVEKIT_API_SECRET=localdevsecret
+      - CALL_E2EE_MASTER_KEY=bG9jYWxkZXZlMmVlbWFzdGVya2V5MDEyMzQ1Njc4OTA=
       - LIVEKIT_URL=ws://xyne-sandbox-livekit:7880
       - LIVEKIT_CLIENT_URL=http://${name}.localhost
       - LIVEKIT_SERVER_URL=ws://xyne-sandbox-livekit:7880

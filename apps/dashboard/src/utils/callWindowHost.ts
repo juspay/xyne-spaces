@@ -108,6 +108,7 @@ const connectHandoff = (handoff: CallWindowHandoff & { handoffId: number }): voi
       type: 'CONNECT',
       token: handoff.token,
       serverUrl: handoff.serverUrl,
+      encryption: handoff.encryption,
       callType: handoff.callType,
       externalId: handoff.externalId,
       zero: null,

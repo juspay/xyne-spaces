@@ -78,8 +78,7 @@ import { cn, Tooltip } from '../../components/ui/Tooltip';
 //   DropdownMenuItem,
 //   DropdownMenuTrigger,
 // } from '../../components/ui/dropdown-menu';
-// Disabled (LLM)
-// import XyneAIStar from '../../components/icons/xyne-ai/XyneAIStar';
+import XyneAIStar from '../../components/icons/xyne-ai/XyneAIStar';
 import { RecordingDetailV2Header } from './components/RecordingDetailV2Header';
 import { RecordingShareModal } from './components/RecordingShareModal';
 import { RecordingDetailV2Skeleton } from './components/RecordingDetailV2Skeleton';
@@ -1087,35 +1086,35 @@ export default function RecordingDetailV2Screen({
         : []),
     ];
 
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'recording_detail',
-  //     startFreshChat: true,
-  //     contextType: 'general',
-  //     initialContextSelections: {
-  //       recordings: [
-  //         {
-  //           // `id` is the canonical Call id. `externalId` is only the public
-  //           // recording-route id, so using it here would make Claw fail to
-  //           // resolve the attached call.
-  //           id: recording.id,
-  //           title: recording.title || 'Recording',
-  //           ...(recording.channelId ? { channelId: recording.channelId } : {}),
-  //           ...(recording.conversationId ? { conversationId: recording.conversationId } : {}),
-  //           externalId: recording.externalId,
-  //         },
-  //       ],
-  //       canvases: canvasSelections,
-  //     },
-  //     threadInfo: hasThreadContext
-  //       ? {
-  //           conversationId: recording.conversationId ?? '',
-  //           previewText: recording.title || 'Recording Transcript',
-  //           ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
-  //         }
-  //       : null,
-  //   });
-  // }, [recording, message, notesCanvasId]);
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'recording_detail',
+      startFreshChat: true,
+      contextType: 'general',
+      initialContextSelections: {
+        recordings: [
+          {
+            // `id` is the canonical Call id. `externalId` is only the public
+            // recording-route id, so using it here would make Claw fail to
+            // resolve the attached call.
+            id: recording.id,
+            title: recording.title || 'Recording',
+            ...(recording.channelId ? { channelId: recording.channelId } : {}),
+            ...(recording.conversationId ? { conversationId: recording.conversationId } : {}),
+            externalId: recording.externalId,
+          },
+        ],
+        canvases: canvasSelections,
+      },
+      threadInfo: hasThreadContext
+        ? {
+            conversationId: recording.conversationId ?? '',
+            previewText: recording.title || 'Recording Transcript',
+            ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+          }
+        : null,
+    });
+  }, [recording, message, notesCanvasId]);
 
   // Disabled (LLM)
   // const handleSummaryProgressPause = useCallback(
