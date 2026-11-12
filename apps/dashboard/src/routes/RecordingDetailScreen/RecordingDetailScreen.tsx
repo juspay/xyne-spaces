@@ -36,8 +36,7 @@ import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentif
 import { CanvasEditor } from '../../components/Canvas/CanvasEditor/CanvasEditor';
 import { CollaborativeCanvasEditor } from '../../components/Canvas/CollaborativeCanvasEditor/CollaborativeCanvasEditor';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
-// Disabled (Claw)
-// import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { removeRecordingsFromCache } from '../../hooks/usePaginatedRecordings';
 import { useMarkRecordingSummaryReadOnOpen } from '../../hooks/useHasUnreadRecordingSummaries';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
@@ -199,13 +198,12 @@ export default function RecordingDetailScreen(): ReactElement {
     enabled: canNavigatePrevious,
   });
 
-  // Disabled (Claw)
-  // // The legacy Ask AI flow still uses attachment ids from the recording message
-  // // when one exists. Recording sharing itself no longer depends on this message.
-  // const [message] = useCachedQuery(
-  //   queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
-  //   { enabled: !!recording?.messageId },
-  // );
+  // The legacy Ask AI flow still uses attachment ids from the recording message
+  // when one exists. Recording sharing itself no longer depends on this message.
+  const [message] = useCachedQuery(
+    queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
+    { enabled: !!recording?.messageId },
+  );
 
   useEffect(() => {
     if (recordingId) {
@@ -274,12 +272,11 @@ export default function RecordingDetailScreen(): ReactElement {
 
   const formatDuration = formatRecordingDuration;
 
-  // Disabled (Claw)
-  // const handleAskAI = (): void => {
-  //   if (!recording?.channelId) {
-  //     toast.error('Cannot open Ask AI for this recording');
-  //     return;
-  //   }
+  const handleAskAI = (): void => {
+    if (!recording?.channelId) {
+      toast.error('Cannot open Ask AI for this recording');
+      return;
+    }
 
   //   const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
   //   xyneAIActor.send({
@@ -445,8 +442,6 @@ export default function RecordingDetailScreen(): ReactElement {
 
           {/* Action Buttons */}
           <div className='flex items-center gap-3 mt-4'>
-            {/* Disabled (Claw) */}
-            {/*
             <button
               onClick={handleAskAI}
               className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
@@ -462,7 +457,6 @@ export default function RecordingDetailScreen(): ReactElement {
               />
               Ask AI
             </button>
-            */}
             {recording?.channelId && recording?.conversationId && (
               <button
                 onClick={() =>

@@ -17,10 +17,8 @@ import { useGeneratePRD } from '../../../hooks/useGeneratePRD';
 import { MessageMetadata } from './MessageBubble.utils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
-// Disabled (Claw)
-// import { xyneAIActor } from '../../../machines/xyneAIMachine';
-// Disabled (Claw)
-// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 // Disabled (LLM)
 // import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
 import { useSpeakerIdentificationEnabled } from '../../SpeakerIdentification/useSpeakerIdentificationEnabled';
@@ -152,18 +150,17 @@ export const GeneratePRDButton: React.FC<{
 //   );
 // };
 
-// Disabled (Claw)
-// /**
-//  * Button component for chatting with Ask AI about the call transcript
-//  */
-// const ChatWithAskAIButton: React.FC<{
-//   channelId?: string | undefined;
-//   conversationId?: string | undefined;
-//   metadata?: MessageMetadata | null | undefined;
-//   attachments?: readonly AttachmentType[] | undefined;
-// }> = ({ channelId, conversationId, metadata, attachments }) => {
-//   const handleClick = (): void => {
-//     if (!channelId) return;
+/**
+ * Button component for chatting with Ask AI about the call transcript
+ */
+const ChatWithAskAIButton: React.FC<{
+  channelId?: string | undefined;
+  conversationId?: string | undefined;
+  metadata?: MessageMetadata | null | undefined;
+  attachments?: readonly AttachmentType[] | undefined;
+}> = ({ channelId, conversationId, metadata, attachments }) => {
+  const handleClick = (): void => {
+    if (!channelId) return;
 
 //     // Get call title from metadata if available
 //     const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
@@ -211,15 +208,13 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   callId,
   isActiveCall,
   channelId,
-  // Disabled (Claw)
-  // conversationId,
+  conversationId,
   context,
   attachments,
 }) => {
   const metadata = message.metadata;
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
-  // Disabled (Claw)
-  // const askAIAvailable = useAskAIAvailable();
+  const askAIAvailable = useAskAIAvailable();
 
   // For headless recordings: show only the identified transcript (fall back to plain transcript
   // if identified is absent). For regular calls: hide the identified transcript attachment.
@@ -323,8 +318,6 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                 />
                               )}
                               */}
-                              {/* Disabled (Claw) */}
-                              {/*
                               {askAIAvailable && (
                                 <ChatWithAskAIButton
                                   channelId={channelId}
@@ -333,7 +326,6 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                   attachments={attachments}
                                 />
                               )}
-                              */}
                               {recordingAttachment && (
                                 <AudioPlayer
                                   onLoad={signal =>

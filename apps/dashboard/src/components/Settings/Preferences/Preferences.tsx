@@ -7,8 +7,7 @@ import {
   Mic,
   MessageSquare,
   Globe,
-  // Disabled (Claw)
-  // Zap,
+  Zap,
   Code2,
   Copy,
   CheckCircle2,
@@ -88,8 +87,7 @@ import {
   inboxItemsStore,
   messageActionsStore,
   useChannelTabsStore,
-  // Disabled (Claw)
-  // useEnsureAppSnapshots,
+  useEnsureAppSnapshots,
   type BarItemsStore,
 } from '../../../hooks/barItems';
 import { isChannelTabsCustomizable } from '../../Chat/ConversationPannel/ConversationPannel.utils';
@@ -134,8 +132,7 @@ const NAV_ITEMS: NavItem[] = [
     desktopOnly: true,
   },
   { id: 'browser', label: 'Browser', icon: <Globe className='size-4' />, desktopOnly: true },
-  // Disabled (Claw)
-  // { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
+  { id: 'launch', label: 'Launch', icon: <Zap className='size-4' />, desktopOnly: true },
   {
     id: 'toolbar',
     label: 'Toolbar',
@@ -1236,28 +1233,27 @@ const PasswordSection: FC = () => {
 };
 
 // ─── Developer ──────────────────────────────────────────────────────────────
-// Disabled (Claw)
-// /** Kept on this device (userPreferencesMachine) and off while it is tried. */
-// const ScreenActionsToggle: FC = () => {
-//   const enabled = useUserPreference('screenActionsEnabled');
-//   return (
-//     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
-//       <div>
-//         <p className='text-sm font-medium text-foreground'>Screen actions</p>
-//         <p className='text-xs text-muted-foreground mt-0.5'>
-//           With Auto selected in Xyne AI, opens pages and presses buttons for what you type or say,
-//           like &ldquo;open general&rdquo; or &ldquo;create a ticket&rdquo;, and only points at
-//           anything that changes data. Off while it is new.
-//         </p>
-//       </div>
-//       <Switch
-//         id='screen-actions-enabled'
-//         checked={enabled}
-//         onCheckedChange={value => setUserPreference('screenActionsEnabled', value)}
-//       />
-//     </div>
-//   );
-// };
+/** Kept on this device (userPreferencesMachine) and off while it is tried. */
+const ScreenActionsToggle: FC = () => {
+  const enabled = useUserPreference('screenActionsEnabled');
+  return (
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Screen actions</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          With Auto selected in Xyne AI, opens pages and presses buttons for what you type or say,
+          like &ldquo;open general&rdquo; or &ldquo;create a ticket&rdquo;, and only points at
+          anything that changes data. Off while it is new.
+        </p>
+      </div>
+      <Switch
+        id='screen-actions-enabled'
+        checked={enabled}
+        onCheckedChange={value => setUserPreference('screenActionsEnabled', value)}
+      />
+    </div>
+  );
+};
 
 const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
   return (
@@ -1291,8 +1287,7 @@ const DeveloperSection: FC<{ state: PreferencesState }> = ({ state }) => {
           />
         </div>
 
-        {/* Disabled (Claw) */}
-        {/* <ScreenActionsToggle /> */}
+        <ScreenActionsToggle />
 
         {detectReactNativeWebView() && (
           <Button
@@ -1533,8 +1528,7 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   const store = useChannelTabsStore(selected?.id ?? 'unknown', publishedIds);
   const publish = useChannelAppPublishing(selected?.id ?? 'unknown', selected, publishedIds);
   const publishedSet = useMemo(() => new Set(publishedIds), [publishedIds]);
-  // Disabled (Claw)
-  // useEnsureAppSnapshots(publishedIds);
+  useEnsureAppSnapshots(publishedIds);
 
   if (!selected) {
     return (

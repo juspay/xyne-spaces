@@ -101,12 +101,11 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
     autoAIDraftSaved,
   } = form;
   const knowledgeAgentSlug = autoAIDraft ? (autoDraftAgentSlug ?? undefined) : undefined;
-  // Disabled (Claw)
-  // const { data: knowledgeAgent, isError: isKnowledgeAgentError } =
-  //   useClawAgentDetail(knowledgeAgentSlug);
-  // // Shares the Knowledge lookup's query key, so this resolves from cache, not a refetch.
-  // const { data: draftAgent } = useClawAgentDetail(autoDraftAgentSlug ?? undefined);
-  // const { data: deskReportAgent } = useClawAgentDetail(deskReportAgentSlug ?? undefined);
+  const { data: knowledgeAgent, isError: isKnowledgeAgentError } =
+    useClawAgentDetail(knowledgeAgentSlug);
+  // Shares the Knowledge lookup's query key, so this resolves from cache, not a refetch.
+  const { data: draftAgent } = useClawAgentDetail(autoDraftAgentSlug ?? undefined);
+  const { data: deskReportAgent } = useClawAgentDetail(deskReportAgentSlug ?? undefined);
   const { data: knowledgeAgent, isError: isKnowledgeAgentError } = useClawAgentDetail(
     (false as boolean) ? knowledgeAgentSlug : undefined,
   );

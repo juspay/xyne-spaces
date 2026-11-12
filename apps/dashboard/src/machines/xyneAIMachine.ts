@@ -938,29 +938,28 @@ const initializeActor = async (): Promise<void> => {
     if (persistedContext && persistedContext.xyneAIState === 'open' && !isSdlcRoute) {
       // Restore the open state with persisted context
       // Only include defined values in the send event
-      // Disabled (Claw)
-      // xyneAIActor.send({
-      // type: 'OPEN',
-      // trackSource: 'restored',
-      // ...(persistedContext.contextType !== undefined &&
-      // persistedContext.contextType !== null && {
-      // contextType: persistedContext.contextType,
-      // }),
-      // ...(persistedContext.contextId !== undefined &&
-      // persistedContext.contextId !== null && {
-      // contextId: persistedContext.contextId,
-      // }),
-      // ...(persistedContext.channelId !== undefined &&
-      // persistedContext.channelId !== null && {
-      // channelId: persistedContext.channelId,
-      // }),
-      // ...(persistedContext.threadInfo !== undefined && {
-      // threadInfo: persistedContext.threadInfo,
-      // }),
-      // ...(persistedContext.initialContextSelections !== undefined && {
-      // initialContextSelections: persistedContext.initialContextSelections,
-      // }),
-      // });
+      xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'restored',
+      ...(persistedContext.contextType !== undefined &&
+      persistedContext.contextType !== null && {
+      contextType: persistedContext.contextType,
+      }),
+      ...(persistedContext.contextId !== undefined &&
+      persistedContext.contextId !== null && {
+      contextId: persistedContext.contextId,
+      }),
+      ...(persistedContext.channelId !== undefined &&
+      persistedContext.channelId !== null && {
+      channelId: persistedContext.channelId,
+      }),
+      ...(persistedContext.threadInfo !== undefined && {
+      threadInfo: persistedContext.threadInfo,
+      }),
+      ...(persistedContext.initialContextSelections !== undefined && {
+      initialContextSelections: persistedContext.initialContextSelections,
+      }),
+      });
     }
 
     // Clean up old mermaid diagrams on app startup

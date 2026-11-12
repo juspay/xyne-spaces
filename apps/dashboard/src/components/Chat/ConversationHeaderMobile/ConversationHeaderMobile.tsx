@@ -24,8 +24,7 @@ import AddPeopleForm from '../AddPeopleForm/AddPeopleForm';
 import { getTargetUserIdForCall } from '../ConversationHeader/ConversationHeader.utils';
 import { useLocation } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
-// Disabled (Claw)
-// import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { cn } from '../../../utils/classNames';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { VisibleChannel } from '../../../machines/stateMachine';
@@ -33,8 +32,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { resolveUserStatus } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-// Disabled (Claw)
-// import { XyneAIStar } from '../../icons/xyne-ai';
+import { XyneAIStar } from '../../icons/xyne-ai';
 
 interface ConversationHeaderMobileProps {
   channelId: string;
@@ -310,8 +308,6 @@ const ConversationHeaderMobile = ({
             />
           </div>
         </div>
-        {/* Disabled (Claw) */}
-        {/*
         <button
           aria-label='Ask AI'
           onClick={() => {
@@ -332,7 +328,6 @@ const ConversationHeaderMobile = ({
         >
           <XyneAIStar size={17} />
         </button>
-        */}
       </div>
       <Drawer
         open={isInfoDrawerOpen}

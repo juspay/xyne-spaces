@@ -12,17 +12,13 @@ import { useCanReadTicket } from '../../../hooks/usePermissions';
 import { ChannelScopeType, supportsChannelApps } from '@xyne/shared';
 import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
-// Disabled (Claw)
-// import { AppIcon } from '../../AppIcon/AppIcon';
+import { AppIcon } from '../../AppIcon/AppIcon';
 import {
   useChannelTabsStore,
-  // Disabled (Claw)
-  // useAppSnapshots,
-  // Disabled (Claw)
-  // useEnsureAppSnapshots,
+  useAppSnapshots,
+  useEnsureAppSnapshots,
   appIdOf,
-  // Disabled (Claw)
-  // appItemId,
+  appItemId,
 } from '../../../hooks/barItems';
 
 export interface ConversationTabListType {
@@ -140,10 +136,8 @@ export const useConversationTabs = (channelId: string, channel?: ChannelTabsSour
   const store = useChannelTabsStore(channelId || 'unknown', publishedIds);
   const ids = store.useItems();
   // Published apps this device never added have no snapshot yet; fetch them.
-  // Disabled (Claw)
-  // useEnsureAppSnapshots(publishedIds);
-  // Disabled (Claw)
-  // const snapshots = useAppSnapshots();
+  useEnsureAppSnapshots(publishedIds);
+  const snapshots = useAppSnapshots();
   const ticketsAllowed = useTicketsTabAllowed(channelScopeType);
   const builtInTabs = useAvailableBuiltInTabs(channelScopeType);
   const customizable = isChannelTabsCustomizable(channel);
@@ -154,15 +148,14 @@ export const useConversationTabs = (channelId: string, channel?: ChannelTabsSour
     for (const id of ids) {
       const appId = appIdOf(id);
       if (appId) {
-        // Disabled (Claw)
-        // const snapshot = snapshots.get(appId);
-        // if (!snapshot) continue;
-        // tabs.push({
-        //   label: snapshot.title,
-        //   value: appItemId(appId),
-        //   icon: <AppIcon name={snapshot.icon} size={14} />,
-        //   published: publishedIds.includes(appId),
-        // });
+        const snapshot = snapshots.get(appId);
+        if (!snapshot) continue;
+        tabs.push({
+          label: snapshot.title,
+          value: appItemId(appId),
+          icon: <AppIcon name={snapshot.icon} size={14} />,
+          published: publishedIds.includes(appId),
+        });
         continue;
       }
       if (id === TICKETS_TAB.value && !ticketsAllowed) continue;
@@ -175,11 +168,9 @@ export const useConversationTabs = (channelId: string, channel?: ChannelTabsSour
     customizable,
     builtInTabs,
     ids,
-    // Disabled (Claw)
-    // snapshots,
+    snapshots,
     ticketsAllowed,
-    // Disabled (Claw)
-    // publishedIds,
+    publishedIds,
   ]);
 
   return useMemo(

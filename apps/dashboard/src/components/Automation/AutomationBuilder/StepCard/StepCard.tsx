@@ -20,8 +20,7 @@ import {
   buildOutputSchemaFromWebhookConfig,
 } from '../AutomationBuilder.utils';
 import { WebhookStepForm } from './WebhookStepForm';
-// Disabled (Claw)
-// import { RunAgentStepForm } from './RunAgentStepForm';
+import { RunAgentStepForm } from './RunAgentStepForm';
 import { SendMessageStepForm } from './SendMessageStepForm';
 import { MakeCallStepForm } from './MakeCallStepForm';
 import { CreateEmailDraftStepForm } from './CreateEmailDraftStepForm';
@@ -203,17 +202,17 @@ export function StepCard({
                   variableSources={variableSources}
                   readOnly={readOnly}
                 />
-              ) : // Disabled (Claw)
-              // step.type === 'RUN_AGENT' ? (
-              //   <RunAgentStepForm
-              //     value={step.config}
-              //     onChange={onConfigChange}
-              //     issues={issues ?? null}
-              //     pathPrefix={pathPrefix}
-              //     variableSources={variableSources}
-              //     readOnly={readOnly}
-              //   />
-              // ) :
+              ) :
+              step.type === 'RUN_AGENT' ? (
+                <RunAgentStepForm
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                  readOnly={readOnly}
+                />
+              ) :
               step.type === 'SEND_MESSAGE' ? (
                 <SendMessageStepForm
                   stepId={step.id}

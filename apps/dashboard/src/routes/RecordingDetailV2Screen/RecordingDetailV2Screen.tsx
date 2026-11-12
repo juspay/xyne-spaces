@@ -2,8 +2,7 @@
   The Xyne Scribe Details Screen
  */
 
-// Disabled (Claw)
-// import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
+import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
@@ -126,8 +125,7 @@ import {
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
-// Disabled (Claw)
-// import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import {
@@ -241,8 +239,7 @@ export default function RecordingDetailV2Screen({
   onBack,
 }: RecordingDetailV2ScreenProps): ReactElement {
   const { isMobile, isElectron } = usePlatform();
-  // Disabled (Claw)
-  // const askAIAvailable = useAskAIAvailable();
+  const askAIAvailable = useAskAIAvailable();
   const params = useParams<{ recordingId: string }>();
   const recordingId = recordingIdOverride ?? params.recordingId;
   const navigate = useNavigate();
@@ -1041,11 +1038,10 @@ export default function RecordingDetailV2Screen({
   //   await handleRegenerateSummary(currentTemplateId, target);
   // };
 
-  // Disabled (Claw)
-  // const [message] = useCachedQuery(
-  //   queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
-  //   { enabled: !!recording?.messageId },
-  // );
+  const [message] = useCachedQuery(
+    queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
+    { enabled: !!recording?.messageId },
+  );
 
   // While live the notes canvas is created by NoteTakerOverlayHost, so its id only
   // reaches this screen through the store until the detail is refetched.
@@ -1054,43 +1050,42 @@ export default function RecordingDetailV2Screen({
     recording?.notesCanvasId ??
     null;
 
-  // Disabled (Claw)
-  // /**
-  //  * A note-taker recording has no channel, message or conversation — it is created
-  //  * from a LiveKit webhook rather than posted anywhere — so none of those can gate
-  //  * opening Ask AI. Each is passed only when it exists, which is the case for a
-  //  * channel call viewed on this screen; otherwise the panel opens unscoped, exactly
-  //  * as the recordings list does.
-  //  */
-  // const handleAskAI = useCallback((): void => {
-  //   if (!recording) return;
-  //   const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
-  //   const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
-  //   // Both canvases are attached with an explicit role: from the row alone the
-  //   // agent cannot tell the machine-written summary from the user's own notes,
-  //   // and it must weigh them differently.
-  //   const canvasSelections = [
-  //     ...(recording.detailedSummaryCanvasId
-  //       ? [
-  //           {
-  //             id: recording.detailedSummaryCanvasId,
-  //             canvasId: recording.detailedSummaryCanvasId,
-  //             title: `${recording.title || 'Recording'} summary`,
-  //             canvasRole: 'call-summary' as const,
-  //           },
-  //         ]
-  //       : []),
-  //     ...(notesCanvasId && notesCanvasId !== recording.detailedSummaryCanvasId
-  //       ? [
-  //           {
-  //             id: notesCanvasId,
-  //             canvasId: notesCanvasId,
-  //             title: `${recording.title || 'Recording'} notes`,
-  //             canvasRole: 'call-notes' as const,
-  //           },
-  //         ]
-  //       : []),
-  //   ];
+  /**
+   * A note-taker recording has no channel, message or conversation — it is created
+   * from a LiveKit webhook rather than posted anywhere — so none of those can gate
+   * opening Ask AI. Each is passed only when it exists, which is the case for a
+   * channel call viewed on this screen; otherwise the panel opens unscoped, exactly
+   * as the recordings list does.
+   */
+  const handleAskAI = useCallback((): void => {
+    if (!recording) return;
+    const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
+    const hasThreadContext = !!recording.conversationId || attachmentIds.length > 0;
+    // Both canvases are attached with an explicit role: from the row alone the
+    // agent cannot tell the machine-written summary from the user's own notes,
+    // and it must weigh them differently.
+    const canvasSelections = [
+      ...(recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: recording.detailedSummaryCanvasId,
+              canvasId: recording.detailedSummaryCanvasId,
+              title: `${recording.title || 'Recording'} summary`,
+              canvasRole: 'call-summary' as const,
+            },
+          ]
+        : []),
+      ...(notesCanvasId && notesCanvasId !== recording.detailedSummaryCanvasId
+        ? [
+            {
+              id: notesCanvasId,
+              canvasId: notesCanvasId,
+              title: `${recording.title || 'Recording'} notes`,
+              canvasRole: 'call-notes' as const,
+            },
+          ]
+        : []),
+    ];
 
   //   xyneAIActor.send({
   //     type: 'OPEN',
@@ -1409,8 +1404,6 @@ export default function RecordingDetailV2Screen({
                   </Button>
                 </Tooltip>
               )}
-              {/* Disabled (Claw) */}
-              {/*
               {!isLive && askAIAvailable && (
                 <Tooltip content='Ask AI about this recording' side='bottom'>
                   <Button
@@ -1427,7 +1420,6 @@ export default function RecordingDetailV2Screen({
                   </Button>
                 </Tooltip>
               )}
-              */}
             </div>
           </div>
           <RecordingDetailV2Header

@@ -4,8 +4,7 @@ import {
   ArrowLeft,
   NotificationBellOn,
   InboxDefault,
-  // Disabled (Claw)
-  // SparkleAi01,
+  SparkleAi01,
   BubbleChart,
   Notebook,
   PhoneDefault,
@@ -76,15 +75,14 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
     path: '/calls',
     isActive: ctx => ctx.activeRoute === '/calls',
   },
-  // Disabled (Claw)
-  // {
-  // key: 'ai-agent',
-  // label: 'AI Agent',
-  // description: 'Also called Ask AI: AI chats, agents and knowledge',
-  // icon: SparkleAi01,
-  // path: '/ai',
-  // isActive: ctx => ctx.activeRoute === '/ai',
-  // },
+  {
+  key: 'ai-agent',
+  label: 'AI Agent',
+  description: 'Also called Ask AI: AI chats, agents and knowledge',
+  icon: SparkleAi01,
+  path: '/ai',
+  isActive: ctx => ctx.activeRoute === '/ai',
+  },
   {
     key: 'automations',
     label: 'Automations',

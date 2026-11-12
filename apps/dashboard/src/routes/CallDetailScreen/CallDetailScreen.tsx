@@ -1,6 +1,5 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
-// Disabled (Claw)
-// import { useSelector } from '@xstate/react';
+import { useSelector } from '@xstate/react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import {
@@ -123,8 +122,7 @@ export default function CallDetailScreen(): ReactElement {
 
   const { user } = useAuth();
 
-  // Disabled (Claw)
-  // const isAIOpen = useSelector(xyneAIActor, state => !state.matches('closed'));
+  const isAIOpen = useSelector(xyneAIActor, state => !state.matches('closed'));
   const allChannels = useAllChannels();
   const visibleChannels = useAllVisibleChannels();
   // Both lists run to hundreds of channels, and this screen re-renders on every
@@ -377,23 +375,22 @@ export default function CallDetailScreen(): ReactElement {
 
   const aiOpenedRef = useRef(false);
 
-  // Disabled (Claw)
-  // // Single source of truth for opening the AI sidebar — used by both the mount
-  // // effect and the "Ask AI" button so the payload isn't duplicated.
-  // const openAI = useCallback((): void => {
-  //   if (!call) return;
-  //   _userClosedAIForCallId = null;
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'call_detail_auto',
-  //     ...(call.channelId ? { channelId: call.channelId } : {}),
-  //     threadInfo: callConversationId
-  //       ? { conversationId: callConversationId, previewText: call.title ?? 'Call' }
-  //       : null,
-  //     startFreshChat: true,
-  //   });
-  //   aiOpenedRef.current = true;
-  // }, [call, callConversationId]);
+  // Single source of truth for opening the AI sidebar — used by both the mount
+  // effect and the "Ask AI" button so the payload isn't duplicated.
+  const openAI = useCallback((): void => {
+    if (!call) return;
+    _userClosedAIForCallId = null;
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'call_detail_auto',
+      ...(call.channelId ? { channelId: call.channelId } : {}),
+      threadInfo: callConversationId
+        ? { conversationId: callConversationId, previewText: call.title ?? 'Call' }
+        : null,
+      startFreshChat: true,
+    });
+    aiOpenedRef.current = true;
+  }, [call, callConversationId]);
 
   const callId = call?.id;
 
@@ -584,8 +581,6 @@ export default function CallDetailScreen(): ReactElement {
                 </span>
               </Tooltip>
               <div className='flex-1' />
-              {/* Disabled (Claw) */}
-              {/*
               {!isAIOpen && !isMobile && (
                 <Tooltip content='Ask AI' delayDuration={300}>
                   <button
@@ -603,7 +598,6 @@ export default function CallDetailScreen(): ReactElement {
                   </button>
                 </Tooltip>
               )}
-              */}
             </div>
 
             {/* Title */}

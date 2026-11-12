@@ -1,42 +1,34 @@
 import {
-  // Disabled (Claw)
-  // createElement,
+  createElement,
   useMemo,
-  // Disabled (Claw)
-  // type ReactElement,
+  type ReactElement,
 } from 'react';
-// Disabled (Claw)
-// import type { PikaIconProps } from '@xyne/icons';
+import type { PikaIconProps } from '@xyne/icons';
 import {
   CHAT_NAV_ITEMS,
   type ChatNavItem,
-  // Disabled (Claw)
-  // type PikaIcon,
+  type PikaIcon,
 } from '../components/AppSidebar/navigationConfig';
-// Disabled (Claw)
-// import { AppIcon } from '../components/AppIcon/AppIcon';
+import { AppIcon } from '../components/AppIcon/AppIcon';
 import {
   inboxItemsStore,
-  // Disabled (Claw)
-  // useAppSnapshots,
+  useAppSnapshots,
   appIdOf,
-  // Disabled (Claw)
-  // appItemId,
+  appItemId,
 } from './barItems';
 import { useDisabledToolbarPaths } from './useDisabledToolbarPaths';
 
-// Disabled (Claw)
-// /** Where an Inbox app entry opens: the chat panel, directory still alongside. */
-// export const inboxAppPath = (appId: string): string => `/chat/dir/app/${appId}`;
-//
-// // Adapts AppIcon (which takes the icon `name`) to the PikaIcon shape the Inbox
-// // rows render, so an app row draws exactly like a built-in one.
-// const appNavIcon = (icon: string | null): PikaIcon => {
-//   const Icon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
-//     createElement(AppIcon, { name: icon, ...props });
-//   Icon.displayName = 'InboxAppIcon';
-//   return Icon;
-// };
+/** Where an Inbox app entry opens: the chat panel, directory still alongside. */
+export const inboxAppPath = (appId: string): string => `/chat/dir/app/${appId}`;
+
+// Adapts AppIcon (which takes the icon `name`) to the PikaIcon shape the Inbox
+// rows render, so an app row draws exactly like a built-in one.
+const appNavIcon = (icon: string | null): PikaIcon => {
+  const Icon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
+    createElement(AppIcon, { name: icon, ...props });
+  Icon.displayName = 'InboxAppIcon';
+  return Icon;
+};
 
 /**
  * The Inbox menubar in the user's order: built-in entries from CHAT_NAV_ITEMS
@@ -46,8 +38,7 @@ import { useDisabledToolbarPaths } from './useDisabledToolbarPaths';
  */
 export const useInboxNavItems = (radarEnabled: boolean): ChatNavItem[] => {
   const ids = inboxItemsStore.useItems();
-  // Disabled (Claw)
-  // const snapshots = useAppSnapshots();
+  const snapshots = useAppSnapshots();
   const disabledToolbarPaths = useDisabledToolbarPaths();
 
   return useMemo(() => {
@@ -56,16 +47,15 @@ export const useInboxNavItems = (radarEnabled: boolean): ChatNavItem[] => {
     for (const id of ids) {
       const appId = appIdOf(id);
       if (appId) {
-        // Disabled (Claw)
-        // const snapshot = snapshots.get(appId);
-        // if (!snapshot) continue;
-        // items.push({
-        //   key: appItemId(appId),
-        //   label: snapshot.title,
-        //   to: inboxAppPath(appId),
-        //   icon: appNavIcon(snapshot.icon),
-        //   trackName: 'OPEN_APP',
-        // });
+        const snapshot = snapshots.get(appId);
+        if (!snapshot) continue;
+        items.push({
+          key: appItemId(appId),
+          label: snapshot.title,
+          to: inboxAppPath(appId),
+          icon: appNavIcon(snapshot.icon),
+          trackName: 'OPEN_APP',
+        });
         continue;
       }
       const item = byKey.get(id);
@@ -77,8 +67,7 @@ export const useInboxNavItems = (radarEnabled: boolean): ChatNavItem[] => {
     return items;
   }, [
     ids,
-    // Disabled (Claw)
-    // snapshots,
+    snapshots,
     radarEnabled,
     disabledToolbarPaths,
   ]);
