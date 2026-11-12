@@ -10,7 +10,7 @@ const log = createLogger("tools");
 function pushToolInvocation(
   progressUrl: string | undefined,
   sessionId: string | undefined,
-  s2sKey: string | undefined,
+  serviceAuth: ToolExecutionContext["serviceAuth"],
   invocation: unknown,
 ): void {
   if (!progressUrl || !sessionId) return;
@@ -18,7 +18,7 @@ function pushToolInvocation(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+      ...(serviceAuth?.("POST", progressUrl) ?? {}),
     },
     body: JSON.stringify({ sessionId, toolInvocation: invocation }),
     signal: AbortSignal.timeout(5_000),
@@ -497,10 +497,10 @@ export const queryCodebase: ToolDefinition = {
                     
                     const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
                     const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
-                    const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
+                    const serviceAuth = (context as ToolExecutionContext | undefined)?.serviceAuth;
                     
                     // Push child tool with parentToolCallId pointing to the framework's tool call ID
-                    pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                    pushToolInvocation(progressUrl, parentSessionId, serviceAuth, {
                       toolName: toolName || "research-agent-tool",
                       args: args || {},
                       result: "",
@@ -525,8 +525,8 @@ export const queryCodebase: ToolDefinition = {
                       // Push completed tool invocation to frontend
                       const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
                       const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
-                      const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
-                      pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                      const serviceAuth = (context as ToolExecutionContext | undefined)?.serviceAuth;
+                      pushToolInvocation(progressUrl, parentSessionId, serviceAuth, {
                         toolName: toolName || started.toolName,
                         args: started.args,
                         result: truncated,
@@ -782,7 +782,7 @@ Review Guidelines:
         const parentToolCallId = (context as ToolExecutionContext | undefined)?.toolCallId;
         const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
         const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
-        const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
+        const serviceAuth = (context as ToolExecutionContext | undefined)?.serviceAuth;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -818,8 +818,8 @@ Review Guidelines:
                     // Push "running" placeholder to frontend
                     const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
                     const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
-                    const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
-                    pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                    const serviceAuth = (context as ToolExecutionContext | undefined)?.serviceAuth;
+                    pushToolInvocation(progressUrl, parentSessionId, serviceAuth, {
                       toolName: toolEvent.tool_name || "research-agent-tool",
                       args: toolEvent.args || {},
                       result: "",
@@ -844,8 +844,8 @@ Review Guidelines:
                       // Push completed tool invocation to frontend
                       const progressUrl = (context as ToolExecutionContext | undefined)?.progressUrl;
                       const parentSessionId = (context as ToolExecutionContext | undefined)?.sessionId;
-                      const s2sKey = (context as ToolExecutionContext | undefined)?.s2sKey;
-                      pushToolInvocation(progressUrl, parentSessionId, s2sKey, {
+                      const serviceAuth = (context as ToolExecutionContext | undefined)?.serviceAuth;
+                      pushToolInvocation(progressUrl, parentSessionId, serviceAuth, {
                         toolName: toolEvent.tool_name || started.toolName,
                         args: started.args,
                         result: truncated,

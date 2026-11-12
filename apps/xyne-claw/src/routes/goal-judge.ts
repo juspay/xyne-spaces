@@ -6,12 +6,12 @@
  * structured `{done, reason}`.
  */
 import { Router, type Request, type Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { judgeGoalProgress, type GoalJudgeInput } from "../goal-judge.js";
 
 const router = Router();
 
-router.post("/goal-judge", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/goal-judge", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const body = req.body as Partial<GoalJudgeInput> | undefined;
   if (!body || typeof body.condition !== "string" || body.condition.trim().length === 0) {
     res.status(400).json({ success: false, error: "condition is required" });

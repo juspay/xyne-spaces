@@ -7,6 +7,7 @@ const requiredEnv = (name: string): string => {
   return val;
 };
 
+
 const rootEncryptionKey = Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex");
 if (rootEncryptionKey.length !== 32) {
   throw new Error("ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hex characters");
@@ -21,6 +22,22 @@ const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("
 // Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
 // the derived data key; reads fall back to the legacy root during migration.
 registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
+
+/** Parse a public-key map env var: JSON object {"<kid>": "<SPKI PEM>"}; invalid JSON yields no keys. */
+export function parseDelegationPublicKeys(raw: string | undefined): Record<string, string> {
+  if (!raw || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [kid, pem] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof pem === "string" && pem.includes("BEGIN PUBLIC KEY")) out[kid] = pem.replace(/\\n/g, "\n");
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
@@ -47,14 +64,6 @@ export const CONFIG = {
   legacyActionSigningKey: rootEncryptionKey,
   legacySessionSigningKey,
   legacyOauthStateSigningKey: rootEncryptionKey,
-  // Spaces' AES-256-CBC key — must equal xyne-spaces backend's ENCRYPTION_KEY
-  // value (the two services are independently keyed). Used ONLY to decrypt
-  // `installed_apps.signingSecret` read from the Spaces DB during the
-  // signing-secret backfill. Empty buffer when unset; the backfill
-  // short-circuits with a clear error if it needs this and it's missing.
-  spacesEncryptionKey: process.env["SPACES_ENCRYPTION_KEY"]
-    ? Buffer.from(process.env["SPACES_ENCRYPTION_KEY"]!, "hex")
-    : Buffer.alloc(0),
   xyneClawUrl: process.env["XYNE_CLAW_URL"] ?? "http://localhost:3002",
   // Public base URL of the claw SPA, used for post-OAuth browser redirects.
   // Precedence: explicit FRONTEND_URL override; else in production the SPA is
@@ -67,7 +76,24 @@ export const CONFIG = {
         : "http://localhost:5174/claw/");
     return configured.endsWith("/") ? configured : `${configured}/`;
   })(),
-  xyneClawS2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+  /** Public keys that verify Spaces-signed delegation tokens (lib/spaces-delegation.ts). */
+  spacesDelegationPublicKeys: parseDelegationPublicKeys(process.env["SPACES_DELEGATION_PUBLIC_KEYS"]),
+  /**
+   * claw-auth's own EC P-256 private key (PKCS#8 PEM) for service assertions to
+   * Spaces (lib/spaces-agent-client.ts). Spaces holds only the public key
+   * (CLAW_SERVICE_PUBLIC_KEYS there). Empty disables agent calls to Spaces.
+   */
+  clawServicePrivateKey: (process.env["CLAW_SERVICE_PRIVATE_KEY"] ?? "").replace(/\\n/g, "\n").trim(),
+  clawServiceKeyId: process.env["CLAW_SERVICE_KEY_ID"] ?? "claw-1",
+  // The xyne-claw runtime's public keys ({"<kid>": "<SPKI PEM>"}): verify its service assertions.
+  clawRuntimePublicKeys: parseDelegationPublicKeys(process.env["CLAW_RUNTIME_PUBLIC_KEYS"]),
+  /**
+   * Claw agent (prisma.agent.id) that "import from Spaces" eval jobs act as, on
+   * behalf of the importing user. It must be added to the workspace in Spaces;
+   * the import route primes it from the user's cookie (2-hour window), or the
+   * user gives it a stored delegation. Empty disables Spaces eval imports.
+   */
+  evalImportAgentId: (process.env["CLAW_EVAL_IMPORT_AGENT_ID"] ?? "").trim(),
   azureTtsEndpoint: (process.env["AZURE_TTS_ENDPOINT"] ?? "").replace(/\/+$/, ""),
   azureTtsApiKey: process.env["AZURE_TTS_API_KEY"] ?? "",
   azureTtsApiVersion: process.env["AZURE_TTS_API_VERSION"] ?? "",
@@ -120,21 +146,6 @@ export const CONFIG = {
   // public ingress out of the path. Falls back to spacesBackendUrl so dev /
   // single-node deploys keep working without setting two envs.
   spacesInternalUrl: process.env["SPACES_INTERNAL_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
-  /**
-   * Read-only Postgres connection string to the Spaces DB. When set, claw-auth
-   * fetches fresh user session credentials (token, sessionId, workspaceId)
-   * directly from `workflow.user_sessions` at MCP-spawn time instead of relying
-   * on the stale cached copy in `userMcpConnection`. Recommended Postgres role:
-   *
-   *   CREATE ROLE claw_readonly WITH LOGIN PASSWORD '…';
-   *   GRANT CONNECT ON DATABASE spaces TO claw_readonly;
-   *   GRANT USAGE ON SCHEMA public, workflow TO claw_readonly;
-   *   GRANT SELECT ON public.users, workflow.user_sessions TO claw_readonly;
-   *
-   * If unset, claw-auth falls back to the stored credentials path (same
-   * behavior as today). Empty value = feature off.
-   */
-  spacesDbUrl: process.env["SPACES_DB_URL"] ?? "",
   // Public user-facing Spaces URL — used for citation links + ticket deep links
   // (anything a human will click). PUBLIC_SPACES_URL is the canonical env;
   // older deployments may still set SPACES_APP_URL / VITE_XYNE_BACKEND_URL /
@@ -412,13 +423,13 @@ export const CONFIG = {
 } as const;
 
 // Prod safety gate: the claw-auth → session-MCP relay and the run callbacks
-// authenticate to xyne-claw with x-s2s-key. If the local harness is enabled in
-// production without that shared secret, every relay/callback would be sent
-// UNAUTHENTICATED — fail fast at boot instead of shipping an open bridge.
-if (CONFIG.localHarnessEnabled && CONFIG.isProduction && !CONFIG.xyneClawS2sKey) {
+// authenticate to xyne-claw with claw-auth's signed service assertion. Without
+// the signing key every relay/callback would fail closed at runtime; fail fast
+// at boot instead.
+if (CONFIG.localHarnessEnabled && CONFIG.isProduction && !CONFIG.clawServicePrivateKey) {
   throw new Error(
-    "LOCAL_HARNESS_ENABLED=true in production requires XYNE_CLAW_S2S_KEY to be set " +
-    "(the local-harness MCP relay and run callbacks must be S2S-authenticated).",
+    "LOCAL_HARNESS_ENABLED=true in production requires CLAW_SERVICE_PRIVATE_KEY " +
+    "(the local-harness MCP relay and run callbacks are signed with it).",
   );
 }
 

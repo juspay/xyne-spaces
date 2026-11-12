@@ -15,7 +15,6 @@ import type { ToolDefinition } from "../types.js";
 const AUTH_URL =
   process.env["XYNE_CLAW_AUTH_URL"] ?? "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003";
 
-const S2S_KEY = process.env["XYNE_CLAW_S2S_KEY"] ?? "";
 
 interface RunSummary {
   sessionId: string;
@@ -83,7 +82,7 @@ export const getAgentRunsTool: ToolDefinition = {
     },
     required: ["agentSlug"],
   },
-  execute: async (params, _context) => {
+  execute: async (params, context) => {
     const agentSlug = String(params["agentSlug"] ?? "").trim();
     if (!agentSlug) {
       return JSON.stringify({ error: "agentSlug is required" });
@@ -100,10 +99,9 @@ export const getAgentRunsTool: ToolDefinition = {
 
     const url = `${AUTH_URL.replace(/\/$/, "")}/claw/api/v1/runs/by-agent/${encodeURIComponent(agentSlug)}${suffix}`;
 
-    if (!S2S_KEY) {
+    if (!context?.serviceAuth) {
       return JSON.stringify({
-        error:
-          "XYNE_CLAW_S2S_KEY not set in claw-pod environment — get-agent-runs cannot authenticate to claw-auth. Ask the admin to configure it.",
+        error: "This run cannot authenticate to claw-auth (no service signer in the tool context) — get-agent-runs unavailable.",
       });
     }
 
@@ -111,7 +109,7 @@ export const getAgentRunsTool: ToolDefinition = {
     try {
       res = await fetch(url, {
         method: "GET",
-        headers: { "x-s2s-key": S2S_KEY },
+        headers: context.serviceAuth("GET", url),
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {

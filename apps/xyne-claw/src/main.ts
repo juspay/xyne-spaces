@@ -30,6 +30,7 @@ import { createLogger } from "./logger.js";
 import { installSandboxRepoConfigLoader } from "./sandbox-repo-configs.js";
 import { startPodAddressPublisher } from "./run-ownership.js";
 import { installGlobalHttpDispatcher } from "./http-dispatcher.js";
+import { serviceSigningConfigured } from "./service-assertion.js";
 const log = createLogger("main");
 
 log.info(`[startup] global HTTP dispatcher capped at ${installGlobalHttpDispatcher()} connections per origin`);
@@ -38,11 +39,15 @@ const DRAIN_TIMEOUT_MS = Number(process.env["DRAIN_TIMEOUT"] ?? 900) * 1_000;
 const FATAL_FLUSH_TIMEOUT_MS = Number(process.env["FATAL_FLUSH_TIMEOUT_MS"] ?? 30_000);
 const HANDOFF_TURN_CAP_MS = Number(process.env["XYNE_HANDOFF_TURN_CAP_MS"] ?? 120_000);
 
-// Fail closed at boot. Every route is gated by the S2S key; serving without it
-// would leave the whole API unauthenticated. Refuse to start unless the key is
-// configured — there is no insecure escape hatch.
-if (!SERVER.s2sKey) {
-  log.error("[startup] FATAL: XYNE_CLAW_S2S_KEY is not set. Refusing to boot an unauthenticated service. Set the key.");
+// Fail closed at boot. Calls to claw-auth are signed with the runtime's own key,
+// and every inbound route accepts only claw-auth's signed assertions. Without
+// either the runtime can't work, so refuse to start — no insecure escape hatch.
+if (!serviceSigningConfigured()) {
+  log.error("[startup] FATAL: CLAW_RUNTIME_PRIVATE_KEY is missing or not an EC P-256 key. Refusing to boot. Set the key.");
+  process.exit(1);
+}
+if (!(process.env["CLAW_SERVICE_PUBLIC_KEYS"] ?? "").trim()) {
+  log.error("[startup] FATAL: CLAW_SERVICE_PUBLIC_KEYS is not set, so no inbound call from claw-auth can be verified. Refusing to boot.");
   process.exit(1);
 }
 

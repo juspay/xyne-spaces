@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalHarnessRun } from "@prisma/client";
 
+vi.mock("./service-assertion.js", () => ({
+  serviceAuthHeaders: (aud: string, method: string) => ({ "x-service-assertion": `test:${aud}:${method}` }),
+}));
+vi.mock("./internal-service-auth.js", () => ({
+  internalServiceHeaders: (method: string) => ({ "x-service-assertion": `test:internal:${method}` }),
+}));
 vi.mock("../config.js", () => ({
   CONFIG: {
     internalUrl: "http://auth.local",
     xyneClawUrl: "http://claw.local",
-    xyneClawS2sKey: "s2s",
     localHarnessRunTimeoutMs: 600000,
     localHarnessEnabled: true,
   },

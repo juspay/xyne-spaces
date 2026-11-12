@@ -158,15 +158,24 @@ kubectl create namespace xyne
 JWT_SECRET="$(openssl rand -hex 32)"
 ZERO_AUTH_SECRET="$(openssl rand -hex 32)"
 ENCRYPTION_KEY="$(openssl rand -hex 32)"
-INTERNAL_S2S_KEY="$(openssl rand -hex 32)"
 ZERO_ADMIN_PASSWORD="$(openssl rand -hex 16)"
 REDIS_PASSWORD="$(openssl rand -hex 16)"
+
+# One P-256 key pair per service: Spaces, claw-auth, the claw runtime. Each private key goes only
+# to its own service; the others get the public key (docs/setup/service-keys.md).
+for svc in spaces claw-auth claw-runtime; do
+  openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${svc}.key"
+  openssl ec -in "${svc}.key" -pubout -out "${svc}.pub"
+done
 ```
 
 `ENCRYPTION_KEY` must be exactly 32 bytes as 64 hex characters; the backend refuses to boot
 otherwise. `ZERO_AUTH_SECRET` must be identical in `xyne-backend-secrets` and `xyne-zero-secrets`.
 `REDIS_URL` carries the same host, port and password as `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`
 (`rediss://` when `REDIS_TLS` is `"true"`).
+
+Delete the `*.key` files once the Secrets exist; each private key must live only in its own
+service's Secret, never in a shared one or in tool / sandbox environments.
 
 y-sweet uses a key pair: the server holds the private key, the backend presents the derived
 server token. Both come from one `y-sweet gen-auth --json` run, which prints `private_key` and
@@ -194,7 +203,9 @@ kubectl -n xyne create secret generic xyne-backend-secrets \
   --from-literal=JWT_SECRET="${JWT_SECRET}" \
   --from-literal=ZERO_AUTH_SECRET="${ZERO_AUTH_SECRET}" \
   --from-literal=ENCRYPTION_KEY="${ENCRYPTION_KEY}" \
-  --from-literal=INTERNAL_S2S_KEY="${INTERNAL_S2S_KEY}" \
+  --from-file=CLAW_DELEGATION_PRIVATE_KEY=spaces.key \
+  --from-literal=CLAW_SERVICE_PUBLIC_KEYS="$(jq -cn --rawfile k claw-auth.pub '{"claw-1": $k}')" \
+  --from-literal=CLAW_RUNTIME_PUBLIC_KEYS="$(jq -cn --rawfile k claw-runtime.pub '{"runtime-1": $k}')" \
   --from-literal=Y_SWEET_SERVER_TOKEN="${Y_SWEET_SERVER_TOKEN}" \
   --from-literal=AWS_ACCESS_KEY_ID="<storage access key>" \
   --from-literal=AWS_SECRET_ACCESS_KEY="<storage secret key>" \
@@ -221,8 +232,8 @@ Which keys each chart reads by default, and which you add through your values:
 
 | Secret | Keys the chart references by default | Keys you add in values (this walkthrough) |
 |---|---|---|
-| `xyne-backend-secrets` (`xyne-backend`) | `DATABASE_URL`, `COMMON_DATABASE_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY` | `REDIS_PASSWORD`, `Y_SWEET_SERVER_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
-| `xyne-backend-secrets` (`xyne-worker`) | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY` | `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `xyne-backend-secrets` (`xyne-backend`) | `DATABASE_URL`, `COMMON_DATABASE_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `CLAW_DELEGATION_PRIVATE_KEY`, `CLAW_SERVICE_PUBLIC_KEYS`, `CLAW_RUNTIME_PUBLIC_KEYS` | `REDIS_PASSWORD`, `Y_SWEET_SERVER_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| `xyne-backend-secrets` (`xyne-worker`) | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`, `CLAW_DELEGATION_PRIVATE_KEY`, `CLAW_SERVICE_PUBLIC_KEYS`, `CLAW_RUNTIME_PUBLIC_KEYS` | `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-zero-secrets` | `ZERO_UPSTREAM_DB`, `ZERO_CVR_DB`, `ZERO_CHANGE_DB`, `ZERO_AUTH_SECRET`, `ZERO_ADMIN_PASSWORD` | - |
 | `xyne-ysweet-secrets` | none (the chart ships `secretEnv: {}`) | `Y_SWEET_AUTH`; with an `s3://` document store also `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-redis-auth` | `password` (through `auth.existingSecret` / `auth.existingSecretKey`) | - |
@@ -232,16 +243,17 @@ marked *optional* are referenced with `optional: true` and may be absent.
 
 ```bash
 kubectl -n xyne create secret generic xyne-claw-secrets \
-  --from-literal=XYNE_CLAW_S2S_KEY="$(openssl rand -hex 32)" \
-  --from-literal=INTERNAL_S2S_KEY="${INTERNAL_S2S_KEY}" \
+  --from-file=CLAW_RUNTIME_PRIVATE_KEY=claw-runtime.key \
+  --from-literal=CLAW_SERVICE_PUBLIC_KEYS="$(jq -cn --rawfile k claw-auth.pub '{"claw-1": $k}')" \
   --from-literal=LITELLM_API_KEY="<llm gateway key>" \
   --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}"
 
 kubectl -n xyne create secret generic xyne-claw-auth-secrets \
   --from-literal=DATABASE_URL="${PG}/claw_auth?sslmode=require" \
   --from-literal=ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-  --from-literal=XYNE_CLAW_S2S_KEY="<same value as in xyne-claw-secrets>" \
-  --from-literal=INTERNAL_S2S_KEY="${INTERNAL_S2S_KEY}" \
+  --from-file=CLAW_SERVICE_PRIVATE_KEY=claw-auth.key \
+  --from-literal=SPACES_DELEGATION_PUBLIC_KEYS="$(jq -cn --rawfile k spaces.pub '{"spaces-1": $k}')" \
+  --from-literal=CLAW_RUNTIME_PUBLIC_KEYS="$(jq -cn --rawfile k claw-runtime.pub '{"runtime-1": $k}')" \
   --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}" \
   --from-literal=GOOGLE_CLIENT_ID="<oauth client id>" \
   --from-literal=GOOGLE_CLIENT_SECRET="<oauth client secret>"
@@ -258,8 +270,8 @@ kubectl -n xyne create secret generic xyne-lighton-ocr-secrets \
 
 | Secret | Required keys | Optional keys |
 |---|---|---|
-| `xyne-claw-secrets` | `XYNE_CLAW_S2S_KEY`, `LITELLM_API_KEY` | `INTERNAL_S2S_KEY`, `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `xyne-claw-auth-secrets` | `DATABASE_URL`, `ENCRYPTION_KEY` (64 hex), `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY` | `SPACES_DB_URL`, `REDIS_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `xyne-claw-secrets` | `CLAW_RUNTIME_PRIVATE_KEY`, `CLAW_SERVICE_PUBLIC_KEYS`, `LITELLM_API_KEY` | `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
+| `xyne-claw-auth-secrets` | `DATABASE_URL`, `ENCRYPTION_KEY` (64 hex), `CLAW_SERVICE_PRIVATE_KEY`, `SPACES_DELEGATION_PUBLIC_KEYS`, `CLAW_RUNTIME_PUBLIC_KEYS` | `REDIS_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-transcription-agent-secrets` | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TRANSCRIPTION_AGENT_API_KEY` | `REDIS_PASSWORD`, `AZURE_OPENAI_STT_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_TTS_API_KEY`, `DEEPGRAM_API_KEY`, `CHUTES_STT_API_KEY`, `GOOGLE_VOICE_CREDENTIALS_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-lighton-ocr-secrets` | - | `LIGHTON_ACCESS_TOKEN`, `REDIS_PASSWORD` |
 
@@ -294,7 +306,8 @@ volume mounted where the seed looks (`migrations.volumes`, `migrations.volumeMou
 built-in credentials encrypted.
 
 The Job reads `DATABASE_URL` (and `COMMON_DATABASE_URL` for the backend) from the service's
-Secret; claw-auth also reads `SPACES_DB_URL` to link its admin to the Spaces user. Watch it with
+Secret. claw-auth has no access to the Spaces database: set `migrations.env.SPACES_DEFAULT_WORKSPACE_ID`
+to link its default org to your Spaces workspace. Watch it with
 `kubectl -n <namespace> logs job/<release>-migrate`.
 
 ### 5. Write `my-values.yaml`

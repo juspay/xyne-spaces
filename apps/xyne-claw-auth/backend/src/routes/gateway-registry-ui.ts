@@ -3,7 +3,7 @@
  *
  * A thin, SESSION-authenticated surface over the MCP Gateway service registry so
  * signed-in users can propose / list / deregister services from the Claw UI. The
- * underlying s2s router (`/gateway/registry/*`) requires the secret `x-s2s-key`
+ * underlying service router (`/gateway/registry/*`) requires a service credential
  * and an allowlisted `x-tenant-id` — neither of which may ever reach the browser.
  *
  * Approval flow (mirrors the MCP "publish request" flow): a UI registration does

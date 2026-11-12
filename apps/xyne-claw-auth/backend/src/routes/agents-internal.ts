@@ -9,8 +9,8 @@
  * for S2S), org scope and the `enabled` filter, so personal/cloned and disabled
  * agents would read as "not an agent" and be stamped APP permanently.
  *
- * Mounted under `requireInternalS2S` — the caller is the Spaces backend, which
- * holds INTERNAL_S2S_KEY (not XYNE_CLAW_S2S_KEY).
+ * Mounted under requireSpacesService — the caller is the Spaces backend,
+ * proven by its signed service assertion.
  */
 
 import { Router, type Request, type Response } from "express";

@@ -65,6 +65,7 @@ import crypto from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
 
 import { createLogger } from "./logger.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 const log = createLogger("subagent-tools");
 
 /**
@@ -381,7 +382,7 @@ function pushChildLabel(progressUrl: ProgressDest, sessionId: string, toolLabel:
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", progressUrl),
     },
     body: JSON.stringify({ sessionId, toolLabel }),
     signal: AbortSignal.timeout(5_000),

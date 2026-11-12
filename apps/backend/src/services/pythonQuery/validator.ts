@@ -171,47 +171,56 @@ function validateWhereDepth(where: Record<string, unknown>, depth: number): Vali
   return { valid: true }
 }
 
+const LOGICAL_KEYS = new Set(['AND', 'OR', 'NOT'])
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * A where clause is fields (and AND/OR/NOT around more where clauses). Each
+ * field takes a value or an object of ALLOWED_OPERATORS (`not` may wrap more
+ * operators). Nothing else nests: relation filters (`some`, `every`, `is`, or a
+ * related model's fields) are rejected, because access checks and scopes only
+ * cover the queried model, so a relation filter would read another model's data.
+ */
 function validateWhereOperators(where: Record<string, unknown>): ValidationResult {
   for (const [key, value] of Object.entries(where)) {
-    // Skip logical operators
-    if (['AND', 'OR', 'NOT'].includes(key)) {
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          if (typeof item === 'object' && item !== null) {
-            const result = validateWhereOperators(item as Record<string, unknown>)
-            if (!result.valid) {
-              return result
-            }
-          }
+    if (LOGICAL_KEYS.has(key)) {
+      const items = Array.isArray(value) ? value : [value]
+      for (const item of items) {
+        if (!isPlainObject(item)) {
+          return { valid: false, error: `"${key}" must contain where clauses` }
         }
-      } else if (typeof value === 'object' && value !== null) {
-        const result = validateWhereOperators(value as Record<string, unknown>)
-        if (!result.valid) {
-          return result
-        }
+        const result = validateWhereOperators(item)
+        if (!result.valid) return result
       }
       continue
     }
-
-    // Check nested operators
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      for (const operator of Object.keys(value as Record<string, unknown>)) {
-        // Skip if it looks like a field name (could be nested relation)
-        if (!ALLOWED_OPERATORS.has(operator) && !operator.match(/^[a-z][a-zA-Z0-9]*$/)) {
-          return {
-            valid: false,
-            error: `Invalid operator "${operator}" in where clause`,
-          }
-        }
-      }
-
-      // Recursively validate nested objects
-      const result = validateWhereOperators(value as Record<string, unknown>)
-      if (!result.valid) {
-        return result
-      }
-    }
+    const result = validateFieldCondition(key, value)
+    if (!result.valid) return result
   }
 
+  return { valid: true }
+}
+
+function validateFieldCondition(field: string, condition: unknown): ValidationResult {
+  if (!isPlainObject(condition)) return { valid: true } // equality: a value or a list
+  for (const [rawOperator, operand] of Object.entries(condition)) {
+    // translator.ts renames these Python-safe spellings
+    const operator = rawOperator === 'in_' ? 'in' : rawOperator === 'not_' ? 'not' : rawOperator
+    if (!ALLOWED_OPERATORS.has(operator)) {
+      return {
+        valid: false,
+        error: `Invalid operator "${rawOperator}" on field "${field}" (relation filters are not supported)`,
+      }
+    }
+    if (isPlainObject(operand)) {
+      if (operator !== 'not') {
+        return { valid: false, error: `Operator "${operator}" on field "${field}" takes a value, not an object` }
+      }
+      const result = validateFieldCondition(field, operand)
+      if (!result.valid) return result
+    }
+  }
   return { valid: true }
 }

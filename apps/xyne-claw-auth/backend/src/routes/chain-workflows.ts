@@ -3,11 +3,11 @@ import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { agentChainWorkflowRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
-import { requireStrictS2S } from "../middleware/require-auth.js";
+import { requireService, serviceAuthHeaders } from "../lib/service-assertion.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
@@ -22,6 +22,7 @@ import {
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
 const log = createLogger("chain-workflows");
 
 /* ------------------------------------------------------------------ */
@@ -115,59 +116,24 @@ async function callSpacesAutomations(
   path: string,
   body?: Record<string, unknown>,
   workspaceHint?: string,
+  requestCookie?: string,
 ): Promise<SpacesAutomationResult | null> {
   try {
-    // Prefer a LIVE token from the Spaces session DB — getSpacesAuthForUser
-    // refreshes an expired access token via /api/auth/refresh-session. Without
-    // this, the automation create/update/delete calls silently 401 once the
-    // user's stored MCP token expires (same defect as resolveUserSpacesAuth).
-    // Fall back to the cached MCP-connection token if the live lookup misses.
-    let token = "";
-    let baseUrl = "";
-    let sessionId = "";
-    let workspaceId = "";
-    const live = await getSpacesAuthForUser(userId, "require-auth", workspaceHint).catch(() => null);
-    if (live?.token) {
-      token = live.token;
-      baseUrl = CONFIG.spacesInternalUrl;
-      sessionId = live.sessionId;
-      workspaceId = live.workspaceId;
-    } else {
-      const connection = await prisma.userMcpConnection.findFirst({
-        where: { userId, mcpServer: { type: "xyne-spaces" } },
-      });
-      if (!connection) return null;
-      const decrypted = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-      const credentials = JSON.parse(decrypted) as Record<string, unknown>;
-      token = typeof credentials["token"] === "string" ? credentials["token"].trim() : "";
-      sessionId = typeof credentials["sessionId"] === "string" ? credentials["sessionId"].trim() : "";
-      workspaceId = typeof credentials["workspaceId"] === "string" ? credentials["workspaceId"].trim() : "";
-      baseUrl = typeof credentials["url"] === "string" && credentials["url"].trim()
-        ? credentials["url"].trim()
-        : CONFIG.spacesInternalUrl;
-    }
-    if (!token) return null;
-    if (!workspaceId) {
-      workspaceId = await getWorkspaceIdForUser(userId, "require-auth", workspaceHint).catch(() => null) ?? "";
-      if (workspaceId) log.info(`[chain-workflows] resolved workspaceId=${workspaceId} from user row for automation userId=${userId}`);
-    }
-    const cookieParts: string[] = [];
-    if (sessionId) {
-      cookieParts.push(`user_session_id=${sessionId}`);
-      cookieParts.push(`xyne_session=${sessionId}`);
-    }
-    if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-    const cookieHeader = cookieParts.join("; ");
+    // The user is present in their browser: forward THEIR Spaces cookie from
+    // this request (Spaces validates/refreshes it itself). No cookie, no call:
+    // claw-auth holds no stored copies of users' Spaces credentials.
+    const cookieHeader = typeof requestCookie === "string" && requestCookie.trim() ? requestCookie : "";
+    if (!cookieHeader) return null;
+    const baseUrl = CONFIG.spacesInternalUrl;
+    const workspaceId = workspaceHint ?? "";
 
     const url = `${baseUrl}/api/automations${path}`;
     const res = await fetch(url, {
       method,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(sessionId ? { "x-session-id": sessionId } : {}),
         ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+        Cookie: cookieHeader,
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(15_000),
@@ -372,15 +338,15 @@ async function createAndSubmitSpacesAutomation(
   requesterId: string,
   name: string,
   config: Record<string, unknown>,
-  opts?: { issueWebhook?: boolean; workspaceHint?: string | undefined },
+  opts?: { issueWebhook?: boolean; workspaceHint?: string | undefined; requestCookie?: string | undefined },
 ): Promise<{ id: string | null; webhookUrl: string | null }> {
-  const created = await callSpacesAutomations(requesterId, "POST", "", { name, config }, opts?.workspaceHint);
+  const created = await callSpacesAutomations(requesterId, "POST", "", { name, config }, opts?.workspaceHint, opts?.requestCookie);
   const id = created?.id ?? null;
   if (!id) {
     throw new Error(`Spaces rejected automation config for "${name}"`);
   }
   let webhookUrl: string | null = null;
-  const submitted = await callSpacesAutomations(requesterId, "POST", `/${id}/submit`, undefined, opts?.workspaceHint);
+  const submitted = await callSpacesAutomations(requesterId, "POST", `/${id}/submit`, undefined, opts?.workspaceHint, opts?.requestCookie);
   if (!submitted) {
     log.warn(`[chain-workflows] automation ${id} created but submit-for-approval failed — left as DRAFT, submit manually from Spaces`);
   }
@@ -388,7 +354,7 @@ async function createAndSubmitSpacesAutomation(
   // once and capture the full URL — Spaces only returns it on first issue, so
   // we persist it on the trigger channel for the UI to display.
   if (opts?.issueWebhook) {
-    const issued = await callSpacesAutomations(requesterId, "POST", `/${id}/webhook`, undefined, opts?.workspaceHint);
+    const issued = await callSpacesAutomations(requesterId, "POST", `/${id}/webhook`, undefined, opts?.workspaceHint, opts?.requestCookie);
     webhookUrl = issued?.url ?? null;
     if (!webhookUrl) {
       log.warn(`[chain-workflows] automation ${id}: webhook URL issue returned no url`);
@@ -404,10 +370,12 @@ export async function syncWorkflowTriggers(params: {
   requesterId: string;
   /** Verified workspace header from the request — scopes identity resolution. */
   requesterWorkspaceHint?: string | undefined;
+  /** The requester's own Spaces Cookie header from this request, forwarded to Spaces. */
+  requesterCookie?: string | undefined;
   existingTriggers: WorkflowTrigger[];
   newTriggers: TriggerPayloadItem[] | null;
 }): Promise<void> {
-  const { workflowId, workflowName, entryAgentSlug, requesterId, existingTriggers, newTriggers, requesterWorkspaceHint } = params;
+  const { workflowId, workflowName, entryAgentSlug, requesterId, existingTriggers, newTriggers, requesterWorkspaceHint, requesterCookie } = params;
   const existingById = new Map(existingTriggers.map((t) => [t.id, t]));
   const oldChannelIds = collectChannelIds(existingTriggers);
   const newTriggersJson: WorkflowTrigger[] = [];
@@ -425,7 +393,7 @@ export async function syncWorkflowTriggers(params: {
       // Delete automations for removed channels.
       for (const [channelId, ch] of existingChannelMap) {
         if (!newChannelSet.has(channelId) && ch.spacesAutomationId) {
-          await callSpacesAutomations(requesterId, "DELETE", `/${ch.spacesAutomationId}`, undefined, requesterWorkspaceHint);
+          await callSpacesAutomations(requesterId, "DELETE", `/${ch.spacesAutomationId}`, undefined, requesterWorkspaceHint, requesterCookie);
         }
       }
       // Create or keep automations for current channels.
@@ -438,7 +406,7 @@ export async function syncWorkflowTriggers(params: {
             requesterId,
             `${workflowName} — ${t.type}`,
             buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
-            { issueWebhook: isVcsTemplateTrigger(t.type), workspaceHint: requesterWorkspaceHint },
+            { issueWebhook: isVcsTemplateTrigger(t.type), workspaceHint: requesterWorkspaceHint, requestCookie: requesterCookie },
           );
           channels.push({ channelId, spacesAutomationId: id, webhookUrl });
         }
@@ -456,7 +424,7 @@ export async function syncWorkflowTriggers(params: {
     // newTriggers null/[] → delete all existing automations.
     for (const t of existingTriggers) {
       for (const c of t.channels) {
-        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requesterWorkspaceHint);
+        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requesterWorkspaceHint, requesterCookie);
       }
     }
   }
@@ -466,7 +434,7 @@ export async function syncWorkflowTriggers(params: {
     const stillExists = (newTriggers ?? []).some((t) => t.id === id);
     if (!stillExists) {
       for (const c of et.channels) {
-        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requesterWorkspaceHint);
+        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requesterWorkspaceHint, requesterCookie);
       }
     }
   }
@@ -578,7 +546,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
           requesterId,
           `${name.trim()} — ${t.type}`,
           buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
-          { issueWebhook: isVcsTemplateTrigger(t.type), workspaceHint: requestWorkspaceHint(req) },
+          { issueWebhook: isVcsTemplateTrigger(t.type), workspaceHint: requestWorkspaceHint(req), requestCookie: req.headers.cookie },
         );
         channels.push({ channelId, spacesAutomationId: id, webhookUrl });
         allNewChannelIds.add(channelId);
@@ -925,6 +893,7 @@ router.put("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
       entryAgentSlug,
       requesterId,
       requesterWorkspaceHint: requestWorkspaceHint(req),
+      requesterCookie: req.headers.cookie,
       existingTriggers: parseTriggers(existing.triggers),
       newTriggers: triggers,
     });
@@ -954,7 +923,7 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
     for (const t of existingTriggers) {
       for (const c of t.channels) {
         if (!c.spacesAutomationId) continue;
-        const result = await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requestWorkspaceHint(req));
+        const result = await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requestWorkspaceHint(req), req.headers.cookie);
         if (!result) failed.push(c.spacesAutomationId);
       }
     }
@@ -997,7 +966,8 @@ function buildTriggerInitialMessage(triggerPayload: Record<string, unknown> | un
   return `Automation event triggered: ${type ?? "unknown"}`;
 }
 
-router.post("/:id/trigger", requireStrictS2S, asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+// The body names the user, so only Spaces (automations) or claw-auth itself may trigger.
+router.post("/:id/trigger", requireService("xyne-spaces", "xyne-claw-auth"), asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
   const { userId, triggerPayload, conversationId: bodyConversationId, targetChannelId } = req.body as {
     userId?: string;
     triggerPayload?: Record<string, unknown>;
@@ -1093,15 +1063,17 @@ router.post("/:id/trigger", requireStrictS2S, asyncHandler(async (req: Request<{
 
       if (channelId) {
         const agentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
-        if (agentRecord?.spacesAppToken) {
-          const [ciphertext, iv, authTag] = agentRecord.spacesAppToken.split(":");
-          const appToken = ciphertext && iv && authTag
-            ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
-          if (appToken) {
+        if (agentRecord) {
+          // Post as the entry agent's bot in the trigger's workspace.
+          const triggerWorkspaceId = requestWorkspaceHint(req)
+            ?? (userId ? await getWorkspaceIdForUser(userId, "unknown").catch(() => null) : null)
+            ?? null;
+          const bot: BotRef = { clawAgentId: agentRecord.id, workspaceId: triggerWorkspaceId };
+          if (await getAgentBotAuth(agentRecord.id, triggerWorkspaceId)) {
             const initialMessage = buildTriggerInitialMessage(triggerPayload);
             const postResult = (await spacesAppFetch("/chat/postMessage", {
               channelId, text: initialMessage,
-            }, appToken)) as { conversationId?: string };
+            }, bot)) as { conversationId?: string };
             if (postResult.conversationId) {
               conversationId = postResult.conversationId;
               log.info(`[chain-workflows/trigger] created conversation ${conversationId} in channel ${channelId}`);
@@ -1129,7 +1101,7 @@ router.post("/:id/trigger", requireStrictS2S, asyncHandler(async (req: Request<{
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
     },
     body: JSON.stringify({
       userId: effectiveUserId, task, agentSlug: entryAgentSlug,
@@ -1151,20 +1123,23 @@ router.post("/:id/trigger", requireStrictS2S, asyncHandler(async (req: Request<{
 
   if (runBody.sessionId && conversationId) {
     try {
-      if (entryAgentRecord?.spacesAppToken && entryAgentRecord.spacesAppId) {
-        const [ciphertext, iv, authTag] = entryAgentRecord.spacesAppToken.split(":");
-        const appToken = ciphertext && iv && authTag
-          ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
+      const sessionWorkspaceId = requestWorkspaceHint(req)
+        ?? (userId ? await getWorkspaceIdForUser(userId, "unknown").catch(() => null) : null)
+        ?? null;
+      const entryBot = entryAgentRecord ? await getAgentBotAuth(entryAgentRecord.id, sessionWorkspaceId) : null;
+      if (entryAgentRecord && entryBot) {
         const sessionContext: SessionContext = {
-          mentionedUserId: entryAgentRecord.spacesAppUserId ?? userId,
+          mentionedUserId: entryBot.botUserId || userId,
           senderId, senderName, channelId,
           channelName: channelId, conversationId,
           task, agentSlug: entryAgentSlug,
           agentId: entryAgentRecord.id,
           agentOrgId: entryAgentRecord.orgId,
-          responseMode: "conversation", appToken,
-          spacesAppId: entryAgentRecord.spacesAppId,
-          spacesAppUserId: entryAgentRecord.spacesAppUserId ?? "",
+          responseMode: "conversation",
+          bot: { clawAgentId: entryAgentRecord.id, workspaceId: entryBot.workspaceId },
+          spacesAppId: entryAgentRecord.spacesAppId ?? "",
+          spacesAppUserId: entryBot.botUserId,
+          workspaceId: entryBot.workspaceId,
         };
         await setSession(runBody.sessionId, sessionContext);
         log.info(`[chain-workflows/trigger] stored session ctx sessionId=${runBody.sessionId} conversationId=${conversationId}`);

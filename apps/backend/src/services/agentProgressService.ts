@@ -1,6 +1,8 @@
 import { MessageType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { redisService } from './redisService';
+import { clawDelegationHeaders } from '@/services/clawDelegationToken';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 
 /**
  * Clear every in-flight agent-progress signal for a conversation and broadcast
@@ -77,14 +79,16 @@ export function requestClawAgentCancel(params: {
   /** The run to cancel, when the caller knows it. */
   sessionId?: string;
 }): Promise<globalThis.Response> {
+  const url = `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/${encodeURIComponent(params.agentSlug)}/chat/cancel`;
   return fetch(
-    `${config.xyneClaw.authUrl}/claw/api/v1/agent-chat/${encodeURIComponent(params.agentSlug)}/chat/cancel`,
+    url,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-id': params.userId,
-        ...(config.xyneClaw.s2sKey ? { 'x-s2s-key': config.xyneClaw.s2sKey } : {}),
+        // The user comes from the delegation token; claw-auth ignores x-user-id.
+        ...clawDelegationHeaders(params.userId),
+        ...serviceAuthHeaders('xyne-claw-auth', 'POST', url),
       },
       body: JSON.stringify({
         conversationId: params.conversationId,

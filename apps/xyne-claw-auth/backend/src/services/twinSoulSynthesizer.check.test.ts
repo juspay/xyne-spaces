@@ -23,7 +23,6 @@ vi.mock("./digitalTwinPipelineEvents.js", () => ({
   finishSynthesisEvent: (...a: unknown[]) => finishSynthesisEvent(...(a as [])),
 }));
 
-process.env["XYNE_CLAW_S2S_KEY"] ??= "test-s2s";
 process.env["XYNE_CLAW_URL"] ??= "http://claw.test";
 const { synthesizeSoulFilesForUser } = await import("./twinSoulSynthesizer.js");
 

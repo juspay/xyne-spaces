@@ -12,6 +12,7 @@ const router = Router();
 router.use(evalFoldersRouter);
 router.use(evalGenerationsRouter);
 router.use(evalJudgingRouter);
-router.use(evalImportRouter);
+// Off: Spaces thread mentions only (2026-11-12). Eval import posts to Spaces.
+// router.use(evalImportRouter);
 
 export { router as evalsRouter };

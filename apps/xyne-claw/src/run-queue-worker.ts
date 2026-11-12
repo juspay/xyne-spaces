@@ -35,6 +35,7 @@ import {
   overHighWater,
   underLowWater,
 } from "./pressure.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const clog = createLogger("run-queue-worker");
 
@@ -75,7 +76,7 @@ export async function postProgressLabel(payload: InternalRunPayload, toolLabel: 
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", dest, payload.sessionToken),
     },
     body: JSON.stringify({
       sessionId,

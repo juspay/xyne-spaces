@@ -1,6 +1,7 @@
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
+import { serviceAuthHeaders } from "./service-assertion.js";
 
 const log = createLogger("conversation-access");
 
@@ -31,11 +32,12 @@ export async function checkConversationAccess(
 ): Promise<ConversationAccessVerdict> {
   if (!CONFIG.spacesInternalUrl) return "unknown";
   try {
-    const res = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/conversation-access`, {
+    const url = `${CONFIG.spacesInternalUrl}/api/internal/conversation-access`;
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-s2s-key": process.env["INTERNAL_S2S_KEY"] ?? "",
+        ...serviceAuthHeaders("xyne-spaces", "POST", url),
       },
       body: JSON.stringify({ conversationId, userId }),
       signal: AbortSignal.timeout(5_000),

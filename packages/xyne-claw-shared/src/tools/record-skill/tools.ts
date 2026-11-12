@@ -179,18 +179,19 @@ export const analyzeSkillRecording: ToolDefinition = {
       }
       let source: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>;
       if (selected.attachmentId) {
-        if (!context.sessionId || !context.sessionToken || !context.s2sKey) {
+        if (!context.sessionId || !context.sessionToken || !context.serviceAuth) {
           return "Error: Per-run credentials are unavailable for the recording stream.";
         }
         abortDownload = new AbortController();
         downloadTimeout = setTimeout(() => abortDownload?.abort(), 30 * 60 * 1000);
         downloadTimeout.unref();
         const authBase = (process.env["XYNE_CLAW_AUTH_URL"] ?? AUTH_URL_DEFAULT).replace(/\/+$/, "");
+        const recordingUrl = `${authBase}/claw/api/v1/internal/run/${encodeURIComponent(context.sessionId)}/recordings/${encodeURIComponent(selected.attachmentId)}`;
         const response = await fetch(
-          `${authBase}/claw/api/v1/internal/run/${encodeURIComponent(context.sessionId)}/recordings/${encodeURIComponent(selected.attachmentId)}`,
+          recordingUrl,
           {
             headers: {
-              "x-s2s-key": context.s2sKey,
+              ...context.serviceAuth("GET", recordingUrl),
               "x-session-token": context.sessionToken,
             },
             signal: abortDownload.signal,

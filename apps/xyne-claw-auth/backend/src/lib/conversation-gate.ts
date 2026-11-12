@@ -10,6 +10,7 @@ import {
   type EnqueueResult,
   type QueuedMessage,
 } from "./message-queue.js";
+import { selfAuthHeaders } from "./internal-call.js";
 
 const log = createLogger("conversation-gate");
 
@@ -55,8 +56,7 @@ export async function requestInterruptWithReply(sessionId: string, userId: strin
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-          "x-user-id": userId,
+          ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/interrupt-with-reply`, { userId, sessionId }),
         },
       },
     );

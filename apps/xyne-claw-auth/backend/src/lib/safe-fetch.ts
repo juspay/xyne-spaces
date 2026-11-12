@@ -22,8 +22,6 @@ interface ResolvedAddress {
 export interface SafeFetchOptions {
   allowPrivate?: boolean;
   allowLoopbackInDev?: boolean;
-  /** internalFetch only: attach the fleet S2S key to the (config-origin) target. */
-  s2s?: boolean;
   lookup?: ((hostname: string) => Promise<ResolvedAddress[]>) | undefined;
   maxRedirects?: number;
   maxResponseBytes?: number;
@@ -35,7 +33,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_REDIRECTS = 5;
 
 const SENSITIVE_HEADERS = new Set([
-  "authorization", "proxy-authorization", "cookie", "x-s2s-key", "x-session-token", "x-api-key",
+  "authorization", "proxy-authorization", "cookie", "x-service-assertion", "x-session-token", "x-api-key",
 ]);
 
 function blockList(v4: Array<[string, number]>, v6: Array<[string, number]>): BlockList {
@@ -371,21 +369,8 @@ export function isConfigOrigin(rawUrl: string): boolean {
 }
 
 /**
- * The only sanctioned way to attach the fleet S2S key: it is added when, and
- * only when, the target origin is one this service was configured with.
- */
-export function attachS2sKey(
-  headers: Record<string, string>,
-  rawUrl: string,
-  key: string = CONFIG.xyneClawS2sKey,
-): Record<string, string> {
-  if (!key || !isConfigOrigin(rawUrl)) return { ...headers };
-  return { ...headers, "x-s2s-key": key };
-}
-
-/**
- * Fetch a config-derived internal URL. Refuses anything not on a config origin,
- * and is the only function permitted to attach the fleet S2S key (`s2s: true`).
+ * Fetch a config-derived internal URL. Refuses anything not on a config origin.
+ * Callers add their own service assertion (lib/service-assertion.ts).
  */
 export async function internalFetch(
   rawUrl: string,
@@ -395,6 +380,5 @@ export async function internalFetch(
   if (!isConfigOrigin(rawUrl)) {
     throw new SafeFetchError("Target is not a configured internal origin", "not-config-origin", rawUrl);
   }
-  const headers = opts.s2s ? attachS2sKey(normalizeHeaders(init.headers), rawUrl) : init.headers;
-  return safeFetch(rawUrl, { ...init, ...(headers ? { headers } : {}) }, { ...opts, allowPrivate: true });
+  return safeFetch(rawUrl, init, { ...opts, allowPrivate: true });
 }

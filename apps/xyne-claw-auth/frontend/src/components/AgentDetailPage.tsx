@@ -1161,7 +1161,7 @@ function JobCard({ job, deleting, onDelete, onUpdate }: { job: ScheduledJob; del
 
   // Live channel search — fires only when the user opens the picker for
   // "Post in channel" mode. Uses `/api/v1/spaces/channels` which scopes to
-  // channels the requesting user can see (live-first via SPACES_DB_URL).
+  // channels the requesting user can see (via Spaces' API).
   useEffect(() => {
     if (!channelDropdownOpen) return;
     let cancelled = false;

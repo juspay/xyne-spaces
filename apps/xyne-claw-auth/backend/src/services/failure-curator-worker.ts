@@ -23,6 +23,7 @@ import { CONFIG } from "../config.js";
 import { selectNegativeSessions, type NegativeSession } from "./failure-curator-detection.js";
 
 import { createLogger } from "../logger.js";
+import { runtimeAuthHeaders } from "../lib/internal-call.js";
 const log = createLogger("failure-curator-worker");
 
 const TICK_MS = Number(process.env["FAILURE_CURATOR_TICK_MS"] ?? 60 * 60 * 1000); // 1h
@@ -32,9 +33,6 @@ const TICK_MS = Number(process.env["FAILURE_CURATOR_TICK_MS"] ?? 60 * 60 * 1000)
 // sessionIds per candidate, so we don't lose statistical rigor.
 const MIN_BATCH = Number(process.env["FAILURE_CURATOR_MIN_BATCH"] ?? 2);
 const CLAW_URL = (process.env["XYNE_CLAW_URL"] ?? process.env["CLAW_URL"] ?? "http://xyne-claw:3001").replace(/\/+$/, "");
-// claw's validateS2SKey reads from req.headers["x-s2s-key"], so we use the
-// same xyneClawS2sKey value claw-auth uses elsewhere when calling claw.
-const S2S_KEY = CONFIG.xyneClawS2sKey ?? "";
 const MAX_CONTEXT_WINDOW_DAYS = 7;
 const MAX_CONTEXT_SESSIONS = 15;
 
@@ -193,7 +191,7 @@ export async function processAgentRange(
   try {
     const res = await fetch(`${CLAW_URL}/internal/failure-curator/distill`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": S2S_KEY },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", `${CLAW_URL}/internal/failure-curator/distill`) },
       body: JSON.stringify(payload),
     });
     if (!res.ok) {

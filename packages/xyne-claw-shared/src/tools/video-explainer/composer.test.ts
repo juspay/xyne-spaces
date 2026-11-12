@@ -49,7 +49,7 @@ function mockSession(failOn?: RegExp): MockSession {
 
 const context: ToolExecutionContext = {
   config: {},
-  s2sKey: "test-s2s-key",
+  serviceAuth: () => ({ "x-service-assertion": "test-assertion" }),
   meta: { userId: "u1", conversationId: "c1", agentSlug: "a1" },
 };
 

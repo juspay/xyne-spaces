@@ -7,7 +7,7 @@
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { curateUsagePatterns, type UsagePatternRequest } from "../usage-pattern-curator.js";
 
 import { createLogger } from "../logger.js";
@@ -15,7 +15,7 @@ const log = createLogger("usage-pattern-curator");
 
 export const usagePatternCuratorRouter = Router();
 
-usagePatternCuratorRouter.post("/internal/usage-pattern-curator/distill", validateS2SKey, async (req: Request, res: Response) => {
+usagePatternCuratorRouter.post("/internal/usage-pattern-curator/distill", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as Partial<UsagePatternRequest>;
     if (!body.agentSlug || !Array.isArray(body.samples)) {

@@ -1787,36 +1787,23 @@ export async function connectLinkedInRapidApi(
   );
 }
 
-export async function createAgentApp(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
+/**
+ * Add the agent to the current Spaces workspace and approve its permissions.
+ * Needs a Spaces workspace admin; the error text says so otherwise.
+ */
+export async function registerAgentInSpaces(slug: string): Promise<void> {
   await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/agents/${slug}/create-app`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/register-in-spaces`,
+    { method: "POST" },
   );
 }
 
-export async function installAgentApp(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/agents/${slug}/install-app`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
+/** Ids of the Claw agents added to the current Spaces workspace. */
+export async function listSpacesRegistrations(): Promise<string[]> {
+  const data = await request<{ success: boolean; data?: { agentIds?: string[] } }>(
+    `${AUTH_API_URL}/api/v1/agents/spaces-registrations`,
   );
-}
-
-export async function configureAgentWebhook(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/agents/${slug}/configure-webhook`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
-  );
-}
-
-export async function grantAgentPermissions(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/agents/${slug}/grant-permissions`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
-  );
+  return data.data?.agentIds ?? [];
 }
 
 export async function uploadAgentPicture(slug: string, file: File): Promise<{ pictureUrl?: string }> {

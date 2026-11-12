@@ -11,7 +11,7 @@
  */
 
 import { userRepository } from "../repositories/index.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import type { Logger } from "../logger.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "./twinRespondGate.js";
 
@@ -32,10 +32,13 @@ export interface TwinMentionPayload {
  * Eligibility (registered in claw-auth + digitalTwinEnabled + resolvable Spaces
  * workspaceId) is checked once per mentioned user, so an opted-out /
  * unresolvable user is skipped individually without dropping the rest.
+ * "Resolvable" now means the twin agent (`clawAgentId`) may act for that user
+ * in Spaces (on-behalf-of agent token); without an agent every user is skipped.
  */
 export async function findEligibleTwins(
   mentionedUserIds: readonly string[],
   log: Logger,
+  agent: { clawAgentId?: string | null; workspaceId?: string | null } = {},
 ): Promise<Array<{ userId: string; workspaceId: string; respondPolicy: string }>> {
   const mentioned = Array.from(new Set(mentionedUserIds));
   const eligibleTwins: Array<{ userId: string; workspaceId: string; respondPolicy: string }> = [];
@@ -49,9 +52,14 @@ export async function findEligibleTwins(
       log.info(`Twin: skipping ${uid} — Digital Twin disabled`);
       continue;
     }
-    const twinAuth = await getSpacesAuthForUser(uid, "webhook").catch(() => null);
+    const twinAuth = await resolveAgentSpacesAuth({
+      clawAgentId: agent.clawAgentId,
+      userId: uid,
+      workspaceId: agent.workspaceId ?? null,
+      caller: "webhook",
+    }).catch(() => null);
     if (!twinAuth?.workspaceId) {
-      log.info(`Twin: skipping ${uid} — no resolvable workspaceId (no active Spaces session)`);
+      log.info(`Twin: skipping ${uid} — agent may not act for this user in Spaces`);
       continue;
     }
     eligibleTwins.push({

@@ -10,12 +10,13 @@ vi.mock("./delivery.js", () => ({ enqueueOutbound }));
 vi.mock("./identity.js", () => ({ resolveIdentity: async () => null }));
 vi.mock("./cards.js", () => ({ newCardToken: () => "t", parkOptions: vi.fn() }));
 const getSpacesPostTarget = vi.fn();
-const getSpacesAuthForUser = vi.fn(async () => ({ token: "t", sessionId: "s", workspaceId: "ws" }));
+const resolveAgentSpacesAuth = vi.fn(async () => ({ agentToken: "at", workspaceId: "ws", principalId: "p1" }));
+const agentSpacesAuthContext = (a: { agentToken: string; workspaceId: string }) => ({ agentToken: a.agentToken, workspaceId: a.workspaceId });
 vi.mock("../../lib/spaces-post-target.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/spaces-post-target.js")>()),
   getSpacesPostTarget,
 }));
-vi.mock("../../lib/spaces-db.js", () => ({ getSpacesAuthForUser }));
+vi.mock("../spaces/user-auth.js", () => ({ resolveAgentSpacesAuth, agentSpacesAuthContext }));
 
 const { redeemApproval, enqueueApprovalCards, describeWriteAction, summarizeApprovedWrite } = await import(
   "./approvals.js"
@@ -118,11 +119,17 @@ describe("user-send-message approval card", () => {
 
   it("names the channel instead of its id", async () => {
     getSpacesPostTarget.mockResolvedValue({ channelName: "general" });
-    await enqueueApprovalCards({ target, userId: "u1", pendingActions: [signed({ channelId: "cmi345s9b07pmk5k4en17sbuy", content: "Go <b>try</b> it" })] });
+    await enqueueApprovalCards({
+      target,
+      userId: "u1",
+      clawAgentId: "agent-1",
+      workspaceId: "ws",
+      pendingActions: [signed({ channelId: "cmi345s9b07pmk5k4en17sbuy", content: "Go <b>try</b> it" })],
+    });
     const card = enqueueOutbound.mock.calls[0]?.[1].card;
     expect(card.body).toBe('Send this message as you to *#general*:\n\n"Go *try* it"');
-    expect(getSpacesPostTarget).toHaveBeenCalledWith({ channelId: "cmi345s9b07pmk5k4en17sbuy" }, { token: "t", sessionId: "s", workspaceId: "ws" }, "u1");
-    expect(getSpacesAuthForUser).toHaveBeenCalledWith("u1", "write-action");
+    expect(getSpacesPostTarget).toHaveBeenCalledWith({ channelId: "cmi345s9b07pmk5k4en17sbuy" }, { agentToken: "at", workspaceId: "ws" }, "u1");
+    expect(resolveAgentSpacesAuth).toHaveBeenCalledWith({ clawAgentId: "agent-1", userId: "u1", workspaceId: "ws", caller: "write-action" });
   });
 
   it("shows which thread a reply lands in: channel, author and the post it answers", () => {

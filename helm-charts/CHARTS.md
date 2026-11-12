@@ -59,7 +59,9 @@ background queue.
 | `JWT_SECRET` | signs session tokens; rotating it logs everyone out |
 | `ZERO_AUTH_SECRET` | same value as in `xyne-zero-secrets` |
 | `ENCRYPTION_KEY` | 32 bytes as 64 hex characters; the process refuses to boot with anything else |
-| `INTERNAL_S2S_KEY` | shared key for service-to-service calls (`xyne-claw-auth`, `xyne-claw`) |
+| `CLAW_DELEGATION_PRIVATE_KEY` | Spaces' own P-256 signing key (PKCS#8 PEM); signs its tokens and service assertions. Never shared |
+| `CLAW_SERVICE_PUBLIC_KEYS` | `{"claw-1":"<claw-auth SPKI PEM>"}`: verifies claw-auth's calls |
+| `CLAW_RUNTIME_PUBLIC_KEYS` | `{"runtime-1":"<runtime SPKI PEM>"}`: verifies the claw runtime's calls |
 
 Keys you add through `secretEnv` when you use them: `REDIS_PASSWORD`, `Y_SWEET_SERVER_TOKEN`
 (without it every canvas connection fails with 401; the backend logs a warning at boot),
@@ -135,7 +137,7 @@ parity only; worker mode starts no HTTP server, nothing listens.
 **Health.** All probes are empty on purpose. Use an exec probe if you need one.
 
 **Secrets.** `xyne-backend-secrets`: `DATABASE_URL`, `REDIS_URL`, `ENCRYPTION_KEY`,
-`INTERNAL_S2S_KEY`. `JWT_SECRET` is optional: only the API and the automation CSAT step sign
+`CLAW_DELEGATION_PRIVATE_KEY`, `CLAW_SERVICE_PUBLIC_KEYS`, `CLAW_RUNTIME_PUBLIC_KEYS`. `JWT_SECRET` is optional: only the API and the automation CSAT step sign
 with it, so a worker that runs neither does not mount it. Add `REDIS_PASSWORD` and the storage
 keys the same way as on the backend.
 
@@ -455,8 +457,8 @@ use `XYNE_CLAW_URL=http://xyne-claw:8081`.
 **Health.** Liveness and readiness are `tcpSocket` on `http` (initial 60 s / 45 s, ten failures).
 `GET /health` and `GET /healthz/ready` exist if you prefer httpGet probes.
 
-**Secrets.** `xyne-claw-secrets`: `XYNE_CLAW_S2S_KEY` (required; refuses to boot without it),
-`LITELLM_API_KEY` (required), and optional `INTERNAL_S2S_KEY`, `REDIS_PASSWORD`,
+**Secrets.** `xyne-claw-secrets`: `CLAW_RUNTIME_PRIVATE_KEY` (the runtime's own signing key; never
+put in tool or sandbox env), `CLAW_SERVICE_PUBLIC_KEYS`, `LITELLM_API_KEY` (required), and optional `REDIS_PASSWORD`,
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 
 **Environment.**
@@ -514,7 +516,7 @@ BullMQ workers in front of `xyne-claw`. Everything it serves lives under `/claw`
 
 **Secrets.** `xyne-claw-auth-secrets`. Required: `DATABASE_URL` (the `claw_auth` database),
 `ENCRYPTION_KEY` (32 bytes as 64 hex characters or the process refuses to boot),
-`XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY`. Optional: `SPACES_DB_URL`, `REDIS_PASSWORD`,
+`CLAW_SERVICE_PRIVATE_KEY`, `SPACES_DELEGATION_PUBLIC_KEYS`, `CLAW_RUNTIME_PUBLIC_KEYS`. Optional: `REDIS_PASSWORD`,
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`,
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
 

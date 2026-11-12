@@ -5,7 +5,8 @@
  * they need:
  *
  *   1. The agent's AgentCollection allowlist (claw-auth Prisma DB).
- *   2. The calling user's live spaces auth context (claw-auth lib/spaces-db).
+ *   2. Spaces auth: the agent acting for the calling user (on-behalf-of
+ *      agent token, surfaces/spaces/user-auth.ts).
  *
  * Two-layer access check on every call:
  *   - Layer 1: requested resource must be in the agent's allowlist.
@@ -19,7 +20,7 @@ import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { resolveAgentSpacesAuth, agentSpacesAuthContext } from "../surfaces/spaces/user-auth.js";
 import { createLogger } from "../logger.js";
 import { extractXlsxText, isXlsxFile } from "./kb-xlsx.js";
 
@@ -154,6 +155,8 @@ interface KbResolution {
    * 404 on the React Router catch-all.
    */
   workspaceId?: string;
+  /** Claw agent (prisma.agent.id) whose Spaces token the handlers act with. */
+  clawAgentId: string;
 }
 
 async function resolveKbContext(
@@ -172,7 +175,13 @@ async function resolveKbContext(
     return { error: "This agent has no Knowledge Base grants configured." };
   }
 
-  const tree = await fetchAccessibleKb(userId, { includeItems: true });
+  // The agent acting for the calling user in Spaces. Unscoped workspace: the
+  // user's single active Spaces identity; handlers below re-use the workspace
+  // this returns.
+  const agentAuth = await resolveAgentSpacesAuth({ clawAgentId: agent.id, userId, caller: "agent-chat" });
+  const tree = agentAuth
+    ? await fetchAccessibleKb(userId, { includeItems: true, auth: agentSpacesAuthContext(agentAuth) })
+    : null;
   if (tree === null) {
     return { error: "Spaces session unavailable — cannot verify Knowledge Base access." };
   }
@@ -242,15 +251,8 @@ async function resolveKbContext(
     walk(root, root.name, root.id, root.projectId || "_", root.scopeId || undefined, "", null);
   }
 
-  // Best-effort fetch of the user's workspaceId for citation deep-links. We
-  // don't fail the resolution if it's missing — link builders just fall back
-  // to a workspace-less URL (which 404s today, but at least the rest of the
-  // handler still works).
-  // First lookup, so no workspace hint exists yet: the unscoped resolution
-  // relies on the user having a single active Spaces identity. Handlers below
-  // re-scope their follow-up lookups with the workspace this one returns.
-  const authForLinks = await getSpacesAuthForUser(userId, "agent-chat");
-  const workspaceId = authForLinks?.workspaceId;
+  // Workspace for citation deep-links: the one the agent token is scoped to.
+  const workspaceId = agentAuth?.workspaceId;
 
   return {
     scope,
@@ -267,6 +269,7 @@ async function resolveKbContext(
     nodesById,
     vespaDocIdToItemId,
     ...(workspaceId ? { workspaceId } : {}),
+    clawAgentId: agent.id,
   };
 }
 
@@ -675,7 +678,7 @@ export async function handleKbSearch(args: {
 
   // Re-scope the identity resolution to the workspace resolveKbContext
   // already selected (session-derived) — safe for two-workspace users.
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
+  const auth = await resolveAgentSpacesAuth({ clawAgentId: ctx.clawAgentId, userId: args.userId, workspaceId: ctx.workspaceId ?? null, caller: "agent-chat" });
   if (!auth) return { content: "Spaces session unavailable — cannot search the Knowledge Base.", isError: true };
 
   // Fetch a bit more than `limit` so the post-filter pass (single-file grants,
@@ -721,11 +724,7 @@ export async function handleKbSearch(args: {
 
   let raw: unknown;
   try {
-    raw = await spacesVespaSearch(params, {
-      token: auth.token,
-      sessionId: auth.sessionId,
-      workspaceId: auth.workspaceId,
-    });
+    raw = await spacesVespaSearch(params, agentSpacesAuthContext(auth));
   } catch (err) {
     log.warn(`[kb-search] vespa call failed: ${errMsg(err)}`);
     return { content: `KB search failed: ${err instanceof Error ? err.message : "unknown error"}`, isError: true };
@@ -1031,13 +1030,13 @@ export async function handleKbReadFile(args: {
 
   // Fetch the binary via spaces' download endpoint, with the user's session auth.
   // Scoped to ctx.workspaceId — see handleKbSearch for why.
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
+  const auth = await resolveAgentSpacesAuth({ clawAgentId: ctx.clawAgentId, userId: args.userId, workspaceId: ctx.workspaceId ?? null, caller: "agent-chat" });
   if (!auth) return { content: "Spaces session unavailable — cannot fetch file content.", isError: true };
 
   try {
     const { buffer, contentType } = await spacesFetchBuffer(
       `/api/collections/items/${encodeURIComponent(args.fileId)}/download`,
-      { token: auth.token, sessionId: auth.sessionId, workspaceId: auth.workspaceId },
+      agentSpacesAuthContext(auth),
     );
 
     // Best-effort text extraction: if the response is plain text / markdown /
@@ -1190,7 +1189,7 @@ export async function handleKbGetChunks(args: {
   }
 
   // Scoped to ctx.workspaceId — see handleKbSearch for why.
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
+  const auth = await resolveAgentSpacesAuth({ clawAgentId: ctx.clawAgentId, userId: args.userId, workspaceId: ctx.workspaceId ?? null, caller: "agent-chat" });
   if (!auth) {
     return { content: "Spaces session unavailable — cannot fetch chunks.", isError: true };
   }
@@ -1211,11 +1210,7 @@ export async function handleKbGetChunks(args: {
 
   let raw: unknown;
   try {
-    raw = await spacesVespaSearch(params, {
-      token: auth.token,
-      sessionId: auth.sessionId,
-      workspaceId: auth.workspaceId,
-    });
+    raw = await spacesVespaSearch(params, agentSpacesAuthContext(auth));
   } catch (err) {
     log.warn(
       `[kb-get-chunks] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,
@@ -1327,7 +1322,7 @@ export async function handleKbSearchWithinDoc(args: {
   }
 
   // Scoped to ctx.workspaceId — see handleKbSearch for why.
-  const auth = await getSpacesAuthForUser(args.userId, "agent-chat", ctx.workspaceId);
+  const auth = await resolveAgentSpacesAuth({ clawAgentId: ctx.clawAgentId, userId: args.userId, workspaceId: ctx.workspaceId ?? null, caller: "agent-chat" });
   if (!auth) {
     return {
       content: "Spaces session unavailable — cannot search within document.",
@@ -1348,11 +1343,7 @@ export async function handleKbSearchWithinDoc(args: {
 
   let raw: unknown;
   try {
-    raw = await spacesVespaSearch(params, {
-      token: auth.token,
-      sessionId: auth.sessionId,
-      workspaceId: auth.workspaceId,
-    });
+    raw = await spacesVespaSearch(params, agentSpacesAuthContext(auth));
   } catch (err) {
     log.warn(
       `[kb-search-within-doc] vespa call failed fileId=${args.fileId} err=${errMsg(err)}`,

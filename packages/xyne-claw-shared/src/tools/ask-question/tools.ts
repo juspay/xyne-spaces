@@ -94,11 +94,12 @@ export const askUserQuestion: ToolDefinition = {
 
     // Store question in xyne-claw-auth Redis
     try {
-      const res = await fetch(`${authUrl}/claw/api/v1/pending-questions`, {
+      const questionsUrl = `${authUrl}/claw/api/v1/pending-questions`;
+      const res = await fetch(questionsUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(context.s2sKey ? { "x-s2s-key": context.s2sKey } : {}),
+          ...(context.serviceAuth?.("POST", questionsUrl) ?? {}),
         },
         body: JSON.stringify({
           questionId,

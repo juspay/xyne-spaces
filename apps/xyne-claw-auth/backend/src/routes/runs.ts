@@ -4,26 +4,19 @@ import { agentRunRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { userIdAliasesFor } from "../lib/users-jit.js";
-import { requireStrictS2S } from "../middleware/require-auth.js";
+import { requireRuntime } from "../lib/service-assertion.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
 import { prisma } from "../db.js";
-import { CONFIG } from "../config.js";
-import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
-import { getDmChannelForUserAndApp } from "../lib/spaces-db.js";
+import { getDmChannelForUserAndAgent } from "../lib/spaces-db.js";
 import { gcsService } from "../services/storageService.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
 const log = createLogger("runs");
 
 const router = Router();
-
-function decryptStoredToken(stored: string): string | null {
-  const [ciphertext, iv, authTag] = stored.split(":");
-  if (!ciphertext || !iv || !authTag) return null;
-  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-}
 
 function truncateForShare(value: string, maxChars: number, note: string): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n\n_${note}_`;
@@ -341,9 +334,9 @@ router.get("/paged", asyncHandler(async (req: Request, res: Response) => {
 
 // GET /runs/by-agent/:slug — cross-user run history for one agent.
 //
-// Powers the `get-agent-runs` system tool. S2S-gated so it's only reachable
+// Powers the `get-agent-runs` system tool. Runtime-only (service assertion), so it's only reachable
 // from inside the cluster (claw-pod custom tools call it with the shared
-// x-s2s-key), not from public clients. No per-user auth — any agent can ask
+// its service assertion), not from public clients. No per-user auth — any agent can ask
 // about any agent's run history, by design (stats are openly inspectable).
 //
 // Query params:
@@ -352,7 +345,7 @@ router.get("/paged", asyncHandler(async (req: Request, res: Response) => {
 //   - status: optional filter (running / completed / failed / cancelled)
 //
 // Must be declared BEFORE /:sessionId so the literal path takes precedence.
-router.get("/by-agent/:slug", requireStrictS2S, async (req: Request<{ slug: string }>, res: Response) => {
+router.get("/by-agent/:slug", requireRuntime, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const slug = req.params.slug;
     if (!slug || typeof slug !== "string") {
@@ -371,7 +364,7 @@ router.get("/by-agent/:slug", requireStrictS2S, async (req: Request<{ slug: stri
       ?? (requesterId
         ? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId
         : undefined);
-    // S2S-key-only callers (the runtime's get-agent-runs tool sends no
+    // Service-only callers (the runtime's get-agent-runs tool sends no
     // x-user-id) have no derivable org — resolve the agent by slug with the
     // single-match-or-fail rule instead (loud 404 on cross-org ambiguity),
     // same pattern as GET /agents/:slug.
@@ -594,32 +587,25 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
     const agent = await prisma.agent.findUnique({
       where: { orgId_slug: { orgId: run.orgId, slug: run.agentSlug } },
       select: {
+        id: true,
         name: true,
-        spacesAppToken: true,
-        spacesAppUserId: true,
         spacesAppId: true,
       },
     });
-    if (!agent?.spacesAppToken || !agent.spacesAppUserId || !agent.spacesAppId) {
+    // The run carries no Spaces workspace: post in the agent's only workspace.
+    const bot: BotRef | null = agent ? { clawAgentId: agent.id, workspaceId: null } : null;
+    const botAuth = bot ? await getAgentBotAuth(bot.clawAgentId, bot.workspaceId) : null;
+    if (!agent || !bot || !botAuth || !agent.spacesAppId) {
       res.status(409).json({
         success: false,
-        error: `Agent "${run.agentSlug}" has no Xyne Spaces app identity`,
-      });
-      return;
-    }
-
-    const appToken = decryptStoredToken(agent.spacesAppToken);
-    if (!appToken) {
-      res.status(409).json({
-        success: false,
-        error: `Agent "${run.agentSlug}" has an invalid Xyne Spaces app identity`,
+        error: `Agent "${run.agentSlug}" is not added to a single Xyne Spaces workspace`,
       });
       return;
     }
 
     let targetChannelId = channelId;
     if (!targetChannelId && deliverTo === "dm") {
-      targetChannelId = await getDmChannelForUserAndApp(requesterId, agent.spacesAppId) ?? undefined;
+      targetChannelId = await getDmChannelForUserAndAgent(requesterId, agent.id) ?? undefined;
       if (!targetChannelId) {
         res.status(409).json({
           success: false,
@@ -640,9 +626,9 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
     const postResult = (await spacesAppFetch("/chat/postMessage", {
       channelId: targetChannelId,
       markdownText,
-      userId: agent.spacesAppUserId,
+      userId: botAuth.botUserId,
       metadata: { contentFormat: "markdown" },
-    }, appToken)) as { conversationId?: string; messageId?: string };
+    }, bot)) as { conversationId?: string; messageId?: string };
     const newConversationId = postResult.conversationId;
     const messageId = postResult.messageId;
     if (!newConversationId || !messageId) {

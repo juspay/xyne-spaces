@@ -3,14 +3,13 @@ import { clampPercent } from "./subagent-model-split.js";
 
 export const SERVER = {
   port: Number(process.env["XYNE_CLAW_PORT"] ?? 3002),
-  s2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
   authServiceUrl: process.env["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003",
 } as const;
 
 // SSRF guard for caller-supplied callback/progress URLs. These arrive in the
 // /run body and are always set by claw-auth to its own internal origin
 // (= authServiceUrl). We never fetch a callback/progress target that isn't that
-// exact origin, so a leaked S2S key can't turn the callback into an SSRF
+// exact origin, so a forged /run request can't turn the callback into an SSRF
 // primitive against cloud metadata / internal services. Extra origins can be
 // added via XYNE_CLAW_CALLBACK_ORIGINS (comma-separated) if a second internal
 // host ever needs to receive callbacks.

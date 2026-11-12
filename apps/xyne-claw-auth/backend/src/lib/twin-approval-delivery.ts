@@ -5,6 +5,7 @@ import { buildSpacesMentionLookupsDb } from "./mention-lookups.js";
 import { createLogger } from "../logger.js";
 import { resolveTwinReplyTarget } from "./twin-reply-target.js";
 import { twinDeliveryParts } from "xyne-claw-shared";
+import { serviceAuthHeaders } from "./service-assertion.js";
 
 const log = createLogger("twin-delivery");
 
@@ -75,11 +76,12 @@ export type TwinDeliveryResult =
     }
   | { ok: false; error: string };
 
-/** POST a JSON body to a Spaces S2S route (30s timeout). */
+/** POST a JSON body to a Spaces internal route as claw-auth (service assertion, 30s timeout). */
 export function spacesInternalPost(path: string, body: unknown): Promise<Response> {
-  return fetch(`${CONFIG.spacesInternalUrl}${path}`, {
+  const url = `${CONFIG.spacesInternalUrl}${path}`;
+  return fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-s2s-key": process.env["INTERNAL_S2S_KEY"] ?? "" },
+    headers: { "Content-Type": "application/json", ...serviceAuthHeaders("xyne-spaces", "POST", url) },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
   });

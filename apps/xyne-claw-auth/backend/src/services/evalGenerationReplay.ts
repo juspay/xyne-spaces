@@ -8,6 +8,7 @@
  * reasoning + tool calls for the turn result.
  */
 import { CONFIG } from "../config.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 
 export interface ReplayResult {
   content: string;
@@ -35,8 +36,8 @@ export async function replayTurn(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-s2s-key": CONFIG.xyneClawS2sKey,
-      "x-user-id": userId,
+      // claw-auth calling its own chat route for this user: assertion + run token.
+      ...selfAuthHeaders("POST", url, { userId }),
     },
     body: JSON.stringify({
       message,

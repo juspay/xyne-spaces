@@ -73,16 +73,18 @@ spec:
               name: litellm-claw
         - name: LITELLM_MODEL
           value: private-large
-        - name: XYNE_CLAW_S2S_KEY
+        # The runtime's own signing key (never passed to tools or sandboxes) and
+        # claw-auth's public key. See docs/setup/service-keys.md.
+        - name: CLAW_RUNTIME_PRIVATE_KEY
           valueFrom:
             secretKeyRef:
-              key: XYNE_CLAW_S2S_KEY
-              name: xyne-claw-s2s-key
-        - name: INTERNAL_S2S_KEY
+              key: CLAW_RUNTIME_PRIVATE_KEY
+              name: xyne-claw-signing-key
+        - name: CLAW_SERVICE_PUBLIC_KEYS
           valueFrom:
             secretKeyRef:
-              key: XYNE_CLAW_S2S_KEY
-              name: xyne-claw-s2s-key
+              key: CLAW_SERVICE_PUBLIC_KEYS
+              name: xyne-claw-signing-key
         - name: XYNE_PGM_DATA_PATH
           value: /app/xyne-claw/data/pgm
         - name: GCS_PROJECT_ID

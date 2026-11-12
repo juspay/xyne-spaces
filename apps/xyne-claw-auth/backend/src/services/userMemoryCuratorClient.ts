@@ -34,6 +34,7 @@ import {
   type PipelineRecordPreview,
 } from "./digitalTwinPipelineEvents.js";
 import { ensureTwinBank, retainTwinMemory, subsystemOfTags } from "./twinMemoryBank.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../lib/internal-call.js";
 
 const logger = createLogger("user-memory-curator-client", createTraceId());
 // claw's /distill runs its OWN retry ladder internally: up to
@@ -86,8 +87,8 @@ async function distillUserMemoryViaClaw(
    *  retrying attempt N/M" state. `prevError` is set from attempt 2 onward. */
   onAttempt?: (attempt: number, maxAttempts: number, prevError?: string) => void,
 ): Promise<{ candidates: UserMemoryCandidatePayload[]; trace: UserMemoryCuratorTrace | null }> {
-  if (!CONFIG.xyneClawS2sKey) {
-    logger.warn("[user-memory-curator-client] XYNE_CLAW_S2S_KEY not set — refusing call");
+  if (!serviceCallsConfigured()) {
+    logger.warn("[user-memory-curator-client] CLAW_SERVICE_PRIVATE_KEY not set — refusing call");
     return noResult();
   }
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/distill`;
@@ -101,7 +102,7 @@ async function distillUserMemoryViaClaw(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-s2s-key": CONFIG.xyneClawS2sKey,
+          ...runtimeAuthHeaders("POST", url),
         },
         body: JSON.stringify({ ...req, includeTrace: true }),
         signal: AbortSignal.timeout(DISTILL_TIMEOUT_MS),

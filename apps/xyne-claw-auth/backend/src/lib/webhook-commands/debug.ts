@@ -9,6 +9,7 @@ import {
   type DebugTraceRun,
 } from "../debug-trace-html.js";
 import type { WebhookCommandCtx } from "./context.js";
+import { runtimeAuthHeaders } from "../internal-call.js";
 
 const REPLY_LABEL = "Failed to post /debug reply";
 const DEBUG_RUN_PREFIX = "claw-debug-runs";
@@ -156,7 +157,7 @@ async function fetchFromClaw(ctx: WebhookCommandCtx, run: ResolvedRun): Promise<
     `${run.userId ? `&userId=${encodeURIComponent(run.userId)}` : ""}` +
     `${run.status === "running" ? `&sessionId=${encodeURIComponent(run.sessionId)}` : ""}`;
   const res = await fetch(url, {
-    headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
+    headers: runtimeAuthHeaders("GET", url),
     signal: AbortSignal.timeout(Number(process.env["DEBUG_PROXY_TIMEOUT_MS"] ?? 30_000)),
   });
   if (!res.ok) {

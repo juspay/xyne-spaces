@@ -56,10 +56,10 @@ vi.mock("./provision.js", () => ({
 }));
 vi.mock("./static-adapters.js", () => ({ STATIC_ADAPTERS: {} }));
 vi.mock("../lib/spaces-db.js", () => ({
-  getSpacesAuthForUser: vi.fn(async () => null),
   getWorkspaceIdForUser: vi.fn(async () => null),
 }));
 vi.mock("../lib/spaces-session-server-types.js", () => ({ SPACES_SESSION_CREDENTIAL_SERVER_TYPES: new Set<string>() }));
+vi.mock("../surfaces/spaces/user-auth.js", () => ({ resolveAgentSpacesAuth: vi.fn(async () => null) }));
 vi.mock("../db.js", () => ({ prisma: {} }));
 vi.mock("../crypto.js", () => ({ decrypt: (v: string) => v }));
 vi.mock("../config.js", () => ({ CONFIG: {} }));

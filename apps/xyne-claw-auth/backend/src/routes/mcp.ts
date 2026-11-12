@@ -52,7 +52,7 @@ import {
   type SubagentMcpListingEntry,
 } from "../lib/subagent-mcp-listing.js";
 import { requireSessionToken } from "../middleware/require-session-token.js";
-import { requireStrictS2S } from "../middleware/require-auth.js";
+import { requireRuntime, serviceAuthHeaders } from "../lib/service-assertion.js";
 import { validateWriteAction } from "../mcp/validators.js";
 import {
   loadForSession as loadAttachedContextForSession,
@@ -94,6 +94,8 @@ import {
   type SubagentToolRefs,
 } from "./mcp-agent-tools.js";
 import { keywordQueryWords, listTools, searchToolsWithFallback } from "../services/tool-index/index.js";
+import { botBearer, getAgentBotAuth, spacesBotUrl, type BotRef } from "../lib/spaces-bot.js";
+import { spacesDbAvailable } from "../lib/spaces-db.js";
 
 const log = createLogger("mcp");
 
@@ -566,8 +568,12 @@ async function postAgentCallProposal(
           where: { orgId_slug: { orgId: context.orgId, slug: context.agentSlug } },
         })
       : null;
-  if (!proposer?.spacesAppToken || !proposer.spacesAppUserId || !proposer.spacesAppId) {
-    return "propose-agent-call failed: running agent has no Spaces app identity.";
+  const proposerBot: BotRef | null = proposer
+    ? { clawAgentId: proposer.id, workspaceId: runContext?.bot?.workspaceId ?? null }
+    : null;
+  const proposerAuth = proposerBot ? await getAgentBotAuth(proposerBot.clawAgentId, proposerBot.workspaceId) : null;
+  if (!proposer || !proposerBot || !proposerAuth) {
+    return "propose-agent-call failed: running agent cannot post in this Spaces workspace.";
   }
   if (proposer.slug === targetSlug) {
     return "propose-agent-call failed: an agent cannot propose calling itself.";
@@ -604,17 +610,16 @@ async function postAgentCallProposal(
     channelId,
     signature: signAction(actionPayload),
   });
-  flow.data = { ...(flow.data ?? {}), spacesAppId: proposer.spacesAppId };
+  flow.data = { ...(flow.data ?? {}), ...(proposer.spacesAppId ? { spacesAppId: proposer.spacesAppId } : {}) };
 
-  const appToken = decryptStoredToken(proposer.spacesAppToken);
-  const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/apps/chat/postMessage`, {
+  const postRes = await fetch(spacesBotUrl("/chat/postMessage"), {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${await botBearer(proposerBot)}` },
     body: JSON.stringify({
       channelId,
       conversationId,
       flow,
-      userId: proposer.spacesAppUserId,
+      userId: proposerAuth.botUserId,
     }),
     signal: AbortSignal.timeout(15_000),
   });
@@ -806,25 +811,29 @@ function injectCustomTools(data: McpServerTools[], entries: ListEntry[]): void {
 }
 
 /**
- * Fallback credentials for xyne-spaces when no userMcpConnection exists.
- * Looks up the agent by spacesAppUserId and uses its app token.
+ * Fallback credentials for xyne-spaces when no userMcpConnection exists: the
+ * agent's bot (a 10-minute bot token, "app" mode → /api/claw-agents/bot/*).
+ * The agent comes from the run's session when known; otherwise from the legacy
+ * bot-user column. No stored token is used.
  */
-async function getAppTokenCredentials(userId: string): Promise<Record<string, unknown> | null> {
-  const agent = await prisma.agent.findFirst({
-    where: { spacesAppUserId: userId },
-    select: { spacesAppToken: true },
-  });
-  if (!agent?.spacesAppToken) return null;
-  const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-  if (!ciphertext || !iv || !authTag) return null;
-  const appToken = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-  const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+async function getAppTokenCredentials(
+  userId: string,
+  runCtx?: { bot?: BotRef | undefined; agentId?: string | undefined } | null,
+): Promise<Record<string, unknown> | null> {
+  let ref: BotRef | null = runCtx?.bot ?? (runCtx?.agentId ? { clawAgentId: runCtx.agentId, workspaceId: null } : null);
+  if (!ref) {
+    const agent = await prisma.agent.findFirst({ where: { spacesAppUserId: userId }, select: { id: true } });
+    if (agent) ref = { clawAgentId: agent.id, workspaceId: null };
+  }
+  if (!ref) return null;
+  const auth = await getAgentBotAuth(ref.clawAgentId, ref.workspaceId);
+  if (!auth) return null;
   return {
     url: CONFIG.spacesBackendUrl,
-    token: appToken,
+    token: auth.token,
     authMode: "app",
-    userId,
-    ...(workspaceId ? { workspaceId } : {}),
+    userId: auth.botUserId,
+    workspaceId: auth.workspaceId,
   };
 }
 
@@ -990,7 +999,10 @@ async function loadEffectiveCredentialsWithSpacesFallback(
   if (effective) return effective;
 
   if (serverType === "xyne-spaces") {
-    const appCreds = await getAppTokenCredentials(userId);
+    const appCreds = await getAppTokenCredentials(
+      userId,
+      sessionId ? await (await import("./webhook.js")).getSession(sessionId).catch(() => null) : null,
+    );
     if (appCreds) {
       // App-token creds are the agent's Spaces app token. Mark as user-sourced
       // for type compatibility; xyne-spaces is ambient, so isPrivateUserCredential
@@ -1033,10 +1045,10 @@ const router = Router();
 // SHADOWED every other route under /sessions/:id — most damagingly
 // POST /sessions/:id/result in run.ts (the handoff/result callback fallback),
 // which 401'd "Bearer token required" on every delivery: claw callbacks send
-// x-s2s-key + x-session-token, never a Bearer. Found 2026-07-16 when a drain
+// a service assertion + x-session-token, never a Bearer. Found 2026-07-16 when a drain
 // dropped ~50 handoff callbacks; the route had never worked.
-router.use("/:sessionId/mcp", requireStrictS2S, requireSessionToken);
-router.use("/:sessionId/actions", requireStrictS2S, requireSessionToken);
+router.use("/:sessionId/mcp", requireRuntime, requireSessionToken);
+router.use("/:sessionId/actions", requireRuntime, requireSessionToken);
 
 /**
  * Every server this session has a credential path to, in resolution order —
@@ -1126,7 +1138,7 @@ async function buildMcpResolutionEntries(args: {
     // Only swap when the app token actually resolves AND the app-tools
     // server row exists — otherwise we'd strip Spaces access and silently
     // break the run. Keep the user server and log loudly instead.
-    const appCreds = await getAppTokenCredentials(runCtx?.spacesAppUserId || userId);
+    const appCreds = await getAppTokenCredentials(runCtx?.spacesAppUserId || userId, runCtx);
     const appToolsRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
     if (appCreds && appToolsRow) {
       automationAppSwap = true;
@@ -1151,14 +1163,14 @@ async function buildMcpResolutionEntries(args: {
     }
   }
 
-  // Virtual xyne-spaces entry: if SPACES_DB_URL is configured the user can
-  // use Spaces tools without ever clicking "Connect" — loadEffectiveCredentials
-  // synthesizes the creds from the live session row. Only add when there's
+  // Virtual xyne-spaces entry: when claw-auth can call Spaces (its service key
+  // is set) the user can use Spaces tools without ever clicking "Connect" —
+  // the run's agent acts for them with an on-behalf-of agent token. Only add when there's
   // no existing user/global row for xyne-spaces (else we'd duplicate).
   // Skipped under the automation app-mode swap — Spaces is served by
   // xyne-spaces-app-tools for those runs.
   const hasSpacesEntry = entries.some((e) => e.serverType === "xyne-spaces");
-  if (!hasSpacesEntry && !automationAppSwap && CONFIG.spacesDbUrl) {
+  if (!hasSpacesEntry && !automationAppSwap && spacesDbAvailable()) {
     const spacesServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces" } });
     log.info(`[mcp/tools] spaces virtual-entry check: mcpServerRow=${!!spacesServer}`);
     if (spacesServer) {
@@ -1173,8 +1185,8 @@ async function buildMcpResolutionEntries(args: {
   }
 
   // Virtual xyne-spaces-app-tools entry: same pattern as xyne-spaces above.
-  // The adapter declares credentialFields: [] (the app_token is auto-sourced
-  // from the default agent's spacesAppToken, not user-supplied), so existing
+  // The adapter declares credentialFields: [] (the bot token is sourced from
+  // the agent's Spaces bot, not user-supplied), so existing
   // users have no user_mcp_connections row for this server. Without this
   // virtual fallback they'd never see apps-send-message in the picker, and
   // the runtime listToolsForUser path would never spawn the MCP server.
@@ -1308,7 +1320,7 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
   const appTokenToolsPromise: Promise<Awaited<ReturnType<typeof listToolsForUser>> | null> =
     !hasSpacesConnection && !automationAppSwap
       ? (async () => {
-          const appCreds = await getAppTokenCredentials(userId);
+          const appCreds = await getAppTokenCredentials(userId, runCtx);
           if (!appCreds) return null;
           return await listToolsForUser(userId, "xyne-spaces", "Xyne Spaces", appCreds);
         })().catch((err) => {
@@ -2344,7 +2356,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+            ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
           },
           body: JSON.stringify({
             userId,
@@ -2369,14 +2381,14 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         }
 
         // Store session context for the callback
-        const { setSession } = await import("./webhook.js");
-        if (targetAgentRow?.spacesAppToken && targetAgentRow.spacesAppId && chanId && convId) {
-          const appToken = decrypt(
-            ...(targetAgentRow.spacesAppToken.split(":") as [string, string, string]),
-            CONFIG.encryptionKey,
-          );
+        const { setSession, getSession } = await import("./webhook.js");
+        const triggerBot: BotRef | null = targetAgentRow
+          ? { clawAgentId: targetAgentRow.id, workspaceId: (await getSession(req.params.sessionId).catch(() => null))?.bot?.workspaceId ?? null }
+          : null;
+        const triggerBotUserId = triggerBot ? (await getAgentBotAuth(triggerBot.clawAgentId, triggerBot.workspaceId))?.botUserId ?? "" : "";
+        if (targetAgentRow && triggerBot && triggerBotUserId && chanId && convId) {
           await setSession(runBody.sessionId!, {
-            mentionedUserId: targetAgentRow.spacesAppUserId ?? "",
+            mentionedUserId: triggerBotUserId,
             senderId: userId,
             senderName: "",
             channelId: chanId,
@@ -2387,9 +2399,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
             agentOrgId: targetAgentRow.orgId ?? null,
             agentSlug: targetAgent,
             responseMode: "conversation",
-            appToken,
-            spacesAppId: targetAgentRow.spacesAppId,
-            spacesAppUserId: targetAgentRow.spacesAppUserId ?? "",
+            bot: triggerBot,
+            spacesAppId: targetAgentRow.spacesAppId ?? "",
+            spacesAppUserId: triggerBotUserId,
           });
         }
 
@@ -2517,7 +2529,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       // Initial-signing shape (2026-07-15): claw's custom-tool write wrapper
       // (custom-tools.ts signWriteAction) sends the bare action — it CANNOT
       // pre-sign because the HMAC key lives only here. The session token +
-      // S2S key on this route already authenticate the caller as the run
+      // service assertion on this route already authenticate the caller as the run
       // itself, which is exactly the authority the /mcp/call path uses when
       // it mints signatures for MCP-server write tools inline. Without this
       // branch, claw-side custom write tools (create-skill was the first)
@@ -2721,7 +2733,7 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
  * Backs the `search-tools` meta-tool for whole-deployment queries. Org comes
  * from the session, not a query param a caller could set.
  *
- * Must stay nested under `/mcp/`: `requireStrictS2S` + `requireSessionToken`
+ * Must stay nested under `/mcp/`: `requireRuntime` + `requireSessionToken`
  * are registered on that prefix — a sibling path would be unauthenticated.
  */
 router.get("/:sessionId/mcp/tools/search", async (req: Request<{ sessionId: string }>, res: Response) => {

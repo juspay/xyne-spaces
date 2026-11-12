@@ -10,8 +10,8 @@ import type { Request } from "express";
  *
  * NOTE: `requireAuth`, `optionalAuth`, and `requireUserAuth` attach org
  * context (via the `stampVerifiedIdentity` / `attachOrgContext` call sites in
- * require-auth.ts). `requireStrictS2S` / `requireInternalS2S` attach none —
- * they carry no user identity, so there is no org to resolve.
+ * require-auth.ts). The service-only gates (requireRuntime / requireSpacesService)
+ * attach none — they carry no user identity, so there is no org to resolve.
  */
 export interface TenantContext {
   userId: string;

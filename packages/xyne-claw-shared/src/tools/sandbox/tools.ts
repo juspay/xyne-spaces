@@ -325,26 +325,22 @@ async function postToExperiment(
     process.env["XYNE_CLAW_AUTH_URL"] ??
     AUTH_URL_DEFAULT
   ).replace(/\/+$/, "");
-  const s2sKey =
-    context.s2sKey ??
-    context.config["XYNE_CLAW_S2S_KEY"] ??
-    process.env["XYNE_CLAW_S2S_KEY"] ??
-    "";
 
   const warn = (error: string) =>
     sandboxLog.warn(`[sandbox] experiment ${suffix} report failed; continuing`, { experimentId, ...logContext, error });
 
-  if (!s2sKey) {
-    warn("XYNE_CLAW_S2S_KEY is unavailable");
+  if (!context.serviceAuth) {
+    warn("no service signer in the tool context");
     return;
   }
 
   try {
+    const experimentUrl = `${authUrl}/claw/api/v1/internal/experiments/${encodeURIComponent(experimentId)}${suffix}`;
     const response = await fetch(
-      `${authUrl}/claw/api/v1/internal/experiments/${encodeURIComponent(experimentId)}${suffix}`,
+      experimentUrl,
       {
         method: "POST",
-        headers: { "content-type": "application/json", "x-s2s-key": s2sKey },
+        headers: { "content-type": "application/json", ...context.serviceAuth("POST", experimentUrl) },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(10_000),
       },
@@ -2962,7 +2958,7 @@ export const sdlcRepositoryAccess: ToolDefinition = {
         { repoId, workspaceId, actorUserId },
         {
           authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? process.env["XYNE_CLAW_AUTH_URL"] ?? AUTH_URL_DEFAULT,
-          s2sKey: context.s2sKey ?? context.config["XYNE_CLAW_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+          ...(context.serviceAuth ? { serviceAuth: context.serviceAuth } : {}),
           runSessionId,
           sessionToken,
         },

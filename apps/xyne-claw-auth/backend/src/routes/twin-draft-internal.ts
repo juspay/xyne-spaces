@@ -11,7 +11,7 @@ const log = createLogger("twin-draft");
  * for the approval DM card). The Spaces backend owns the draft (Redis, owner-
  * only) and forwards the user's approve/decline here — claw-auth owns the Twin's
  * tested DELIVERY (react/post as the user) and FEEDBACK recording. Mounted under
- * requireInternalS2S, so only a trusted service (Spaces) reaches it.
+ * requireSpacesService, so only Spaces (by its service assertion) reaches it.
  *
  * The delivery-execution context comes from the SERVER-SIDE Redis draft (Spaces
  * reads it, not the client), so the reply's destination can't be tampered with.

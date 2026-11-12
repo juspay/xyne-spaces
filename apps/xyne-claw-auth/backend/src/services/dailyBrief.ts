@@ -38,6 +38,7 @@ import {
   recordScheduledDeliveryDelay,
   type DailyBriefTrigger,
 } from "../otel/daily-brief-metrics.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 
 const log = createLogger("daily-brief");
 
@@ -241,9 +242,9 @@ export async function generateDailyBrief(
   try {
     const streamResult = await consumeClawStream({
       url: `${CONFIG.internalUrl}/claw/api/v1/internal/run`,
-      s2sKey: CONFIG.xyneClawS2sKey,
-      // /internal/run resolves identity from x-user-id (pinned for S2S callers).
-      extraHeaders: { "x-user-id": userId },
+      // claw-auth calling its own /internal/run for this user: service assertion
+      // + a run token naming the user (never an x-user-id header).
+      extraHeaders: selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, { userId, agentSlug }),
       ...(opts.signal ? { signal: opts.signal } : {}),
       body: {
         task: BRIEF_TASK,

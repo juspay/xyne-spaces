@@ -30,9 +30,6 @@ import type { ToolDefinition } from "../types.js";
 function authUrl(): string {
   return (process.env["XYNE_CLAW_AUTH_URL"] ?? "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003").replace(/\/$/, "");
 }
-function s2sKey(): string {
-  return process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-}
 
 /** Slugs must be lowercase kebab so they map cleanly to the DB unique key. */
 function normalizeSlug(input: string): string {
@@ -136,9 +133,8 @@ export const updateSkillTool: ToolDefinition = {
     if (!proposerUserId) {
       return JSON.stringify({ error: "Cannot propose skill update: missing requesting user id in tool context." });
     }
-    const S2S_KEY = s2sKey();
-    if (!S2S_KEY) {
-      return JSON.stringify({ error: "XYNE_CLAW_S2S_KEY not set in claw-pod environment — update-skill cannot authenticate to claw-auth." });
+    if (!context?.serviceAuth) {
+      return JSON.stringify({ error: "This run cannot authenticate to claw-auth (no service signer in the tool context) — update-skill unavailable." });
     }
 
     const url = `${authUrl()}/claw/api/v1/skills/${encodeURIComponent(slug)}/propose-update`;
@@ -148,8 +144,8 @@ export const updateSkillTool: ToolDefinition = {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-s2s-key": S2S_KEY,
-          "x-user-id": proposerUserId,
+          // The runtime's assertion + this run's session token, which names the user to claw-auth.
+          ...context.serviceAuth("POST", url),
         },
         body: JSON.stringify({ ...(edits.length > 0 ? { edits } : { content }), summary, agentSlug }),
         signal: AbortSignal.timeout(20_000),

@@ -29,7 +29,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
-import { s2sKeyMatches } from "./require-auth.js";
+import { callerService } from "../lib/service-assertion.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("verify-spaces-signature");
@@ -223,16 +223,16 @@ export async function verifySpacesSignature(
     verificationFailure("stale_timestamp", "signature timestamp outside allowed window", `skewMs=${now - signedTs}`);
     return;
   }
-  // Replay dedup runs ONLY for external Spaces callers (no s2s key). A single
+  // Replay dedup runs ONLY for external Spaces callers (not claw-auth itself). A single
   // approval click is signature-verified TWICE in one request chain: first at
   // the /webhook edge, then again at /flow/action after proxyFlowAction
-  // forwards the SAME x-xyne-signature. That internal hop always carries the
-  // s2s key (the /flow mount is requireStrictS2S), so gating on its ABSENCE
+  // forwards the SAME x-xyne-signature. That internal hop is claw-auth's own
+  // signed call (the /flow mount is requireRuntime), so gating on it
   // means the same in-flight signature is only recorded once. Without this the
   // replay guard rejects the second (proxied) verification as a "duplicate
   // signature" and every Spaces flow-action approval 401s. The HMAC
   // authenticity check above still runs on BOTH hops; only the replay-set
-  // record/check is skipped for trusted s2s callers.
+  // record/check is skipped for claw-auth's own re-verification.
   // Flow-action callbacks (X-Xyne-Event: flow_action) are exempt from
   // signature-replay dedup: their signed body is intentionally STABLE (the same
   // approval re-clicks/retries hash identically), and double-execution is
@@ -240,10 +240,10 @@ export async function verifySpacesSignature(
   // signature and the plan/skill/agent-tools apply paths consume the card
   // atomically ("already used"). Replay-rejecting them here is redundant AND is
   // exactly what hard-blocks approvals ("duplicate signature"). Detected at the
-  // edge by the header; the internal /flow/action proxy hop carries the s2s key
-  // (its mount is requireStrictS2S) and is covered by isInternalReverify.
+  // edge by the header; the internal /flow/action proxy hop is claw-auth's own
+  // signed call (its mount is requireRuntime) and is covered by isInternalReverify.
   const isFlowAction = req.headers["x-xyne-event"] === "flow_action";
-  const isInternalReverify = s2sKeyMatches(req.headers["x-s2s-key"]);
+  const isInternalReverify = callerService(req) === "xyne-claw-auth";
   if (!isInternalReverify && !isFlowAction) {
     const redisVerdict = await checkSignatureReplayRedis(received);
     if (redisVerdict === "replay") {

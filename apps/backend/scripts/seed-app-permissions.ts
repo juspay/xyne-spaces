@@ -28,6 +28,19 @@ const APP_PERMISSION_SCOPES = [
   { scope: 'usergroups:read', description: 'Read user groups from apps' },
   { scope: 'users:read', description: 'Read user profile information from apps' },
   { scope: 'workflows:start', description: 'Start attached workflows from apps' },
+  // Scopes for Claw agents acting on behalf of a user (src/claw/routeScopes.ts).
+  { scope: 'automations:read', description: 'Read automations, runs, versions and schema' },
+  { scope: 'automations:write', description: 'Create, update, submit and delete automations' },
+  { scope: 'activity:read', description: 'Read activity history the user can see' },
+  { scope: 'canvas:read', description: 'Read canvases the user can access' },
+  { scope: 'canvas:write', description: 'Create canvases' },
+  { scope: 'email:write', description: 'Send email replies on ticket conversations' },
+  { scope: 'kb:read', description: 'List and read knowledge-base collections the user can access' },
+  { scope: 'kb:write', description: 'Upload files to knowledge-base collections' },
+  { scope: 'sdlc:read', description: 'Read SDLC repository and channel context' },
+  { scope: 'sdlc:write', description: 'Create SDLC links and artifacts' },
+  { scope: 'search:read', description: 'Search workspace content the user can access' },
+  { scope: 'workflows:read', description: 'Read workflows and their executions the user can see' },
 ];
 
 async function main() {

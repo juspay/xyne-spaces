@@ -14,11 +14,66 @@
 import { errMsg } from "../../lib/errors.js";
 
 export interface SpacesAuthContext {
+  /** Legacy: a user's Spaces session token. Being removed (agent tokens replace it). */
   token?: string;
+  /** Legacy: a user's Spaces session id. Being removed. */
   sessionId?: string;
   workspaceId?: string;
   baseUrl?: string;
-  s2sKey?: string;
+  /**
+   * claw-auth's own service identity (parent process only): signs a one-shot
+   * service assertion for each request's exact method + path. Passed in by the
+   * caller (lib/service-assertion.ts) so this module never holds a key and an
+   * MCP child can never sign.
+   */
+  serviceSigner?: (method: string, path: string) => Record<string, string>;
+  /**
+   * Spaces agent token (lib/spaces-agent-client.ts): the agent as itself, or
+   * on behalf of a user. Sent as the only credential; read queries go to
+   * /api/agent-query and `/claw` path variants are not used.
+   */
+  agentToken?: string;
+  /** The signed-in user's own Spaces cookie, forwarded from their browser request. */
+  cookie?: string;
+}
+
+/**
+ * Auth headers for one Spaces request, by mode (first match wins):
+ *   agent token → Bearer only;  forwarded cookie → Cookie only;
+ *   service signer → a per-request service assertion (no user token alongside it);
+ *   legacy user session → token + session cookies (being removed).
+ * In an MCP child (no `auth`), the same modes come from XYNE_SPACES_* env vars.
+ */
+export function resolveSpacesAuth(auth?: SpacesAuthContext): { headers: Record<string, string>; agent: boolean } {
+  const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
+  const ws: Record<string, string> = workspaceId ? { "x-workspace-id": workspaceId } : {};
+  const agentToken = auth ? (auth.agentToken ?? "") : (process.env["XYNE_SPACES_AGENT_TOKEN"] ?? "");
+  if (agentToken) return { agent: true, headers: { Authorization: `Bearer ${agentToken}`, ...ws } };
+  if (auth?.cookie) return { agent: false, headers: { Cookie: auth.cookie, ...ws } };
+  // Signed per attempt by the fetch functions (an assertion is single-use and path-bound).
+  if (auth?.serviceSigner) return { agent: false, headers: { ...ws } };
+
+  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
+  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
+  if (!token) throw new Error("Spaces auth token is missing for this request.");
+  const cookieParts: string[] = [];
+  if (sessionId) cookieParts.push(`xyne_session=${sessionId}`, `user_session_id=${sessionId}`);
+  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  return {
+    agent: false,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(sessionId ? { "x-session-id": sessionId } : {}),
+      ...ws,
+      ...(cookieParts.length ? { Cookie: cookieParts.join("; ") } : {}),
+    },
+  };
+}
+
+/** Path an agent token may call: plain routes only, and the agent query route for read queries. */
+export function agentPath(path: string): string {
+  const plain = path.replace(/\/claw(?=\/|$|\?)/, "");
+  return plain.replace(/^\/api\/query(?=$|\?)/, "/api/agent-query");
 }
 
 /**
@@ -85,47 +140,15 @@ const DEFAULT_TOKEN = process.env["XYNE_SPACES_TOKEN"] ?? "";
 export const CURRENT_USER_ID = extractUserIdFromToken(DEFAULT_TOKEN);
 
 export async function spacesFetch(path: string, init?: RequestInit, auth?: SpacesAuthContext): Promise<unknown> {
-  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
-  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
-  const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
-
   if (!baseUrl) {
     throw new Error("Spaces base URL is not configured. Set SPACES_BACKEND_URL (preferred) or XYNE_SPACES_URL.");
   }
-  // An internal route is authenticated by the S2S key alone, so it needs no user token.
-  if (!token && !auth?.s2sKey) {
-    throw new Error("Spaces auth token is missing for this request.");
-  }
-
-  // Spaces' auth middleware reads session ID from multiple cookie names
-  // depending on which middleware variant is mounted:
-  //   - `auth.ts` (legacy):           reads `xyne_session`
-  //   - `auth.ts` (newer refresh path): reads `user_session_id` ← REQUIRED for
-  //     proactive token refresh. Without this, when our token is within ~60s
-  //     of expiring (always true in tight TTL setups), the middleware tries
-  //     to refresh, fails because the cookie is missing, and returns 401
-  //     ("Token expired and no session provided for refresh"). Sending it
-  //     unconditionally is harmless on other paths.
-  //   - `authV2Middleware.ts`:        reads `x-session-id` header or
-  //                                   `user_session_id` cookie.
-  // Workspace id (legacy: `xyne_last_workspace` cookie, authV2: `x-workspace-id`
-  // header) is sent through both channels for the same reason.
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const cookieHeader = cookieParts.join("; ");
-
+  const resolved = resolveSpacesAuth(auth);
+  if (resolved.agent) path = agentPath(path);
   const headers: Record<string, string> = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...resolved.headers,
     "Content-Type": "application/json",
-    ...(sessionId ? { "x-session-id": sessionId } : {}),
-    ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-    ...(auth?.s2sKey ? { "x-s2s-key": auth.s2sKey } : {}),
-    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     ...(init?.headers as Record<string, string> | undefined),
   };
 
@@ -140,7 +163,9 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
       // first-attempt timeout doesn't instantly fail the fallback.
       const response = await fetch(url, {
         ...init,
-        headers,
+        headers: auth?.serviceSigner
+          ? { ...headers, ...auth.serviceSigner(init?.method ?? "GET", new URL(url).pathname) }
+          : headers,
         signal: init?.signal ?? AbortSignal.timeout(30_000),
       });
       if (!response.ok) {
@@ -204,29 +229,14 @@ export async function spacesFetchBuffer(
   path: string,
   auth?: SpacesAuthContext,
 ): Promise<{ buffer: Buffer; contentType: string }> {
-  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
-  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
-  const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
   if (!baseUrl) throw new Error("Spaces base URL not configured");
-  if (!token) throw new Error("Spaces auth token missing");
-
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const cookieHeader = cookieParts.join("; ");
+  const resolved = resolveSpacesAuth(auth);
+  if (resolved.agent) path = agentPath(path);
 
   const url = new URL(path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(sessionId ? { "x-session-id": sessionId } : {}),
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-    },
+    headers: auth?.serviceSigner ? { ...resolved.headers, ...auth.serviceSigner("GET", new URL(url).pathname) } : resolved.headers,
     signal: AbortSignal.timeout(30_000),
   });
 
@@ -240,29 +250,14 @@ export async function spacesFetchBuffer(
 
 /** Plain-text variant of spacesFetch — returns the response body as a string. */
 export async function spacesFetchText(path: string, auth?: SpacesAuthContext): Promise<string> {
-  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
-  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
-  const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
   if (!baseUrl) throw new Error("Spaces base URL not configured");
-  if (!token) throw new Error("Spaces auth token missing");
-
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const cookieHeader = cookieParts.join("; ");
+  const resolved = resolveSpacesAuth(auth);
+  if (resolved.agent) path = agentPath(path);
 
   const url = new URL(path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(sessionId ? { "x-session-id": sessionId } : {}),
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-    },
+    headers: auth?.serviceSigner ? { ...resolved.headers, ...auth.serviceSigner("GET", new URL(url).pathname) } : resolved.headers,
     signal: AbortSignal.timeout(30_000),
   });
 
@@ -288,7 +283,7 @@ export async function appFetch(path: string, init?: RequestInit, auth?: SpacesAu
   if (!baseUrl) throw new Error("Spaces base URL is not configured.");
   if (!token) throw new Error("Spaces app token is missing for this request.");
 
-  const url = `${baseUrl}/api/apps${path}`;
+  const url = `${baseUrl}/api/claw-agents/bot${path}`;
   const response = await fetch(url, {
     ...init,
     headers: {
@@ -322,7 +317,7 @@ export async function appFetchBuffer(
   if (!baseUrl) throw new Error("Spaces base URL is not configured.");
   if (!token) throw new Error("Spaces app token is missing for this request.");
 
-  const url = `${baseUrl}/api/apps${path}`;
+  const url = `${baseUrl}/api/claw-agents/bot${path}`;
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(30_000),

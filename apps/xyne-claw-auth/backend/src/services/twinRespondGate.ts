@@ -22,6 +22,7 @@ import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
 import { recordGateEvent } from "./digitalTwinPipelineEvents.js";
 import { createLogger, createTraceId } from "../logger.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../lib/internal-call.js";
 
 const logger = createLogger("twin-respond-gate-client", createTraceId());
 const memory = getMemoryProvider();
@@ -275,7 +276,7 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
     void recordGateEvent({ ...gateEvent, decision: FAIL_CLOSED, llm, error, durationMs: Date.now() - tStart });
   };
 
-  if (!CONFIG.xyneClawS2sKey) return FAIL_CLOSED;
+  if (!serviceCallsConfigured()) return FAIL_CLOSED;
 
   try {
     // EVERY mention goes through the LLM gate — no deterministic short-circuits.
@@ -291,9 +292,10 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
     // Corrections (wrong-silence cases) are the highest-priority guidance.
     const allPatterns = [...corrections, ...patterns];
 
-    const res = await fetch(`${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/should-respond`, {
+    const shouldRespondUrl = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/should-respond`;
+    const res = await fetch(shouldRespondUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", shouldRespondUrl) },
       body: JSON.stringify({
         incoming: args.incoming,
         ...(args.channelName ? { channelName: args.channelName } : {}),

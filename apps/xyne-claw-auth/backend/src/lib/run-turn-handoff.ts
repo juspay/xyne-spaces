@@ -3,6 +3,7 @@ import { createLogger } from "../logger.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { localHarnessRepository } from "../repositories/localHarnessRepository.js";
 import { relayResult, requestLocalHarnessInterrupt, TURN_HANDOFF_SUMMARY_FALLBACK } from "./local-harness.js";
+import { selfAuthHeaders } from "./internal-call.js";
 
 const log = createLogger("run-turn-handoff");
 
@@ -48,12 +49,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function internalRunHeaders(userId: string): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-    "x-user-id": userId,
-  };
+/** claw-auth calling its own run route for `userId`: service assertion + run token (no x-user-id). */
+function internalRunHeaders(url: string, userId: string, sessionId: string): Record<string, string> {
+  return { "Content-Type": "application/json", ...selfAuthHeaders("POST", url, { userId, sessionId }) };
 }
 
 interface RunActionOutcome {
@@ -73,9 +71,10 @@ async function postInternalRunAction(
   userId: string,
 ): Promise<RunActionOutcome> {
   try {
+    const actionUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/${action}`;
     const res = await fetch(
-      `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/${action}`,
-      { method: "POST", headers: internalRunHeaders(userId) },
+      actionUrl,
+      { method: "POST", headers: internalRunHeaders(actionUrl, userId, sessionId) },
     );
     if (!res.ok) {
       log.warn(`[turn-handoff] ${action} rejected session=${sessionId} status=${res.status}`);

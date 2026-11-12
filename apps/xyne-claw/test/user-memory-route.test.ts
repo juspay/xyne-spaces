@@ -19,7 +19,7 @@ vi.mock("../src/twin-respond-gate.js", () => ({ decideRespond: vi.fn() }));
 
 type Handler = (req: unknown, res: unknown) => Promise<void>;
 
-/** The route's own handler, skipping validateS2SKey (the last layer in the route stack). */
+/** The route's own handler, skipping requireClawAuthService (the last layer in the route stack). */
 function handlerFor(path: string): Handler {
   const layer = (userMemoryRouter as unknown as { stack: Array<{ route?: { path: string; stack: Array<{ handle: unknown }> } }> }).stack
     .find((l) => l.route?.path === path);

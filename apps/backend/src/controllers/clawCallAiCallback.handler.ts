@@ -8,7 +8,7 @@ import {
 /**
  * Terminal result of a call AI Claw run, forwarded by claw-auth to the URL the
  * run was dispatched with (`/api/internal/call-ai/claw-callback/:runKey`).
- * Authenticated by validateS2SKey at the route. The waiter that dispatched the
+ * Authenticated by a service assertion at the route (claw/serviceAuth.ts). The waiter that dispatched the
  * run (possibly on another pod) picks the outcome up from Redis.
  */
 export async function handleClawCallAiCallback(

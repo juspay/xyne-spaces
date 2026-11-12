@@ -1,4 +1,5 @@
 import type { Session } from "@xyne/kata-sdk";
+import type { ToolExecutionContext } from "../types.js";
 
 /** Who asks, for which Repository. Both ids come from backend run context, never the LLM. */
 export interface SdlcRepositoryAccessBinding {
@@ -10,7 +11,8 @@ export interface SdlcRepositoryAccessBinding {
 /** How claw reaches claw-auth, which forwards to Spaces under the run's session token. */
 export interface SdlcRepositoryAccessTransport {
   authUrl: string;
-  s2sKey: string;
+  /** Signs the call as the runtime (never a key). */
+  serviceAuth?: ToolExecutionContext["serviceAuth"];
   runSessionId: string;
   sessionToken: string;
 }
@@ -47,14 +49,14 @@ async function requestEnvelope(
   sandboxId: string,
   sandboxPublicKey: string,
 ): Promise<{ envelope: SdlcCredentialEnvelope | null; repository: SdlcRepositoryAccessTarget }> {
-  const { authUrl, s2sKey, runSessionId, sessionToken } = transport;
-  if (!authUrl || !s2sKey || !runSessionId || !sessionToken) {
-    throw new Error("Claw auth URL, S2S key or session token is unavailable for repository access");
+  const { authUrl, serviceAuth, runSessionId, sessionToken } = transport;
+  if (!authUrl || !serviceAuth || !runSessionId || !sessionToken) {
+    throw new Error("Claw auth URL, service signer or session token is unavailable for repository access");
   }
   const url = `${authUrl.replace(/\/+$/, "")}/claw/api/v1/sessions/${encodeURIComponent(runSessionId)}/sdlc/runtime-credentials/bootstrap`;
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-s2s-key": s2sKey, Authorization: `Bearer ${sessionToken}` },
+    headers: { "Content-Type": "application/json", ...serviceAuth("POST", url), Authorization: `Bearer ${sessionToken}` },
     body: JSON.stringify({ ...binding, sandboxId, sandboxPublicKey }),
     signal: AbortSignal.timeout(20_000),
   });

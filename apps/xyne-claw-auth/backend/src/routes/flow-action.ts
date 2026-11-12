@@ -19,11 +19,14 @@ import { errMsg } from "../lib/errors.js";
 import { classifyToolError, flowActionError } from "../lib/flow-action-error.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
-import { decrypt } from "../crypto.js";
 import { isOAuthProvider, prepareOAuthCustomTool } from "../lib/oauth-custom-tool.js";
 import { executeTwinApprovalDelivery, twinDeliveryContextFromFlowData } from "../lib/twin-approval-delivery.js";
 import { fetchTicketForCard, parseSentEmailFromToolResult, parseXyneIdFromToolResult } from "../lib/ticket-card.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
+import { serviceAuthHeaders } from "../lib/service-assertion.js";
+import { EVENT_HEADER, FLOW_ACTION_PURPOSE, verifySpacesEvent } from "../lib/spaces-delegation.js";
+import { claimEventJti } from "../lib/spaces-event-replay.js";
+import { findPrincipalById } from "../lib/spaces-agent-client.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
@@ -72,6 +75,8 @@ import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-wo
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
+import { botBearer, getAgentBotAuth, spacesBotUrl, type BotRef } from "../lib/spaces-bot.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 const log = createLogger("flow-action");
 
 function sanitizeForLog(value: unknown): string {
@@ -170,9 +175,8 @@ async function consumePlanCard(
 
 // ── Spaces signature re-verification ─────────────────────────────────────────
 // The handler below trusts body-supplied identity (context.userId = the user
-// who clicked the Flow button). requireStrictS2S at the mount only proves the
-// caller holds the shared S2S key — it does NOT bind that identity, so a key
-// holder could act as any user. The webhook /:agentSlug proxy forwards the
+// who clicked the Flow button). The service assertion at the mount only proves
+// which service is calling — it does NOT bind that identity. The webhook /:agentSlug proxy forwards the
 // original raw bytes, Spaces' X-Xyne-Signature, and the agent slug; here we
 // re-run the per-agent HMAC check so context.userId is bound to a payload
 // Spaces actually signed. verifySpacesSignature keys off req.params.agentSlug,
@@ -207,7 +211,7 @@ async function replaceFlowCardWithText(
     return;
   }
   try {
-    const spacesBase = `${CONFIG.spacesInternalUrl}/api/apps`;
+    const spacesBase = spacesBotUrl("");
     const res = await fetch(`${spacesBase}/chat/updateMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${agent.token}` },
@@ -258,16 +262,22 @@ type AppActionResponse =
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function decryptSpacesAppToken(stored: string): string | null {
-  const [ciphertext, iv, authTag] = stored.split(":");
-  if (!ciphertext || !iv || !authTag) return null;
-  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+/**
+ * Spaces workspace of the click being handled, when known: set for clicks on the
+ * agent route (from the verified event token). Legacy app-webhook clicks leave
+ * it unset, and posting then uses the agent's only workspace.
+ */
+const flowWorkspace = new AsyncLocalStorage<string>();
+
+/** Posts as the agent's bot in the click's workspace (fresh token per call). */
+function flowBot(agentId: string): BotRef {
+  return { clawAgentId: agentId, workspaceId: flowWorkspace.getStore() ?? null };
 }
 
-async function postAsSpacesApp(appToken: string, path: string, body: Record<string, unknown>): Promise<unknown> {
-  const r = await fetch(`${CONFIG.spacesInternalUrl}/api/apps${path}`, {
+async function postAsSpacesApp(bot: BotRef, path: string, body: Record<string, unknown>): Promise<unknown> {
+  const r = await fetch(spacesBotUrl(path), {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${await botBearer(bot)}` },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
   });
@@ -280,8 +290,6 @@ async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: str
   orgId: string;
   slug: string;
   name: string;
-  spacesAppToken: string | null;
-  spacesAppUserId: string | null;
   spacesAppId: string | null;
   config?: unknown;
 } | null> {
@@ -312,13 +320,14 @@ async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: str
   return matches[0] ?? null;
 }
 
-async function getAgentTokenAndUserId(agentSlug: string | undefined, spacesAppId?: string): Promise<{ token: string; userId: string } | null> {
+/** The agent's bot for this click: a current token and its bot user, or null when it can't post here. */
+async function getAgentTokenAndUserId(agentSlug: string | undefined, spacesAppId?: string): Promise<{ bot: BotRef; token: string; userId: string } | null> {
   const agent = await findAgentForFlow(agentSlug, spacesAppId);
-  if (!agent?.spacesAppToken || !agent.spacesAppUserId) return null;
-  const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-  if (!ciphertext || !iv || !authTag) return null;
-  const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-  return { token, userId: agent.spacesAppUserId };
+  if (!agent) return null;
+  const bot = flowBot(agent.id);
+  const auth = await getAgentBotAuth(bot.clawAgentId, bot.workspaceId);
+  if (!auth) return null;
+  return { bot, token: auth.token, userId: auth.botUserId };
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────────
@@ -399,7 +408,7 @@ async function replaceFlowCardWithFlow(
     return "failed";
   }
   try {
-    const spacesBase = `${CONFIG.spacesInternalUrl}/api/apps`;
+    const spacesBase = spacesBotUrl("");
     const res = await fetch(`${spacesBase}/chat/updateMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${agent.token}` },
@@ -455,15 +464,13 @@ async function dispatchContinuationRun(opts: {
       return;
     }
     const agent = await findAgentForFlow(opts.agentSlug, opts.spacesAppId, orgId);
-    const appToken = agent?.spacesAppToken
-      ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
-      : "";
+    const botUserId = agent ? (await getAgentBotAuth(agent.id, flowWorkspace.getStore() ?? null))?.botUserId ?? "" : "";
     const trimmed = trimForPrompt(opts.resultText);
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
         "x-user-id": writeUserId,
       },
       body: JSON.stringify({
@@ -480,7 +487,7 @@ async function dispatchContinuationRun(opts: {
     const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
     if (runBody.success && runBody.sessionId && agent) {
       await setSession(runBody.sessionId, {
-        mentionedUserId: agent.spacesAppUserId ?? "",
+        mentionedUserId: botUserId,
         senderId: writeUserId,
         senderName: "",
         channelId: opts.channelId ?? "",
@@ -491,9 +498,9 @@ async function dispatchContinuationRun(opts: {
         agentOrgId: agent.orgId,
         agentSlug: opts.agentSlug ?? "",
         responseMode: "conversation",
-        appToken,
+        bot: flowBot(agent.id),
         spacesAppId: agent.spacesAppId ?? "",
-        spacesAppUserId: agent.spacesAppUserId ?? "",
+        spacesAppUserId: botUserId,
       });
     }
     log.info(`[flow-action] continuation run dispatched after ${opts.tool} (session=${runBody.sessionId})`);
@@ -662,7 +669,7 @@ async function finishWriteSuccess(opts: {
     const xyneId = parseXyneIdFromToolResult(opts.resultText);
     const agent = xyneId ? await getAgentTokenAndUserId(opts.agentSlug, opts.spacesAppId) : null;
     if (xyneId && agent) {
-      const ticket = await fetchTicketForCard(xyneId, agent.token);
+      const ticket = await fetchTicketForCard(xyneId, agent.bot);
       if (ticket) {
         flow = buildTicketFlow(ticket);
         usedRichFlow = true;
@@ -680,7 +687,7 @@ async function finishWriteSuccess(opts: {
         ? await getAgentTokenAndUserId(opts.agentSlug, opts.spacesAppId)
         : null;
       const ticket =
-        sent.ticketXyneId && agent ? await fetchTicketForCard(sent.ticketXyneId, agent.token) : null;
+        sent.ticketXyneId && agent ? await fetchTicketForCard(sent.ticketXyneId, agent.bot) : null;
       flow = buildEmailSentFlow({
         to: sent.to,
         ...(sent.cc.length ? { cc: sent.cc } : {}),
@@ -805,7 +812,7 @@ async function finishWriteFailure(opts: {
   });
 }
 
-router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req: Request, res: Response): Promise<void> => {
+const handleFlowAction = async (req: Request, res: Response): Promise<void> => {
   const body = req.body as ActionRequest;
   const { actionId, values, context, applyToDraft } = body;
   const { flowJSON, messageId, conversationId, userId: rawCallerUserId } = context;
@@ -970,14 +977,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // Execute the tool
       if (serverType === "xyne-spaces" && tool === "spaces-send-message") {
         const agent = await findAgentForFlow(agentSlug, spacesAppId, writeUser.orgId);
-        if (!agent?.spacesAppToken) {
-          log.error(`[flow-action] No spacesAppToken for agent ${agentSlug ?? "(default)"}`);
-          res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
-          return;
-        }
-        const appToken = decryptSpacesAppToken(agent.spacesAppToken);
-        if (!appToken) {
-          log.error(`[flow-action] Invalid spacesAppToken format for agent ${agentSlug ?? "(default)"}`);
+        const sendBot = agent ? flowBot(agent.id) : null;
+        if (!agent || !sendBot || !(await getAgentBotAuth(sendBot.clawAgentId, sendBot.workspaceId))) {
+          log.error(`[flow-action] agent ${agentSlug ?? "(default)"} cannot post in Spaces (not added to this workspace)`);
           res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
           return;
         }
@@ -987,12 +989,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         const msgConversationId = params["conversationId"] as string | undefined;
         const channelId = params["channelId"] as string | undefined;
         const sourceConversationId = (params["sourceConversationId"] as string | undefined) ?? msgConversationId;
-        const spacesBase = `${CONFIG.spacesInternalUrl}/api/apps`;
+        const spacesBase = spacesBotUrl("");
 
         const spacesPost = async (path: string, b: Record<string, unknown>) => {
           const r = await fetch(`${spacesBase}${path}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${await botBearer(sendBot)}` },
             body: JSON.stringify(b),
             signal: AbortSignal.timeout(30_000),
           });
@@ -1181,16 +1183,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return;
         }
         const agent = await findAgentForFlow(agentSlug, spacesAppId, writeUser.orgId);
-        const appToken = agent?.spacesAppToken ? decryptSpacesAppToken(agent.spacesAppToken) : null;
-        if (!agent || !appToken) {
-          log.error(`[flow-action] No spacesAppToken for agent ${agentSlug ?? "(default)"}`);
+        const forkBot = agent ? flowBot(agent.id) : null;
+        if (!agent || !forkBot || !(await getAgentBotAuth(forkBot.clawAgentId, forkBot.workspaceId))) {
+          log.error(`[flow-action] agent ${agentSlug ?? "(default)"} cannot post in Spaces (not added to this workspace)`);
           res.json(flowActionError("MISCONFIGURED") satisfies AppActionResponse);
           return;
         }
         const outcome = await applyConversationFork(
           params,
           { conversationId, ...(continueChannelId ? { channelId: continueChannelId } : {}), agentSlug: agent.slug, userId: writeUserId },
-          { post: (body) => postAsSpacesApp(appToken, "/chat/postMessage", body) as Promise<{ conversationId?: string }> },
+          { post: (body) => postAsSpacesApp(forkBot, "/chat/postMessage", body) as Promise<{ conversationId?: string }> },
         );
         const text = outcome.ok ? outcome.message : `Fork failed: ${outcome.error}`;
         resp = { type: "close_screen", finalMessage: text };
@@ -1716,9 +1718,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
 
         const agent = await findAgentForFlow(answerAgentSlug, answerSpacesAppId);
-        const appToken = agent?.spacesAppToken
-          ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
-          : "";
+        const botUserId = agent ? (await getAgentBotAuth(agent.id, flowWorkspace.getStore() ?? null))?.botUserId ?? "" : "";
         const answerOrgId = agent?.orgId
           ?? (await prisma.user.findUnique({ where: { id: await resolveCardUserId(answerUserId) }, select: { orgId: true } }))?.orgId;
         if (!answerOrgId) {
@@ -1745,7 +1745,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+            ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
           },
           body: JSON.stringify({
             userId: answerUserId,
@@ -1768,12 +1768,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             conversationId: answerConversationId,
             channelId: answerChannelId,
             agentSlug: answerAgentSlug,
-            spacesAppUserId: agent.spacesAppUserId ?? undefined,
-            appToken,
+            spacesAppUserId: botUserId || undefined,
+            bot: flowBot(agent.id),
             toolLabel: "Working on your answers…",
           });
           await setSession(runBody.sessionId, {
-            mentionedUserId: agent.spacesAppUserId ?? "",
+            mentionedUserId: botUserId,
             senderId: answerUserId,
             senderName: "",
             channelId: answerChannelId,
@@ -1784,9 +1784,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             agentOrgId: agent.orgId,
             agentSlug: answerAgentSlug,
             responseMode: "conversation",
-            appToken,
+            bot: flowBot(agent.id),
             spacesAppId: agent.spacesAppId ?? "",
-            spacesAppUserId: agent.spacesAppUserId ?? "",
+            spacesAppUserId: botUserId,
           });
         }
 
@@ -1875,8 +1875,6 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           slug: true,
           name: true,
           spacesAppId: true,
-          spacesAppToken: true,
-          spacesAppUserId: true,
           config: true,
         },
       });
@@ -1967,7 +1965,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
         },
         body: JSON.stringify(dispatchPayload),
       });
@@ -1988,11 +1986,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      if (targetAgent.spacesAppToken && targetAgent.spacesAppId) {
+      const botUserId = (await getAgentBotAuth(targetAgent.id, flowWorkspace.getStore() ?? null))?.botUserId ?? "";
+      if (botUserId) {
         const { setSession } = await import("./webhook.js");
-        const appToken = decrypt(...(targetAgent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey);
         const sessionContext = {
-          mentionedUserId: targetAgent.spacesAppUserId ?? "",
+          mentionedUserId: botUserId,
           senderId: callerUserId,
           senderName: "",
           channelId: proposalChannelId,
@@ -2003,9 +2001,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           agentOrgId: targetAgent.orgId,
           agentSlug: targetAgent.slug,
           responseMode: "conversation" as const,
-          appToken,
-          spacesAppId: targetAgent.spacesAppId,
-          spacesAppUserId: targetAgent.spacesAppUserId ?? "",
+          bot: flowBot(targetAgent.id),
+          spacesAppId: targetAgent.spacesAppId ?? "",
+          spacesAppUserId: botUserId,
           traceId,
           rootAgentSlug: targetAgent.slug,
         };
@@ -2435,9 +2433,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // a stuck dispatch is recoverable; a broken UI promise is not.
       (async () => {
         try {
-          const appToken = agent.spacesAppToken
-            ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
-            : "";
+          const botUserId = (await getAgentBotAuth(agent.id, flowWorkspace.getStore() ?? null))?.botUserId ?? "";
 
           const { handleSlashCommandBeforeRun, persistGoalStart } = await import("../services/goalRelooper.js");
           const { setSession } = await import("./webhook.js");
@@ -2470,7 +2466,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+              ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
               "x-user-id": goalUserId,
             },
             body: JSON.stringify(dispatchPayload),
@@ -2481,7 +2477,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             // Register session so /webhook/result can resolve agent context
             // when turn-1 finishes — no prior /webhook event for this run.
             await setSession(runBody.sessionId, {
-              mentionedUserId: agent.spacesAppUserId ?? "",
+              mentionedUserId: botUserId,
               senderId: goalUserId,
               senderName: "",
               channelId: goalChannelId,
@@ -2492,9 +2488,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               agentOrgId: agent.orgId,
               agentSlug: goalAgentSlug,
               responseMode: "conversation",
-              appToken,
+              bot: flowBot(agent.id),
               spacesAppId: agent.spacesAppId ?? "",
-              spacesAppUserId: agent.spacesAppUserId ?? "",
+              spacesAppUserId: botUserId,
             });
 
             // Persist after /run has acknowledged — persisting earlier risks
@@ -2764,9 +2760,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             log.error(`[flow-action] plan-approval: agent ${planAgentSlug} not found`);
             return;
           }
-          const appToken = agent.spacesAppToken
-            ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
-            : "";
+          const botUserId = (await getAgentBotAuth(agent.id, flowWorkspace.getStore() ?? null))?.botUserId ?? "";
 
           const { setSession } = await import("./webhook.js");
 
@@ -2812,7 +2806,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+              ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
             },
             body: JSON.stringify(dispatchPayload),
           });
@@ -2829,8 +2823,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               channelId: planChannelId,
               agentSlug: planAgentSlug,
               agentName: agent.name,
-              spacesAppUserId: agent.spacesAppUserId ?? undefined,
-              appToken,
+              spacesAppUserId: botUserId || undefined,
+              bot: flowBot(agent.id),
               toolLabel: "Starting the plan…",
             });
             const approvedTodos = approved.map((t) => ({ id: t.id, title: t.title }));
@@ -2852,7 +2846,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               });
             } else {
               await setSession(runBody.sessionId, {
-                mentionedUserId: agent.spacesAppUserId ?? "",
+                mentionedUserId: botUserId,
                 senderId: planUserId,
                 senderName: "",
                 channelId: planChannelId ?? "",
@@ -2863,9 +2857,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
                 agentOrgId: agent.orgId,
                 agentSlug: planAgentSlug,
                 responseMode: "conversation",
-                appToken,
+                bot: flowBot(agent.id),
                 spacesAppId: agent.spacesAppId ?? "",
-                spacesAppUserId: agent.spacesAppUserId ?? "",
+                spacesAppUserId: botUserId,
                 mode: "auto",
                 pendingPlan: { todos: approvedTodos },
                 ...planMessageIdField,
@@ -2890,6 +2884,54 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     log.error("[flow-action] Unexpected error:", err);
     res.status(500).json({ type: "error", message: "Internal server error" } satisfies AppActionResponse);
   }
-});
+};
 
-export { router as flowActionRouter };
+router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, handleFlowAction);
+
+// ── Agent principals: clicks on cards a Claw agent posted ────────────────────
+// Spaces sends these straight here (not via the app webhook proxy) with an
+// event token: signed by Spaces, single use, naming the user who clicked (sub)
+// and binding the exact body. Mounted without a service gate (http/routes.ts).
+async function verifyAgentFlowClick(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const principalId = String(req.params["principalId"] ?? "");
+  const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody ?? Buffer.alloc(0);
+  const ev = await verifySpacesEvent(req.headers[EVENT_HEADER], principalId, rawBody);
+  if (typeof ev === "string" || ev.purpose !== FLOW_ACTION_PURPOSE) {
+    log.warn(`[flow-action/agent] click token rejected (${typeof ev === "string" ? ev : "wrong purpose"}) principal=${sanitizeForLog(principalId)}`);
+    res.status(401).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+    return;
+  }
+  if (!(await claimEventJti(ev.jti))) {
+    log.warn(`[flow-action/agent] click token replayed principal=${sanitizeForLog(principalId)}`);
+    res.status(401).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+    return;
+  }
+  // The clicking user in the body must be the token's.
+  const bodyUserId = (req.body as Partial<ActionRequest> | undefined)?.context?.userId;
+  if (bodyUserId !== ev.spacesUserId) {
+    log.warn(`[flow-action/agent] body user does not match the click token principal=${sanitizeForLog(principalId)}`);
+    res.status(401).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+    return;
+  }
+  const principal = await findPrincipalById(principalId).catch(() => null);
+  if (!principal || principal.status !== "ACTIVE" || principal.workspaceId !== ev.workspaceId) {
+    res.status(404).json({ type: "error", message: "This agent is no longer available." } satisfies AppActionResponse);
+    return;
+  }
+  const agent = await prisma.agent.findUnique({ where: { id: principal.clawAgentId }, select: { slug: true } });
+  if (!agent) {
+    res.status(404).json({ type: "error", message: "This agent is no longer available." } satisfies AppActionResponse);
+    return;
+  }
+  (req.params as Record<string, string>)["agentSlug"] = agent.slug;
+  res.locals["spacesEvent"] = ev;
+  next();
+}
+
+const agentRouter = Router();
+agentRouter.post("/:principalId/action", verifyAgentFlowClick, (req: Request, res: Response) =>
+  // Posting during this click (and its follow-up work) uses the token's workspace.
+  flowWorkspace.run((res.locals["spacesEvent"] as { workspaceId: string }).workspaceId, () => handleFlowAction(req, res)),
+);
+
+export { router as flowActionRouter, agentRouter as agentFlowActionRouter };

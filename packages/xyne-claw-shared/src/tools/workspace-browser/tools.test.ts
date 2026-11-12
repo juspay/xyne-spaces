@@ -16,7 +16,7 @@ vi.mock("../claw-auth-url.js", () => ({ clawAuthUrl: () => "http://claw-auth" })
 
 import { pageClick, pageRead } from "./tools.js";
 
-const serverRun = { sessionId: "s1", meta: { userId: "u1" }, s2sKey: "k" } as never;
+const serverRun = { sessionId: "s1", meta: { userId: "u1" }, serviceAuth: () => ({}) } as never;
 
 function answer(data: Record<string, unknown>) {
   return vi.fn(async () => new Response(JSON.stringify({ success: true, data }), { status: 200 }));

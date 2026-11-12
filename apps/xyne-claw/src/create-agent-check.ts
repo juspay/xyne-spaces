@@ -1,5 +1,6 @@
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("create-agent-check");
 
@@ -18,12 +19,13 @@ export async function checkCreateAgent(
   userId: string,
   params: Record<string, unknown>,
 ): Promise<CreateAgentCheck> {
-  if (!userId || !SERVER.s2sKey) return PASS;
+  if (!userId) return PASS;
   try {
     const base = SERVER.authServiceUrl.replace(/\/$/, "");
-    const res = await fetch(`${base}/claw/api/v1/internal/agent-create/check`, {
+    const url = `${base}/claw/api/v1/internal/agent-create/check`;
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
+      headers: { "Content-Type": "application/json", ...clawAuthHeaders("POST", url) },
       body: JSON.stringify({ userId, params }),
       signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });

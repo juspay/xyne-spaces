@@ -10,6 +10,7 @@
 
 import type { AwakeningConfig } from "./config.js";
 import type { PriorRun } from "./prior-runs.js";
+import type { BotRef } from "../lib/spaces-bot.js";
 
 export interface ResolvedChannel {
   id: string;
@@ -90,9 +91,11 @@ export type GateOutcome =
   | { decision: "run"; rule: string }
   | { decision: "skip"; rule: string };
 
-/** Auth for reads/writes performed as the agent's Spaces app identity. */
+/** Auth for reads/writes performed as the agent's Spaces bot (its principal in the workspace). */
 export interface AgentSpacesIdentity {
-  appToken: string;
+  bot: BotRef;
+  /** Agent token (the agent itself, 10 minutes) fetched when the window started. */
+  agentToken: string;
   spacesAppId: string;
   spacesAppUserId: string;
   workspaceId: string;

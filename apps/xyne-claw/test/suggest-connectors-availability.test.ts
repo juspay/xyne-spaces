@@ -1,13 +1,13 @@
 import { test, expect, vi, afterEach } from "vitest";
 
-vi.hoisted(() => {
-  process.env["XYNE_CLAW_S2S_KEY"] = "test-key";
-});
 
 import {
   buildSuggestConnectorsTool,
   type SuggestConnectorsRef,
 } from "../src/suggest-connectors.js";
+import { useRuntimeTestKey } from "./runtime-test-key.js";
+
+useRuntimeTestKey();
 
 async function callTool(ref: SuggestConnectorsRef, params: unknown, userId?: string) {
   const tool = buildSuggestConnectorsTool(ref, userId);

@@ -2,7 +2,7 @@
  * Connectors for Spaces artifact apps.
  *
  * An app running in the dashboard can only reach Spaces (`/api/sdk/*`); the
- * Spaces backend relays here over INTERNAL_S2S_KEY with the viewer's user id.
+ * Spaces backend relays here with its service assertion and the viewer's user id.
  * We resolve the VIEWER's own connection, run the MCP tool server-side, and
  * hand back text. The credential never leaves this process — that is the whole
  * point versus shipping a secret inside the app bundle.

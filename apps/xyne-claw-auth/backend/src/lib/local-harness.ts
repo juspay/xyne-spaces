@@ -14,6 +14,8 @@ import { createLogger } from "../logger.js";
 import { mintSessionToken } from "./session-tokens.js";
 import { ingestArtifactSignals } from "./conversation-artifact-signals.js";
 import { authenticatedProviders, localHarnessRepository } from "../repositories/localHarnessRepository.js";
+import { serviceAuthHeaders } from "./service-assertion.js";
+import { internalServiceHeaders } from "./internal-service-auth.js";
 
 const log = createLogger("local-harness");
 
@@ -158,7 +160,7 @@ export async function resolveLocalSandbox(command: string): Promise<LocalSandbox
 
   try {
     const res = await fetch(`${CONFIG.xyneClawUrl}/internal/task-commands/${encodeURIComponent(name)}`, {
-      headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
+      headers: serviceAuthHeaders("xyne-claw", "GET", `${CONFIG.xyneClawUrl}/internal/task-commands/${encodeURIComponent(name)}`),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
@@ -355,7 +357,7 @@ export async function failOverToServerRun(run: LocalHarnessRun, reason: string):
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
       },
       body: raw,
       signal: AbortSignal.timeout(30_000),
@@ -397,7 +399,7 @@ type McpServerTools = {
   writeTools?: string[];
 };
 
-function sessionAuthHeaders(run: Pick<LocalHarnessRun, "sessionId" | "userId" | "agentSlug">): Record<string, string> {
+function sessionAuthHeaders(run: Pick<LocalHarnessRun, "sessionId" | "userId" | "agentSlug">, method: string, url: string): Record<string, string> {
   const token = mintSessionToken({
     sessionId: run.sessionId,
     userId: run.userId,
@@ -407,7 +409,8 @@ function sessionAuthHeaders(run: Pick<LocalHarnessRun, "sessionId" | "userId" | 
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`,
-    ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    "x-session-token": token,
+    ...serviceAuthHeaders("xyne-claw-auth", method, url),
   };
 }
 
@@ -458,7 +461,7 @@ async function localToolsForRun(run: LocalHarnessRun): Promise<LocalHarnessToolS
 }
 
 export async function listToolsForRun(run: LocalHarnessRun): Promise<LocalHarnessToolSpec[]> {
-  const res = await fetch(mcpUrl(run.sessionId, "tools"), { headers: sessionAuthHeaders(run) });
+  const res = await fetch(mcpUrl(run.sessionId, "tools"), { headers: sessionAuthHeaders(run, "GET", mcpUrl(run.sessionId, "tools")) });
   if (!res.ok) {
     log.warn(`[local-harness] tool listing failed run=${run.id} status=${res.status}`);
     return [];
@@ -581,7 +584,7 @@ export async function callToolForRun(
   }
   const res = await fetch(mcpUrl(run.sessionId, "call"), {
     method: "POST",
-    headers: sessionAuthHeaders(run),
+    headers: sessionAuthHeaders(run, "POST", mcpUrl(run.sessionId, "call")),
     body: JSON.stringify({ serverType: call.serverType, tool: call.toolName, params: call.params }),
   });
 
@@ -645,10 +648,10 @@ export async function callToolForRun(
   return { ok: true, content };
 }
 
-function callbackHeaders(run: Pick<LocalHarnessRun, "sessionId" | "userId" | "agentSlug">): Record<string, string> {
+function callbackHeaders(run: Pick<LocalHarnessRun, "sessionId" | "userId" | "agentSlug">, url: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    ...internalServiceHeaders("POST", url),
     "x-session-token": mintSessionToken({
       sessionId: run.sessionId,
       userId: run.userId,
@@ -661,7 +664,7 @@ function callbackHeaders(run: Pick<LocalHarnessRun, "sessionId" | "userId" | "ag
 export async function relayProgress(run: LocalHarnessRun, body: Record<string, unknown>): Promise<void> {
   await fetch(run.progressUrl, {
     method: "POST",
-    headers: callbackHeaders(run),
+    headers: callbackHeaders(run, run.progressUrl),
     body: JSON.stringify({ ...body, sessionId: run.sessionId }),
   }).catch((err) => {
     log.warn(`[local-harness] progress relay failed run=${run.id}: ${err instanceof Error ? err.message : String(err)}`);
@@ -731,7 +734,7 @@ export async function relayResult(
 
   await fetch(run.callbackUrl, {
     method: "POST",
-    headers: callbackHeaders(run),
+    headers: callbackHeaders(run, run.callbackUrl),
     body: JSON.stringify({
       status: toCallbackStatus(result.status),
       result: result.text,

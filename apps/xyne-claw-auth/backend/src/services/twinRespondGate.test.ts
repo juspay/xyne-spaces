@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../lib/internal-call.js", () => ({ serviceCallsConfigured: () => mocks.config.serviceKeyConfigured !== false, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: (method: string, _url: string, user?: { userId?: string }) => ({ "x-service-assertion": `test:xyne-claw-auth:${method}`, ...(user?.userId ? { "x-session-token": `run:${user.userId}` } : {}) }), selfCallRunToken: (u: { userId: string }) => `run:${u.userId}` }));
 
 // Characterization tests for the Digital Twin respond/ignore gate (claw-auth
 // client side). They pin the exact body POSTed to claw's /should-respond, the
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   resolveAuthForUser: vi.fn(),
   recordGateEvent: vi.fn(),
   loggerWarn: vi.fn(),
-  config: { xyneClawS2sKey: "s2s-secret", xyneClawUrl: "http://claw.test/" },
+  config: { serviceKeyConfigured: true, xyneClawUrl: "http://claw.test/" },
 }));
 
 vi.mock("../db.js", () => ({
@@ -119,7 +120,7 @@ beforeEach(() => {
   ]) {
     m.mockReset();
   }
-  mocks.config.xyneClawS2sKey = "s2s-secret";
+  mocks.config.serviceKeyConfigured = true;
   mocks.config.xyneClawUrl = "http://claw.test/";
   mocks.recordGateEvent.mockResolvedValue("evt");
   mocks.upsert.mockResolvedValue({});
@@ -139,7 +140,7 @@ afterEach(() => {
 
 describe("shouldTwinRespond: request to claw", () => {
   it("stays silent (fail-closed) with no S2S key: no fetch, no recall, no gate event", async () => {
-    mocks.config.xyneClawS2sKey = "";
+    mocks.config.serviceKeyConfigured = false;
     const d = await shouldTwinRespond("u1", { incoming: "hi", conversationId: "c1" });
     expect(d).toBe(FAIL_CLOSED);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -171,7 +172,7 @@ describe("shouldTwinRespond: request to claw", () => {
     const init = postedInit();
     expect(fetchMock.mock.calls[0]![0]).toBe("http://claw.test/internal/user-memory/should-respond");
     expect(init.method).toBe("POST");
-    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-s2s-key": "s2s-secret" });
+    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-service-assertion": "test:xyne-claw:POST" });
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(postedBody()).toBe(
       JSON.stringify({

@@ -1,4 +1,4 @@
-import { s2sKeyMatches } from "../middleware/require-auth.js";
+import { callerService, serviceAuthHeaders } from "../lib/service-assertion.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
@@ -83,7 +83,7 @@ import {
   type ContextSearchType,
 } from "../services/agentChatContextService.js";
 import { appendCitations, collectCitationIconUrls } from "../lib/citations.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
@@ -209,6 +209,19 @@ function extractSlideJsonByFilename(toolInvocations: unknown): Map<string, unkno
   }
 
   return map;
+}
+
+/**
+ * The chatting user: the verified requester (Spaces session, Spaces delegation
+ * token, run token). Only claw-auth's own internal callers may name the user in
+ * the body; any other service must send a user token.
+ */
+function chatUserId(req: Request): string | undefined {
+  const verified = getRequesterId(req);
+  if (verified) return verified;
+  if (callerService(req) !== "xyne-claw-auth") return undefined;
+  const bodyUserId = (req.body as { userId?: unknown } | undefined)?.userId;
+  return typeof bodyUserId === "string" && bodyUserId ? bodyUserId : undefined;
 }
 
 const router = Router();
@@ -741,60 +754,16 @@ async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAu
     ? spacesUserIdHeader.trim()
     : userId;
   const verifiedWorkspaceId = extractSpacesWorkspaceId(req);
-  // Prefer the live Spaces DB read when SPACES_DB_URL is configured — the
-  // userMcpConnection cache below goes stale every time Spaces' middleware
-  // refreshes the user's JWT, and that drift is the dominant 401 root cause.
-  const live = await getSpacesAuthForUser(spacesUserId, "agent-chat", verifiedWorkspaceId);
-  if (live) {
+  // The user is present in their browser: forward THEIR Spaces cookie from
+  // this request. Spaces validates it itself — claw-auth never reads or stores
+  // another user's session (no Spaces-DB session reads, no cached token copy).
+  const cookie = req.headers.cookie;
+  if (typeof cookie === "string" && cookie.trim()) {
     return {
-      token: live.token,
+      cookie,
       baseUrl: CONFIG.spacesInternalUrl,
-      sessionId: live.sessionId,
-      workspaceId: live.workspaceId,
+      ...(verifiedWorkspaceId ? { workspaceId: verifiedWorkspaceId } : {}),
     };
-  }
-
-  try {
-    // Legacy rows may be keyed by the raw Spaces id under the same caller.
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId: { in: getRequesterAliases(req) }, mcpServer: { type: "xyne-spaces" } },
-    });
-
-    if (connection) {
-      const decrypted = decrypt(
-        connection.encryptedCreds,
-        connection.iv,
-        connection.authTag,
-        CONFIG.encryptionKey,
-      );
-      const credentials = JSON.parse(decrypted) as Record<string, unknown>;
-      const tokenRaw = credentials["token"];
-      const urlRaw = credentials["url"];
-      const sessionIdRaw = credentials["sessionId"];
-      const workspaceIdRaw = credentials["workspaceId"];
-
-      const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
-      if (token) {
-        const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
-        const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
-        const workspaceIdFromCreds = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
-        const workspaceId = verifiedWorkspaceId
-          ?? workspaceIdFromCreds
-          ?? await getWorkspaceIdForUser(spacesUserId, "agent-chat").catch(() => null)
-          ?? undefined;
-        if (!workspaceIdFromCreds && workspaceId) {
-          log.info(`[agent-chat] resolved workspaceId=${workspaceId} from user row for cached Spaces auth userId=${userId}`);
-        }
-        return {
-          token,
-          baseUrl,
-          ...(sessionId ? { sessionId } : {}),
-          ...(workspaceId ? { workspaceId } : {}),
-        };
-      }
-    }
-  } catch (err) {
-    log.error("[agent-chat] failed to load xyne-spaces MCP credentials:", err);
   }
 
   const token = extractSpacesUserToken(req);
@@ -833,7 +802,7 @@ router.post(
   ]) as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
     try {
-      const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+      const userId = chatUserId(req);
       if (!userId) {
         res.status(400).json({ success: false, error: "userId or x-user-id header required" });
         return;
@@ -1081,11 +1050,10 @@ async function listPlatformModels(): Promise<{
   pinProvider: "spaces";
 }> {
   const empty = { success: true as const, data: [], defaultModel: null, pinProvider: "spaces" as const };
-  if (!CONFIG.xyneClawS2sKey) return empty;
   try {
     const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/litellm/models`;
     const upstream = await fetch(url, {
-      headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: serviceAuthHeaders("xyne-claw", "GET", url),
       signal: AbortSignal.timeout(20_000),
     });
     if (!upstream.ok) {
@@ -1255,7 +1223,8 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
 // POST /agents/:slug/chat — send a message, stream progress via SSE, return result
 
 function evalRunSwitches(req: Request, optimizations: unknown): { optimizations?: string } {
-  if (!s2sKeyMatches(req.headers["x-s2s-key"])) return {};
+  // Only a verified service (e.g. the eval harness) may switch optimizations.
+  if (!callerService(req)) return {};
   return typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {};
 }
 
@@ -1323,7 +1292,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
       sandboxMode?: "local" | "remote" | "container";
     };
-    const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const userId = chatUserId(req);
     const speedOverride: "standard" | "fast" | undefined =
       rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
     if (rawSpeed !== undefined && !speedOverride) {
@@ -1425,7 +1394,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
     const conversationId = existingConvId ?? `chat-${randomUUID()}`;
 
-    const sdlcResolution = await resolveSdlcRepositoryForUser(userId, researchContext, conversationId, extractSpacesWorkspaceId(req));
+    const sdlcResolution = await resolveSdlcRepositoryForUser(userId, researchContext, conversationId, extractSpacesWorkspaceId(req), { cookie: req.headers.cookie });
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;
@@ -2196,11 +2165,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         assistantMessageId: assistantMsg.id,
       });
     } else {
-      const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+      const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
+      const runRes = await fetch(runUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
         },
         body: JSON.stringify(forwardBody),
       });
@@ -2333,7 +2303,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
 // POST /agents/:slug/chat/cancel — cancel an in-flight chat run
 router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
   try {
-    const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const userId = chatUserId(req);
     if (!userId) {
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
@@ -3315,7 +3285,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
  */
 router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
   try {
-    const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const userId = chatUserId(req);
     const sessionId = typeof (req.body as { sessionId?: unknown }).sessionId === "string"
       ? ((req.body as { sessionId: string }).sessionId).trim()
       : "";
@@ -3335,17 +3305,14 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       return;
     }
     await cancelRunRecovery(sessionId).catch(() => {});
-    const cancelRes = await fetch(
-      `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-          "x-user-id": run.userId,
-        },
+    const cancelUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`;
+    const cancelRes = await fetch(cancelUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...serviceAuthHeaders("xyne-claw-auth", "POST", cancelUrl),
       },
-    ).catch(() => null);
+    }).catch(() => null);
     res.json({ success: true, data: { cancelled: cancelRes?.ok ?? false } });
   } catch (err) {
     log.error("[agent-chat] cancel failed", err);
@@ -3642,7 +3609,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     let upstream: globalThis.Response;
     try {
       upstream = await fetch(upstreamUrl, {
-        headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
+        headers: serviceAuthHeaders("xyne-claw", "GET", upstreamUrl),
         // A long thread's bundle can take several seconds to assemble on claw's
         // side once GCS runs are merged in. A 15s ceiling turned a slow-but-fine
         // read into a 502 that looked to the user like "no debug data exists".
@@ -4198,7 +4165,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
  */
 router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const callerUserId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
+    const callerUserId = chatUserId(req);
     if (!callerUserId) {
       res.status(401).json({ success: false, error: "userId or x-user-id header required" });
       return;
@@ -4277,6 +4244,24 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       if (typeof storedSubagentId === "string" && storedSubagentId) subagentId = storedSubagentId;
     }
 
+    // The user clicked Approve in their browser: a live interaction. Exchange
+    // their cookie with Spaces for this agent, then run the write as the agent
+    // acting for them (no stored or DB-read user credentials).
+    const approveOrgId = typeof req.headers["x-org-id"] === "string" ? req.headers["x-org-id"] : undefined;
+    const { clawAgentIdForSlug } = await import("../surfaces/spaces/user-auth.js");
+    const approveAgentId = await clawAgentIdForSlug(req.params.slug, approveOrgId);
+    const approveWorkspaceId = extractSpacesWorkspaceId(req);
+    const approveSpacesUserId = typeof req.headers["x-spaces-user-id"] === "string" ? req.headers["x-spaces-user-id"] : undefined;
+    if (approveAgentId && approveWorkspaceId && approveSpacesUserId && typeof req.headers.cookie === "string" && req.headers.cookie) {
+      const { primeAgentAuthFromCookie } = await import("../lib/spaces-agent-client.js");
+      await primeAgentAuthFromCookie({
+        cookie: req.headers.cookie,
+        workspaceId: approveWorkspaceId,
+        clawAgentId: approveAgentId,
+        spacesUserId: approveSpacesUserId,
+      });
+    }
+
     const { executeWriteAction } = await import("../lib/write-actions.js");
     const result = await executeWriteAction({
       serverType: action.serverType,
@@ -4285,6 +4270,9 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
       userId: action.userId,
       signature: action.signature,
       ...(subagentId ? { subagentId } : {}),
+    }, {
+      ...(approveAgentId ? { clawAgentId: approveAgentId } : {}),
+      ...(approveWorkspaceId ? { workspaceId: approveWorkspaceId } : {}),
     });
 
     if (!result.ok) {
@@ -4387,7 +4375,6 @@ async function runAgentChatViaSse(
         const consumeResult = await consumeClawStream({
           url: `${CONFIG.internalUrl}/claw/api/v1/internal/run`,
           body: forwardBody,
-          ...(CONFIG.xyneClawS2sKey ? { s2sKey: CONFIG.xyneClawS2sKey } : {}),
           ...(liveUserId
             ? {
                 artifactContext: {
@@ -4520,7 +4507,7 @@ async function runAgentChatViaSse(
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                ...serviceAuthHeaders("xyne-claw-auth", "POST", callbackUrl),
               },
               body: JSON.stringify(callbackBody),
             });
@@ -4540,7 +4527,7 @@ async function runAgentChatViaSse(
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+                ...serviceAuthHeaders("xyne-claw-auth", "POST", callbackUrl),
               },
               body: JSON.stringify({
                 sessionId: capturedSessionId ?? "",
@@ -4565,7 +4552,7 @@ async function runAgentChatViaSse(
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+              ...serviceAuthHeaders("xyne-claw-auth", "POST", callbackUrl),
             },
             body: JSON.stringify({
               sessionId: capturedSessionId ?? "",

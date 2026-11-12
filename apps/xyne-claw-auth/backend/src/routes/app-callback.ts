@@ -22,6 +22,8 @@ import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { agentRunRepository } from "../repositories/index.js";
 
 import { createLogger } from "../logger.js";
+import { botBearer, getAgentBotAuth, spacesBotUrl, type BotRef } from "../lib/spaces-bot.js";
+import { serviceAuthHeaders } from "../lib/service-assertion.js";
 const log = createLogger("app-callback");
 
 const router = Router();
@@ -55,13 +57,13 @@ function humanizeToolName(tool: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-async function spacesAppFetch(path: string, body: Record<string, unknown>, appToken: string): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
+async function spacesAppFetch(path: string, body: Record<string, unknown>, bot: BotRef): Promise<unknown> {
+  const url = spacesBotUrl(path);
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${appToken}`,
+      Authorization: `Bearer ${await botBearer(bot)}`,
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
@@ -95,14 +97,16 @@ async function findAgent(agentSlug: string | undefined, spacesAppId?: string) {
   return matches[0] ?? null;
 }
 
-async function getAgentToken(agentSlug: string | undefined, spacesAppId?: string): Promise<string | null> {
+/**
+ * The agent's bot, when it can post in Spaces. Callbacks carry no workspace, so
+ * this is the agent's only workspace (an agent in several is refused).
+ */
+async function getAgentBot(agentSlug: string | undefined, spacesAppId?: string): Promise<{ bot: BotRef; botUserId: string } | null> {
   const agent = await findAgent(agentSlug, spacesAppId);
-
-  if (!agent?.spacesAppToken) return null;
-
-  const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-  if (!ciphertext || !iv || !authTag) return null;
-  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+  if (!agent) return null;
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId: null };
+  const auth = await getAgentBotAuth(bot.clawAgentId, bot.workspaceId);
+  return auth ? { bot, botUserId: auth.botUserId } : null;
 }
 
 async function escalateWriteActionFailure(opts: {
@@ -137,9 +141,9 @@ async function escalateWriteActionFailure(opts: {
     return;
   }
 
-  const appToken = await getAgentToken(agentSlug, spacesAppId);
-  if (!appToken) {
-    log.error(`[app-callback] Cannot post failure message — no agent token for ${agentSlug ?? "(default)"}`);
+  const agentBot = await getAgentBot(agentSlug, spacesAppId);
+  if (!agentBot) {
+    log.error(`[app-callback] Cannot post failure message — agent ${agentSlug ?? "(default)"} cannot post in Spaces`);
     return;
   }
 
@@ -187,7 +191,7 @@ async function escalateWriteActionFailure(opts: {
   try {
     const body: Record<string, unknown> = {
       markdownText: failureMsg,
-      userId: agent?.spacesAppUserId ?? "",
+      userId: agentBot.botUserId,
       metadata: { hasAppActions: true, appId: agent?.spacesAppId ?? "", contentFormat: "markdown" },
     };
     if (conversationId) {
@@ -196,7 +200,7 @@ async function escalateWriteActionFailure(opts: {
       body.channelId = channelId;
     }
 
-    await spacesAppFetch("/chat/postMessage", body, appToken);
+    await spacesAppFetch("/chat/postMessage", body, agentBot.bot);
     log.info(`[app-callback] Posted failure message with Retry/Dismiss for ${tool} in ${conversationId ?? channelId}`);
   } catch (err) {
     log.error(`[app-callback] Failed to post failure message:`, errMsg(err));
@@ -230,8 +234,9 @@ async function startWriteRetryRun(opts: {
 
   const agent = await findAgent(agentSlug, spacesAppId);
 
-  if (!agent?.spacesAppToken || !agent.spacesAppId) {
-    log.error(`[app-callback] write-retry: no agent found for ${agentSlug ?? "(default)"}`);
+  const retryBot = agent ? await getAgentBot(agent.slug, agent.spacesAppId ?? undefined) : null;
+  if (!agent || !retryBot) {
+    log.error(`[app-callback] write-retry: no agent that can post in Spaces for ${agentSlug ?? "(default)"}`);
     return;
   }
   const retryOrgId = agent.orgId
@@ -240,8 +245,6 @@ async function startWriteRetryRun(opts: {
     log.error(`[app-callback] write-retry: no orgId for user=${writeUserId} agent=${agentSlug ?? "(default)"}`);
     return;
   }
-
-  const appToken = decrypt(...agent.spacesAppToken.split(":") as [string, string, string], CONFIG.encryptionKey);
 
   const paramsPreview = paramsStr.length > 500 ? paramsStr.slice(0, 500) + "…" : paramsStr;
   const retryTask = originalTask
@@ -256,7 +259,7 @@ async function startWriteRetryRun(opts: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
       },
       body: JSON.stringify({
         userId: writeUserId,
@@ -280,7 +283,7 @@ async function startWriteRetryRun(opts: {
     if (runBody.success && runBody.sessionId) {
       const { setSession } = await import("./webhook.js");
       const sessionContext = {
-        mentionedUserId: agent.spacesAppUserId ?? "",
+        mentionedUserId: retryBot.botUserId,
         senderId: writeUserId,
         senderName: "",
         channelId: channelId ?? "",
@@ -291,9 +294,9 @@ async function startWriteRetryRun(opts: {
         agentOrgId: agent.orgId ?? null,
         agentSlug: agentSlug ?? "",
         responseMode: "conversation" as const,
-        appToken,
-        spacesAppId: agent.spacesAppId,
-        spacesAppUserId: agent.spacesAppUserId ?? "",
+        bot: retryBot.bot,
+        spacesAppId: agent.spacesAppId ?? "",
+        spacesAppUserId: retryBot.botUserId,
       };
       await setSession(runBody.sessionId, sessionContext);
 
@@ -381,9 +384,7 @@ router.post("/callback", async (req: Request, res: Response) => {
 
     try {
       const agent = await findAgent(answerAgentSlug, answerSpacesAppId);
-      const appToken = agent?.spacesAppToken
-        ? decrypt(...agent.spacesAppToken.split(":") as [string, string, string], CONFIG.encryptionKey)
-        : "";
+      const answerBot = agent ? await getAgentBot(agent.slug, agent.spacesAppId ?? undefined) : null;
       const answerOrgId = agent?.orgId
         ?? (await prisma.user.findUnique({ where: { id: answerUserId }, select: { orgId: true } }))?.orgId;
       if (!answerOrgId) {
@@ -396,7 +397,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
         },
         body: JSON.stringify({
           userId: answerUserId,
@@ -411,9 +412,9 @@ router.post("/callback", async (req: Request, res: Response) => {
       });
 
       const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
-      if (runBody.success && runBody.sessionId && agent) {
+      if (runBody.success && runBody.sessionId && agent && answerBot) {
         await setSession(runBody.sessionId, {
-          mentionedUserId: agent.spacesAppUserId ?? "",
+          mentionedUserId: answerBot.botUserId,
           senderId: answerUserId,
           senderName: "",
           channelId: answerChannelId,
@@ -424,9 +425,9 @@ router.post("/callback", async (req: Request, res: Response) => {
           agentOrgId: agent.orgId ?? null,
           agentSlug: answerAgentSlug,
           responseMode: "conversation",
-          appToken,
+          bot: answerBot.bot,
           spacesAppId: agent.spacesAppId ?? "",
-          spacesAppUserId: agent.spacesAppUserId ?? "",
+          spacesAppUserId: answerBot.botUserId,
         });
       }
 
@@ -465,17 +466,17 @@ router.post("/callback", async (req: Request, res: Response) => {
       return;
     }
 
-    const appToken = await getAgentToken(agentSlug, spacesAppId);
-    if (appToken && (conversationId || channelId)) {
+    const noticeBot = await getAgentBot(agentSlug, spacesAppId);
+    if (noticeBot && (conversationId || channelId)) {
       try {
         const body: Record<string, unknown> = {
           markdownText: `Retrying **${humanizeToolName(tool ?? "unknown")}** — the agent is diagnosing the failure and will attempt again.`,
-          userId: (await findAgent(agentSlug, spacesAppId))?.spacesAppUserId ?? "",
+          userId: noticeBot.botUserId,
           metadata: { contentFormat: "markdown" },
         };
         if (conversationId) body.conversationId = conversationId;
         else if (channelId) body.channelId = channelId;
-        await spacesAppFetch("/chat/postMessage", body, appToken);
+        await spacesAppFetch("/chat/postMessage", body, noticeBot.bot);
       } catch { /* non-fatal */ }
     }
 
@@ -534,16 +535,12 @@ router.post("/callback", async (req: Request, res: Response) => {
       if (serverType === "xyne-spaces" && tool === "spaces-send-message") {
         // Look up the agent that triggered this action by slug, falling back to default
         const agent = await findAgent(agentSlug, spacesAppId);
-        if (!agent?.spacesAppToken) {
-          log.error(`[app-callback] spaces-send-message: no spacesAppToken for agent ${agentSlug ?? "(default)"}`);
+        const sendBot = agent ? await getAgentBot(agent.slug, agent.spacesAppId ?? undefined) : null;
+        if (!sendBot) {
+          log.error(`[app-callback] spaces-send-message: agent ${agentSlug ?? "(default)"} cannot post in Spaces`);
           return;
         }
-        const tokenParts = agent.spacesAppToken.split(":");
-        if (tokenParts.length < 3 || !tokenParts[0] || !tokenParts[1] || !tokenParts[2]) {
-          log.error("[app-callback] spaces-send-message: invalid spacesAppToken format");
-          return;
-        }
-        const appToken = decrypt(tokenParts[0], tokenParts[1], tokenParts[2], CONFIG.encryptionKey);
+        const appToken = sendBot.bot;
 
         const content = params["content"] as string;
         const conversationId = params["conversationId"] as string | undefined;
@@ -801,13 +798,12 @@ router.post("/callback", async (req: Request, res: Response) => {
     }
 
     try {
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
       const url = `${CONFIG.spacesInternalUrl}/api/internal/postAsUser`;
       const postRes = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-s2s-key": s2sKey,
+          ...serviceAuthHeaders("xyne-spaces", "POST", url),
         },
         body: JSON.stringify({
           channelId: targetChannelId,

@@ -82,9 +82,16 @@ secretEnv:
   ENCRYPTION_KEY:
     name: xyne-backend-secrets
     key: ENCRYPTION_KEY
-  INTERNAL_S2S_KEY:
+  # Spaces' own signing key (tokens and service assertions); public keys of claw-auth and the claw runtime.
+  CLAW_DELEGATION_PRIVATE_KEY:
     name: xyne-backend-secrets
-    key: INTERNAL_S2S_KEY
+    key: CLAW_DELEGATION_PRIVATE_KEY
+  CLAW_SERVICE_PUBLIC_KEYS:
+    name: xyne-backend-secrets
+    key: CLAW_SERVICE_PUBLIC_KEYS
+  CLAW_RUNTIME_PUBLIC_KEYS:
+    name: xyne-backend-secrets
+    key: CLAW_RUNTIME_PUBLIC_KEYS
 
 envFromSecrets: []
 envFromConfigMaps: []

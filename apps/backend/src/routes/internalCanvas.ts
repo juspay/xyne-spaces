@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { CanvasController } from '../controllers/canvasController.js';
-import { validateS2SKey } from '../middleware/validateS2SKey.js';
+import { authenticateService } from '../claw/serviceAuth.js';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository.js';
 
 const router = Router();
@@ -8,20 +8,18 @@ const messageAttachmentRepository = new MessageAttachmentRepository();
 const canvasController = new CanvasController(messageAttachmentRepository);
 
 /**
- * Extract the acting userId from x-user-id header and attach it to req.user
- * so the CanvasController can perform permission checks without modification.
+ * A caller-named user (x-user-id) is not accepted: a service assertion proves
+ * which service is calling, never which user. This route stays closed until its
+ * caller sends a signed user token (an agent on-behalf-of token) instead.
+ * TODO: switch the caller to /api/canvas with an on-behalf-of agent token.
  */
-function attachInternalUser(req: Request, _res: Response, next: NextFunction): void {
-  const userId = req.headers['x-user-id'] as string | undefined;
-  if (!userId) {
-    next(new Error('x-user-id header is required'));
-    return;
-  }
-  (req as unknown as Record<string, unknown>).user = { id: userId };
-  next();
+function attachInternalUser(_req: Request, res: Response, _next: NextFunction): void {
+  res.status(403).json({ error: 'A signed user token is required; x-user-id is not accepted' });
 }
 
-router.get('/view/:canvasId', validateS2SKey, attachInternalUser, canvasController.readCanvas);
-router.patch('/view/:canvasId', validateS2SKey, attachInternalUser, canvasController.updateCanvas);
+const internalCaller = authenticateService('xyne-claw-auth', 'xyne-claw');
+
+router.get('/view/:canvasId', internalCaller, attachInternalUser, canvasController.readCanvas);
+router.patch('/view/:canvasId', internalCaller, attachInternalUser, canvasController.updateCanvas);
 
 export default router;

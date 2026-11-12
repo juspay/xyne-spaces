@@ -43,7 +43,6 @@ import {
 } from "../middleware/agent-acl.js";
 import { getRequesterAliases, matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { findUserByAnyId, resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser } from "../lib/users-jit.js";
-import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
 import { validateAgentModelConfig, validateAwakeningConfig } from "../lib/agent-config-validation.js";
@@ -57,15 +56,13 @@ import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, confli
 import { agentRunDetail, agentRunHealth, closeLostRuns } from "../lib/agent-run-health.js";
 
 import { createLogger } from "../logger.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
+import { callerService, serviceAuthHeaders } from "../lib/service-assertion.js";
+import { findActivePrincipalsForAgent, findPrincipalForAgent, forgetPrincipalsForAgent, mintServiceAssertion, SpacesAgentError } from "../lib/spaces-agent-client.js";
 const log = createLogger("agents");
 
 const router = Router();
-
-function decryptStoredToken(stored: string): string | null {
-  const [ciphertext, iv, authTag] = stored.split(":");
-  if (!ciphertext || !iv || !authTag) return null;
-  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-}
 
 function logAgentScopedMiss(req: Request, routeName: string, slug: string | undefined, orgId?: string | null): void {
   log.warn(`[${routeName}] agent org-scoped miss slug=${slug ?? "none"} orgId=${orgId ?? getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
@@ -247,11 +244,12 @@ async function normalizeGatewayServicesInConfig(config: Record<string, unknown> 
 
 router.post("/generate-prompt", async (req: Request, res: Response) => {
   try {
-    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/generate-prompt`, {
+    const clawUrl = `${CONFIG.xyneClawUrl}/generate-prompt`;
+    const clawRes = await fetch(clawUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", clawUrl),
       },
       body: JSON.stringify(req.body),
       signal: AbortSignal.timeout(35_000),
@@ -271,11 +269,12 @@ router.post("/generate-prompt", async (req: Request, res: Response) => {
 
 router.post("/generate-output-format", async (req: Request, res: Response) => {
   try {
-    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/generate-output-format`, {
+    const clawUrl = `${CONFIG.xyneClawUrl}/generate-output-format`;
+    const clawRes = await fetch(clawUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", clawUrl),
       },
       body: JSON.stringify(req.body),
       signal: AbortSignal.timeout(60_000),
@@ -336,11 +335,12 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       })),
     };
 
-    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
+    const clawUrl = `${CONFIG.xyneClawUrl}/suggest-tools`;
+    const clawRes = await fetch(clawUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", clawUrl),
       },
       body: JSON.stringify({ intent, catalog }),
       signal: AbortSignal.timeout(50_000),
@@ -609,6 +609,24 @@ router.post("/draft-requests/:requestId/decision", asyncHandler(async (req: Requ
   });
 }));
 
+/**
+ * Which Claw agents are added to the person's current Spaces workspace
+ * (Spaces' own list, read with their Spaces session). Must stay above GET /:slug.
+ */
+router.get("/spaces-registrations", asyncHandler(async (req: Request, res: Response) => {
+  const cookie = req.headers.cookie;
+  if (!cookie) { res.status(401).json({ success: false, error: "Sign in to Spaces first" }); return; }
+  const workspaceId = extractWorkspaceId(req as Request<{ slug: string }>);
+  const r = await fetch(`${CONFIG.spacesInternalUrl}/api/claw-agents/principals`, {
+    headers: { Cookie: cookie, ...(workspaceId ? { "x-workspace-id": workspaceId } : {}) },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!r.ok) { res.status(r.status === 401 ? 401 : 502).json({ success: false, error: `Spaces ${r.status}` }); return; }
+  const body = (await r.json()) as { principals?: Array<{ clawAgentId: string; status: string }> };
+  const agentIds = (body.principals ?? []).filter((p) => p.status === "ACTIVE").map((p) => p.clawAgentId);
+  res.json({ success: true, data: { agentIds } });
+}));
+
 router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Response, next) => {
   // Phase-2: org-scope this un-ACL'd read so agent metadata can't be read
   // across orgs by slug. For S2S callers with no derivable org (Spaces'
@@ -627,7 +645,8 @@ router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Re
 
   const record = agent as unknown as Record<string, unknown>;
   const viewerId = getRequesterId(req);
-  const isS2S = s2sKeyMatches(req.headers["x-s2s-key"]);
+  // A verified service (the runtime loading the agent for a run, Spaces) reads the full agent.
+  const isS2S = callerService(req) !== undefined;
   let canEdit = isS2S;
   if (!canEdit && viewerId) {
     const access = await getAgentEditAccess(viewerId, req.params.slug, getOrgId(req)).catch(() => null);
@@ -770,7 +789,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     knowledgeBase.length > 0 &&
     requesterId
   ) {
-    const { accepted, rejected } = await validateKbGrants(requesterId, knowledgeBase);
+    const { accepted, rejected } = await validateKbGrants(requesterId, knowledgeBase, { cookie: req.headers.cookie }, requestWorkspaceHint(req));
     rejectedKb = rejected;
     if (accepted.length > 0) {
       await agentRepository.replaceCollections(agent.id, accepted);
@@ -1045,7 +1064,7 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
     //     UI sends `knowledgeBase[]` (mirrors skills' replace semantics).
     let rejectedKb: Array<{ collectionId: string; fileId: string | null; reason: string }> = [];
     if (effectiveKbScope === "COLLECTIONS" && knowledgeBase !== undefined && Array.isArray(knowledgeBase) && requesterId) {
-      const { accepted, rejected } = await validateKbGrants(requesterId, knowledgeBase);
+      const { accepted, rejected } = await validateKbGrants(requesterId, knowledgeBase, { cookie: req.headers.cookie }, requestWorkspaceHint(req));
       rejectedKb = rejected;
       await agentRepository.replaceCollections(existing.id, accepted);
     }
@@ -1180,11 +1199,9 @@ router.post(
 // like agent config routes; no cross-org grants.
 async function postDelegationDmWithCalleeIdentity(args: {
   callee: {
+    id: string;
     slug: string;
     name: string;
-    spacesAppId: string | null;
-    spacesAppToken: string | null;
-    spacesAppUserId: string | null;
   };
   targetUserId: string | null;
   text: string;
@@ -1192,18 +1209,15 @@ async function postDelegationDmWithCalleeIdentity(args: {
 }): Promise<void> {
   const { callee, targetUserId, text, logContext } = args;
   if (!targetUserId) return;
-  if (!callee.spacesAppId || !callee.spacesAppToken || !callee.spacesAppUserId) {
-    log.info(`[agents/delegation] DM skipped ${logContext}: callee agent ${callee.slug} not Spaces-registered`);
-    return;
-  }
-  const token = decryptStoredToken(callee.spacesAppToken);
-  if (!token) {
-    log.warn(`[agents/delegation] DM skipped ${logContext}: invalid app token for callee agent ${callee.slug}`);
-    return;
-  }
   const workspaceId = await getWorkspaceIdForUser(targetUserId, "clone-owner-dm");
   if (!workspaceId) {
     log.warn(`[agents/delegation] DM skipped ${logContext}: no workspaceId for user ${targetUserId}`);
+    return;
+  }
+  const bot: BotRef = { clawAgentId: callee.id, workspaceId };
+  const botAuth = await getAgentBotAuth(bot.clawAgentId, workspaceId);
+  if (!botAuth) {
+    log.info(`[agents/delegation] DM skipped ${logContext}: callee agent ${callee.slug} not added to workspace ${workspaceId}`);
     return;
   }
 
@@ -1213,27 +1227,25 @@ async function postDelegationDmWithCalleeIdentity(args: {
   const dm = (await spacesAppFetch("/channel/openDm", {
     targetUserId: spacesTargetUserId,
     workspaceId,
-  }, token)) as { channelId: string };
+  }, bot)) as { channelId: string };
 
   await spacesAppFetch("/chat/postMessage", {
     channelId: dm.channelId,
     markdownText: text,
-    userId: callee.spacesAppUserId,
+    userId: botAuth.botUserId,
     workspaceId,
     metadata: { contentFormat: "markdown" },
-  }, token);
+  }, bot);
 }
 
 async function notifyOwnerOfDelegationRequestInSpaces(args: {
   caller: { slug: string; name: string; ownerUserId: string | null };
   requestReason?: string | null;
   callee: {
+    id: string;
     slug: string;
     name: string;
     ownerUserId: string | null;
-    spacesAppId: string | null;
-    spacesAppToken: string | null;
-    spacesAppUserId: string | null;
   };
 }): Promise<void> {
   const { caller, callee, requestReason } = args;
@@ -1253,11 +1265,9 @@ async function notifyDelegationRequesterOfDecisionInSpaces(args: {
   grant: { createdByUserId: string | null; status: string };
   caller: { slug: string; name: string };
   callee: {
+    id: string;
     slug: string;
     name: string;
-    spacesAppId: string | null;
-    spacesAppToken: string | null;
-    spacesAppUserId: string | null;
   };
   deciderUserId: string;
 }): Promise<void> {
@@ -1410,7 +1420,7 @@ router.post(
           // Owner display name — the caller-side UI names who must approve.
           owner: { select: { name: true, email: true } },
           spacesAppId: true,
-          spacesAppToken: true,
+         
           spacesAppUserId: true,
         },
       });
@@ -1650,7 +1660,7 @@ router.post(
             }),
             prisma.agent.findUnique({
               where: { id: grant.calleeAgentId },
-              select: { id: true, slug: true, name: true, spacesAppId: true, spacesAppToken: true, spacesAppUserId: true },
+              select: { id: true, slug: true, name: true, spacesAppId: true, spacesAppUserId: true },
             }),
           ]);
           if (!callerAgent || !calleeAgent) return;
@@ -1706,7 +1716,7 @@ router.post(
             }),
             prisma.agent.findUnique({
               where: { id: grant.calleeAgentId },
-              select: { id: true, slug: true, name: true, spacesAppId: true, spacesAppToken: true, spacesAppUserId: true },
+              select: { id: true, slug: true, name: true, spacesAppId: true, spacesAppUserId: true },
             }),
           ]);
           if (!callerAgent || !calleeAgent) return;
@@ -1994,26 +2004,25 @@ function describeCloneError(err: unknown): string {
  * surface, so notification failure must never fail the clone request.
  */
 async function notifyOwnerOfCloneRequestInSpaces(args: {
-  agent: { slug: string; name: string; ownerUserId: string | null; spacesAppId: string | null; spacesAppToken: string | null; spacesAppUserId: string | null };
+  agent: { id: string; slug: string; name: string; ownerUserId: string | null };
   requestId: string;
   requesterName: string;
 }): Promise<void> {
   const { agent, requestId, requesterName } = args;
   if (!agent.ownerUserId) return;
-  if (!agent.spacesAppId || !agent.spacesAppToken || !agent.spacesAppUserId) {
-    log.info(`[agents/clone] owner DM skipped for ${agent.slug}: source agent not Spaces-registered`);
-    return;
-  }
   try {
-    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-    if (!ciphertext || !iv || !authTag) return;
-    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
     // openDm requires the owner's own workspace. Resolve from the Spaces user
     // row (or the claw SurfaceTenantLink fallback inside getWorkspaceIdForUser);
     // never pin a per-user DM to the deployment-wide default workspace.
     const workspaceId = (await getWorkspaceIdForUser(agent.ownerUserId, "clone-owner-dm")) ?? "";
     if (!workspaceId) {
       log.warn(`[agents/clone] owner DM skipped for ${agent.slug}: no workspaceId for owner ${agent.ownerUserId}`);
+      return;
+    }
+    const bot: BotRef = { clawAgentId: agent.id, workspaceId };
+    const botAuth = await getAgentBotAuth(agent.id, workspaceId);
+    if (!botAuth) {
+      log.info(`[agents/clone] owner DM skipped for ${agent.slug}: source agent not added to workspace ${workspaceId}`);
       return;
     }
 
@@ -2023,7 +2032,7 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
     const dm = (await spacesAppFetch("/channel/openDm", {
       targetUserId: spacesOwnerUserId,
       workspaceId,
-    }, token)) as { channelId: string };
+    }, bot)) as { channelId: string };
 
     const flow = buildCloneApprovalFlow({
       requestId,
@@ -2037,8 +2046,8 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
     await spacesAppFetch("/chat/postMessage", {
       channelId: dm.channelId,
       flow,
-      userId: agent.spacesAppUserId,
-    }, token);
+      userId: botAuth.botUserId,
+    }, bot);
 
     log.info(`[agents/clone] sent clone-approval DM to owner ${agent.ownerUserId} for agent ${agent.slug}`);
   } catch (err) {
@@ -2820,214 +2829,19 @@ function resolveSpacesUserAuth(req: Request): {
   return { ...(explicitWorkspace ? { workspaceId: explicitWorkspace } : {}) };
 }
 
-function extractUserToken(req: Request): string | undefined {
-  return resolveSpacesUserAuth(req).token;
-}
-
-function extractSessionId(req: Request): string | undefined {
-  const header = req.headers["x-session-id"];
-  if (typeof header === "string" && header) return header;
-  return getCookieValue(req, "xyne_session") ?? getCookieValue(req, "user_session_id");
-}
-
 function extractWorkspaceId(req: Request): string | undefined {
   // Derived from the SAME resolution as the bearer token, so the two can never
   // point at different workspaces. See resolveSpacesUserAuth.
   return resolveSpacesUserAuth(req).workspaceId ?? getCookieValue(req, "xyne_last_workspace");
 }
 
-// /api/apps/* routes are mounted on Spaces' legacy `auth.ts` middleware, which
-// reads the session ONLY from the `xyne_session` cookie (gated behind a
-// truthy workspaceId). Send both Cookie + headers so we work on both legacy
-// and authV2 routes; otherwise these calls 401 ~15min after the JWT issues.
-function spacesUserAuthHeaders(
-  userToken: string,
-  sessionId: string | undefined,
-  workspaceId: string | undefined,
-): Record<string, string> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${userToken}` };
-  if (sessionId) headers["x-session-id"] = sessionId;
-  if (workspaceId) headers["x-workspace-id"] = workspaceId;
-  const cookieParts: string[] = [];
-  if (sessionId) cookieParts.push(`xyne_session=${sessionId}`);
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  if (cookieParts.length > 0) headers["Cookie"] = cookieParts.join("; ");
-  return headers;
-}
+// ── Add the agent to a Spaces workspace (one step) ───────────────────
 
-// ── Step-by-step Spaces App registration (3 separate buttons) ────────
-
-router.post("/:slug/create-app", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
-
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!agent) { logAgentScopedMiss(req, "agents/create-app", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    if (agent.spacesAppId) { res.status(400).json({ success: false, error: "Agent already has a Spaces App" }); return; }
-
-    const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
-    const createRes = await fetch(`${spacesUrl}/api/apps/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
-      body: JSON.stringify({ name: agent.name, description: agent.description }),
-    });
-
-    if (!createRes.ok) {
-      const text = await createRes.text().catch(() => "");
-      // ORG_REQUIRED from Spaces means it could not resolve an org for
-      // `req.user.workspaceId` — which, when the workspace itself is healthy,
-      // means the principal it resolved is not the one we think we sent. Say so
-      // here: chasing this from the Spaces-side message alone leads through the
-      // workspace, its orgId and the org mapping, all of which look fine.
-      if (text.includes("ORG_REQUIRED")) {
-        const auth = resolveSpacesUserAuth(req);
-        log.warn(
-          `[agents] create-app ORG_REQUIRED slug=${req.params.slug} ` +
-          `forwardedSub=${auth.sub ?? "unknown"} forwardedWorkspace=${auth.workspaceId ?? "none"} ` +
-          `sessionId=${sessionId ? "present" : "MISSING"}`,
-        );
-        res.status(400).json({
-          success: false,
-          error:
-            `Spaces could not resolve an organization for workspace ${auth.workspaceId ?? "(none sent)"}. ` +
-            `This usually means the workspace token and the login session belong to different Spaces users. ` +
-            `Switch to the workspace you normally work in and retry.`,
-        });
-        return;
-      }
-      res.status(createRes.status).json({ success: false, error: `Spaces: ${text.slice(0, 300)}` });
-      return;
-    }
-
-    const body = (await createRes.json()) as { id?: string };
-    if (!body.id) { res.status(500).json({ success: false, error: "Spaces did not return app ID" }); return; }
-
-    await agentRepository.update(req.params.slug, agent.orgId, { spacesAppId: body.id });
-
-    log.info(`[agents] Created Spaces App ${body.id} for ${req.params.slug}`);
-    res.json({ success: true, data: { spacesAppId: body.id } });
-  } catch (err) {
-    log.error("[agents] create-app error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
-
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!agent) { logAgentScopedMiss(req, "agents/install-app", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
-    if (agent.spacesAppToken) { res.status(400).json({ success: false, error: "App already installed" }); return; }
-
-    const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
-    const installRes = await fetch(`${spacesUrl}/api/apps/install/${agent.spacesAppId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
-    });
-
-    if (!installRes.ok) {
-      const text = await installRes.text().catch(() => "");
-      res.status(installRes.status).json({ success: false, error: `Spaces: ${text.slice(0, 300)}` });
-      return;
-    }
-
-    const body = (await installRes.json()) as { jwtToken?: string };
-    if (!body.jwtToken) { res.status(500).json({ success: false, error: "Spaces did not return JWT token" }); return; }
-
-    // Decode JWT to extract appUserId
-    let appUserId: string | null = null;
-    const jwtParts = body.jwtToken.split(".");
-    if (jwtParts[1]) {
-      try {
-        const decoded = JSON.parse(Buffer.from(jwtParts[1], "base64url").toString()) as { userId?: string };
-        appUserId = decoded.userId ?? null;
-      } catch { /* ignore */ }
-    }
-
-    const encToken = encrypt(body.jwtToken, CONFIG.encryptionKey);
-    await agentRepository.update(req.params.slug, agent.orgId, {
-      spacesAppUserId: appUserId,
-      spacesAppToken: `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`,
-    });
-
-    log.info(`[agents] Installed Spaces App ${agent.spacesAppId} for ${req.params.slug} (botUser=${appUserId})`);
-    // The hub's Agents page also promotes on read, so a failed notice only delays the join.
-    if (appUserId) {
-      notifySdlcAgentRegistered(agent.id, appUserId).catch((err) =>
-        log.warn(`[agents] install-app: SDLC hub notice failed for ${req.params.slug} — ${errMsg(err)}`),
-      );
-    }
-    res.json({ success: true, data: { spacesAppUserId: appUserId } });
-  } catch (err) {
-    log.error("[agents] install-app error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-router.post("/:slug/configure-webhook", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
-  try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
-
-    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!agent) { logAgentScopedMiss(req, "agents/configure-webhook", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
-
-    const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
-    const webhookUrl = `${CONFIG.selfUrl}/claw/api/v1/webhook/app/${agent.spacesAppId}`;
-
-    const configRes = await fetch(`${spacesUrl}/api/apps/configureWebhook/${agent.spacesAppId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
-      body: JSON.stringify({ webhookUrl }),
-    });
-
-    if (!configRes.ok) {
-      const text = await configRes.text().catch(() => "");
-      res.status(configRes.status).json({ success: false, error: `Spaces: ${text.slice(0, 300)}` });
-      return;
-    }
-
-    log.info(`[agents] Configured webhook for ${req.params.slug}: ${webhookUrl}`);
-
-    // Fetch + persist the per-app signingSecret so verify-spaces-signature can
-    // HMAC-check inbound webhook bodies. Best-effort — if Spaces is reachable
-    // for configureWebhook (just succeeded above) it's almost certainly
-    // reachable for signing-secret too. On failure we log and leave the
-    // signature column null; fail-closed verification rejects this agent's
-    // webhooks until a future call (or the backfill script) succeeds.
-    await fetchAndStoreSigningSecretFromSpacesApi({
-      agentId: agent.id,
-      spacesAppId: agent.spacesAppId,
-      userAuthHeaders: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
-    }).catch((err) => {
-      log.warn(`[agents] signing-secret fetch swallowed for ${req.params.slug}: ${errMsg(err)}`);
-      return false;
-    });
-
-    res.json({ success: true, data: { webhookUrl } });
-  } catch (err) {
-    log.error("[agents] configure-webhook error:", err);
-    res.status(500).json({ success: false, error: "Internal server error" });
-  }
-});
-
-// Full app-permission set a Claw agent bot needs to operate against Spaces'
-// /api/apps/* routes (mirrors the `requirePermission(...)` gates: chat:write
-// for posting results/progress, channels/users/usergroups reads for resolving
-// mentions, tickets + files + im + email for the spaces tools). Granted as ONE
-// set so every spaces tool works; tighten per-agent later if needed.
-const CLAW_APP_PERMISSIONS = [
+// Scopes an agent asks for when it is added to a workspace: what its bot needs
+// on the bot API (post, cards, DMs, files, tickets) plus what its tools need
+// when acting for a user (each user's own permissions still apply). Spaces drops
+// any it doesn't know. A workspace admin approves them by adding the agent.
+const CLAW_AGENT_SCOPES = [
   "chat:write",
   "channels:read",
   "users:read",
@@ -3038,109 +2852,115 @@ const CLAW_APP_PERMISSIONS = [
   "files:write",
   "im:write",
   "email:read",
+  "email:write",
+  "search:read",
+  "kb:read",
+  "kb:write",
+  "canvas:read",
+  "canvas:write",
+  "workflows:read",
+  "automations:read",
+  "automations:write",
+  "sdlc:read",
+  "sdlc:write",
+  "activity:read",
 ];
 
-// Final registration step: grant the bot its app permissions and re-install so
-// they take effect. Spaces loads an app's permissions per-request from
-// installed_app_permissions (NOT from the JWT), and a post-install setPermissions
-// lands as UNAPPROVED until the app is re-installed — so we must setPermissions
-// THEN install (the existing-installation branch re-approves + re-issues the JWT).
-// Without this the bot 403s with `missing_permission required:chat:write granted:[]`
-// the moment it tries to post a result back to the thread.
-router.post("/:slug/grant-permissions", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+const SPACES_PRINCIPALS_PATH = "/api/claw-agents/principals";
+
+/** Spaces call as the signed-in person (their Spaces session cookie), with the workspace hint. */
+function spacesSessionHeaders(req: Request<{ slug: string }>): Record<string, string> | null {
+  const cookie = req.headers.cookie;
+  if (!cookie) return null;
+  const workspaceId = extractWorkspaceId(req);
+  return { Cookie: cookie, ...(workspaceId ? { "x-workspace-id": workspaceId } : {}) };
+}
+
+async function spacesErrorText(r: globalThis.Response): Promise<string> {
+  const text = await r.text().catch(() => "");
   try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
+    const j = JSON.parse(text) as { error?: string; message?: string };
+    return (j.error ?? j.message ?? text).slice(0, 300);
+  } catch {
+    return text.slice(0, 300);
+  }
+}
+
+/**
+ * Add this agent to the person's current Spaces workspace and approve its scopes.
+ * Claw checks the person owns or administers the agent (requireAgentOwnerOrAdmin);
+ * Spaces checks they are a workspace admin and that claw-auth vouches for the
+ * agent (service assertion). Safe to repeat: re-enables a disabled agent and only
+ * adds missing scopes.
+ */
+router.post("/:slug/register-in-spaces", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const session = spacesSessionHeaders(req);
+    if (!session) { res.status(401).json({ success: false, error: "Sign in to Spaces first" }); return; }
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-    if (!agent) { logAgentScopedMiss(req, "agents/grant-permissions", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
+    if (!agent) { logAgentScopedMiss(req, "agents/register-in-spaces", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
 
-    const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
-    const headers = { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) };
-
-    // 1. Grant the bot its permissions. The set of AVAILABLE permissions is
-    //    environment-specific — the Spaces `availableAppPermission` registry may
-    //    be only partially seeded (e.g. local has 5 of the 10). setPermissions
-    //    400s with "Unknown permissions: …" if we send a scope the registry
-    //    doesn't know, so fetch the registry and grant only the intersection of
-    //    what we want and what exists. Robust across local / staging / prod.
-    let grantScopes = CLAW_APP_PERMISSIONS;
-    try {
-      const availRes = await fetch(`${spacesUrl}/api/apps/permissions`, { method: "GET", headers });
-      if (availRes.ok) {
-        const availBody = (await availRes.json()) as { permissions?: Array<{ name?: string; type?: string }> };
-        const available = new Set(
-          (availBody.permissions ?? [])
-            .filter((p) => p?.name && p?.type)
-            .map((p) => `${p.name}:${String(p.type).toLowerCase()}`),
-        );
-        if (available.size > 0) {
-          grantScopes = CLAW_APP_PERMISSIONS.filter((s) => available.has(s));
-        }
-      }
-    } catch (err) {
-      log.warn(`[agents] grant-permissions: registry fetch failed for ${req.params.slug}; using full desired set — ${errMsg(err)}`);
-    }
-    if (grantScopes.length === 0) {
-      res.status(400).json({ success: false, error: "No grantable permissions — the Spaces permission registry has none of the bot's scopes." });
-      return;
-    }
-
-    // Replace the app's permission set with the grantable scopes.
-    const permRes = await fetch(`${spacesUrl}/api/apps/permissions/${agent.spacesAppId}`, {
+    const r = await fetch(`${CONFIG.spacesInternalUrl}${SPACES_PRINCIPALS_PATH}`, {
       method: "POST",
-      headers,
-      body: JSON.stringify({ permissions: grantScopes }),
+      headers: {
+        "Content-Type": "application/json",
+        ...session,
+        "x-service-assertion": mintServiceAssertion("POST", SPACES_PRINCIPALS_PATH),
+      },
+      body: JSON.stringify({ clawAgentId: agent.id, name: agent.name || agent.slug, scopes: CLAW_AGENT_SCOPES }),
+      signal: AbortSignal.timeout(15_000),
     });
-    if (!permRes.ok) {
-      const text = await permRes.text().catch(() => "");
-      res.status(permRes.status).json({ success: false, error: `Spaces (setPermissions): ${text.slice(0, 300)}` });
+    if (!r.ok) {
+      const error = r.status === 403 ? "Only a Spaces workspace admin can add an agent" : `Spaces: ${await spacesErrorText(r)}`;
+      log.warn(`[agents] register-in-spaces ${req.params.slug} → Spaces ${r.status}`);
+      res.status(r.status === 401 || r.status === 403 ? r.status : 502).json({ success: false, error });
       return;
     }
-
-    // 2. Re-install to APPROVE the just-granted permissions + re-issue the JWT.
-    const installRes = await fetch(`${spacesUrl}/api/apps/install/${agent.spacesAppId}`, {
-      method: "POST",
-      headers,
+    const body = (await r.json()) as {
+      principal?: { id: string; workspaceId: string; botUserId: string };
+      granted?: string[];
+      skipped?: string[];
+    };
+    forgetPrincipalsForAgent(agent.id);
+    log.info(
+      `[agents] ${req.params.slug} added to Spaces workspace ${body.principal?.workspaceId} principal=${body.principal?.id} granted=${body.granted?.length ?? 0} skipped=${(body.skipped ?? []).join(",") || "none"}`,
+    );
+    res.json({
+      success: true,
+      data: {
+        principalId: body.principal?.id,
+        workspaceId: body.principal?.workspaceId,
+        botUserId: body.principal?.botUserId,
+        granted: body.granted ?? [],
+        skipped: body.skipped ?? [],
+      },
     });
-    if (!installRes.ok) {
-      const text = await installRes.text().catch(() => "");
-      res.status(installRes.status).json({ success: false, error: `Spaces (reinstall): ${text.slice(0, 300)}` });
-      return;
-    }
-
-    // 3. Persist the refreshed token (re-signed with the same secret). Permissions
-    //    are read from the DB per request, but re-storing keeps the bot token fresh
-    //    and mirrors install-app's persistence.
-    const body = (await installRes.json()) as { jwtToken?: string };
-    if (body.jwtToken) {
-      let appUserId: string | null = agent.spacesAppUserId ?? null;
-      const jwtParts = body.jwtToken.split(".");
-      if (jwtParts[1]) {
-        try {
-          const decoded = JSON.parse(Buffer.from(jwtParts[1], "base64url").toString()) as { userId?: string };
-          appUserId = decoded.userId ?? appUserId;
-        } catch { /* keep prior appUserId */ }
-      }
-      const encToken = encrypt(body.jwtToken, CONFIG.encryptionKey);
-      await agentRepository.update(req.params.slug, agent.orgId, {
-        spacesAppToken: `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`,
-        ...(appUserId ? { spacesAppUserId: appUserId } : {}),
-      });
-    }
-
-    log.info(`[agents] Granted ${grantScopes.length} permissions (${grantScopes.join(", ")}) + reinstalled ${agent.spacesAppId} for ${req.params.slug}`);
-    res.json({ success: true, data: { permissions: grantScopes } });
   } catch (err) {
-    log.error("[agents] grant-permissions error:", err);
+    if (err instanceof SpacesAgentError) { res.status(err.status).json({ success: false, error: err.message }); return; }
+    log.error("[agents] register-in-spaces error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
 
-// ── Upload bot picture (proxies to spaces /api/apps/upload-picture/:appId) ──────────
+/** Is this agent added to the person's current Spaces workspace? */
+router.get("/:slug/spaces-registration", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
+  try {
+    const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
+    if (!agent) { res.status(404).json({ success: false, error: "Agent not found" }); return; }
+    const workspaceId = extractWorkspaceId(req);
+    const principal = workspaceId
+      ? await findPrincipalForAgent(agent.id, workspaceId)
+      : (await findActivePrincipalsForAgent(agent.id))[0] ?? null;
+    const registered = !!principal && principal.status === "ACTIVE";
+    res.json({ success: true, data: { registered, workspaceId: principal?.workspaceId ?? workspaceId ?? null } });
+  } catch (err) {
+    log.error("[agents] spaces-registration error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+// ── Agent bot picture (the agent's bot user in this workspace) ──────────
 const pictureUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -3152,38 +2972,39 @@ router.post(
   pictureUpload.single("picture") as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response) => {
     try {
-      const userToken = extractUserToken(req);
-      if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
+      const session = spacesSessionHeaders(req);
+      if (!session) { res.status(401).json({ success: false, error: "Sign in to Spaces first" }); return; }
 
       const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
       if (!agent) { logAgentScopedMiss(req, "agents/upload-picture", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-      if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
 
       const file = req.file;
       if (!file) { res.status(400).json({ success: false, error: "picture file is required" }); return; }
 
-      const form = new FormData();
-      const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
-      form.append("picture", blob, file.originalname);
-
-      const spacesUrl = CONFIG.spacesInternalUrl;
-      const sessionId = extractSessionId(req);
       const workspaceId = extractWorkspaceId(req);
-      const uploadRes = await fetch(`${spacesUrl}/api/apps/upload-picture/${agent.spacesAppId}`, {
-        method: "POST",
-        headers: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
-        body: form,
-      });
-
-      if (!uploadRes.ok) {
-        const text = await uploadRes.text().catch(() => "");
-        res.status(uploadRes.status).json({ success: false, error: `Spaces: ${text.slice(0, 300)}` });
+      const principal = workspaceId
+        ? await findPrincipalForAgent(agent.id, workspaceId)
+        : (await findActivePrincipalsForAgent(agent.id))[0] ?? null;
+      if (!principal || principal.status !== "ACTIVE") {
+        res.status(400).json({ success: false, error: "Add the agent to this Spaces workspace first" });
         return;
       }
 
-      const body = await uploadRes.json().catch(() => ({})) as { pictureUrl?: string };
-      log.info(`[agents] Uploaded picture for ${req.params.slug}`);
-      res.json({ success: true, data: body });
+      const form = new FormData();
+      form.append("picture", new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }), file.originalname);
+      const uploadRes = await fetch(`${CONFIG.spacesInternalUrl}${SPACES_PRINCIPALS_PATH}/${encodeURIComponent(principal.id)}/picture`, {
+        method: "POST",
+        headers: session,
+        body: form,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!uploadRes.ok) {
+        res.status(uploadRes.status).json({ success: false, error: `Spaces: ${await spacesErrorText(uploadRes)}` });
+        return;
+      }
+      const body = (await uploadRes.json().catch(() => ({}))) as { picture?: string };
+      log.info(`[agents] Uploaded picture for ${req.params.slug} principal=${principal.id}`);
+      res.json({ success: true, data: { picture: body.picture } });
     } catch (err) {
       log.error("[agents] upload-picture error:", err);
       res.status(500).json({ success: false, error: "Internal server error" });

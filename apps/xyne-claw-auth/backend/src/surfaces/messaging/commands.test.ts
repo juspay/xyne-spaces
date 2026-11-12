@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+vi.mock("../../lib/internal-call.js", () => ({ serviceCallsConfigured: () => true, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: (method: string, _url: string, user?: { userId?: string }) => ({ "x-service-assertion": `test:xyne-claw-auth:${method}`, ...(user?.userId ? { "x-session-token": `run:${user.userId}` } : {}) }), selfCallRunToken: (u: { userId: string }) => `run:${u.userId}` }));
 
-vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost", xyneClawS2sKey: "k" } }));
+vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost" } }));
 vi.mock("../../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 const store = new Map<string, string>();
 vi.mock("../../redis.js", () => ({
@@ -139,7 +140,7 @@ describe("runChatSlashCommand", () => {
       autoGoalEnabled: true,
       isTwin: false,
       channelDelivery: target,
-      agent: { id: "a1", slug: "assistant", orgId: "org", appToken: "" },
+      agent: { id: "a1", slug: "assistant", orgId: "org" },
     });
     expect(enqueueOutbound).toHaveBeenCalledWith("acc", { kind: "text", chatId: "919", text: "**Debug trace** — …" });
     expect(sendGeneratedFile).toHaveBeenCalledWith(target, expect.objectContaining({ fileName: "debug.html" }));

@@ -1,9 +1,10 @@
 /**
- * claw-auth's `/internal/sandbox-profiles` (INTERNAL_S2S_KEY). Spaces decides who may edit a
+ * claw-auth's `/internal/sandbox-profiles` (Spaces service assertion). Spaces decides who may edit a
  * profile; claw-auth stores it and scopes every row to its workspace.
  */
 import type { SandboxProfileConfig } from '@xyne/shared';
 import { config } from '@/config/env';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 import { AppError } from '@/middleware/errorHandler';
 
 export interface ClawSandboxProfile {
@@ -17,12 +18,11 @@ export interface ClawSandboxProfile {
 }
 
 async function call<T>(method: 'GET' | 'PUT' | 'POST', path: string, body?: unknown): Promise<T> {
-  const key = config.internalS2sKey;
-  if (!key) throw new Error('[ClawSandboxProfiles] INTERNAL_S2S_KEY is not configured');
   const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/claw/api/v1/internal/sandbox-profiles${path}`, {
+  const url = `${base}/claw/api/v1/internal/sandbox-profiles${path}`;
+  const res = await fetch(url, {
     method,
-    headers: { 'x-s2s-key': key, 'content-type': 'application/json' },
+    headers: { ...serviceAuthHeaders('xyne-claw-auth', method, url), 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(15_000),
   });

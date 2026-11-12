@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { useRuntimeTestKey } from "./runtime-test-key.js";
 
-process.env["XYNE_CLAW_S2S_KEY"] ||= "test-s2s-key";
+useRuntimeTestKey();
+
 
 const { RunCancelledError, ProviderStallError } = await import("../src/agent.js");
 const { abortTelemetry } = await import("../src/routes/run.js");

@@ -44,9 +44,6 @@ import { SurfaceLogo } from './components/SurfaceLogo';
 import { PersonPill } from '../shared/primitives/PersonPill';
 import type { AgentRegistration } from './hooks/useAgentRegistration';
 
-const isRegistered = (agent: Agent): boolean =>
-  Boolean(agent.spacesAppId) && (agent.spacesAppTokenConfigured ?? Boolean(agent.spacesAppToken));
-
 const slackLabel = (status: SlackAgentStatus | undefined, ready: boolean): string => {
   if (!ready) return 'Slack (checking…)';
   if (!status) return 'Slack';
@@ -66,6 +63,7 @@ function AgentRow({
   actions,
   query,
   showRegistration,
+  registered,
   showOrgLabels,
   orgNamesById,
   slackStatus,
@@ -74,6 +72,8 @@ function AgentRow({
   actions: ReactElement;
   query: string;
   showRegistration: boolean;
+  /** Added to the current Spaces workspace. */
+  registered: boolean;
   showOrgLabels: boolean;
   orgNamesById: Record<string, string>;
   slackStatus?: SlackAgentStatus | undefined;
@@ -95,11 +95,11 @@ function AgentRow({
 
       {showRegistration ? (
         <div className='flex min-w-0 flex-wrap items-center gap-2'>
-          <Pill tone={isRegistered(agent) ? 'success' : 'neutral'}>
-            {isRegistered(agent) ? 'Registered' : 'Not registered'}
+          <Pill tone={registered ? 'success' : 'neutral'}>
+            {registered ? 'In this workspace' : 'Not in this workspace'}
           </Pill>
-          {isRegistered(agent) && (
-            <Tooltip content='Registered on Spaces' side='top'>
+          {registered && (
+            <Tooltip content='Added to this Spaces workspace' side='top'>
               <span className='inline-flex'>
                 <SurfaceLogo surface='spaces' label='Spaces' />
               </span>
@@ -133,6 +133,7 @@ function AgentSection({
   query,
   renderActions,
   showRegistration,
+  isRegistered,
   showOrgLabels,
   orgNamesById,
   slackStatuses,
@@ -143,6 +144,7 @@ function AgentSection({
   query: string;
   renderActions: (agent: Agent) => ReactElement;
   showRegistration: boolean;
+  isRegistered: (agentId: string) => boolean;
   showOrgLabels: boolean;
   orgNamesById: Record<string, string>;
   slackStatuses: Record<string, SlackAgentStatus>;
@@ -163,6 +165,7 @@ function AgentSection({
               actions={renderActions(agent)}
               query={query}
               showRegistration={showRegistration}
+              registered={isRegistered(agent.id)}
               showOrgLabels={showOrgLabels}
               orgNamesById={orgNamesById}
               slackStatus={slackStatuses[agent.id]}
@@ -337,8 +340,7 @@ export function AgentsTab({
   };
 
   const registerMenu = (agent: Agent): ReactElement => {
-    const registered = isRegistered(agent);
-    const hasApp = Boolean(agent.spacesAppId);
+    const registered = registration.isRegistered(agent.id);
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -353,7 +355,7 @@ export function AgentsTab({
           >
             <PluginAddonDefault className='size-4 text-current' />
             <span className='text-current'>
-              {hasApp && !registered ? 'Resume setup' : 'Add surface'}
+              Add surface
             </span>
             <ChevronDown className='size-4 text-current' />
           </Button>
@@ -365,7 +367,7 @@ export function AgentsTab({
             className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
           >
             <SurfaceLogo surface='spaces' label='' className='mr-2 size-4' />
-            {hasApp && !registered ? 'Spaces (resume setup)' : 'Spaces'}
+            {registered ? 'Spaces (added)' : 'Spaces'}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!slack.isReady || slackActions.busySlug === agent.slug}
@@ -398,6 +400,7 @@ export function AgentsTab({
         agents={globalAgents}
         emptyText='No global agents.'
         showRegistration
+        isRegistered={registration.isRegistered}
         showOrgLabels={showOrgLabels}
         orgNamesById={orgNamesById}
         slackStatuses={slack.byAgentId}
@@ -424,7 +427,7 @@ export function AgentsTab({
                 () => setSlackRemoveTarget(agent),
                 { disabled: slackActions.busySlug === agent.slug },
               )}
-            {isRegistered(agent) &&
+            {registration.isRegistered(agent.id) &&
               iconAction('Upload photo', <PhotoImagePlus className='size-4' />, () =>
                 registration.pickPictureFor(agent.slug),
               )}
@@ -444,6 +447,7 @@ export function AgentsTab({
         agents={personalAgents}
         emptyText='No personal agents.'
         showRegistration={false}
+        isRegistered={registration.isRegistered}
         showOrgLabels={showOrgLabels}
         orgNamesById={orgNamesById}
         slackStatuses={slack.byAgentId}
@@ -470,7 +474,7 @@ export function AgentsTab({
                 () => setSlackRemoveTarget(agent),
                 { disabled: slackActions.busySlug === agent.slug },
               )}
-            {isRegistered(agent) &&
+            {registration.isRegistered(agent.id) &&
               iconAction('Upload photo', <PhotoImagePlus className='size-4' />, () =>
                 registration.pickPictureFor(agent.slug),
               )}

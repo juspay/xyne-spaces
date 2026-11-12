@@ -6,14 +6,15 @@
  * `/internal/attachments/ingest`, which runs the converter pipeline and returns
  * extracted markdown.
  *
- * Mounted under `requireInternalS2S` — the caller is the Spaces backend
- * (INTERNAL_S2S_KEY), not the claw runtime. The onward hop to the runtime uses
- * the runtime's own S2S key (XYNE_CLAW_S2S_KEY), same as the other proxies here.
+ * Mounted under requireAnyService (service assertion; callers: claw-auth's own
+ * MCP tools and the runtime). The onward hop to the runtime carries claw-auth's
+ * service assertion, same as the other proxies here.
  */
 
 import { Router, type Request, type Response } from "express";
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
+import { serviceAuthHeaders } from "../lib/service-assertion.js";
 
 const log = createLogger("attachments-ingest");
 
@@ -25,11 +26,12 @@ const INGEST_TIMEOUT_MS = 120_000;
 
 attachmentsInternalRouter.post("/ingest", async (req: Request, res: Response) => {
   try {
-    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/internal/attachments/ingest`, {
+    const ingestUrl = `${CONFIG.xyneClawUrl}/internal/attachments/ingest`;
+    const clawRes = await fetch(ingestUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", ingestUrl),
       },
       body: JSON.stringify(req.body ?? {}),
       signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),

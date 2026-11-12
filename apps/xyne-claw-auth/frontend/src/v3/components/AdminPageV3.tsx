@@ -53,10 +53,8 @@ import {
   listPendingRequests,
   approveRequest,
   rejectRequest,
-  createAgentApp,
-  installAgentApp,
-  configureAgentWebhook,
-  grantAgentPermissions,
+  registerAgentInSpaces,
+  listSpacesRegistrations,
   uploadAgentPicture,
   getAgentDetail,
   listAgentUsageStats,
@@ -122,18 +120,7 @@ interface Props {
 interface SpacesFlow {
   requestId: string;
   agentSlug: string;
-  step:
-    | "creating"
-    | "create"
-    | "installing"
-    | "install"
-    | "configuring"
-    | "configure"
-    | "granting"
-    | "grant"
-    | "upload"
-    | "uploading"
-    | "done";
+  step: "register" | "registering" | "upload" | "uploading" | "done";
   error?: string;
 }
 
@@ -221,6 +208,8 @@ export function AdminPageV3({ userId }: Props) {
 
   /* Spaces App registration flow */
   const [spacesFlow, setSpacesFlow] = useState<SpacesFlow | null>(null);
+  // Agents added to the current Spaces workspace (Spaces' own list).
+  const [spacesRegistered, setSpacesRegistered] = useState<Set<string>>(new Set());
   const [slackCreatingSlug, setSlackCreatingSlug] = useState<string | null>(null);
   const [slackAgentStatuses, setSlackAgentStatuses] = useState<Record<string, SlackAgentStatus>>({});
   const [slackStatusesReady, setSlackStatusesReady] = useState(false);
@@ -258,6 +247,9 @@ export function AdminPageV3({ userId }: Props) {
 
   const load = useCallback(async () => {
     setLoading(true);
+    listSpacesRegistrations()
+      .then((ids) => setSpacesRegistered(new Set(ids)))
+      .catch((err) => console.warn("[admin] spaces registrations load error:", err));
     try {
       const [a, r, sr, reqs] = await Promise.all([
         // Admin panel: the full roster across all users (server enforces admin).
@@ -866,16 +858,11 @@ export function AdminPageV3({ userId }: Props) {
         return;
       }
       try {
-        const agent = await getAgentDetail(agentSlug);
-        if (agent.spacesAppId && agent.spacesAppTokenConfigured) {
-          setSpacesFlow({ requestId, agentSlug, step: "done" });
-        } else if (agent.spacesAppId) {
-          setSpacesFlow({ requestId, agentSlug, step: "install" });
-        } else {
-          setSpacesFlow({ requestId, agentSlug, step: "create" });
-        }
+        const [agent, ids] = await Promise.all([getAgentDetail(agentSlug), listSpacesRegistrations()]);
+        setSpacesRegistered(new Set(ids));
+        setSpacesFlow({ requestId, agentSlug, step: ids.includes(agent.id) ? "done" : "register" });
       } catch {
-        setSpacesFlow({ requestId, agentSlug, step: "create" });
+        setSpacesFlow({ requestId, agentSlug, step: "register" });
       }
       load();
     },
@@ -883,37 +870,20 @@ export function AdminPageV3({ userId }: Props) {
   );
 
   const handleSpacesStep = useCallback(
-    async (step: "create" | "install" | "configure" | "grant") => {
+    async (_step: "register") => {
       if (!spacesFlow) return;
       const { agentSlug } = spacesFlow;
-      const loadingStep =
-        step === "create"
-          ? "creating"
-          : step === "install"
-            ? "installing"
-            : step === "configure"
-              ? "configuring"
-              : "granting";
-      setSpacesFlow((f) => (f ? { ...f, step: loadingStep, error: undefined } : f));
+      setSpacesFlow((f) => (f ? { ...f, step: "registering", error: undefined } : f));
       try {
-        if (step === "create") {
-          await createAgentApp(agentSlug);
-          setSpacesFlow((f) => (f ? { ...f, step: "install" } : f));
-        } else if (step === "install") {
-          await installAgentApp(agentSlug);
-          setSpacesFlow((f) => (f ? { ...f, step: "configure" } : f));
-        } else if (step === "configure") {
-          await configureAgentWebhook(agentSlug);
-          setSpacesFlow((f) => (f ? { ...f, step: "grant" } : f));
-        } else {
-          await grantAgentPermissions(agentSlug);
-          setSpacesFlow((f) => (f ? { ...f, step: "upload" } : f));
-        }
+        await registerAgentInSpaces(agentSlug);
+        setSpacesFlow((f) => (f ? { ...f, step: "upload" } : f));
         load();
       } catch (err) {
-        console.error(`[admin] spaces ${step} error:`, err);
+        console.error("[admin] spaces register error:", err);
         setSpacesFlow((f) =>
-          f ? { ...f, step, error: `Failed to ${step}. Try again.` } : f,
+          f
+            ? { ...f, step: "register", error: err instanceof Error ? err.message : "Could not add the agent. Try again." }
+            : f,
         );
       }
     },
@@ -957,10 +927,6 @@ export function AdminPageV3({ userId }: Props) {
 
   // Grant is recommended but skippable — a failed/deferred grant must not strand
   // the admin on the step. Skipping proceeds to the (optional) picture upload.
-  const handleSkipGrant = useCallback(() => {
-    setSpacesFlow((f) => (f ? { ...f, step: "upload" } : f));
-  }, []);
-
   const handleCreateSlackApp = useCallback(async (agent: AgentLight) => {
     setSlackCreatingSlug(agent.slug);
     try {
@@ -1302,7 +1268,6 @@ export function AdminPageV3({ userId }: Props) {
                     onSpacesStep={handleSpacesStep}
                     onPictureClick={() => pictureInputRef.current?.click()}
                     onSkipUpload={handleSkipUpload}
-                    onSkipGrant={handleSkipGrant}
                     onDismissSpaces={() => setSpacesFlow(null)}
                     pictureInputRef={pictureInputRef}
                     onPictureChange={handlePictureFileChange}
@@ -1399,14 +1364,15 @@ export function AdminPageV3({ userId }: Props) {
                     globalAgents={globalAgents}
                     personalAgents={personalAgents}
                     spacesFlow={spacesFlow}
+                    spacesRegistered={spacesRegistered}
                     slackCreatingSlug={slackCreatingSlug}
                     slackAgentStatuses={slackAgentStatuses}
                     slackStatusesReady={slackStatusesReady}
-                    onResumeSetup={(a, hasApp) =>
+                    onResumeSetup={(a) =>
                       setSpacesFlow({
                         requestId: "",
                         agentSlug: a.slug,
-                        step: hasApp ? "install" : "create",
+                        step: "register",
                       })
                     }
                     onUploadPicture={openRowPicturePicker}
@@ -1781,7 +1747,6 @@ function RequestsTab({
   onSpacesStep,
   onPictureClick,
   onSkipUpload,
-  onSkipGrant,
   onDismissSpaces,
   pictureInputRef,
   onPictureChange,
@@ -1793,10 +1758,9 @@ function RequestsTab({
   onApproveSkill: (id: string) => void | Promise<void>;
   onStartSpacesFlow: (id: string, slug: string) => void;
   onReject: (id: string) => void;
-  onSpacesStep: (step: "create" | "install" | "configure" | "grant") => void | Promise<void>;
+  onSpacesStep: (step: "register") => void | Promise<void>;
   onPictureClick: () => void;
   onSkipUpload: () => void;
-  onSkipGrant: () => void;
   onDismissSpaces: () => void;
   pictureInputRef: React.RefObject<HTMLInputElement | null>;
   onPictureChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -1896,7 +1860,6 @@ function RequestsTab({
           onStep={onSpacesStep}
           onPictureClick={onPictureClick}
           onSkipUpload={onSkipUpload}
-          onSkipGrant={onSkipGrant}
           onDismiss={onDismissSpaces}
           showUploadStep
           pictureInputRef={pictureInputRef}
@@ -1912,32 +1875,30 @@ function SpacesFlowCard({
   onStep,
   onPictureClick,
   onSkipUpload,
-  onSkipGrant,
   onDismiss,
   showUploadStep,
   pictureInputRef,
   onPictureChange,
 }: {
   flow: SpacesFlow;
-  onStep: (step: "create" | "install" | "configure" | "grant") => void | Promise<void>;
+  onStep: (step: "register") => void | Promise<void>;
   onPictureClick?: () => void;
   onSkipUpload?: () => void;
-  onSkipGrant?: () => void;
   onDismiss: () => void;
   showUploadStep?: boolean;
   pictureInputRef?: React.RefObject<HTMLInputElement | null>;
   onPictureChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
-  const isDone = (s: SpacesFlow["step"], threshold: SpacesFlow["step"][]) =>
-    threshold.includes(s);
+  // Without the picture step, adding the agent finishes the flow.
+  const finished = flow.step === "done" || (!showUploadStep && flow.step === "upload");
 
   return (
     <div className="rounded-xl border border-xyne-info-border bg-xyne-info-bg px-5 py-4">
       <div className="mb-3 flex items-center justify-between">
         <h4 className="text-[13px] font-semibold text-xyne-info-fg">
-          Spaces App Setup — {flow.agentSlug}
+          Add to Spaces workspace — {flow.agentSlug}
         </h4>
-        {flow.step === "done" && (
+        {finished && (
           <button
             onClick={onDismiss}
             className="text-[11px] text-xyne-fg-muted hover:text-xyne-fg-primary"
@@ -1953,70 +1914,17 @@ function SpacesFlowCard({
 
       <div className="flex flex-wrap items-center gap-3">
         <StepButton
-          label="1. Create App"
-          doneLabel="Created"
+          label="1. Add to workspace"
+          doneLabel="Added to workspace"
           state={
-            flow.step === "create"
+            flow.step === "register"
               ? "active"
-              : flow.step === "creating"
+              : flow.step === "registering"
                 ? "loading"
                 : "done"
           }
-          onClick={() => onStep("create")}
+          onClick={() => onStep("register")}
         />
-        <span className="text-xyne-fg-muted">→</span>
-        <StepButton
-          label="2. Install App"
-          doneLabel="Installed"
-          state={
-            flow.step === "install"
-              ? "active"
-              : flow.step === "installing"
-                ? "loading"
-                : isDone(flow.step, ["configure", "configuring", "upload", "uploading", "done"])
-                  ? "done"
-                  : "idle"
-          }
-          onClick={() => onStep("install")}
-        />
-        <span className="text-xyne-fg-muted">→</span>
-        <StepButton
-          label="3. Configure Webhook"
-          doneLabel="Configured"
-          state={
-            flow.step === "configure"
-              ? "active"
-              : flow.step === "configuring"
-                ? "loading"
-                : isDone(flow.step, ["grant", "granting", "upload", "uploading", "done"])
-                  ? "done"
-                  : "idle"
-          }
-          onClick={() => onStep("configure")}
-        />
-        <span className="text-xyne-fg-muted">→</span>
-        <StepButton
-          label="4. Grant Permissions"
-          doneLabel="Permissions Granted"
-          state={
-            flow.step === "grant"
-              ? "active"
-              : flow.step === "granting"
-                ? "loading"
-                : isDone(flow.step, ["upload", "uploading", "done"])
-                  ? "done"
-                  : "idle"
-          }
-          onClick={() => onStep("grant")}
-        />
-        {flow.step === "grant" && (
-          <button
-            onClick={onSkipGrant}
-            className="rounded-full px-3 py-2 text-[11px] text-xyne-fg-muted hover:text-xyne-fg-primary"
-          >
-            Skip
-          </button>
-        )}
         {showUploadStep && (
           <>
             <span className="text-xyne-fg-muted">→</span>
@@ -2028,7 +1936,7 @@ function SpacesFlowCard({
               onChange={onPictureChange}
             />
             <StepButton
-              label="5. Upload Picture"
+              label="2. Upload Picture"
               doneLabel="Picture Set"
               state={
                 flow.step === "upload"
@@ -2053,9 +1961,9 @@ function SpacesFlowCard({
         )}
       </div>
 
-      {flow.step === "done" && (
+      {finished && (
         <p className="mt-3 text-[11px] text-xyne-success-fg">
-          Agent is live on Spaces.
+          Agent is added to this Spaces workspace.
         </p>
       )}
     </div>
@@ -2414,6 +2322,7 @@ function AgentsTab({
   slackAgentStatuses,
   slackStatusesReady,
   onResumeSetup,
+  spacesRegistered,
   onSlackAction,
   onUpdateSlackApp,
   onRemoveSlack,
@@ -2431,7 +2340,9 @@ function AgentsTab({
   slackCreatingSlug: string | null;
   slackAgentStatuses: Record<string, SlackAgentStatus>;
   slackStatusesReady: boolean;
-  onResumeSetup: (a: AgentLight, hasApp: boolean) => void;
+  onResumeSetup: (a: AgentLight) => void;
+  /** Ids of agents added to the current Spaces workspace. */
+  spacesRegistered: Set<string>;
   onSlackAction: (a: AgentLight) => void;
   onUpdateSlackApp: (a: AgentLight) => void;
   onRemoveSlack: (a: AgentLight) => void;
@@ -2439,7 +2350,7 @@ function AgentsTab({
   onPromote: (a: AgentLight) => void;
   onDemote: (a: AgentLight) => void;
   onDelete: (a: AgentLight) => void;
-  onSpacesStep: (step: "create" | "install" | "configure" | "grant") => void | Promise<void>;
+  onSpacesStep: (step: "register") => void | Promise<void>;
   onDismissSpaces: () => void;
   showOrgLabels: boolean;
 }) {
@@ -2459,8 +2370,7 @@ function AgentsTab({
         </h3>
         <div className="space-y-2">
           {globalAgents.map((a) => {
-            const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
-            const hasApp = Boolean(a.spacesAppId);
+            const registered = spacesRegistered.has(a.id);
             const slackStatus = slackAgentStatuses[a.id];
             return (
               <div
@@ -2481,7 +2391,7 @@ function AgentsTab({
                         as="span"
                         size="sm"
                         variant={registered ? "success" : "warning"}
-                        label={registered ? "Registered" : "Not registered"}
+                        label={registered ? "In this workspace" : "Not in this workspace"}
                       />
                     </span>
                     {slackStatus && (
@@ -2524,17 +2434,17 @@ function AgentsTab({
                         className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium text-xyne-fg-secondary transition-colors hover:bg-xyne-surface-subtle hover:text-xyne-fg-primary disabled:opacity-50"
                       >
                         {slackCreatingSlug === a.slug ? <SpinnerGapIcon size={13} className="animate-spin" /> : <PlugIcon size={13} />}
-                        {hasApp && !registered ? "Resume setup" : "Register"}
+                        Add to workspace
                         <CaretDownIcon size={11} />
                       </button>
                     )}
                   >
                     <MenuItem
-                      onSelect={() => onResumeSetup(a, hasApp)}
+                      onSelect={() => onResumeSetup(a)}
                       disabled={registered}
                       leading={<PlugIcon size={13} />}
                     >
-                      {registered ? "Spaces (registered)" : hasApp ? "Spaces (resume setup)" : "Spaces"}
+                      {registered ? "Spaces (added)" : "Spaces"}
                     </MenuItem>
                     <MenuItem
                       onSelect={() => onSlackAction(a)}
@@ -2610,8 +2520,7 @@ function AgentsTab({
         ) : (
           <div className="space-y-2">
             {personalAgents.map((a) => {
-              const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
-              const hasApp = Boolean(a.spacesAppId);
+              const registered = spacesRegistered.has(a.id);
               const slackStatus = slackAgentStatuses[a.id];
               return (
                 <div
@@ -2678,11 +2587,11 @@ function AgentsTab({
                       )}
                     >
                       <MenuItem
-                        onSelect={() => onResumeSetup(a, hasApp)}
+                        onSelect={() => onResumeSetup(a)}
                         disabled={registered}
                         leading={<PlugIcon size={13} />}
                       >
-                        {registered ? "Spaces (registered)" : hasApp ? "Spaces (resume setup)" : "Spaces"}
+                        {registered ? "Spaces (added)" : "Spaces"}
                       </MenuItem>
                       <MenuItem
                         onSelect={() => onSlackAction(a)}

@@ -4,7 +4,7 @@
  * POST /pending-questions  — store a question (called by ask-user-question tool)
  * GET  /pending-questions/:id — retrieve a question (called by flow-action / app-callback)
  *
- * Auth: strict S2S only (also enforced at the mount in main.ts). Questions
+ * Auth: runtime / claw-auth service assertion only (also enforced at the mount). Questions
  * carry another user's prompt context, and the question ID is the only lookup
  * key — the old requireS2S cookie fallback let any logged-in user who learned
  * an ID read or overwrite someone else's pending question.
@@ -13,7 +13,7 @@
 import { Router, type Request, type Response } from "express";
 import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
 import { redisService } from "../redis.js";
-import { requireStrictS2S } from "../middleware/require-auth.js";
+import { requireRuntime } from "../lib/service-assertion.js";
 import type { UserQuestion } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
@@ -54,7 +54,7 @@ export async function consumeQuestion(questionId: string): Promise<StoredQuestio
 }
 
 // POST / — store a pending question
-router.post("/", requireStrictS2S, asyncHandler(async (req: Request, res: Response) => {
+router.post("/", requireRuntime, asyncHandler(async (req: Request, res: Response) => {
   const { questionId, userId, agentSlug, channelId, conversationId, questions } = req.body as {
     questionId?: string;
     userId?: string;
@@ -85,7 +85,7 @@ router.post("/", requireStrictS2S, asyncHandler(async (req: Request, res: Respon
 }));
 
 // GET /:id — retrieve a pending question
-router.get("/:id", requireStrictS2S, asyncHandler(async (req: Request, res: Response) => {
+router.get("/:id", requireRuntime, asyncHandler(async (req: Request, res: Response) => {
   const questionId = (req.params as { id: string }).id;
   const data = await getQuestion(questionId);
   if (!data) {

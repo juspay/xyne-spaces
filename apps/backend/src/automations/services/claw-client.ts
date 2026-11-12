@@ -2,6 +2,7 @@ import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 import crypto from 'crypto';
 
 function signWebhookPayload(payload: string, signingSecret: string): string {
@@ -46,12 +47,9 @@ class ClawClient {
     return config.xyneClaw.authUrl.replace(/\/$/, '');
   }
 
-  private get s2sKey(): string {
-    return config.xyneClaw.s2sKey;
-  }
-
-  private get s2sHeaders(): Record<string, string> {
-    return this.s2sKey ? { 'x-s2s-key': this.s2sKey } : {};
+  /** Proves Spaces is calling claw-auth (signed per request, no shared key). */
+  private serviceHeaders(method: string, url: string): Record<string, string> {
+    return serviceAuthHeaders('xyne-claw-auth', method, url);
   }
 
   async listAgents(): Promise<ClawAgent[]> {
@@ -60,7 +58,7 @@ class ClawClient {
     try {
       res = await fetch(url, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json', ...this.s2sHeaders },
+        headers: { 'Content-Type': 'application/json', ...this.serviceHeaders('GET', url) },
         signal: AbortSignal.timeout(15_000),
       });
     } catch (err) {
@@ -107,7 +105,7 @@ class ClawClient {
           'Content-Type': 'application/json',
           'X-Xyne-Signature': signature,
           'X-Source': 'XyneSpaces',
-          ...this.s2sHeaders,
+          ...this.serviceHeaders('POST', url),
         },
         body,
         signal: AbortSignal.timeout(30_000),

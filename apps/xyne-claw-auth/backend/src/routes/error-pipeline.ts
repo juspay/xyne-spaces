@@ -7,13 +7,13 @@
  * `Authorization: Bearer <JWT>` signed with ERROR_PIPELINE_JWT_SECRET (only in
  * this service's env). The token verifies only here (aud=error-pipeline), so a
  * leaked webhook credential is useless against any other route. Internal
- * callers may use the master x-s2s-key instead. Mint tokens via the admin API
+ * services may send their signed service assertion instead. Mint tokens via the admin API
  * (POST /claw/api/v1/admin/error-pipeline/token — CLAW_ADMIN).
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { errMsg } from "../lib/errors.js";
 import jwt from "jsonwebtoken";
-import { s2sKeyMatches } from "../middleware/require-auth.js";
+import { authenticateCaller } from "../lib/service-assertion.js";
 import { ERROR_PIPELINE } from "../config.js";
 import { classify } from "../error-pipeline/classify.js";
 import { routeError } from "../error-pipeline/buckets.js";
@@ -29,7 +29,7 @@ export const errorPipelineIngestRouter = Router();
 
 /**
  * Internal callback the runner points its dispatched runs at (mounted under
- * requireStrictS2S). claw POSTs the terminal result here when a headless
+ * requireRuntime). claw POSTs the terminal result here when a headless
  * automation run finishes — we do ONE thing: finalize the AgentRun row (status
  * + result). The runner polls that row, so a guaranteed finalize is what lets
  * its poll terminate. Await the finalize BEFORE acking and return non-2xx on
@@ -108,7 +108,7 @@ errorPipelineInternalRouter.post("/run-result", async (req: Request, res: Respon
 
 export const INGEST_JWT_AUDIENCE = "error-pipeline";
 
-function validateIngestAuth(req: Request, res: Response, next: NextFunction): void {
+async function validateIngestAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
     if (!ERROR_PIPELINE.jwtSecret) {
@@ -129,15 +129,20 @@ function validateIngestAuth(req: Request, res: Response, next: NextFunction): vo
       return;
     }
   }
-  // No Bearer header: allow internal S2S callers, otherwise say what this
-  // route accepts.
-  if (s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)) {
+  // No Bearer header: allow internal services by their signed service
+  // assertion, otherwise say what this route accepts.
+  const caller = await authenticateCaller(req, ["xyne-claw", "xyne-claw-auth", "xyne-spaces"]);
+  if (caller === "unavailable") {
+    res.status(503).json({ success: false, error: "Service authentication unavailable" });
+    return;
+  }
+  if (caller !== "missing" && caller !== "rejected") {
     next();
     return;
   }
   res.status(401).json({
     success: false,
-    error: "Missing credentials: send `Authorization: Bearer <ingest JWT>` (or `x-s2s-key` for internal services)",
+    error: "Missing credentials: send `Authorization: Bearer <ingest JWT>` (or a service assertion for internal services)",
   });
 }
 

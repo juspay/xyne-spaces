@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../../redis.js", () => ({ redisService: { getConnection: () => ({}) } }));
 vi.mock("../../logger.js", () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
 // commands.ts reads required env at import time; these tests never call it.
-vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost", xyneClawS2sKey: "" } }));
+vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost" } }));
 
 const { sendOutbound, PartialSendError } = await import("./delivery.js");
 type OutboxItem = Parameters<typeof sendOutbound>[2];

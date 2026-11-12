@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
-import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
 import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { requestWorkspaceHint } from "../lib/spaces-db.js";
@@ -65,6 +65,10 @@ import {
 import { buildCallbackBodyFromDone } from "./lib/sse-done-callback.js";
 
 import { createLogger } from "../logger.js";
+import { primeAgentAuthFromCookie } from "../lib/spaces-agent-client.js";
+import { internalServiceHeaders } from "../lib/internal-service-auth.js";
+import { callerService, requireRuntime, requireSpacesService, serviceAuthHeaders } from "../lib/service-assertion.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 const log = createLogger("run-stream");
 const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
 
@@ -781,7 +785,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         : (typeof sessionUserId === "string" && sessionUserId ? sessionUserId : userId);
     if (
       typeof conversationId === "string" && conversationId &&
-      accessCheckUserId && !s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)
+      accessCheckUserId && !callerService(req)
     ) {
       const accessError = await conversationAccessError(accessCheckUserId, [conversationId]);
       if (accessError) {
@@ -817,6 +821,19 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     }
     const orgId = agentRow.orgId;
 
+    // Browser-started turn: the user's own Spaces cookie is the live proof.
+    // Exchange it with Spaces for this agent so the run's Spaces calls can act
+    // for the user (on-behalf-of token + 2-hour renewal). x-spaces-* here were
+    // stamped by requireAuth from the verified session, not by the client.
+    {
+      const cookie = req.headers.cookie;
+      const spacesWorkspaceId = req.headers["x-spaces-workspace-id"];
+      if (typeof cookie === "string" && cookie && typeof spacesRequesterId === "string" && spacesRequesterId &&
+          typeof spacesWorkspaceId === "string" && spacesWorkspaceId) {
+        await primeAgentAuthFromCookie({ cookie, workspaceId: spacesWorkspaceId, clawAgentId: agentRow.id, spacesUserId: spacesRequesterId });
+      }
+    }
+
     // Gate for `debug` SSE frames (system prompt / instructions / tool policy).
     // Same predicate the /agent-chat stream uses: only the agent's editors or a
     // Claw admin may watch a live debug trace. Resolved here (not in the
@@ -832,6 +849,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         : undefined,
       convId,
       requestWorkspaceHint(req),
+      { cookie: req.headers.cookie },
     );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
@@ -840,7 +858,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const sdlcContext =
       sdlcResolution.repository?.agentContext ??
       (typeof channelId === "string"
-        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req))
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req), { cookie: req.headers.cookie })
         : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
@@ -1654,8 +1672,13 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         const { buildAttachedContextPayload, normalizeAttachedContext } = await import(
           "../services/agentChatContextService.js"
         );
-        const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
+        // Forward the user's own Spaces cookie from this request (no Spaces-DB
+        // session reads). No cookie → no Spaces auth → skip context resolution.
+        const requestCookie = req.headers.cookie;
+        const workspaceHint = requestWorkspaceHint(req);
+        const auth = typeof requestCookie === "string" && requestCookie.trim()
+          ? { cookie: requestCookie, baseUrl: CONFIG.spacesInternalUrl, ...(workspaceHint ? { workspaceId: workspaceHint } : {}) }
+          : null;
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth, { userId });
@@ -1856,7 +1879,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         task: effectiveTask,
         runRequestBody,
         cookie: req.headers["cookie"] as string | undefined,
-        xUserId: req.headers["x-user-id"] as string | undefined,
         internalCallbackUrl,
         res,
         upstreamSignal: upstreamAbort.signal,
@@ -1895,9 +1917,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
         ...(req.headers["cookie"] ? { Cookie: req.headers["cookie"] as string } : {}),
-        ...(req.headers["x-user-id"] ? { "x-user-id": req.headers["x-user-id"] as string } : {}),
       },
       body: JSON.stringify(runRequestBody),
       signal: upstreamAbort.signal,
@@ -2047,8 +2068,11 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": run.userId,
+        ...selfAuthHeaders(
+          "POST",
+          `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`,
+          { userId: run.userId, sessionId },
+        ),
       },
     });
 
@@ -2780,7 +2804,6 @@ interface RunViaSseOpts {
   task: string;
   runRequestBody: Record<string, unknown>;
   cookie: string | undefined;
-  xUserId: string | undefined;
   internalCallbackUrl: string;
   res: Response;
   upstreamSignal?: AbortSignal;
@@ -2790,7 +2813,7 @@ interface RunViaSseOpts {
 }
 
 async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
-  const { streamId, convId, slug, userId, orgId, task, runRequestBody, cookie, xUserId, internalCallbackUrl, res, upstreamSignal, assistantMessageId } = opts;
+  const { streamId, convId, slug, userId, orgId, task, runRequestBody, cookie, internalCallbackUrl, res, upstreamSignal, assistantMessageId } = opts;
   const stream = pendingStreams.get(streamId);
   if (!stream) {
     throw new Error(`pendingStream ${streamId} missing before SSE consume started`);
@@ -2813,10 +2836,8 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
   const consumeResult = await consumeClawStream({
     url: `${CONFIG.internalUrl}/claw/api/v1/internal/run`,
     body: runRequestBody,
-    ...(CONFIG.xyneClawS2sKey ? { s2sKey: CONFIG.xyneClawS2sKey } : {}),
     extraHeaders: {
       ...(cookie ? { Cookie: cookie } : {}),
-      ...(xUserId ? { "x-user-id": xUserId } : {}),
     },
     ...(upstreamSignal ? { signal: upstreamSignal } : {}),
     artifactContext: {
@@ -2925,7 +2946,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+            ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`),
           },
           body: JSON.stringify({ sessionId, ...payload }),
           signal: AbortSignal.timeout(5_000),
@@ -2938,7 +2959,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+            ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`),
           },
           body: JSON.stringify({ sessionId, ...payload }),
           signal: AbortSignal.timeout(5_000),
@@ -2999,7 +3020,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          ...internalServiceHeaders("POST", internalCallbackUrl),
         },
         body: JSON.stringify({
           sessionId: sessionIdFromStarted ?? "",
@@ -3032,7 +3053,7 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...internalServiceHeaders("POST", internalCallbackUrl),
     },
     body: JSON.stringify(buildCallbackBodyFromDone(r, {
       sessionId,

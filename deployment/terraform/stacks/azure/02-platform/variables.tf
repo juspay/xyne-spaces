@@ -190,21 +190,25 @@ variable "overlay_sources" {
 
 variable "app_secrets" {
   type = object({
-    jwt_secret                  = string
-    zero_auth_secret            = string
-    zero_admin_password         = string
-    encryption_key              = string
-    internal_s2s_key            = string
-    claw_s2s_key                = string
-    claw_auth_encryption_key    = string
-    ysweet_auth                 = string
-    ysweet_server_token         = string
-    transcription_agent_api_key = string
-    litellm_api_key             = optional(string, "")
-    hindsight_api_key           = optional(string, "")
-    hindsight_llm_api_key       = optional(string, "")
-    google_client_id            = optional(string, "")
-    google_client_secret        = optional(string, "")
+    jwt_secret                       = string
+    zero_auth_secret                 = string
+    zero_admin_password              = string
+    encryption_key                   = string
+    spaces_signing_private_key       = string
+    spaces_signing_public_key        = string
+    claw_auth_signing_private_key    = string
+    claw_auth_signing_public_key     = string
+    claw_runtime_signing_private_key = string
+    claw_runtime_signing_public_key  = string
+    claw_auth_encryption_key         = string
+    ysweet_auth                      = string
+    ysweet_server_token              = string
+    transcription_agent_api_key      = string
+    litellm_api_key                  = optional(string, "")
+    hindsight_api_key                = optional(string, "")
+    hindsight_llm_api_key            = optional(string, "")
+    google_client_id                 = optional(string, "")
+    google_client_secret             = optional(string, "")
   })
   sensitive = true
 }

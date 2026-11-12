@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useRuntimeTestKey } from "./runtime-test-key.js";
 
-process.env["XYNE_CLAW_S2S_KEY"] = "s2s-secret";
+useRuntimeTestKey();
+
 
 describe("attachment ingest URL inputs", () => {
   beforeEach(() => {

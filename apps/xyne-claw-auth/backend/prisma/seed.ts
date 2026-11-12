@@ -5,10 +5,8 @@ import { createCipheriv, randomBytes } from "node:crypto";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { SDLC_AGENT_SLUG, getAllCustomTools } from "xyne-claw-shared";
 import { sdlcAgentDesiredState } from "../src/lib/sdlc-agent-sync.js";
-import {
-  WORKFLOW_TOOL_NAMES,
-  WORKFLOW_WRITE_TOOL_NAMES,
-} from "../src/mcp/servers/xyne-workflows-tools.js";
+// The xyne-workflows MCP server was removed with workflow V2; nothing grants its tools now.
+const WORKFLOW_TOOL_NAMES: string[] = [];
 
 const prisma = new PrismaClient();
 
@@ -140,14 +138,6 @@ const SERVERS = [
     description: "Dedicated dynamic-dashboard tools for the dashboard-ai agent (pinned; not user-connectable).",
     credentialForm: { fields: [] },
     writeToolPolicy: { mode: "allowlist", tools: [] },
-  },
-  {
-    type: "xyne-workflows",
-    name: "Xyne Workflows",
-    url: "",
-    description: "Workflow authoring and run tools for Ask AI (pinned; not user-connectable).",
-    credentialForm: { fields: [] },
-    writeToolPolicy: { mode: "allowlist", tools: [...WORKFLOW_WRITE_TOOL_NAMES] },
   },
   {
     type: "xyne-spaces-app-tools",
@@ -555,22 +545,9 @@ async function main() {
 
   // Link Spaces default workspace → default org via SurfaceTenantLink.
   // This lets ensureUserExists() resolve the org from the user's workspaceId.
-  // Try to fetch the workspace ID from the Spaces DB; fall back to a known dev ID.
-  let spacesWorkspaceId = "";
-  const spacesDbUrl = process.env.SPACES_DB_URL;
-  if (spacesDbUrl) {
-    try {
-      const { PrismaClient: SpacesPrisma } = await import("@prisma/client");
-      const spacesDb = new SpacesPrisma({ datasourceUrl: spacesDbUrl });
-      const workspace = await spacesDb.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM workspaces WHERE name = 'Default Workspace' LIMIT 1
-      `;
-      spacesWorkspaceId = workspace[0]?.id ?? "";
-      await spacesDb.$disconnect();
-    } catch {
-      console.warn("[seed] Could not fetch workspace ID from Spaces DB — SurfaceTenantLink will use fallback");
-    }
-  }
+  // The workspace id comes from SPACES_DEFAULT_WORKSPACE_ID (claw-auth has no
+  // access to the Spaces database); otherwise keep any existing link.
+  let spacesWorkspaceId = (process.env.SPACES_DEFAULT_WORKSPACE_ID ?? "").trim();
   if (!spacesWorkspaceId) {
     // Fallback: query the claw-auth DB for any existing link, keep it as-is
     const existingLink = await prisma.surfaceTenantLink.findFirst({

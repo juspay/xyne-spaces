@@ -1,3 +1,4 @@
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 /**
  * Claw Connectors Service
  *
@@ -6,7 +7,7 @@
  * MCP connection and runs the tool server-side. The connector credential stays
  * in claw-auth; only the tool's text output comes back.
  *
- * Authenticated with INTERNAL_S2S_KEY (claw-auth's `requireInternalS2S`) and an
+ * Authenticated with Spaces' signed service assertion (claw-auth's `requireSpacesService`) and an
  * explicit `userId` in every body — Spaces user ids are claw's `User.id`. With
  * no key configured nothing is sent: an unauthenticated request would only be
  * refused upstream, and failing here names the actual cause.
@@ -101,15 +102,11 @@ async function post<T>(
   connector?: string,
   tool?: string,
 ): Promise<T> {
-  const key = config.internalS2sKey;
-  if (!key) {
-    throw new Error('[ClawConnectorsService] INTERNAL_S2S_KEY is not configured');
-  }
-
   const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/claw/api/v1/internal/app-connectors/${op}`, {
+  const url = `${base}/claw/api/v1/internal/app-connectors/${op}`;
+  const res = await fetch(url, {
     method: 'POST',
-    headers: { 'x-s2s-key': key, 'content-type': 'application/json' },
+    headers: { ...serviceAuthHeaders('xyne-claw-auth', 'POST', url), 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });

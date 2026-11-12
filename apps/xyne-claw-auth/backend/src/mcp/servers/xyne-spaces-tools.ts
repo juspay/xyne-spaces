@@ -31,6 +31,7 @@ import {
 } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../../lib/internal-call.js";
 
 const log = createLogger("xyne-spaces-tools");
 
@@ -5146,14 +5147,11 @@ const spacesReadCanvas: ToolDef = {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
+      // Acting for this run's user with the agent's on-behalf-of token (the
+      // only Spaces credential this process holds); Spaces applies their access.
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
-        {
-          method: "GET",
-          headers: { "x-user-id": ctx.userId },
-        },
-        { s2sKey },
+        { method: "GET" },
       )) as { title?: string; markdown?: string; url?: string; error?: string };
 
       if (result.error) return err(result.error);
@@ -5197,15 +5195,13 @@ const spacesEditCanvas: ToolDef = {
       if (!viewAccessId) return err("viewAccessId is required");
       if (!content) return err("content is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
+      // On-behalf-of agent token (see spaces-read-canvas): the user's own edit access applies.
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
           method: "PATCH",
           body: JSON.stringify({ markdown: content, ...(title ? { title } : {}) }),
-          headers: { "x-user-id": ctx.userId },
         },
-        { s2sKey },
       )) as {
         url?: string | null;
         title?: string;
@@ -5561,18 +5557,9 @@ async function sdlcClawCall(label: string, path: string, body: Record<string, un
 }
 
 /** Internal routes that take the bound Actor pair in the body. */
-async function sdlcInternalFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
-  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  if (!s2sKey) throw new Error("Internal S2S key is unavailable for SDLC tools.");
-  return spacesFetch(
-    path,
-    {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(body),
-    },
-    { s2sKey },
-  );
+async function sdlcInternalFetch(path: string, body: Record<string, unknown>, _ctx: HandlerContext): Promise<unknown> {
+  // The agent's on-behalf-of token names the acting user; no header can.
+  return spacesFetch(path, { method: "POST", body: JSON.stringify(body) });
 }
 
 async function sdlcInternalCall(label: string, path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
@@ -6338,11 +6325,13 @@ async function ingestAttachmentToMarkdown(
   source: AttachmentSource,
   size: number,
 ): Promise<Array<{ path: string; content: string }>> {
-  const response = await fetch(`${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/internal/attachments/ingest`, {
+  const ingestUrl = `${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/internal/attachments/ingest`;
+  const response = await fetch(ingestUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      // Signed by claw-auth's key, which only the parent process holds.
+      ...(serviceCallsConfigured() ? runtimeAuthHeaders("POST", ingestUrl) : {}),
     },
     body: JSON.stringify({
       attachments: [{

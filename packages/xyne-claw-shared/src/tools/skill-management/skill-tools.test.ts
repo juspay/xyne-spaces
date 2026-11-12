@@ -49,7 +49,6 @@ describe("updateSkillTool.execute validation", () => {
 describe("updateSkillTool.execute HTTP behavior", () => {
   const OLD = { ...process.env };
   beforeEach(() => {
-    process.env["XYNE_CLAW_S2S_KEY"] = "test-s2s";
     process.env["XYNE_CLAW_AUTH_URL"] = "http://auth.local:3003";
   });
   afterEach(() => {
@@ -57,22 +56,21 @@ describe("updateSkillTool.execute HTTP behavior", () => {
     process.env = { ...OLD };
   });
 
-  it("errors clearly when S2S key not configured", async () => {
-    delete process.env["XYNE_CLAW_S2S_KEY"];
+  it("errors clearly when the run has no service signer", async () => {
     const out = JSON.parse(await updateSkillTool.execute(
       { slug: "s", content: "x" },
       { config: {}, meta: { userId: "u1" } },
     ));
-    expect(out.error).toMatch(/S2S/i);
+    expect(out.error).toMatch(/cannot authenticate/i);
   });
 
-  it("posts to /skills/:slug/propose-update with S2S + user headers and returns proposed", async () => {
+  it("posts to /skills/:slug/propose-update signed as the runtime for the run's user and returns proposed", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { requestId: "req-1" } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const out = JSON.parse(await updateSkillTool.execute(
       { slug: "My Skill", content: "new body", summary: "tidy up" },
-      { config: {}, meta: { userId: "u1", agentSlug: "a1" } },
+      { config: {}, meta: { userId: "u1", agentSlug: "a1" }, serviceAuth: (method: string, url: string) => ({ "x-service-assertion": `sig:${method}:${url}`, "x-session-token": "run-tok" }) },
     ));
 
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -82,8 +80,10 @@ describe("updateSkillTool.execute HTTP behavior", () => {
     expect(String(url)).toBe("http://auth.local:3003/claw/api/v1/skills/my-skill/propose-update");
     expect(init.method).toBe("POST");
     const headers = init.headers as Record<string, string>;
-    expect(headers["x-s2s-key"]).toBe("test-s2s");
-    expect(headers["x-user-id"]).toBe("u1");
+    expect(headers["x-service-assertion"]).toBe("sig:POST:http://auth.local:3003/claw/api/v1/skills/my-skill/propose-update");
+    expect(headers["x-session-token"]).toBe("run-tok");
+    expect(headers["x-s2s-key"]).toBeUndefined();
+    expect(headers["x-user-id"]).toBeUndefined();
     const body = JSON.parse(init.body as string);
     expect(body).toMatchObject({ content: "new body", summary: "tidy up", agentSlug: "a1" });
     expect(out.status).toBe("proposed");
@@ -91,13 +91,13 @@ describe("updateSkillTool.execute HTTP behavior", () => {
 
   it("maps 404 to a clear not-found error", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: false, error: "nope" }), { status: 404 })));
-    const out = JSON.parse(await updateSkillTool.execute({ slug: "ghost", content: "x" }, { config: {}, meta: { userId: "u1" } }));
+    const out = JSON.parse(await updateSkillTool.execute({ slug: "ghost", content: "x" }, { config: {}, meta: { userId: "u1" }, serviceAuth: () => ({}) }));
     expect(out.error).toMatch(/not found/i);
   });
 
   it("maps 409 to a no-op / identical error", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: false, error: "identical" }), { status: 409 })));
-    const out = JSON.parse(await updateSkillTool.execute({ slug: "s", content: "x" }, { config: {}, meta: { userId: "u1" } }));
+    const out = JSON.parse(await updateSkillTool.execute({ slug: "s", content: "x" }, { config: {}, meta: { userId: "u1" }, serviceAuth: () => ({}) }));
     expect(out.error).toMatch(/identical/i);
   });
 });

@@ -198,7 +198,8 @@ async function install(name: string, version: string | undefined, dir: string): 
         timeout: INSTALL_TIMEOUT_MS,
         // npm install output can exceed the 1MB default and abort with ENOBUFS.
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, npm_config_update_notifier: "false" },
+        // Install scripts run third-party code: never hand them the runtime's signing key.
+        env: (() => { const e: NodeJS.ProcessEnv = { ...process.env, npm_config_update_notifier: "false" }; delete e["CLAW_RUNTIME_PRIVATE_KEY"]; return e; })(),
       },
     );
 

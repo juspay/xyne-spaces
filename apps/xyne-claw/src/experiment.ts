@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SERVER } from "./config.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 export interface ExperimentContext {
   id: string;
@@ -59,11 +60,12 @@ async function experimentFetch<T>(
   suffix: string,
   init?: RequestInit,
 ): Promise<T> {
-  const res = await fetch(experimentUrl(id, suffix), {
+  const url = experimentUrl(id, suffix);
+  const res = await fetch(url, {
     ...init,
     headers: {
       "content-type": "application/json",
-      "x-s2s-key": SERVER.s2sKey,
+      ...clawAuthHeaders(init?.method ?? "GET", url),
       ...init?.headers,
     },
     signal: AbortSignal.timeout(10_000),
@@ -80,11 +82,12 @@ async function experimentPostNoData(
   suffix: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const res = await fetch(experimentUrl(id, suffix), {
+  const url = experimentUrl(id, suffix);
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-s2s-key": SERVER.s2sKey,
+      ...clawAuthHeaders("POST", url),
     },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10_000),

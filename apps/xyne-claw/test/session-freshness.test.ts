@@ -25,7 +25,8 @@ function writeSessionFile(conversationId: string, rel: string, content: string):
 
 describe("ensureFreshSession", () => {
   beforeEach(() => {
-    delete process.env["XYNE_CLAW_S2S_KEY"];
+    // No runtime signing key: the claw-auth archive fallback is skipped.
+    delete process.env["CLAW_RUNTIME_PRIVATE_KEY"];
   });
 
   it("returns fresh-start when no local dir and no archive", async () => {

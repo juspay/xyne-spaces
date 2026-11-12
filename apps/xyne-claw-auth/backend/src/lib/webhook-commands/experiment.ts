@@ -216,7 +216,7 @@ const handlers: ExperimentHandlers = {
         channelId: payload.channelId,
         conversationId: payload.conversationId,
         userId: agent.spacesAppUserId,
-        appToken: agent.appToken,
+        bot: agent.bot,
         filename: bundle ? bundle.filename : filename,
         markdown: bundle ? bundle.buffer : markdown,
         ...(bundle ? { mimeType: "application/zip" } : {}),

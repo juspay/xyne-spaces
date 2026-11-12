@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("./internal-call.js", () => ({ serviceCallsConfigured: () => true, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: (method: string, _url: string, user?: { userId?: string }) => ({ "x-service-assertion": `test:xyne-claw-auth:${method}`, ...(user?.userId ? { "x-session-token": `run:${user.userId}` } : {}) }), selfCallRunToken: (u: { userId: string }) => `run:${u.userId}` }));
 
 const tryAcquireSlot = vi.fn(async (..._args: unknown[]) => "tok-1" as string | null);
 const getSlotOwner = vi.fn(async (..._args: unknown[]) => ({ userId: "u1", sessionId: "sess-old" }) as { userId?: string; sessionId?: string } | null);
 const enqueueMessage = vi.fn(async (_msg: Record<string, unknown>) => ({ enqueued: true, position: 1, deduped: false, full: false }));
 const fetchMock = vi.fn(async (..._args: unknown[]) => ({ ok: true, status: 200, text: async () => "" }));
 
-vi.mock("../config.js", () => ({ CONFIG: { internalUrl: "http://claw", xyneClawS2sKey: "" } }));
+vi.mock("../config.js", () => ({ CONFIG: { internalUrl: "http://claw" } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock("./message-queue.js", () => ({ QUEUE_CAP: 10, enqueueMessage, getSlotOwner, tryAcquireSlot }));
 

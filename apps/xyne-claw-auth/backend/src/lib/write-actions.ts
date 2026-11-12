@@ -66,7 +66,18 @@ function parseGatewayActionTarget(serverType: string): { serviceName: string; ba
  * so we don't execute an action on behalf of someone other than its intended
  * approver.
  */
-export async function executeWriteAction(action: SignedWriteAction): Promise<WriteActionResult> {
+export interface WriteActionAgentContext {
+  /** Claw agent (prisma.agent.id) whose run queued the write. The Spaces-session
+   *  server types (xyne-spaces, xyne-dashboard) act through this agent's
+   *  on-behalf-of token; without it they fail closed. */
+  clawAgentId?: string | null;
+  workspaceId?: string | null;
+}
+
+export async function executeWriteAction(
+  action: SignedWriteAction,
+  agentContext: WriteActionAgentContext = {},
+): Promise<WriteActionResult> {
   const { serverType, tool, params, userId, signature } = action;
 
   // 1. Signature verification — prevents tampered params sneaking through.
@@ -183,17 +194,25 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
     let credentials: Record<string, unknown>;
     let instance: string | undefined;
     if (AMBIENT_USER_CREDENTIAL_SERVER_TYPES.has(serverType)) {
-      const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-      const live = await getSpacesAuthForUser(userId, "write-action");
+      // The run's agent acting for the approving user (on-behalf-of agent
+      // token). No agent in context, or Spaces refuses → no connection.
+      const { resolveAgentSpacesAuth } = await import("../surfaces/spaces/user-auth.js");
+      const live = await resolveAgentSpacesAuth({
+        clawAgentId: agentContext.clawAgentId,
+        userId,
+        workspaceId: agentContext.workspaceId ?? null,
+        caller: "write-action",
+      });
       if (live) {
         credentials = {
           // Server-to-server call from the claw-auth pod: use the in-cluster
           // Spaces URL, same as credentials-loader (flow-action path). The
           // public spacesAppUrl is not reachable from here ("fetch failed").
           url: CONFIG.spacesInternalUrl,
-          token: live.token,
-          sessionId: live.sessionId,
+          agentToken: live.agentToken,
           workspaceId: live.workspaceId,
+          principalId: live.principalId,
+          clawAgentId: agentContext.clawAgentId,
           userId,
         };
       } else {

@@ -27,6 +27,7 @@ import type {
   UsageSample,
   UsageWindow,
 } from "./types.js";
+import { runtimeAuthHeaders } from "../../lib/internal-call.js";
 
 /**
  * Synthesis stage: corpus → redaction → distiller → thresholds → storage.
@@ -237,7 +238,7 @@ async function distill(corpus: UsageCorpus, agentDescription: string | null): Pr
   try {
     const res = await fetch(`${CLAW_URL}${DISTILL_PATH}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey ?? "" },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", `${CLAW_URL}${DISTILL_PATH}`) },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

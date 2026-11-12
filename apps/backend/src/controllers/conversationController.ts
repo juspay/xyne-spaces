@@ -72,6 +72,8 @@ import {
   encodeThreadListCursor,
   type ThreadListCursor,
 } from '@/utils/threadListCursor';
+import { clawDelegationHeaders } from '@/services/clawDelegationToken';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 
 // Local type definitions
 interface UserInfo {
@@ -2240,7 +2242,9 @@ export class ConversationController {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(config.internalS2sKey ? { 'x-s2s-key': config.internalS2sKey } : {}),
+          ...serviceAuthHeaders('xyne-claw-auth', 'POST', url),
+          // The acting user comes from a Spaces-signed delegation, not the body alone.
+          ...clawDelegationHeaders(actorUserId),
         },
         body: JSON.stringify({
           action,

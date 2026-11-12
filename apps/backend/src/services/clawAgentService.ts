@@ -6,6 +6,8 @@
  */
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
+import { clawDelegationHeaders } from '@/services/clawDelegationToken';
 import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
@@ -374,9 +376,9 @@ function getS2SWebhookUrl(spacesAppId: string): string {
   return url.toString();
 }
 
-function getS2SHeaders(): Record<string, string> {
-  const s2sKey = config.xyneClaw.s2sKey;
-  return s2sKey ? { 'x-s2s-key': s2sKey } : {};
+/** Proves Spaces is calling claw-auth (signed service assertion, no shared key). */
+function clawServiceHeaders(method: string, url: string): Record<string, string> {
+  return serviceAuthHeaders('xyne-claw-auth', method, url);
 }
 
 export interface SynthesizedSpeechResult {
@@ -391,7 +393,7 @@ export async function synthesizeSpeech(payload: {
   const url = `${getClawBaseUrl()}/claw/api/v1/internal/tts`;
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
+    headers: { 'Content-Type': 'application/json', ...clawServiceHeaders('POST', url) },
     body: JSON.stringify({ text: payload.text, ...(payload.voice ? { voice: payload.voice } : {}) }),
   });
   if (!response.ok) {
@@ -448,10 +450,13 @@ function extractUserIdHeader(userId: string, workspaceId?: string): Record<strin
   // identity for Claw versions that canonicalize it at the auth boundary.
   // The workspace completes the compound Spaces surface identity and prevents
   // a canonicalizer from guessing a membership for a multi-workspace person.
+  // Only the signed delegation token names the user to claw-auth (it strips any
+  // inbound x-user-id); the plain headers are informational.
   return {
     'x-user-id': userId,
     'x-spaces-user-id': userId,
     ...(workspaceId ? { 'x-spaces-workspace-id': workspaceId } : {}),
+    ...clawDelegationHeaders(userId, workspaceId),
   };
 }
 
@@ -1101,7 +1106,7 @@ export async function warmClawAgent(
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      ...getS2SHeaders(),
+      ...clawServiceHeaders('POST', url),
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
     },
@@ -1130,7 +1135,7 @@ export async function listClawAgentModels(
   try {
     const response = await fetch(url, {
       headers: {
-        ...getS2SHeaders(),
+        ...clawServiceHeaders('GET', url),
         ...extractUserIdHeader(req.userId),
         ...extractCookieHeader(req),
       },
@@ -1651,7 +1656,7 @@ export async function getClawDebugArtifacts(
   try {
     response = await fetch(url, {
       headers: {
-        ...getS2SHeaders(),
+        ...clawServiceHeaders('GET', url),
         ...extractUserIdHeader(req.userId),
         ...extractCookieHeader(req),
       },
@@ -1798,7 +1803,7 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
   try {
     res = await fetch(url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
+      headers: { 'Content-Type': 'application/json', ...clawServiceHeaders('GET', url) },
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {
@@ -1831,7 +1836,7 @@ export async function listS2SClawSkills(
     // The pinned user scopes the list to their org.
     headers: {
       'Content-Type': 'application/json',
-      ...getS2SHeaders(),
+      ...clawServiceHeaders('GET', url),
       ...extractUserIdHeader(userId, workspaceId),
     },
     signal: AbortSignal.timeout(15_000),
@@ -1861,19 +1866,22 @@ export class ClawAgentLookupError extends Error {
  * Whether a Claw agent is published as this Spaces app. Asks claw-auth, which
  * owns the agent↔app link, via its internal by-spaces-app lookup — unfiltered by
  * visibility/org/enabled, unlike listS2SClawAgents (which would miss personal and
- * disabled agents). Authenticated with INTERNAL_S2S_KEY, the key the backend
- * shares with claw-auth (the backend is not given XYNE_CLAW_S2S_KEY).
+ * disabled agents). Authenticated with Spaces' signed service assertion.
  * Returns true/false only on a well-formed answer; every other outcome throws
  * ClawAgentLookupError.
  */
 export async function isSpacesAppClawAgent(spacesAppId: string): Promise<boolean> {
-  const key = config.internalS2sKey;
-  if (!key) throw new ClawAgentLookupError('INTERNAL_S2S_KEY is not configured');
   const url = `${getClawBaseUrl()}/claw/api/v1/internal/agents/by-spaces-app/${encodeURIComponent(spacesAppId)}`;
+  let headers: Record<string, string>;
+  try {
+    headers = clawServiceHeaders('GET', url);
+  } catch (err) {
+    throw new ClawAgentLookupError(err instanceof Error ? err.message : String(err));
+  }
   let res: globalThis.Response;
   try {
     // Above claw-auth's own DB retry budget, so a slow-but-healthy answer isn't cut off.
-    res = await fetch(url, { method: 'GET', headers: { 'x-s2s-key': key }, signal: AbortSignal.timeout(15_000) });
+    res = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(15_000) });
   } catch (err) {
     throw new ClawAgentLookupError(`claw-auth unreachable (${err instanceof Error ? err.message : String(err)})`);
   }
@@ -1936,7 +1944,7 @@ export async function listScopedClawAgents(
   const url = `${getClawBaseUrl()}/claw/api/v1/agents?userId=${encodeURIComponent(identity.userId)}`;
   const res = await fetch(url, {
     headers: {
-      ...getS2SHeaders(),
+      ...clawServiceHeaders('GET', url),
       ...extractUserIdHeader(identity.userId, identity.workspaceId),
       ...(identity.orgId ? { 'x-org-id': identity.orgId } : {}),
       ...(identity.cookie ? { Cookie: identity.cookie } : {}),
@@ -2030,7 +2038,6 @@ async function dispatchClawAgent(
   const url = getS2SWebhookUrl(agent.spacesAppId);
   const sessionId = req.sessionId ?? randomUUID();
   const body = JSON.stringify({
-    s2sKey: config.xyneClaw.s2sKey,
     sessionId,
     agentSlug: req.agentSlug,
     task: req.task,
@@ -2059,7 +2066,7 @@ async function dispatchClawAgent(
         'Content-Type': 'application/json',
         'X-Xyne-Signature': signature,
         'X-Source': 'XyneSpaces',
-        ...getS2SHeaders(),
+        ...clawServiceHeaders('POST', url),
       },
       body,
       signal: AbortSignal.timeout(30_000),
@@ -2090,7 +2097,7 @@ export async function cancelS2SClawRun(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getS2SHeaders(),
+        ...clawServiceHeaders('POST', url),
         ...extractUserIdHeader(userId),
       },
       signal: AbortSignal.timeout(15_000),
@@ -2122,8 +2129,8 @@ export async function getS2SClawRunStatus(
   const url = `${getClawBaseUrl()}/claw/api/v1/runs/${encodeURIComponent(sessionId)}`;
   const response = await fetch(url, {
     headers: {
-      ...getS2SHeaders(),
-      'x-user-id': userId,
+      ...clawServiceHeaders('GET', url),
+      ...extractUserIdHeader(userId),
     },
     signal: AbortSignal.timeout(15_000),
   });
@@ -2292,7 +2299,7 @@ async function fetchClawChatMessages(params: {
       headers: {
         'Content-Type': 'application/json',
         ...extractUserIdHeader(userId, spacesWorkspaceId),
-        ...getS2SHeaders(),
+        ...clawServiceHeaders('GET', url),
       },
       signal: AbortSignal.timeout(15_000),
     });
@@ -2342,7 +2349,7 @@ export async function forkClawConversation(params: {
       headers: {
         'Content-Type': 'application/json',
         ...extractUserIdHeader(userId, spacesWorkspaceId),
-        ...getS2SHeaders(),
+        ...clawServiceHeaders('POST', url),
       },
       body: JSON.stringify({ targetConversationId }),
       signal: AbortSignal.timeout(30_000),

@@ -271,7 +271,9 @@ Every value is an input; the module only assembles connection URLs from the cont
 [secrets](secrets.md) has every field, its constraint and the full Secret list.
 
 `app_secrets` fields: `jwt_secret`, `zero_auth_secret`, `zero_admin_password`, `encryption_key`,
-`internal_s2s_key`, `claw_s2s_key`, `claw_auth_encryption_key`, `ysweet_auth`,
+`spaces_signing_private_key`, `spaces_signing_public_key`, `claw_auth_signing_private_key`,
+`claw_auth_signing_public_key`, `claw_runtime_signing_private_key`, `claw_runtime_signing_public_key`,
+`claw_auth_encryption_key`, `ysweet_auth`,
 `ysweet_server_token`, `transcription_agent_api_key`, `google_client_id`, `google_client_secret`,
 and optional `litellm_api_key`, `hindsight_api_key`, `hindsight_llm_api_key`.
 `extra_secret_data` merges keys into any of the nine Secrets.

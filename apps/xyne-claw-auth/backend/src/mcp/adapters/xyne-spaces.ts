@@ -33,16 +33,19 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
     // routes. Defaults to "user" (session token → /api/query). Set by the
     // runner's app-user fallback.
     const authMode = (credentials["authMode"] as string | undefined) === "app" ? "app" : "user";
+    // Agent token (lib/spaces-agent-client.ts): the run's agent acting for its
+    // user. When present it is the child's only Spaces credential.
+    const agentToken = (credentials["agentToken"] as string | undefined) ?? "";
     return {
       cmd: "node",
       args: ["--import", "tsx/esm", SERVER_PATH],
       env: {
         XYNE_SPACES_URL: url,
-        XYNE_SPACES_TOKEN: token,
-        XYNE_SPACES_SESSION_ID: sessionId,
+        XYNE_SPACES_TOKEN: agentToken ? "" : token,
+        XYNE_SPACES_SESSION_ID: agentToken ? "" : sessionId,
+        XYNE_SPACES_AGENT_TOKEN: agentToken,
         XYNE_SPACES_WORKSPACE_ID: workspaceId,
         XYNE_SPACES_AUTH_MODE: authMode,
-        INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
         XYNE_USER_ID: userId,
         // Bench lane — set ONLY when the cred lane stamped directVespa + the
         // benchmark Vespa endpoint on this session. Direct-query the bench

@@ -1,4 +1,5 @@
 import { type Express, type NextFunction, type Request, type Response } from "express";
+import { CONFIG } from "../config.js";
 import { requestLogger } from "../middleware/requestLogger.js";
 import { errorMiddleware } from "../lib/http.js";
 import { serversRouter } from "../routes/servers.js";
@@ -12,7 +13,7 @@ import { usersRouter } from "../routes/users.js";
 import { spacesSyncRouter } from "../routes/spaces-sync.js";
 import { gatewaysRouter } from "../routes/gateways.js";
 import { webhookRouter } from "../routes/webhook.js";
-import { flowActionRouter } from "../routes/flow-action.js";
+import { agentFlowActionRouter, flowActionRouter } from "../routes/flow-action.js";
 import { twinDraftInternalRouter } from "../routes/twin-draft-internal.js";
 import { attachmentsInternalRouter } from "../routes/attachments.js";
 import { appConnectorsInternalRouter } from "../routes/app-connectors-internal.js";
@@ -36,7 +37,6 @@ import { sandboxReposInternalRouter } from "../routes/sandbox-repos-internal.js"
 import { sandboxProfilesInternalRouter } from "../routes/sandbox-profiles-internal.js";
 import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
-import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
 // TEMPORARY — delete this import + its mount + the file once XYNE-66817's
 // backfill has run everywhere and `agent.config.designSystem` is dropped.
 import { adminBackfillDesignSystemsRouter } from "../routes/admin-backfill-design-systems.js";
@@ -100,9 +100,10 @@ import { entityExtractionRouter } from "../routes/entity-extraction.js";
 import { cliAuthRouter } from "../routes/cli-auth.js";
 import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
-import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireUserAuth, optionalAuth } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
-import { apiLimiter, sampleClientIp, isUnlimitedInternalS2S } from "../middleware/rate-limiters.js";
+import { apiLimiter, sampleClientIp, isUnlimitedSpacesCall } from "../middleware/rate-limiters.js";
+import { requireAnyService, requireRuntime, requireSpacesService } from "../lib/service-assertion.js";
 
 const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
 
@@ -111,26 +112,14 @@ const BASE = "/claw/api/v1";
 function mountRequestContext(app: Express): void {
   // Per-request structured log context (requestId) + request start/end.
   app.use(requestLogger);
-  // Identity-header firewall (defense-in-depth). A browser/client request must
-  // never assert its own identity: only an internal caller holding a valid S2S
-  // key may pin `x-user-id`. For everyone else we strip inbound `x-user-id` here,
-  // before any route or auth middleware runs, so a forged header can't reach a
-  // handler even if some route forgets to re-derive identity. The auth middlewares
-  // (requireAuth/requireUserAuth) set `x-user-id` from the verified Spaces session
-  // downstream. NOTE: the public ingress should ALSO strip x-user-id/x-s2s-key on
-  // inbound external traffic — this is the in-process backstop, not a replacement.
-  // x-s2s-key is intentionally NOT stripped: internal callers need it and it is
-  // already validated in constant time (see require-auth.ts).
+  // No caller may name a user by header: identity comes only from a verified
+  // Spaces session, a CLI token, a Spaces delegation token or a run token (each
+  // auth middleware sets x-user-id from that). Strip any inbound x-user-id here,
+  // before any route runs, so a forged header can't reach a handler even if a
+  // route forgets to re-derive identity.
   app.use((req, _res, next) => {
-    if (!s2sKeyMatches(req.headers["x-s2s-key"])) {
-      delete req.headers["x-user-id"];
-    }
-    // Phase-2: `x-org-id` / `x-user-role` are ALWAYS server-derived (set by
-    // attachOrgContext from the verified session) and are never a legitimate
-    // inbound header — not even over S2S (verified: xyne-claw sends neither).
-    // Strip them unconditionally here so org context is fail-closed uniformly,
-    // including on requireStrictS2S / unauthenticated mounts. The per-auth-
-    // middleware strips remain as defense-in-depth.
+    delete req.headers["x-user-id"];
+    // `x-org-id` / `x-user-role` are always server-derived (attachOrgContext).
     delete req.headers["x-org-id"];
     delete req.headers["x-user-role"];
     next();
@@ -146,7 +135,7 @@ function mountRequestContext(app: Express): void {
       return;
     }
     sampleClientIp(req);
-    if (isUnlimitedInternalS2S(req)) {
+    if (isUnlimitedSpacesCall(req)) {
       next();
       return;
     }
@@ -172,7 +161,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, usersRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): every
-  // sub-path self-authenticates inside the router with requireStrictS2S +
+  // sub-path self-authenticates inside the router with a runtime service assertion +
   // requireSessionToken (routes/mcp.ts) — the run's HMAC session token is the
   // credential, not a user identity. Do NOT add requireAuth here expecting the
   // access-token barrier to apply; add the guard inside the router instead.
@@ -193,13 +182,14 @@ function mountCoreApi(app: Express): void {
   // Messaging channels (WhatsApp, Telegram, …): admin API is user-authed inside
   // the router; the per-account webhook ingress self-authenticates per plugin.
   app.use(`${BASE}/surfaces/:channel`, messagingRouter);
-  app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);
+  // Off: Spaces thread mentions only (2026-11-12).
+  // app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);
   app.use(`${BASE}/spaces`, requireAuth, requireNoAccessToken, spacesRouter);
   app.use(`${BASE}/tools`, requireAuth, requireNoAccessToken, toolsRouter);
   app.use(`${BASE}/skills`, requireAuth, allowScopedAccessToken({ write: "skills:write" }), skillsRouter);
-  // Session-authed UI surface over the MCP Gateway registry (secret x-s2s-key
-  // stays server-side; see routes/gateway-registry-ui.ts). Distinct from the
-  // s2s `${BASE}/gateway` router below, which external services still call.
+  // Session-authed UI surface over the MCP Gateway registry (the gateway's own
+  // registration key stays server-side; see routes/gateway-registry-ui.ts). Distinct
+  // from the `${BASE}/gateway` router below, which external services call.
   app.use(`${BASE}/gateway-registry`, requireAuth, requireNoAccessToken, gatewayRegistryUiRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
   app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
@@ -210,8 +200,6 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/admin/sandbox-repos`, requireAuth, requireNoAccessToken, requireClawAdmin, adminSandboxReposRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
   extension?.mount(app, { base: BASE, requireAuth, requireNoAccessToken });
-  // TEMPORARY — delete this mount + the import above + the file after backfill.
-  app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillDesignSystemsRouter);
   app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
   app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
@@ -228,27 +216,28 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);
   app.use(`${BASE}/proactive-inbox`, requireAuth, requireNoAccessToken, proactiveInboxRouter);
   app.use(`${BASE}/public/gmail-push`, gmailPushRouter);
-  app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
-  app.use(`${BASE}/internal/agent-warm`, requireStrictS2S, agentWarmInternalRouter);
-  app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
-  app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
-  app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)
-  app.use(`${BASE}/internal/app-connectors`, requireInternalS2S, appConnectorsInternalRouter); // Spaces → sdk.connectors: run the viewer's own MCP connection for an artifact app (INTERNAL_S2S_KEY)
-  app.use(`${BASE}/internal/surface`, requireStrictS2S, surfaceInternalRouter);       // app-control calls from xyne-claw → the user's desktop window
-  app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
+  app.use(`${BASE}/internal/agent-chat`, requireRuntime, agentChatInternalRouter); // progress/callback from xyne-claw
+  app.use(`${BASE}/internal/agent-warm`, requireRuntime, agentWarmInternalRouter);
+  app.use(`${BASE}/internal/twin-draft`, requireSpacesService, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (Spaces service assertion)
+  app.use(`${BASE}/internal/attachments`, requireAnyService, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (Spaces service assertion)
+  app.use(`${BASE}/internal/agents`, requireSpacesService, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (Spaces service assertion)
+  app.use(`${BASE}/internal/app-connectors`, requireSpacesService, appConnectorsInternalRouter); // Spaces → sdk.connectors: run the viewer's own MCP connection for an artifact app (Spaces service assertion)
+  app.use(`${BASE}/internal/surface`, requireRuntime, surfaceInternalRouter);       // app-control calls from xyne-claw → the user's desktop window
+  app.use(`${BASE}/internal/sessions`, requireRuntime, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — runtime only (transcripts)
   // Spaces → org/workspace/user provisioning. The Spaces provisioning worker
-  // authenticates with the shared XYNE_CLAW_S2S_KEY (x-s2s-key) and drives the
+  // authenticates with a Spaces service assertion and drives the
   // org/workspace/user upserts — see services/clawSpacesSyncClient.ts in Spaces.
-  app.use(`${BASE}/internal/spaces-sync`, requireStrictS2S, spacesSyncRouter);
-  app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
+  app.use(`${BASE}/internal/spaces-sync`, requireSpacesService, spacesSyncRouter);
+  // Off: Spaces thread mentions only (2026-11-12).
+  // app.use(`${BASE}/internal/experiments`, requireRuntime, experimentsInternalRouter);
   app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
-  app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
-  app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
-  app.use(`${BASE}/internal/sandbox-repos`, requireStrictS2S, sandboxReposInternalRouter);
-  app.use(`${BASE}/internal/sandbox-profiles`, requireInternalS2S, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
-  app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
-  app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
-  app.use(`${BASE}/internal/agent-create`, requireStrictS2S, agentCreateCheckRouter);
+  app.use(`${BASE}/internal/error-pipeline`, requireRuntime, errorPipelineInternalRouter); // run-result callback from xyne-claw (runtime only)
+  app.use(`${BASE}/internal/tts`, requireAnyService, ttsRouter);
+  app.use(`${BASE}/internal/sandbox-repos`, requireRuntime, sandboxReposInternalRouter);
+  app.use(`${BASE}/internal/sandbox-profiles`, requireSpacesService, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
+  app.use(`${BASE}/internal/connectors`, requireRuntime, connectorsInternalRouter); // connector availability lookup for xyne-claw (runtime only)
+  app.use(`${BASE}/internal/providers`, requireRuntime, providersInternalRouter); // AI provider availability lookup for xyne-claw (runtime only)
+  app.use(`${BASE}/internal/agent-create`, requireRuntime, agentCreateCheckRouter);
 }
 
 function mountOAuthProviders(app: Express): void {
@@ -312,34 +301,39 @@ function mountRunAndWebhooks(app: Express): void {
   // allowlist + elevated-delivery scope — see routes/run.ts, `accessToken` in
   // res.locals). Every other requireAuth mount carries the barrier. Do not "fix"
   // this asymmetry by adding the barrier — it would break every service token.
-  app.use(`${BASE}/internal`, requireStrictS2S, runRouter);
+  app.use(`${BASE}/internal`, requireAnyService, runRouter);
   // IMPORTANT: more-specific runStreamRouter MUST be mounted BEFORE the broader
   // runRouter at BASE. runRouter has `POST /run/:sessionId/cancel`, which would
   // otherwise match `POST /claw/api/v1/run/stream/cancel` with sessionId="stream"
   // and shadow the dedicated cancel handler in run-stream.ts. Mounting the
   // longer prefix first lets Express dispatch the right router.
   app.use(`${BASE}/run/stream`, runStreamRouter);
-  app.use(`${BASE}/internal/run-stream`, requireStrictS2S, runStreamInternalRouter);
+  app.use(`${BASE}/internal/run-stream`, requireRuntime, runStreamInternalRouter);
   app.use(BASE, runRouter);
-  // Awakening: the result callback self-protects with requireStrictS2S and the
+  // Awakening: the result callback self-protects with requireRuntime and the
   // status route carries its own admin gate, so no mount-level auth here.
-  app.use(BASE, awakeningRouter);
+  // Off: Spaces thread mentions only (2026-11-12).
+  // app.use(BASE, awakeningRouter);
   // No mount-level auth on /webhook by design: it mixes auth schemes per route.
-  // POST / , /result and /progress are S2S callbacks; POST /:agentSlug is hit
-  // directly by Spaces and self-protects via verifySpacesSignature (per-agent
-  // HMAC over the raw body). Any new route added to webhookRouter MUST carry
-  // its own auth middleware explicitly.
+  // /result and /progress are runtime callbacks (service assertion + run token);
+  // /pr-event comes from Spaces; POST /agent/:principalId is hit directly by
+  // Spaces and self-protects with its signed event token. Any new route added to
+  // webhookRouter MUST carry its own auth middleware explicitly.
   app.use(`${BASE}/webhook`, webhookRouter);
-  // Flow UI action webhook. Reached only via the signature-verified webhook
-  // /:agentSlug proxy. requireStrictS2S keeps it unreachable by external/browser
-  // callers, and the route itself re-verifies the forwarded Spaces signature
-  // (see flow-action.ts) so the body-supplied userId is bound to a payload
-  // Spaces signed — an S2S key alone is no longer enough to forge identity.
-  app.use(`${BASE}/flow`, requireStrictS2S, flowActionRouter);
-  app.use(`${BASE}/scheduled-jobs`, requireAuth, requireNoAccessToken, scheduledJobsRouter);
-  // Strict S2S: the ask-question tool stores questions here with the S2S key;
+  // Flow UI action webhook. Reached only through claw-auth's own signed proxy hop;
+  // requireRuntime keeps it unreachable by external/browser callers, and the
+  // route re-verifies the forwarded Spaces signature (see flow-action.ts) so the
+  // body-supplied userId is bound to a payload Spaces signed.
+  // Clicks on cards a Claw agent posted: Spaces calls this directly with a
+  // signed, single-use event token (flow-action.ts verifyAgentFlowClick).
+  // Must stay above the service-gated /flow mount.
+  app.use(`${BASE}/flow/agent`, agentFlowActionRouter);
+  app.use(`${BASE}/flow`, requireRuntime, flowActionRouter);
+  // Off: Spaces thread mentions only (2026-11-12).
+  // app.use(`${BASE}/scheduled-jobs`, requireAuth, requireNoAccessToken, scheduledJobsRouter);
+  // Runtime only: the ask-question tool stores questions here (service assertion);
   // flow-action consumes them through the module's atomic Redis helper.
-  app.use(`${BASE}/pending-questions`, requireStrictS2S, pendingQuestionsRouter);
+  app.use(`${BASE}/pending-questions`, requireRuntime, pendingQuestionsRouter);
 }
 
 function mountWorkspace(app: Express): void {
@@ -357,7 +351,7 @@ function mountWorkspace(app: Express): void {
   // Mount-level baseline auth (defense-in-depth): every memory route also has
   // stricter per-route middleware (requireUserAuth / requireClawAdmin), but a
   // future route that forgets it must still fail closed at the mount. requireAuth
-  // (not requireUserAuth) because /recall-hits is an S2S callback from xyne-claw.
+  // (not requireUserAuth) because /recall-hits is a runtime callback from xyne-claw.
   // The per-request memoization in require-auth.ts makes the second layer free.
   app.use(`${BASE}/memory`, requireAuth, requireNoAccessToken, memoryRouter);
   app.use(`${BASE}/agent-index`, requireAuth, requireNoAccessToken, agentIndexRouter);

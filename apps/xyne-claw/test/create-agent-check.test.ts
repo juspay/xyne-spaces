@@ -1,8 +1,5 @@
 import { test, expect, vi, afterEach } from "vitest";
 
-vi.hoisted(() => {
-  process.env["XYNE_CLAW_S2S_KEY"] = "test-key";
-});
 
 import {
   checkCreateAgent,
@@ -10,6 +7,9 @@ import {
   createAgentRefusedText,
   createAgentUnknownToolsText,
 } from "../src/create-agent-check.js";
+import { useRuntimeTestKey } from "./runtime-test-key.js";
+
+useRuntimeTestKey();
 
 afterEach(() => {
   vi.unstubAllGlobals();

@@ -13,6 +13,7 @@ matches what you are doing.
 | Get a full local environment running | [Local Development](local-development.md) |
 | Make the AI features actually respond | [AI Providers](ai-providers.md) |
 | Understand what each background service does | [Services](services.md) |
+| Set up the keys Spaces, claw-auth and the claw runtime sign with | [Service keys](service-keys.md) |
 | Run the mobile app (iOS / Android) | [Mobile developer setup](../../apps/mobile/DEV_SETUP.md) |
 | Fix something that broke | [Troubleshooting](troubleshooting.md) |
 

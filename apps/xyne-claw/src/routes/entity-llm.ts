@@ -8,12 +8,12 @@
  * the pipeline — prompts, JSON-schema validation, the repair loop — and treats
  * this as a raw text completion.
  *
- * S2S-protected via the existing x-s2s-key middleware.
+ * Only claw-auth may call it (signed service assertion, middleware/auth.ts).
  */
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { completeEntityPrompt, parseEntityLlmMessages, EntityLlmError } from "../entity-llm.js";
 
 import { createLogger } from "../logger.js";
@@ -21,7 +21,7 @@ const log = createLogger("entity-llm");
 
 export const entityLlmRouter = Router();
 
-entityLlmRouter.post("/internal/entity-llm/complete", validateS2SKey, async (req: Request, res: Response) => {
+entityLlmRouter.post("/internal/entity-llm/complete", requireClawAuthService, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { messages?: unknown; purpose?: unknown };
   const purpose = typeof body.purpose === "string" ? body.purpose.slice(0, 80) : undefined;
 

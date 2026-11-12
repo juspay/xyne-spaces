@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { validateS2SKey } from '@/middleware/validateS2SKey';
+import { authenticateService } from '@/claw/serviceAuth';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
@@ -112,7 +112,7 @@ async function sendVarysWebhook(
  *
  * Route: POST /api/apps/pr-check/callback
  */
-router.post('/callback', validateS2SKey, async (req: Request, res: Response) => {
+router.post('/callback', authenticateService('xyne-spaces'), async (req: Request, res: Response) => {
   try {
     const { context, callerUserId } = req.body as {
       context?: Record<string, unknown>;

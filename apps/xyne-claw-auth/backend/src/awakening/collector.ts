@@ -91,7 +91,7 @@ function titleOf(conv: RawConversation | undefined): string {
  */
 async function resolveSenderNames(
   messages: RawMessage[],
-  auth: { token: string; workspaceId: string },
+  auth: { agentToken: string; workspaceId: string },
 ): Promise<Map<string, string>> {
   const names = new Map<string, string>();
   const ids = [...new Set(messages.map((m) => m.senderId).filter(Boolean))];
@@ -135,7 +135,7 @@ export async function collectWindow(
   identity: AgentSpacesIdentity,
   config: AwakeningConfig,
 ): Promise<CollectResult> {
-  const auth = { token: identity.appToken, workspaceId: identity.workspaceId };
+  const auth = { agentToken: identity.agentToken, workspaceId: identity.workspaceId };
   const activeChannels = new Set<string>();
   if (channels.length === 0) return { events: [], truncated: false, activeChannels };
 

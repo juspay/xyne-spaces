@@ -11,10 +11,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./xyne-spaces-client.js", () => mocks);
+vi.mock("../../lib/internal-call.js", () => ({ serviceCallsConfigured: () => true, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: () => ({}) }));
 
 process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);
 process.env["XYNE_CLAW_URL"] = "http://claw.local";
-process.env["XYNE_CLAW_S2S_KEY"] = "s2s-secret";
 
 async function fetchAttachmentTool() {
   const mod = await import("./xyne-spaces-tools.js");
@@ -81,7 +81,7 @@ describe("spaces-fetch-attachment", () => {
       "http://claw.local/internal/attachments/ingest",
       expect.objectContaining({
         method: "POST",
-        headers: expect.objectContaining({ "x-s2s-key": "s2s-secret" }),
+        headers: expect.objectContaining({ "x-service-assertion": "test:xyne-claw:POST" }),
         body: JSON.stringify({
           attachments: [{
             fileName: "Lotuspay Webappsec final report.pdf",

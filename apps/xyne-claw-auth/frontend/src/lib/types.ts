@@ -146,7 +146,6 @@ export interface AgentLight {
   readonly modelId?: string;
   readonly spacesAppId?: string | null;
   readonly spacesAppUserId?: string | null;
-  readonly spacesAppTokenConfigured?: boolean;
   readonly signingSecretConfigured?: boolean;
   /** Knowledge Base scoping mode. "COLLECTIONS" (default) = per-agent
    *  allowlist via `collections`. "USER" = inherits whatever the calling

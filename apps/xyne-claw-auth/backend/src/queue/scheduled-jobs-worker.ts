@@ -2,7 +2,6 @@ import { DelayedError, Worker, type Job } from "bullmq";
 import { redisService } from "../redis.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
-import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { ensureUserExists, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
@@ -21,6 +20,8 @@ import {
 import { createLogger } from "../logger.js";
 import { WHATSAPP_REPLY_MODE } from "../surfaces/messaging/const.js";
 import { notificationSurfaceInstructions } from "../surfaces/messaging/dispatch.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 const log = createLogger("scheduled-jobs-worker");
 
 let worker: Worker<ScheduledJobData> | undefined;
@@ -88,7 +89,7 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
   // rest of this worker).
   const agentRow = await prisma.agent.findUnique({
     where: { orgId_slug: { orgId: row.orgId, slug: agentSlug } },
-    select: { id: true, config: true, orgId: true, spacesAppId: true, spacesAppToken: true, spacesAppUserId: true },
+    select: { id: true, config: true, orgId: true, spacesAppId: true, spacesAppUserId: true },
   }).catch((err) => {
     log.warn(`[scheduler] agent lookup failed for ${agentSlug}:`, err instanceof Error ? err.message : err);
     return null;
@@ -161,7 +162,7 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, dispatchPayload.userId ? { userId: String(dispatchPayload.userId) } : undefined),
       },
       body: JSON.stringify(dispatchPayload),
     });
@@ -222,14 +223,10 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
       orgId: agentRow?.orgId ?? row.orgId ?? null,
     }).catch((e) => log.warn(`[scheduler] ChatMessage.create failed:`, e instanceof Error ? e.message : e));
 
-    const appToken = agentRow?.spacesAppToken
-      ? (() => {
-          const [ciphertext, iv, authTag] = agentRow.spacesAppToken.split(":");
-          return ciphertext && iv && authTag ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
-        })()
-      : "";
+    const bot: BotRef = { clawAgentId: agentRow?.id ?? "", workspaceId: row.workspaceId ?? null };
+    const botUserId = agentRow ? ((await getAgentBotAuth(bot.clawAgentId, bot.workspaceId))?.botUserId ?? "") : "";
     const recoveryCtx: RecoverySessionContext = {
-      mentionedUserId: agentRow?.spacesAppUserId ?? "",
+      mentionedUserId: botUserId,
       senderId: userId,
       // Display name, not the canonical id — senderName is rendered to humans.
       senderName: await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
@@ -242,9 +239,9 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
       ...(agentRow ? { agentId: agentRow.id, agentOrgId: agentRow.orgId ?? null } : {}),
       agentSlug,
       responseMode: "conversation",
-      appToken,
+      bot,
       spacesAppId: agentRow?.spacesAppId ?? "",
-      spacesAppUserId: agentRow?.spacesAppUserId ?? "",
+      spacesAppUserId: botUserId,
       ...(row.workspaceId ? { workspaceId: row.workspaceId } : {}),
     };
     await registerRunRecovery({

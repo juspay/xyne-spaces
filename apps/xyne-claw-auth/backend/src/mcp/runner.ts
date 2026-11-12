@@ -10,16 +10,16 @@ import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./t
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition, effectiveWriteTools } from "./connector-definitions.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
-import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
+import { getAgentBotAuth, type AgentBotAuth } from "../lib/spaces-bot.js";
 const log = createLogger("runner");
 
 /**
@@ -39,26 +39,32 @@ const passThroughSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> =
 };
 
 /**
- * Resolve the app token for an agent's app user. App users have no Spaces login
- * session (so getSpacesAuthForUser returns null for them), but the agent row
- * carries a `spacesAppToken` (GCM-encrypted "ciphertext:iv:authTag"). When the
- * spaces MCP runs for such a userId we hand it this token + APP MODE so its
- * tools hit the /api/apps/* routes instead of /api/query.
+ * Bot token for a run whose user is the agent's own bot (no person behind it):
+ * a 10-minute agent token for the bot API (lib/spaces-bot.ts), re-resolved on
+ * every call so a rotated token respawns the child (see incomingToken below).
+ * Only when `userId` IS the agent's bot — the principal's bot user, or the
+ * legacy app bot user on the agent row — never for a person without a session.
  */
-async function resolveAppTokenForAppUser(appUserId: string): Promise<string | null> {
+async function resolveBotTokenForAgentUser(
+  userId: string,
+  clawAgentId: string | undefined,
+  workspaceId: string | null | undefined,
+): Promise<AgentBotAuth | null> {
   try {
-    const agent = await prisma.agent.findFirst({
-      where: { spacesAppUserId: appUserId },
-      select: { spacesAppToken: true },
-    });
-    if (!agent?.spacesAppToken) return null;
-    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-    if (!ciphertext || !iv || !authTag) return null;
-    return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+    let agentId = clawAgentId;
+    let legacyBotUser = false;
+    if (!agentId) {
+      const row = await prisma.agent.findFirst({ where: { spacesAppUserId: userId }, select: { id: true } });
+      agentId = row?.id;
+      legacyBotUser = !!row;
+    }
+    if (!agentId) return null;
+    const bot = await getAgentBotAuth(agentId, workspaceId ?? null);
+    if (!bot) return null;
+    if (!legacyBotUser && bot.botUserId !== userId) return null;
+    return bot;
   } catch (err) {
-    log.warn(
-      `[mcp/runner] app-token resolve failed for app user ${appUserId}: ${errMsg(err)}`,
-    );
+    log.warn(`[mcp/runner] bot token resolve failed for user ${userId}: ${errMsg(err)}`);
     return null;
   }
 }
@@ -84,6 +90,29 @@ interface McpSession {
    *  so the cache (and its spawned child processes) doesn't grow unbounded —
    *  the leak that OOM'd claw-auth. Stamped on every create AND reuse. */
   lastUsedAt: number;
+}
+
+/**
+ * Parent environment variables an MCP child may inherit: process plumbing,
+ * locale, proxy/CA settings (egress goes through the proxy) and package-manager
+ * caches. Everything secret-bearing stays in claw-auth. A server that needs
+ * more gets it explicitly from its adapter's buildCommand env.
+ */
+const CHILD_ENV_ALLOWLIST = [
+  "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TZ", "TMPDIR", "NODE_ENV",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NODE_USE_ENV_PROXY",
+  "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+  "XDG_CACHE_HOME", "npm_config_cache", "UV_CACHE_DIR", "PIP_CACHE_DIR",
+  "SPACES_BACKEND_URL", "LOG_LEVEL",
+] as const;
+
+export function childBaseEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of CHILD_ENV_ALLOWLIST) {
+    const v = source[name];
+    if (typeof v === "string") out[name] = v;
+  }
+  return out;
 }
 
 const sessions = new Map<string, McpSession>();
@@ -196,6 +225,13 @@ function sessionKey(
     SPACES_WORKSPACE_SCOPED_SERVER_TYPES.has(serverType) && typeof credsWorkspaceId === "string" && credsWorkspaceId.trim()
       ? `:ws:${credsWorkspaceId.trim()}`
       : "";
+  // An agent-token child acts as ONE agent (Spaces principal) for the user:
+  // agent A's child must never serve agent B, so the principal is in the key.
+  const credsPrincipalId = credentials?.["principalId"];
+  const principalSegment =
+    SPACES_WORKSPACE_SCOPED_SERVER_TYPES.has(serverType) && typeof credsPrincipalId === "string" && credsPrincipalId.trim()
+      ? `:pr:${credsPrincipalId.trim()}`
+      : "";
   // Slack credentials can be supplied by the workspace that dispatched a
   // surface run. Keep each team's env-bound child process isolated.
   const slackTeamId = credentials?.["teamId"];
@@ -203,9 +239,9 @@ function sessionKey(
     return `${userId}:${serverType}:team:${slackTeamId}${instanceSegment}${wsSegment}${suffix}`;
   }
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
-    return `${userId}:${serverType}:${agentSlug}${instanceSegment}${wsSegment}${suffix}`;
+    return `${userId}:${serverType}:${agentSlug}${instanceSegment}${wsSegment}${principalSegment}${suffix}`;
   }
-  return `${userId}:${serverType}${instanceSegment}${wsSegment}${suffix}`;
+  return `${userId}:${serverType}${instanceSegment}${wsSegment}${principalSegment}${suffix}`;
 }
 
 /** Close + drop sessions idle longer than the TTL. Best-effort; never throws. */
@@ -239,14 +275,16 @@ async function getOrCreateSession(
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
-    // app token is resolved so the spaces tools authenticate via /api/apps/*
+    // bot token is resolved so the spaces tools authenticate via the bot API
     // (no user session needed).
     if (agentSlug === "onyx-ask-ai") {
       if (!CONFIG.onyxVespaEndpoint.trim()) {
         throw new Error("[mcp/runner] onyx dispatch but ONYX_EVAL_VESPA_ENDPOINT is unset — refusing to spawn (no prod fallback).");
       }
-      const appToken = await resolveAppTokenForAppUser(userId);
-      log.info(`[mcp/runner] onyx-routing for bench agent (slug=${agentSlug}, user=${userId}) → ${CONFIG.onyxVespaEndpoint} (appToken=${appToken ? "resolved" : "missing"})`);
+      const benchAgentId = typeof credentials["clawAgentId"] === "string" ? (credentials["clawAgentId"] as string) : undefined;
+      const bot = await resolveBotTokenForAgentUser(userId, benchAgentId, CONFIG.onyxWorkspaceId);
+      const appToken = bot?.token ?? null;
+      log.info(`[mcp/runner] onyx-routing for bench agent (slug=${agentSlug}, user=${userId}) → ${CONFIG.onyxVespaEndpoint} (botToken=${appToken ? "resolved" : "missing"})`);
       credentials = {
         ...credentials,
         authMode: "app",
@@ -264,7 +302,19 @@ async function getOrCreateSession(
       const credsWorkspaceId = typeof credentials["workspaceId"] === "string" && credentials["workspaceId"].trim()
         ? (credentials["workspaceId"] as string).trim()
         : undefined;
-      const live = await getSpacesAuthForUser(userId, "mcp-runner", credsWorkspaceId);
+      // Spaces auth is the run's agent acting for this user: the loader stamps
+      // `clawAgentId` on the credentials, and the token is re-resolved here on
+      // every call (in-memory cached; Spaces tokens last 10 min) so a stale
+      // child is evicted below when it rotates. No agent / Spaces refuses →
+      // the non-agent fallbacks below, never a stale token.
+      const clawAgentId = typeof credentials["clawAgentId"] === "string" ? (credentials["clawAgentId"] as string) : undefined;
+      const live = clawAgentId
+        ? await resolveAgentSpacesAuth({ clawAgentId, userId, workspaceId: credsWorkspaceId ?? null, caller: "mcp-runner" })
+        : null;
+      if (!live) {
+        const { agentToken: _a, principalId: _p, clawAgentId: _c, ...rest } = credentials;
+        credentials = rest;
+      }
       if (live) {
         // The child's ctx.userId powers Spaces-facing headers
         // (x-user-id / x-xyne-acting-user-id), createdBy, whoami and every
@@ -273,22 +323,21 @@ async function getOrCreateSession(
         // hand the child the Spaces id; the Claw-canonical `userId` argument
         // still keys the session cache and every Claw-side lookup.
         const spacesUserId = await spacesUserIdForClawUser(userId, live.workspaceId).catch(() => userId);
+        const { token: _t, sessionId: _s, ...rest } = credentials;
         credentials = {
-          ...credentials,
-          token: live.token,
-          sessionId: live.sessionId,
+          ...rest,
+          agentToken: live.agentToken,
+          principalId: live.principalId,
           workspaceId: live.workspaceId,
           userId: spacesUserId,
         };
       } else {
-        // No login session for this userId. If it's an agent's app user, fall
-        // back to the agent's app token in APP MODE so the spaces tools work
-        // headlessly via /api/apps/* (no user session needed).
-        const appToken = await resolveAppTokenForAppUser(userId);
-        if (appToken) {
-          const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner", credsWorkspaceId).catch(() => null);
-          log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
-          credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
+        // No person behind this userId: if it is the agent's own bot, run the
+        // spaces tools in APP MODE on the bot API with a bot token.
+        const bot = await resolveBotTokenForAgentUser(userId, clawAgentId, credsWorkspaceId ?? null);
+        if (bot) {
+          log.info(`[mcp/runner] xyne-spaces app-mode for agent bot ${userId} (bot token, workspace ${bot.workspaceId})`);
+          credentials = { ...credentials, token: bot.token, authMode: "app", userId, workspaceId: bot.workspaceId };
         } else {
           // Cached-credentials path (no live session): same Claw→Spaces id
           // translation as the live branch so the child's Spaces-facing
@@ -319,10 +368,14 @@ async function getOrCreateSession(
   // the OLD key forever → every call through it timed out (-32001) even though
   // creds-loader had already resolved the new key. Seen on expense-prod.
   const incomingToken =
-    typeof credentials["token"] === "string"
+    typeof credentials["agentToken"] === "string" && credentials["agentToken"]
+      ? (credentials["agentToken"] as string)
+      : typeof credentials["token"] === "string"
       ? (credentials["token"] as string)
       : typeof credentials["accessToken"] === "string"
         ? (credentials["accessToken"] as string)
+        : typeof credentials["app_token"] === "string" && credentials["app_token"]
+          ? (credentials["app_token"] as string)
         : typeof credentials["botToken"] === "string"
           ? (credentials["botToken"] as string)
         : typeof credentials["apiKey"] === "string"
@@ -413,7 +466,10 @@ async function spawnSession(
     transport = new StdioClientTransport({
       command: launch.command,
       args: launch.args,
-      env: { ...process.env, ...env } as Record<string, string>,
+      // Only harmless parent variables, then the server's own. Never the whole
+      // process.env: that would hand every MCP server (incl. third-party npm/uvx
+      // packages) ENCRYPTION_KEY, the S2S keys, DB URLs and the service key.
+      env: { ...childBaseEnv(), ...env } as Record<string, string>,
       cwd: "/tmp",
     });
   }

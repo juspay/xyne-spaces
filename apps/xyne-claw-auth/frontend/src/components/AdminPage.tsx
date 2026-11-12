@@ -5,7 +5,7 @@ import {
   listAdminRoles, grantAdmin, revokeAdmin, listAuditLogsPaged, listAgents,
   promoteAgent, demoteAgent, deleteAgent,
   listPendingRequests, approveRequest, rejectRequest,
-  createAgentApp, installAgentApp, configureAgentWebhook, uploadAgentPicture, getAgentDetail,
+  registerAgentInSpaces, listSpacesRegistrations, uploadAgentPicture, getAgentDetail,
   listAgentUsageStats,
   listAdminScheduledJobs, deleteScheduledJob,
   listMcpPublishRequests, approveServerPublish, rejectServerPublish,
@@ -78,8 +78,14 @@ export function AdminPage({ userId }: Props) {
   const [viewingAgent, setViewingAgent] = useState<Agent | null>(null);
   const [viewingLoading, setViewingLoading] = useState(false);
 
+  // Agents added to the current Spaces workspace (Spaces' own list).
+  const [spacesRegistered, setSpacesRegistered] = useState<Set<string>>(new Set());
+
   const load = useCallback(async () => {
     setLoading(true);
+    listSpacesRegistrations()
+      .then((ids) => setSpacesRegistered(new Set(ids)))
+      .catch((err) => console.warn("[admin] spaces registrations load error:", err));
     try {
       const [a, r, reqs] = await Promise.all([
         // Admin panel: the full roster across all users (server enforces admin).
@@ -463,8 +469,8 @@ export function AdminPage({ userId }: Props) {
     setViewingAgent(null);
   }, []);
 
-  // Spaces registration flow state: tracks which request is doing Create→Install→Configure
-  const [spacesFlow, setSpacesFlow] = useState<{ requestId: string; agentSlug: string; step: "creating" | "create" | "installing" | "install" | "configuring" | "configure" | "upload" | "uploading" | "done"; error?: string } | null>(null);
+  // Spaces registration flow state: tracks which request is doing Add to workspace → picture
+  const [spacesFlow, setSpacesFlow] = useState<{ requestId: string; agentSlug: string; step: "register" | "registering" | "upload" | "uploading" | "done"; error?: string } | null>(null);
   const pictureInputRef = useRef<HTMLInputElement | null>(null);
   // Standalone per-row picture upload (outside the spaces-flow wizard) — lets admins
   // change a registered agent's picture any time.
@@ -480,42 +486,28 @@ export function AdminPage({ userId }: Props) {
       console.error("[admin] approve error:", err);
       return;
     }
-    // Check if agent already has a Spaces App
+    // Already added to this workspace? Then there is nothing to set up.
     try {
-      const agent = await getAgentDetail(agentSlug);
-      if (agent.spacesAppId && agent.spacesAppTokenConfigured) {
-        setSpacesFlow({ requestId, agentSlug, step: "done" });
-      } else if (agent.spacesAppId) {
-        setSpacesFlow({ requestId, agentSlug, step: "install" });
-      } else {
-        setSpacesFlow({ requestId, agentSlug, step: "create" });
-      }
+      const [agent, ids] = await Promise.all([getAgentDetail(agentSlug), listSpacesRegistrations()]);
+      setSpacesRegistered(new Set(ids));
+      setSpacesFlow({ requestId, agentSlug, step: ids.includes(agent.id) ? "done" : "register" });
     } catch {
-      setSpacesFlow({ requestId, agentSlug, step: "create" });
+      setSpacesFlow({ requestId, agentSlug, step: "register" });
     }
     load();
   }, [userId, load]);
 
-  const handleSpacesStep = useCallback(async (step: "create" | "install" | "configure") => {
+  const handleSpacesRegister = useCallback(async () => {
     if (!spacesFlow) return;
     const { agentSlug } = spacesFlow;
-    setSpacesFlow((f) => f ? { ...f, step: step === "create" ? "creating" : step === "install" ? "installing" : "configuring", error: undefined } : f);
+    setSpacesFlow((f) => f ? { ...f, step: "registering", error: undefined } : f);
     try {
-      if (step === "create") {
-        await createAgentApp(agentSlug);
-        setSpacesFlow((f) => f ? { ...f, step: "install" } : f);
-      } else if (step === "install") {
-        await installAgentApp(agentSlug);
-        setSpacesFlow((f) => f ? { ...f, step: "configure" } : f);
-      } else {
-        await configureAgentWebhook(agentSlug);
-        // Webhook configured — advance to optional picture upload step.
-        setSpacesFlow((f) => f ? { ...f, step: "upload" } : f);
-      }
+      await registerAgentInSpaces(agentSlug);
+      setSpacesFlow((f) => f ? { ...f, step: "upload" } : f);
       load();
     } catch (err) {
-      console.error(`[admin] spaces ${step} error:`, err);
-      setSpacesFlow((f) => f ? { ...f, step, error: `Failed to ${step}. Try again.` } : f);
+      console.error("[admin] spaces register error:", err);
+      setSpacesFlow((f) => f ? { ...f, step: "register", error: err instanceof Error ? err.message : "Could not add the agent. Try again." } : f);
     }
   }, [spacesFlow, load]);
 
@@ -680,7 +672,7 @@ export function AdminPage({ userId }: Props) {
           {spacesFlow && (
             <div className="rounded-lg border border-blue-800 bg-blue-950/20 px-5 py-4">
               <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-blue-300">Spaces App Setup — {spacesFlow.agentSlug}</h4>
+                <h4 className="text-sm font-semibold text-blue-300">Add to Spaces workspace — {spacesFlow.agentSlug}</h4>
                 {spacesFlow.step === "done" && (
                   <button onClick={() => setSpacesFlow(null)} className="text-xs text-zinc-500 hover:text-zinc-300">Dismiss</button>
                 )}
@@ -691,62 +683,24 @@ export function AdminPage({ userId }: Props) {
               )}
 
               <div className="flex items-center gap-3">
-                {/* Step 1: Create App */}
+                {/* Step 1: Add to workspace */}
                 <button
-                  onClick={() => handleSpacesStep("create")}
-                  disabled={spacesFlow.step !== "create"}
+                  onClick={() => handleSpacesRegister()}
+                  disabled={spacesFlow.step !== "register"}
                   className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${
-                    spacesFlow.step === "create" ? "bg-blue-600 text-white hover:bg-blue-500" :
-                    spacesFlow.step === "creating" ? "bg-blue-600/50 text-blue-200" :
+                    spacesFlow.step === "register" ? "bg-blue-600 text-white hover:bg-blue-500" :
+                    spacesFlow.step === "registering" ? "bg-blue-600/50 text-blue-200" :
                     "bg-zinc-800 text-green-400"
                   } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
-                  {spacesFlow.step === "creating" ? <Loader2 size={14} className="animate-spin" /> :
-                   spacesFlow.step === "create" ? "1. Create App" :
-                   <><CheckCircle size={14} /> Created</>}
+                  {spacesFlow.step === "registering" ? <Loader2 size={14} className="animate-spin" /> :
+                   spacesFlow.step === "register" ? "1. Add to workspace" :
+                   <><CheckCircle size={14} /> Added to workspace</>}
                 </button>
 
                 <span className="text-zinc-600">→</span>
 
-                {/* Step 2: Install App */}
-                <button
-                  onClick={() => handleSpacesStep("install")}
-                  disabled={spacesFlow.step !== "install"}
-                  className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${
-                    spacesFlow.step === "install" ? "bg-blue-600 text-white hover:bg-blue-500" :
-                    spacesFlow.step === "installing" ? "bg-blue-600/50 text-blue-200" :
-                    ["configure", "configuring", "upload", "uploading", "done"].includes(spacesFlow.step) ? "bg-zinc-800 text-green-400" :
-                    "bg-zinc-800 text-zinc-500"
-                  } disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {spacesFlow.step === "installing" ? <Loader2 size={14} className="animate-spin" /> :
-                   spacesFlow.step === "install" ? "2. Install App" :
-                   ["configure", "configuring", "upload", "uploading", "done"].includes(spacesFlow.step) ? <><CheckCircle size={14} /> Installed</> :
-                   "2. Install App"}
-                </button>
-
-                <span className="text-zinc-600">→</span>
-
-                {/* Step 3: Configure Webhook */}
-                <button
-                  onClick={() => handleSpacesStep("configure")}
-                  disabled={spacesFlow.step !== "configure"}
-                  className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${
-                    spacesFlow.step === "configure" ? "bg-blue-600 text-white hover:bg-blue-500" :
-                    spacesFlow.step === "configuring" ? "bg-blue-600/50 text-blue-200" :
-                    ["upload", "uploading", "done"].includes(spacesFlow.step) ? "bg-zinc-800 text-green-400" :
-                    "bg-zinc-800 text-zinc-500"
-                  } disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {spacesFlow.step === "configuring" ? <Loader2 size={14} className="animate-spin" /> :
-                   spacesFlow.step === "configure" ? "3. Configure Webhook" :
-                   ["upload", "uploading", "done"].includes(spacesFlow.step) ? <><CheckCircle size={14} /> Configured</> :
-                   "3. Configure Webhook"}
-                </button>
-
-                <span className="text-zinc-600">→</span>
-
-                {/* Step 4: Upload Picture (optional) */}
+                {/* Step 2: Upload Picture (optional) */}
                 <input
                   ref={pictureInputRef}
                   type="file"
@@ -765,9 +719,9 @@ export function AdminPage({ userId }: Props) {
                   } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   {spacesFlow.step === "uploading" ? <Loader2 size={14} className="animate-spin" /> :
-                   spacesFlow.step === "upload" ? "4. Upload Picture" :
+                   spacesFlow.step === "upload" ? "2. Upload Picture" :
                    spacesFlow.step === "done" ? <><CheckCircle size={14} /> Picture Set</> :
-                   "4. Upload Picture"}
+                   "2. Upload Picture"}
                 </button>
 
                 {spacesFlow.step === "upload" && (
@@ -781,7 +735,7 @@ export function AdminPage({ userId }: Props) {
               </div>
 
               {spacesFlow.step === "done" && (
-                <p className="mt-3 text-xs text-green-400">Agent is live on Spaces.</p>
+                <p className="mt-3 text-xs text-green-400">Agent is added to this Spaces workspace.</p>
               )}
             </div>
           )}
@@ -1065,11 +1019,11 @@ export function AdminPage({ userId }: Props) {
       {/* ── Agents Tab ── */}
       {tab === "agents" && (
         <div className="space-y-6">
-          {/* Spaces App Registration Flow (shared with Requests tab, fires from Register button below) */}
+          {/* Add-to-workspace flow (shared with Requests tab, fires from the Add button below) */}
           {spacesFlow && (
             <div className="rounded-lg border border-blue-800 bg-blue-950/20 px-5 py-4">
               <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-blue-300">Spaces App Setup — {spacesFlow.agentSlug}</h4>
+                <h4 className="text-sm font-semibold text-blue-300">Add to Spaces workspace — {spacesFlow.agentSlug}</h4>
                 {spacesFlow.step === "done" && (
                   <button onClick={() => setSpacesFlow(null)} className="text-xs text-zinc-500 hover:text-zinc-300">Dismiss</button>
                 )}
@@ -1077,30 +1031,28 @@ export function AdminPage({ userId }: Props) {
               {spacesFlow.error && <p className="mb-3 text-xs text-red-400">{spacesFlow.error}</p>}
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => handleSpacesStep("create")}
-                  disabled={spacesFlow.step !== "create"}
-                  className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${spacesFlow.step === "create" ? "bg-blue-600 text-white hover:bg-blue-500" : spacesFlow.step === "creating" ? "bg-blue-600/50 text-blue-200" : "bg-zinc-800 text-green-400"} disabled:cursor-not-allowed disabled:opacity-50`}
+                  onClick={() => handleSpacesRegister()}
+                  disabled={spacesFlow.step !== "register"}
+                  className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${spacesFlow.step === "register" ? "bg-blue-600 text-white hover:bg-blue-500" : spacesFlow.step === "registering" ? "bg-blue-600/50 text-blue-200" : "bg-zinc-800 text-green-400"} disabled:cursor-not-allowed disabled:opacity-50`}
                 >
-                  {spacesFlow.step === "creating" ? <Loader2 size={14} className="animate-spin" /> : spacesFlow.step === "create" ? "1. Create App" : <><CheckCircle size={14} /> Created</>}
+                  {spacesFlow.step === "registering" ? <Loader2 size={14} className="animate-spin" /> : spacesFlow.step === "register" ? "1. Add to workspace" : <><CheckCircle size={14} /> Added to workspace</>}
                 </button>
-                <span className="text-zinc-600">→</span>
-                <button
-                  onClick={() => handleSpacesStep("install")}
-                  disabled={spacesFlow.step !== "install"}
-                  className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${spacesFlow.step === "install" ? "bg-blue-600 text-white hover:bg-blue-500" : spacesFlow.step === "installing" ? "bg-blue-600/50 text-blue-200" : ["configure", "configuring", "done"].includes(spacesFlow.step) ? "bg-zinc-800 text-green-400" : "bg-zinc-800 text-zinc-500"} disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {spacesFlow.step === "installing" ? <Loader2 size={14} className="animate-spin" /> : spacesFlow.step === "install" ? "2. Install App" : ["configure", "configuring", "done"].includes(spacesFlow.step) ? <><CheckCircle size={14} /> Installed</> : "2. Install App"}
-                </button>
-                <span className="text-zinc-600">→</span>
-                <button
-                  onClick={() => handleSpacesStep("configure")}
-                  disabled={spacesFlow.step !== "configure"}
-                  className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition ${spacesFlow.step === "configure" ? "bg-blue-600 text-white hover:bg-blue-500" : spacesFlow.step === "configuring" ? "bg-blue-600/50 text-blue-200" : spacesFlow.step === "done" ? "bg-zinc-800 text-green-400" : "bg-zinc-800 text-zinc-500"} disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {spacesFlow.step === "configuring" ? <Loader2 size={14} className="animate-spin" /> : spacesFlow.step === "configure" ? "3. Configure Webhook" : spacesFlow.step === "done" ? <><CheckCircle size={14} /> Done</> : "3. Configure Webhook"}
-                </button>
+                {spacesFlow.step === "upload" && (
+                  <>
+                    <span className="text-zinc-600">→</span>
+                    <button
+                      onClick={() => openRowPicturePicker(spacesFlow.agentSlug)}
+                      className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500"
+                    >
+                      <ImageIcon size={14} /> 2. Upload Picture
+                    </button>
+                    <button onClick={handleSkipUpload} className="rounded-lg px-3 py-2 text-xs text-zinc-400 transition hover:text-zinc-200">
+                      Done
+                    </button>
+                  </>
+                )}
               </div>
-              {spacesFlow.step === "done" && <p className="mt-3 text-xs text-green-400">Agent is live on Spaces.</p>}
+              {spacesFlow.step === "done" && <p className="mt-3 text-xs text-green-400">Agent is added to this Spaces workspace.</p>}
             </div>
           )}
 
@@ -1109,8 +1061,7 @@ export function AdminPage({ userId }: Props) {
             <h3 className="mb-2 text-sm font-medium text-zinc-400">Global Agents ({globalAgents.length})</h3>
             <div className="space-y-2">
               {globalAgents.map((a) => {
-                const registered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
-                const hasApp = Boolean(a.spacesAppId);
+                const registered = spacesRegistered.has(a.id);
                 return (
                   <div key={a.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -1120,18 +1071,18 @@ export function AdminPage({ userId }: Props) {
                         <span className="ml-2 text-xs text-zinc-500">{a.slug}</span>
                         {allOrgs && <span className="ml-2"><OrgBadge orgName={a.orgName} orgId={a.orgId} /></span>}
                         <span className={`ml-2 rounded px-1.5 py-0.5 text-xs ${registered ? "bg-green-950 text-green-400" : "bg-amber-950 text-amber-400"}`}>
-                          {registered ? "Registered" : "Not registered"}
+                          {registered ? "In this workspace" : "Not in this workspace"}
                         </span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       {!registered && (
                         <button
-                          onClick={() => setSpacesFlow({ requestId: "", agentSlug: a.slug, step: hasApp ? "install" : "create" })}
+                          onClick={() => setSpacesFlow({ requestId: "", agentSlug: a.slug, step: "register" })}
                           className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-400 hover:bg-zinc-800"
-                          title={hasApp ? "Continue setup (install + webhook)" : "Register this agent with Spaces"}
+                          title="Add this agent to the current Spaces workspace"
                         >
-                          <Plug size={14} /> {hasApp ? "Resume setup" : "Register"}
+                          <Plug size={14} /> Add to workspace
                         </button>
                       )}
                       {registered && (
@@ -1176,7 +1127,7 @@ export function AdminPage({ userId }: Props) {
             ) : (
               <div className="space-y-2">
                 {personalAgents.map((a) => {
-                  const pRegistered = Boolean(a.spacesAppId && a.spacesAppTokenConfigured);
+                  const pRegistered = spacesRegistered.has(a.id);
                   return (
                   <div key={a.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
                     <div className="flex items-center gap-3">

@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential", "ClawAgentPrincipal", "ClawAgentGrant"]
 }
 
 datasource db {
@@ -5455,3 +5455,52 @@ model RadarRule {
   @@schema("non_zero")
 }
 
+// ── Claw agents as first-party principals ────────────────────────────────────
+// A Claw agent present in a workspace. It is a member there through its own bot
+// user (User.userType AGENT), holds no secret, and can do only what its grants
+// allow. Server-only (non_zero): never synced to clients.
+model ClawAgentPrincipal {
+  id          String    @id @default(cuid())
+  workspaceId String // denormalized tenant key (stamped on insert)
+  orgId       String
+  clawAgentId String // the agent's id in claw-auth
+  name        String
+  botUserId   String    @unique // User (userType AGENT) the agent acts as in this workspace
+  status      String    @default("ACTIVE") // ACTIVE | DISABLED
+  createdBy   String // user who added the agent to the workspace
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  revokedAt   DateTime?
+
+  grants ClawAgentGrant[]
+
+  @@unique([clawAgentId, workspaceId])
+  @@index([workspaceId])
+  @@map("claw_agent_principals")
+  @@schema("non_zero")
+}
+
+// What a Claw agent may do. onBehalfOfUserId null: the agent acting as itself
+// (e.g. replying in a channel it was added to), approved by a workspace admin.
+// onBehalfOfUserId set: that user lets the agent act for them while they are
+// not present (scheduled jobs, daily brief), approved by that user. Revoking
+// (status REVOKED / revokedAt) takes effect on the next token request.
+model ClawAgentGrant {
+  id               String    @id @default(cuid())
+  workspaceId      String // denormalized tenant key (stamped on insert)
+  principalId      String
+  scope            String // AvailableAppPermission scope "name:type", e.g. "chat:write"
+  onBehalfOfUserId String?
+  grantedBy        String
+  status           String    @default("APPROVED") // APPROVED | REVOKED
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+  revokedAt        DateTime?
+
+  principal ClawAgentPrincipal @relation(fields: [principalId], references: [id])
+
+  @@index([principalId, status])
+  @@index([onBehalfOfUserId])
+  @@map("claw_agent_grants")
+  @@schema("non_zero")
+}

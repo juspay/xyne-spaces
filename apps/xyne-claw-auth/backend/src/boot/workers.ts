@@ -60,18 +60,21 @@ const WORKERS: WorkerEntry[] = [
   // connections return idle and the pod can exit without dropping a run.
   { name: "local-harness-bridge", closeSync: beginLocalHarnessDrain },
   { name: "bitbucket-stats", closeSync: stopBitbucketStatsBackgroundRefresh },
-  { name: "scheduled-jobs-worker", init: initScheduledJobsWorker, close: closeWorker },
+  { name: "scheduled-jobs-worker", /* off: Spaces thread mentions only (2026-11-12) */ // init: initScheduledJobsWorker,
+    close: closeWorker },
   { name: "eval-sweeper", init: initEvalSweeper, close: closeEvalSweeper },
   { name: "scheduled-jobs-queue", close: closeQueue },
   { name: "run-recovery-worker", init: initRunRecoveryWorker, close: closeRunRecoveryWorker },
   { name: "agent-run-queue", init: initAgentRunQueue, closeSync: closeAgentRunQueue },
   { name: "provider-retry-worker", init: initProviderRetryWorker, close: closeProviderRetryWorker },
-  { name: "experiment-supervisor", init: initExperimentSupervisor, closeSync: closeExperimentSupervisor },
+  { name: "experiment-supervisor", /* off: Spaces thread mentions only (2026-11-12) */ // init: initExperimentSupervisor,
+    closeSync: closeExperimentSupervisor },
   { name: "digital-twin-backfill-worker", init: initDigitalTwinBackfillWorker },
   { name: "digital-twin-backfill-queue", close: closeBackfillQueue },
   { name: "agent-backfill-worker", init: initAgentBackfillWorker, close: closeAgentBackfillWorker },
   { name: "agent-backfill-queue", close: closeAgentBackfillQueue },
-  { name: "eval-import-worker", init: initEvalImportWorker, close: closeEvalImportWorker },
+  { name: "eval-import-worker", /* off: Spaces thread mentions only (2026-11-12) */ // init: initEvalImportWorker,
+    close: closeEvalImportWorker },
   { name: "eval-generation-worker", init: initEvalGenerationWorker, close: closeEvalGenerationWorker },
   { name: "eval-judge-worker", init: initEvalJudgeWorker, close: closeEvalJudgeWorker },
   { name: "search-eval-run-worker", init: initSearchEvalRunWorker, close: closeSearchEvalRunWorker },
@@ -100,9 +103,12 @@ const WORKERS: WorkerEntry[] = [
   // ensureTickScheduler is idempotent, so every pod calling it converges on
   // a single scheduler — which is also what makes a Redis wipe self-heal on
   // the next boot instead of silently stopping every awakened agent.
-  { name: "awakening-tick-worker", init: initAwakeningTickWorker, close: closeAwakeningTickWorker },
-  { name: "awakening-window-worker", init: initAwakeningWindowWorker, close: closeAwakeningWindowWorker },
-  { name: "awakening-reflex-worker", init: initAwakeningReflexWorker, close: closeAwakeningReflexWorker },
+  { name: "awakening-tick-worker", /* off: Spaces thread mentions only (2026-11-12) */ // init: initAwakeningTickWorker,
+    close: closeAwakeningTickWorker },
+  { name: "awakening-window-worker", /* off: Spaces thread mentions only (2026-11-12) */ // init: initAwakeningWindowWorker,
+    close: closeAwakeningWindowWorker },
+  { name: "awakening-reflex-worker", /* off: Spaces thread mentions only (2026-11-12) */ // init: initAwakeningReflexWorker,
+    close: closeAwakeningReflexWorker },
   { name: "awakening-queues", close: closeAwakeningQueues },
   { name: "local-harness-expiry", init: initLocalHarnessExpirySweep },
   { name: "proactive-workers", init: initProactiveWorkers, close: closeProactiveWorkers },
@@ -175,9 +181,11 @@ export function bootWorkers(): void {
 
   startMcpRestartListener();
 
-  void ensureTickScheduler().catch((err) =>
-    log.error("[boot] awakening tick scheduler registration failed:", err),
-  );
+  // Off: Spaces thread mentions only (2026-11-12). Awakening reads Spaces as the
+  // agent itself, which has no read path yet.
+  // void ensureTickScheduler().catch((err) =>
+  //   log.error("[boot] awakening tick scheduler registration failed:", err),
+  // );
   // Upsert custom tools from the shared registry so newly added tools (e.g.
   // google-sheets-create, google-forms-create) show up in the agent UI on
   // restart without needing a manual POST /tools/sync call.

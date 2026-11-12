@@ -15,6 +15,7 @@ import {
   isEmailDomainAllowed,
 } from '@/services/emailDomainPolicy';
 import { isRefreshAllowed } from '../services/sessionRefreshValidator';
+import { authenticateClawAgentOnBehalfOf, looksLikeAgentToken } from '@/claw/tokens';
 
 export class AuthMiddleware {
   // private googleClient?: OAuth2Client;
@@ -45,6 +46,14 @@ export class AuthMiddleware {
    */
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authHeader = req.headers.authorization;
+
+    // A Claw agent acting for a user (claw/tokens.ts): handled entirely there and
+    // never falls through to the Google/session logic below. The typ header only
+    // routes it; it is fully verified, on-behalf-of only, and route-scope gated.
+    if (authHeader?.startsWith('Bearer ') && looksLikeAgentToken(authHeader.slice(7).trim())) {
+      await authenticateClawAgentOnBehalfOf(req, res, next);
+      return;
+    }
     
     // Get workspace ID from header or last_workspace cookie
     const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;

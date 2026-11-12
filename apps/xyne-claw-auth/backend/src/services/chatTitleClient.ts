@@ -6,6 +6,7 @@ import {
   chatConversationMetaRepository,
   chatMessageRepository,
 } from "../repositories/index.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../lib/internal-call.js";
 
 const logger = createLogger("chat-title-client", createTraceId());
 
@@ -19,15 +20,15 @@ export interface ChatTitleRequest {
 }
 
 export async function generateChatTitleViaClaw(req: ChatTitleRequest): Promise<string | null> {
-  if (!CONFIG.xyneClawS2sKey) {
-    logger.warn("[chat-title-client] XYNE_CLAW_S2S_KEY not set — refusing call");
+  if (!serviceCallsConfigured()) {
+    logger.warn("[chat-title-client] CLAW_SERVICE_PRIVATE_KEY not set — refusing call");
     return null;
   }
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/chat-title/generate`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(CHAT_TITLE_TIMEOUT_MS),
     });

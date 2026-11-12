@@ -6,6 +6,8 @@ import { createLogger } from "../logger.js";
 import { setSession } from "./session-context.js";
 import { resolveProvidersForDispatch } from "./provider-resolution.js";
 import type { ChannelDeliveryTarget } from "../surfaces/messaging/plugin.js";
+import type { BotRef } from "./spaces-bot.js";
+import { selfAuthHeaders } from "./internal-call.js";
 
 const log = createLogger("eval-run");
 
@@ -86,7 +88,7 @@ export interface EvalState {
   conversationId: string;
   agentSlug: string;
   spacesAppUserId: string;
-  appToken: string;
+  bot: BotRef;
   dispatches: EvalDispatch[];
   /** Set when /eval was typed in a messaging chat: the arms answer there and
    *  the comparison goes there too (as a link — it is HTML). */
@@ -227,7 +229,7 @@ export async function dispatchEvalRun(args: {
   agentSlug: string;
   orgId: string;
   agentId: string;
-  spacesAppToken: string;
+  bot: BotRef;
   spacesAppId: string;
   spacesAppUserId: string;
   senderName?: string;
@@ -240,7 +242,7 @@ export async function dispatchEvalRun(args: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, { userId: args.userId }),
     },
     body: JSON.stringify({
       userId: args.userId,
@@ -291,7 +293,7 @@ export async function dispatchEvalRun(args: {
       agentSlug: args.agentSlug,
       responseMode: "conversation",
       replyPrefix: evalReplyPrefix(args.target),
-      appToken: args.spacesAppToken,
+      bot: args.bot,
       spacesAppId: args.spacesAppId,
       spacesAppUserId: args.spacesAppUserId,
       // Each arm answers in the chat rather than through Spaces.

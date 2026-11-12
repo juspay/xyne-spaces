@@ -37,7 +37,6 @@ vi.mock("../config.js", () => ({
     encryptionKey: Buffer.alloc(32, 9),
     spacesAppUrl: "https://app.example.org/claw",
     spacesInternalUrl: "http://spaces.internal.test",
-    xyneClawS2sKey: "test-s2s-key",
     cliTokensEnabled: false,
   },
 }));

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../lib/internal-call.js", () => ({ serviceCallsConfigured: () => h.config.serviceKeyConfigured !== false, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: (method: string, _url: string, user?: { userId?: string }) => ({ "x-service-assertion": `test:xyne-claw-auth:${method}`, ...(user?.userId ? { "x-session-token": `run:${user.userId}` } : {}) }), selfCallRunToken: (u: { userId: string }) => `run:${u.userId}` }));
 import type { UserMemoryCandidatePayload, UserMemoryCuratorTrace, UserMemoryRecord } from "xyne-claw-shared";
 
 // Characterization tests for curateAndPersistBatch and the claw distill S2S call
@@ -8,7 +9,7 @@ import type { UserMemoryCandidatePayload, UserMemoryCuratorTrace, UserMemoryReco
 // curateAndPersistBatch (the only entry point).
 
 const h = vi.hoisted(() => ({
-  config: { xyneClawS2sKey: "s2s-key", xyneClawUrl: "http://claw.test:3002/" },
+  config: { serviceKeyConfigured: true, xyneClawUrl: "http://claw.test:3002/" },
   provider: { ensureBank: vi.fn(), listMemories: vi.fn(), retain: vi.fn() },
   prisma: {
     user: { findUnique: vi.fn() },
@@ -185,7 +186,7 @@ beforeEach(() => {
   }
   h.logs.length = 0;
   h.order.length = 0;
-  h.config.xyneClawS2sKey = "s2s-key";
+  h.config.serviceKeyConfigured = true;
   h.config.xyneClawUrl = "http://claw.test:3002/";
 
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -311,13 +312,13 @@ describe("curateAndPersistBatch: empty outcomes", () => {
   });
 
   it("refuses the call without an S2S key: 'empty', zero fetches, no attempt event", async () => {
-    h.config.xyneClawS2sKey = "";
+    h.config.serviceKeyConfigured = false;
     expect(await run()).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(attemptCalls()).toEqual([]);
     expect(finishCalls()[0]).toStrictEqual(["evt1", finishInput({ status: "empty", durationMs: 0 })]);
     expect(h.logs).toEqual([
-      ["warn", "[user-memory-curator-client] XYNE_CLAW_S2S_KEY not set — refusing call", undefined],
+      ["warn", "[user-memory-curator-client] CLAW_SERVICE_PRIVATE_KEY not set — refusing call", undefined],
     ]);
   });
 });
@@ -714,7 +715,7 @@ describe("distill S2S call", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe(DISTILL_URL);
     expect(init.method).toBe("POST");
-    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-s2s-key": "s2s-key" });
+    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-service-assertion": "test:xyne-claw:POST" });
     expect(Object.keys(JSON.parse(init.body))).toEqual(["userId", "window", "records", "existingMemories", "includeTrace"]);
     expect(JSON.parse(init.body)).toEqual({
       userId: "u1",

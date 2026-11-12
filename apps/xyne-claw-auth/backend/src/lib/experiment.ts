@@ -6,7 +6,9 @@ import { setSession, type SessionContext } from "./session-context.js";
 import { parseFrontierItems, normalizeFocus } from "./experiment-text.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
-import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
+import { spacesAppFetch } from "../surfaces/spaces/client.js";
+import { getAgentBotAuth, type BotRef } from "./spaces-bot.js";
+import { selfAuthHeaders } from "./internal-call.js";
 
 const log = createLogger("experiment");
 
@@ -102,8 +104,7 @@ export async function cancelRunSession(sessionId: string, userId: string): Promi
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      "x-user-id": userId,
+      ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, { userId, sessionId }),
     },
   });
   if (!cancelRes.ok) {
@@ -306,15 +307,17 @@ export async function postExperimentNotice(run: { channelId: string; conversatio
     return;
   }
   const agent = await agentRepository.findBySlug(run.agentSlug, run.orgId);
-  if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
-  const appToken = decryptStoredField(agent.spacesAppToken);
+  if (!agent) return;
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId: null };
+  const botAuth = await getAgentBotAuth(bot.clawAgentId, bot.workspaceId);
+  if (!botAuth) return;
   await spacesAppFetch("/chat/postMessage", {
     channelId: run.channelId,
     conversationId: run.conversationId,
     markdownText,
-    userId: agent.spacesAppUserId,
+    userId: botAuth.botUserId,
     metadata: { contentFormat: "markdown" },
-  }, appToken);
+  }, bot);
 }
 
 export function buildEpochTask(run: ExperimentRun, ledgerMarkdown: string): string {
@@ -423,10 +426,12 @@ async function dispatchExperimentRun(
   // An experiment started from a chat reports there, and needs no Spaces app.
   const { chatTargetFor } = await import("../surfaces/messaging/commands.js");
   const chat = await chatTargetFor(run.conversationId);
-  if (!chat && (!agent.spacesAppToken || !agent.spacesAppId || !agent.spacesAppUserId)) {
-    throw new Error(`Experiment dispatch agent ${run.agentSlug} missing Spaces app identity`);
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId: null };
+  const botAuth = chat ? null : await getAgentBotAuth(bot.clawAgentId, bot.workspaceId);
+  if (!chat && !botAuth) {
+    throw new Error(`Experiment dispatch agent ${run.agentSlug} is not added to a Spaces workspace`);
   }
-  const appToken = !chat && agent.spacesAppToken ? decryptStoredField(agent.spacesAppToken) : "";
+  const botUserId = botAuth?.botUserId ?? "";
 
   const dispatchPayload = {
     userId: run.userId,
@@ -460,7 +465,7 @@ async function dispatchExperimentRun(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, dispatchPayload.userId ? { userId: String(dispatchPayload.userId) } : undefined),
     },
     body: JSON.stringify(dispatchPayload),
   });
@@ -470,7 +475,7 @@ async function dispatchExperimentRun(
   }
 
   const sessionContext: SessionContext = {
-    mentionedUserId: chat ? run.userId : (agent.spacesAppUserId ?? ""),
+    mentionedUserId: chat ? run.userId : botUserId,
     targetUserId: run.userId,
     senderId: run.userId,
     senderName: run.userId,
@@ -482,9 +487,9 @@ async function dispatchExperimentRun(
     agentOrgId: run.orgId ?? agent.orgId,
     agentSlug: run.agentSlug,
     responseMode: "conversation",
-    appToken,
+    bot,
     spacesAppId: chat ? "" : (agent.spacesAppId ?? ""),
-    spacesAppUserId: chat ? "" : (agent.spacesAppUserId ?? ""),
+    spacesAppUserId: chat ? "" : botUserId,
     ...(chat ? { channelDelivery: chat, triggerSource: chat.channel } : {}),
     traceId,
     rootAgentSlug: run.agentSlug,

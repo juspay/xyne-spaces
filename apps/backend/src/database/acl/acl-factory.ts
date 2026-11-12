@@ -389,6 +389,11 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'auditLog':
       return new BaseQueryACL(ctx, prisma)
+    // Claw agent principals/grants: workspace-scoped; per-user rules live in claw/principals.ts.
+    case 'clawAgentPrincipal':
+      return new BaseQueryACL(ctx, prisma)
+    case 'clawAgentGrant':
+      return new BaseQueryACL(ctx, prisma)
     case 'auditLogChange':
       return new BaseQueryACL(ctx, prisma)
     case 'activityAlias':

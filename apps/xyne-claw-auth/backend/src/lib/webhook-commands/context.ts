@@ -30,8 +30,8 @@ export interface WebhookCommandCtx {
    *  command was typed: a Spaces file message, or a chat document or link. */
   attach: (file: { fileName: string; mimeType: string; content: string | Buffer; summary: string }) => Promise<void>;
   /** Set when the command came from a messaging chat (WhatsApp …) rather than
-   *  a Spaces thread. There is no Spaces app identity then — `agent.appToken`
-   *  is empty — so anything that would post through Spaces goes here instead. */
+   *  a Spaces thread. There is no Spaces bot identity then (no
+   *  principal) — so anything that would post through Spaces goes here instead. */
   channelDelivery?: ChannelDeliveryTarget;
   reconcileStoppedRuns: (
     conversationId: string,

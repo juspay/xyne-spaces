@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../redis.js", () => ({ redisService: { getConnection: () => ({}) } }));
 vi.mock("../../logger.js", () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
-vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost", xyneClawS2sKey: "" } }));
+vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost" } }));
 
 const { sendOutbound } = await import("./delivery.js");
 type OutboxItem = Parameters<typeof sendOutbound>[2];

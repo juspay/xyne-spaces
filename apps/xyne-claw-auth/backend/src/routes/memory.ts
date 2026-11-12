@@ -23,7 +23,8 @@ import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
-import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
+import { requireAuth, requireUserAuth } from "../middleware/require-auth.js";
+import { callerService } from "../lib/service-assertion.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { isClawAdmin, requireClawAdmin, getAgentEditAccess, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
@@ -89,8 +90,11 @@ async function assertMemoryUserAccess(
   res: Response,
   targetUserId: string,
 ): Promise<boolean> {
-  if (s2sKeyMatches(req.headers["x-s2s-key"])) return true;
   const requesterId = getRequesterId(req);
+  // The runtime (or claw-auth) with no user on the request (no run token) reads
+  // a user's memory to build a run; with a run token it is held to that user.
+  const service = callerService(req);
+  if (service && !requesterId && (service === "xyne-claw" || service === "xyne-claw-auth")) return true;
   // targetUserId arrives as the raw Spaces id from the browser; match it against
   // the caller's alias set (canonical x-user-id OR raw x-spaces-user-id).
   if (matchesAuthenticatedUserId(req, targetUserId)) return true;
@@ -107,7 +111,7 @@ export const memoryRouter = Router();
  * Internal (S2S): returns the file-based memory files flagged loadInPrompt for
  * (agentSlug, userId) — the always-loaded persona (soul.md, …) that xyne-claw
  * injects into the agent's system prompt at run start. Mounted under the memory
- * router which accepts x-s2s-key. Degrades to an empty list on any error so a
+ * router, whose requireAuth accepts a service assertion. Degrades to an empty list on any error so a
  * missing/slow file store never breaks a run.
  */
 memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
@@ -2084,7 +2088,7 @@ memoryRouter.post("/batches/:id/approve", requireUserAuth, requireClawAdmin, asy
  * a network retry can't double-count.
  *
  * Authenticated via the same requireAuth middleware as the rest of this
- * router — claw passes x-s2s-key (CONFIG.xyneClawS2sKey).
+ * router — claw sends its service assertion.
  */
 interface RecallHitInput {
   agentSlug: string;

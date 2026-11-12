@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-const { finalize } = vi.hoisted(() => ({ finalize: vi.fn(async () => undefined) }));
+const { finalize } = vi.hoisted(() => {
+  process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);
+  return { finalize: vi.fn(async () => undefined) };
+});
 
 vi.mock("../db.js", () => ({ prisma: { agentRun: { findUnique: vi.fn(async () => null) } } }));
 vi.mock("../repositories/index.js", () => ({
@@ -11,6 +14,9 @@ vi.mock("./claw-fetch.js", () => ({ fetchClawRunWithRetry: vi.fn() }));
 vi.mock("./consume-claw-stream.js", () => ({ consumeAlreadyOpenStream: vi.fn() }));
 vi.mock("../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
+vi.mock("./service-assertion.js", () => ({
+  serviceAuthHeaders: (aud: string, method: string) => ({ "x-service-assertion": `test:${aud}:${method}` }),
 }));
 vi.mock("node:dns/promises", () => ({
   lookup: async () => [{ address: "93.184.216.34", family: 4 }],
@@ -24,7 +30,7 @@ function headersOf(call: unknown[]): Record<string, string> {
   return (init.headers ?? {}) as Record<string, string>;
 }
 
-describe("run-bridge callback delivery — S2S key policy", () => {
+describe("run-bridge callback delivery — service assertion policy", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -37,7 +43,7 @@ describe("run-bridge callback delivery — S2S key policy", () => {
     vi.unstubAllGlobals();
   });
 
-  it("attaches x-s2s-key when the callback target is a configured internal origin", async () => {
+  it("signs a service assertion when the callback target is our own service", async () => {
     await postBrokenSseTerminalCallback({
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
       sessionId: "s1",
@@ -47,11 +53,12 @@ describe("run-bridge callback delivery — S2S key policy", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const headers = headersOf(fetchMock.mock.calls[0]!);
-    expect(headers["x-s2s-key"]).toBe(CONFIG.xyneClawS2sKey || undefined);
+    expect(headers["x-service-assertion"]).toBe("test:xyne-claw-auth:POST");
+    expect(headers["x-s2s-key"]).toBeUndefined();
     expect(headers["x-session-token"]).toBe("run-hmac");
   });
 
-  it("never hands the fleet S2S key to a caller-supplied external callbackUrl", async () => {
+  it("never signs for a caller-supplied external callbackUrl", async () => {
     await postBrokenSseTerminalCallback({
       callbackUrl: "https://attacker.example.com/collect",
       sessionId: "s2",
@@ -61,6 +68,7 @@ describe("run-bridge callback delivery — S2S key policy", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const headers = headersOf(fetchMock.mock.calls[0]!);
+    expect(headers["x-service-assertion"]).toBeUndefined();
     expect(headers["x-s2s-key"]).toBeUndefined();
     // The per-run HMAC token stays: it is bound to this session and is the
     // credential the receiver is meant to check.

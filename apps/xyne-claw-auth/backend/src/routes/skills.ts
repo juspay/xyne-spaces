@@ -3,7 +3,7 @@ import { errMsg } from "../lib/errors.js";
 import { Prisma } from "@prisma/client";
 import { skillRepository, agentRequestRepository, userRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAccess , requireRequester} from "../middleware/agent-acl.js";
-import { s2sKeyMatches } from "../middleware/require-auth.js";
+import { callerService } from "../lib/service-assertion.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { findUserByAnyId, spacesUserIdForClawUser } from "../lib/users-jit.js";
@@ -23,6 +23,7 @@ import {
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
 const log = createLogger("skills");
 
 const router = Router();
@@ -31,16 +32,19 @@ const router = Router();
  * A skill slug/id is caller-supplied, so org scope is tenant isolation, not
  * authorization: a same-org user must not read another user's PRIVATE (non-global)
  * skill's content or files by guessing its slug/id. Readable = global, owned, or
- * admin; internal S2S callers (the runner) are trusted. A not-readable skill
+ * admin; the runtime / claw-auth with no user on the request (loading a run) is trusted. A not-readable skill
  * resolves to 404 — never 403 — so the slug is not confirmed to someone probing.
  */
 async function assertSkillReadable(
   skill: { slug: string; scope: string; ownerUserId: string | null },
   req: Request,
 ): Promise<void> {
-  if (s2sKeyMatches(req.headers["x-s2s-key"])) return;
   if (skill.scope === "global") return;
   const requesterId = getRequesterId(req);
+  // The runtime (or claw-auth) with no user on the request loads skills for a
+  // run; with a run token it is held to that user like anyone else.
+  const service = callerService(req);
+  if (service && !requesterId && (service === "xyne-claw" || service === "xyne-claw-auth")) return;
   if (requesterId && skill.ownerUserId === requesterId) return;
   if (requesterId && (await isClawAdmin(requesterId))) return;
   log.warn(`[skills] private-skill read blocked slug=${skill.slug} owner=${skill.ownerUserId ?? "none"} viewer=${requesterId ?? "none"}`);
@@ -437,25 +441,22 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
   // body-supplied slug in here — mirrors notifyOwnerOfCloneRequestInSpaces,
   // which is handed the resource agent resolved from the trusted URL param.
   agent: {
+    id: string;
     slug: string;
     spacesAppId: string | null;
-    spacesAppToken: string | null;
-    spacesAppUserId: string | null;
   };
 }): Promise<void> {
   try {
     const { agent } = args;
-    if (!agent.spacesAppId || !agent.spacesAppToken || !agent.spacesAppUserId) {
-      log.info(`[skills/propose-update] owner DM skipped for ${args.skillSlug}: agent ${agent.slug} not Spaces-registered`);
-      return;
-    }
-    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-    if (!ciphertext || !iv || !authTag) return;
-    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-
     const workspaceId = (await getWorkspaceIdForUser(args.approverUserId, "skill-update-owner-dm")) ?? "";
     if (!workspaceId) {
       log.warn(`[skills/propose-update] owner DM skipped for ${args.skillSlug}: no workspaceId for approver ${args.approverUserId}`);
+      return;
+    }
+    const bot: BotRef = { clawAgentId: agent.id, workspaceId };
+    const botAuth = await getAgentBotAuth(agent.id, workspaceId);
+    if (!botAuth) {
+      log.info(`[skills/propose-update] owner DM skipped for ${args.skillSlug}: agent ${agent.slug} not added to workspace ${workspaceId}`);
       return;
     }
     // openDm is keyed by Spaces' workspace-scoped user id; approverUserId is
@@ -464,7 +465,7 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
     const dm = (await spacesAppFetch("/channel/openDm", {
       targetUserId: spacesApproverUserId,
       workspaceId,
-    }, token)) as { channelId: string };
+    }, bot)) as { channelId: string };
 
     const flow = buildSkillUpdateApprovalFlow({
       requestId: args.requestId,
@@ -475,15 +476,15 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
       diff: args.diff,
       ...(args.summary ? { summary: args.summary } : {}),
       agentSlug: agent.slug,
-      spacesAppId: agent.spacesAppId,
+      spacesAppId: agent.spacesAppId ?? "",
       spacesBaseUrl: CONFIG.spacesAppUrl,
     });
 
     await spacesAppFetch("/chat/postMessage", {
       channelId: dm.channelId,
       flow,
-      userId: agent.spacesAppUserId,
-    }, token);
+      userId: botAuth.botUserId,
+    }, bot);
     log.info(`[skills/propose-update] sent skill-update DM to approver ${args.approverUserId} for ${args.skillSlug}`);
   } catch (err) {
     log.warn(`[skills/propose-update] owner DM failed for ${args.skillSlug}:`, errMsg(err));

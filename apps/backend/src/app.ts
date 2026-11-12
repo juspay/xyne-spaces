@@ -119,7 +119,7 @@ import vespaSearchRoutes from '@/routes/vespaSearch';
 // Disabled (LLM)
 // import summarizeRoutes from '@/routes/summarize';
 // Disabled (Claw)
-// import xyneAIRoutes from '@/routes/xyneAI';
+import xyneAIRoutes from '@/routes/xyneAI';
 import cacConfigRoutes from '@/routes/cacConfig';
 import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
@@ -154,9 +154,9 @@ import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskAutoAssignRoutes from '@/routes/deskAutoAssignRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 // Disabled (Claw)
-// import customInstructionRoutes from '@/routes/customInstruction';
-// import dailyBriefRoutes from '@/routes/dailyBrief';
-// import userSkillsRoutes from '@/routes/userSkills';
+import customInstructionRoutes from '@/routes/customInstruction';
+import dailyBriefRoutes from '@/routes/dailyBrief';
+import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
 // Disabled (LLM)
 // import { tagRoutes, registerDeskEmailTags } from '@/tags';
@@ -249,6 +249,8 @@ import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
 import channelsDeskRoutes from '@/routes/channelsDesks';
+import { clawAgentRoutes } from '@/claw/routes';
+import { agentQueryRoutes } from '@/claw/agentQuery';
 
 
 export class App {
@@ -553,17 +555,14 @@ export class App {
     // App routes
     this.app.use('/api/apps', appRoutes);
 
+    // Claw agents as first-party principals (claw/routes.ts): grants, and agent tokens for claw-auth.
+    this.app.use('/api/claw-agents', clawAgentRoutes);
+    // Read queries for Claw agents acting for a user: per-model scopes, user's own ACL (claw/agentQuery.ts).
+    this.app.use('/api/agent-query', authMiddleware.authenticate, agentQueryRoutes);
+
     // Internal S2S endpoints (trusted service-to-service calls)
     // Disabled (Claw)
-    // const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
-    //   const supplied = req.headers['x-s2s-key'];
-    //   const accepted = [config.internalS2sKey, config.xyneClaw.s2sKey].filter(Boolean);
-    //   if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
-    //     res.status(401).json({ error: 'Invalid or missing S2S key' });
-    //     return;
-    //   }
-    //   next();
-    // };
+    // (The shared-key validator that guarded these routes was removed; service calls use claw/serviceAuth.ts.)
 
     // Disabled (Claw)
     // this.app.post('/api/internal/postAsUser', validateS2SKey, (req: Request, res: Response) => {
@@ -775,7 +774,7 @@ export class App {
 
     // Xyne AI routes (unified AI assistant with context awareness)
     // Disabled (Claw)
-    // this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
+    this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
 
     // Generic CAC config routes
     this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
@@ -784,15 +783,15 @@ export class App {
 
     // Custom instruction routes (auth required)
     // Disabled (Claw)
-    // this.app.use('/api/custom-instruction', customInstructionRoutes);
+    this.app.use('/api/custom-instruction', customInstructionRoutes);
 
     // Daily Brief routes (auth required) — proxies to xyne-claw-auth
     // Disabled (Claw)
-    // this.app.use('/api/daily-brief', authMiddleware.authenticate, dailyBriefRoutes);
+    this.app.use('/api/daily-brief', authMiddleware.authenticate, dailyBriefRoutes);
 
     // User skills routes (auth required)
     // Disabled (Claw)
-    // this.app.use('/api/user-skills', authMiddleware.authenticate, userSkillsRoutes);
+    this.app.use('/api/user-skills', authMiddleware.authenticate, userSkillsRoutes);
 
     // Scheduled messages routes (auth required)
     this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);

@@ -5,7 +5,6 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
-import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { agentRepository, chatMessageRepository, agentRunRepository, chatAttachmentRepository, userProviderCredentialsRepository, userAgentInstructionRepository } from "../repositories/index.js";
 import { clawMetricsFields, type FinalizeRunInput } from "../repositories/agentRunRepository.js";
@@ -45,18 +44,16 @@ import { withAwakeningSendTool } from "../awakening/send-tool.js";
 import { redisService } from "../redis.js";
 import {
   requireAuth,
-  requireStrictS2S,
   requireUserAuth,
   requireResultToken,
-  s2sKeyMatches,
 } from "../middleware/require-auth.js";
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
-import { getDmChannelForUserAndApp, getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
-import { decryptStoredField } from "../surfaces/spaces/client.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
@@ -78,6 +75,7 @@ import {
   type StartRunInput,
 } from "../lib/start-run.js";
 import type { SessionContext } from "./webhook.js";
+import { callerService, requireRuntime, requireSpacesService, serviceAuthHeaders } from "../lib/service-assertion.js";
 const log = createLogger("run");
 
 const router = Router();
@@ -193,8 +191,8 @@ async function resolveSpacesAuthFromRequest(
 //
 // claw-auth doesn't own PI session files (xyne-claw does), so chat branching
 // asks xyne-claw to materialize a sibling JSONL via SessionManager.createBranchedSession.
-// This route is the S2S bridge. Body: { sourceConversationId, targetConversationId, branchMode? }
-router.post("/clone-session", requireStrictS2S, async (req: Request, res: Response) => {
+// claw-auth's own bridge to the runtime. Body: { sourceConversationId, targetConversationId, branchMode? }
+router.post("/clone-session", requireRuntime, async (req: Request, res: Response) => {
   const { sourceConversationId, targetConversationId, branchMode } = req.body as {
     sourceConversationId?: string;
     targetConversationId?: string;
@@ -217,7 +215,7 @@ router.post("/clone-session", requireStrictS2S, async (req: Request, res: Respon
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", `${CONFIG.xyneClawUrl}/clone-session`),
       },
       body: JSON.stringify({
         sourceConversationId,
@@ -237,7 +235,7 @@ router.post("/clone-session", requireStrictS2S, async (req: Request, res: Respon
   }
 });
 
-router.get("/callable-agent-spec", requireStrictS2S, async (req: Request, res: Response) => {
+router.get("/callable-agent-spec", requireRuntime, async (req: Request, res: Response) => {
   try {
     const caller = (req.query["caller"] as string | undefined)?.trim();
     const callee = (req.query["callee"] as string | undefined)?.trim();
@@ -282,7 +280,7 @@ router.get("/callable-agent-spec", requireStrictS2S, async (req: Request, res: R
  * xyne-claw and never passes through `startRun`, so these give it the same row
  * and transcript a user-invoked run gets, tagged with the caller.
  */
-router.post("/delegated-run/start", requireStrictS2S, async (req: Request, res: Response) => {
+router.post("/delegated-run/start", requireRuntime, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as {
       sessionId?: string; userId?: string; agentSlug?: string; task?: string;
@@ -341,7 +339,7 @@ router.post("/delegated-run/start", requireStrictS2S, async (req: Request, res: 
   }
 });
 
-router.post("/delegated-run/finish", requireStrictS2S, async (req: Request, res: Response) => {
+router.post("/delegated-run/finish", requireRuntime, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as {
       sessionId?: string;
@@ -402,12 +400,12 @@ router.post("/delegated-run/finish", requireStrictS2S, async (req: Request, res:
 
 /**
  * Stream one recording that was explicitly attached to this run. Sandboxes
- * have no egress; xyne-claw presents its S2S key + per-run token and relays
+ * have no egress; xyne-claw presents its service assertion + per-run token and relays
  * this response through the Kata file API in bounded chunks.
  */
 router.get(
   "/run/:sessionId/recordings/:attachmentId",
-  requireStrictS2S,
+  requireRuntime,
   requireResultToken((req) => req.params["sessionId"]),
   async (req: Request<{ sessionId: string; attachmentId: string }>, res: Response): Promise<void> => {
     const sessionId = req.params.sessionId;
@@ -442,39 +440,21 @@ router.get(
     }
 
     const sources: Array<{ label: string; url: string; headers: Record<string, string> }> = [];
-    const live = await getSpacesAuthForUser(token.uid, "webhook").catch(() => null);
+    // The run's agent (from the session token's app id) acting for the run's
+    // user: on-behalf-of agent token only (no stored app token).
+    const agent = token.appid ? await agentRepository.findBySpacesAppId(token.appid).catch(() => null) : null;
+    const live = agent
+      ? await resolveAgentSpacesAuth({ clawAgentId: agent.id, userId: token.uid, caller: "webhook" })
+      : null;
     if (live) {
-      const cookie = [
-        `google_access_token=${live.token}`,
-        `user_session_id=${live.sessionId}`,
-        `xyne_session=${live.sessionId}`,
-        `xyne_last_workspace=${live.workspaceId}`,
-      ].join("; ");
       sources.push({
-        label: "user-token",
+        label: "agent-token",
         url: `${CONFIG.spacesInternalUrl}/api/attachments/${encodeURIComponent(attachmentId)}/download`,
         headers: {
-          Authorization: `Bearer ${live.token}`,
-          "x-session-id": live.sessionId,
+          Authorization: `Bearer ${live.agentToken}`,
           "x-workspace-id": live.workspaceId,
-          Cookie: cookie,
         },
       });
-    }
-    if (token.appid) {
-      const agent = await agentRepository.findBySpacesAppId(token.appid).catch(() => null);
-      if (agent?.spacesAppToken) {
-        try {
-          const appToken = decryptStoredField(agent.spacesAppToken);
-          sources.push({
-            label: "apps-route",
-            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${encodeURIComponent(attachmentId)}/download`,
-            headers: { Authorization: `Bearer ${appToken}` },
-          });
-        } catch (error) {
-          log.warn(`[recording-stream] could not decrypt app token for appid=${token.appid}: ${errMsg(error)}`);
-        }
-      }
     }
     if (sources.length === 0) {
       res.status(401).json({ success: false, error: "No Spaces credential is available for this recording" });
@@ -564,12 +544,24 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
     req.body = sanitized;
   }
 
+  // A service may start a run only for a user it proves with a token: a run
+  // token (runtime / claw-auth) or a Spaces delegation token, which requireAuth
+  // turned into the authenticated user. A user named only in the body is refused,
+  // so holding a service key alone never lets a caller act as any user.
+  const bodyUser = (req.body as { userId?: unknown } | undefined)?.userId;
+  if (callerService(req) && !getRequesterId(req) && typeof bodyUser === "string" && bodyUser.trim()) {
+    log.warn(`[run] ${callerService(req)} named a user without a run or delegation token; refused`);
+    res.status(403).json({ success: false, error: "A user-scoped run needs a run token or a delegation token" });
+    return;
+  }
+
   const acceptHeader = (req.headers["accept"] as string | undefined) ?? "";
   const wantsSse = acceptHeader.includes("text/event-stream");
   const input: StartRunInput = {
     body: req.body as Record<string, unknown>,
     isInternalRun: req.baseUrl.includes("/internal"),
-    isInternalS2SCaller: s2sKeyMatches(req.headers["x-s2s-key"]),
+    // A verified service (Spaces, the runtime or claw-auth itself) — not a user or CLI token.
+    isInternalS2SCaller: callerService(req) !== undefined,
     wantsSse,
     authenticatedUserId: getRequesterId(req),
     headerOrgId: getOrgId(req),
@@ -611,7 +603,6 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
         },
         body: JSON.stringify(forwardBody),
       },
@@ -753,9 +744,11 @@ async function forwardRunControl(
     return;
   }
 
+  // Verified user only (cookie, delegation or run token — claw-auth's own /stop
+  // path sends a run token for the run's owner).
   const callerUserId = req.headers["x-user-id"];
   if (typeof callerUserId !== "string" || !callerUserId.trim()) {
-    res.status(400).json({ success: false, error: "x-user-id is required" });
+    res.status(400).json({ success: false, error: "the run's user is required" });
     return;
   }
 
@@ -764,7 +757,7 @@ async function forwardRunControl(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", `${CONFIG.xyneClawUrl}/run/${encodeURIComponent(sessionId)}/${action}`),
         "x-user-id": callerUserId,
       },
     });
@@ -804,16 +797,16 @@ router.post(
 
 // ── POST /clear-session — proxy to xyne-claw (forget a thread's session) ──
 // Hit by webhook.ts when a user types `/clear`. The handler lives on the pod
-// (xyne-claw run.ts); claw-auth only needs to forward it. requireStrictS2S
+// (xyne-claw run.ts); claw-auth only needs to forward it. requireRuntime
 // because runRouter is also mounted at the unauthenticated BASE, so the route
-// must self-protect; the webhook supplies the same xyneClawS2sKey end-to-end.
-router.post("/clear-session", requireStrictS2S, async (req: Request, res: Response) => {
+// must self-protect; the webhook signs its own call (service assertion).
+router.post("/clear-session", requireRuntime, async (req: Request, res: Response) => {
   try {
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/clear-session`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", `${CONFIG.xyneClawUrl}/clear-session`),
       },
       body: JSON.stringify(req.body ?? {}),
     });
@@ -837,7 +830,7 @@ router.post("/clear-session", requireStrictS2S, async (req: Request, res: Respon
 
 router.post(
   "/sessions/:id/result",
-  requireStrictS2S,
+  requireRuntime,
   requireResultToken((req) => req.params["id"]),
   async (req: Request<{ id: string }>, res: Response) => {
     const { id } = req.params;

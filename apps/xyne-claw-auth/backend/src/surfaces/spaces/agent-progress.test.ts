@@ -12,13 +12,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const calls = vi.hoisted(() => ({
-  fetches: [] as Array<{ path: string; body: Record<string, unknown>; token: string | undefined }>,
+  fetches: [] as Array<{ path: string; body: Record<string, unknown>; token: unknown }>,
   fail: false,
   warns: [] as string[],
 }));
 
 vi.mock("./client.js", () => ({
-  spacesAppFetch: vi.fn(async (path: string, body: Record<string, unknown>, token?: string) => {
+  spacesAppFetch: vi.fn(async (path: string, body: Record<string, unknown>, token?: unknown) => {
     calls.fetches.push({ path, body, token });
     if (calls.fail) throw new Error("spaces unreachable");
     return {};
@@ -51,7 +51,7 @@ const target = {
   agentSlug: "askpmm",
   agentName: "askPMM",
   spacesAppUserId: "spaces-user-1",
-  appToken: "token-1",
+  bot: { clawAgentId: "agent-1", workspaceId: "ws-1" },
 };
 
 describe("agent progress signal", () => {
@@ -106,7 +106,7 @@ describe("agent progress signal", () => {
   it.each([
     ["digital-twin", { ...target, agentSlug: "digital-twin" }],
     ["no channelId", { ...target, channelId: undefined }],
-    ["no appToken", { ...target, appToken: undefined }],
+    ["no bot", { ...target, bot: undefined }],
   ])("skips both the light and the clear for %s", async (_label, skipped) => {
     await emitAgentProgressWorking(skipped, "a-tool");
     await emitAgentProgressDone(skipped);

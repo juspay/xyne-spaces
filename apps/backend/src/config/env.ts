@@ -500,7 +500,13 @@ const envSchema = Joi.object({
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(false),
   // XYNE Claw Integration (Ask AI v2)
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
-  XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
+  // EC P-256 private key (PKCS#8 PEM) that signs Spaces→claw-auth delegation tokens
+  // (services/clawDelegationToken.ts). claw-auth holds the public key.
+  CLAW_DELEGATION_PRIVATE_KEY: Joi.string().allow('').default(''),
+  CLAW_DELEGATION_KEY_ID: Joi.string().allow('').default('spaces-1'),
+  // claw-auth's public keys for its service assertions: JSON {"<kid>":"<SPKI PEM>"} (not secret).
+  CLAW_SERVICE_PUBLIC_KEYS: Joi.string().allow('').default(''),
+  CLAW_RUNTIME_PUBLIC_KEYS: Joi.string().allow('').default(''),
   XYNE_CLAW_AUTH_URL: Joi.string().uri().default('http://localhost:3003'),
   XYNE_CLAW_WEBHOOK_URL: Joi.string().uri().default('http://localhost:3003/claw/api/v1/webhook'),
   XYNE_CLAW_AUTH_CALLBACK_URL_AUTOMATION: Joi.string()
@@ -508,8 +514,6 @@ const envSchema = Joi.object({
     .default('http://localhost:3003/claw/api/v1/webhook'),
   XYNE_CLAW_CALLBACK_URL: Joi.string().allow('').default('http://localhost:3001'),
   ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v2'),
-  // Internal S2S key for service-to-service communication
-  INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
   // Stringified JSON mapping external webhook hosts to in-cluster pod base URLs.
   // e.g. {"claw.example.com":"http://claw-auth.svc.cluster.local:3003"}
   INTERNAL_APP_HOST_MAP: Joi.string().allow('').default(''),
@@ -977,7 +981,6 @@ export const config = {
   aiProvisioning: {
     xyneClawAuthInternalUrl: envVars.XYNE_CLAW_AUTH_INTERNAL_URL as string,
     enableUserProvisioning: envVars.ENABLE_USER_AI_PROVISIONING as boolean,
-    s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     queueAttempts: envVars.AI_PROVISIONING_QUEUE_ATTEMPTS as number,
     queueBackoffMs: envVars.AI_PROVISIONING_QUEUE_BACKOFF_MS as number,
     requestTimeoutMs: envVars.AI_PROVISIONING_REQUEST_TIMEOUT_MS as number,
@@ -1347,14 +1350,16 @@ export const config = {
   },
   xyneClaw: {
     url: envVars.XYNE_CLAW_URL as string,
-    s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
+    delegationPrivateKey: envVars.CLAW_DELEGATION_PRIVATE_KEY as string,
+    delegationKeyId: envVars.CLAW_DELEGATION_KEY_ID as string,
+    servicePublicKeys: envVars.CLAW_SERVICE_PUBLIC_KEYS as string,
+    runtimePublicKeys: envVars.CLAW_RUNTIME_PUBLIC_KEYS as string,
     authUrl: envVars.XYNE_CLAW_AUTH_URL as string,
     webhookUrl: envVars.XYNE_CLAW_WEBHOOK_URL as string,
     clawAuthCallbackUrlAutomation: envVars.XYNE_CLAW_AUTH_CALLBACK_URL_AUTOMATION as string,
     callbackUrl: (envVars.XYNE_CLAW_CALLBACK_URL || envVars.BACKEND_URL) as string,
     debugProxyTimeoutMs: envVars.CLAW_DEBUG_PROXY_TIMEOUT_MS as string,
   },
-  internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
   userDeactivationServiceSecret: envVars.USER_DEACTIVATION_SERVICE_SECRET as string,
   mtlsService: {

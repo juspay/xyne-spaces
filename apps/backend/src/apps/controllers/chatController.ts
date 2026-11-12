@@ -16,6 +16,7 @@ import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
@@ -879,7 +880,7 @@ export class ChatController {
     // `actionableUrl` is caller-supplied, so it is dispatched via `safeWebhookFetch`,
     // which validates the destination and pins the connection to it (rebinding-safe).
     // The first-party internal callback (same origin as backendUrl, authenticated
-    // with the S2S key) is exempt so it works even when backendUrl is a private/dev host.
+    // with Spaces' own service assertion) is exempt so it works even when backendUrl is a private/dev host.
     try {
       const isInternalSpacesCallback = (() => {
         try {
@@ -891,11 +892,11 @@ export class ChatController {
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (isInternalSpacesCallback) {
-        const s2sKey = config.internalS2sKey;
-        if (s2sKey) {
-          headers['x-s2s-key'] = s2sKey;
-        } else {
-          logger.error('[dispatchAction] INTERNAL_S2S_KEY is missing; internal callback cannot be authenticated');
+        // Spaces calling its own callback: signed with Spaces' key, single use.
+        try {
+          Object.assign(headers, serviceAuthHeaders('xyne-spaces', 'POST', actionableUrl));
+        } catch (err) {
+          logger.error('[dispatchAction] internal callback cannot be authenticated:', err instanceof Error ? err.message : err);
         }
       }
 
@@ -906,7 +907,7 @@ export class ChatController {
         redirect: 'manual', // don't follow 3xx redirects
         signal: AbortSignal.timeout(30_000),
       };
-      // Internal S2S callbacks are trusted-config hosts (kept on the plain client);
+      // Internal callbacks are trusted-config hosts (kept on the plain client);
       // external targets are caller-supplied, so validate + pin (rebinding-safe).
       const callbackRes = isInternalSpacesCallback
         ? await fetch(actionableUrl, callbackInit)

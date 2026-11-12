@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useRuntimeTestKey } from "./runtime-test-key.js";
+
+useRuntimeTestKey();
 
 vi.mock("bullmq", () => ({ DelayedError: class extends Error {}, Worker: class {} }));
 vi.mock("../src/run-execution.js", () => ({ executeRunFromPayload: vi.fn() }));
@@ -11,7 +14,6 @@ vi.mock("../src/metrics.js", () => ({ metric: { count: vi.fn(), observe: vi.fn()
 async function load() {
   vi.resetModules();
   process.env["XYNE_CLAW_AUTH_URL"] = "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003";
-  process.env["XYNE_CLAW_S2S_KEY"] = "s2s-secret";
   return await import("../src/run-queue-worker.js");
 }
 
@@ -25,19 +27,23 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env["XYNE_CLAW_AUTH_URL"];
-  delete process.env["XYNE_CLAW_S2S_KEY"];
 });
 
 describe("postProgressLabel", () => {
-  it("posts to the allowlisted claw-auth origin with the S2S key", async () => {
+  it("posts to the allowlisted claw-auth origin signed as the runtime, with the run token", async () => {
     const { postProgressLabel } = await load();
     await postProgressLabel(
-      { sessionId: "s1", progressUrl: "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003/claw/api/v1/webhook/progress" } as never,
+      { sessionId: "s1", sessionToken: "run-tok", progressUrl: "http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003/claw/api/v1/webhook/progress" } as never,
       "Working on it...",
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0]![1] as RequestInit;
-    expect((init.headers as Record<string, string>)["x-s2s-key"]).toBe("s2s-secret");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["x-s2s-key"]).toBeUndefined();
+    expect(headers["x-service-assertion"]).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+    expect(headers["x-session-token"]).toBe("run-tok");
+    const claims = JSON.parse(Buffer.from(headers["x-service-assertion"]!.split(".")[1]!, "base64url").toString("utf8"));
+    expect(claims).toMatchObject({ iss: "xyne-claw", aud: "xyne-claw-auth", htm: "POST", htu: "/claw/api/v1/webhook/progress" });
   });
 
   it.each([

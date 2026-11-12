@@ -40,14 +40,14 @@ describe("webhook signature replay guard", () => {
     expect(guard).toContain("if (!isInternalReverify && !isFlowAction)");
   });
 
-  it("skips the replay dedup for internal s2s re-verification (the proxy hop)", () => {
+  it("skips the replay dedup for claw-auth's own re-verification (the proxy hop)", () => {
     // A single approval is signature-verified twice in one chain: /webhook edge
-    // (external, no s2s key) then /flow/action (proxied WITH the s2s key). The
+    // (external) then /flow/action (claw-auth's own signed proxy hop). The
     // replay set must record only the edge check, or the proxied re-verify of
     // the SAME signature is rejected as "duplicate signature" and every Spaces
-    // flow-action approval 401s. Gate: replay runs only when NOT an s2s caller.
+    // flow-action approval 401s. Gate: replay runs only when NOT claw-auth itself.
     const guard = src.slice(src.indexOf("const isInternalReverify"), src.indexOf("next();"));
-    expect(guard).toContain("s2sKeyMatches(req.headers[\"x-s2s-key\"])");
+    expect(guard).toContain('callerService(req) === "xyne-claw-auth"');
     expect(guard).toContain("!isInternalReverify");
     // The HMAC authenticity check must NOT be inside the skip — only the replay
     // record/check is gated. (The match comparison lives above this slice.)

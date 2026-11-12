@@ -144,8 +144,8 @@ const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
  *
  * This block is load-bearing, not boilerplate: xyne-claw builds each tool's
  * context with `resolveToolConfig(tool.configSchema, config)`, so a tool that
- * declares no schema is handed an EMPTY config object. Without it the S2S key
- * is undefined, the read-back goes out unauthenticated, and claw-auth answers
+ * declares no schema is handed an EMPTY config object. Without it the auth URL
+ * falls back to its default, the read-back goes to the wrong host, and claw-auth answers
  * 401 — which is exactly how incremental updates silently degraded into full
  * rebuilds (observed 2026-09-02: every `mode:"update"` returned
  * "could not load the current app (HTTP 401)").
@@ -156,12 +156,6 @@ export const REACT_ARTIFACT_CONFIG_SCHEMA = {
     default: "http://localhost:3003",
     required: true as const,
     placeholder: "http://localhost:3003",
-  },
-  XYNE_CLAW_S2S_KEY: {
-    label: "Claw S2S Key (reads, updates and publishes apps as the run's user)",
-    default: "",
-    required: false as const,
-    placeholder: "Shared secret between xyne-claw and xyne-claw-auth",
   },
 };
 

@@ -59,7 +59,7 @@ function makeCtx(over: Partial<SessionContext> = {}): SessionContext {
     agentOrgId: "org-1",
     agentSlug: "digital-twin",
     responseMode: "approval",
-    appToken: "app-token",
+    bot: { clawAgentId: "agent-1", workspaceId: "ws-1" },
     spacesAppId: "app-1",
     spacesAppUserId: "app-user-1",
     workspaceId: "ws-1",

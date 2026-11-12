@@ -65,8 +65,11 @@ export interface ToolExecutionContext {
   emitUiWidget?: (widget: UiWidget) => Promise<void>;
   /** Session ID for this agent run (claw agent only) */
   sessionId?: string;
-  /** S2S key for authenticating with the progress endpoint (claw agent only) */
-  s2sKey?: string;
+  /**
+   * Signs a call to claw-auth from the runtime: returns the headers (a one-shot
+   * service assertion, plus the run's session token). Tools never see a key.
+   */
+  serviceAuth?: (method: string, url: string) => Record<string, string>;
   /**
    * Per-run HMAC bearer token for authenticating with claw-auth's
    * /sessions/:sessionId/mcp/* endpoints. Minted by claw-auth at /run

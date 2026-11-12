@@ -15,12 +15,12 @@
  * picker would fail at run time. The one difference from /eval-models is the
  * default: chat runs default to LITELLM.model, not the judge fastModel.
  *
- * S2S-protected via the existing x-s2s-key middleware.
+ * Only claw-auth may call it (signed service assertion, middleware/auth.ts).
  */
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { listJudgeModels } from "../eval-judge.js";
 import { LITELLM } from "../config.js";
 
@@ -29,7 +29,7 @@ const log = createLogger("litellm-models");
 
 export const litellmModelsRouter = Router();
 
-litellmModelsRouter.get("/internal/litellm/models", validateS2SKey, async (_req: Request, res: Response) => {
+litellmModelsRouter.get("/internal/litellm/models", requireClawAuthService, async (_req: Request, res: Response) => {
   try {
     // Empty when LITELLM_API_KEY is unset — the caller's "hide the picker"
     // contract, not an error.

@@ -652,8 +652,8 @@ lost, and the agent then came up with no way to speak at all.
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `POST /awakening/:idempotencyKey/result` | `requireStrictS2S` | Terminal callback. Idempotent by construction — writes `completedAt` on a row keyed by the same idempotency key the dispatch used. |
-| `POST /awakening/inbox/:sessionId/drain` | `requireStrictS2S` | Destructive drain of queued injection batches |
+| `POST /awakening/:idempotencyKey/result` | `requireRuntime` (runtime service assertion) | Terminal callback. Idempotent by construction — writes `completedAt` on a row keyed by the same idempotency key the dispatch used. |
+| `POST /awakening/inbox/:sessionId/drain` | `requireRuntime` (runtime service assertion) | Destructive drain of queued injection batches |
 | `GET /awakening/:agentId/status` | `requireAuth` + `requireNoAccessToken` + `requireClawAdmin` | Admin health: state row + last 20 runs |
 
 The result callback **acks first, reconciles after** — claw must never block on
