@@ -8,6 +8,7 @@ import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { v4 as uuidv4 } from 'uuid';
 import { callSideEffectService } from '@/services/callSideEffectService';
+import { callActivationService } from '@/services/callActivationService';
 import { livekitWebhookACL } from './livekitWebhookACL';
 import { transcriptService } from '@/services/transcriptService';
 import {
@@ -20,21 +21,8 @@ import { isTrackTurnedOffByHostControls } from '@/services/callHostControlUtils'
 import { callRecordingService } from '@/services/callRecordingService';
 import { EgressStatus } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
-import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
+import { emitCallEnded } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
-import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { validateOwnerInChannel, resolveItemTrackId, resolveInheritedOwner } from '@/sdlc/entityLinkService';
-import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared/sdlc';
-
-/** The owners a call may be filed against; mirrors sdlcCallLinkSchema. */
-const SDLC_CALL_OWNER_TYPES: readonly string[] = [
-  'CANVAS',
-  'TRACK',
-  'FOLDER',
-  'LINK',
-  'ATTACHMENT',
-];
-import { activityService } from '@/services/activity/activityService';
 import { userActivityStatusService } from '@/services/userActivityStatusService';
 import { handleParticipantJoinedTx } from '@/bypassAcl/transactions/livekitWebhookController';
 
@@ -179,30 +167,22 @@ export class LiveKitWebhookController {
 
   /**
    * Determine whether a webhook event belongs to a NOTE_TAKER (HEADLESS) room.
-   * Prefers the DB row (authoritative once the call exists); falls back to the
-   * room metadata for events that arrive before the Call row is created
-   * (room_started, and the very first participant_joined).
+   * Decided from the Call row alone, which /initiate writes before the room
+   * exists; room metadata is never consulted. Unknown rooms fall through to the
+   * channel handlers, which drop them.
    */
   private async isNoteTakerRoom(event: WebhookEvent): Promise<boolean> {
     const roomName = event.room?.name;
     if (!roomName) return false;
 
     const call = await repositories.calls.findByExternalId(roomName);
-    if (call) return call.callType === CallType.HEADLESS;
-
-    if (!event.room?.metadata) return false;
-    try {
-      const metadata = JSON.parse(event.room.metadata) as Record<string, unknown>;
-      return metadata.callType === CallType.HEADLESS;
-    } catch {
-      return false;
-    }
+    return call?.callType === CallType.HEADLESS;
   }
 
   /**
    * Handle room_started event
    * Called when a room is first created and becomes active
-   * 
+   *
    * Note: We only log this event. All DB operations happen when the first participant joins.
    */
   private async handleRoomStarted(event: WebhookEvent): Promise<void> {
@@ -212,7 +192,6 @@ export class LiveKitWebhookController {
     logger.info(`[LiveKit Webhook] Room started: ${roomName}`, {
       sid: event.room?.sid,
       creationTime: event.room?.creationTime ? Number(event.room.creationTime) : undefined,
-      metadata: event.room?.metadata,
     });
   }
 
@@ -391,322 +370,34 @@ export class LiveKitWebhookController {
     }
 
     try {
-      // Check if call record already exists
       let call = await repositories.calls.findByExternalId(roomName);
-      const callNotExist = !call;
 
-      // If call doesn't exist, this is the first participant - create everything using repository
-      if (callNotExist) {
-        logger.info(`[LiveKit Webhook] First participant joined - creating call record for ${roomName}`);
-
-        // Parse room metadata to get channel info
-        // Unguarded JSON.parse would throw into the outer catch with no stage context.
-        let roomMetadata: Record<string, any>;
-        try {
-          roomMetadata = event.room?.metadata ? JSON.parse(event.room.metadata) : {};
-        } catch (parseError) {
-          logger.error('[LiveKit Webhook] metadata_parse_failed', {
-            stage: 'metadata_parse',
-            room: roomName,
-            raw_metadata: (event.room?.metadata ?? '').substring(0, 200),
-            error: parseError,
-          });
-          return;
-        }
-        const channelId = roomMetadata.channelId;
-        const createdBy = roomMetadata.createdBy || participant.identity;
-        const callType = roomMetadata.callType;
-        const callOrigin = roomMetadata.callOrigin;
-        const existingConversationId = roomMetadata.conversationId;
-        const artifactMessageId = roomMetadata.artifactMessageId;
-        const invitedUserIds = roomMetadata.invitedUserIds; // Selected participants for conversation calls
-        const agentName = typeof roomMetadata.agentName === 'string' ? roomMetadata.agentName : undefined;
-
-        if (!channelId) {
-          logger.error(`[LiveKit Webhook] Missing channelId in room metadata for ${roomName}`);
-          return;
-        }
-
-        // ACL Validation: Verify permissions for call creation
-        // A DB timeout inside canCreateCall would fall into the outer catch with no stage label.
-        let aclCheck: Awaited<ReturnType<typeof livekitWebhookACL.canCreateCall>>;
-        try {
-          aclCheck = await livekitWebhookACL.canCreateCall({
-            channelId,
-            createdBy,
-            joiningUserId: participant.identity,
-          });
-        } catch (aclError) {
-          logger.error('[LiveKit Webhook] acl_check_failed', {
-            stage: 'acl_validation',
-            room: roomName,
-            channel: channelId,
-            error: aclError,
-          });
-          return;
-        }
-
-        if (!aclCheck.valid) {
-          logger.error(`[LiveKit Webhook] ACL validation failed: ${aclCheck.reason}`);
-          return;
-        }
-
-        logger.info(`[LiveKit Webhook] ACL validation passed for call creation: channel=${channelId}, creator=${createdBy}, joiner=${participant.identity}`);
-
-        // Get channel participants for creating participant records
-        let participantsToInvite: Array<{ userId: string }>;
-        if (invitedUserIds && Array.isArray(invitedUserIds) && invitedUserIds.length > 0) {
-          participantsToInvite = invitedUserIds.map((userId: string) => ({ userId }));
-          if (!participantsToInvite.some((p) => p.userId === createdBy)) {
-            participantsToInvite = [{ userId: createdBy }, ...participantsToInvite];
-          }
-        } else {
-          // Use all channel participants (default behavior for channel calls)
-          // DB failure here is otherwise unguarded and falls into outer catch with no stage.
-          try {
-            participantsToInvite = await repositories.channelParticipants.getChannelParticipants(channelId);
-          } catch (participantsError) {
-            logger.error('[LiveKit Webhook] channel_participants_lookup_failed', {
-              stage: 'channel_participants_lookup',
-              room: roomName,
-              channel: channelId,
-              error: participantsError,
-            });
-            return;
-          }
-        }
-
-        const now = new Date();
-
-        const conversationId = existingConversationId || uuidv4();
-        const messageId = uuidv4();
-        const callId = uuidv4();
-
-        // Construct room link
-        const roomLink = buildCallInviteUrl(roomName);
-
-        // Use repository method to create call with all related records atomically
-        // If this transaction fails the LiveKit room is already live with no DB record — a
-        // "ghost room". Catch it specifically so the log contains the room name and explicit
-        // ghost_room_detected marker rather than the generic 'Error handling participant join'.
-        const channelRecord = await this.db.channel.findUnique({
-          where: { id: channelId },
-          select: { workspaceId: true },
+      // Only the backend creates Call rows (/initiate, scheduling, automations). An
+      // event for a room it never created is dropped: whoever holds the LiveKit API
+      // secret can sign webhooks and edit room metadata, so neither is trusted as intent.
+      if (!call) {
+        logger.warn('[LiveKit Webhook] unknown_room_dropped', {
+          room: roomName,
+          participant: participant.identity,
         });
-        const result = await repositories.calls.createCallWithParticipantsAndMessage({
-          callId,
-          roomName,
-          channelId,
-          workspaceId: channelRecord?.workspaceId,
-          createdBy,
-          callType,
-          roomLink,
-          joiningUserId: participant.identity,
-          channelParticipants: participantsToInvite,
-          conversationId,
-          messageId,
-          now,
-          callOrigin,
-          ...(typeof artifactMessageId === 'string' && { artifactMessageId }),
-          agentName,
-          dispatchStatus: agentName ? 'dispatched' : undefined,
-        }).catch((txError) => {
-          logger.error('[LiveKit Webhook] call_record_creation_failed', {
-            stage: 'call_record_creation',
-            room: roomName,
-            channel: channelId,
-            error: txError,
-          });
-          logger.error('[LiveKit Webhook] ghost_room_detected', {
-            room: roomName,
-            livekit_room_is_live: true,
-            no_db_record: true,
-            action: 'manual_cleanup_may_be_required',
-          });
-          return null;
+        return;
+      }
+
+      // First join of a PENDING call: activate it from the intent /initiate persisted.
+      if (call.status === CallStatus.PENDING) {
+        const activated = await callActivationService.activatePendingCall(call, participant.identity);
+        if (!activated) return;
+        call = activated;
+      } else if (call.status === CallStatus.CANCELLED || call.status === CallStatus.ENDED) {
+        // Joins are refused for finished calls, so only a token issued earlier can land
+        // here; with room auto-create off the room is gone too. Never revive the row.
+        logger.warn('[LiveKit Webhook] finished_call_join_dropped', {
+          room: roomName,
+          status: call.status,
+          participant: participant.identity,
         });
-
-        if (!result) return;
-
-        call = result.call;
-
-        // SDLC linking: the initiator validated this context; now that the call
-        // and its conversation exist, record the entity mapping. Owner is a
-        // canvas or a track — either way the same two links are written:
-        //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
-        const sdlcLink = (
-          roomMetadata as {
-            sdlcLink?: { ownerType?: string; ownerId?: string };
-          }
-        ).sdlcLink;
-        if (sdlcLink?.ownerType && sdlcLink.ownerId) {
-          try {
-            const linkWorkspaceId = channelRecord?.workspaceId ?? null;
-            const ownerValid = SDLC_CALL_OWNER_TYPES.includes(sdlcLink.ownerType)
-              ? await validateOwnerInChannel(
-                  this.db,
-                  {
-                    sourceType: sdlcLink.ownerType as EntityLinkOwner['sourceType'],
-                    sourceId: sdlcLink.ownerId,
-                  },
-                  channelId
-                )
-              : false;
-            if (linkWorkspaceId && ownerValid) {
-              await this.db.sdlcEntityLink.createMany({
-                data: [
-                  {
-                    workspaceId: linkWorkspaceId,
-                    channelId,
-                    sourceType: sdlcLink.ownerType,
-                    sourceId: sdlcLink.ownerId,
-                    targetType: 'CALL',
-                    targetId: callId,
-                    relationType: 'CALL',
-                    createdBy,
-                  },
-                  {
-                    workspaceId: linkWorkspaceId,
-                    channelId,
-                    sourceType: sdlcLink.ownerType,
-                    sourceId: sdlcLink.ownerId,
-                    targetType: 'CONVERSATION',
-                    targetId: conversationId,
-                    relationType: 'DISCUSSION',
-                    createdBy,
-                  },
-                ],
-                skipDuplicates: true,
-              });
-              // A conversation filed against an item is also filed against the
-              // item's track, the way a message-started one is through
-              // entityLinkContext.trackRollUp. Without this edge the call's
-              // conversation exists but never appears in the track's list.
-              if (
-                sdlcLink.ownerType === 'FOLDER' ||
-                sdlcLink.ownerType === 'ATTACHMENT' ||
-                sdlcLink.ownerType === 'LINK'
-              ) {
-                const rollUpTrackId = await resolveItemTrackId(
-                  this.db,
-                  sdlcLink.ownerType,
-                  sdlcLink.ownerId
-                );
-                if (rollUpTrackId) {
-                  await this.db.sdlcEntityLink.createMany({
-                    data: [
-                      {
-                        workspaceId: linkWorkspaceId,
-                        channelId,
-                        sourceType: 'TRACK',
-                        sourceId: rollUpTrackId,
-                        targetType: 'CONVERSATION',
-                        targetId: conversationId,
-                        relationType: SDLC_TRACK_FLAT_RELATION,
-                        createdBy,
-                      },
-                    ],
-                    skipDuplicates: true,
-                  });
-                }
-              }
-              if (existingConversationId) {
-                await activityService.fillSdlcOwner(conversationId, channelId);
-              }
-              logger.info(
-                `[LiveKit Webhook] sdlc_link_created | call=${roomName} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
-              );
-            }
-          } catch (sdlcLinkError) {
-            // Linking must never break call creation.
-            logger.warn('[LiveKit Webhook] sdlc_link_failed', {
-              call: roomName,
-              error: sdlcLinkError,
-            });
-          }
-        } else if (existingConversationId) {
-          // A call started inside a discussion belongs where the discussion does: its
-          // DISCUSSION link names the track, item or artifact, and the call is filed
-          // there too. The conversation already carries that link.
-          try {
-            const linkWorkspaceId = channelRecord?.workspaceId ?? null;
-            const owner = await resolveInheritedOwner(this.db, existingConversationId, channelId);
-            if (linkWorkspaceId && owner) {
-              await this.db.sdlcEntityLink.createMany({
-                data: [
-                  {
-                    workspaceId: linkWorkspaceId,
-                    channelId,
-                    sourceType: owner.sourceType,
-                    sourceId: owner.sourceId,
-                    targetType: 'CALL',
-                    targetId: callId,
-                    relationType: 'CALL',
-                    createdBy,
-                  },
-                ],
-                skipDuplicates: true,
-              });
-              logger.info(
-                `[LiveKit Webhook] sdlc_call_link_inherited | call=${roomName} owner=${owner.sourceType}:${owner.sourceId}`,
-              );
-            }
-          } catch (inheritError) {
-            // Linking must never break call creation.
-            logger.warn('[LiveKit Webhook] sdlc_call_link_inherit_failed', {
-              call: roomName,
-              error: inheritError,
-            });
-          }
-        }
-
-        // Emit call-started automation event when the first participant creates the call
-        if (call) {
-          emitCallStarted({
-            id: call.id,
-            externalId: call.externalId,
-            channelId: call.channelId,
-            title: call.title,
-            callType: call.callType as CallType,
-            startedAt: call.startedAt,
-          }).catch(autoError => {
-            logger.error(`[LiveKit Webhook] Failed to emit call-started automation event:`, autoError);
-          });
-          logger.info(`[LiveKit Webhook] Emitted call-started automation event for ${roomName}`);
-        }
-
-        logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
-
-        // Disabled (LLM)
-        // // Generate title from thread call
-        // if (callOrigin === CallOrigin.CONVERSATION && existingConversationId && call) {
-        //   const callIdForUpdate = call.id;
-        //   transcriptService.generateCallTitleFromConversation(existingConversationId)
-        //     .then(async (generatedTitle) => {
-        //       if (generatedTitle) {
-        //         await repositories.calls.update(callIdForUpdate, { title: generatedTitle });
-        //         logger.info(`[LiveKit Webhook] Generated and saved title "${generatedTitle}" for call ${roomName}`);
-        //       }
-        //     })
-        //     .catch((error) => {
-        //       logger.error(`[LiveKit Webhook] Failed to generate title for call ${roomName}:`, error);
-        //     });
-        // }
-
-        // Trigger notifications for invited participants
-        if (result.invitedParticipantIds.length > 0) {
-          logger.info(`[LiveKit Webhook] Triggering notifications for ${result.invitedParticipantIds.length} invited participants`);
-          await Promise.allSettled(
-            result.invitedParticipantIds.map(async (participantId) => {
-              try {
-                await callSideEffectService.handleParticipantInvited(participantId);
-              } catch (error) {
-                logger.error(`[LiveKit Webhook] Failed to trigger notification for participant ${participantId}:`, error);
-              }
-            })
-          );
-        }
-      } else if (call) {
+        return;
+      } else {
         // If it's a scheduled call, activate it FIRST
         if (call.status === CallStatus.SCHEDULED) {
           // ── Scheduled call activation ──────────────────────────────────────────
