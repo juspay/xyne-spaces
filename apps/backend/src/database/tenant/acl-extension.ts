@@ -13,7 +13,7 @@ import { getContextOrNull, currentWorkspaceId, isRequestContext } from './contex
 import { ACLFactory } from '@/database/acl';
 import { logger } from '@/utils/logger';
 
-type TransactionFrame = { tx: unknown; open: boolean };
+type TransactionFrame = { tx: Prisma.TransactionClient; open: boolean };
 const txStorage = new AsyncLocalStorage<TransactionFrame>();
 
 /**
@@ -21,7 +21,7 @@ const txStorage = new AsyncLocalStorage<TransactionFrame>();
  * one. Work scheduled inside a transaction keeps its frame, so the frame is closed once the
  * transaction callback settles.
  */
-export function currentTransactionClient(): unknown {
+export function currentTransactionClient(): Prisma.TransactionClient | undefined {
   const frame = txStorage.getStore();
   return frame?.open ? frame.tx : undefined;
 }
@@ -197,7 +197,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          if (txStorage.getStore() !== undefined) {
+          if (txStorage.getStore()?.open) {
             // Interactive transactions run on the base client; record what goes through.
             notePattern('[acl] ran inside a transaction', model, operation);
             return query(args);
@@ -419,8 +419,8 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
     client: {
       $transaction(...args: unknown[]) {
         if (typeof args[0] === 'function') {
-          const fn = args[0] as (tx: unknown) => unknown;
-          return runTransaction(async (tx: unknown) => {
+          const fn = args[0] as (tx: Prisma.TransactionClient) => unknown;
+          return runTransaction(async (tx: Prisma.TransactionClient) => {
             const frame: TransactionFrame = { tx, open: true };
             try {
               return await txStorage.run(frame, () => fn(tx));
