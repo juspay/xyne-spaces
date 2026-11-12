@@ -93,7 +93,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "engine.io-client": "^6.6.6",
-    "expo": "57.0.11",
+    "expo": "57.0.32",
     "expo-asset": "57.0.9",
     "expo-audio": "57.0.3",
     "expo-battery": "57.0.1",
