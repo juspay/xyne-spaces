@@ -52,8 +52,10 @@ export const AuthSessionRevokeReason = {
   PASSWORD_RESET: 'password_reset',
   ACCOUNT_DEACTIVATED: 'account_deactivated',
   TEST_CLEANUP: 'test_cleanup',
-  /** SDK SSO: a rotated refresh token was presented again after its grace window. */
+  /** A rotated refresh token was presented again after its grace window. */
   REFRESH_TOKEN_REUSED: 'refresh_token_reused',
+  /** Refresh denied: the member is no longer an active user of the workspace being refreshed. */
+  WORKSPACE_ACCESS_LOST: 'workspace_access_lost',
 } as const;
 
 export type AuthSessionRevokeReason = (typeof AuthSessionRevokeReason)[keyof typeof AuthSessionRevokeReason];
@@ -192,6 +194,11 @@ export class AuthSessionService {
     };
   }
 
+  /** Clear the `xs` cookie; any Set-Cookie for it earlier in this response is overridden. */
+  clearAuthSessionCookie(req: Request, res: Response): void {
+    res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
+  }
+
   private setAuthSessionCookie(req: Request, res: Response, token: string, refreshTokenExpiry: Date): void {
     res.cookie(AUTH_SESSION_COOKIE, token, {
       ...this.authSessionCookieOptions(req),
@@ -311,7 +318,7 @@ export class AuthSessionService {
           platform: resolveDevicePlatform(req),
         });
         await this.revokeById(rotation.sessionId, AuthSessionRevokeReason.REFRESH_TOKEN_REUSED);
-        res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
+        this.clearAuthSessionCookie(req, res);
         return { status: 'invalid' };
       }
       case 'invalid':
@@ -500,7 +507,7 @@ export class AuthSessionService {
       revokedIds.push(identity.sessionId);
     }
     await this.markSessionsRevoked(revokedIds);
-    res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
+    this.clearAuthSessionCookie(req, res);
   }
 
   /** Deny access JWTs carrying these sids until the longest-lived one has expired. Never throws. */
