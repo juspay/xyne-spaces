@@ -1,5 +1,6 @@
 import { config } from 'dotenv'
 import { config as appConfig } from '@/config/env'
+import '@/services/redisEncryption'
 // Disabled (LLM)
 // import { startDoclingSchedulerRole } from '@/services/ingestion/docling/workers/scheduler'
 // import { startRuntimeConfigPolling } from '@/services/ingestion/docling/runtime/config'
