@@ -5,6 +5,8 @@ import type { GoogleCalendarPushState } from '@/database/repositories/callReposi
 import { db } from '@/database/client';
 import { MessageType } from '@xyne/shared';
 import { pushCallToCalendar } from '@/services/callCalendarPushService';
+import type { CallTranscriptionJobData } from '@/queues/callTranscriptionQueue';
+import type { CallTranscriptionService } from '@/services/ozonetel/callTranscriptionService';
 import { asSystem, asService, rawQuery } from './base';
 
 /**
@@ -148,5 +150,28 @@ export async function appendCallMarkedItem(externalId: string, item: Prisma.Inpu
       SET "markedItems" = "markedItems" || ${JSON.stringify(item)}::jsonb
       WHERE "externalId" = ${externalId}
     `,
+  );
+}
+
+/**
+ * Relocated from queues/callTranscriptionQueue.ts's processor. Background job → no request
+ * context; acts as the user who asked for the transcript, in the call's workspace, so the
+ * transcript attachment is stamped and written under the workspace storage key.
+ */
+export function runCallTranscriptionJob(
+  job: CallTranscriptionJobData,
+  attempt: number,
+  maxAttempts: number,
+): ReturnType<CallTranscriptionService['process']> {
+  return asService(
+    ['Email', 'MessageAttachment', 'Ticket', 'Channel'],
+    'call transcription job: background job has no request context, scope opened from the job\'s workspace',
+    job.userId,
+    job.workspaceId,
+    async () => {
+      // Lazy import keeps the producer (API) free of the service's dependencies.
+      const { callTranscriptionService } = await import('@/services/ozonetel/callTranscriptionService');
+      return callTranscriptionService.process(job, attempt, maxAttempts);
+    },
   );
 }

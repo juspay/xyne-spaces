@@ -161,7 +161,15 @@ export function isSystemWorkspaceId(workspaceId: string | null | undefined): boo
  * before any route. Auth-agnostic — resolves req.user lazily at DB-call time.
  */
 export function tenantScopeMiddleware(req: Request, _res: Response, next: NextFunction): void {
-  storage.run({ kind: 'request', req }, () => next());
+  runInRequestContext(req, next);
+}
+
+/**
+ * Re-enter `req`'s scope from a callback a library runs off the request's async chain — e.g.
+ * a multer storage engine, which busboy calls from socket data events.
+ */
+export function runInRequestContext<T>(req: Request, fn: () => T): T {
+  return storage.run({ kind: 'request', req }, fn);
 }
 
 /**
