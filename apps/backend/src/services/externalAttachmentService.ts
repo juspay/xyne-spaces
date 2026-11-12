@@ -4,7 +4,7 @@ import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { decrypt } from './encryptionService';
-import { assertUrlSyntaxSafe, safeExternalFetch } from '@/utils/ssrfGuard';
+import { assertUrlSyntaxSafe, safeWebhookFetch } from '@/utils/ssrfGuard';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { UploadedFileResult } from '@/services/fileUploadService';
@@ -344,7 +344,7 @@ export class ExternalAttachmentService {
           // The source's credential goes only to the provider's own hosts; a link or a
           // redirect anywhere else is fetched without it.
           const headers = authHandler.isCredentialHost(new URL(url).hostname) ? authHeaders : publicHeaders;
-          response = await safeExternalFetch(url, { method: 'GET', headers, signal: controller.signal });
+          response = await safeWebhookFetch(url, { method: 'GET', headers, signal: controller.signal });
           const location = response.headers.get('location');
           if (response.status < 300 || response.status >= 400 || !location) break;
           if (hop >= MAX_ATTACHMENT_REDIRECTS) throw new Error(`Too many redirects downloading ${fileName}`);

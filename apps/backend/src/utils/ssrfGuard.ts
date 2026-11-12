@@ -310,10 +310,21 @@ export async function safeWebhookFetch(rawUrl: string, init: RequestInit = {}): 
   return (await undiciFetch(rawUrl, { ...init, redirect: 'manual', dispatcher } as never)) as unknown as Response;
 }
 
+// One ProxyAgent per proxy URL, reused across requests and redirect hops so sockets are pooled
+// rather than leaked.
+const proxyAgents = new Map<string, ProxyAgent>();
+function proxyAgentFor(proxyUrl: string): ProxyAgent {
+  let agent = proxyAgents.get(proxyUrl);
+  if (!agent) {
+    agent = new ProxyAgent(proxyUrl);
+    proxyAgents.set(proxyUrl, agent);
+  }
+  return agent;
+}
+
 /**
- * safeWebhookFetch's stricter sibling for a URL that has no legitimate internal target (a link
- * preview): private, loopback and in-cluster hosts are always refused, whatever
- * WEBHOOK_ALLOW_INTERNAL_HOSTS says. The connection is pinned to the validated addresses, or sent
+ * A strict fetch for a URL that has no legitimate internal target (a link
+ * preview): private, loopback and in-cluster hosts are always refused. The connection is pinned to the validated addresses, or sent
  * through `proxyUrl` when one is configured (the proxy then makes the outbound connection, so
  * address pinning applies to direct connections only). Callers must follow redirects themselves.
  */
@@ -333,7 +344,7 @@ export async function safeExternalFetch(
     isAllowPrivate() && config.env === 'development',
   );
   const dispatcher = opts.proxyUrl
-    ? new ProxyAgent(opts.proxyUrl)
+    ? proxyAgentFor(opts.proxyUrl)
     : pinned
       ? pinnedDispatcherFor(parsed.hostname, pinned)
       : new Agent({ keepAliveTimeout: 1000 });
@@ -370,8 +381,8 @@ const CROSS_ORIGIN_STRIPPED_HEADERS = ['authorization', 'cookie', 'proxy-authori
 /**
  * safeWebhookFetch for callers that need redirects followed (provider file downloads
  * answer with a 302 to a signed CDN URL). Each hop goes back through safeWebhookFetch, so
- * every redirect target is validated and pinned like the first request. Credentials are
- * dropped when a hop leaves the original origin.
+ * every redirect target is validated like the first request (and sent through the egress
+ * proxy when one is configured). Credentials are dropped when a hop leaves the original origin.
  */
 export async function safeFetchFollowingRedirects(
   rawUrl: string,
@@ -429,12 +440,6 @@ export function assertUrlSyntaxSafe(rawUrl: string): URL {
   if (!host) throw new SsrfBlockedError(rawUrl, null, 'empty host');
 
   const literalKind = isIP(host);
-  if (config.webhooks.allowInternalHosts) {
-    if (isMetadataHostname(host) || (literalKind === 4 && isMetadataV4(host)) || (literalKind === 6 && isMetadataV6(host))) {
-      throw new SsrfBlockedError(host, literalKind ? host : null, 'loopback / link-local / metadata');
-    }
-    return parsed;
-  }
   if (isAllowPrivate() && config.env === 'development') return parsed;
 
   if (isBlockedHostname(host)) {
@@ -558,7 +563,11 @@ export function createHttpClient(
     data?: unknown,
     config: HttpRequestConfig = {},
   ): Promise<HttpResponse<T>> {
-    const target = new URL(url, defaults.baseURL);
+    // Join like axios: new URL(url, baseURL) would drop the baseURL's path for a leading-slash url.
+    const absolute = /^([a-z][a-z\d+\-.]*:)?\/\//i.test(url);
+    const target = new URL(
+      defaults.baseURL && !absolute ? `${defaults.baseURL.replace(/\/+$/, '')}/${url.replace(/^\/+/, '')}` : url,
+    );
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) target.searchParams.append(key, String(value));
     }
@@ -601,7 +610,20 @@ export function createHttpClient(
       );
     }
 
-    const payload = (await readBody(res, config.responseType, config.maxContentLength)) as T;
+    let payload: T;
+    try {
+      payload = (await readBody(res, config.responseType, config.maxContentLength)) as T;
+    } catch (error) {
+      // A timeout or reset while the body streams is still a network failure, not a raw DOMException.
+      if (error instanceof HttpError) throw error;
+      const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+      throw new HttpError(
+        error instanceof Error ? error.message : 'Network error',
+        undefined,
+        timedOut ? 'ECONNABORTED' : 'ERR_NETWORK',
+        error,
+      );
+    }
     const accepted = config.validateStatus ? config.validateStatus(res.status) : res.ok;
     if (!accepted) {
       throw new HttpError(`Request failed with status code ${res.status}`, {
