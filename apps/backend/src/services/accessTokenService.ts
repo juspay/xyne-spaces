@@ -101,6 +101,20 @@ export function setAccessCookies(
   });
 }
 
+/**
+ * Clear every workspace JWT cookie the request carries and the `xyne_last_workspace` pointer.
+ * Used when a session ends server-side (logout, refresh denied) so the browser does not keep
+ * presenting tokens that will only earn it more 401s/403s.
+ */
+export function clearAccessCookies(req: Request, res: Response): void {
+  for (const cookieName of Object.keys(req.cookies ?? {})) {
+    if (cookieName.startsWith(WORKSPACE_TOKEN_COOKIE_PREFIX) && cookieName.endsWith('_token')) {
+      res.clearCookie(cookieName, { path: '/' });
+    }
+  }
+  res.clearCookie(LAST_WORKSPACE_COOKIE, { path: '/' });
+}
+
 /** Mint and set in one go; returns the minted token for callers that also put it in the body. */
 export function issueAccessCookies(
   res: Response,

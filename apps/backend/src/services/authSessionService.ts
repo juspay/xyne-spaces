@@ -50,6 +50,8 @@ export const AuthSessionRevokeReason = {
   TEST_CLEANUP: 'test_cleanup',
   /** SDK SSO: a rotated refresh token was presented again after its grace window. */
   REFRESH_TOKEN_REUSED: 'refresh_token_reused',
+  /** Refresh denied: the member is no longer an active user of the workspace being refreshed. */
+  WORKSPACE_ACCESS_LOST: 'workspace_access_lost',
 } as const;
 
 export type AuthSessionRevokeReason = (typeof AuthSessionRevokeReason)[keyof typeof AuthSessionRevokeReason];
@@ -167,6 +169,11 @@ export class AuthSessionService {
       sameSite: isMobileNative ? ('none' as const) : ('strict' as const),
       path: AUTH_SESSION_COOKIE_PATH,
     };
+  }
+
+  /** Clear the `xs` cookie with the same options it was set with. */
+  clearAuthSessionCookie(req: Request, res: Response): void {
+    res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
   }
 
   private setAuthSessionCookie(req: Request, res: Response, token: string, refreshTokenExpiry: Date): void {
@@ -399,7 +406,7 @@ export class AuthSessionService {
       revokedIds.push(identity.sessionId);
     }
     await this.markSessionsRevoked(revokedIds);
-    res.clearCookie(AUTH_SESSION_COOKIE, this.authSessionCookieOptions(req));
+    this.clearAuthSessionCookie(req, res);
   }
 
   /** Deny access JWTs carrying these sids until the longest-lived one has expired. Never throws. */
