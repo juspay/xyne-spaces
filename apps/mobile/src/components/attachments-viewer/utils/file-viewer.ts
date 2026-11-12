@@ -101,7 +101,8 @@ export const getAttachmentFileCategory = (
   if (mime.startsWith('audio/')) return 'audio';
   // The declared MIME comes from the uploader; a name with another extension (e.g. evil.html
   // sent as application/pdf) must not be routed to the in-app PDF WebView.
-  if (name.endsWith('.pdf') || (mime === 'application/pdf' && !/\.[a-z0-9]{1,8}$/.test(name))) return 'pdf';
+  if (name.endsWith('.pdf') || (mime === 'application/pdf' && !/\.[a-z0-9]{1,8}$/.test(name)))
+    return 'pdf';
   if (mime === 'text/csv' || name.endsWith('.csv')) return 'csv';
   if (mime === 'text/html' || name.endsWith('.html') || name.endsWith('.htm')) return 'html';
 
