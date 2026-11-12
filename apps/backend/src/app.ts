@@ -232,7 +232,7 @@ import merchantRoutes from '@/routes/merchants';
 import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
-// import sdlcClawRoutes from '@/routes/sdlcClaw';
+import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
@@ -721,7 +721,10 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
-    // this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    // The SDLC screen creates artifacts, artifact types and links through these routes.
+    // User auth only: 25c3a5cc3 took this router away from Claw app tokens
+    // (authenticateUserOrApp), and that stays so.
+    this.app.use('/api/sdlc/claw', authMiddleware.authenticate, sdlcClawRoutes);
     this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
     // Board routes (auth and ACL required)
