@@ -1608,7 +1608,6 @@ export const queries = defineQueries({
         const q = searchQuery.trim();
         query = query.where(helpers =>
           helpers.or(
-            helpers.exists('ticket', ticket => ticket.where('title', 'ILIKE', `%${q}%`)),
             helpers.exists('ticket', ticket => ticket.where('xyneId', 'ILIKE', `%${q}%`)),
             helpers.cmp('workflowName', 'ILIKE', `%${q}%`),
           ),
@@ -5517,21 +5516,16 @@ export const queries = defineQueries({
 
   releaseTicketsSearch: defineQuery(
     z.object({
-      search: z.string().optional(),
+      // Matches from Vespa; omitted means the most recent tickets.
+      ticketIds: z.array(z.string()).optional(),
       limit: z.number().optional(),
     }),
-    ({ args: { search, limit } }) => {
+    ({ args: { ticketIds, limit } }) => {
       let query = zql.tickets
         .where('ticketType', BaseTicketType.Release)
         .orderBy('createdAt', 'desc');
-      if (search && search.trim()) {
-        const searchValue = `%${search.trim()}%`;
-        query = query.where(helpers =>
-          helpers.or(
-            helpers.cmp('xyneId', 'ILIKE', searchValue),
-            helpers.cmp('title', 'ILIKE', searchValue),
-          ),
-        );
+      if (ticketIds) {
+        query = query.where('id', 'IN', ticketIds);
       }
       return query.limit(limit ?? 10);
     },
@@ -5539,10 +5533,11 @@ export const queries = defineQueries({
 
   ticketsSearch: defineQuery(
     z.object({
-      search: z.string().optional(),
+      // Matches from Vespa; omitted means the most recent tickets.
+      ticketIds: z.array(z.string()).optional(),
       limit: z.number().optional(),
     }),
-    ({ args: { search, limit } }) => {
+    ({ args: { ticketIds, limit } }) => {
       let query = zql.tickets
         .where(helpers =>
           helpers.and(
@@ -5551,14 +5546,8 @@ export const queries = defineQueries({
           ),
         )
         .orderBy('createdAt', 'desc');
-      if (search && search.trim()) {
-        const searchValue = `%${search.trim()}%`;
-        query = query.where(helpers =>
-          helpers.or(
-            helpers.cmp('xyneId', 'ILIKE', searchValue),
-            helpers.cmp('title', 'ILIKE', searchValue),
-          ),
-        );
+      if (ticketIds) {
+        query = query.where('id', 'IN', ticketIds);
       }
       return query.limit(limit ?? 10);
     },
