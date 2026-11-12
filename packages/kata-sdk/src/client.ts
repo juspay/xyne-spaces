@@ -181,7 +181,6 @@ export class KataClient {
         name: claimName,
       });
     } catch (err) {
-      // client-node rejects with ApiException, whose `code` is the HTTP status.
       if ((err as { code?: number }).code === 404) return;
       console.error(`Failed to delete orphaned SandboxClaim ${claimName} in ${namespace} after provisioning error:`, err);
     }

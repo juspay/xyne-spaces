@@ -96,7 +96,6 @@ export class Session {
         name: this.claimName,
       });
     } catch (err) {
-      // client-node rejects with ApiException, whose `code` is the HTTP status.
       if ((err as { code?: number }).code !== 404) throw err;
     }
   }

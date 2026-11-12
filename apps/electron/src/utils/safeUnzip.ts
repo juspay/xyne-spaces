@@ -4,17 +4,9 @@ import { pipeline } from 'stream/promises';
 import yauzl, { type Entry, type ZipFile } from 'yauzl';
 import { safeChildPath } from './safePath';
 
-// Unix file-type bits live in the high 16 bits of a zip entry's external attributes.
+const MAX_UNZIPPED_BYTES = 1024 * 1024 * 1024; // 1 GB
 const S_IFMT = 0o170000;
 const S_IFLNK = 0o120000;
-
-/** Default cap on the total unpacked size, so a zip bomb cannot fill the disk. */
-export const DEFAULT_MAX_UNZIPPED_BYTES = 1024 * 1024 * 1024; // 1 GB
-
-export interface SafeUnzipOptions {
-  /** Refuse the archive once its entries add up to more than this many bytes. */
-  maxTotalBytes?: number;
-}
 
 function isSymlink(entry: Entry): boolean {
   return ((entry.externalFileAttributes >>> 16) & S_IFMT) === S_IFLNK;
@@ -38,23 +30,8 @@ function openEntryStream(zipFile: ZipFile, entry: Entry): Promise<NodeJS.Readabl
   });
 }
 
-/**
- * Extracts `zipPath` into `destDir`, refusing any entry that could write outside it.
- *
- * Replaces extract-zip, which recreates symlink entries and then writes later
- * entries through them (GHSA-7pqw-9j4j-h8q3, GHSA-jmr9-qjv8-65gv). Here symlink
- * entries are rejected outright and every entry path must resolve inside
- * `destDir`, so the archive can only create regular files and directories under it.
- *
- * The total unpacked size is capped (1 GB by default). yauzl's validateEntrySizes,
- * on by default, fails any entry whose data is longer than its declared size, so
- * summing the declared sizes bounds what can actually be written.
- */
-export async function safeUnzip(
-  zipPath: string,
-  destDir: string,
-  { maxTotalBytes = DEFAULT_MAX_UNZIPPED_BYTES }: SafeUnzipOptions = {},
-): Promise<void> {
+/** Extracts a zip into destDir, rejecting symlinks, paths outside destDir and archives over 1 GB. */
+export async function safeUnzip(zipPath: string, destDir: string): Promise<void> {
   const zipFile = await openZip(zipPath);
   let totalBytes = 0;
   try {
@@ -69,8 +46,8 @@ export async function safeUnzip(
             throw new Error(`Refusing symlink entry in zip: ${entry.fileName}`);
           }
           totalBytes += entry.uncompressedSize;
-          if (totalBytes > maxTotalBytes) {
-            throw new Error(`Refusing zip: unpacked size exceeds the ${maxTotalBytes}-byte limit`);
+          if (totalBytes > MAX_UNZIPPED_BYTES) {
+            throw new Error('Refusing zip: unpacked size exceeds 1 GB');
           }
           const target = safeChildPath(destDir, entry.fileName);
           if (!target) {
