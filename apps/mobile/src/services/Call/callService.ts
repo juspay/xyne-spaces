@@ -168,7 +168,9 @@ function extractCredentials(
     throw new ApiError(errorFallback, 500, 'INVALID_RESPONSE');
   }
   const encryption =
-    response.encryption && typeof response.encryption.key === 'string' ? response.encryption : undefined;
+    response.encryption && typeof response.encryption.key === 'string'
+      ? response.encryption
+      : undefined;
   return {
     token: response.token,
     livekitUrl: response.livekitUrl,
