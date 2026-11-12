@@ -105,7 +105,8 @@ interface ConfluencePageResponse<T> {
 export class ConfluenceClient {
   private readonly baseUrl: string;
   // Only the configured Confluence host.
-  private readonly confluenceFetch = allowlistedFetch(() => [this.baseUrl]);
+  // Attachment downloads redirect to Atlassian's media host.
+  private readonly confluenceFetch = allowlistedFetch(() => [this.baseUrl, 'api.media.atlassian.com']);
 
   constructor(private readonly config: ConfluenceClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, '');

@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises';
 import { config } from '@/config/env';
 import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
-import { assertUrlSyntaxSafe, safeWebhookFetch } from '@/utils/ssrfGuard';
+import { assertUrlSyntaxSafe, safeFetchFollowingRedirects } from '@/utils/ssrfGuard';
 
 const USER_MAP_TTL_MS = 15 * 60 * 1000;
 
@@ -79,7 +79,7 @@ export const loadJiraUserMapFromLocation = async (location: string): Promise<Man
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        const response = await safeWebhookFetch(trimmed, { redirect: 'manual' });
+        const response = await safeFetchFollowingRedirects(trimmed);
         if (!response.ok) {
           throw new Error(`User map CSV request failed (${response.status})`);
         }

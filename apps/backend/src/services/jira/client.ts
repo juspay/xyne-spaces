@@ -5,7 +5,8 @@ import { ChannelScopeType } from '@xyne/shared';
 import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 // Only the configured Jira host.
-const jiraFetch = allowlistedFetch(() => [config.jira.baseUrl]);
+// Attachment downloads redirect to Atlassian's media host.
+const jiraFetch = allowlistedFetch(() => [config.jira.baseUrl, 'api.media.atlassian.com']);
 
 const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const JIRA_MAX_RETRY_ATTEMPTS = 5;
