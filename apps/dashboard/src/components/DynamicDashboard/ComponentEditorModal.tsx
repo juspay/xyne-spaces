@@ -1,8 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  QueryVisualizationType,
-  type DashboardToolCall,
-} from '@xyne/shared';
+import { QueryVisualizationType, type DashboardToolCall } from '@xyne/shared';
 import { AlertTriangle, Database, Loader2 } from 'lucide-react';
 import { ReactElement, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -18,11 +15,7 @@ import {
 } from '../../services/DynamicDashboard/dashboardCrudService';
 import { dashboardKeys } from '../../hooks/useDashboards';
 import { dataSourceKeys } from '../../hooks/useDataSources';
-import {
-  ComponentTile,
-  type ComponentTileData,
-  getRendererForType,
-} from './ComponentGrid';
+import { ComponentTile, type ComponentTileData, getRendererForType } from './ComponentGrid';
 import {
   ALL_TYPES,
   type FilterRow,

@@ -349,38 +349,38 @@ const RecapPanel = (): ReactElement => {
         firstCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
       if (!conversationId) return null;
 
-  //     const messageId = firstCitation?.messageId ?? drilldown?.messageId ?? undefined;
-  //     return {
-  //       conversationId,
-  //       channelId: card.channelId,
-  //       senderName: card.channelName,
-  //       previewText: `${card.channelName} recap reference`,
-  //       ...(messageId && { messageId }),
-  //       isThreadMessage: true,
-  //     };
-  //   },
-  //   [],
-  // );
+      const messageId = firstCitation?.messageId ?? drilldown?.messageId ?? undefined;
+      return {
+        conversationId,
+        channelId: card.channelId,
+        senderName: card.channelName,
+        previewText: `${card.channelName} recap reference`,
+        ...(messageId && { messageId }),
+        isThreadMessage: true,
+      };
+    },
+    [],
+  );
 
-  // const handleAskAIAboutRecapReference = useCallback(
-  //   (
-  //     card: RecapCard,
-  //     pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
-  //     drilldown?: { conversationId: string | null; messageId: string | null },
-  //   ): void => {
-  //     const threadInfo = buildAskAIThreadInfo(card, pointCitations, drilldown);
-  //     if (!threadInfo) return;
+  const handleAskAIAboutRecapReference = useCallback(
+    (
+      card: RecapCard,
+      pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
+      drilldown?: { conversationId: string | null; messageId: string | null },
+    ): void => {
+      const threadInfo = buildAskAIThreadInfo(card, pointCitations, drilldown);
+      if (!threadInfo) return;
 
-  //     xyneAIActor.send({
-  //       type: 'OPEN',
-  //       channelId: card.channelId,
-  //       threadInfo,
-  //       startFreshChat: true,
-  //       trackSource: 'recap_panel',
-  //     });
-  //   },
-  //   [buildAskAIThreadInfo],
-  // );
+      xyneAIActor.send({
+        type: 'OPEN',
+        channelId: card.channelId,
+        threadInfo,
+        startFreshChat: true,
+        trackSource: 'recap_panel',
+      });
+    },
+    [buildAskAIThreadInfo],
+  );
 
   // Render recap cards content (left/center panel)
   const renderRecapCards = (): ReactElement => {

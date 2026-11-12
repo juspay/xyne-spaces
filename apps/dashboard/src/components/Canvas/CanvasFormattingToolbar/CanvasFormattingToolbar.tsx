@@ -84,63 +84,63 @@ export function CanvasToolbarAttachedActions({
     const state = editor?._tiptapEditor?.view?.state;
     if (!state || state.selection.empty) return '';
 
-  //   const { selection } = state;
-  //   const withinOneTextblock =
-  //     selection instanceof TextSelection &&
-  //     selection.$from.parent === selection.$to.parent &&
-  //     selection.$from.parent.isTextblock;
+    const { selection } = state;
+    const withinOneTextblock =
+      selection instanceof TextSelection &&
+      selection.$from.parent === selection.$to.parent &&
+      selection.$from.parent.isTextblock;
 
-  //   if (!withinOneTextblock) {
-  //     try {
-  //       // Cells are selected by rectangle, not by range, and the slice cut from
-  //       // that range collapses to a single cell — which is why a table used to
-  //       // arrive as one of its cells. Picking cells out of a table means the
-  //       // table, so the whole block is what goes.
-  //       const blocks = isCellSelection(selection)
-  //         ? [editor.getTextCursorPosition().block]
-  //         : editor.getSelectionCutBlocks().blocks;
-  //       const markdown = editor
-  //         .blocksToMarkdownLossy(blocks as Parameters<typeof editor.blocksToMarkdownLossy>[0])
-  //         .trim();
-  //       if (markdown) return markdown;
-  //     } catch {
-  //       // Custom blocks without a markdown form fall through to their text.
-  //     }
-  //   }
+    if (!withinOneTextblock) {
+      try {
+        // Cells are selected by rectangle, not by range, and the slice cut from
+        // that range collapses to a single cell — which is why a table used to
+        // arrive as one of its cells. Picking cells out of a table means the
+        // table, so the whole block is what goes.
+        const blocks = isCellSelection(selection)
+          ? [editor.getTextCursorPosition().block]
+          : editor.getSelectionCutBlocks().blocks;
+        const markdown = editor
+          .blocksToMarkdownLossy(blocks as Parameters<typeof editor.blocksToMarkdownLossy>[0])
+          .trim();
+        if (markdown) return markdown;
+      } catch {
+        // Custom blocks without a markdown form fall through to their text.
+      }
+    }
 
-  //   return state.doc.textBetween(selection.from, selection.to, '\n', ' ').trim();
-  // }, [editor]);
+    return state.doc.textBetween(selection.from, selection.to, '\n', ' ').trim();
+  }, [editor]);
 
   const handleAskAI = useCallback((): void => {
     if (!canvasId) return;
 
-  //   const selectedText =
-  //     selectionText ||
-  //     readSelection() ||
-  //     window.getSelection()?.toString().trim() ||
-  //     selectedTextRef.current;
-  //   if (!selectedText) return;
+    const selectedText =
+      selectionText ||
+      readSelection() ||
+      window.getSelection()?.toString().trim() ||
+      selectedTextRef.current;
+    if (!selectedText) return;
 
-  //   const preview = selectedText.length > 50 ? `${selectedText.substring(0, 50)}...` : selectedText;
-  //   const selectionInfo: SelectionInfo = {
-  //     text: selectedText,
-  //     preview,
-  //     canvasId,
-  //     ...(canvasTitle && { canvasTitle }),
-  //   };
+    const preview = selectedText.length > 50 ? `${selectedText.substring(0, 50)}...` : selectedText;
+    const selectionInfo: SelectionInfo = {
+      text: selectedText,
+      preview,
+      canvasId,
+      ...(canvasTitle && { canvasTitle }),
+    };
 
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'canvas_toolbar',
-  //     canvasInfo: {
-  //       canvasId,
-  //       ...(canvasTitle && { title: canvasTitle }),
-  //     },
-  //     selectionInfo,
-  //   });
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'canvas_toolbar',
+      canvasInfo: {
+        canvasId,
+        ...(canvasTitle && { title: canvasTitle }),
+      },
+      selectionInfo,
+    });
 
-  //   window.getSelection()?.removeAllRanges();
-  // }, [selectionText, readSelection, canvasId, canvasTitle]);
+    window.getSelection()?.removeAllRanges();
+  }, [selectionText, readSelection, canvasId, canvasTitle]);
 
   const handleCreateTicket = useCallback((): void => {
     const selectedText = window.getSelection()?.toString().trim() || selectedTextRef.current;
@@ -266,7 +266,6 @@ export const createCanvasFormattingToolbar = (
 
     // Nothing to offer: no editing, and Ask AI left out by the host screen.
     if (!Components || (!hasEditorActions && !askAIAvailable)) return null;
-    if (!Components || !hasEditorActions) return null;
 
     return (
       <Components.FormattingToolbar.Root

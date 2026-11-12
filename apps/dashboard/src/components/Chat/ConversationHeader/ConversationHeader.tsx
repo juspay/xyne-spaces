@@ -318,17 +318,17 @@ const ConversationHeader = ({
   const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // useEffect(() => {
-  //   const handler = (): void => {
-  //     setShowOnboardingTooltip(true);
-  //     tooltipTimerRef.current = setTimeout(() => setShowOnboardingTooltip(false), 4000);
-  //   };
-  //   window.addEventListener('ai-onboarding-complete', handler);
-  //   return () => {
-  //     window.removeEventListener('ai-onboarding-complete', handler);
-  //     if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-  //   };
-  // }, []);
+  useEffect(() => {
+    const handler = (): void => {
+      setShowOnboardingTooltip(true);
+      tooltipTimerRef.current = setTimeout(() => setShowOnboardingTooltip(false), 4000);
+    };
+    window.addEventListener('ai-onboarding-complete', handler);
+    return () => {
+      window.removeEventListener('ai-onboarding-complete', handler);
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    };
+  }, []);
 
   const handleStarToggle = (): void => {
     void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: Date.now() }));

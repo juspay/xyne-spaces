@@ -10,7 +10,6 @@
  * needs. To add a command, add one entry here (+ one dispatch arm if its behaviour is new).
  */
 import { Phone, MessageSquare, Sparkles, AudioLines, Compass, type LucideIcon } from 'lucide-react';
-import { Phone, MessageSquare, AudioLines, Compass, type LucideIcon } from 'lucide-react';
 
 // Value = metadata + structural family. No `kind`/`word`/`action` field — the KEY is the identity.
 type CommandDef =

@@ -278,19 +278,19 @@ export default function RecordingDetailScreen(): ReactElement {
       return;
     }
 
-  //   const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'recording_detail',
-  //     startFreshChat: true,
-  //     channelId: recording.channelId,
-  //     threadInfo: {
-  //       conversationId: recording.conversationId ?? '',
-  //       previewText: recording.title || 'Recording Transcript',
-  //       ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
-  //     },
-  //   });
-  // };
+    const attachmentIds = (message?.attachments ?? []).map((att: { id: string }) => att.id);
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'recording_detail',
+      startFreshChat: true,
+      channelId: recording.channelId,
+      threadInfo: {
+        conversationId: recording.conversationId ?? '',
+        previewText: recording.title || 'Recording Transcript',
+        ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+      },
+    });
+  };
 
   const handleDownloadRecording = async (): Promise<void> => {
     if (!recording) return;

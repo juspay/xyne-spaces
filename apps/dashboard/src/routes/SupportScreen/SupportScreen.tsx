@@ -2269,9 +2269,6 @@ const SupportScreen = (): ReactElement => {
   // and opens them; the desk owner and channel admins add/remove them — the same
   // rule the table's ACL enforces on the write (canPublishAppsTo).
   const deskPublishedAppIds = useChannelPublishedApps(preferenceChannelId);
-  const deskPublishedAppIds = useChannelPublishedApps(
-    (false as boolean) ? preferenceChannelId : null,
-  );
   const deskApps = useDeskApps(deskPublishedAppIds);
   const canManageDeskApps =
     canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
@@ -4677,28 +4674,27 @@ const SupportScreen = (): ReactElement => {
                   getCanvasRoute={id => canvasesPath(`canvases/${id}`)}
                   onBack={() => goCanvases(routeCanvasId ? 'canvases' : '')}
                 />
+              ) : selectedChannelId && openDeskAppId ? (
+                // A desk app replaces the ticket list. Keyed on the app so switching
+                // apps boots a fresh sandbox; the host's back arrow returns to tickets.
+                // Apps see the `channel` surface with this desk, so a channel-scoped
+                // app scopes itself to the desk unchanged.
+                <div className='flex-1 min-h-0'>
+                  <ArtifactAppHost
+                    key={openDeskAppId}
+                    appId={openDeskAppId}
+                    onBack={() => showDeskApp(null)}
+                    placement={{
+                      surface: 'channel',
+                      channel: {
+                        id: selectedChannelId,
+                        name: selectedChannelFull?.name ?? '',
+                        scopeType: selectedChannelFull?.scopeType ?? '',
+                      },
+                    }}
+                  />
+                </div>
               ) : (
-                ) : selectedChannelId && openDeskAppId ? (
-                  // A desk app replaces the ticket list. Keyed on the app so switching
-                  // apps boots a fresh sandbox; the host's back arrow returns to tickets.
-                  // Apps see the `channel` surface with this desk, so a channel-scoped
-                  // app scopes itself to the desk unchanged.
-                  <div className='flex-1 min-h-0'>
-                    <ArtifactAppHost
-                      key={openDeskAppId}
-                      appId={openDeskAppId}
-                      onBack={() => showDeskApp(null)}
-                      placement={{
-                        surface: 'channel',
-                        channel: {
-                          id: selectedChannelId,
-                          name: selectedChannelFull?.name ?? '',
-                          scopeType: selectedChannelFull?.scopeType ?? '',
-                        },
-                      }}
-                    />
-                  </div>
-                ) : (
                 <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                   {!selectedChannelId ? (
                     <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>

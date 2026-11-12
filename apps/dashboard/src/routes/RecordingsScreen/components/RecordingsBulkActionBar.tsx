@@ -1,6 +1,5 @@
 import { ReactElement } from 'react';
 import { Trash2, X, Loader2 } from 'lucide-react';
-import { Trash2, X } from 'lucide-react';
 import { Tooltip } from '../../../components/ui/Tooltip';
 
 interface RecordingsBulkActionBarProps {

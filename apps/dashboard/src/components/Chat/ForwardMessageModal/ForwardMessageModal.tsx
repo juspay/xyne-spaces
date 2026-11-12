@@ -107,10 +107,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const zero = useZero();
   const [forwardMode, setForwardMode] = useState<ForwardMode>('message');
   const [addAgent, setAddAgent] = useState(true);
-  const [
-    shareOperationId,
-    setShareOperationId,
-  ] = useState(() => uuidv4());
+  const [shareOperationId, setShareOperationId] = useState(() => uuidv4());
   const channelAgentsQuery = useReactQuery({
     queryKey: ['channel-claw-agents', channelId],
     queryFn: () => fetchChannelClawAgents(channelId),

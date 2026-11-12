@@ -76,12 +76,12 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
     isActive: ctx => ctx.activeRoute === '/calls',
   },
   {
-  key: 'ai-agent',
-  label: 'AI Agent',
-  description: 'Also called Ask AI: AI chats, agents and knowledge',
-  icon: SparkleAi01,
-  path: '/ai',
-  isActive: ctx => ctx.activeRoute === '/ai',
+    key: 'ai-agent',
+    label: 'AI Agent',
+    description: 'Also called Ask AI: AI chats, agents and knowledge',
+    icon: SparkleAi01,
+    path: '/ai',
+    isActive: ctx => ctx.activeRoute === '/ai',
   },
   {
     key: 'automations',

@@ -1154,19 +1154,19 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     const canvasIdForAI = selectedCanvas?.id;
     if (!canvasIdForAI) return;
 
-  //   // Create canvas info for context
-  //   const canvasInfo: CanvasInfo = {
-  //     canvasId: canvasIdForAI,
-  //     title: currentTitle,
-  //   };
+    // Create canvas info for context
+    const canvasInfo: CanvasInfo = {
+      canvasId: canvasIdForAI,
+      title: currentTitle,
+    };
 
-  //   // Open XyneAI with canvas context
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'canvas_screen',
-  //     canvasInfo,
-  //   });
-  // };
+    // Open XyneAI with canvas context
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'canvas_screen',
+      canvasInfo,
+    });
+  };
 
   const canvasIsRecording = selectedCanvas ? isRecordingCanvas(selectedCanvas) : false;
   const canvasCallId = selectedCanvas ? getCanvasCallId(selectedCanvas) : null;

@@ -142,7 +142,6 @@ export const InternalXyneLink = ({
     queryKey: ['artifact-app', parsedLink?.appId ?? ''],
     queryFn: () => getArtifactApp(parsedLink?.appId ?? ''),
     enabled: parsedLink?.kind === 'app' && !!parsedLink.appId,
-    enabled: false,
     retry: false,
     staleTime: 5 * 60_000,
   });

@@ -120,16 +120,16 @@ export const FileViewerLayout: React.FC = () => {
     };
     sessionStorage.setItem('kb_xyne_ai_context', JSON.stringify(kbContext));
 
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'file_viewer',
-  //     startFreshChat: true,
-  //     kbCollectionId: collectionId ?? null,
-  //     kbChannelId: channelId ?? null,
-  //     kbDocId: docId,
-  //     kbDocName: docName,
-  //   });
-  // };
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'file_viewer',
+      startFreshChat: true,
+      kbCollectionId: collectionId ?? null,
+      kbChannelId: channelId ?? null,
+      kbDocId: docId,
+      kbDocName: docName,
+    });
+  };
 
   return (
     <div className='flex h-full overflow-hidden'>

@@ -52,7 +52,6 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { AppIcon } from '../AppIcon/AppIcon';
 import { toolbarItemsStore, useAppSnapshots, appIdOf, appItemId } from '../../hooks/barItems';
-import { toolbarItemsStore, appIdOf, appItemId } from '../../hooks/barItems';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../hooks/useAiLaunchPreference';
 import {
   preventNativeDrag,
@@ -406,8 +405,7 @@ const AppSidebar = (): ReactElement => {
       if (item) entries.push({ kind: 'nav', item });
     }
     return entries;
-    }, [visibleNavigationItems, toolbarIds, appSnapshots]);
-  }, [visibleNavigationItems, toolbarIds]);
+  }, [visibleNavigationItems, toolbarIds, appSnapshots]);
   // Everything permitted but not in the rail lives under "More". Apps are
   // never there: an app is either in the rail or not on the sidebar at all.
   const moreItems = useMemo(

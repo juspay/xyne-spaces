@@ -69,7 +69,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   const [activeTab, setActiveTab] = useState<TabId>('inbox');
   const [activeAIFeaturesSubTab, setActiveAIFeaturesSubTab] =
     useState<AIFeaturesSubTabId>('ai-draft');
-    useState<AIFeaturesSubTabId>('attribution');
+  useState<AIFeaturesSubTabId>('attribution');
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
   // The audit-log API is ANALYTICS-admin only; hide the tab rather than show a dead error.
   const canViewHistory = useCanViewAnalytics();

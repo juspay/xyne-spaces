@@ -722,10 +722,7 @@ export default function SdlcScreen(): ReactElement {
   // The hub's artifacts load a folder at a time, with the page that shows them. Hub
   // Knowledge's load on its own page and the Overview, which counts those ready.
   const knowledgeShown = section === 'knowledge' || section === 'overview';
-  const [
-    knowledgeRows,
-    knowledgeDetails,
-  ] = useCachedQuery(
+  const [knowledgeRows, knowledgeDetails] = useCachedQuery(
     queries.getSdlcFolderCanvases({
       channelId: channelId || '',
       folderId: knowledgeFolderId || '',
@@ -4214,21 +4211,20 @@ export default function SdlcScreen(): ReactElement {
                   onOpenCanvas={openReleaseCanvas}
                   onConnectRepository={() => setHubDialog('manage')}
                 />
+              ) : section === 'agents' ? (
+                <div className='min-h-0 flex-1 overflow-auto bg-background'>
+                  <LibraryV2 channelId={channelId} />
+                </div>
+              ) : section === 'environments' ? (
+                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                  <EnvironmentsView
+                    key={channelId}
+                    channelId={channelId}
+                    hubRepoIds={channelRepos.map(repo => repo.id)}
+                    onAddRepository={() => setHubDialog('manage')}
+                  />
+                </div>
               ) : (
-                section === 'agents' ? (
-                  <div className='min-h-0 flex-1 overflow-auto bg-background'>
-                    <LibraryV2 channelId={channelId} />
-                  </div>
-                ) : section === 'environments' ? (
-                  <div className='min-h-0 flex-1 overflow-hidden bg-background'>
-                    <EnvironmentsView
-                      key={channelId}
-                      channelId={channelId}
-                      hubRepoIds={channelRepos.map(repo => repo.id)}
-                      onAddRepository={() => setHubDialog('manage')}
-                    />
-                  </div>
-                ) : (
                 <>
                   {onTrackPage && selectedTrack && (
                     // Under the name, its tabs: one per kind of thing it holds, as a

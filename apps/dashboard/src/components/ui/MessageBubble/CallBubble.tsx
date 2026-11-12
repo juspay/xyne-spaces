@@ -162,41 +162,41 @@ const ChatWithAskAIButton: React.FC<{
   const handleClick = (): void => {
     if (!channelId) return;
 
-//     // Get call title from metadata if available
-//     const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
+    // Get call title from metadata if available
+    const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
 
-//     // Get attachment IDs from the call message (transcript)
-//     const attachmentIds = attachments?.map(att => att.id) || [];
+    // Get attachment IDs from the call message (transcript)
+    const attachmentIds = attachments?.map(att => att.id) || [];
 
-//     // Create thread info for the call transcript pill
-//     const threadInfo = {
-//       conversationId: conversationId || '',
-//       previewText: callTitle,
-//       ...(attachmentIds.length > 0 && { attachmentIds }),
-//     };
+    // Create thread info for the call transcript pill
+    const threadInfo = {
+      conversationId: conversationId || '',
+      previewText: callTitle,
+      ...(attachmentIds.length > 0 && { attachmentIds }),
+    };
 
-//     // Open sidebar with thread info
-//     xyneAIActor.send({
-//       type: 'OPEN',
-//       trackSource: 'call_bubble',
-//       channelId,
-//       threadInfo,
-//     });
-//   };
+    // Open sidebar with thread info
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'call_bubble',
+      channelId,
+      threadInfo,
+    });
+  };
 
-//   return (
-//     <button
-//       type='button'
-//       onClick={handleClick}
-//       data-track-category='MESSAGE'
-//       data-track-name='CHAT_WITH_CALL_TRANSCRIPT'
-//       className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
-//       title='Chat with Transcript'
-//     >
-//       <img alt='Ask AI' width='16' height='16' src='/svgs/icons/ai-bot-gradient-star.svg' />
-//     </button>
-//   );
-// };
+  return (
+    <button
+      type='button'
+      onClick={handleClick}
+      data-track-category='MESSAGE'
+      data-track-name='CHAT_WITH_CALL_TRANSCRIPT'
+      className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
+      title='Chat with Transcript'
+    >
+      <img alt='Ask AI' width='16' height='16' src='/svgs/icons/ai-bot-gradient-star.svg' />
+    </button>
+  );
+};
 
 /**
  * CallBubble component displays call-related messages with specialized UI.
