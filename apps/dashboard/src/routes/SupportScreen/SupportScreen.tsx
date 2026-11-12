@@ -243,18 +243,15 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
-// Disabled (Claw)
-// import { DeskAppsMenu } from '../../components/xyne-desk/DeskApps/DeskAppsMenu';
-// Disabled (Claw)
-// import { ArtifactAppHost } from '../../components/ArtifactApp/ArtifactAppHost';
+import { DeskAppsMenu } from '../../components/xyne-desk/DeskApps/DeskAppsMenu';
+import { ArtifactAppHost } from '../../components/ArtifactApp/ArtifactAppHost';
 import { useDeskApps } from '../../components/xyne-desk/DeskApps/useDeskApps';
 import { useChannelPublishedApps } from '../../hooks/useChannelPublishedApps';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 // Disabled (LLM)
 // import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
-// Disabled (Claw)
-// import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
+import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
   DeskInsightsPanel,
   type DeskInsightsSection,
@@ -292,8 +289,7 @@ import {
 import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { afterReturn, markWhenLeft, usePageCoverage } from '../../hooks/usePageCoverage';
-// Disabled (Claw)
-// import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
 import {
   channelService,
   CreateChannelFormData,
@@ -2179,13 +2175,12 @@ const SupportScreen = (): ReactElement => {
       : []),
     // Disabled (LLM)
     // ...(canExploreTopics ? (['topics'] as const) : []),
-    // Disabled (Claw)
-    // ...(isSelectedChannelJoined &&
-    // selectedChannelId !== ALL_CHANNELS_ID &&
-    // channelPreference?.deskReportEnabled &&
-    // canManageDeskInsights
-    //   ? (['report'] as const)
-    //   : []),
+    ...(isSelectedChannelJoined &&
+    selectedChannelId !== ALL_CHANNELS_ID &&
+    channelPreference?.deskReportEnabled &&
+    canManageDeskInsights
+      ? (['report'] as const)
+      : []),
   ];
   // Only an open section the user can actually see counts, so a stale deep link
   // (e.g. ?metrics=open with metrics off) doesn't leave the button looking active.
@@ -2273,15 +2268,10 @@ const SupportScreen = (): ReactElement => {
   // Artifact apps added to this desk (channel_published_tabs). Every member sees
   // and opens them; the desk owner and channel admins add/remove them — the same
   // rule the table's ACL enforces on the write (canPublishAppsTo).
-  // Disabled (Claw)
-  // const deskPublishedAppIds = useChannelPublishedApps(preferenceChannelId);
-  const deskPublishedAppIds = useChannelPublishedApps(
-    (false as boolean) ? preferenceChannelId : null,
-  );
+  const deskPublishedAppIds = useChannelPublishedApps(preferenceChannelId);
   const deskApps = useDeskApps(deskPublishedAppIds);
-  // Disabled (Claw)
-  // const canManageDeskApps =
-  //   canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
+  const canManageDeskApps =
+    canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
   const requestedDeskAppId = searchParams.get('deskApp');
   // A stale or foreign id in the URL (removed from the desk, or not visible to
   // this viewer) opens nothing rather than an error panel.
@@ -2289,16 +2279,15 @@ const SupportScreen = (): ReactElement => {
     requestedDeskAppId && deskApps.apps.some(app => app.id === requestedDeskAppId)
       ? requestedDeskAppId
       : null;
-  // Disabled (Claw)
-  // // Same URL discipline as showInsights: swap only our param, keep the filters.
-  // const showDeskApp = (appId: string | null, replace = true): void => {
-  //   const params = new URLSearchParams(searchParams);
-  //   params.delete('deskApp');
-  //   if (appId) params.set('deskApp', appId);
-  //   const qs = params.toString();
-  //   const path = `${supportBase}/${selectedChannelId}`;
-  //   void navigate(qs ? `${path}?${qs}` : path, { replace });
-  // };
+  // Same URL discipline as showInsights: swap only our param, keep the filters.
+  const showDeskApp = (appId: string | null, replace = true): void => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('deskApp');
+    if (appId) params.set('deskApp', appId);
+    const qs = params.toString();
+    const path = `${supportBase}/${selectedChannelId}`;
+    void navigate(qs ? `${path}?${qs}` : path, { replace });
+  };
 
   const canvasesPath = (sub: string): string => {
     const qs = searchParams.toString();
@@ -3551,8 +3540,6 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
-                      {/* Disabled (Claw) */}
-                      {/*
                       {selectedChannelId &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         isSelectedChannelJoined && (
@@ -3564,7 +3551,6 @@ const SupportScreen = (): ReactElement => {
                             onOpenApp={appId => showDeskApp(appId, false)}
                           />
                         )}
-                      */}
                       {selectedChannelId &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
                         selectedChannelFull && (
@@ -3772,8 +3758,6 @@ const SupportScreen = (): ReactElement => {
                             </button>
                           </Tooltip>
                         ))}
-                      {/* Disabled (Claw) */}
-                      {/*
                       {isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID && (
                         <Tooltip content='Ask AI' side='bottom'>
                           <button
@@ -3795,7 +3779,6 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
-                      */}
                       {insightsSections.length > 0 && (
                         <Tooltip content='Insights' side='bottom'>
                           <button
@@ -4129,8 +4112,6 @@ const SupportScreen = (): ReactElement => {
                                     aria-label='My tickets'
                                   />
                                 </div>
-                                {/* Disabled (Claw) */}
-                                {/*
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleHasAiDraft'
@@ -4149,7 +4130,6 @@ const SupportScreen = (): ReactElement => {
                                     aria-label='Has AI draft'
                                   />
                                 </div>
-                                */}
                                 <div
                                   data-track-category='Support'
                                   data-track-name='ToggleHasSubTickets'
@@ -4676,8 +4656,6 @@ const SupportScreen = (): ReactElement => {
                     />
                   )}
                   */}
-                  {/* Disabled (Claw) */}
-                  {/*
                   {activeInsightsSection === 'report' && (
                     <DeskReportPanel
                       open
@@ -4687,7 +4665,6 @@ const SupportScreen = (): ReactElement => {
                       channelName={selectedChannelName ?? undefined}
                     />
                   )}
-                  */}
                 </DeskInsightsPanel>
               )}
               {selectedChannelId && showCanvases ? (
@@ -4697,29 +4674,27 @@ const SupportScreen = (): ReactElement => {
                   getCanvasRoute={id => canvasesPath(`canvases/${id}`)}
                   onBack={() => goCanvases(routeCanvasId ? 'canvases' : '')}
                 />
+              ) : selectedChannelId && openDeskAppId ? (
+                // A desk app replaces the ticket list. Keyed on the app so switching
+                // apps boots a fresh sandbox; the host's back arrow returns to tickets.
+                // Apps see the `channel` surface with this desk, so a channel-scoped
+                // app scopes itself to the desk unchanged.
+                <div className='flex-1 min-h-0'>
+                  <ArtifactAppHost
+                    key={openDeskAppId}
+                    appId={openDeskAppId}
+                    onBack={() => showDeskApp(null)}
+                    placement={{
+                      surface: 'channel',
+                      channel: {
+                        id: selectedChannelId,
+                        name: selectedChannelFull?.name ?? '',
+                        scopeType: selectedChannelFull?.scopeType ?? '',
+                      },
+                    }}
+                  />
+                </div>
               ) : (
-                // Disabled (Claw)
-                // ) : selectedChannelId && openDeskAppId ? (
-                //   // A desk app replaces the ticket list. Keyed on the app so switching
-                //   // apps boots a fresh sandbox; the host's back arrow returns to tickets.
-                //   // Apps see the `channel` surface with this desk, so a channel-scoped
-                //   // app scopes itself to the desk unchanged.
-                //   <div className='flex-1 min-h-0'>
-                //     <ArtifactAppHost
-                //       key={openDeskAppId}
-                //       appId={openDeskAppId}
-                //       onBack={() => showDeskApp(null)}
-                //       placement={{
-                //         surface: 'channel',
-                //         channel: {
-                //           id: selectedChannelId,
-                //           name: selectedChannelFull?.name ?? '',
-                //           scopeType: selectedChannelFull?.scopeType ?? '',
-                //         },
-                //       }}
-                //     />
-                //   </div>
-                // ) : (
                 <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                   {!selectedChannelId ? (
                     <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
@@ -6906,17 +6881,16 @@ export const SupportTicketDetail = ({
                           setReplyToEmailId(null);
                         }}
                         isAIPanelOpen={isAIPanelOpen}
-                        // Disabled (Claw)
-                        // onToggleAIPanel={() => {
-                        //   if (isAIPanelOpen) {
-                        //     xyneAIActor.send({ type: 'CLOSE' });
-                        //   } else {
-                        //     xyneAIActor.send({ type: 'OPEN', trackSource: 'support_screen' });
-                        //   }
-                        // }}
-                        // onOpenAskAISidebarFresh={() => {
-                        //   xyneAIActor.send({ type: 'OPEN', trackSource: 'support_screen' });
-                        // }}
+                        onToggleAIPanel={() => {
+                          if (isAIPanelOpen) {
+                            xyneAIActor.send({ type: 'CLOSE' });
+                          } else {
+                            xyneAIActor.send({ type: 'OPEN', trackSource: 'support_screen' });
+                          }
+                        }}
+                        onOpenAskAISidebarFresh={() => {
+                          xyneAIActor.send({ type: 'OPEN', trackSource: 'support_screen' });
+                        }}
                         onSeeSources={sessionId => void openDraftAgentSession(sessionId)}
                         hasAutoDraft={ticketDraft?.autoDraftStatus === AutoDraftStatus.READY}
                         trackSource={composerOpenSourceRef.current}

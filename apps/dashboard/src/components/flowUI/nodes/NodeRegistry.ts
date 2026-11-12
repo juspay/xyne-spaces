@@ -18,16 +18,14 @@ import { PrNode } from './PrNode';
 import { CallScheduleNode } from './CallScheduleNode';
 import { UserQuestionNode } from './UserQuestionNode';
 import { CodeNode } from './CodeNode';
-// Disabled (Claw)
-// import { DiffNode } from './DiffNode';
+import { DiffNode } from './DiffNode';
 import { TicketNode } from './TicketNode';
 import { ChartNode } from './ChartNode';
-// Disabled (Claw)
-// import { AgentNode } from './AgentNode';
-// import { AgentSummaryNode } from './AgentSummaryNode';
-// import { McpSuggestNode } from './McpSuggestNode';
-// import { ProviderSuggestNode } from './ProviderSuggestNode';
-// import { McpConfigureNode } from './McpConfigureNode';
+import { AgentNode } from './AgentNode';
+import { AgentSummaryNode } from './AgentSummaryNode';
+import { McpSuggestNode } from './McpSuggestNode';
+import { ProviderSuggestNode } from './ProviderSuggestNode';
+import { McpConfigureNode } from './McpConfigureNode';
 import { SlashCommandArtifactNode } from '../../Chat/SlashCommandArtifacts';
 // PrApprovalNode is intentionally NOT imported/registered for now — the component
 // is kept in ./PrApprovalNode.tsx but unlinked so 'pr_approval' isn't a live artifact.
@@ -79,16 +77,14 @@ NodeRegistry.register('pr', PrNode);
 NodeRegistry.register('call_schedule', CallScheduleNode);
 NodeRegistry.register('user_question', UserQuestionNode);
 NodeRegistry.register('code', CodeNode);
-// Disabled (Claw)
-// NodeRegistry.register('diff', DiffNode);
+NodeRegistry.register('diff', DiffNode);
 NodeRegistry.register('ticket', TicketNode);
 NodeRegistry.register('chart', ChartNode);
-// Disabled (Claw)
-// NodeRegistry.register('agent', AgentNode);
-// NodeRegistry.register('agent_summary', AgentSummaryNode);
-// NodeRegistry.register('mcp_suggest', McpSuggestNode);
-// NodeRegistry.register('provider_suggest', ProviderSuggestNode);
-// NodeRegistry.register('mcpConfigure', McpConfigureNode);
+NodeRegistry.register('agent', AgentNode);
+NodeRegistry.register('agent_summary', AgentSummaryNode);
+NodeRegistry.register('mcp_suggest', McpSuggestNode);
+NodeRegistry.register('provider_suggest', ProviderSuggestNode);
+NodeRegistry.register('mcpConfigure', McpConfigureNode);
 NodeRegistry.register('slash_command_artifact', SlashCommandArtifactNode);
 
 /**

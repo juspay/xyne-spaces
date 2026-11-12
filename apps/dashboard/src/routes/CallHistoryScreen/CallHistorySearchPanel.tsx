@@ -7,8 +7,7 @@ import Avatar from '../../components/ui/Avatar/Avatar';
 import { Button } from '../../components/ui/Button/Button';
 import { Switch } from '../../components/ui/Switch';
 import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
-// Disabled (Claw)
-// import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { cn } from '../../utils/classNames';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
@@ -85,8 +84,7 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
     syncMessage,
     reauthCountdown,
     onCalendarSync,
-    // Disabled (Claw)
-    // onOpenAskAI,
+    onOpenAskAI,
     callMentionSearchType,
     callMentionSearchQuery,
     callSearchSelectedMentions,
@@ -126,8 +124,6 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
               Calls
             </h1>
             <div className='flex items-center gap-2'>
-              {/* Disabled (Claw) */}
-              {/*
               <Button
                 type='button'
                 variant='outline'
@@ -139,7 +135,6 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
                 <XyneAIStar size={15} />
                 Ask AI
               </Button>
-              */}
               <Button
                 type='button'
                 variant='outline'

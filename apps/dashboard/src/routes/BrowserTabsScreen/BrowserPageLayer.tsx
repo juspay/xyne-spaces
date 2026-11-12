@@ -18,8 +18,7 @@ import {
   PageContextMenu,
   runPageMenuAction,
   ask,
-  // Disabled (Claw)
-  // askAiAboutSelection,
+  askAiAboutSelection,
   subscribeToPageKeys,
   type PageKeyCommand,
   type PageMenuAction,
@@ -259,9 +258,7 @@ export function BrowserPageLayer(): ReactElement | null {
             }}
             shown={tab.id === shownId}
             audible={!tab.muted}
-            // Disabled (Claw)
-            // plain={false}
-            plain
+            plain={false}
             register={view => browserPages.setView(tab.id, view)}
             onLive={change => {
               browserPages.setLive(tab.id, change);
@@ -293,16 +290,15 @@ export function BrowserPageLayer(): ReactElement | null {
               if (!browserPages.isShowing()) browserPanelActor.send({ type: 'OPEN' });
               window.electronAPI?.bringAppToFront?.();
             }}
-            // Disabled (Claw)
-            // onAskAi={payload => {
-            //   const page = browserPages.view(tab.id);
-            //   if (!page) return;
-            //   askAiAboutSelection(
-            //     payload,
-            //     { url: ask(() => page.getURL(), ''), title: ask(() => page.getTitle(), '') },
-            //     'browser_panel',
-            //   );
-            // }}
+            onAskAi={payload => {
+              const page = browserPages.view(tab.id);
+              if (!page) return;
+              askAiAboutSelection(
+                payload,
+                { url: ask(() => page.getURL(), ''), title: ask(() => page.getTitle(), '') },
+                'browser_panel',
+              );
+            }}
           />
         ) : null,
       )}

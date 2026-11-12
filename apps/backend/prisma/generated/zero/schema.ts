@@ -532,6 +532,37 @@ export const userSessionTable = table("user_sessions")
   })
   .primaryKey("id");
 
+export const authSessionTable = table("auth_sessions")
+  .columns({
+    id: string(),
+    orgMemberId: string(),
+    orgId: string(),
+    refreshToken: string(),
+    deviceKey: string(),
+    status: string(),
+    platform: string(),
+    refreshTokenExpiry: number(),
+    deviceInfo: string().optional(),
+    fcmToken: string().optional(),
+    voipToken: string().optional(),
+    revokedAt: number().optional(),
+    revokeReason: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const authSessionWorkspaceAccessTable = table("auth_session_workspace_access")
+  .columns({
+    id: string(),
+    authSessionId: string(),
+    workspaceId: string(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const userTable = table("users")
   .columns({
     id: string(),
@@ -3788,6 +3819,22 @@ export const userSessionTableRelationships = relationships(userSessionTable, ({ 
   })
 }));
 
+export const authSessionTableRelationships = relationships(authSessionTable, ({ many }) => ({
+  workspaceAccess: many({
+    sourceField: ["id"],
+    destField: ["authSessionId"],
+    destSchema: authSessionWorkspaceAccessTable,
+  })
+}));
+
+export const authSessionWorkspaceAccessTableRelationships = relationships(authSessionWorkspaceAccessTable, ({ one }) => ({
+  authSession: one({
+    sourceField: ["authSessionId"],
+    destField: ["id"],
+    destSchema: authSessionTable,
+  })
+}));
+
 export const userTableRelationships = relationships(userTable, ({ one, many }) => ({
   workspace: one({
     sourceField: ["workspaceId"],
@@ -5480,6 +5527,8 @@ export const schema = createSchema(
       roleTable,
       userRoleMappingTable,
       userSessionTable,
+      authSessionTable,
+      authSessionWorkspaceAccessTable,
       userTable,
       userPreferenceTable,
       userSkillTable,
@@ -5670,6 +5719,8 @@ export const schema = createSchema(
       roleTableRelationships,
       userRoleMappingTableRelationships,
       userSessionTableRelationships,
+      authSessionTableRelationships,
+      authSessionWorkspaceAccessTableRelationships,
       userTableRelationships,
       userGroupMappingTableRelationships,
       userAssignmentStateTableRelationships,
@@ -5802,6 +5853,8 @@ export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type Role = Row<typeof schema.tables.roles>;
 export type UserRoleMapping = Row<typeof schema.tables.user_role_mappings>;
 export type UserSession = Row<typeof schema.tables.user_sessions>;
+export type AuthSession = Row<typeof schema.tables.auth_sessions>;
+export type AuthSessionWorkspaceAccess = Row<typeof schema.tables.auth_session_workspace_access>;
 export type User = Row<typeof schema.tables.users>;
 export type UserPreference = Row<typeof schema.tables.user_preferences>;
 export type UserSkill = Row<typeof schema.tables.user_skills>;

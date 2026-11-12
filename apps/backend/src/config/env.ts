@@ -111,6 +111,9 @@ const envSchema = Joi.object({
   AUTOMATION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(10).default(1),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+  // Gmail Pub/Sub streaming-pull subscriber. Runs only when this is set AND
+  // GOOGLE_PUBSUB_DELIVERY_MODE=pull; set it on one worker role.
+  ENABLE_GMAIL_PULL_WORKER: Joi.boolean().default(false),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
   ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
 
@@ -223,6 +226,40 @@ const envSchema = Joi.object({
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
+  // 32 random bytes, base64. Master secret that per-call end-to-end encryption keys
+  // are derived from (callEncryptionService). Required wherever LiveKit is configured:
+  // every AUDIO/VIDEO call is encrypted, so without it no call can be joined.
+  CALL_E2EE_MASTER_KEY: Joi.when('LIVEKIT_API_SECRET', {
+    is: Joi.string().min(1),
+    then: Joi.string().base64().required(),
+    otherwise: Joi.string().allow('').base64().default(''),
+  }),
+  // Version of CALL_E2EE_MASTER_KEY. Calls pin the version current when they activate.
+  CALL_E2EE_MASTER_KEY_VERSION: Joi.number().integer().min(1).default(1),
+  // Rotation: JSON object of version -> base64 master key for versions that calls still
+  // in progress were activated with, e.g. {"1":"<old key>"}. Remove a version once no
+  // call activated with it is live.
+  CALL_E2EE_PREVIOUS_MASTER_KEYS: Joi.string()
+    .allow('')
+    .default('')
+    .custom((value: string, helpers) => {
+      if (!value) return value;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      for (const [version, key] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!/^[1-9]\d*$/.test(version) || typeof key !== 'string' || !key) {
+          return helpers.message({ custom: `CALL_E2EE_PREVIOUS_MASTER_KEYS has an invalid entry for version "${version}"` });
+        }
+      }
+      return value;
+    }),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
@@ -693,6 +730,16 @@ const envSchema = Joi.object({
   GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').default(''),
   GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: Joi.string().allow('').default(''),
   GOOGLE_PUBSUB_PUSH_SUBSCRIPTION: Joi.string().allow('').default(''),
+  // push: Pub/Sub POSTs to the public webhook. pull: a worker reads the subscription
+  // over an outbound StreamingPull connection (no public endpoint needed).
+  GOOGLE_PUBSUB_DELIVERY_MODE: Joi.string().valid('push', 'pull').default('push'),
+  // Pull subscription name; empty means gmail-google-shared-<env>-pull.
+  GOOGLE_PUBSUB_PULL_SUBSCRIPTION: Joi.string().allow('').default(''),
+  // Optional dead-letter topic for the pull subscription (short name or full path).
+  GOOGLE_PUBSUB_DEAD_LETTER_TOPIC: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_MAX_DELIVERY_ATTEMPTS: Joi.number().integer().min(5).max(100).default(10),
+  // Messages one subscriber holds unacked at a time.
+  GOOGLE_PUBSUB_PULL_MAX_MESSAGES: Joi.number().integer().min(1).max(1000).default(16),
   MICROSOFT_CLIENT_ID: Joi.string().allow('').default(''),
   MICROSOFT_CLIENT_SECRET: Joi.string().allow('').default(''),
   MICROSOFT_TENANT_ID: Joi.string().allow('').default(''),
@@ -927,6 +974,7 @@ export const config = {
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  enableGmailPullWorker: envVars.ENABLE_GMAIL_PULL_WORKER as boolean,
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
@@ -1065,6 +1113,11 @@ export const config = {
     url: envVars.LIVEKIT_URL,
     clientUrl: envVars.LIVEKIT_CLIENT_URL,
     serverUrl: envVars.LIVEKIT_SERVER_URL,
+    e2eeMasterKey: envVars.CALL_E2EE_MASTER_KEY as string,
+    e2eeMasterKeyVersion: envVars.CALL_E2EE_MASTER_KEY_VERSION as number,
+    e2eePreviousMasterKeys: (envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS
+      ? JSON.parse(envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS as string)
+      : {}) as Record<string, string>,
   },
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,
@@ -1544,6 +1597,11 @@ export const config = {
     pubsubServiceAccountBase64: envVars.GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 as string,
     pubsubPushServiceAccountEmail: envVars.GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL as string,
     pubsubPushSubscription: envVars.GOOGLE_PUBSUB_PUSH_SUBSCRIPTION as string,
+    pubsubDeliveryMode: envVars.GOOGLE_PUBSUB_DELIVERY_MODE as 'push' | 'pull',
+    pubsubPullSubscription: envVars.GOOGLE_PUBSUB_PULL_SUBSCRIPTION as string,
+    pubsubDeadLetterTopic: envVars.GOOGLE_PUBSUB_DEAD_LETTER_TOPIC as string,
+    pubsubMaxDeliveryAttempts: envVars.GOOGLE_PUBSUB_MAX_DELIVERY_ATTEMPTS as number,
+    pubsubPullMaxMessages: envVars.GOOGLE_PUBSUB_PULL_MAX_MESSAGES as number,
   },
   microsoft: {
     clientId: envVars.MICROSOFT_CLIENT_ID as string,

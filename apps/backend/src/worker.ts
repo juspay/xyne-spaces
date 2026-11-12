@@ -39,6 +39,7 @@ import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 // import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 // import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
+import { gmailPubSubPullWorker } from '@/workers/gmailPubSubPullWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
@@ -315,6 +316,18 @@ class WorkerService {
         await emailFetchWorker.start();
       }
 
+      // Gmail notifications over Pub/Sub StreamingPull (no public push endpoint).
+      if (appConfig.enableGmailPullWorker) {
+        if (appConfig.google.pubsubDeliveryMode === 'pull') {
+          logger.info('Initializing notification service for Gmail pull worker...');
+          await notificationService.initialize();
+          logger.info('Starting Gmail Pub/Sub pull worker...');
+          await gmailPubSubPullWorker.start();
+        } else {
+          logger.warn('ENABLE_GMAIL_PULL_WORKER is set but GOOGLE_PUBSUB_DELIVERY_MODE is push; not starting the Gmail pull worker');
+        }
+      }
+
       // Calendar sync consumers. The API owns the Google/Microsoft webhook
       // endpoints and only enqueues; the paging, upserts and cursor bookkeeping
       // run here so a webhook burst never lands on the request path.
@@ -534,6 +547,8 @@ class WorkerService {
       if (appConfig.enableEmailFetchWorker) {
         await emailFetchWorker.shutdown();
       }
+
+      await gmailPubSubPullWorker.shutdown();
 
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();

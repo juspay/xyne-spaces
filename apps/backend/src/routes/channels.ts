@@ -1,15 +1,13 @@
 import { Router } from 'express';
 import { ChannelController } from '../controllers/channelController';
 import { ConversationController } from '../controllers/conversationController';
-// Disabled (Claw)
-// import { ShareAgentConversationController } from '../controllers/shareAgentConversationController';
+import { ShareAgentConversationController } from '../controllers/shareAgentConversationController';
 import { uploadMultiple } from '../middleware/upload';
 
 const router = Router();
 const channelController = new ChannelController();
 const conversationController = new ConversationController();
-// Disabled (Claw)
-// const shareAgentConversationController = new ShareAgentConversationController();
+const shareAgentConversationController = new ShareAgentConversationController();
 
 // Channel Management Routes
 router.post('/', channelController.createChannel);
@@ -26,11 +24,10 @@ router.get('/:channelId/can-link-boards', channelController.canLinkChannelBoards
 // Conversation Routes (nested under channels)
 router.post('/:channelId/conversations', uploadMultiple, conversationController.createConversation);
 
-// Disabled (Claw)
-// router.get(
-//   '/:channelId/share-agent-conversation/status',
-//   shareAgentConversationController.getStatus
-// );
-// router.post('/:channelId/share-agent-conversation', shareAgentConversationController.share);
+router.get(
+  '/:channelId/share-agent-conversation/status',
+  shareAgentConversationController.getStatus
+);
+router.post('/:channelId/share-agent-conversation', shareAgentConversationController.share);
 
 export default router;

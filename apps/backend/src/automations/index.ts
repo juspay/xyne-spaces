@@ -34,8 +34,7 @@ import { updateTagsStep } from './steps/update-tags.step';
 import { applyConversationLabelStep } from './steps/apply-conversation-label.step';
 import { assignTicketToGroupStep } from './steps/assign-ticket-to-group.step';
 import { triggerWebhookStep } from './steps/trigger-webhook.step';
-// Disabled (Claw)
-// import { runAgentStep } from './steps/run-agent.step';
+import { runAgentStep } from './steps/run-agent.step';
 import { createEmailDraftStep } from './steps/create-email-draft.step';
 import { replyOnMessageStep } from './steps/reply-on-message.step';
 import { promoteMessageToTicketStep } from './steps/promote-message-to-ticket.step';
@@ -88,8 +87,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(applyConversationLabelStep);
   stepRegistry.register(assignTicketToGroupStep);
   stepRegistry.register(triggerWebhookStep);
-  // Disabled (Claw)
-  // stepRegistry.register(runAgentStep);
+  stepRegistry.register(runAgentStep);
   stepRegistry.register(createEmailDraftStep);
   stepRegistry.register(replyOnMessageStep);
   stepRegistry.register(promoteMessageToTicketStep);

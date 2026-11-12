@@ -860,8 +860,7 @@ export class EmailService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    // Disabled (Claw)
-    // if (draftingChannelId) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
+    if (draftingChannelId) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
     if (draftingChannelId && (false as boolean)) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
   }
 
@@ -1436,14 +1435,13 @@ export class EmailService {
     //   channelId,
     // });
 
-    // Disabled (Claw)
-    // void this.triggerAutoDraft({
-    //   ticketId: ticket.id,
-    //   conversationId: conversation.conversationId,
-    //   channelId,
-    //   emailSubject,
-    //   emailBody,
-    // });
+    void this.triggerAutoDraft({
+      ticketId: ticket.id,
+      conversationId: conversation.conversationId,
+      channelId,
+      emailSubject,
+      emailBody,
+    });
 
     // Create message with ticket
     const messageData: CreateMessageInput = {
@@ -1694,16 +1692,15 @@ export class EmailService {
       }
       await this.createEmailAttachments(email.id, conversation.conversationId, conversation.channelId, conversation.createdBy, channel.workspaceId, uploadedFiles);
 
-      // Disabled (Claw)
-      // if (ticketRow) {
-      //   void this.triggerAutoDraft({
-      //     ticketId: ticketRow.id,
-      //     conversationId,
-      //     channelId: conversation.channelId,
-      //     emailSubject,
-      //     emailBody,
-      //   });
-      // }
+      if (ticketRow) {
+        void this.triggerAutoDraft({
+          ticketId: ticketRow.id,
+          conversationId,
+          channelId: conversation.channelId,
+          emailSubject,
+          emailBody,
+        });
+      }
 
       // Process Google Meet links from reply email body and send to SAM service
       try {

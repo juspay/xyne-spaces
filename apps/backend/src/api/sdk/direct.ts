@@ -32,8 +32,7 @@ import { callController as callsController } from '@/controllers/callController'
 import { affinityController } from '@/controllers/affinityController';
 import { userManagementController } from '@/controllers/userManagementController';
 import { notificationController } from '@/controllers/notificationController';
-// Disabled (Claw)
-// import * as dailyBriefController from '@/controllers/dailyBriefController';
+import * as dailyBriefController from '@/controllers/dailyBriefController';
 import { customEmojiController } from '@/controllers/customEmojiController';
 import { CanvasController } from '@/controllers/canvasController';
 import { deskMetricsController } from '@/controllers/deskMetricsController';
@@ -53,20 +52,17 @@ import { cleanConditions, parsePageQuery } from '@/routes/radarExecution';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
 import {
-  // Disabled (Claw)
-  // getS2SClawRunStatus,
-  // listScopedClawAgents,
-  // runScopedClawAgent,
+  getS2SClawRunStatus,
+  listScopedClawAgents,
+  runScopedClawAgent,
   ClawAgentNotAvailableError,
-  // Disabled (Claw)
-  // type ScopedClawIdentity,
+  type ScopedClawIdentity,
 } from '@/services/clawAgentService';
 import {
-  // Disabled (Claw)
-  // callConnectorTool,
-  // listConnectorTools,
-  // listConnectors,
-  // startConnectorConnect,
+  callConnectorTool,
+  listConnectorTools,
+  listConnectors,
+  startConnectorConnect,
   ConnectorNotConnectedError,
   ConnectorNotFoundError,
   ConnectorValidationError,
@@ -74,8 +70,7 @@ import {
   ConnectorWriteToolError,
 } from '@/services/clawConnectorsService';
 import { uploadMultiple, uploadSingle } from '@/middleware/upload';
-// Disabled (Claw)
-// import { config } from '@/config/env';
+import { config } from '@/config/env';
 import { SdkApiError } from './errors';
 import { handle } from './handler';
 
@@ -103,15 +98,14 @@ const canvasController = new CanvasController(new MessageAttachmentRepository())
  * The cookie is still forwarded when there is one, so a browser caller keeps
  * whatever claw-auth infers from it.
  */
-// Disabled (Claw)
-// function clawIdentity(req: Request, authData: AuthData): ScopedClawIdentity {
-//   return {
-//     userId: authData.sub,
-//     ...(authData.orgId ? { orgId: authData.orgId } : {}),
-//     ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
-//     ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}),
-//   };
-// }
+function clawIdentity(req: Request, authData: AuthData): ScopedClawIdentity {
+  return {
+    userId: authData.sub,
+    ...(authData.orgId ? { orgId: authData.orgId } : {}),
+    ...(authData.workspaceId ? { workspaceId: authData.workspaceId } : {}),
+    ...(req.headers.cookie ? { cookie: req.headers.cookie } : {}),
+  };
+}
 
 async function buildAuthData(req: Request): Promise<AuthData> {
   const user = req.user;
@@ -238,55 +232,53 @@ const deskMetricsQuery = z.object({
  * `channelId` is the one real bridge between the two services: supplying one
  * makes the agent post its reply into that Spaces thread as well as returning it.
  */
-// Disabled (Claw)
-// const clawRunBody = z.object({
-//   agent: z.string().min(1),
-//   task: z.string().min(1),
-//   conversationId: z.string().min(1).optional(),
-//   channelId: z.string().min(1).optional(),
-//   context: z.string().optional(),
-// });
+const clawRunBody = z.object({
+  agent: z.string().min(1),
+  task: z.string().min(1),
+  conversationId: z.string().min(1).optional(),
+  channelId: z.string().min(1).optional(),
+  context: z.string().optional(),
+});
 
-// Disabled (Claw)
-// /** A connector's `McpServer.type`, as it appears in `/connectors/:type/...`. */
-// const CONNECTOR_TYPE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** A connector's `McpServer.type`, as it appears in `/connectors/:type/...`. */
+const CONNECTOR_TYPE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
-// function connectorType(req: Request): string {
-//   const type = req.params['type'];
-//   if (!type || !CONNECTOR_TYPE.test(type)) {
-//     throw new SdkApiError('validation_failed', 'Invalid connector type.');
-//   }
-//   return type;
-// }
+function connectorType(req: Request): string {
+  const type = req.params['type'];
+  if (!type || !CONNECTOR_TYPE.test(type)) {
+    throw new SdkApiError('validation_failed', 'Invalid connector type.');
+  }
+  return type;
+}
 
-// const connectorCallBody = z
-//   .object({
-//     tool: z.string().min(1).max(200),
-//     args: z.record(z.string(), z.unknown()).optional(),
-//   })
-//   .strict();
+const connectorCallBody = z
+  .object({
+    tool: z.string().min(1).max(200),
+    args: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
 
-// const connectorConnectBody = z
-//   .object({
-//     returnTo: z.string().url().max(2048).optional(),
-//   })
-//   .strict();
+const connectorConnectBody = z
+  .object({
+    returnTo: z.string().url().max(2048).optional(),
+  })
+  .strict();
 
-// /**
-//  * Where the browser lands after an OAuth consent: the dashboard that made the
-//  * request. claw-auth re-validates it against its own allowlist regardless.
-//  */
-// function defaultReturnTo(req: Request): string {
-//   const origin = req.headers.origin;
-//   if (origin && /^https?:\/\//.test(origin)) return origin;
-//   return config.frontendUrl;
-// }
+/**
+ * Where the browser lands after an OAuth consent: the dashboard that made the
+ * request. claw-auth re-validates it against its own allowlist regardless.
+ */
+function defaultReturnTo(req: Request): string {
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\//.test(origin)) return origin;
+  return config.frontendUrl;
+}
 
-// /** The dashboard's connector page, where credential-form connectors are set up. */
-// function connectorSettingsUrl(authData: AuthData, type: string): string {
-//   const base = config.frontendUrl.replace(/\/+$/, '');
-//   return `${base}/${encodeURIComponent(authData.workspaceId)}/ai/library/mcp/${encodeURIComponent(type)}`;
-// }
+/** The dashboard's connector page, where credential-form connectors are set up. */
+function connectorSettingsUrl(authData: AuthData, type: string): string {
+  const base = config.frontendUrl.replace(/\/+$/, '');
+  return `${base}/${encodeURIComponent(authData.workspaceId)}/ai/library/mcp/${encodeURIComponent(type)}`;
+}
 
 /** `GET /notifications`: the product route's paging, with its 100-row cap as a bound. */
 const notificationListQuery = z.object({
@@ -295,10 +287,9 @@ const notificationListQuery = z.object({
   status: z.nativeEnum(NotificationStatus).optional(),
 });
 
-// Disabled (Claw)
-// const dailyBriefLimitQuery = z.object({
-//   limit: z.coerce.number().int().min(1).optional(),
-// });
+const dailyBriefLimitQuery = z.object({
+  limit: z.coerce.number().int().min(1).optional(),
+});
 
 const ROUTES: readonly DirectRoute[] = [
   {
@@ -435,52 +426,51 @@ const ROUTES: readonly DirectRoute[] = [
    * conversation to post into and returns only whether it dispatched, so a result
    * cannot be read back.
    */
-  // Disabled (Claw)
-  // {
-  //   method: 'get',
-  //   path: '/claw/agents',
-  //   // Scoped to the acting user; see clawIdentity.
-  //   service: async (req, authData) => listScopedClawAgents(clawIdentity(req, authData)),
-  // },
-  // {
-  //   method: 'post',
-  //   path: '/claw/runs',
-  //   body: clawRunBody,
-  //   service: async (req, authData) => {
-  //     const input = clawRunBody.parse(req.body);
-  //     const result = await runScopedClawAgent({
-  //       identity: clawIdentity(req, authData),
-  //       agentSlug: input.agent,
-  //       task: input.task,
-  //       userId: authData.sub,
-  //       userName: authData.displayName || authData.name || authData.email,
-  //       userEmail: authData.email,
-  //       spacesWorkspaceId: authData.workspaceId,
-  //       spacesOrgId: authData.orgId,
-  //       spacesOrgMemberId: authData.memberId,
-  //       workspaceId: authData.workspaceId,
-  //       // Required by the webhook contract. The run is polled through
-  //       // `/claw/runs/:sessionId` rather than delivered here, but claw-auth
-  //       // rejects a run without somewhere to call back to.
-  //       callbackUrl: config.xyneClaw.callbackUrl,
-  //       ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-  //       ...(input.channelId ? { channelId: input.channelId } : {}),
-  //       ...(input.context ? { context: input.context } : {}),
-  //     });
-  //     return { sessionId: result.sessionId };
-  //   },
-  // },
-  // {
-  //   method: 'get',
-  //   path: '/claw/runs/:sessionId',
-  //   service: async (req, authData) => {
-  //     const sessionId = req.params['sessionId'];
-  //     if (!sessionId) throw new SdkApiError('validation_failed', 'sessionId is required.');
-  //     const status = await getS2SClawRunStatus(sessionId, authData.sub);
-  //     if (!status) throw SdkApiError.notFound('Claw run');
-  //     return status;
-  //   },
-  // },
+  {
+    method: 'get',
+    path: '/claw/agents',
+    // Scoped to the acting user; see clawIdentity.
+    service: async (req, authData) => listScopedClawAgents(clawIdentity(req, authData)),
+  },
+  {
+    method: 'post',
+    path: '/claw/runs',
+    body: clawRunBody,
+    service: async (req, authData) => {
+      const input = clawRunBody.parse(req.body);
+      const result = await runScopedClawAgent({
+        identity: clawIdentity(req, authData),
+        agentSlug: input.agent,
+        task: input.task,
+        userId: authData.sub,
+        userName: authData.displayName || authData.name || authData.email,
+        userEmail: authData.email,
+        spacesWorkspaceId: authData.workspaceId,
+        spacesOrgId: authData.orgId,
+        spacesOrgMemberId: authData.memberId,
+        workspaceId: authData.workspaceId,
+        // Required by the webhook contract. The run is polled through
+        // `/claw/runs/:sessionId` rather than delivered here, but claw-auth
+        // rejects a run without somewhere to call back to.
+        callbackUrl: config.xyneClaw.callbackUrl,
+        ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+        ...(input.channelId ? { channelId: input.channelId } : {}),
+        ...(input.context ? { context: input.context } : {}),
+      });
+      return { sessionId: result.sessionId };
+    },
+  },
+  {
+    method: 'get',
+    path: '/claw/runs/:sessionId',
+    service: async (req, authData) => {
+      const sessionId = req.params['sessionId'];
+      if (!sessionId) throw new SdkApiError('validation_failed', 'sessionId is required.');
+      const status = await getS2SClawRunStatus(sessionId, authData.sub);
+      if (!status) throw SdkApiError.notFound('Claw run');
+      return status;
+    },
+  },
 
   /*
    * Connectors: an app reads external data through the VIEWER's own claw-auth
@@ -488,42 +478,41 @@ const ROUTES: readonly DirectRoute[] = [
    * claw-auth, which runs the MCP tool server-side, so the credential never
    * reaches the app. Read-only in v1 — write tools are refused with 403.
    */
-  // Disabled (Claw)
-  // {
-  //   method: 'get',
-  //   path: '/connectors',
-  //   service: async (_req, authData) => ({ connectors: await listConnectors(authData.sub) }),
-  // },
-  // {
-  //   method: 'get',
-  //   path: '/connectors/:type/tools',
-  //   service: async (req, authData) => ({
-  //     tools: await listConnectorTools(authData.sub, connectorType(req)),
-  //   }),
-  // },
-  // {
-  //   method: 'post',
-  //   path: '/connectors/:type/call',
-  //   body: connectorCallBody,
-  //   service: async (req, authData) => {
-  //     const type = connectorType(req);
-  //     const input = connectorCallBody.parse(req.body);
-  //     return callConnectorTool(authData.sub, type, input.tool, input.args ?? {});
-  //   },
-  // },
-  // {
-  //   method: 'post',
-  //   path: '/connectors/:type/connect',
-  //   body: connectorConnectBody,
-  //   service: async (req, authData) => {
-  //     const type = connectorType(req);
-  //     const input = connectorConnectBody.parse(req.body);
-  //     return startConnectorConnect(authData.sub, type, {
-  //       returnTo: input.returnTo ?? defaultReturnTo(req),
-  //       settingsUrl: connectorSettingsUrl(authData, type),
-  //     });
-  //   },
-  // },
+  {
+    method: 'get',
+    path: '/connectors',
+    service: async (_req, authData) => ({ connectors: await listConnectors(authData.sub) }),
+  },
+  {
+    method: 'get',
+    path: '/connectors/:type/tools',
+    service: async (req, authData) => ({
+      tools: await listConnectorTools(authData.sub, connectorType(req)),
+    }),
+  },
+  {
+    method: 'post',
+    path: '/connectors/:type/call',
+    body: connectorCallBody,
+    service: async (req, authData) => {
+      const type = connectorType(req);
+      const input = connectorCallBody.parse(req.body);
+      return callConnectorTool(authData.sub, type, input.tool, input.args ?? {});
+    },
+  },
+  {
+    method: 'post',
+    path: '/connectors/:type/connect',
+    body: connectorConnectBody,
+    service: async (req, authData) => {
+      const type = connectorType(req);
+      const input = connectorConnectBody.parse(req.body);
+      return startConnectorConnect(authData.sub, type, {
+        returnTo: input.returnTo ?? defaultReturnTo(req),
+        settingsUrl: connectorSettingsUrl(authData, type),
+      });
+    },
+  },
 
   /*
    * The caller: personalization weights, people search, and DMs.
@@ -635,56 +624,55 @@ const ROUTES: readonly DirectRoute[] = [
    * Daily brief. Stored and generated by claw-auth; these relay the caller's
    * request. The org-wide settings write is admin-only, enforced by claw-auth.
    */
-  // Disabled (Claw)
-  // {
-  //   method: 'get',
-  //   path: '/daily-brief/latest',
-  //   controller: dailyBriefController.getLatest,
-  // },
-  // {
-  //   method: 'get',
-  //   path: '/daily-brief/history',
-  //   controller: dailyBriefController.getHistory,
-  //   query: dailyBriefLimitQuery,
-  // },
-  // {
-  //   method: 'get',
-  //   path: '/daily-brief/dates',
-  //   controller: dailyBriefController.getDates,
-  //   query: dailyBriefLimitQuery,
-  // },
-  // {
-  //   method: 'get',
-  //   path: '/daily-brief/by-date/:date',
-  //   controller: dailyBriefController.getByDate,
-  //   guards: [briefDateGuard],
-  // },
-  // {
-  //   method: 'get',
-  //   path: '/daily-brief/config',
-  //   controller: dailyBriefController.getConfig,
-  // },
-  // {
-  //   method: 'put',
-  //   path: '/daily-brief/config',
-  //   controller: dailyBriefController.saveConfig,
-  //   body: z.object({
-  //     enabled: z.boolean().optional(),
-  //     instructions: z.string().optional(),
-  //     instructionsEnabled: z.boolean().optional(),
-  //   }),
-  // },
-  // {
-  //   method: 'get',
-  //   path: '/daily-brief/settings',
-  //   controller: dailyBriefController.getSettings,
-  // },
-  // {
-  //   method: 'put',
-  //   path: '/daily-brief/settings',
-  //   controller: dailyBriefController.saveSettings,
-  //   body: z.object({ agentSlug: z.string().min(1).nullable() }),
-  // },
+  {
+    method: 'get',
+    path: '/daily-brief/latest',
+    controller: dailyBriefController.getLatest,
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/history',
+    controller: dailyBriefController.getHistory,
+    query: dailyBriefLimitQuery,
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/dates',
+    controller: dailyBriefController.getDates,
+    query: dailyBriefLimitQuery,
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/by-date/:date',
+    controller: dailyBriefController.getByDate,
+    guards: [briefDateGuard],
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/config',
+    controller: dailyBriefController.getConfig,
+  },
+  {
+    method: 'put',
+    path: '/daily-brief/config',
+    controller: dailyBriefController.saveConfig,
+    body: z.object({
+      enabled: z.boolean().optional(),
+      instructions: z.string().optional(),
+      instructionsEnabled: z.boolean().optional(),
+    }),
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/settings',
+    controller: dailyBriefController.getSettings,
+  },
+  {
+    method: 'put',
+    path: '/daily-brief/settings',
+    controller: dailyBriefController.saveSettings,
+    body: z.object({ agentSlug: z.string().min(1).nullable() }),
+  },
 
   /*
    * Radar. The product handlers are closures in routes/radarExecution.ts, so
@@ -993,17 +981,16 @@ const ROUTES: readonly DirectRoute[] = [
    * /api/desk-metrics/claw mount). The query body is validated by the
    * controller's own strict schema, whose 400s name the offending field.
    */
-  // Disabled (Claw)
-  // {
-  //   method: 'get',
-  //   path: '/claw/desk-metrics/desks',
-  //   controller: deskMetricsController.listDesks,
-  // },
-  // {
-  //   method: 'post',
-  //   path: '/claw/desk-metrics/query',
-  //   controller: deskMetricsController.queryMetrics,
-  // },
+  {
+    method: 'get',
+    path: '/claw/desk-metrics/desks',
+    controller: deskMetricsController.listDesks,
+  },
+  {
+    method: 'post',
+    path: '/claw/desk-metrics/query',
+    controller: deskMetricsController.queryMetrics,
+  },
 ];
 
 /** Build the router for every direct operation. */
@@ -1251,14 +1238,13 @@ function middlewareGuard(middleware: RequestHandler): Guard {
     });
 }
 
-// Disabled (Claw)
-// const BRIEF_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const BRIEF_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-// async function briefDateGuard(req: Request): Promise<void> {
-//   if (!BRIEF_DATE.test(req.params['date'] ?? '')) {
-//     throw new SdkApiError('validation_failed', 'date must be YYYY-MM-DD.');
-//   }
-// }
+async function briefDateGuard(req: Request): Promise<void> {
+  if (!BRIEF_DATE.test(req.params['date'] ?? '')) {
+    throw new SdkApiError('validation_failed', 'date must be YYYY-MM-DD.');
+  }
+}
 
 /**
  * The access `getConversationMessage` requires, applied to the conversation a

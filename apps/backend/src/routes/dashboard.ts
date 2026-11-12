@@ -34,17 +34,15 @@ const query = Router()
   .post('/preview',          readDS,  ctrl.queryPreview)
   .get('/component/:id',     ctrl.queryGetComponentData);
 
-// Disabled (Claw)
-// const ai = Router()
-//   .post('/create',           ctrl.aiCreate)
-//   .post('/cancel/:runId',    ctrl.aiCancel);
+const ai = Router()
+  .post('/create',           ctrl.aiCreate)
+  .post('/cancel/:runId',    ctrl.aiCancel);
 
 // Mounted at /api/dashboard
 export const dashboardRouter = Router()
   .use('/datasource',  datasource)
   .use('/query',       query)
-  // Disabled (Claw)
-  // .use('/ai',          ai);
+  .use('/ai',          ai);
   ;
 
 // Mounted at /api/dashboards. Specific paths (components/:queryId,

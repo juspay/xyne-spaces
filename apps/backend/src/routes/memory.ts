@@ -3,8 +3,7 @@ import { AccessType } from '@xyne/shared';
 import { memoryController } from '@/controllers/memoryController';
 import { documentController } from '@/controllers/documentController';
 import { authMiddleware } from '@/middleware/auth';
-// Disabled (Claw)
-// import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
+import { authenticateUserOrApp } from '@/middleware/authenticateUserOrApp';
 import { authorize } from '@/middleware/authorize';
 import { validateZod } from '@/middleware/validation';
 import { z } from 'zod';
@@ -69,8 +68,7 @@ const memoryUpdateSchema = z.object({
 router.post('/search', authMiddleware.authenticate, validateZod(memorySearchSchema), memoryController.searchMemoryDocuments);
 
 
-// Disabled (Claw)
-// router.post('/claw/search', authenticateUserOrApp, validateZod(memorySearchSchema), memoryController.searchMemoryDocuments);
+router.post('/claw/search', authenticateUserOrApp, validateZod(memorySearchSchema), memoryController.searchMemoryDocuments);
 
 /**
   * @route PATCH /api/memory/:docId
@@ -106,8 +104,7 @@ router.delete('/:docId', authMiddleware.authenticate, memoryController.deleteMem
   */
 router.post('/index', authMiddleware.authenticate, memoryController.indexMemoryDocument);
 
-// Disabled (Claw)
-// router.post('/claw/index', authenticateUserOrApp, memoryController.indexMemoryDocument);
+router.post('/claw/index', authenticateUserOrApp, memoryController.indexMemoryDocument);
 
 /**
   * Validation schema for POST /memory/replaceSession

@@ -17,10 +17,8 @@ import { useGeneratePRD } from '../../../hooks/useGeneratePRD';
 import { MessageMetadata } from './MessageBubble.utils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
-// Disabled (Claw)
-// import { xyneAIActor } from '../../../machines/xyneAIMachine';
-// Disabled (Claw)
-// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 // Disabled (LLM)
 // import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
 import { useSpeakerIdentificationEnabled } from '../../SpeakerIdentification/useSpeakerIdentificationEnabled';
@@ -152,54 +150,53 @@ export const GeneratePRDButton: React.FC<{
 //   );
 // };
 
-// Disabled (Claw)
-// /**
-//  * Button component for chatting with Ask AI about the call transcript
-//  */
-// const ChatWithAskAIButton: React.FC<{
-//   channelId?: string | undefined;
-//   conversationId?: string | undefined;
-//   metadata?: MessageMetadata | null | undefined;
-//   attachments?: readonly AttachmentType[] | undefined;
-// }> = ({ channelId, conversationId, metadata, attachments }) => {
-//   const handleClick = (): void => {
-//     if (!channelId) return;
+/**
+ * Button component for chatting with Ask AI about the call transcript
+ */
+const ChatWithAskAIButton: React.FC<{
+  channelId?: string | undefined;
+  conversationId?: string | undefined;
+  metadata?: MessageMetadata | null | undefined;
+  attachments?: readonly AttachmentType[] | undefined;
+}> = ({ channelId, conversationId, metadata, attachments }) => {
+  const handleClick = (): void => {
+    if (!channelId) return;
 
-//     // Get call title from metadata if available
-//     const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
+    // Get call title from metadata if available
+    const callTitle = (metadata?.['callTitle'] as string) || 'Call Transcript';
 
-//     // Get attachment IDs from the call message (transcript)
-//     const attachmentIds = attachments?.map(att => att.id) || [];
+    // Get attachment IDs from the call message (transcript)
+    const attachmentIds = attachments?.map(att => att.id) || [];
 
-//     // Create thread info for the call transcript pill
-//     const threadInfo = {
-//       conversationId: conversationId || '',
-//       previewText: callTitle,
-//       ...(attachmentIds.length > 0 && { attachmentIds }),
-//     };
+    // Create thread info for the call transcript pill
+    const threadInfo = {
+      conversationId: conversationId || '',
+      previewText: callTitle,
+      ...(attachmentIds.length > 0 && { attachmentIds }),
+    };
 
-//     // Open sidebar with thread info
-//     xyneAIActor.send({
-//       type: 'OPEN',
-//       trackSource: 'call_bubble',
-//       channelId,
-//       threadInfo,
-//     });
-//   };
+    // Open sidebar with thread info
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'call_bubble',
+      channelId,
+      threadInfo,
+    });
+  };
 
-//   return (
-//     <button
-//       type='button'
-//       onClick={handleClick}
-//       data-track-category='MESSAGE'
-//       data-track-name='CHAT_WITH_CALL_TRANSCRIPT'
-//       className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
-//       title='Chat with Transcript'
-//     >
-//       <img alt='Ask AI' width='16' height='16' src='/svgs/icons/ai-bot-gradient-star.svg' />
-//     </button>
-//   );
-// };
+  return (
+    <button
+      type='button'
+      onClick={handleClick}
+      data-track-category='MESSAGE'
+      data-track-name='CHAT_WITH_CALL_TRANSCRIPT'
+      className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
+      title='Chat with Transcript'
+    >
+      <img alt='Ask AI' width='16' height='16' src='/svgs/icons/ai-bot-gradient-star.svg' />
+    </button>
+  );
+};
 
 /**
  * CallBubble component displays call-related messages with specialized UI.
@@ -211,15 +208,13 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   callId,
   isActiveCall,
   channelId,
-  // Disabled (Claw)
-  // conversationId,
+  conversationId,
   context,
   attachments,
 }) => {
   const metadata = message.metadata;
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
-  // Disabled (Claw)
-  // const askAIAvailable = useAskAIAvailable();
+  const askAIAvailable = useAskAIAvailable();
 
   // For headless recordings: show only the identified transcript (fall back to plain transcript
   // if identified is absent). For regular calls: hide the identified transcript attachment.
@@ -323,8 +318,6 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                 />
                               )}
                               */}
-                              {/* Disabled (Claw) */}
-                              {/*
                               {askAIAvailable && (
                                 <ChatWithAskAIButton
                                   channelId={channelId}
@@ -333,7 +326,6 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                   attachments={attachments}
                                 />
                               )}
-                              */}
                               {recordingAttachment && (
                                 <AudioPlayer
                                   onLoad={signal =>

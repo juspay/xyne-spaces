@@ -5982,15 +5982,12 @@ const ChannelCommandMenuContent = ({
           <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-card to-transparent' />
           {/* Left: Ask AI hint and the Feedback button */}
           <span className='flex items-center gap-5'>
-            {/* Disabled (Claw) */}
-            {/*
             <span className='flex items-center gap-2.5'>
               <span className='flex items-center justify-center px-1.5 py-1 bg-muted rounded-lg leading-none'>
                 /
               </span>
               <span>Ask AI</span>
             </span>
-            */}
             {canPostFeedback && (
               <button
                 type='button'

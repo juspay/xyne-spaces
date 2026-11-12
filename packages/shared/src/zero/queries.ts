@@ -2905,7 +2905,7 @@ export const queries = defineQueries({
       let query = zql.calls
         .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
         .where(helpers =>
-          helpers.cmp('status', 'NOT IN', [CallStatus.SCHEDULED, CallStatus.CANCELLED]),
+          helpers.cmp('status', 'NOT IN', [CallStatus.PENDING, CallStatus.SCHEDULED, CallStatus.CANCELLED]),
         )
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
@@ -2928,6 +2928,7 @@ export const queries = defineQueries({
         .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
         .where(helpers =>
           helpers.cmp('status', 'NOT IN', [
+            CallStatus.PENDING,
             CallStatus.ACTIVE,
             CallStatus.SCHEDULED,
             CallStatus.CANCELLED,
@@ -2962,6 +2963,7 @@ export const queries = defineQueries({
         .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
         .where(helpers =>
           helpers.cmp('status', 'NOT IN', [
+            CallStatus.PENDING,
             CallStatus.ACTIVE,
             CallStatus.SCHEDULED,
             CallStatus.CANCELLED,
