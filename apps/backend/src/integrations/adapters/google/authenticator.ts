@@ -5,6 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { GoogleCredentials } from './types';
 import { SHARED_GOOGLE_WEBHOOK_PATH } from '@/services/googleService';
 import { config } from '@/config/env';
+import { checkNotificationMailbox } from './pubsubNotification';
 
 const TAG = '[GoogleAuthenticator]';
 const FAIL: AuthResult = { authenticated: false };
@@ -34,7 +35,7 @@ export class GoogleAuthenticator extends BaseAuthenticator {
       if (jwtError) return this.fail(jwtError, { sourceName });
 
       // 2. Verify email matches credentials
-      const emailError = this.verifyEmail(payload.message.data, credentials.email);
+      const emailError = checkNotificationMailbox(payload.message.data, credentials.email);
       if (emailError) return this.fail(emailError, { sourceName });
 
       logger.info(`${TAG} Authentication successful`, { sourceName });
@@ -81,17 +82,6 @@ export class GoogleAuthenticator extends BaseAuthenticator {
       return `JWT verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
 
-    return null;
-  }
-
-  private verifyEmail(base64Data: string, expectedEmail: string): string | null {
-    try {
-      const data = JSON.parse(Buffer.from(base64Data, 'base64').toString('utf-8'));
-      if (!data.emailAddress || !data.historyId) return 'Missing emailAddress or historyId in Pub/Sub data';
-      if (data.emailAddress !== expectedEmail) return `Email mismatch: expected ${expectedEmail}, got ${data.emailAddress}`;
-    } catch {
-      return 'Failed to decode Pub/Sub message data';
-    }
     return null;
   }
 
