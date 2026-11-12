@@ -240,7 +240,7 @@ import merchantRoutes from '@/routes/merchants';
 import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
-// import sdlcClawRoutes from '@/routes/sdlcClaw';
+import sdlcClawRoutes from '@/routes/sdlcClaw';
 // Disabled (Claw)
 // import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 // import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
@@ -739,7 +739,10 @@ export class App {
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
-    // this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    // The SDLC screen creates artifacts, artifact types and links through these routes.
+    // User auth only while Claw is disabled; with Claw back on, use authenticateUserOrApp
+    // so Claw apps can call them for a user too.
+    this.app.use('/api/sdlc/claw', authMiddleware.authenticate, sdlcClawRoutes);
     this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
     // Board routes (auth and ACL required)

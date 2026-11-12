@@ -42,7 +42,8 @@ import SecretsScreen from './SecretsScreen/SecretsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
-import { SdlcWindowHost } from './SdlcScreen/SdlcWindow';
+import SdlcScreen from './SdlcScreen/SdlcScreen';
+import SdlcWindow, { SdlcWindowHost } from './SdlcScreen/SdlcWindow';
 import ReleaseDetailScreen from './ReleaseDetailScreen/ReleaseDetailScreen';
 
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
@@ -1589,6 +1590,38 @@ export const router = createBrowserRouter([
                   },
                 ],
               },
+              {
+                path: 'sdlc',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'sdlc/:channelId',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'sdlc/:channelId/:section',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'sdlc/:channelId/tickets/:ticketId',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <TicketView />
+                  </ResourceProtectedRoute>
+                ),
+              },
               // Disabled (LLM)
               // {
               // path: 'team-intelligence',
@@ -2062,6 +2095,12 @@ export const router = createBrowserRouter([
             element: <ThreadMessages />,
           },
         ],
+      },
+      {
+        // Names the window and redirects to the hub's own route, which renders
+        // there without the app's chrome (see isSdlcWindow).
+        path: '/newWindow/sdlc/:workspaceId/:channelId/:section',
+        element: <SdlcWindow />,
       },
       {
         path: '/newWindow/chat/canvas',
