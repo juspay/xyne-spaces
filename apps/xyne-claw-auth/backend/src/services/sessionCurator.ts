@@ -18,6 +18,7 @@ import { CONFIG } from "../config.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
 import type { MemoryProvider, SessionTranscriptForCurator, SubsystemUpdate } from "xyne-claw-shared";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../lib/internal-call.js";
 
 const logger = createLogger("session-curator-client", createTraceId());
 
@@ -37,14 +38,14 @@ export interface ClassifySessionSubsystemArgs {
 /** One cheap claw-side curator call. Any failure returns null (ingest proceeds). */
 export async function classifySessionSubsystem(args: ClassifySessionSubsystemArgs): Promise<string | null> {
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/curator/classify-subsystem`;
-  if (!CONFIG.xyneClawS2sKey) {
-    logger.warn("[curator-client] XYNE_CLAW_S2S_KEY not set — subsystem classification skipped", { sessionId: args.sessionId });
+  if (!serviceCallsConfigured()) {
+    logger.warn("[curator-client] CLAW_SERVICE_PRIVATE_KEY not set — subsystem classification skipped", { sessionId: args.sessionId });
     return null;
   }
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify({ ...args, transcript: args.transcript.slice(0, 4_000) }),
       signal: AbortSignal.timeout(Math.min(CURATE_TIMEOUT_MS, 60_000)),
     });
@@ -122,8 +123,8 @@ export async function classifySessionSubsystemForBank(
 export async function distillSession(t: SessionTranscriptForCurator): Promise<SubsystemUpdate[]> {
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/curator/distill`;
 
-  if (!CONFIG.xyneClawS2sKey) {
-    logger.warn("[curator-client] XYNE_CLAW_S2S_KEY not set — refusing to call claw without auth", {
+  if (!serviceCallsConfigured()) {
+    logger.warn("[curator-client] CLAW_SERVICE_PRIVATE_KEY not set — refusing to call claw without auth", {
       sessionId: t.sessionId,
     });
     return [];
@@ -134,7 +135,7 @@ export async function distillSession(t: SessionTranscriptForCurator): Promise<Su
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-s2s-key": CONFIG.xyneClawS2sKey,
+        ...runtimeAuthHeaders("POST", url),
       },
       body: JSON.stringify(t),
       signal: AbortSignal.timeout(CURATE_TIMEOUT_MS),
@@ -206,14 +207,14 @@ export async function parseSessionFile(
   args: DistillSessionFileArgs,
 ): Promise<{ transcript: string; meta: { format?: string; turnCount?: number; conversationCount?: number; toolsUsed?: string[]; task?: string } } | null> {
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/curator/distill-session`;
-  if (!CONFIG.xyneClawS2sKey) {
-    logger.warn("[curator-client] XYNE_CLAW_S2S_KEY not set — refusing to call claw without auth", { sessionId: args.sessionId });
+  if (!serviceCallsConfigured()) {
+    logger.warn("[curator-client] CLAW_SERVICE_PRIVATE_KEY not set — refusing to call claw without auth", { sessionId: args.sessionId });
     return null;
   }
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify({ ...args, parseOnly: true }),
       signal: AbortSignal.timeout(CURATE_TIMEOUT_MS),
     });
@@ -237,8 +238,8 @@ export async function parseSessionFile(
 export async function distillSessionFile(args: DistillSessionFileArgs): Promise<SubsystemUpdate[]> {
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/curator/distill-session`;
 
-  if (!CONFIG.xyneClawS2sKey) {
-    logger.warn("[curator-client] XYNE_CLAW_S2S_KEY not set — refusing to call claw without auth", {
+  if (!serviceCallsConfigured()) {
+    logger.warn("[curator-client] CLAW_SERVICE_PRIVATE_KEY not set — refusing to call claw without auth", {
       sessionId: args.sessionId,
     });
     return [];
@@ -249,7 +250,7 @@ export async function distillSessionFile(args: DistillSessionFileArgs): Promise<
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-s2s-key": CONFIG.xyneClawS2sKey,
+        ...runtimeAuthHeaders("POST", url),
       },
       body: JSON.stringify(args),
       signal: AbortSignal.timeout(CURATE_TIMEOUT_MS),

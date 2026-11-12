@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("./internal-call.js", () => ({ serviceCallsConfigured: () => true, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: (method: string, _url: string, user?: { userId?: string }) => ({ "x-service-assertion": `test:xyne-claw-auth:${method}`, ...(user?.userId ? { "x-session-token": `run:${user.userId}` } : {}) }), selfCallRunToken: (u: { userId: string }) => `run:${u.userId}` }));
 import type { LocalHarnessRun } from "@prisma/client";
 
 const state = vi.hoisted(() => ({
@@ -12,7 +13,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("../config.js", () => ({
-  CONFIG: { internalUrl: "http://auth.local", xyneClawS2sKey: "s2s" },
+  CONFIG: { internalUrl: "http://auth.local" },
 }));
 
 vi.mock("../logger.js", () => ({

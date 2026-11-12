@@ -57,7 +57,7 @@ import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { TurnParts } from "../turn-parts.js";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
   searchDeploymentTools,
@@ -222,6 +222,7 @@ import {
   type ExecutableTool,
 } from "../prefetch.js";
 import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext } from "../answer-context.js";
+import { clawAuthHeaders } from "../run-credentials.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -549,7 +550,7 @@ function toWorkspaceContextPath(input: string): string {
   return cleaned.join("/");
 }
 
-router.post("/run", validateS2SKey, async (req, res: Response) => {
+router.post("/run", requireClawAuthService, async (req, res: Response) => {
   if (isDraining()) {
     res.status(503).json({ success: false, error: "xyne-claw is draining" });
     return;
@@ -1218,7 +1219,7 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
 // resume: `buildSandboxStoreKey(userId, conversationId, agentSlug)` →
 // `<conversationId>_<agentSlug>`. S2S-only; claw-auth calls this when a user
 // types `/clear`. Idempotent — deleting a non-existent session is a no-op.
-router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
+router.post("/clear-session", requireClawAuthService, async (req, res: Response) => {
   const { userId, conversationId, agentSlug } = (req.body ?? {}) as {
     userId?: string;
     conversationId?: string;
@@ -1243,7 +1244,7 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
-router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, async (req, res: Response) => {
+router.post("/run/:sessionId/interrupt-with-reply", requireClawAuthService, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
@@ -1314,7 +1315,7 @@ function applyGracefulInterrupt(sessionId: string, active: ActiveRunControl): vo
   });
 }
 
-router.post("/run/:sessionId/cancel", validateS2SKey, async (req, res: Response) => {
+router.post("/run/:sessionId/cancel", requireClawAuthService, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
@@ -1399,7 +1400,7 @@ registerRunControlApplier((msg: RunControlMessage): boolean => {
 // Body: { sourceConversationId, targetConversationId, branchMode? }
 //   branchMode = "lastUser"       → regenerate (default)
 //   branchMode = "beforeLastUser" → edit-user
-router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
+router.post("/clone-session", requireClawAuthService, async (req, res: Response) => {
   const { sourceConversationId, targetConversationId } = req.body as {
     sourceConversationId?: string;
     targetConversationId?: string;
@@ -2122,7 +2123,6 @@ export async function processTask(
       researchContext,
       progressUrlForCustom,
       sessionId,
-      SERVER.s2sKey,
       sessionToken,
       undefined,
       runtimeProviderConfig,
@@ -2457,7 +2457,7 @@ export async function processTask(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+          ...clawAuthHeaders("POST", progressUrl),
         },
         body: JSON.stringify({
           sessionId,
@@ -2566,7 +2566,6 @@ export async function processTask(
           researchContext,
           progressUrlForCustom,
           sessionId,
-          SERVER.s2sKey,
           calleeSessionToken,
           undefined,
           calleeProviderConfigForTools,
@@ -2841,7 +2840,7 @@ export async function processTask(
       const res = await fetch(`${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/internal/callable-agent-spec?${qs.toString()}`, {
         method: "GET",
         headers: {
-          ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+          ...clawAuthHeaders("GET", `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/internal/callable-agent-spec?${qs.toString()}`),
         },
         signal: AbortSignal.timeout(30_000),
       });
@@ -5584,10 +5583,10 @@ export async function sendCallback(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+          ...clawAuthHeaders("POST", url, sessionToken),
           // Per-run proof bound to {sid, uid} so claw-auth can verify this
-          // result actually belongs to this run, not just that it came from a
-          // holder of the shared S2S key. Verified at the /result endpoints.
+          // result actually belongs to this run, not just that it came from
+          // the runtime. Verified at the /result endpoints.
           ...(sessionToken ? { "x-session-token": sessionToken } : {}),
         },
         body,
@@ -5629,7 +5628,7 @@ export async function sendCallback(
 
 // ── Chain judge endpoint (called by xyne-claw-auth webhook) ──────────────
 
-router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
+router.post("/chain-judge", requireClawAuthService, async (req, res: Response) => {
   const {
     agentResult,
     sourceAgent,
@@ -5677,7 +5676,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
 // body), so the probe must run claw-side. Returns state=available|capacity|
 // permanent; claw-auth re-dispatches on available, backs off on capacity, and
 // stops on permanent.
-router.post("/internal/provider-probe", validateS2SKey, async (req, res: Response) => {
+router.post("/internal/provider-probe", requireClawAuthService, async (req, res: Response) => {
   const { provider, model, providerConfig, automation } = req.body as {
     provider?: string;
     model?: string;
@@ -5700,7 +5699,7 @@ router.post("/internal/provider-probe", validateS2SKey, async (req, res: Respons
 
 // ── Generate agent prompt (called by xyne-claw-auth) ──────────────────────
 
-router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
+router.post("/generate-prompt", requireClawAuthService, async (req, res: Response) => {
   const { intent, agentName, existingPrompt } = req.body as {
     intent?: string;
     agentName?: string;
@@ -5770,7 +5769,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
 
 // ── Routing card for agent proactivity (called by xyne-claw-auth) ────────
 
-router.post("/generate-routing-card", validateS2SKey, async (req, res: Response) => {
+router.post("/generate-routing-card", requireClawAuthService, async (req, res: Response) => {
   const { name, description, systemPrompt, tools, skills, asked } = req.body as Partial<RoutingCardInput>;
   if (typeof name !== "string" || typeof systemPrompt !== "string" || !systemPrompt.trim()) {
     res.status(400).json({ success: false, error: "name and systemPrompt are required" });
@@ -5892,7 +5891,7 @@ function templatePlaceholders(template: string): string[] {
 
 router.post(
   "/generate-output-format",
-  validateS2SKey,
+  requireClawAuthService,
   async (req, res: Response) => {
     const { description, format, existingSchema, existingTemplate, agentName } =
       req.body as {
@@ -6063,7 +6062,7 @@ router.post(
 // set. The endpoint is intentionally side-effect-free: it just returns a
 // proposal and the UI renders it as a diff for the user to accept.
 
-router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
+router.post("/suggest-tools", requireClawAuthService, async (req, res: Response) => {
   const { intent, catalog } = req.body as {
     intent?: string;
     catalog?: {

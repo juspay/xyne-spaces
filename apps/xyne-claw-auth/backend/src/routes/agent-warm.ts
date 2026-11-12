@@ -7,6 +7,7 @@ import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { redisService } from "../redis.js";
 import { agentRepository } from "../repositories/index.js";
 import { warmMcpToolLists } from "./mcp.js";
+import { requireService, serviceAuthHeaders } from "../lib/service-assertion.js";
 
 const log = createLogger("agent-warm");
 
@@ -34,11 +35,12 @@ router.post("/:slug", async (req: Request<{ slug: string }>, res: Response): Pro
     .set(`claw:mcp-warm:${userId}:${agent.slug}`, "1", "EX", MCP_WARM_INTERVAL_SECONDS, "NX")
     .catch(() => null);
   if (claimed !== "OK") return;
-  await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/agent-warm/mcp`, {
+  const warmUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/agent-warm/mcp`;
+  await fetch(warmUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-s2s-key": CONFIG.xyneClawS2sKey,
+      ...serviceAuthHeaders("xyne-claw-auth", "POST", warmUrl),
       [CLAW_USER_HEADER]: userId,
     },
     body: JSON.stringify({ userId, agentSlug: agent.slug }),
@@ -46,7 +48,8 @@ router.post("/:slug", async (req: Request<{ slug: string }>, res: Response): Pro
   }).catch((err) => log.warn(`[agent-warm] internal warm request failed slug=${agent.slug}: ${errMsg(err)}`));
 });
 
-internalRouter.post("/mcp", async (req: Request, res: Response): Promise<void> => {
+// Only claw-auth itself sends this (above): the body names the user.
+internalRouter.post("/mcp", requireService("xyne-claw-auth"), async (req: Request, res: Response): Promise<void> => {
   const { userId, agentSlug } = (req.body ?? {}) as { userId?: unknown; agentSlug?: unknown };
   if (typeof userId !== "string" || !userId || typeof agentSlug !== "string" || !AGENT_SLUG.test(agentSlug)) {
     res.status(400).json({ success: false, error: "userId and agentSlug are required" });

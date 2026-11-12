@@ -10,7 +10,7 @@
 
 import { spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { errMsg } from "./errors.js";
-import { getSpacesAuthForUser } from "./spaces-db.js";
+import { resolveSpacesAccess, type SpacesAccess } from "../surfaces/spaces/user-auth.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("spaces-kb");
@@ -47,27 +47,26 @@ export interface KbCollectionNode {
 }
 
 /**
- * Build a SpacesAuthContext for `userId` from the live spaces session DB.
- * Returns null if the user has no active session (no read possible).
- * `workspaceHint` disambiguates users holding two Spaces memberships.
- */
-async function authForUser(userId: string, workspaceHint?: string | null): Promise<SpacesAuthContext | null> {
-  const auth = await getSpacesAuthForUser(userId, "agent-chat", workspaceHint);
-  if (!auth) return null;
-  return { token: auth.token, sessionId: auth.sessionId, workspaceId: auth.workspaceId };
-}
-
-/**
  * Fetch the requesting user's accessible KB tree from spaces backend. When
  * `includeItems` is true, every root collection is expanded with its full
  * sub-folder + file tree (one DB pass on the spaces side). Returns null when
- * the user has no active spaces session.
+ * there is no Spaces auth (see `access`) or the call fails.
  */
 export async function fetchAccessibleKb(
   userId: string,
-  options: { includeItems?: boolean; scopeType?: string; scopeId?: string; workspaceHint?: string | null | undefined } = {},
+  options: {
+    includeItems?: boolean;
+    scopeType?: string;
+    scopeId?: string;
+    workspaceHint?: string | null | undefined;
+    /** How to reach Spaces: the user's forwarded cookie (browser request) or
+     *  the run's agent acting for the user. Neither → null (no auth). */
+    access?: SpacesAccess;
+    /** Already-resolved Spaces auth (skips `access`). */
+    auth?: SpacesAuthContext;
+  } = {},
 ): Promise<KbCollectionNode[] | null> {
-  const auth = await authForUser(userId, options.workspaceHint);
+  const auth = options.auth ?? (await resolveSpacesAccess(userId, options.workspaceHint, options.access ?? {}, "agent-chat"));
   if (!auth) return null;
 
   const qs = new URLSearchParams();
@@ -121,13 +120,15 @@ export function indexKbTree(tree: KbCollectionNode[]): { collections: Set<string
 export async function validateKbGrants(
   userId: string,
   grants: Array<{ collectionId: string; fileId?: string | null }>,
+  access: SpacesAccess = {},
+  workspaceHint?: string | null,
 ): Promise<{
   accepted: Array<{ collectionId: string; fileId: string | null }>;
   rejected: Array<{ collectionId: string; fileId: string | null; reason: string }>;
 }> {
   if (grants.length === 0) return { accepted: [], rejected: [] };
 
-  const tree = await fetchAccessibleKb(userId, { includeItems: true });
+  const tree = await fetchAccessibleKb(userId, { includeItems: true, access, workspaceHint });
   if (!tree) {
     // No session → can't validate. Reject the whole batch rather than
     // silently accepting unverifiable ids.

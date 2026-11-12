@@ -41,7 +41,7 @@ function cacheKey(agentId: string, rules: AwakeningChannelRules): string {
  * wire actually carries.
  */
 async function fetchMemberships(identity: AgentSpacesIdentity): Promise<ResolvedChannel[]> {
-  const auth = { token: identity.appToken, workspaceId: identity.workspaceId };
+  const auth = { agentToken: identity.agentToken, workspaceId: identity.workspaceId };
 
   const participants = await boundedInteract<Array<{ channelId: string }>>(
     {

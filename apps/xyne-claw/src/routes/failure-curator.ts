@@ -7,7 +7,7 @@
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { curateImprovements, type CuratorRequest } from "../failure-curator.js";
 
 import { createLogger } from "../logger.js";
@@ -15,7 +15,7 @@ const log = createLogger("failure-curator");
 
 export const failureCuratorRouter = Router();
 
-failureCuratorRouter.post("/internal/failure-curator/distill", validateS2SKey, async (req: Request, res: Response) => {
+failureCuratorRouter.post("/internal/failure-curator/distill", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as Partial<CuratorRequest>;
     if (!body.agentSlug || !Array.isArray(body.newNegatives)) {

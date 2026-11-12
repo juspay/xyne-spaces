@@ -15,6 +15,7 @@ import type { SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import type { ChannelDeliveryTarget, MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import type { RootAttachmentRef } from "./workflow-handoff.js";
 import { twinScopedKey } from "./twin-scope.js";
+import type { BotRef } from "./spaces-bot.js";
 
 
 export interface SessionContext {
@@ -79,7 +80,8 @@ export interface SessionContext {
    * the thread.
    */
   suppressThreadReply?: boolean;
-  appToken: string;
+  /** Posts as the agent's bot in Spaces (a fresh token per call; never a stored token). */
+  bot: BotRef;
   spacesAppId: string;
   spacesAppUserId: string;
   traceId?: string;
@@ -145,7 +147,7 @@ export interface SessionContext {
    * mentions into clickable/notifying Spaces mentions (name→userId via
    * user-search, then HTML-span expansion) BEFORE forwarding. Set by the Spaces
    * automation path (handleAutomationWebhook), where there is no human session —
-   * resolution uses the agent's bot token (`appToken`). Left unset for the email
+   * resolution uses the agent's bot (`bot`). Left unset for the email
    * auto-draft forward, which must NOT inject mention spans into a draft body.
    */
   resolveMentions?: boolean;

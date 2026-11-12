@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import {
   decideInterrupt,
   extractOpenLoops,
@@ -18,7 +18,7 @@ function str(value: unknown, max: number): string | null {
   return typeof value === "string" && value.trim() ? value.slice(0, max) : null;
 }
 
-router.post("/inbox/triage", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/inbox/triage", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const raw = (req.body as { items?: unknown } | undefined)?.items;
   if (!Array.isArray(raw) || raw.length === 0) {
     res.status(400).json({ success: false, error: "items is required" });
@@ -41,7 +41,7 @@ router.post("/inbox/triage", validateS2SKey, async (req: Request, res: Response)
   res.json({ success: true, results: await triageItems(items) });
 });
 
-router.post("/inbox/interrupt", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/inbox/interrupt", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const state = str((req.body as { state?: unknown } | undefined)?.state, 8_000);
   if (!state) {
     res.status(400).json({ success: false, error: "state is required" });
@@ -59,7 +59,7 @@ router.post("/inbox/interrupt", validateS2SKey, async (req: Request, res: Respon
   res.json({ success: true, ...result });
 });
 
-router.post("/inbox/extract", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/inbox/extract", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const now = str(body["now"], 64);
   const timezone = str(body["timezone"], 64) ?? "UTC";

@@ -8,7 +8,7 @@
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { distillUserMemory } from "../user-memory-curator.js";
 import { synthesizeMemoryFile } from "../twin-soul-synthesizer.js";
 import { checkMemoryUpdate } from "../twin-soul-update-check.js";
@@ -33,7 +33,7 @@ const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
-userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (req: Request, res: Response) => {
+userMemoryRouter.post("/internal/user-memory/distill", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as Partial<UserMemoryDistillRequest>;
     if (!body.userId || !body.window?.from || !body.window?.to || !Array.isArray(body.records)) {
@@ -101,7 +101,7 @@ userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (re
  * user's approved facts. S2S — claw-auth passes the facts + current content,
  * claw runs the LLM (LITELLM_API_KEY is here) and returns the file markdown.
  */
-userMemoryRouter.post("/internal/user-memory/synthesize-file", validateS2SKey, async (req: Request, res: Response) => {
+userMemoryRouter.post("/internal/user-memory/synthesize-file", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as Partial<SynthesizeFileRequest>;
     if (!body.fileName || !Array.isArray(body.facts)) {
@@ -149,7 +149,7 @@ userMemoryRouter.post("/internal/user-memory/synthesize-file", validateS2SKey, a
  * and returns whether the Twin should reply. FAIL-CLOSED (stay silent) on any
  * problem — a wrong post AS the user is not recoverable.
  */
-userMemoryRouter.post("/internal/user-memory/should-respond", validateS2SKey, async (req: Request, res: Response) => {
+userMemoryRouter.post("/internal/user-memory/should-respond", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as Partial<RespondGateRequest>;
     if (typeof body.incoming !== "string" || !body.incoming.trim()) {

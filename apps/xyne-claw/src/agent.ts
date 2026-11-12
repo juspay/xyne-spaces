@@ -96,6 +96,7 @@ import { installToolBudget } from "./tool-budget.js";
 import { installAwakeningInbox } from "./awakening-inbox.js";
 import { TurnParts, type TurnPart } from "./turn-parts.js";
 import type { FastToolRuntimeController } from "./tool-catalog.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("agent");
 
@@ -1453,7 +1454,7 @@ function maybeEmitPrCard(progressUrl: ProgressDest, sessionId: string, invocatio
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+        ...clawAuthHeaders("POST", progressUrl),
       },
       body: JSON.stringify({ sessionId, kind: "pr", pr }),
       signal: AbortSignal.timeout(5_000),
@@ -1492,7 +1493,7 @@ export function pushInvocation(progressUrl: ProgressDest, sessionId: string, inv
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", progressUrl),
     },
     body: JSON.stringify({ sessionId, toolInvocation: invocation }),
     signal: AbortSignal.timeout(5_000),
@@ -1523,7 +1524,7 @@ export function pushInterimMessage(progressUrl: ProgressDest, sessionId: string,
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", progressUrl),
     },
     body: JSON.stringify({ sessionId, kind: "interim", text: text.slice(0, INTERIM_MESSAGE_MAX_CHARS) }),
     signal: AbortSignal.timeout(5_000),
@@ -1550,7 +1551,7 @@ export function pushAttachment(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", progressUrl),
     },
     body: JSON.stringify({ sessionId, attachment }),
     signal: AbortSignal.timeout(15_000),
@@ -1582,7 +1583,7 @@ export function pushSandboxPreview(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", progressUrl),
     },
     body: JSON.stringify({
       sessionId,
@@ -1618,7 +1619,7 @@ function postStreamChunk(chunk: PendingStreamChunk): void {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", chunk.url),
     },
     body: JSON.stringify({
       sessionId: chunk.sessionId,
@@ -1696,7 +1697,7 @@ export function pushDebugProgress(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", progressUrl),
     },
     body: JSON.stringify({ sessionId, debugEvent: event }),
     signal: AbortSignal.timeout(5_000),
@@ -1748,7 +1749,7 @@ function createProgressReporter(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+        ...clawAuthHeaders("POST", dest),
       },
       body: JSON.stringify({
         sessionId,

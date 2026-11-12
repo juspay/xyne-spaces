@@ -695,23 +695,21 @@ describe("create-app description teaches incremental updates", () => {
   });
 });
 
-describe("S2S config is actually reachable at runtime", () => {
+describe("auth config is actually reachable at runtime", () => {
   // xyne-claw builds tool context with resolveToolConfig(tool.configSchema, …),
-  // so an undeclared key is simply absent — the read-back then goes out with no
-  // x-s2s-key and claw-auth returns 401. That failure is silent: the tool falls
-  // back to advising a full rebuild, which looks like the model choosing badly
-  // rather than a misconfiguration.
-  it("create-app declares the auth URL and S2S key it reads", () => {
+  // so an undeclared key is simply absent. Calls are signed through
+  // context.serviceAuth; no shared key is declared or read.
+  it("create-app declares the auth URL and no shared key", () => {
     const keys = Object.keys(createReactArtifactTool.configSchema ?? {});
     expect(keys).toContain("XYNE_CLAW_AUTH_URL");
-    expect(keys).toContain("XYNE_CLAW_S2S_KEY");
+    expect(keys).not.toContain("XYNE_CLAW_S2S_KEY");
   });
 
   it("read-app-file declares them too", async () => {
     const { readArtifactAppFileTool } = await import("./readTool.js");
     const keys = Object.keys(readArtifactAppFileTool.configSchema ?? {});
     expect(keys).toContain("XYNE_CLAW_AUTH_URL");
-    expect(keys).toContain("XYNE_CLAW_S2S_KEY");
+    expect(keys).not.toContain("XYNE_CLAW_S2S_KEY");
   });
 });
 

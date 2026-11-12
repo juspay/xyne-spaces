@@ -1,4 +1,5 @@
 import { spacesAppFetchMultipart } from "../surfaces/spaces/client.js";
+import type { BotRef } from "./spaces-bot.js";
 
 /**
  * Upload a generated markdown document as a thread attachment.
@@ -13,7 +14,7 @@ export async function postGeneratedMarkdownFile(args: {
   conversationId: string;
   workspaceId?: string | null;
   userId: string;
-  appToken: string;
+  bot: BotRef;
   filename: string;
   /** Text body, or raw bytes when `mimeType` says the payload is binary. */
   markdown: string | Uint8Array;
@@ -43,5 +44,5 @@ export async function postGeneratedMarkdownFile(args: {
   if (args.workspaceId) form.append("workspaceId", args.workspaceId);
   form.append("markdownText", args.summary);
   form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
-  await spacesAppFetchMultipart("/files/filesUpload", form, args.appToken);
+  await spacesAppFetchMultipart("/files/filesUpload", form, args.bot);
 }

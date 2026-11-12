@@ -1,14 +1,16 @@
 import { getRepoConfigs, setRepoConfigLoader, type RepoConfigMap } from "xyne-claw-shared";
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("sandbox-repo-configs");
 
 const FETCH_TIMEOUT_MS = 5_000;
 
 async function fetchRepoConfigs(): Promise<RepoConfigMap> {
-  const res = await fetch(`${SERVER.authServiceUrl}/claw/api/v1/internal/sandbox-repos`, {
-    headers: { "x-s2s-key": SERVER.s2sKey },
+  const url = `${SERVER.authServiceUrl}/claw/api/v1/internal/sandbox-repos`;
+  const res = await fetch(url, {
+    headers: clawAuthHeaders("GET", url),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`sandbox-repos ${res.status}`);

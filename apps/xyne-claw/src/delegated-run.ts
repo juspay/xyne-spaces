@@ -10,6 +10,7 @@ import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
 import type { LatencyMetrics, TokenUsage, ToolInvocation } from "./debug/index.js";
 import type { LlmCallStat } from "./llm-turn-stats.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("delegated-run");
 
@@ -45,11 +46,12 @@ export interface DelegatedRunFinish {
 
 async function post(path: string, body: unknown): Promise<void> {
   const base = SERVER.authServiceUrl.replace(/\/+$/, "");
-  const res = await fetch(`${base}/claw/api/v1/internal/delegated-run/${path}`, {
+  const url = `${base}/claw/api/v1/internal/delegated-run/${path}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", url),
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),

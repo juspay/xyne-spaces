@@ -2,13 +2,13 @@ import { Router, type Request, type Response } from "express";
 import { CONFIG } from "../config.js";
 import { errMsg } from "../lib/errors.js";
 import { spacesUserIdForClawUser, userIdAliasesFor } from "../lib/users-jit.js";
-import { requireStrictS2S } from "../middleware/require-auth.js";
+import { requireRuntime, serviceAuthHeaders } from "../lib/service-assertion.js";
 import { requireSessionToken } from "../middleware/require-session-token.js";
 
 const router = Router();
 
 // Scoped to /sdlc: a bare "/:sessionId" guard shadows other /sessions/:id routes (see routes/mcp.ts).
-router.use("/:sessionId/sdlc", requireStrictS2S, requireSessionToken);
+router.use("/:sessionId/sdlc", requireRuntime, requireSessionToken);
 
 // xyne-claw has no Spaces URL, so it bootstraps sandbox git credentials through here.
 // The actor comes from the run's session token, not the body. Bodies carry the envelope: never log them.
@@ -30,11 +30,12 @@ router.post("/:sessionId/sdlc/runtime-credentials/bootstrap", async (req: Reques
     typeof body?.workspaceId === "string" && body.workspaceId.trim() ? body.workspaceId.trim() : undefined;
   const actingUserId = await spacesUserIdForClawUser(userId, workspaceId).catch(() => userId);
   try {
-    const response = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/sdlc/vcs/runtime-credentials/bootstrap`, {
+    const url = `${CONFIG.spacesInternalUrl}/api/internal/sdlc/vcs/runtime-credentials/bootstrap`;
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-s2s-key": process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+        ...serviceAuthHeaders("xyne-spaces", "POST", url),
         "x-xyne-acting-user-id": actingUserId,
       },
       body: JSON.stringify(req.body),

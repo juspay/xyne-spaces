@@ -253,26 +253,12 @@ export async function deleteAgent(userId: string, slug: string): Promise<void> {
   });
 }
 
-export async function createAgentApp(slug: string): Promise<void> {
-  await clawApiRequest<unknown>(`/agents/${encodeURIComponent(slug)}/create-app`, {
-    method: 'POST',
-  });
-}
-
-export async function installAgentApp(slug: string): Promise<void> {
-  await clawApiRequest<unknown>(`/agents/${encodeURIComponent(slug)}/install-app`, {
-    method: 'POST',
-  });
-}
-
-export async function configureAgentWebhook(slug: string): Promise<void> {
-  await clawApiRequest<unknown>(`/agents/${encodeURIComponent(slug)}/configure-webhook`, {
-    method: 'POST',
-  });
-}
-
-export async function grantAgentPermissions(slug: string): Promise<void> {
-  await clawApiRequest<unknown>(`/agents/${encodeURIComponent(slug)}/grant-permissions`, {
+/**
+ * Add the agent to the current Spaces workspace and approve its permissions.
+ * The caller must be a Spaces workspace admin and own or administer the agent.
+ */
+export async function registerAgentInSpaces(slug: string): Promise<void> {
+  await clawApiRequest<unknown>(`/agents/${encodeURIComponent(slug)}/register-in-spaces`, {
     method: 'POST',
   });
 }

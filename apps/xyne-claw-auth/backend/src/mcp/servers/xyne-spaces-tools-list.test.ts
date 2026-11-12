@@ -14,7 +14,6 @@ vi.mock("./xyne-spaces-client.js", () => mocks);
 
 process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);
 process.env["XYNE_CLAW_URL"] = "http://claw.local";
-process.env["XYNE_CLAW_S2S_KEY"] = "s2s-secret";
 
 type InteractParams = { model: string };
 

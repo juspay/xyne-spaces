@@ -1,7 +1,7 @@
 import rateLimit, { ipKeyGenerator, type RateLimitRequestHandler } from "express-rate-limit";
 import type { Request, Response } from "express";
 import { createHash } from "node:crypto";
-import { internalS2sKeyMatches, s2sKeyMatches } from "./require-auth.js";
+import { SERVICE_ASSERTION_HEADER, verifyServiceAssertion, type ServiceName } from "../lib/service-assertion.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("rate-limiters");
@@ -11,7 +11,7 @@ const log = createLogger("rate-limiters");
  *
  * The limiter is mounted at the API root, which is BEFORE any auth middleware
  * runs, so `x-user-id` is not set yet: http/routes.ts strips the inbound header
- * for every non-S2S caller and only requireAuth puts it back. Reading it there
+ * for every caller and only the auth middleware puts it back. Reading it there
  * always found nothing and fell through to the IP, and behind a load balancer
  * that is one bucket for every signed-in person in the company.
  *
@@ -57,23 +57,38 @@ function requesterKey(req: Request): string {
   return clientIpKey(req);
 }
 
+/**
+ * True when the request carries a valid service assertion from one of `allow`
+ * (signature, audience, lifetime, method + path). The limiter runs before auth
+ * and must stay synchronous, so the single-use jti is NOT claimed here — the
+ * route's own requireService / requireAuth does that and rejects a replay. A
+ * replayed assertion can at most skip this counter, never reach a handler.
+ */
+function hasValidServiceAssertion(req: Request, allow: readonly ServiceName[]): boolean {
+  const raw = req.headers?.[SERVICE_ASSERTION_HEADER];
+  if (!raw) return false;
+  const path = (req.originalUrl || req.url || "").split("?")[0] ?? "";
+  return typeof verifyServiceAssertion(raw, { allow, method: req.method, path }) !== "string";
+}
+
+/** The runtime and claw-auth itself are never limited; Spaces only on SPACES_UNLIMITED_PREFIXES. */
 function isInternalCaller(req: Request, _res: Response): boolean {
-  return s2sKeyMatches(req.headers?.["x-s2s-key"]);
+  return hasValidServiceAssertion(req, ["xyne-claw", "xyne-claw-auth"]);
 }
 
 /**
- * Spaces-backend routes (INTERNAL_S2S_KEY) that skip apiLimiter. Those calls
+ * Spaces-backend routes (Spaces service assertion) that skip apiLimiter. Those calls
  * carry no user or cookie, so the requester key falls back to the address and
  * every Spaces call shares one bucket. The agent check runs inside installApp,
  * which stamps AGENT/APP once, so a 429 there fails the install.
  */
-const INTERNAL_S2S_UNLIMITED_PREFIXES = ["/internal/agents"] as const;
+const SPACES_UNLIMITED_PREFIXES = ["/internal/agents"] as const;
 
 /** `req.path` must be relative to the API base, as it is where apiLimiter is mounted. */
-export function isUnlimitedInternalS2S(req: Request): boolean {
+export function isUnlimitedSpacesCall(req: Request): boolean {
   return (
-    INTERNAL_S2S_UNLIMITED_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)) &&
-    internalS2sKeyMatches(req.headers?.["x-s2s-key"])
+    SPACES_UNLIMITED_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)) &&
+    hasValidServiceAssertion(req, ["xyne-spaces"])
   );
 }
 

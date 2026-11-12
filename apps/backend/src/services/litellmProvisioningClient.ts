@@ -1,3 +1,4 @@
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 import { config } from '@/config/env';
 
 const USER_MODELS = ['no-default-models'];
@@ -287,17 +288,12 @@ class LiteLLMProvisioningClient {
       });
     }
 
-    if (!config.aiProvisioning.s2sKey) {
-      throw new LiteLLMProvisioningError('XYNE_CLAW_S2S_KEY is not configured', {
-        retryable: false,
-      });
-    }
-
+    const url = `${baseUrl}/claw/api/v1/internal/litellm-sync${path}`;
     return this.post({
-      url: `${baseUrl}/claw/api/v1/internal/litellm-sync${path}`,
+      url,
       headers: {
         'content-type': 'application/json',
-        'x-s2s-key': config.aiProvisioning.s2sKey,
+        ...serviceAuthHeaders('xyne-claw-auth', 'POST', url),
       },
       payload,
       path,

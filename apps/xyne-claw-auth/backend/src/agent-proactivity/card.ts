@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
+import { runtimeAuthHeaders } from "../lib/internal-call.js";
 import { createLogger } from "../logger.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { publicChannels } from "./spaces-scope.js";
@@ -145,12 +146,10 @@ export async function refreshRoutingCard(agentId: string, opts: { force?: boolea
   const newQuestions = newest !== null && newest.getTime() > generatedAt && Date.now() - generatedAt > ASKED_REFRESH_MS;
   if (!opts.force && current?.sourceHash === sourceHash && !newQuestions) return current;
 
-  const res = await fetch(`${CONFIG.xyneClawUrl}/generate-routing-card`, {
+  const url = `${CONFIG.xyneClawUrl}/generate-routing-card`;
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-    },
+    headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
     body: JSON.stringify({ ...source, asked }),
     signal: AbortSignal.timeout(240_000),
   });

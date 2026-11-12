@@ -1,6 +1,7 @@
 import { CONFIG } from "../config.js";
 import { streamDispatcher } from "./consume-claw-stream.js";
 import { createLogger } from "../logger.js";
+import { serviceAuthHeaders } from "./service-assertion.js";
 
 const log = createLogger("run");
 
@@ -38,8 +39,11 @@ export async function fetchClawRunWithRetry(init: RequestInit, label: string): P
   let retried = false;
   for (;;) {
     try {
-      const response = await fetch(`${CONFIG.xyneClawUrl}/run`, {
+      const url = `${CONFIG.xyneClawUrl}/run`;
+      const response = await fetch(url, {
         ...init,
+        // A fresh service assertion per attempt: each is single use.
+        headers: { ...((init.headers ?? {}) as Record<string, string>), ...serviceAuthHeaders("xyne-claw", init.method ?? "POST", url) },
         // `dispatcher` is an undici extension not in the DOM RequestInit type.
         dispatcher: streamDispatcher,
       } as unknown as RequestInit);

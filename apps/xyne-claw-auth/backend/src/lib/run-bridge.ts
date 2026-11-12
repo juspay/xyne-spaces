@@ -12,6 +12,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("run");
 
 import type { MessagingChannelKey } from "../surfaces/messaging/plugin.js";
+import { internalServiceHeaders } from "./internal-service-auth.js";
 
 type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
 
@@ -30,7 +31,7 @@ export interface BridgeForProbeOpts {
   /** Per-run HMAC bearer minted by mintSessionToken (bound to {sid, uid}).
    *  Required on the final callback POST — /webhook/result + the per-session
    *  /sessions/:id/result endpoints gate on it via requireResultToken so a
-   *  leaked S2S key alone can't post a result for an arbitrary run. Legacy
+   *  service assertion alone can't post a result for an arbitrary run. Legacy
    *  claw's sendCallback shipped it as x-session-token; the bridge has to
    *  do the same or the receiver rejects with "malformed". */
   sessionToken: string;
@@ -140,7 +141,6 @@ async function retryBrokenBridgeOnce(opts: {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
         },
         body: JSON.stringify(newBody),
       },
@@ -331,7 +331,7 @@ export async function postBrokenSseTerminalCallback(opts: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...internalServiceHeaders("POST", opts.callbackUrl),
         ...(opts.sessionToken ? { "x-session-token": opts.sessionToken } : {}),
       },
       body: JSON.stringify(body),
@@ -378,21 +378,21 @@ export async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promi
     return;
   }
 
-  // Progress POSTs only need x-s2s-key (the per-event /webhook/progress sink
-  // is shared-secret-gated, not per-run-bound). The FINAL callback POST is
-  // different — it needs x-session-token too (see callbackHeaders below).
-  const sharedHeaders: Record<string, string> = {
+  // Progress POSTs carry a service assertion (signed per request: it is
+  // single use and bound to method + path). The FINAL callback POST also needs
+  // x-session-token (see callbackHeaders below).
+  const sharedHeaders = (url: string): Record<string, string> => ({
     "Content-Type": "application/json",
-    ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-  };
+    ...internalServiceHeaders("POST", url),
+  });
   // Final-callback POST adds the per-run HMAC bearer so /webhook/result and
   // /sessions/:id/result accept it. Mirrors legacy claw sendCallback's headers
   // (xyne-claw/src/routes/run.ts:1924). Without this the receiver logs
   // "[result-token] rejecting result (session=...): malformed → 401".
-  const callbackHeaders: Record<string, string> = {
-    ...sharedHeaders,
+  const callbackHeaders = (url: string): Record<string, string> => ({
+    ...sharedHeaders(url),
     ...(sessionToken ? { "x-session-token": sessionToken } : {}),
-  };
+  });
   const spacesProgress = isSpacesWebhookProgressUrl(progressUrl);
   // Conv-keyed fallback fields. Always present in legacy POSTs that claw used
   // to send (createProgressReporter ships them when progressMeta is set).
@@ -411,7 +411,7 @@ export async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promi
     try {
       await fetch(progressUrl, {
         method: "POST",
-        headers: sharedHeaders,
+        headers: sharedHeaders(progressUrl),
         body: JSON.stringify({ ...convFallback, ...body }),
         signal: AbortSignal.timeout(15_000),
       });
@@ -482,7 +482,7 @@ export async function runBridgeForProbeResponse(opts: BridgeForProbeOpts): Promi
         // digital-twin suffix, etc.).
         await fetch(callbackUrl, {
           method: "POST",
-          headers: callbackHeaders,
+          headers: callbackHeaders(callbackUrl),
           body: JSON.stringify({
             ...convFallback,
             ...result.result,

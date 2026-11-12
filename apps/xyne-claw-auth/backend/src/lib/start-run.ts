@@ -5,7 +5,6 @@ import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/mes
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
-import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
 import { resolveProjectInstructions } from "./project-context.js";
 import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
@@ -51,7 +50,7 @@ import {
 import { resolveFastMode } from "./fast-mode.js";
 import { withAwakeningSendTool } from "../awakening/send-tool.js";
 import { redisService } from "../redis.js";
-import { getDmChannelForUserAndApp, getWorkspaceIdForUser } from "./spaces-db.js";
+import { getDmChannelForUserAndAgent, getWorkspaceIdForUser } from "./spaces-db.js";
 import {
   isAllowedExternalCallbackUrl,
   isInternalCallbackOrigin,
@@ -68,6 +67,7 @@ import { dispatchRun } from "./dispatch-run.js";
 import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
+import { getAgentBotAuth, type BotRef } from "./spaces-bot.js";
 
 const log = createLogger("run");
 
@@ -329,6 +329,12 @@ function toRunSkill(skill: Prisma.SkillGetPayload<{ include: { files: true } }>)
   };
 }
 
+/** The agent's bot for this run: the workspace the caller named, else the agent's only one. */
+function runBotRef(clawAgentId: string, body: unknown): BotRef {
+  const ws = (body as { workspaceId?: unknown } | null)?.workspaceId;
+  return { clawAgentId, workspaceId: typeof ws === "string" && ws.trim() ? ws.trim() : null };
+}
+
 async function resolveAgent(
   agentSlug: string | undefined,
   orgId: string | undefined,
@@ -342,7 +348,6 @@ async function resolveAgent(
       orgId: string;
       delegationTier: "standard" | "orchestrator";
       spacesAppId?: string | null;
-      spacesAppToken?: string | null;
       spacesAppUserId?: string | null;
       skills?: {
         slug: string;
@@ -394,7 +399,6 @@ async function resolveAgent(
     orgId: agent.orgId,
     delegationTier: agent.delegationTier === "orchestrator" ? "orchestrator" : "standard",
     spacesAppId: agent.spacesAppId ?? null,
-    spacesAppToken: agent.spacesAppToken ?? null,
     spacesAppUserId: agent.spacesAppUserId ?? null,
     agentConfig: stripPlatformConfigKeys(agent.config as Record<string, unknown>),
     config: agent.config,
@@ -627,7 +631,7 @@ export async function prepareRun(
     log.info(
       `[run] Received: ticketIds=${JSON.stringify(ticketIds)}, canvasIds=${JSON.stringify(canvasIds)}, callIds=${JSON.stringify(callIds)}`,
     );
-    // [AUTODBG] confirm automation forwards reach this handler (past requireStrictS2S)
+    // [AUTODBG] confirm automation forwards reach this handler (past the service-assertion gate)
     // and which dispatch path they take. Trusted internal calls preserve the
     // caller's dispatchSessionId so upstream can persist it before dispatch.
     {
@@ -826,10 +830,7 @@ export async function prepareRun(
 
     let effectiveChannelId = channelId;
     if (!effectiveChannelId && deliverTo === "dm" && authenticatedUserId) {
-      if (agent.spacesAppId) {
-        effectiveChannelId =
-          (await getDmChannelForUserAndApp(authenticatedUserId, agent.spacesAppId)) ?? undefined;
-      }
+      effectiveChannelId = (await getDmChannelForUserAndAgent(authenticatedUserId, agent.id)) ?? undefined;
       if (!effectiveChannelId) {
         log.warn(
           `[run] dm-delivery unresolved user=${authenticatedUserId} agent=${agentSlug || "assistant"}`,
@@ -846,14 +847,11 @@ export async function prepareRun(
     // pain: HITL approval cards vanishing on API-triggered runs).
     if (isServiceTokenCaller && effectiveChannelId) {
       try {
-        const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
-        const appToken = ciphertext && iv && authTag
-          ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey)
-          : "";
-        if (!appToken) {
-          return { ok: false, status: 403, error: "This agent has no Spaces app credential; it cannot post to a channel" };
+        const bot = runBotRef(agent.id, body);
+        if (!(await getAgentBotAuth(bot.clawAgentId, bot.workspaceId))) {
+          return { ok: false, status: 403, error: "This agent is not added to the Spaces workspace; it cannot post to a channel" };
         }
-        await spacesAppFetch("/channel/info", { channelId: effectiveChannelId }, appToken);
+        await spacesAppFetch("/channel/info", { channelId: effectiveChannelId }, bot);
       } catch (channelErr) {
         const msg = errMsg(channelErr);
         if (/Spaces app API 404/i.test(msg) || /CHANNEL_NOT_FOUND/i.test(msg)) {
@@ -1080,6 +1078,7 @@ export async function prepareRun(
           (reason) => {
             sdlcContextError = reason;
           },
+          { clawAgentId: agent.id },
         ),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
@@ -1343,14 +1342,13 @@ export async function prepareRun(
     // this cannot be used to self-declare an unattended run from a browser.
     if (awakeningBlock) {
       try {
-        const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
-        const appToken =
-          ciphertext && iv && authTag ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
+        const bot = runBotRef(agent.id, body);
+        const botUserId = (await getAgentBotAuth(bot.clawAgentId, bot.workspaceId))?.botUserId ?? "";
         const kind = String((awakeningBlock as Record<string, unknown>)["kind"] ?? "");
         const { setSession } = await import("../routes/webhook.js");
         await setSession(sessionId, {
-          mentionedUserId: agent.spacesAppUserId ?? "",
-          senderId: agent.spacesAppUserId ?? "",
+          mentionedUserId: botUserId,
+          senderId: botUserId,
           senderName: agentSlug || "assistant",
           channelId: "",
           channelName: "",
@@ -1366,9 +1364,9 @@ export async function prepareRun(
           // The agent posts through tools, choosing thread and wording itself;
           // its final answer is an operator log line, not a channel message.
           suppressThreadReply: true,
-          appToken,
+          bot,
           spacesAppId: agent.spacesAppId ?? "",
-          spacesAppUserId: agent.spacesAppUserId ?? "",
+          spacesAppUserId: botUserId,
           ...(traceId ? { traceId } : {}),
         });
       } catch (sessionErr) {
@@ -1423,11 +1421,10 @@ export async function prepareRun(
 
     if (injectedCallbackUrl) {
       try {
-        const [ciphertext, iv, authTag] = (agent.spacesAppToken ?? "").split(":");
-        const appToken =
-          ciphertext && iv && authTag ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
+        const bot = runBotRef(agent.id, body);
+        const botUserId = (await getAgentBotAuth(bot.clawAgentId, bot.workspaceId))?.botUserId ?? "";
         const sessionContext: SessionContext = {
-          mentionedUserId: agent.spacesAppUserId ?? "",
+          mentionedUserId: botUserId,
           senderId: resolved.userId,
           // Never render the canonical id as a display name.
           senderName: resolved.userName || resolved.userEmail || resolved.userId,
@@ -1439,9 +1436,9 @@ export async function prepareRun(
           agentOrgId: agent.orgId,
           agentSlug: agentSlug || "assistant",
           responseMode: "conversation",
-          appToken,
+          bot,
           spacesAppId: agent.spacesAppId ?? "",
-          spacesAppUserId: agent.spacesAppUserId ?? "",
+          spacesAppUserId: botUserId,
           rootAgentSlug: agentSlug || "assistant",
           ...(traceId ? { traceId } : {}),
           ...(externalResultCallback ? { externalResultCallback } : {}),

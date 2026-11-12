@@ -13,6 +13,7 @@ import { HINDSIGHT, SERVER } from "./config.js";
 import { jaccard, wordSet } from "./text-similarity.js";
 
 import { createLogger } from "./logger.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 const log = createLogger("memory-search");
 
 const MAX_LIMIT = 12;
@@ -255,7 +256,7 @@ async function logRecallHits(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", `${SERVER.authServiceUrl}/claw/api/v1/memory/recall-hits`),
     },
     body: JSON.stringify({ hits: payload }),
     signal: AbortSignal.timeout(5_000),

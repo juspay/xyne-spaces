@@ -38,6 +38,7 @@ router.get("/tree", asyncHandler(async (req: Request, res: Response) => {
     ...(scopeType ? { scopeType } : {}),
     ...(scopeId ? { scopeId } : {}),
     ...(requestWorkspaceHint(req) ? { workspaceHint: requestWorkspaceHint(req) } : {}),
+    access: { cookie: req.headers.cookie },
   });
   if (tree === null) {
     // No active spaces session — the picker should ask the user to log in

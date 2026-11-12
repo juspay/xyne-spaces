@@ -31,8 +31,11 @@ vi.mock("./credentials-refresh.js", () => ({
   hasDedicatedRefresh: (type: string) => state.dedicated.has(type),
 }));
 vi.mock("./spaces-db.js", () => ({
-  getSpacesAuthForUser: vi.fn(async () => null),
   getWorkspaceIdForUser: vi.fn(async () => null),
+}));
+vi.mock("../surfaces/spaces/user-auth.js", () => ({
+  resolveAgentSpacesAuth: vi.fn(async () => null),
+  clawAgentIdForSlug: vi.fn(async () => null),
 }));
 vi.mock("../db.js", () => ({
   prisma: {

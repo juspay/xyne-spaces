@@ -43,6 +43,7 @@ import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { agentRunRepository, chatMessageRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { createLogger } from "../logger.js";
+import { serviceAuthHeaders } from "../lib/service-assertion.js";
 
 const log = createLogger("artifact-app-agents");
 export const artifactAppAgentsRouter: Router = Router();
@@ -531,11 +532,12 @@ async function dispatchRun(input: {
     fastMode: fastModeEnabled,
   };
 
-  const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+  const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
+  const res = await fetch(runUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
     },
     body: JSON.stringify(dispatchPayload),
   });
@@ -723,19 +725,16 @@ artifactAppAgentsRouter.post("/runs/:id/cancel", async (req: Request<{ id: strin
     return;
   }
 
-  // claw authorizes the cancel itself on x-user-id === the run's user, so the
-  // header is not decoration — it is the object-level check on the far side.
-  const clawRes = await fetch(
-    `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(row.sessionId)}/cancel`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-user-id": requesterId,
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      },
+  // Ownership is checked above (row.userId === requesterId); the internal cancel
+  // is a claw-auth self-call authenticated by its service assertion.
+  const cancelUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(row.sessionId)}/cancel`;
+  const clawRes = await fetch(cancelUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...serviceAuthHeaders("xyne-claw-auth", "POST", cancelUrl),
     },
-  ).catch(() => null);
+  }).catch(() => null);
 
   const ok = Boolean(clawRes?.ok);
   await prisma.artifactAppAgentRun

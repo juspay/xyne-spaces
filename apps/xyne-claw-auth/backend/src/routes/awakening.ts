@@ -12,7 +12,8 @@
 
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
-import { requireAuth, requireNoAccessToken, requireStrictS2S } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken } from "../middleware/require-auth.js";
+import { requireRuntime } from "../lib/service-assertion.js";
 import { requireClawAdmin } from "../middleware/agent-acl.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { clawMetricsFields, type FinalizeRunInput } from "../repositories/agentRunRepository.js";
@@ -106,7 +107,7 @@ function toolNames(value: unknown): string[] | undefined {
  * idempotencyKey the dispatch used, so a duplicate delivery (retry, recovery
  * refire) just rewrites the same values.
  */
-awakeningRouter.post("/awakening/:idempotencyKey/result", requireStrictS2S, async (req: Request, res: Response) => {
+awakeningRouter.post("/awakening/:idempotencyKey/result", requireRuntime, async (req: Request, res: Response) => {
   const { idempotencyKey } = req.params as { idempotencyKey?: string };
   if (!idempotencyKey) {
     res.status(400).json({ success: false, error: "idempotencyKey is required" });
@@ -202,7 +203,7 @@ awakeningRouter.post("/awakening/:idempotencyKey/result", requireStrictS2S, asyn
  * delivered — the caller steers it into the session immediately, and a pod
  * that dies mid-turn loses at most one batch, which the next reflex re-counts.
  */
-awakeningRouter.post("/awakening/inbox/:sessionId/drain", requireStrictS2S, async (req: Request, res: Response) => {
+awakeningRouter.post("/awakening/inbox/:sessionId/drain", requireRuntime, async (req: Request, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });

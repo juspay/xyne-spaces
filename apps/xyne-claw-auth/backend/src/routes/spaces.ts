@@ -1,11 +1,12 @@
 import { Router, type Request, type Response } from "express";
 import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { spacesAppFetchGet } from "../lib/spaces-api.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getRequesterId, getOrgId } from "../middleware/agent-acl.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces");
@@ -55,79 +56,43 @@ interface SpacesBoardRow {
 
 const router = Router();
 
-async function resolveUserSpacesAuth(userId: string, workspaceHint?: string): Promise<SpacesAuthContext | null> {
-  // Prefer a LIVE token from the Spaces session DB. getSpacesAuthForUser reads
-  // the user's active session and, if the access token has expired, refreshes
-  // it via Spaces' /api/auth/refresh-session — the same mechanism the MCP
-  // runner uses. Without this we decrypt the token cached in userMcpConnection
-  // at connect-time and use it verbatim; once it expires (Spaces JWTs are
-  // short-lived) every call here 401s with "Invalid or expired session" until
-  // the user re-connects. This is why some users hit that error on the channel
-  // picker "always".
-  const live = await getSpacesAuthForUser(userId, "require-auth", workspaceHint).catch(() => null);
-  if (live?.token) {
+async function resolveUserSpacesAuth(
+  userId: string,
+  workspaceHint?: string,
+  requestCookie?: string,
+): Promise<SpacesAuthContext | null> {
+  // Forward the user's OWN Spaces cookie that arrived on this request — Spaces
+  // validates and refreshes it itself. claw-auth no longer reads users' live
+  // sessions from the Spaces DB (that let it act as anyone).
+  if (typeof requestCookie === "string" && requestCookie.trim()) {
     return {
-      token: live.token,
+      cookie: requestCookie,
       baseUrl: CONFIG.spacesInternalUrl,
-      ...(live.sessionId ? { sessionId: live.sessionId } : {}),
-      workspaceId: live.workspaceId,
+      ...(workspaceHint ? { workspaceId: workspaceHint } : {}),
     };
   }
 
-  // Fallback: the cached MCP-connection credentials (works until they expire).
-  const connection = await prisma.userMcpConnection.findFirst({
-    where: { userId, mcpServer: { type: "xyne-spaces" } },
-  });
-  if (!connection) return null;
-
-  const decrypted = decrypt(
-    connection.encryptedCreds,
-    connection.iv,
-    connection.authTag,
-    CONFIG.encryptionKey,
-  );
-  const credentials = JSON.parse(decrypted) as Record<string, unknown>;
-  const tokenRaw = credentials["token"];
-  const urlRaw = credentials["url"];
-  const sessionIdRaw = credentials["sessionId"];
-  const workspaceIdRaw = credentials["workspaceId"];
-
-  const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
-  if (!token) return null;
-
-  const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
-  const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
-  const workspaceIdFromCreds = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
-  const workspaceId = workspaceIdFromCreds ?? await getWorkspaceIdForUser(userId, "require-auth", workspaceHint).catch(() => null) ?? undefined;
-  if (!workspaceIdFromCreds && workspaceId) {
-    log.info(`[spaces] resolved workspaceId=${workspaceId} from user row for cached auth userId=${userId}`);
-  }
-
-  return {
-    token,
-    baseUrl,
-    ...(sessionId ? { sessionId } : {}),
-    ...(workspaceId ? { workspaceId } : {}),
-  };
+  // No cookie: no Spaces auth. (The old fallback decrypted a stored copy of the
+  // user's Spaces token from userMcpConnection; stored user credentials are gone.)
+  return null;
 }
 
-async function resolveAgentAppToken(orgId: string | undefined, agentSlug?: string): Promise<string | null> {
+/**
+ * The org's agent (by slug, or the default agent) as a bot reference in the
+ * request's workspace, or null when it isn't added to that Spaces workspace.
+ */
+async function resolveAgentBot(orgId: string | undefined, agentSlug: string | undefined, workspaceId: string | null): Promise<BotRef | null> {
   if (!orgId) {
-    log.error(`[spaces] orgId is required; refusing global app-token lookup agentSlug=${agentSlug ?? "none"}`);
+    log.error(`[spaces] orgId is required; refusing global agent lookup agentSlug=${agentSlug ?? "none"}`);
     return null;
   }
   const agent = await prisma.agent.findFirst({
-    where: agentSlug
-      ? { orgId, slug: agentSlug, spacesAppToken: { not: null } }
-      : { orgId, isDefault: true, spacesAppToken: { not: null } },
-    select: { spacesAppToken: true },
+    where: agentSlug ? { orgId, slug: agentSlug } : { orgId, isDefault: true },
+    select: { id: true },
   });
-  if (!agent?.spacesAppToken) return null;
-
-  const parts = agent.spacesAppToken.split(":");
-  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return null;
-
-  return decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey) || null;
+  if (!agent) return null;
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId };
+  return (await getAgentBotAuth(agent.id, workspaceId)) ? bot : null;
 }
 
 // GET /api/v1/spaces/channels?q=&limit=&scopeType=&agentSlug=
@@ -135,8 +100,8 @@ async function resolveAgentAppToken(orgId: string | undefined, agentSlug?: strin
 // Channel picker proxy. Two auth paths:
 //   1. User has a Spaces MCP connection → use their token with /api/query
 //      (ACL-scoped to what they can see).
-//   2. No user connection → use the agent's app token with
-//      GET /api/apps/channel/list (authenticateApp, no user session needed).
+//   2. No user session → as the agent's bot, GET /api/claw-agents/bot/channel/list
+//      (agent token, no user session needed).
 router.get("/channels", async (req: Request, res: Response) => {
   const requesterId = getRequesterId(req);
   if (!requesterId) {
@@ -154,7 +119,7 @@ router.get("/channels", async (req: Request, res: Response) => {
   const limit = Math.max(1, Math.min(isFinite(limitRaw) ? limitRaw : 50, 200));
   const memberOnly = req.query["memberOnly"] === "true";
 
-  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch((err) => {
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req), req.headers.cookie).catch((err) => {
     log.error("[spaces/channels] failed to load MCP credentials:", err);
     return null;
   });
@@ -214,13 +179,14 @@ router.get("/channels", async (req: Request, res: Response) => {
     return;
   }
 
-  // Path 2: no user MCP connection — use agent app token with /api/apps/channel/list
-  const appToken = await resolveAgentAppToken(orgId, agentSlug).catch((err) => {
-    log.error("[spaces/channels] failed to load agent app token:", err);
+  // Path 2: no user session — list channels as the agent's bot (/api/claw-agents/bot/channel/list)
+  const workspaceHint = requestWorkspaceHint(req);
+  const bot = await resolveAgentBot(orgId, agentSlug, workspaceHint ?? null).catch((err) => {
+    log.error("[spaces/channels] failed to resolve the agent bot:", err);
     return null;
   });
 
-  if (!appToken) {
+  if (!bot) {
     res.status(412).json({
       success: false,
       error: "Xyne Spaces MCP connection not found for this user. Connect Spaces first.",
@@ -245,7 +211,7 @@ router.get("/channels", async (req: Request, res: Response) => {
     const params = new URLSearchParams({ limit: String(fetchLimit), scopeType });
     const result = (await spacesAppFetchGet(
       `/channel/list?${params.toString()}`,
-      appToken,
+      bot,
     )) as AppChannelListResponse;
 
     let items = result.items ?? [];
@@ -293,7 +259,7 @@ router.get("/projects", async (req: Request, res: Response) => {
   const limitRaw = Number(req.query["limit"] ?? 50);
   const limit = Math.max(1, Math.min(isFinite(limitRaw) ? limitRaw : 50, 200));
 
-  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch((err) => {
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req), req.headers.cookie).catch((err) => {
     log.error("[spaces/projects] failed to load Spaces auth:", err);
     return null;
   });
@@ -347,7 +313,7 @@ router.get("/boards", async (req: Request, res: Response) => {
   const limitRaw = Number(req.query["limit"] ?? 50);
   const limit = Math.max(1, Math.min(isFinite(limitRaw) ? limitRaw : 50, 200));
 
-  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch((err) => {
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req), req.headers.cookie).catch((err) => {
     log.error("[spaces/boards] failed to load Spaces auth:", err);
     return null;
   });
@@ -401,7 +367,7 @@ router.get("/automations-schema/triggers", async (req: Request, res: Response) =
     return;
   }
 
-  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch(() => null);
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req), req.headers.cookie).catch(() => null);
   if (!userAuth) {
     res.status(412).json({
       success: false,
@@ -440,7 +406,7 @@ router.get("/automations-schema/triggers/:type", async (req: Request, res: Respo
     return;
   }
 
-  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch(() => null);
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req), req.headers.cookie).catch(() => null);
   if (!userAuth) {
     res.status(412).json({
       success: false,

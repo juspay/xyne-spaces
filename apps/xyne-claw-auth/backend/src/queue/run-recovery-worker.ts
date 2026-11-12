@@ -9,6 +9,8 @@ import { enqueueMessage, type QueuedMessage } from "../lib/message-queue.js";
 import { systemNote } from "../lib/notice-format.js";
 import { createLogger } from "../logger.js";
 import { isRunWaitingInQueue } from "./run-execution-queue.js";
+import type { BotRef } from "../lib/spaces-bot.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 const log = createLogger("run-recovery-worker");
 
 const RECOVERY_PREFIX = "run-recovery:";
@@ -102,7 +104,8 @@ export interface RecoverySessionContext {
   agentSlug?: string | undefined;
   agentName?: string | undefined;
   responseMode: "conversation" | "approval";
-  appToken: string;
+  /** Posts as the agent's bot (fresh token per call). */
+  bot: BotRef;
   spacesAppId: string;
   spacesAppUserId: string;
   traceId?: string;
@@ -316,7 +319,7 @@ async function notifySandboxDeferred(state: RunRecoveryState): Promise<void> {
     ].join("\n"),
     userId: ctx.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
-  }, ctx.appToken);
+  }, ctx.bot);
 }
 
 async function deferSandboxRetry(
@@ -539,7 +542,7 @@ async function notifyExhausted(state: RunRecoveryState): Promise<void> {
     markdownText: message,
     userId: state.sessionContext.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
-  }, state.sessionContext.appToken);
+  }, state.sessionContext.bot);
 }
 
 async function markExhausted(state: RunRecoveryState, reason: string): Promise<void> {
@@ -605,7 +608,7 @@ async function dispatchRetry(rootSessionId: string, reason: string): Promise<voi
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, redispatchBody.userId ? { userId: String(redispatchBody.userId) } : undefined),
       },
       body: JSON.stringify(redispatchBody),
       signal: AbortSignal.timeout(30_000),

@@ -24,6 +24,8 @@
 import { randomUUID } from "node:crypto";
 import { SERVER } from "./config.js";
 import { metric } from "./metrics.js";
+import { clawAuthHeaders } from "./run-credentials.js";
+import { serviceSigningConfigured } from "./service-assertion.js";
 
 const POD_ID = randomUUID();
 export const SESSION_LOCK_TTL_MS = Number(process.env["SESSION_LOCK_TTL_MS"] ?? 90_000);
@@ -57,11 +59,12 @@ function holderToken(conversationId: string): string {
  * SESSION_LOCK_REQUIRED=true.
  */
 async function tryAcquireSessionLock(conversationId: string, timeoutMs = LOCK_CALL_TIMEOUT_MS): Promise<boolean> {
-  if (!SERVER.s2sKey) return !SESSION_LOCK_REQUIRED; // local dev escape hatch
+  if (!serviceSigningConfigured()) return !SESSION_LOCK_REQUIRED; // local dev escape hatch
   try {
-    const res = await fetch(lockUrl(conversationId), {
+    const url = lockUrl(conversationId);
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
+      headers: { "Content-Type": "application/json", ...clawAuthHeaders("POST", url) },
       body: JSON.stringify({ holder: holderToken(conversationId), ttlMs: SESSION_LOCK_TTL_MS }),
       signal: AbortSignal.timeout(Math.max(1, timeoutMs)),
     });
@@ -116,11 +119,12 @@ export async function acquireSessionLock(conversationId: string): Promise<boolea
 
 /** Non-mutating lock check for inventory/backfill tooling. */
 export async function isSessionLockActive(conversationId: string): Promise<boolean> {
-  if (!SERVER.s2sKey) return false;
+  if (!serviceSigningConfigured()) return false;
   try {
-    const res = await fetch(lockUrl(conversationId), {
+    const url = lockUrl(conversationId);
+    const res = await fetch(url, {
       method: "GET",
-      headers: { "x-s2s-key": SERVER.s2sKey },
+      headers: clawAuthHeaders("GET", url),
       signal: AbortSignal.timeout(LOCK_CALL_TIMEOUT_MS),
     });
     if (!res.ok) return SESSION_LOCK_REQUIRED;
@@ -133,11 +137,12 @@ export async function isSessionLockActive(conversationId: string): Promise<boole
 
 /** Extend the lock TTL (called each turn). Best-effort, never throws. */
 export async function refreshSessionLock(conversationId: string): Promise<void> {
-  if (!SERVER.s2sKey) return;
+  if (!serviceSigningConfigured()) return;
   try {
-    await fetch(lockUrl(conversationId, "/refresh"), {
+    const url = lockUrl(conversationId, "/refresh");
+    await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
+      headers: { "Content-Type": "application/json", ...clawAuthHeaders("POST", url) },
       body: JSON.stringify({ holder: holderToken(conversationId), ttlMs: SESSION_LOCK_TTL_MS }),
       signal: AbortSignal.timeout(LOCK_CALL_TIMEOUT_MS),
     });
@@ -160,11 +165,12 @@ export function startSessionLockHeartbeat(conversationId: string): () => void {
 
 /** Release the lock (compare-and-delete; only frees it if we still own it). */
 export async function releaseSessionLock(conversationId: string): Promise<void> {
-  if (!SERVER.s2sKey) return;
+  if (!serviceSigningConfigured()) return;
   try {
-    await fetch(lockUrl(conversationId), {
+    const url = lockUrl(conversationId);
+    await fetch(url, {
       method: "DELETE",
-      headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
+      headers: { "Content-Type": "application/json", ...clawAuthHeaders("DELETE", url) },
       body: JSON.stringify({ holder: holderToken(conversationId) }),
       signal: AbortSignal.timeout(LOCK_CALL_TIMEOUT_MS),
     });

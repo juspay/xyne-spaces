@@ -26,6 +26,7 @@
 import { createLogger } from "../../logger.js";
 import { errMsg } from "../../lib/errors.js";
 import { spacesAppFetch } from "./client.js";
+import type { BotRef } from "../../lib/spaces-bot.js";
 
 const log = createLogger("agent-progress");
 
@@ -54,7 +55,7 @@ export interface AgentProgressTarget {
   agentSlug?: string | undefined;
   agentName?: string | undefined;
   spacesAppUserId?: string | undefined;
-  appToken?: string | undefined;
+  bot?: BotRef | undefined;
 }
 
 /**
@@ -71,9 +72,9 @@ export interface AgentProgressTarget {
  * left behind by a stricter clear-side check.
  */
 export function isSpacesProgressDeliverable(
-  target: Pick<AgentProgressTarget, "agentSlug" | "channelId" | "appToken">,
+  target: Pick<AgentProgressTarget, "agentSlug" | "channelId" | "bot">,
 ): boolean {
-  return Boolean(target.appToken) && target.agentSlug !== "digital-twin" && Boolean(target.channelId);
+  return Boolean(target.bot) && target.agentSlug !== "digital-twin" && Boolean(target.channelId);
 }
 
 function payloadFor(target: AgentProgressTarget, extra: Record<string, unknown>): Record<string, unknown> {
@@ -98,7 +99,7 @@ export async function emitAgentProgressWorking(
     await spacesAppFetch(
       "/chat/agentProgress",
       payloadFor(target, { toolLabel, status: "working" }),
-      target.appToken,
+      target.bot!,
     );
   } catch (err) {
     // The pill is cosmetic — a failed tick must never fail the run.
@@ -121,7 +122,7 @@ export async function emitAgentProgressDone(target: AgentProgressTarget): Promis
     await spacesAppFetch(
       "/chat/agentProgress",
       payloadFor(target, { status: "done" }),
-      target.appToken,
+      target.bot!,
     );
   } catch (err) {
     log.warn("Failed to clear agent progress signal", { error: errMsg(err) });

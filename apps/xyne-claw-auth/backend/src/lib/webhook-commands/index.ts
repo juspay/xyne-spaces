@@ -91,8 +91,11 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   const custom = resolved;
   const experimentCommand = parseExperimentCommand(ctx.userText, custom);
 
+  // Off: Spaces thread mentions only (2026-11-12) — experiments are not running.
   if (experimentCommand) {
-    await handleExperimentCommand(ctx, experimentCommand, custom);
+    // await handleExperimentCommand(ctx, experimentCommand, custom);
+    void handleExperimentCommand;
+    ctx.log.info("/experiment is turned off");
     return { kind: "handled" };
   }
 
@@ -120,7 +123,10 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
       ctx.log.info("/eval ignored on digital-twin run — eval runs only on the agent itself");
       return { kind: "handled" };
     }
-    await handleEval(ctx, slash.question, slash.providers, slash.opts);
+    // Off: Spaces thread mentions only (2026-11-12) — evals post via disabled paths.
+    // await handleEval(ctx, slash.question, slash.providers, slash.opts);
+    void handleEval;
+    ctx.log.info("/eval is turned off");
     return { kind: "handled" };
   }
 

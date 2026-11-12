@@ -1,8 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
-import { timingSafeEqual } from "node:crypto";
 import { CONFIG } from "../config.js";
 import { ensureUserExists, resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
-import { checkResultCallbackToken } from "../lib/session-tokens.js";
+import { authenticateCaller } from "../lib/service-assertion.js";
+import { checkResultCallbackToken, verifySessionToken } from "../lib/session-tokens.js";
+import { DELEGATION_HEADER, verifySpacesDelegation } from "../lib/spaces-delegation.js";
 import { verify as verifyCliToken } from "../lib/cli-tokens.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { prisma } from "../db.js";
@@ -25,9 +26,8 @@ const accessTokenRegistry = new WeakMap<Response, VerifiedCliToken>();
  * or the lookup fails, we simply leave the headers unset. Nothing downstream
  * requires them this phase.
  *
- * Called only after the caller's identity is authenticated: browser-cookie auth
- * derives `userId` from Spaces, and S2S callers may pin `x-user-id` after the
- * shared key has been validated.
+ * Called only after the caller's identity is authenticated: from the Spaces
+ * session, a CLI token, a Spaces delegation token or a run token.
  */
 async function attachOrgContext(req: Request, userId: string): Promise<void> {
   try {
@@ -61,43 +61,27 @@ interface VerifiedSpacesIdentity {
 }
 
 /**
- * Constant-time S2S key comparison. A plain `===` short-circuits on the first
- * differing byte, leaking key bytes via response timing to an attacker who can
- * measure it. Compare lengths first (length isn't secret; timingSafeEqual throws
- * on mismatch) then do the constant-time check. Mirrors xyne-claw's auth.ts.
- */
-/**
  * Strip inbound org-context and Spaces-identity headers so a client can NEVER
  * inject them. `x-org-id` / `x-user-role` are derived SERVER-SIDE (by
  * `attachOrgContext` on a verified session); the `x-spaces-*` headers are stamped
- * only by VERIFIED branches below (cookie /me success via stampVerifiedIdentity,
- * or canonicalizeS2SIdentity after the shared key validates — the entry middleware
- * snapshots them first, see snapshotS2SIdentityHeaders). A client supplying any of
- * them is attempting to spoof identity/org context.
+ * only by VERIFIED branches below (cookie /me success, a delegation token or a run
+ * token, via stampVerifiedIdentity). A client supplying any of them is attempting
+ * to spoof identity/org context.
  *
  * Removing them at entry makes identity and org context fail-CLOSED: e.g. a
  * CLI/service-token request carrying a forged `x-spaces-user-id` can no longer
  * impersonate that user through matchesAuthenticatedUserId / getRequesterAliases,
  * and a failed/absent org attach yields an EMPTY org (→ getOrgId undefined → safe
- * no-match) rather than an attacker-chosen org. (x-user-id is left intact: the
- * S2S contract legitimately sets it, and the cookie path overwrites it from the
- * verified session.)
+ * no-match) rather than an attacker-chosen org. x-user-id is removed too: every
+ * branch that authenticates a user sets it from the verified source.
  */
 function stripClientOrgHeaders(req: Request): void {
+  delete req.headers["x-user-id"];
   delete req.headers["x-org-id"];
   delete req.headers["x-user-role"];
   delete req.headers["x-spaces-user-id"];
   delete req.headers["x-spaces-workspace-id"];
   delete req.headers["x-spaces-org-member-id"];
-}
-
-export function s2sKeyMatches(provided: string | string[] | undefined): boolean {
-  const expected = CONFIG.xyneClawS2sKey;
-  if (!expected || typeof provided !== "string") return false; // fail closed when key unset
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
 }
 
 // Memoize the Spaces /api/auth/me lookup per request. Routes now stack
@@ -235,57 +219,6 @@ function headerValue(req: Request, name: string): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/** The trust-bearing `x-spaces-*` headers as sent by the client, captured
- *  BEFORE stripClientOrgHeaders removes them. */
-interface PinnedS2SHeaders {
-  spacesUserId: string | undefined;
-  spacesWorkspaceId: string | undefined;
-}
-
-/**
- * Capture the S2S contract's `x-spaces-*` headers before entry stripping erases
- * them. They may only be trusted after the shared key validates, so the entry
- * middleware snapshots them and hands them to canonicalizeS2SIdentity inside the
- * key-verified branch.
- */
-function snapshotS2SIdentityHeaders(req: Request): PinnedS2SHeaders {
-  return {
-    spacesUserId: headerValue(req, "x-spaces-user-id"),
-    spacesWorkspaceId: headerValue(req, "x-spaces-workspace-id"),
-  };
-}
-
-/**
- * Normalize the backwards-compatible Spaces S2S contract at the boundary.
- * Older callers put the raw workspace user id in `x-user-id`; newer callers
- * may additionally send `x-spaces-user-id` and workspace context. Downstream
- * Claw code must always see the canonical id in `x-user-id`.
- */
-async function canonicalizeS2SIdentity(req: Request, pinned: PinnedS2SHeaders): Promise<string | undefined> {
-  const explicitSpacesUserId = pinned.spacesUserId;
-  const suppliedUserId = explicitSpacesUserId ?? headerValue(req, "x-user-id");
-  if (!suppliedUserId) return undefined;
-
-  const workspaceId = pinned.spacesWorkspaceId ?? headerValue(req, "x-workspace-id");
-  await ensureUserExists(suppliedUserId, "require-auth").catch((err) => {
-    log.warn(`[require-auth] ensureUserExists(${suppliedUserId}) for S2S failed:`, err instanceof Error ? err.message : err);
-  });
-  const clawUserId = await resolveClawUserIdForSpacesIdentity(suppliedUserId, workspaceId).catch((err) => {
-    log.warn(`[require-auth] resolveClawUserIdForSpacesIdentity(${suppliedUserId}) for S2S failed:`, err instanceof Error ? err.message : err);
-    return undefined;
-  });
-  if (!clawUserId) return undefined;
-
-  req.headers["x-user-id"] = clawUserId;
-  // Do not manufacture a raw Spaces id when a Claw-internal caller supplied
-  // an already-canonical id. Keep it only when the source identity is known.
-  if (explicitSpacesUserId || clawUserId !== suppliedUserId) {
-    req.headers["x-spaces-user-id"] = suppliedUserId;
-  }
-  if (workspaceId) req.headers["x-spaces-workspace-id"] = workspaceId;
-  return clawUserId;
-}
-
 /**
  * Stamp a VERIFIED Spaces session identity onto the request: the canonical Claw
  * id in `x-user-id`, the raw workspace identity retained on the `x-spaces-*` side
@@ -317,6 +250,77 @@ async function stampVerifiedIdentity(
   await attachOrgContext(req, clawUserId ?? userId);
 }
 
+/** Drop every caller-supplied user/identity header: the request then names no user. */
+function clearUserPin(req: Request): void {
+  delete req.headers["x-user-id"];
+  delete req.headers["x-spaces-user-id"];
+  delete req.headers["x-spaces-workspace-id"];
+  delete req.headers["x-spaces-org-member-id"];
+}
+
+/**
+ * Identity from a signed token, or undefined when the request carries none.
+ *
+ * - `x-spaces-delegation`: ES256 JWT minted by the Spaces backend for one user
+ *   and one action (lib/spaces-delegation.ts). The user is its `sub`.
+ * - `x-session-token` together with a valid runtime service assertion: the run
+ *   token claw-auth mints for each run (lib/session-tokens.ts). The user is its
+ *   `uid` (already a canonical Claw id).
+ *
+ * Returns "rejected" when a token is present but fails verification.
+ */
+async function resolveSignedIdentity(req: Request): Promise<"rejected" | "unavailable" | "delegation" | "run-token" | undefined> {
+  const delegationRaw = headerValue(req, DELEGATION_HEADER);
+  if (delegationRaw) {
+    const delegation = await verifySpacesDelegation(delegationRaw);
+    if (typeof delegation === "string") {
+      log.warn(`[require-auth] delegation token rejected (${delegation}) ${req.method} ${req.originalUrl ?? req.url}`);
+      return "rejected";
+    }
+    clearUserPin(req);
+    await ensureUserExists(delegation.spacesUserId, "require-auth").catch((err) => {
+      log.warn(`[require-auth] ensureUserExists(${delegation.spacesUserId}) for delegation failed:`, err instanceof Error ? err.message : err);
+    });
+    await stampVerifiedIdentity(
+      req,
+      { userId: delegation.spacesUserId, ...(delegation.workspaceId ? { workspaceId: delegation.workspaceId } : {}) },
+      "[require-auth:delegation]",
+    );
+    log.debug?.(`[require-auth] delegation kid=${delegation.keyId} jti=${delegation.jti ?? "-"} purpose=${delegation.purpose ?? "-"}`);
+    return "delegation";
+  }
+
+  const runTokenRaw = headerValue(req, "x-session-token");
+  if (runTokenRaw) {
+    // A run token names the user only on a call that also proves it comes from
+    // the Claw runtime (or claw-auth itself): a signed service assertion.
+    // Neither alone is enough, so a run token copied out of a run is not a
+    // general bearer.
+    const caller = await authenticateCaller(req, ["xyne-claw", "xyne-claw-auth"]);
+    if (caller === "unavailable") return "unavailable";
+    if (caller === "missing" || caller === "rejected") {
+      log.warn(`[require-auth] run token without a runtime service assertion rejected ${req.method} ${req.originalUrl ?? req.url}`);
+      return "rejected";
+    }
+    const run = verifySessionToken(runTokenRaw);
+    if (typeof run === "string") {
+      log.warn(`[require-auth] run token rejected (${run}) ${req.method} ${req.originalUrl ?? req.url}`);
+      return "rejected";
+    }
+    clearUserPin(req);
+    req.headers["x-user-id"] = run.uid;
+    req.session = {
+      userId: run.uid,
+      sessionId: run.sid,
+      ...(run.aslug ? { agentSlug: run.aslug } : {}),
+      ...(run.appid ? { spacesAppId: run.appid } : {}),
+    };
+    await attachOrgContext(req, run.uid);
+    return "run-token";
+  }
+  return undefined;
+}
+
 /**
  * Express middleware that verifies the caller's identity.
  *
@@ -324,7 +328,12 @@ async function stampVerifiedIdentity(
  * 1. Spaces backend auth middleware via /api/auth/me (cookie-based)
  * 2. CLI/service access token via `Authorization: Bearer xyne_cli_...` or
  *    `xyne_svc_...` when CLI_TOKENS_ENABLED is on
- * 3. `x-s2s-key` header — service-to-service calls (must match CONFIG.xyneClawS2sKey)
+ * 3. A signed identity token: `x-spaces-delegation` (Spaces-signed, per user and
+ *    action) or `x-session-token` (claw-auth run token). The user comes from the
+ *    token only.
+ * 4. A service assertion (lib/service-assertion.ts) from the runtime, Spaces or
+ *    claw-auth itself, with no user token: authenticates the service and names
+ *    no user (every caller-supplied identity header is dropped).
  *
  * On success, ensures `req.headers["x-user-id"]` is set so downstream code works unchanged.
  */
@@ -333,9 +342,6 @@ export async function requireAuth(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  // Capture the S2S contract headers BEFORE stripping: only a caller that then
-  // proves the shared key below is trusted to pin them.
-  const pinnedS2S = snapshotS2SIdentityHeaders(req);
   stripClientOrgHeaders(req);
   // 1. Verify browser cookies through Spaces backend auth middleware.
   const identity = await resolveSpacesIdentity(req);
@@ -344,7 +350,7 @@ export async function requireAuth(
   if (userId) {
     // JIT-mirror the user row from Spaces if we've never seen them. Lets a
     // brand-new Spaces user hit any claw-auth route without first POSTing
-    // /users from the SPA. Silent no-op if SPACES_DB_URL is unset or the
+    // /users from the SPA. Silent no-op if the Spaces directory lookup misses or the
     // user row already exists.
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
@@ -375,18 +381,36 @@ export async function requireAuth(
     }
   }
 
-  // 3. Service-to-service: x-s2s-key header
-  const s2sKey = req.headers["x-s2s-key"] as string | undefined;
-  if (s2sKeyMatches(s2sKey)) {
-    const pinnedUserId = await canonicalizeS2SIdentity(req, pinnedS2S);
-    if (pinnedUserId) {
-      await attachOrgContext(req, pinnedUserId);
-    }
+  // 3. Signed identity: a Spaces delegation token or a claw-auth run token names
+  // the user; no header or body field the caller chose can. A token that is
+  // present but invalid is rejected outright.
+  const signed = await resolveSignedIdentity(req);
+  if (signed === "unavailable") {
+    res.status(503).json({ success: false, error: "Service authentication unavailable" });
+    return;
+  }
+  if (signed === "rejected") {
+    res.status(401).json({ success: false, error: "Invalid or expired identity token" });
+    return;
+  }
+  if (signed) {
     next();
     return;
   }
 
-  // 4. No valid auth. A Spaces lookup that never completed is reported as 503,
+  // 4. A service with no user: proves which service is calling, names no user.
+  const service = await authenticateCaller(req, ["xyne-claw", "xyne-spaces", "xyne-claw-auth"]);
+  if (service === "unavailable") {
+    res.status(503).json({ success: false, error: "Service authentication unavailable" });
+    return;
+  }
+  if (service !== "missing" && service !== "rejected") {
+    clearUserPin(req);
+    next();
+    return;
+  }
+
+  // 5. No valid auth. A Spaces lookup that never completed is reported as 503,
   // not 401 — see denyUnverified.
   denyUnverified(res, identity, "Authentication required");
 }
@@ -426,61 +450,43 @@ export async function optionalAuth(
 }
 
 /**
- * Strictest S2S middleware: ONLY accepts a valid x-s2s-key. It does NOT fall
- * back to a Spaces user cookie, so it can't be reached by an ordinary logged-in
- * browser user.
- *
- * Use this on internal callback / data-plane routes whose only legitimate
- * caller is another service (xyne-claw posting run results, session
- * archive/restore, lock acquisition). The removed requireS2S middleware had a
- * cookie fallback intended for manual admin testing but with no role check, so
- * it effectively downgraded these endpoints to "any authenticated user" — a cross-user data
- * exposure for the session/result routes.
+ * For routes the runtime calls on behalf of a run's user: the caller must be
+ * the runtime (or claw-auth) by service assertion, and the user comes only from
+ * the run's session token (`x-session-token`), which claw-auth issued. Sets
+ * x-user-id and req.session from the token. Use after (or instead of)
+ * requireRuntime; it verifies the assertion itself if not already done.
  */
-export function requireStrictS2S(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): void {
-  const s2sKey = req.headers["x-s2s-key"] as string | undefined;
-  if (s2sKeyMatches(s2sKey)) {
-    next();
+export async function requireRunUser(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const caller = await authenticateCaller(req, ["xyne-claw", "xyne-claw-auth"]);
+  if (caller === "unavailable") {
+    res.status(503).json({ success: false, error: "Service authentication unavailable" });
     return;
   }
-  res.status(401).json({ success: false, error: "s2s key required" });
+  if (caller === "missing" || caller === "rejected") {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+  const run = verifySessionToken(headerValue(req, "x-session-token") ?? "");
+  if (typeof run === "string") {
+    log.warn(`[require-run-user] run token rejected (${run}) ${req.method} ${req.originalUrl ?? req.url}`);
+    res.status(401).json({ success: false, error: "Run token required" });
+    return;
+  }
+  clearUserPin(req);
+  req.headers["x-user-id"] = run.uid;
+  req.session = {
+    userId: run.uid,
+    sessionId: run.sid,
+    ...(run.aslug ? { agentSlug: run.aslug } : {}),
+    ...(run.appid ? { spacesAppId: run.appid } : {}),
+  };
+  await attachOrgContext(req, run.uid);
+  next();
 }
 
 /**
- * Strict S2S using the Spaces↔claw-auth shared `INTERNAL_S2S_KEY` (the key the
- * Spaces backend uses for its own `/api/internal` routes and that claw-auth
- * sends when calling Spaces). Use this — NOT requireStrictS2S — for endpoints
- * whose caller is the Spaces backend rather than the claw runtime, since Spaces
- * does not hold `XYNE_CLAW_S2S_KEY`. Constant-time; fails closed when unset.
- */
-export function requireInternalS2S(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): void {
-  if (internalS2sKeyMatches(req.headers["x-s2s-key"])) {
-    next();
-    return;
-  }
-  res.status(401).json({ success: false, error: "s2s key required" });
-}
-
-/** Constant-time check against `INTERNAL_S2S_KEY`; fails closed when unset. */
-export function internalS2sKeyMatches(provided: string | string[] | undefined): boolean {
-  const expected = process.env["INTERNAL_S2S_KEY"] ?? "";
-  if (!expected || typeof provided !== "string") return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-/**
- * Per-run authentication for pod result callbacks. Layered AFTER requireStrictS2S:
- * the S2S key proves "a trusted pod sent this", this proves "for THIS run". The
+ * Per-run authentication for pod result callbacks. Layered AFTER requireRuntime:
+ * the service assertion proves "the runtime sent this", this proves "for THIS run". The
  * pod attaches the run's sessionToken as `x-session-token`; we verify it binds to
  * the run's sessionId. The sessionId lives in different places per route (path
  * param vs body), so the caller supplies an extractor.
@@ -501,7 +507,7 @@ export function requireResultToken(getSessionId: (req: Request) => string | stri
 
 /**
  * Stricter form of requireAuth: ONLY accepts verified browser-cookie auth.
- * Rejects x-s2s-key even if the key is valid.
+ * Rejects service assertions and run tokens.
  *
  * Use this on routes whose semantics are "act on behalf of *this specific
  * user* identified by their session". Digital Twin is the canonical case —
@@ -539,7 +545,7 @@ export async function requireUserAuth(
 /**
  * Barrier middleware: reject requests whose identity came from a CLI/service
  * access token. Mount this AFTER requireAuth on routes that should only be
- * reachable by a browser session or a validated S2S key.
+ * reachable by a browser session or a verified service.
  *
  * This closes the bearer-token scope-enforcement gap: requireAuth accepts
  * xyne_cli_* / xyne_svc_* tokens, but most routes do not enforce scopes.

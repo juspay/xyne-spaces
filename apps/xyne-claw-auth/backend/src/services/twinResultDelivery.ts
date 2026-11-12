@@ -129,7 +129,7 @@ async function sendDigitalTwinApprovalDm(
   attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
   sessionId: string,
 ): Promise<void> {
-  const token = ctx.appToken;
+  const token = ctx.bot;
 
   // workspaceId required by prod openDm schema. Empty fallback only to satisfy
   // types — the earlier USER_MENTIONED gate already rejected runs where we

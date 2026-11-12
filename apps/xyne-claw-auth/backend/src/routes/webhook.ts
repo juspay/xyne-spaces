@@ -34,7 +34,7 @@ import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
-import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
+import { resolveUserSpacesAuth, resolveAgentSpacesAuth, clawAgentIdForSlug } from "../surfaces/spaces/user-auth.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
@@ -68,6 +68,9 @@ import {
 import { createTraceId, createLogger } from "../logger.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
+import { EVENT_HEADER, FLOW_ACTION_PURPOSE, verifySpacesEvent, type SpacesEvent } from "../lib/spaces-delegation.js";
+import { findPrincipalById, primeAgentAuthFromEvent } from "../lib/spaces-agent-client.js";
+import { claimEventJti } from "../lib/spaces-event-replay.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
 import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
@@ -97,10 +100,10 @@ import {
 } from "../lib/chain-workflow.js";
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
-import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { ensureUserExists, orgIdForSpacesUser, resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
-import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
+import { requireResultToken } from "../middleware/require-auth.js";
 import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedExternalCallbackUrl, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { decryptSurfaceSecret, encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import {
@@ -231,7 +234,7 @@ async function scheduleCapacityRetryIfNeeded(
         conversationId: ctx.conversationId,
         flow,
         userId: ctx.spacesAppUserId,
-      }, ctx.appToken)) as { messageId?: string; id?: string };
+      }, ctx.bot)) as { messageId?: string; id?: string };
       const messageId = posted?.messageId ?? posted?.id;
       if (messageId) card = { messageId, ...(ctx.spacesAppId ? { spacesAppId: ctx.spacesAppId } : {}) };
     } catch (err) {
@@ -354,7 +357,7 @@ async function judgeChainContinuation(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw", "POST", `${CONFIG.xyneClawUrl}/chain-judge`),
       },
       body: JSON.stringify({
         agentResult,
@@ -514,6 +517,8 @@ import {
   readPlanBindingData,
   markPlanBindingStatus,
 } from "../lib/agent-widget-binding.js";
+import { botBearer, botUserIdFor, spacesBotUrl, type BotRef } from "../lib/spaces-bot.js";
+
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -559,7 +564,6 @@ import {
   spacesAppFetchMultipart,
   SpacesApiError,
   isFlowSchemaRejection,
-  decryptStoredField,
 } from "../surfaces/spaces/client.js";
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
 import {
@@ -578,6 +582,9 @@ import {
   type OutgoingAttachment,
   prepareAgentResultForPosting,
 } from "../surfaces/spaces/attachments.js";
+import { internalServiceHeaders } from "../lib/internal-service-auth.js";
+import { callerService, requireRuntime, requireSpacesService, serviceAuthHeaders } from "../lib/service-assertion.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 
 /** Owner display name + id for an agent's card chin ("Created by @x"). */
 /** Connectors shown before the card defers to "Browse MCPs". */
@@ -620,7 +627,7 @@ function pendingActionTargetChannelId(action: Record<string, unknown>): string |
 async function pendingActionTargetValidation(
   action: Record<string, unknown>,
   ctx: SessionContext,
-  appToken: string,
+  bot: BotRef,
 ): Promise<{ error: string | null; channelName?: string }> {
   const conversationId = pendingActionTargetConversationId(action);
   const channelId = pendingActionTargetChannelId(action);
@@ -639,7 +646,7 @@ async function pendingActionTargetValidation(
     try {
       await spacesAppFetchGet(
         `/chat/conversationReplies?conversationId=${encodeURIComponent(conversationId)}&limit=1`,
-        appToken,
+        bot,
       );
       return { error: null };
     } catch (err) {
@@ -660,7 +667,7 @@ async function pendingActionTargetValidation(
   if (!channelId) return { error: null };
 
   try {
-    const channel = (await spacesAppFetch("/channel/info", { channelId }, appToken)) as { name?: string } | undefined;
+    const channel = (await spacesAppFetch("/channel/info", { channelId }, bot)) as { name?: string } | undefined;
     return channel?.name ? { error: null, channelName: channel.name } : { error: null };
   } catch (err) {
     // Same typed-status branch as the queue-time validator (mcp/validators.ts):
@@ -687,13 +694,13 @@ export const threadAwarenessContext = (history: string): string =>
 
 export async function fetchConversationHistory(
   conversationId: string,
-  appToken?: string,
+  bot: BotRef,
   excludeUserId?: string,
 ): Promise<string | undefined> {
   try {
     const data = await spacesAppFetchGet(
       `/chat/conversationReplies?conversationId=${encodeURIComponent(conversationId)}`,
-      appToken,
+      bot,
     ) as { items?: Array<{ userId: string; cleanContent: string; createdAt: string }> };
 
     let items = data.items ?? [];
@@ -761,7 +768,7 @@ function rendersAgentDraftCard(action: Record<string, unknown>, ctx: SessionCont
 async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
   ctx: SessionContext;
-  token: string;
+  token: BotRef;
   targetValidation: { channelName?: string };
   runOwnerId?: string | undefined;
 }): Promise<void> {
@@ -784,7 +791,7 @@ async function postWriteApprovalAction(args: {
           conversationId: ctx.conversationId,
           spacesAppUserId: ctx.spacesAppUserId,
           spacesAppId: ctx.spacesAppId,
-          appToken: token,
+          bot: token,
         },
         runOwnerId: args.runOwnerId ?? ctx.senderId,
         log: clog,
@@ -841,7 +848,7 @@ async function postWriteApprovalAction(args: {
         conversationId: ctx.conversationId,
         ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
         userId: ctx.spacesAppUserId,
-        appToken: token,
+        bot: token,
         filename: `memory-${memDocType}-${Date.now()}.md`,
         markdown: memContent,
         summary: "",
@@ -911,7 +918,18 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // before dispatching anything.
   const runAsTwin = eventType === "USER_MENTIONED" && mentionedUserIds.length > 0;
 
-  if (spacesAppIdFromUrl) {
+  const principalAgentRow = res.locals?.["clawAgentRow"] as Awaited<ReturnType<typeof agentRepository.findBySpacesAppId>> | undefined;
+  // Verified event from POST /agent/:principalId: its workspace scopes the
+  // agent's on-behalf-of Spaces token for this run.
+  const spacesEventWorkspaceId = (res.locals?.["spacesEvent"] as SpacesEvent | undefined)?.workspaceId;
+  if (principalAgentRow) {
+    // Event from an agent principal (POST /agent/:principalId, verified there).
+    if (eventType === "USER_MENTIONED" && principalAgentRow.slug !== "digital-twin") {
+      res.json({ success: true });
+      return;
+    }
+    agent = await toResolvedAgent(principalAgentRow, spacesEventWorkspaceId);
+  } else if (spacesAppIdFromUrl) {
     const agentRow = await agentRepository.findBySpacesAppId(spacesAppIdFromUrl);
     if (!agentRow) {
       log.warn(`Webhook app route miss for spacesAppId=${spacesAppIdFromUrl}`);
@@ -923,7 +941,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       res.json({ success: true });
       return;
     }
-    agent = toResolvedAgent(agentRow);
+    agent = await toResolvedAgent(agentRow, payload.workspaceId);
   } else if (agentSlugFromUrl) {
     const legacyMatches = await prisma.agent.findMany({
       where: { slug: agentSlugFromUrl },
@@ -949,7 +967,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     //     entry points for the Twin — they're conversation agents only.
     //   - The DM with approve/decline buttons always arrives from the
     //     Digital Twin bot (because we authenticate using digital-twin's
-    //     spacesAppToken — which is the agentRow loaded for this webhook).
+    //     bot — the agent loaded for this webhook).
     //
     // Rationale (2026-05-23): user observed that mentions were arriving
     // via Assistant's bot, posting approve-DMs from Assistant rather than
@@ -964,12 +982,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (agentRow) agent = toResolvedAgent(agentRow);
+    if (agentRow) agent = await toResolvedAgent(agentRow, payload.workspaceId);
   }
 
   if (!agent) {
     log.error(
-      `[webhook] agent unresolved route=${spacesAppIdFromUrl ? `app/${spacesAppIdFromUrl}` : agentSlugFromUrl ? `/${agentSlugFromUrl}` : "(bare)"} eventType=${eventType} — refusing to dispatch as the default agent`,
+      `[webhook] agent unresolved route=${spacesAppIdFromUrl ? `app/${spacesAppIdFromUrl}` : agentSlugFromUrl ? `/${agentSlugFromUrl}` : "(bare)"} eventType=${eventType} workspace=${spacesEventWorkspaceId ?? payload.workspaceId ?? "?"} (unknown agent, or not added to this Spaces workspace) — refusing to dispatch as the default agent`,
     );
     res.status(404).json({ success: false, error: "Agent not resolved" });
     return;
@@ -989,7 +1007,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       log.info(`Sender ${payload.userId} not registered — sending setup template`);
       res.json({ success: true });
       postAgentMessage(
-        { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+        { spacesAppUserId: agent.spacesAppUserId, bot: agent.bot },
         {
           channelId: payload.channelId,
           conversationId: payload.conversationId,
@@ -1068,7 +1086,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     isTwin: runAsTwin,
     reply: async (markdownText, failureLabel) => {
       await postAgentMessage(
-        { spacesAppUserId: commandAgent.spacesAppUserId, appToken: commandAgent.appToken },
+        { spacesAppUserId: commandAgent.spacesAppUserId, bot: commandAgent.bot },
         {
           channelId: payload.channelId,
           conversationId: payload.conversationId,
@@ -1084,7 +1102,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         channelId: payload.channelId,
         conversationId: payload.conversationId,
         userId: commandAgent.spacesAppUserId,
-        appToken: commandAgent.appToken,
+        bot: commandAgent.bot,
         filename: file.fileName,
         markdown: file.content,
         mimeType: file.mimeType,
@@ -1146,7 +1164,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           channelId: payload.channelId,
           orgId: agent.orgId,
           spacesAppUserId: agent.spacesAppUserId,
-          appToken: agent.appToken,
+          bot: agent.bot,
         },
         queueEventFor(gate.enq, gate.interrupted),
       );
@@ -1156,7 +1174,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const history = await fetchConversationHistory(payload.conversationId, agent.appToken, agent.spacesAppUserId);
+    const history = await fetchConversationHistory(payload.conversationId, agent.bot, agent.spacesAppUserId);
     const prBindingsBlock = payload.conversationId
       ? prBindingsContextBlock(
           await listConversationPrBindings(payload.conversationId).catch((err: unknown) => {
@@ -1202,11 +1220,14 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       log,
     });
 
-    const userSpacesAuth = await resolveUserSpacesAuth(payload.userId, "webhook");
-    const userSpacesToken = userSpacesAuth?.token;
-    const userSpacesSessionId = userSpacesAuth?.sessionId;
+    // The run's agent acting for the sender (on-behalf-of token, primed from
+    // the event on POST /agent/:principalId). null → no user-token source.
+    const userSpacesAuth = await resolveUserSpacesAuth(payload.userId, "webhook", {
+      clawAgentId: agent.id,
+      workspaceId: spacesEventWorkspaceId ?? payload.workspaceId ?? null,
+    });
+    const userSpacesToken = userSpacesAuth?.agentToken;
     const userSpacesWorkspaceId = userSpacesAuth?.workspaceId;
-    const userCookieHeader = userSpacesAuth?.cookieHeader;
     // Twin runs carry the mentioned user's resolved workspace; it wins over the sender's.
     const effectiveWorkspaceId = twinWorkspaceId || userSpacesWorkspaceId;
 
@@ -1248,7 +1269,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             log.warn(`Skipping /record-skill recording ${att.attachmentId} (${att.fileName}) — ${reason}`);
             if (!payload.conversationId) return;
             void postAgentMessage(
-              { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+              { spacesAppUserId: agent.spacesAppUserId, bot: agent.bot },
               {
                 channelId: payload.channelId,
                 conversationId: payload.conversationId,
@@ -1293,7 +1314,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           continue;
         }
         log.info(
-          `Attachment ${att.attachmentId}: fileUrl=${att.fileUrl ? `"${att.fileUrl.slice(0, 120)}"` : "(empty)"} hasUserToken=${!!userSpacesToken} hasSessionId=${!!userSpacesSessionId}`,
+          `Attachment ${att.attachmentId}: fileUrl=${att.fileUrl ? `"${att.fileUrl.slice(0, 120)}"` : "(empty)"} hasAgentToken=${!!userSpacesToken}`,
         );
 
         const safeAttachmentId = safePathSegment(att.attachmentId);
@@ -1308,21 +1329,19 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             headers: {
               Authorization: `Bearer ${userSpacesToken}`,
               ...(userSpacesWorkspaceId ? { "x-workspace-id": userSpacesWorkspaceId } : {}),
-              ...(userCookieHeader ? { Cookie: userCookieHeader } : {}),
             },
           });
         }
         if (safeAttachmentId) {
-          sources.push({
-            label: "apps-route",
-            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${safeAttachmentId}/download`,
-            headers: { Authorization: `Bearer ${agent.appToken}` },
-          });
-          sources.push({
-            label: "user-route",
-            url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
-            headers: { Authorization: `Bearer ${agent.appToken}` },
-          });
+          // The agent's bot (bot API, files:read). Skipped when the agent can't post here.
+          const botToken = await botBearer(agent.bot).catch(() => "");
+          if (botToken) {
+            sources.push({
+              label: "bot-route",
+              url: spacesBotUrl(`/files/download/${safeAttachmentId}`),
+              headers: { Authorization: `Bearer ${botToken}` },
+            });
+          }
         }
 
         const failures: string[] = [];
@@ -1467,7 +1486,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       agentSlug: agent.slug,
       agentName: agent.name,
       responseMode: eventType === "USER_MENTIONED" ? "approval" as const : "conversation" as const,
-      appToken: agent.appToken,
+      bot: agent.bot,
       spacesAppId: agent.spacesAppId,
       spacesAppUserId: agent.spacesAppUserId,
       traceId,
@@ -1627,11 +1646,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               agentSlug: agent.slug,
               agentName: agent.name,
               spacesAppUserId: agent.spacesAppUserId,
-              appToken: agent.appToken,
+              bot: agent.bot,
             }, initialProgressLabel);
           } else {
             const placeholderRes = await postAgentMessage(
-              { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+              { spacesAppUserId: agent.spacesAppUserId, bot: agent.bot },
               {
                 channelId: payload.channelId,
                 conversationId: payload.conversationId,
@@ -1703,7 +1722,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         ? systemNote(`**${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`)
         : systemNote(`I couldn't start this request: ${refusal}`);
       await postAgentMessage(
-        { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+        { spacesAppUserId: agent.spacesAppUserId, bot: agent.bot },
         {
           channelId: payload.channelId,
           conversationId: payload.conversationId,
@@ -1741,9 +1760,17 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           log.info(`Twin: skipping ${uid} — Digital Twin disabled`);
           continue;
         }
-        const twinAuth = await getSpacesAuthForUser(uid, "webhook").catch(() => null);
+        // The twin agent must be allowed to act for the MENTIONED user (a
+        // stored delegation, or their own recent interaction) — the sender's
+        // event is no proof for them. null → skip, as before.
+        const twinAuth = await resolveAgentSpacesAuth({
+          clawAgentId: agent.id,
+          userId: uid,
+          workspaceId: spacesEventWorkspaceId ?? payload.workspaceId ?? null,
+          caller: "webhook",
+        });
         if (!twinAuth?.workspaceId) {
-          log.info(`Twin: skipping ${uid} — no resolvable workspaceId (no active Spaces session)`);
+          log.info(`Twin: skipping ${uid} — agent may not act for this user in Spaces`);
           continue;
         }
         twins.push({
@@ -1790,7 +1817,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         log.warn(`Invocation denied (not whitelisted) agent=${agent.slug} userId=${clawSenderId} conv=${payload.conversationId}`);
         if (payload.conversationId) {
           await postAgentMessage(
-            { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+            { spacesAppUserId: agent.spacesAppUserId, bot: agent.bot },
             {
               channelId: payload.channelId,
               conversationId: payload.conversationId,
@@ -1834,7 +1861,7 @@ async function clearSpacesAgentProgress(
     agentSlug?: string | undefined;
     agentName?: string | undefined;
     spacesAppUserId?: string | undefined;
-    appToken?: string | undefined;
+    bot?: BotRef | undefined;
   } | null | undefined,
 ): Promise<void> {
   if (!ctx) return;
@@ -1845,7 +1872,7 @@ async function clearSpacesAgentProgress(
     agentSlug: ctx.agentSlug,
     agentName: ctx.agentName,
     spacesAppUserId: ctx.spacesAppUserId,
-    appToken: ctx.appToken,
+    bot: ctx.bot,
   });
 }
 
@@ -1889,8 +1916,12 @@ export async function reconcileStoppedRuns(conversationId: string, targetAgentSl
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-            ...(run.userId ? { "x-user-id": run.userId } : {}),
+            // Acts for the run's owner: a short run token, never an x-user-id header.
+            ...selfAuthHeaders(
+              "POST",
+              `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(run.sessionId)}/cancel`,
+              run.userId ? { userId: run.userId, sessionId: run.sessionId } : undefined,
+            ),
           },
         },
       );
@@ -1975,26 +2006,27 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       id: true,
       orgId: true,
       slug: true,
-      spacesAppToken: true,
       spacesAppId: true,
-      spacesAppUserId: true,
       config: true,
     },
   });
-  if (!agentRow?.spacesAppToken || !agentRow.spacesAppId) {
-    throw new Error(`/internal/run queued redispatch missing Spaces app identity for conv=${msg.conversationId} agent=${msg.agentSlug} org=${queuedOrgId}`);
+  if (!agentRow) {
+    throw new Error(`/internal/run queued redispatch: agent not found conv=${msg.conversationId} agent=${msg.agentSlug} org=${queuedOrgId}`);
   }
-  const appToken = decryptStoredField(agentRow.spacesAppToken);
   const workspaceId = msg.workspaceId
-    ?? (await getWorkspaceIdForUser(msg.userId, "webhook").catch(() => null))
-    ?? (agentRow.spacesAppUserId ? await getSpacesUserWorkspaceId(agentRow.spacesAppUserId).catch(() => null) : null);
+    ?? (await getWorkspaceIdForUser(msg.userId, "webhook").catch(() => null));
+  const bot: BotRef = { clawAgentId: agentRow.id, workspaceId: workspaceId ?? null };
+  const botUserId = await botUserIdFor(bot);
+  if (!botUserId) {
+    throw new Error(`/internal/run queued redispatch: agent is not added to the Spaces workspace conv=${msg.conversationId} agent=${msg.agentSlug} workspace=${workspaceId ?? "?"}`);
+  }
   const traceId = createTraceId();
   const fastModeEnabled = await resolveFastMode(msg.conversationId, msg.agentSlug, agentRow.config);
   const res = await fetch(runUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...internalServiceHeaders("POST", runUrl),
     },
     body: JSON.stringify({
       userId: msg.userId,
@@ -2031,7 +2063,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     throw new Error(`/internal/run for queued message returned no sessionId conv=${msg.conversationId} agent=${msg.agentSlug}`);
   }
   const queuedContext: SessionContext = {
-    mentionedUserId: agentRow.spacesAppUserId ?? "",
+    mentionedUserId: botUserId,
     senderId: msg.userId,
     senderName: msg.senderName ?? msg.userId,
     channelId: msg.channelId,
@@ -2042,9 +2074,9 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     agentOrgId: agentRow.orgId,
     agentSlug: agentRow.slug,
     responseMode: "conversation",
-    appToken,
-    spacesAppId: agentRow.spacesAppId,
-    spacesAppUserId: agentRow.spacesAppUserId ?? "",
+    bot,
+    spacesAppId: agentRow.spacesAppId ?? "",
+    spacesAppUserId: botUserId,
     traceId,
     rootAgentSlug: agentRow.slug,
     ...(workspaceId ? { workspaceId } : {}),
@@ -2059,8 +2091,8 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       channelId: msg.channelId,
       agentSlug: msg.agentSlug,
       agentName: queuedContext.agentName,
-      spacesAppUserId: agentRow.spacesAppUserId ?? "",
-      appToken,
+      spacesAppUserId: botUserId,
+      bot,
       toolLabel: "Picked up your new message — continuing from the summary above…",
     });
   }
@@ -2125,7 +2157,7 @@ async function redispatchStoredQueuedMessage(msg: QueuedMessage): Promise<void> 
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
     },
     body: JSON.stringify(dispatch),
   });
@@ -2154,7 +2186,7 @@ async function redispatchStoredQueuedMessage(msg: QueuedMessage): Promise<void> 
   clog.info(`[twin-queue] redispatched queued twin sessionId=${body.sessionId} conv=${msg.conversationId} owner=${msg.twinUserScopeId ?? "?"}`);
 }
 
-// ── S2S automation webhook handler for /webhook/:agentSlug ────────────────
+// ── Automation webhook handler (its /webhook/:agentSlug route is off) ───────
 //
 // Why this exists, and why we don't reuse `/run`:
 //   - `POST /claw/api/v1/run` (run.ts:243) is the user-facing dispatcher — it
@@ -2371,17 +2403,17 @@ export async function handleAutomationWebhook(
   // (instead of straight to the automation's callback) so we can resolve the
   // agent's plain `@Name`/`@email` mentions into clickable/notifying Spaces
   // mentions before the automation's REPLY_ON_MESSAGE posts them. The automation
-  // has no human session, so resolution uses the agent's bot token + workspace
-  // (derived from spacesAppUserId) — it does NOT need conversationId/channelId.
+  // has no human session, so resolution uses the agent's bot in the automation's
+  // workspace — it does NOT need conversationId/channelId.
   // We deliberately do NOT gate on conversationId/channelId: automations that
   // create a NEW conversation have no conversationId at call time, yet still
   // need their mentions resolved (the resolve-and-forward path posts nothing
   // itself — it forwards the resolved text to the automation's callback, which
   // creates the conversation). Without a bot identity we keep the original
   // direct-callback behavior (no interposition, no mention resolution).
-  const interpose = Boolean(
-    callbackUrl && agent.spacesAppUserId && agent.spacesAppToken && agent.spacesAppId,
-  );
+  const automationBot: BotRef = { clawAgentId: agent.id, workspaceId: payload.workspaceId ?? null };
+  const automationBotUserId = callbackUrl ? await botUserIdFor(automationBot) : "";
+  const interpose = Boolean(callbackUrl && automationBotUserId);
   let automationSlotToken: string | null = null;
   const releaseAutomationSlot = async (): Promise<void> => {
     if (automationSlotToken && payload.conversationId) {
@@ -2426,9 +2458,8 @@ export async function handleAutomationWebhook(
     }
   }
   if (interpose) {
-    const appToken = decryptStoredField(agent.spacesAppToken!);
     const sessionContext: SessionContext = {
-      mentionedUserId: agent.spacesAppUserId!,
+      mentionedUserId: automationBotUserId,
       senderId: clawUserId,
       senderName: senderDisplayName,
       // conversationId/channelId may be absent for new-conversation automations.
@@ -2449,9 +2480,9 @@ export async function handleAutomationWebhook(
       agentSlug: agent.slug,
       agentName: agent.name,
       responseMode: "conversation",
-      appToken,
-      spacesAppId: agent.spacesAppId!,
-      spacesAppUserId: agent.spacesAppUserId!,
+      bot: automationBot,
+      spacesAppId: agent.spacesAppId ?? "",
+      spacesAppUserId: automationBotUserId,
       rootAgentSlug: agent.slug,
       // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
       // MCP swap on this (not on the resolveMentions proxy).
@@ -2496,7 +2527,7 @@ export async function handleAutomationWebhook(
   const sdlcProfile =
     payload.executionProfile === "sdlc" &&
     agentSlug === SDLC_AGENT_SLUG &&
-    s2sKeyMatches(req.headers["x-s2s-key"]);
+    callerService(req) !== undefined;
   const allowSandboxWrite = automationRunAllowsSandboxWrite({
     sessionId,
     requested: payload.allowWriteInReadOnlyJob,
@@ -2601,7 +2632,7 @@ export async function handleAutomationWebhook(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-s2s-key": CONFIG.xyneClawS2sKey,
+        ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
       },
       body: JSON.stringify({
         sessionId,
@@ -2714,7 +2745,7 @@ export async function handleAutomationWebhook(
       ...(context ? { context } : {}),
     };
     const recoveryCtx: RecoverySessionContext = {
-      mentionedUserId: agent.spacesAppUserId!,
+      mentionedUserId: automationBotUserId,
       senderId: clawUserId,
       senderName: senderDisplayName,
       channelId: payload.channelId ?? "",
@@ -2726,9 +2757,9 @@ export async function handleAutomationWebhook(
       agentSlug: agent.slug,
       agentName: agent.name,
       responseMode: "conversation",
-      appToken: decryptStoredField(agent.spacesAppToken!),
-      spacesAppId: agent.spacesAppId!,
-      spacesAppUserId: agent.spacesAppUserId!,
+      bot: automationBot,
+      spacesAppId: agent.spacesAppId ?? "",
+      spacesAppUserId: automationBotUserId,
       ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
       // Explicit automation marker — see SessionContext.isAutomation. Set
       // unconditionally: a plain-callback automation (no externalResultCallback,
@@ -2765,7 +2796,7 @@ export async function handleAutomationWebhook(
 
 /**
  * Forward a finished run's result to a caller-supplied URL (Spaces auto-draft
- * callback / any automation forward). Best-effort, s2s-signed; matches the
+ * callback / any automation forward). Best-effort, service-signed; matches the
  * autodraft-callback payload shape the Spaces side expects.
  */
 async function forwardResult(
@@ -2845,7 +2876,8 @@ async function forwardResult(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(forwardToInternal && CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        // Our own services get a service assertion; external callback targets never do.
+        ...(forwardToInternal ? internalServiceHeaders("POST", deliveryUrl) : {}),
       },
       body: JSON.stringify({
         sessionId: payload.sessionId,
@@ -2863,7 +2895,7 @@ async function forwardResult(
       // signature (callback origin not in selfUrl/internalUrl/xyneClawUrl, or
       // key mismatch) — the detail names it so the fix is obvious from the log.
       const authHint = res.status === 401 || res.status === 403
-        ? " (auth rejected — check the callback origin against SELF_URL/INTERNAL_URL/XYNE_CLAW_URL and the S2S key)"
+        ? " (auth rejected — check the callback origin against SELF_URL/INTERNAL_URL/XYNE_CLAW_URL and the service keys)"
         : "";
       forwardFailure(`http_${res.status}`, `delivery rejected by target${authHint}`);
     }
@@ -2929,7 +2961,7 @@ async function publishThreadArtifactShare(
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
         spacesAppUserId: ctx.spacesAppUserId,
-        appToken: ctx.appToken,
+        bot: ctx.bot,
       },
       { id: delivered.designShareId, link: delivered.designShareUrl, command },
     );
@@ -2940,7 +2972,7 @@ async function publishThreadArtifactShare(
 }
 
 const REVIEW_ROOM_MAX_HTML_BYTES = 10 * 1024 * 1024;
-router.post("/review-room", requireStrictS2S, async (req: Request, res: Response) => {
+router.post("/review-room", requireRuntime, async (req: Request, res: Response) => {
   const body = req.body as {
     sessionId?: string;
     roomConversationId?: string;
@@ -2975,7 +3007,7 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
       }
       if (ctx.responseMode === "conversation") {
         await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+          { spacesAppUserId: ctx.spacesAppUserId, bot: ctx.bot },
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
@@ -3074,7 +3106,7 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
           conversationId: ctx.conversationId,
           ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
           userId: ctx.spacesAppUserId,
-          appToken: ctx.appToken,
+          bot: ctx.bot,
           filename: fileName,
           markdown: buffer,
           mimeType: "text/html",
@@ -3094,7 +3126,7 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
   }
 });
 
-router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body as { sessionId?: string })?.sessionId), async (req: Request, res: Response) => {
+router.post("/result", requireRuntime, requireResultToken((req) => (req.body as { sessionId?: string })?.sessionId), async (req: Request, res: Response) => {
   const payload = req.body as {
     sessionId?: string;
     userId?: string;
@@ -3350,7 +3382,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   >();
   if (ctx && payload.status === "completed" && pendingActionList.length > 0) {
     for (const action of pendingActionList) {
-      const v = await pendingActionTargetValidation(action, ctx, ctx.appToken).catch(
+      const v = await pendingActionTargetValidation(action, ctx, ctx.bot).catch(
         () => ({ error: null as string | null }),
       );
       pendingActionValidation.set(action, v);
@@ -3604,8 +3636,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // ctx.channelId: headless runs with no bound channel skip this, exactly as before.
     const externalPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
     const cbCtx = ctx;
-    if (cbCtx?.channelId && cbCtx.appToken && externalPendingActions?.length) {
-      const cbAppToken = cbCtx.appToken;
+    if (cbCtx?.channelId && cbCtx.bot && externalPendingActions?.length) {
+      const cbAppToken = cbCtx.bot;
       let approvalCardsSent = 0;
       for (const action of externalPendingActions) {
         try {
@@ -3721,6 +3753,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         pendingActions: channelPendingActions,
         ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
         ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+        ...(ctx.agentId ? { clawAgentId: ctx.agentId } : {}),
+        ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
       }).catch((err) => {
         clog.warn(`[webhook/result] channel approval cards failed for session ${sessionId}: ${errMsg(err)}`);
       });
@@ -3820,9 +3854,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           : parseChainConfig(agentRow?.config as Record<string, unknown> | null);
 
         if (chain?.onFailure?.escalate) {
-          const token = ctx.appToken;
+          const token = ctx.bot;
           await postAgentMessage(
-            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            { spacesAppUserId: ctx.spacesAppUserId, bot: token },
             {
               channelId: ctx.channelId,
               conversationId: ctx.conversationId,
@@ -3842,7 +3876,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+              ...internalServiceHeaders("POST", runUrl),
             },
             body: JSON.stringify({
               userId: ctx.senderId,
@@ -3856,10 +3890,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           });
           if (!runRes.ok) { clog.error(`[webhook/result] Failure chain trigger HTTP ${runRes.status}`); return; }
           const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
-          if (runBody.success && runBody.sessionId && failureAgentRow?.spacesAppToken && failureAgentRow.spacesAppId) {
-            const failureAppToken = decryptStoredField(failureAgentRow.spacesAppToken);
+          const failureBot: BotRef | undefined = failureAgentRow ? { clawAgentId: failureAgentRow.id, workspaceId: ctx.workspaceId ?? null } : undefined;
+          const failureBotUserId = failureBot ? await botUserIdFor(failureBot) : "";
+          if (runBody.success && runBody.sessionId && failureAgentRow && failureBot && failureBotUserId) {
             const failureContext: SessionContext = {
-              mentionedUserId: failureAgentRow.spacesAppUserId ?? "",
+              mentionedUserId: failureBotUserId,
               senderId: ctx.senderId,
               senderName: ctx.senderName,
               channelId: ctx.channelId,
@@ -3870,9 +3905,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               agentOrgId: failureAgentRow.orgId ?? null,
               agentSlug: chain.onFailure.triggerAgent,
               responseMode: "conversation",
-              appToken: failureAppToken,
-              spacesAppId: failureAgentRow.spacesAppId,
-              spacesAppUserId: failureAgentRow.spacesAppUserId ?? "",
+              bot: failureBot,
+              spacesAppId: failureAgentRow.spacesAppId ?? "",
+              spacesAppUserId: failureBotUserId,
+              ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
               chainDepth: (ctx.chainDepth ?? 0) + 1,
               // Thread workflow identity through failure chains so the next
               // agent in the chain can re-resolve the same workflow binding
@@ -3947,7 +3983,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           ? "I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
           : "I couldn't complete this request due to an internal error. Please try again.";
       await postAgentMessage(
-        { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+        { spacesAppUserId: ctx.spacesAppUserId, bot: ctx.bot },
         {
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
@@ -4030,7 +4066,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // clickable/notifying Spaces mentions before forwarding, so the
     // downstream REPLY_ON_MESSAGE posts a real tag rather than dead text.
     // No human session exists here, so we search with the agent's bot token
-    // (ctx.appToken). Fail-open: any error forwards the raw text unchanged.
+    // (ctx.bot). Fail-open: any error forwards the raw text unchanged.
     // Verify-Responses / copilot agents deliver their turn via `pendingResponses`
     // (often with a placeholder/empty result.text). The channel-post path posts
     // pendingResponses INSTEAD of result.text (line ~3044); the forward branch must
@@ -4042,17 +4078,16 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       : resultWithCitations;
     // DIAG: confirm whether mention resolution is even attempted for this forward.
     // If skipped, the @email stays raw — and the per-email byEmail logs won't fire.
-    log.info(`[webhook/result] mention-resolve gate: resolveMentions=${!!ctx.resolveMentions} appToken=${!!ctx.appToken} hasText=${!!forwardText.trim()} pending=${payload.pendingResponses?.length ?? 0} usedPending=${!resultWithCitations.trim() && !!forwardText.trim()} sessionId=${sessionId}`);
-    if (ctx.resolveMentions && ctx.appToken && forwardText.trim()) {
+    log.info(`[webhook/result] mention-resolve gate: resolveMentions=${!!ctx.resolveMentions} bot=${!!ctx.bot} hasText=${!!forwardText.trim()} pending=${payload.pendingResponses?.length ?? 0} usedPending=${!resultWithCitations.trim() && !!forwardText.trim()} sessionId=${sessionId}`);
+    if (ctx.resolveMentions && ctx.bot && forwardText.trim()) {
       try {
-        // Scope name resolution to the agent's workspace. Automations don't
-        // carry ctx.workspaceId, so derive it from the agent's app user.
-        const wsId = ctx.workspaceId
+        // Scope name resolution to the agent's workspace.
+        const wsId = ctx.workspaceId ?? ctx.bot.workspaceId
           ?? (ctx.spacesAppUserId ? await getSpacesUserWorkspaceId(ctx.spacesAppUserId) : null);
         const resolved = await resolveUnboundMentions(
           forwardText,
           buildSpacesMentionLookups({
-            token: ctx.appToken,
+            token: await botBearer(ctx.bot),
             ...(wsId ? { workspaceId: wsId } : {}),
           }),
         );
@@ -4138,7 +4173,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     ctx.responseMode === "conversation" &&
     ctx.mode === "plan"
   ) {
-    const token = ctx.appToken;
+    const token = ctx.bot;
     try {
       const planTodos = pendingPlan.todos; // [{ id, title }]
       const trivial = pendingPlan.trivial === true;
@@ -4393,7 +4428,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+            ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
           },
           body: JSON.stringify(dispatchPayload),
         });
@@ -4420,7 +4455,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             agentSlug: ctx.agentSlug,
             agentName: ctx.agentName,
             spacesAppUserId: ctx.spacesAppUserId,
-            appToken: ctx.appToken,
+            bot: ctx.bot,
             toolLabel: "Starting the plan…",
           });
           log.info(`Auto-dispatched trivial plan Turn 2 session=${runBody.sessionId} conv=${ctx.conversationId}`);
@@ -4491,7 +4526,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
     spacesAppUserId: ctx.spacesAppUserId,
-    appToken: ctx.appToken,
+    bot: ctx.bot,
   };
   if (pendingAgentCard?.variant === "profile" && agentCardDeliverable && agentCardIdentity) {
     try {
@@ -4571,7 +4606,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         conversationId: ctx.conversationId,
         spacesAppUserId: ctx.spacesAppUserId,
         spacesAppId: ctx.spacesAppId,
-        appToken: ctx.appToken,
+        bot: ctx.bot,
       },
       runOwnerId,
       ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
@@ -4661,7 +4696,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ...(payload.emptyReasonDetail ? { emptyReasonDetail: payload.emptyReasonDetail } : {}),
     });
     try {
-      const token = ctx.appToken;
+      const token = ctx.bot;
       // Raw payload.error must not be surfaced to users (leak risk). But when
       // claw tagged the blank as a provider failure after a fallback (429 /
       // quota / transient error / empty completion), say so — and include the
@@ -4674,7 +4709,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           ? "Sorry — I completed some steps but didn't have a final answer to show. Please try rephrasing, or send your message again."
           : "Sorry, I wasn't able to produce a response. Please try sending your message again.";
       await postAgentMessage(
-        { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+        { spacesAppUserId: ctx.spacesAppUserId, bot: token },
         {
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
@@ -4692,7 +4727,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // sessionStore.delete(sessionId);
 
   try {
-    const token = ctx.appToken;
+    const token = ctx.bot;
 
     // pendingResponses (Verify Responses OR copilot) are posted RAW below,
     // unlike the normal result path which runs prepareAgentResultForPosting.
@@ -4702,10 +4737,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // fall back to the agent's bot token. Fail-open — return the text unchanged
     // on any error so the reply still posts.
     const pendingSenderAuth = payload.pendingResponses?.length
-      ? await getSpacesAuthForUser(ctx.senderId, "webhook", ctx.workspaceId).catch(() => null)
+      ? await resolveAgentSpacesAuth({
+          clawAgentId: ctx.agentId ?? (await clawAgentIdForSlug(ctx.agentSlug, ctx.agentOrgId)),
+          userId: ctx.senderSpacesUserId ?? ctx.senderId,
+          workspaceId: ctx.workspaceId ?? null,
+          caller: "webhook",
+        })
       : null;
     const resolvePendingMentions = async (text: string): Promise<string> => {
-      const lookupToken = pendingSenderAuth?.token ?? ctx.appToken;
+      const lookupToken = pendingSenderAuth?.agentToken ?? (ctx.bot ? await botBearer(ctx.bot).catch(() => "") : "");
       if (!text.trim() || !lookupToken) return text;
       try {
         // Human sender's workspace if we have one, else the agent's own.
@@ -4715,7 +4755,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           text,
           buildSpacesMentionLookups({
             token: lookupToken,
-            ...(pendingSenderAuth?.sessionId ? { sessionId: pendingSenderAuth.sessionId } : {}),
             ...(wsId ? { workspaceId: wsId } : {}),
           }),
         );
@@ -4869,8 +4908,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
           const targetAgentSlug = selected.nextNode.agentSlug;
           const targetAgentRow = await agentRepository.findBySlug(targetAgentSlug, ctx.agentOrgId);
-          if (!targetAgentRow?.spacesAppToken || !targetAgentRow.spacesAppId) {
-            log.error(`Chain: target agent "${targetAgentSlug}" not found or not configured`);
+          const targetBot: BotRef | undefined = targetAgentRow ? { clawAgentId: targetAgentRow.id, workspaceId: ctx.workspaceId ?? null } : undefined;
+          const targetBotUserId = targetBot ? await botUserIdFor(targetBot) : "";
+          if (!targetAgentRow || !targetBot || !targetBotUserId) {
+            log.error(`Chain: target agent "${targetAgentSlug}" not found or not added to this Spaces workspace`);
             return;
           }
 
@@ -4884,7 +4925,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           const rootAttachmentRefs = ctx.rootAttachments ?? [];
           const rootFiles = rootAttachmentRefs.length > 0
             ? await downloadRootAttachments(rootAttachmentRefs, {
-                appToken: decryptStoredField(targetAgentRow.spacesAppToken),
+                appToken: await botBearer(targetBot).catch(() => ""),
                 scopeId: ctx.conversationId || ctx.channelId || "unscoped",
               })
             : { attachments: [], failed: [] };
@@ -4905,7 +4946,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+              ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
             },
             body: JSON.stringify({
               userId: ctx.senderId,
@@ -4925,10 +4966,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           if (!runRes.ok) { log.error(`Chain trigger HTTP ${runRes.status}`); return; }
           const runBody = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
 
-          if (runBody.success && runBody.sessionId && targetAgentRow.spacesAppToken && targetAgentRow.spacesAppId) {
-            const targetAppToken = decryptStoredField(targetAgentRow.spacesAppToken);
+          if (runBody.success && runBody.sessionId) {
             const targetContext: SessionContext = {
-              mentionedUserId: targetAgentRow.spacesAppUserId ?? "",
+              mentionedUserId: targetBotUserId,
               senderId: ctx.senderId,
               senderName: ctx.senderName,
               channelId: ctx.channelId,
@@ -4941,9 +4981,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               agentOrgId: targetAgentRow.orgId ?? null,
               agentSlug: targetAgentSlug,
               responseMode: "conversation",
-              appToken: targetAppToken,
-              spacesAppId: targetAgentRow.spacesAppId,
-              spacesAppUserId: targetAgentRow.spacesAppUserId ?? "",
+              bot: targetBot,
+              spacesAppId: targetAgentRow.spacesAppId ?? "",
+              spacesAppUserId: targetBotUserId,
+              ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
               chainDepth: currentDepth + 1,
               rootAgentSlug,
               workflowId: binding.workflowId,
@@ -4976,7 +5017,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
             log.info(`Chain: ${ctx.agentSlug} → ${targetAgentSlug} (step ${currentDepth + 1}/${maxDepth}, workflow ${binding.workflowId})`);
             await postAgentMessage(
-              { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+              { spacesAppUserId: ctx.spacesAppUserId, bot: token },
               {
                 channelId: ctx.channelId,
                 conversationId: ctx.conversationId,
@@ -5076,7 +5117,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
           await postAgentMessage(
-            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            { spacesAppUserId: ctx.spacesAppUserId, bot: token },
             {
               channelId: ctx.channelId,
               conversationId: ctx.conversationId,
@@ -5090,7 +5131,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         for (const pr of payload.pendingResponses) {
           const prText = await resolvePendingMentions(pr.message);
           await postAgentMessage(
-            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            { spacesAppUserId: ctx.spacesAppUserId, bot: token },
             {
               channelId: ctx.channelId,
               conversationId: ctx.conversationId,
@@ -5192,7 +5233,14 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // can do name → userId lookups for plain `@Name` mentions the LLM emitted
       // without brackets. Falls back to null on lookup failure — the prepare
       // function gracefully skips resolution when senderSpacesToken is absent.
-      const senderAuth = await getSpacesAuthForUser(ctx.senderId, "webhook", ctx.workspaceId).catch(() => null);
+      // The run's agent acting for the sender (on-behalf-of token); null when
+      // Spaces won't let it — same fallback as a missing session.
+      const senderAuth = await resolveAgentSpacesAuth({
+        clawAgentId: ctx.agentId ?? (await clawAgentIdForSlug(ctx.agentSlug, ctx.agentOrgId)),
+        userId: ctx.senderSpacesUserId ?? ctx.senderId,
+        workspaceId: ctx.workspaceId ?? null,
+        caller: "webhook",
+      });
 
       // Apply the 10K-char + attachment-count guards. When the result is
       // too long, this swaps the body for a stub + a PDF attachment, which
@@ -5201,7 +5249,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // Headless run (no human sender) → scope name resolution to the agent's
       // own workspace, derived from its app user. Skipped when a sender token
       // exists (that path carries the human's workspace already).
-      const agentWsId = !senderAuth?.token && ctx.spacesAppUserId
+      const agentWsId = !senderAuth?.agentToken && ctx.spacesAppUserId
         ? (ctx.workspaceId ?? await getSpacesUserWorkspaceId(ctx.spacesAppUserId))
         : null;
       const prepared = await prepareAgentResultForPosting(
@@ -5209,8 +5257,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         payload.attachments as OutgoingAttachment[] | undefined,
         {
           ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
-          ...(senderAuth?.token ? { senderSpacesToken: senderAuth.token } : {}),
-          ...(senderAuth?.sessionId ? { senderSpacesSessionId: senderAuth.sessionId } : {}),
+          ...(senderAuth?.agentToken ? { senderSpacesToken: senderAuth.agentToken } : {}),
           ...(senderAuth?.workspaceId ? { senderWorkspaceId: senderAuth.workspaceId } : {}),
           ...(agentWsId ? { agentWorkspaceId: agentWsId } : {}),
         },
@@ -5251,7 +5298,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
           await postAgentMessage(
-            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            { spacesAppUserId: ctx.spacesAppUserId, bot: token },
             {
               channelId: ctx.channelId,
               conversationId: ctx.conversationId,
@@ -5286,7 +5333,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         if (!posted) {
           log.info(`Posting result: channelId=${ctx.channelId} conversationId=${ctx.conversationId} resultLen=${prepared.text.length} userId=${ctx.spacesAppUserId}`);
           await postAgentMessage(
-            { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+            { spacesAppUserId: ctx.spacesAppUserId, bot: token },
             {
               channelId: ctx.channelId,
               // Channel-bound, thread-less runs (API/event-triggered) carry an
@@ -5344,7 +5391,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           });
           if (decision.kind === "terminated") {
             await postAgentMessage(
-              { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+              { spacesAppUserId: ctx.spacesAppUserId, bot: token },
               {
                 channelId: ctx.channelId,
                 conversationId: ctx.conversationId,
@@ -5358,7 +5405,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             // (same surface as tool calls), not a new chat message — only the
             // terminal outcome above is posted permanently.
             await postGoalPhase(
-              { sessionId, conversationId: ctx.conversationId, channelId: ctx.channelId, agentSlug: ctx.agentSlug, spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+              { sessionId, conversationId: ctx.conversationId, channelId: ctx.channelId, agentSlug: ctx.agentSlug, spacesAppUserId: ctx.spacesAppUserId, bot: token },
               decision.replyToUser,
             );
             // Refire claw's /run with the stashed dispatch payload, overriding
@@ -5388,8 +5435,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-                "x-user-id": refireUserId,
+                ...selfAuthHeaders("POST", runUrl, { userId: refireUserId }),
               },
               body: JSON.stringify(refire),
             }).catch((err) => {
@@ -5522,7 +5568,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       conversationId: ctx?.conversationId,
       mentionedUserId: ctx?.mentionedUserId,
       spacesAppId: ctx?.spacesAppId,
-      hasToken: Boolean(ctx?.appToken),
+      hasToken: Boolean(ctx?.bot),
       resultLength: resultWithCitations.length,
     });
   }
@@ -5562,7 +5608,7 @@ async function doRenderPlanCard(
   // first-todo-write that races the seed still updates the SAME card instead of
   // being dropped by a momentary getSession miss.
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
-  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) return;
+  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.bot) return;
 
   // Per-agent opt-out (agent.config.postTodos === false): suppress the live
   // plan/todo card in the Spaces thread for agents whose owner turned this off.
@@ -5643,7 +5689,7 @@ async function doRenderPlanCard(
     const resp = (await spacesAppFetch(
       "/chat/postMessage",
       { channelId: ctx.channelId, conversationId: ctx.conversationId, flow, userId: ctx.spacesAppUserId },
-      ctx.appToken,
+      ctx.bot,
     )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
     const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
     if (messageId) await setSession(sessionId, { ...ctx, planMessageId: messageId });
@@ -5653,7 +5699,7 @@ async function doRenderPlanCard(
     await spacesAppFetch(
       "/chat/updateMessage",
       { messageId: ctx.planMessageId, flowJSON: flow, userId: ctx.spacesAppUserId, channelId: ctx.channelId },
-      ctx.appToken,
+      ctx.bot,
     );
   }
 }
@@ -5788,11 +5834,11 @@ async function doRenderPrCard(
   // recovery → conv-index), so a refired run that minted a fresh sessionId still
   // lands the card in the right thread.
   const ctx = await resolveSessionContext(sessionId, conversationId ?? null, agentSlug ?? null);
-  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.appToken) {
+  if (!ctx || ctx.responseMode !== "conversation" || !ctx.channelId || !ctx.bot) {
     clog.warn(
       `[pr-card] skipping render for ${sessionId}: ctx=${ctx ? "yes" : "MISSING"} ` +
         `responseMode=${ctx?.responseMode ?? "?"} channelId=${ctx?.channelId ? "yes" : "MISSING"} ` +
-        `appToken=${ctx?.appToken ? "yes" : "MISSING"} (conv=${conversationId ?? "?"} agent=${agentSlug ?? "?"})`,
+        `bot=${ctx?.bot ? "yes" : "MISSING"} (conv=${conversationId ?? "?"} agent=${agentSlug ?? "?"})`,
     );
     return;
   }
@@ -5838,7 +5884,7 @@ async function doRenderPrCard(
     const resp = (await spacesAppFetch(
       "/chat/postMessage",
       { channelId: ctx.channelId, conversationId: ctx.conversationId, flow, userId: ctx.spacesAppUserId },
-      ctx.appToken,
+      ctx.bot,
     )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
     const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
     if (messageId) {
@@ -5861,7 +5907,7 @@ async function doRenderPrCard(
     await spacesAppFetch(
       "/chat/updateMessage",
       { messageId: existing, flowJSON: flow, userId: ctx.spacesAppUserId, channelId: ctx.channelId },
-      ctx.appToken,
+      ctx.bot,
     );
   }
 
@@ -5927,10 +5973,10 @@ function renderPrCard(
   return next;
 }
 
-// ── POST /webhook/pr-event — inbound git-host PR status change (S2S) ────────
+// ── POST /webhook/pr-event — inbound git-host PR status change (from Spaces) ─
 //
 // The MAIN backend receives + HMAC-verifies the GitHub / Bitbucket webhook and
-// forwards a normalized PR fact HERE (fire-and-forget, x-s2s-key). We look up the
+// forwards a normalized PR fact HERE (fire-and-forget, Spaces service assertion). We look up the
 // durable AgentWidgetBinding for this PR by its normalized URL and — only if an
 // agent originally posted a card for it — move THAT card to the new status in
 // place (same screenId, updateMessage on the bound messageId): one evolving card
@@ -5988,7 +6034,7 @@ async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
   }
 
   const agentRow = await agentRepository.findBySpacesAppId(binding.spacesAppId);
-  if (!agentRow?.spacesAppToken) return { outcome: "skipped", reason: "agent-unresolved" };
+  if (!agentRow) return { outcome: "skipped", reason: "agent-unresolved" };
   // Defense-in-depth org isolation: the agent resolved from the binding's OWN
   // spacesAppId must belong to the binding's org. They agree by construction
   // (both captured from one SessionContext at card-creation), so a mismatch
@@ -6002,8 +6048,10 @@ async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
     );
     return { outcome: "skipped", reason: "org-mismatch" };
   }
-  const appToken = decryptStoredField(agentRow.spacesAppToken);
-  const userId = binding.spacesAppUserId || agentRow.spacesAppUserId || "";
+  // Bindings carry no workspace: the agent's single workspace is used (an agent
+  // in several workspaces is skipped rather than posting into the wrong one).
+  const bot: BotRef = { clawAgentId: agentRow.id, workspaceId: null };
+  const userId = await botUserIdFor(bot);
   if (!userId) return { outcome: "skipped", reason: "no-bot-user" };
 
   // The binding's own screenId, so the card reconciles onto the agent's original.
@@ -6035,7 +6083,7 @@ async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
       await spacesAppFetch(
         "/chat/updateMessage",
         { messageId, flowJSON: flow, userId, channelId: binding.channelId },
-        appToken,
+        bot,
       );
     } catch (e) {
       clog.warn(
@@ -6050,7 +6098,7 @@ async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
     const resp = (await spacesAppFetch(
       "/chat/postMessage",
       { channelId: binding.channelId, conversationId: binding.conversationId, flow, userId },
-      appToken,
+      bot,
     )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
     messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
   }
@@ -6073,7 +6121,7 @@ async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
 
 const prEventQueue = new Map<string, Promise<unknown>>();
 
-router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) => {
+router.post("/pr-event", requireSpacesService, async (req: Request, res: Response) => {
   // Ack immediately — never block the caller (the backend webhook handler).
   res.json({ success: true });
 
@@ -6372,7 +6420,7 @@ async function renderUiWidget(
       });
       return delivered;
     }
-    if (!ctx || !ctx.channelId || !ctx.appToken) return false;
+    if (!ctx || !ctx.channelId || !ctx.bot) return false;
     // Static/live artifacts historically render only for conversation replies;
     // clarification questions also support approval-mode agent runs.
     if (widget.type !== "question" && ctx.responseMode !== "conversation") return false;
@@ -6392,7 +6440,7 @@ async function renderUiWidget(
       conversationId: ctx.conversationId,
       flow,
       userId: ctx.spacesAppUserId,
-    }, ctx.appToken);
+    }, ctx.bot);
     delivered = true;
     log.info(`Posted ${widget.type} UI widget ${widget.id} in thread ${ctx.conversationId}`);
     return true;
@@ -6406,7 +6454,7 @@ async function renderUiWidget(
 // xyne-claw POSTs here on every tool_execution_start (throttled to 10s).
 // We look up the session, then call updateMessage on the progress placeholder.
 
-router.post("/progress", requireStrictS2S, async (req: Request, res: Response) => {
+router.post("/progress", requireRuntime, async (req: Request, res: Response) => {
   const { sessionId, toolLabel, toolInvocation, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxTermUrl, sandboxId, conversationId, agentSlug } = req.body as {
     sessionId?: string;
     toolLabel?: string;
@@ -6635,7 +6683,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     if (!ingest.recorded) {
       try {
         await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+          { spacesAppUserId: ctx.spacesAppUserId, bot: ctx.bot },
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
@@ -6650,7 +6698,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     }
     try {
       await postAgentMessage(
-        { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
+        { spacesAppUserId: ctx.spacesAppUserId, bot: ctx.bot },
         {
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
@@ -6721,7 +6769,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         agentSlug: ctx.agentSlug,
         agentName: ctx.agentName,
         spacesAppUserId: ctx.spacesAppUserId,
-        appToken: ctx.appToken,
+        bot: ctx.bot,
       }, toolLabel);
       log.info(`Progress (ephemeral): ${toolLabel} → conv=${ctx.conversationId}`);
     } else if (ctx.progressMessageId) {
@@ -6729,7 +6777,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         messageId: ctx.progressMessageId,
         markdownText: `${toolLabel}`,
         userId: ctx.spacesAppUserId,
-      }, ctx.appToken);
+      }, ctx.bot);
       log.info(`Progress (placeholder): ${toolLabel} → messageId=${ctx.progressMessageId}`);
     }
     // else: placeholder mode with no placeholderId (initial post failed) — silently skip
@@ -6762,7 +6810,7 @@ async function proxyFlowAction(req: Request, res: Response, headers: Record<stri
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/flow/action`),
         ...(typeof sigHeader === "string" ? { "x-xyne-signature": sigHeader } : {}),
         ...headers,
       },
@@ -6777,75 +6825,136 @@ async function proxyFlowAction(req: Request, res: Response, headers: Record<stri
   res.status((proxyRes as unknown as { status: number }).status).type("application/json").send(text);
 }
 
-router.post("/app/:spacesAppId", async (req: Request, res: Response): Promise<void> => {
-  const spacesAppId = req.params["spacesAppId"];
-  if (typeof spacesAppId !== "string" || !spacesAppId) {
-    res.status(400).json({ success: false, error: "spacesAppId is required" });
+// ── Agent principals (Claw agents as first-party Spaces principals) ──────────
+// Spaces delivers mentions / DMs for an agent's bot user here, with an event
+// token (x-spaces-event) it signed: names the sender (sub), the principal (pid),
+// and binds the exact body (bh). No per-app secret, and the user comes from the
+// token, never from the body alone.
+router.post("/agent/:principalId", async (req: Request, res: Response): Promise<void> => {
+  const principalId = req.params["principalId"];
+  if (typeof principalId !== "string" || !principalId) {
+    res.status(400).json({ success: false, error: "principalId is required" });
+    return;
+  }
+  const rawBody = (req as unknown as { rawBody?: Buffer }).rawBody ?? Buffer.alloc(0);
+  const ev = await verifySpacesEvent(req.headers[EVENT_HEADER], principalId, rawBody);
+  if (typeof ev === "string") {
+    clog.warn(`[webhook/agent] event token rejected (${ev}) principal=${principalId}`);
+    res.status(401).json({ success: false, error: "invalid event token" });
+    return;
+  }
+  // Flow-card clicks have their own route (flow-action.ts); their tokens are not events here.
+  if (ev.purpose === FLOW_ACTION_PURPOSE) {
+    clog.warn(`[webhook/agent] flow-action token sent to the event route principal=${principalId}`);
+    res.status(401).json({ success: false, error: "invalid event token" });
+    return;
+  }
+  if (!(await claimEventJti(ev.jti))) {
+    clog.warn(`[webhook/agent] event replayed principal=${principalId} jti=${ev.jti}`);
+    res.status(401).json({ success: false, error: "event replayed" });
     return;
   }
 
-  const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
-
-  // Signature verification is UNCONDITIONAL for every caller — s2s key or
-  // not. (A 2026-08-10 TEMPORARY bypass let unsigned s2s callers through with
-  // a warning; it was removed once every s2s caller signed — 30 days of prod
-  // logs show zero uses. Guarded by webhook-unsigned-s2s.security.test.ts.)
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
-
-  if (isAutomationRequest) {
-    const agent = await agentRepository.findBySpacesAppId(spacesAppId);
-    if (!agent) {
-      clog.warn(`[webhook/app-automation] agent app miss spacesAppId=${spacesAppId} orgId=none`);
-      res.status(404).json({ success: false, error: "Agent not found" });
-      return;
-    }
-    await handleAutomationWebhook(req, res, agent.slug, agent.orgId);
+  const principal = await findPrincipalById(principalId).catch(() => null);
+  if (!principal || principal.status !== "ACTIVE" || principal.workspaceId !== ev.workspaceId) {
+    res.status(404).json({ success: false, error: "Agent not found" });
+    return;
+  }
+  const agentRow = await prisma.agent.findUnique({ where: { id: principal.clawAgentId } });
+  if (!agentRow) {
+    clog.warn(`[webhook/agent] no claw agent for principal=${principalId} clawAgentId=${principal.clawAgentId}`);
+    res.status(404).json({ success: false, error: "Agent not found" });
     return;
   }
 
-  if (req.headers["x-xyne-event"] === "flow_action") {
-    await proxyFlowAction(req, res, { "x-spaces-app-id": spacesAppId });
+  // The body is bound to the token by its hash; its user and workspace must also be the token's.
+  const payload = ((req.body ?? {}) as { payload?: { userId?: unknown; workspaceId?: unknown } }).payload ?? {};
+  if ((payload.userId !== undefined && payload.userId !== ev.spacesUserId) ||
+      (payload.workspaceId !== undefined && payload.workspaceId !== ev.workspaceId)) {
+    clog.warn(`[webhook/agent] body identity does not match the event token principal=${principalId}`);
+    res.status(401).json({ success: false, error: "identity mismatch" });
     return;
   }
 
+  res.locals["clawAgentRow"] = agentRow;
+  res.locals["spacesEvent"] = ev;
+  // The event is the live proof: exchange it now so the run's Spaces calls can
+  // act for the sender (on-behalf-of token + 2-hour renewal, shared via Redis).
+  await primeAgentAuthFromEvent(ev);
   return handleWebhook(req, res);
 });
 
-router.post("/:agentSlug", async (req: Request, res: Response): Promise<void> => {
-  const agentSlug = req.params["agentSlug"];
-  if (typeof agentSlug !== "string" || !agentSlug) {
-    res.status(400).json({ success: false, error: "agentSlug is required" });
-    return;
-  }
-  clog.warn(`[webhook] legacy slug webhook route hit agentSlug=${agentSlug}`);
-
-  const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
-
-  // Signature verification is UNCONDITIONAL — see the /app/:spacesAppId route
-  // above for the removed 2026-08-10 unsigned-s2s bypass and its guard test.
-  let verified = false;
-  await verifySpacesSignature(req, res, () => {
-    verified = true;
-  });
-  if (!verified || res.headersSent) return;
-
-  if (isAutomationRequest) {
-    await handleAutomationWebhook(req, res, agentSlug);
-    return;
-  }
-
-  if (req.headers["x-xyne-event"] === "flow_action") {
-    // Proxy to the flow-action handler (same process, different route). Forward
-    // the original raw bytes plus the Spaces signature and route identity so
-    // /flow/action can re-verify the HMAC itself.
-    await proxyFlowAction(req, res, { "x-agent-slug": agentSlug });
-    return;
-  }
-  return handleWebhook(req, res);
-});
+// Off: Spaces thread mentions only (2026-11-12). The old app-webhook routes
+// (app signing secret + S2S-key automations) are replaced by POST /agent/:principalId.
+// router.post("/app/:spacesAppId", async (req: Request, res: Response): Promise<void> => {
+//   const spacesAppId = req.params["spacesAppId"];
+//   if (typeof spacesAppId !== "string" || !spacesAppId) {
+//     res.status(400).json({ success: false, error: "spacesAppId is required" });
+//     return;
+//   }
+//
+//   const isAutomationRequest = false; // (shared S2S key removed)
+//
+//   // Signature verification is UNCONDITIONAL for every caller — s2s key or
+//   // not. (A 2026-08-10 TEMPORARY bypass let unsigned s2s callers through with
+//   // a warning; it was removed once every s2s caller signed — 30 days of prod
+//   // logs show zero uses. Guarded by webhook-unsigned-s2s.security.test.ts.)
+//   let verified = false;
+//   await verifySpacesSignature(req, res, () => {
+//     verified = true;
+//   });
+//   if (!verified || res.headersSent) return;
+//
+//   if (isAutomationRequest) {
+//     const agent = await agentRepository.findBySpacesAppId(spacesAppId);
+//     if (!agent) {
+//       clog.warn(`[webhook/app-automation] agent app miss spacesAppId=${spacesAppId} orgId=none`);
+//       res.status(404).json({ success: false, error: "Agent not found" });
+//       return;
+//     }
+//     await handleAutomationWebhook(req, res, agent.slug, agent.orgId);
+//     return;
+//   }
+//
+//   if (req.headers["x-xyne-event"] === "flow_action") {
+//     await proxyFlowAction(req, res, { "x-spaces-app-id": spacesAppId });
+//     return;
+//   }
+//
+//   return handleWebhook(req, res);
+// });
+//
+// router.post("/:agentSlug", async (req: Request, res: Response): Promise<void> => {
+//   const agentSlug = req.params["agentSlug"];
+//   if (typeof agentSlug !== "string" || !agentSlug) {
+//     res.status(400).json({ success: false, error: "agentSlug is required" });
+//     return;
+//   }
+//   clog.warn(`[webhook] legacy slug webhook route hit agentSlug=${agentSlug}`);
+//
+//   const isAutomationRequest = false; // (shared S2S key removed)
+//
+//   // Signature verification is UNCONDITIONAL — see the /app/:spacesAppId route
+//   // above for the removed 2026-08-10 unsigned-s2s bypass and its guard test.
+//   let verified = false;
+//   await verifySpacesSignature(req, res, () => {
+//     verified = true;
+//   });
+//   if (!verified || res.headersSent) return;
+//
+//   if (isAutomationRequest) {
+//     await handleAutomationWebhook(req, res, agentSlug);
+//     return;
+//   }
+//
+//   if (req.headers["x-xyne-event"] === "flow_action") {
+//     // Proxy to the flow-action handler (same process, different route). Forward
+//     // the original raw bytes plus the Spaces signature and route identity so
+//     // /flow/action can re-verify the HMAC itself.
+//     await proxyFlowAction(req, res, { "x-agent-slug": agentSlug });
+//     return;
+//   }
+//   return handleWebhook(req, res);
+// });
 
 export { router as webhookRouter };

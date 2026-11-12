@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("../lib/internal-call.js", () => ({ serviceCallsConfigured: () => true, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: (method: string, _url: string, user?: { userId?: string }) => ({ "x-service-assertion": `test:xyne-claw-auth:${method}`, ...(user?.userId ? { "x-session-token": `run:${user.userId}` } : {}) }), selfCallRunToken: (u: { userId: string }) => `run:${u.userId}` }));
 
 vi.mock("../config.js", () => ({
-  CONFIG: { xyneClawUrl: "http://claw.test", xyneClawS2sKey: "s2s-test-key" },
+  CONFIG: { xyneClawUrl: "http://claw.test" },
 }));
 
 import { listEvalModels } from "./evalJudgeClient.js";

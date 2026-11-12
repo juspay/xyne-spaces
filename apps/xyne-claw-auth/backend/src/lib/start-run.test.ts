@@ -7,7 +7,6 @@ vi.mock("../logger.js", () => ({
 vi.mock("../config.js", () => ({
   CONFIG: {
     xyneClawUrl: "http://claw.local",
-    xyneClawS2sKey: "s2s",
     internalUrl: "http://auth.local",
     clawSseTransport: false,
     encryptionKey: Buffer.alloc(32, 7),

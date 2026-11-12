@@ -50,8 +50,7 @@ export type ApprovedWriteOutcome =
 export function needsSpacesApproval(serverType: string, tool: string): boolean {
   if (serverType === "skill") return true;
   if (serverType === "agent-tools" && (AGENT_TOOL_SLUGS.has(tool) || tool === "create-skill" || tool === FORK_TO_CONVERSATION_TOOL)) return true;
-  // Posting AS the user through the Spaces app token needs an agent's
-  // spacesAppToken, which is resolved from the card's own agent binding.
+  // Posting through Spaces needs the agent's bot, resolved from the card's own agent binding.
   if (serverType === "xyne-spaces" && tool === "spaces-send-message") return true;
   return false;
 }

@@ -27,6 +27,7 @@ import {
   type SynthFileResult,
 } from "./digitalTwinPipelineEvents.js";
 import { listUserTwinMemories, subsystemOfTags } from "./twinMemoryBank.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../lib/internal-call.js";
 
 const logger = createLogger("twin-soul-synthesizer", createTraceId());
 
@@ -58,12 +59,12 @@ async function fetchApprovedFactsBySubsystem(userId: string): Promise<Map<string
 async function synthesizeViaClaw(
   req: SynthesizeFileRequest,
 ): Promise<{ content: string | null; error?: string; trace?: SynthesizeFileTrace; check?: MemoryUpdateCheck }> {
-  if (!CONFIG.xyneClawS2sKey) return { content: null, error: "no-s2s-key" };
+  if (!serviceCallsConfigured()) return { content: null, error: "no-service-key" };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/synthesize-file`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(SYNTH_TIMEOUT_MS),
     });

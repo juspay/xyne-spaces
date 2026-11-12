@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { useRuntimeTestKey } from "./runtime-test-key.js";
 
-process.env["XYNE_CLAW_S2S_KEY"] ||= "test-s2s-key";
+useRuntimeTestKey();
+
 
 describe("run-execution module surface", () => {
   it("exports executeRunFromPayload", async () => {

@@ -20,6 +20,7 @@ import type { ChannelAccount, ChannelDeliveryTarget } from "./plugin.js";
 import type { BoundAgent } from "./store.js";
 import { forgetChatTasks } from "./threads/registry.js";
 import { clearChatState } from "./threads/state.js";
+import { selfAuthHeaders } from "../../lib/internal-call.js";
 
 const log = createLogger("channel-commands");
 
@@ -95,7 +96,7 @@ export async function clearConversation(input: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/clear-session`, input.userId ? { userId: input.userId } : undefined),
       },
       body: JSON.stringify(input),
     });
@@ -114,7 +115,7 @@ export async function cancelRun(sessionId: string): Promise<boolean> {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+          ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`),
         },
       },
     );
@@ -292,7 +293,8 @@ export async function runChatSlashCommand(input: {
       slug: agent.slug,
       name: agent.name,
       orgId: agent.orgId,
-      appToken: "",
+      // No Spaces workspace here: posting goes through channelDelivery.
+      bot: { clawAgentId: agent.id, workspaceId: null },
       spacesAppId: "",
       spacesAppUserId: "",
       isDefault: false,

@@ -16,7 +16,7 @@ const dispatchChannelRun = vi.fn(
 const resolveIdentity = vi.fn(async (_input: Record<string, unknown>) => "user-1" as string | null);
 const redisStore = new Map<string, string>();
 
-vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost", xyneClawS2sKey: "" } }));
+vi.mock("../../config.js", () => ({ CONFIG: { internalUrl: "http://localhost" } }));
 vi.mock("../../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 vi.mock("../../redis.js", () => ({
   redisService: {

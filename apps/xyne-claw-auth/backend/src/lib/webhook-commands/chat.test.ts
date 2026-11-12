@@ -17,7 +17,7 @@ function ctx(chat: boolean) {
   return {
     reply,
     value: {
-      agent: { id: "a", slug: "assistant", name: "Assistant", orgId: "o", appToken: "", spacesAppId: "", spacesAppUserId: "", isDefault: false },
+      agent: { id: "a", slug: "assistant", name: "Assistant", orgId: "o", bot: { clawAgentId: "a", workspaceId: null }, spacesAppId: "", spacesAppUserId: "", isDefault: false },
       payload: { conversationId: "whatsapp-cloud-acct_1-assistant-919", channelId: "919", userId: "u" },
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       userText: "",

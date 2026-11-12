@@ -16,7 +16,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("sandbox-profiles-internal");
 
 /**
- * Spaces → sandbox profile editor (INTERNAL_S2S_KEY). Spaces decides who may edit; this layer only
+ * Spaces → sandbox profile editor (Spaces service assertion). Spaces decides who may edit; this layer only
  * keeps ownership straight: a workspace's profile is reachable only with that workspaceId.
  */
 export const sandboxProfilesInternalRouter = Router();

@@ -5,12 +5,12 @@
  * runtime). Running the curator here keeps that credential scoped to one
  * pod and preserves the "all LLM calls happen on claw" invariant.
  *
- * S2S-protected via the existing x-s2s-key middleware.
+ * Only claw-auth may call it (signed service assertion, middleware/auth.ts).
  */
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { classifyIngestSubsystem, distillSession, distillLargeTranscript } from "../curator.js";
 import { parseSession } from "../session-parsers/index.js";
 import type { SessionTranscriptForCurator } from "xyne-claw-shared";
@@ -20,7 +20,7 @@ const log = createLogger("curator");
 
 export const curatorRouter = Router();
 
-curatorRouter.post("/internal/curator/classify-subsystem", validateS2SKey, async (req: Request, res: Response) => {
+curatorRouter.post("/internal/curator/classify-subsystem", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as {
       sessionId?: string;
@@ -55,7 +55,7 @@ curatorRouter.post("/internal/curator/classify-subsystem", validateS2SKey, async
   }
 });
 
-curatorRouter.post("/internal/curator/distill", validateS2SKey, async (req: Request, res: Response) => {
+curatorRouter.post("/internal/curator/distill", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as Partial<SessionTranscriptForCurator> & { bankId?: string };
 
@@ -103,7 +103,7 @@ curatorRouter.post("/internal/curator/distill", validateS2SKey, async (req: Requ
  * S2S-protected. This can be slow (N map calls) — callers must use a long
  * timeout and run it off the user's request path.
  */
-curatorRouter.post("/internal/curator/distill-session", validateS2SKey, async (req: Request, res: Response) => {
+curatorRouter.post("/internal/curator/distill-session", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const body = (req.body ?? {}) as {
       sessionId?: string;

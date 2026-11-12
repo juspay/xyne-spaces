@@ -1,5 +1,6 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 import type { AgentCard, DraftContext, Snapshot } from './types';
 
 export interface DraftRequest {
@@ -77,9 +78,10 @@ export async function requestDraft(request: DraftRequest): Promise<{ sessionId: 
     `${encodeURIComponent(request.episodeId)}/${encodeURIComponent(request.agent.slug)}` +
     `?context=${encodeDraftContext(request.context)}`;
   try {
-    const response = await fetch(`${config.xyneClaw.authUrl}/claw/api/v1/proactivity/draft`, {
+    const url = `${config.xyneClaw.authUrl}/claw/api/v1/proactivity/draft`;
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-s2s-key': config.internalS2sKey },
+      headers: { 'Content-Type': 'application/json', ...serviceAuthHeaders('xyne-claw-auth', 'POST', url) },
       body: JSON.stringify({
         agentSlug: request.agent.slug,
         agentUserId: request.agent.userId,
@@ -152,7 +154,7 @@ export async function fetchDrafts(episodeId: string, channelId: string): Promise
   );
   url.searchParams.set('channelId', channelId);
   const response = await fetch(url, {
-    headers: { 'x-s2s-key': config.internalS2sKey },
+    headers: serviceAuthHeaders('xyne-claw-auth', 'GET', url.toString()),
     signal: AbortSignal.timeout(10_000),
   });
   const body = (await response.json().catch(() => null)) as {

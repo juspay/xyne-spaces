@@ -1,6 +1,7 @@
 import type { DecideQuestion } from "xyne-claw-shared";
 import { CONFIG } from "../config.js";
 import { errMsg } from "../lib/errors.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../lib/internal-call.js";
 import { createLogger, createTraceId } from "../logger.js";
 
 const logger = createLogger("xor-try-client", createTraceId());
@@ -22,12 +23,12 @@ export async function tryChecksViaClaw(req: {
   item: { text?: string; image?: string };
   context?: string;
 }): Promise<XorTryResult> {
-  if (!CONFIG.xyneClawS2sKey) return { ok: false, status: 503, error: "claw is not reachable from this deployment" };
+  if (!serviceCallsConfigured()) return { ok: false, status: 503, error: "claw is not reachable from this deployment" };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/xor-decide/try`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -79,12 +80,12 @@ export async function evalChecksViaClaw(req: {
   variants?: Record<string, string[]>;
   context?: string;
 }): Promise<XorEvalResult> {
-  if (!CONFIG.xyneClawS2sKey) return { ok: false, status: 503, error: "claw is not reachable from this deployment" };
+  if (!serviceCallsConfigured()) return { ok: false, status: 503, error: "claw is not reachable from this deployment" };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/xor-decide/eval`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(EVAL_TIMEOUT_MS),
     });

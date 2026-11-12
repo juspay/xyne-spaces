@@ -10,7 +10,6 @@ const state = vi.hoisted(() => ({
   config: {
     selfUrl: "https://auth.example.internal",
     xyneClawUrl: "http://claw.local",
-    xyneClawS2sKey: "s2s-secret",
     clawSseTransport: false,
     internalUrl: "http://auth.local",
     encryptionKey: Buffer.alloc(32, 7),
@@ -57,9 +56,15 @@ vi.mock("../middleware/require-auth.js", () => ({
     req.headers["x-org-id"] = "org-token";
     next();
   }),
-  requireStrictS2S: vi.fn((_req, _res, next) => next()),
   requireResultToken: vi.fn(() => (_req: Request, _res: Response, next: () => void) => next()),
-  s2sKeyMatches: vi.fn((value: unknown) => value === "s2s-secret"),
+}));
+
+// A request with a (test) service assertion counts as a verified service caller.
+vi.mock("../lib/service-assertion.js", () => ({
+  callerService: (req: Request) => (req.headers["x-service-assertion"] === "valid" ? "xyne-claw-auth" : undefined),
+  requireRuntime: (_req: Request, _res: Response, next: () => void) => next(),
+  requireSpacesService: (_req: Request, _res: Response, next: () => void) => next(),
+  serviceAuthHeaders: (aud: string, method: string) => ({ "x-service-assertion": `test:${aud}:${method}` }),
 }));
 
 vi.mock("../mcpgateway/services/http-client.js", async (importOriginal) => ({
@@ -197,7 +202,7 @@ async function postRun(
       baseUrl: "",
       headers: {
         authorization: options.serviceToken ? "Bearer xyne_svc_real" : "Bearer xyne_cli_real",
-        ...(options.s2s ? { "x-s2s-key": "s2s-secret" } : {}),
+        ...(options.s2s ? { "x-service-assertion": "valid" } : {}),
       },
       body,
       ip: "127.0.0.1",

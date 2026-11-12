@@ -6,6 +6,7 @@ import { chatMessageRepository } from "../repositories/chatMessageRepository.js"
 import { errMsg } from "./errors.js";
 import { publishLiveEvent } from "./live-conversation-bus.js";
 import { spacesAppFetch } from "../surfaces/spaces/client.js";
+import type { BotRef } from "./spaces-bot.js";
 
 const log = createLogger("flow-card");
 
@@ -14,7 +15,7 @@ export interface SpacesCardTarget {
   channelId: string;
   conversationId: string | undefined;
   spacesAppUserId: string | undefined;
-  appToken: string;
+  bot: BotRef;
 }
 
 export interface XyneAiCardTarget {
@@ -188,7 +189,7 @@ export async function postFlowCard(
       flow,
       userId: target.spacesAppUserId,
     },
-    target.appToken,
+    target.bot,
   );
   return flow;
 }

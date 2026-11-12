@@ -10,6 +10,7 @@ import { errMsg } from "../../lib/errors.js";
 import { decrypt } from "../../crypto.js";
 import { createLogger } from "../../logger.js";
 import { SpacesApiError, isFlowSchemaRejection } from "../../mcp/servers/xyne-spaces-client.js";
+import { botBearer, spacesBotUrl, type BotRef } from "../../lib/spaces-bot.js";
 
 // Re-export so callers (webhook.ts) can branch on `err.status` / detect a
 // flow-schema rejection from the same module they import the fetch helpers.
@@ -30,17 +31,15 @@ export async function withSpaces5xxRetry<T>(label: string, fn: () => Promise<T>)
   }
 }
 
-export async function spacesAppFetchMultipart(path: string, form: FormData, appToken?: string): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  const token = appToken ?? "";
-  if (!token) throw new Error("No app token provided");
+export async function spacesAppFetchMultipart(path: string, form: FormData, bot: BotRef): Promise<unknown> {
+  const url = spacesBotUrl(path);
 
   return withSpaces5xxRetry(`POST ${path} (multipart)`, async () => {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         // Do NOT set Content-Type — let fetch set it with the multipart boundary
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${await botBearer(bot)}`,
       },
       body: form,
       signal: AbortSignal.timeout(60_000),
@@ -55,12 +54,10 @@ export async function spacesAppFetchMultipart(path: string, form: FormData, appT
   });
 }
 
-export async function spacesAppFetchGet(path: string, appToken?: string): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  const token = appToken ?? "";
-  if (!token) throw new Error("No app token provided");
+export async function spacesAppFetchGet(path: string, bot: BotRef): Promise<unknown> {
+  const url = spacesBotUrl(path);
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${await botBearer(bot)}` },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
@@ -70,17 +67,15 @@ export async function spacesAppFetchGet(path: string, appToken?: string): Promis
   return res.json();
 }
 
-export async function spacesAppFetch(path: string, body: Record<string, unknown>, appToken?: string): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  const token = appToken ?? "";
-  if (!token) throw new Error("No app token provided");
+export async function spacesAppFetch(path: string, body: Record<string, unknown>, bot: BotRef): Promise<unknown> {
+  const url = spacesBotUrl(path);
 
   return withSpaces5xxRetry(`POST ${path}`, async () => {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${await botBearer(bot)}`,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30_000),
@@ -114,7 +109,7 @@ export async function emitAgentWorkingSignal(opts: {
   agentSlug?: string | undefined;
   agentName?: string | undefined;
   spacesAppUserId?: string | undefined;
-  appToken?: string | undefined;
+  bot: BotRef | undefined;
   toolLabel?: string;
 }): Promise<void> {
   const { emitAgentProgressWorking } = await import("./agent-progress.js");

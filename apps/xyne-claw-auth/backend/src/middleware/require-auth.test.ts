@@ -237,11 +237,14 @@ describe("requireAuth CLI bearer branch", () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 
-  it("rejects CLI bearer tokens on strict S2S endpoints", async () => {
-    const { requireStrictS2S } = await import("./require-auth.js");
+  it("rejects CLI bearer tokens on service-only endpoints", async () => {
+    const { requireRuntime } = await import("../lib/service-assertion.js");
     const req = {
+      method: "POST",
+      originalUrl: "/claw/api/v1/internal/sessions/s1",
       headers: {
         authorization: "Bearer xyne_cli_real",
+        "x-s2s-key": "a-leaked-shared-key-means-nothing-now",
       },
     } as unknown as Request;
     const res = {
@@ -250,7 +253,7 @@ describe("requireAuth CLI bearer branch", () => {
     } as unknown as Response;
     const next: NextFunction = vi.fn();
 
-    requireStrictS2S(req, res, next);
+    await requireRuntime(req, res, next);
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
@@ -299,7 +302,7 @@ describe("x-spaces-* header trust boundary", () => {
     expect(getRequesterAliases(req)).toEqual(["token-owner"]);
   });
 
-  it("keeps the verified S2S contract: a valid key may pin x-spaces-* identity", async () => {
+  it("an old shared key can no longer pin x-spaces-* identity", async () => {
     state.clawUserId = "claw-canonical-1";
     const { requireAuth } = await import("./require-auth.js");
     const req = {
@@ -318,17 +321,10 @@ describe("x-spaces-* header trust boundary", () => {
 
     await requireAuth(req, res, next);
 
-    expect(next).toHaveBeenCalledOnce();
-    expect(res.status).not.toHaveBeenCalled();
-    // Canonical Claw id is stamped in x-user-id; the raw workspace identity is
-    // retained on the side headers as the verified alias pair.
-    expect(req.headers["x-user-id"]).toBe("claw-canonical-1");
-    expect(req.headers["x-spaces-user-id"]).toBe("ws-member-1");
-    expect(req.headers["x-spaces-workspace-id"]).toBe("ws-1");
-
-    const { matchesAuthenticatedUserId } = await import("./pin-user-id-param.js");
-    expect(matchesAuthenticatedUserId(req, "claw-canonical-1")).toBe(true);
-    expect(matchesAuthenticatedUserId(req, "ws-member-1")).toBe(true);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(req.headers["x-user-id"]).toBeUndefined();
+    expect(req.headers["x-spaces-user-id"]).toBeUndefined();
   });
 });
 
@@ -604,7 +600,7 @@ describe("requireAuth: unverifiable identity is 503, not 401", () => {
     expect(res._status).toBe(401);
   });
 
-  it("lets a valid s2s key through even while /api/auth/me is timing out", async () => {
+  it("an old shared key does not get past a Spaces outage: 503 like any caller", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       const err = new Error("timeout");
       err.name = "TimeoutError";
@@ -620,8 +616,8 @@ describe("requireAuth: unverifiable identity is 503, not 401", () => {
       next,
     );
 
-    expect(next).toHaveBeenCalledOnce();
-    expect(res._status).toBeUndefined();
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(503);
     vi.unstubAllGlobals();
   });
 });

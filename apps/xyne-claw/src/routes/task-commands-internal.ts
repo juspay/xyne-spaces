@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { TASK_COMMANDS } from "../task-commands.js";
 import { createLogger } from "../logger.js";
 
@@ -24,7 +24,7 @@ async function collectMarkdownFiles(dir: string): Promise<string[]> {
   return files.sort();
 }
 
-router.get("/internal/task-commands/:name", validateS2SKey, async (req: Request<{ name: string }>, res: Response) => {
+router.get("/internal/task-commands/:name", requireClawAuthService, async (req: Request<{ name: string }>, res: Response) => {
   const name = req.params.name;
   if (!/^[a-z0-9-]{1,40}$/i.test(name)) {
     res.status(400).json({ success: false, error: "Invalid task command name" });

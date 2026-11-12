@@ -8,14 +8,11 @@ import type { RegistrationFlow, RegistrationStep } from '../hooks/useAgentRegist
 type StepState = 'idle' | 'active' | 'loading' | 'done';
 
 const STEPS: { step: RegistrationStep; label: string; doneLabel: string }[] = [
-  { step: 'create', label: 'Create app', doneLabel: 'Created' },
-  { step: 'install', label: 'Install app', doneLabel: 'Installed' },
-  { step: 'configure', label: 'Configure webhook', doneLabel: 'Configured' },
-  { step: 'grant', label: 'Grant permissions', doneLabel: 'Permissions granted' },
+  { step: 'register', label: 'Add to workspace', doneLabel: 'Added to workspace' },
   { step: 'upload', label: 'Upload picture', doneLabel: 'Picture set' },
 ];
 
-const ORDER: RegistrationStep[] = ['create', 'install', 'configure', 'grant', 'upload', 'done'];
+const ORDER: RegistrationStep[] = ['register', 'upload', 'done'];
 
 function StepRow({
   position,
@@ -118,7 +115,6 @@ export function RegistrationFlowDialog({
   const skipFor = (step: RegistrationStep): (() => void) | undefined => {
     if (flow.step !== step) return undefined;
     if (step === 'upload') return onSkipUpload;
-    if (step === 'grant') return onDismiss;
     return undefined;
   };
 
@@ -129,7 +125,7 @@ export function RegistrationFlowDialog({
         if (!open) onDismiss();
       }}
       title={`Set up ${flow.agentName} on Spaces`}
-      description='Run each registration step in order to connect this agent to Spaces.'
+      description='Adds this agent to your current workspace and approves what it can do there. Only a workspace admin can add an agent.'
       testId='agent-registration-dialog'
       footer={
         finished ? (

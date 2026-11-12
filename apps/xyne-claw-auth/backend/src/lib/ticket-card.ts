@@ -1,5 +1,6 @@
 import type { TicketArtifact } from "xyne-claw-shared";
 import { spacesAppFetchGet } from "./spaces-api.js";
+import type { BotRef } from "./spaces-bot.js";
 
 const TICKET_STATUSES = ["TODO", "STARTED", "PAUSED", "CANCELLED", "COMPLETED"] as const;
 const TICKET_PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
@@ -45,12 +46,12 @@ export function parseSentEmailFromToolResult(resultText: string): {
 
 export async function fetchTicketForCard(
   xyneId: string,
-  appToken: string,
+  bot: BotRef,
 ): Promise<TicketArtifact | null> {
   try {
     const data = (await spacesAppFetchGet(
       `/ticket/${encodeURIComponent(xyneId)}`,
-      appToken,
+      bot,
     )) as {
       id?: string;
       xyneId?: string;

@@ -38,10 +38,11 @@ export const xyneDashboardAdapter: StdioMcpAdapter = {
       args: ["--import", "tsx/esm", SERVER_PATH],
       env: {
         XYNE_SPACES_URL: url,
-        XYNE_SPACES_TOKEN: String(credentials["token"] ?? ""),
-        XYNE_SPACES_SESSION_ID: String(credentials["sessionId"] ?? ""),
+        // Agent token (the run's agent acting for its user) is the only credential when present.
+        XYNE_SPACES_AGENT_TOKEN: String(credentials["agentToken"] ?? ""),
+        XYNE_SPACES_TOKEN: credentials["agentToken"] ? "" : String(credentials["token"] ?? ""),
+        XYNE_SPACES_SESSION_ID: credentials["agentToken"] ? "" : String(credentials["sessionId"] ?? ""),
         XYNE_SPACES_WORKSPACE_ID: String(credentials["workspaceId"] ?? ""),
-        INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
         XYNE_USER_ID: String(credentials["userId"] ?? ""),
       },
     };

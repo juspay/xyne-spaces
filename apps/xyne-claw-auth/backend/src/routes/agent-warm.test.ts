@@ -10,7 +10,15 @@ const state = vi.hoisted(() => ({
   warmed: [] as Array<[string, string]>,
 }));
 
-vi.mock("../config.js", () => ({ CONFIG: { internalUrl: "http://claw-auth.internal", xyneClawS2sKey: "s2s-key" } }));
+vi.mock("../config.js", () => ({ CONFIG: { internalUrl: "http://claw-auth.internal" } }));
+vi.mock("../lib/service-assertion.js", () => ({
+  serviceAuthHeaders: (aud: string, method: string, url: string) => ({ "x-service-assertion": `${aud} ${method} ${new URL(url).pathname}` }),
+  requireService: (...allow: string[]) => (req: { headers: Record<string, unknown> }, res: { status: (n: number) => { json: (b: unknown) => void } }, next: () => void) => {
+    const a = String(req.headers["x-service-assertion"] ?? "");
+    if (allow.some((s) => a === `signed-by:${s}`)) return next();
+    res.status(401).json({ success: false });
+  },
+}));
 vi.mock("../logger.js", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
@@ -94,7 +102,7 @@ describe("agent warm-up", () => {
     expect(res.status).toBe(202);
     await vi.waitFor(() => expect(state.internalCalls).toHaveLength(1));
     expect(state.internalCalls[0]!.headers[CLAW_USER_HEADER]).toBe("user-1");
-    expect(state.internalCalls[0]!.headers["x-s2s-key"]).toBe("s2s-key");
+    expect(state.internalCalls[0]!.headers["x-service-assertion"]).toBe("xyne-claw-auth POST /claw/api/v1/internal/agent-warm/mcp");
     expect(state.internalCalls[0]!.body).toEqual({ userId: "user-1", agentSlug: "ask-ai" });
   });
 
@@ -120,23 +128,35 @@ describe("agent warm-up", () => {
   it("internal warm-up loads the agent's tool lists", async () => {
     const res = await fetch(`${base}/internal/agent-warm/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-service-assertion": "signed-by:xyne-claw-auth" },
       body: JSON.stringify({ userId: "user-1", agentSlug: "ask-ai" }),
     });
     expect(res.status).toBe(202);
     await vi.waitFor(() => expect(state.warmed).toEqual([["user-1", "ask-ai"]]));
   });
 
+  it("internal warm-up is only for claw-auth itself (the body names the user)", async () => {
+    for (const assertion of [undefined, "signed-by:xyne-claw", "signed-by:xyne-spaces"]) {
+      const res = await fetch(`${base}/internal/agent-warm/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(assertion ? { "x-service-assertion": assertion } : {}) },
+        body: JSON.stringify({ userId: "user-1", agentSlug: "ask-ai" }),
+      });
+      expect(res.status).toBe(401);
+    }
+    expect(state.warmed).toEqual([]);
+  });
+
   it("internal warm-up rejects a request without user or agent", async () => {
     const res = await fetch(`${base}/internal/agent-warm/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-service-assertion": "signed-by:xyne-claw-auth" },
       body: JSON.stringify({ agentSlug: "ask-ai" }),
     });
     expect(res.status).toBe(400);
     const injected = await fetch(`${base}/internal/agent-warm/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-service-assertion": "signed-by:xyne-claw-auth" },
       body: JSON.stringify({ userId: "user-1", agentSlug: "ask-ai\nfake log line" }),
     });
     expect(injected.status).toBe(400);

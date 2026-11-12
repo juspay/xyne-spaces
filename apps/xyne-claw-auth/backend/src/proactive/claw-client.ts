@@ -2,6 +2,7 @@ import { CONFIG } from "../config.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger } from "../logger.js";
 import type { PlannedLoopInput } from "./schedule.js";
+import { serviceAuthHeaders, serviceSigningConfigured } from "../lib/service-assertion.js";
 
 const log = createLogger("proactive-claw-client");
 
@@ -35,11 +36,12 @@ export interface InterruptResponse {
 }
 
 async function post<T>(path: string, body: unknown, timeoutMs: number): Promise<T | null> {
-  if (!CONFIG.xyneClawS2sKey) return null;
+  if (!serviceSigningConfigured()) return null;
   try {
-    const res = await fetch(`${CONFIG.xyneClawUrl.replace(/\/$/, "")}${path}`, {
+    const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}${path}`;
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...serviceAuthHeaders("xyne-claw", "POST", url) },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });

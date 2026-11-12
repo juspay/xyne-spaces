@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { decideBatch, validateQuestions, type DecideItem } from "../xor-decide.js";
 import { isImageDataUrl, xorEnabled } from "../xor.js";
 import { CURRENT_MODEL, findRegressions, formatEvalReport, MAX_EVAL_MODELS, MAX_EVAL_SAMPLES, runChecksEval, type EvalSample, type Expected } from "../xor-eval.js";
@@ -9,7 +9,7 @@ const MAX_IMAGE_CHARS = 11_000_000;
 
 const router = Router();
 
-router.post("/xor-decide/try", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/xor-decide/try", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const body = (req.body ?? {}) as { questions?: unknown; item?: { text?: unknown; image?: unknown }; context?: unknown };
   const q = validateQuestions(body.questions);
   if ("error" in q) {
@@ -64,7 +64,7 @@ function parseSamples(raw: unknown): EvalSample[] | string {
   return out;
 }
 
-router.post("/xor-decide/eval", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/xor-decide/eval", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const body = (req.body ?? {}) as { checks?: unknown; samples?: unknown; models?: unknown; compare?: unknown; variants?: unknown; context?: unknown };
   const q = validateQuestions(body.checks);
   if ("error" in q) {

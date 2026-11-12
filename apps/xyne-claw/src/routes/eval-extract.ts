@@ -6,14 +6,14 @@
  * (query, response) pairs — reconstructed verbatim from the thread.
  */
 import { Router, type Request, type Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { extractEvalPairs, type ThreadMessage } from "../eval-extract.js";
 
 const router = Router();
 
 const ROLES = new Set(["customer", "human-agent", "bot", "other"]);
 
-router.post("/eval-extract", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/eval-extract", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const body = req.body as { messages?: unknown; kind?: unknown; model?: unknown; copilot?: { token?: unknown; model?: unknown } } | undefined;
   if (!body || !Array.isArray(body.messages)) {
     res.status(400).json({ success: false, error: "messages array is required" });

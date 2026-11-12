@@ -35,7 +35,7 @@ export async function announceGoalStart(
   // tool calls), not as a permanent chat message — the goal loop's meta lines
   // shouldn't clutter the thread. The terminal outcome stays a real message.
   await postGoalPhase(
-    { sessionId, conversationId: payload.conversationId, channelId: payload.channelId, agentSlug: agent.slug, spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+    { sessionId, conversationId: payload.conversationId, channelId: payload.channelId, agentSlug: agent.slug, spacesAppUserId: agent.spacesAppUserId, bot: agent.bot },
     replyToUser,
   );
 }

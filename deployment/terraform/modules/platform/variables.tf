@@ -50,21 +50,25 @@ variable "postgres_password" {
 
 variable "app_secrets" {
   type = object({
-    jwt_secret                  = string
-    zero_auth_secret            = string
-    zero_admin_password         = string
-    encryption_key              = string
-    internal_s2s_key            = string
-    claw_s2s_key                = string
-    claw_auth_encryption_key    = string
-    ysweet_auth                 = string
-    ysweet_server_token         = string
-    transcription_agent_api_key = string
-    litellm_api_key             = optional(string, "")
-    hindsight_api_key           = optional(string, "")
-    hindsight_llm_api_key       = optional(string, "")
-    google_client_id            = optional(string, "")
-    google_client_secret        = optional(string, "")
+    jwt_secret                       = string
+    zero_auth_secret                 = string
+    zero_admin_password              = string
+    encryption_key                   = string
+    spaces_signing_private_key       = string
+    spaces_signing_public_key        = string
+    claw_auth_signing_private_key    = string
+    claw_auth_signing_public_key     = string
+    claw_runtime_signing_private_key = string
+    claw_runtime_signing_public_key  = string
+    claw_auth_encryption_key         = string
+    ysweet_auth                      = string
+    ysweet_server_token              = string
+    transcription_agent_api_key      = string
+    litellm_api_key                  = optional(string, "")
+    hindsight_api_key                = optional(string, "")
+    hindsight_llm_api_key            = optional(string, "")
+    google_client_id                 = optional(string, "")
+    google_client_secret             = optional(string, "")
   })
   sensitive = true
 
@@ -78,11 +82,18 @@ variable "app_secrets" {
       length(var.app_secrets.jwt_secret) >= 32,
       length(var.app_secrets.zero_auth_secret) >= 32,
       length(var.app_secrets.zero_admin_password) >= 16,
-      length(var.app_secrets.internal_s2s_key) >= 32,
-      length(var.app_secrets.claw_s2s_key) >= 32,
       length(var.app_secrets.transcription_agent_api_key) >= 32,
     ])
-    error_message = "jwt_secret, zero_auth_secret, internal_s2s_key, claw_s2s_key and transcription_agent_api_key need at least 32 characters; zero_admin_password at least 16."
+    error_message = "jwt_secret, zero_auth_secret and transcription_agent_api_key need at least 32 characters; zero_admin_password at least 16."
+  }
+
+  validation {
+    condition = alltrue([for k in [
+      var.app_secrets.spaces_signing_private_key, var.app_secrets.claw_auth_signing_private_key, var.app_secrets.claw_runtime_signing_private_key,
+      ] : strcontains(k, "BEGIN PRIVATE KEY")]) && alltrue([for k in [
+      var.app_secrets.spaces_signing_public_key, var.app_secrets.claw_auth_signing_public_key, var.app_secrets.claw_runtime_signing_public_key,
+    ] : strcontains(k, "BEGIN PUBLIC KEY")])
+    error_message = "The *_signing_private_key fields are PKCS#8 EC P-256 private keys and the *_signing_public_key fields their SPKI public keys (docs/setup/service-keys.md). Each service gets only its own private key."
   }
 
   validation {

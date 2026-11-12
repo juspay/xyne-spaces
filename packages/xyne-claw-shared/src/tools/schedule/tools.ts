@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../types.js";
+import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 
 export const SCHEDULE_CONFIG_SCHEMA = {
   XYNE_CLAW_AUTH_URL: {
@@ -6,12 +6,6 @@ export const SCHEDULE_CONFIG_SCHEMA = {
     default: "http://localhost:3003",
     required: true as const,
     placeholder: "http://localhost:3003",
-  },
-  XYNE_CLAW_S2S_KEY: {
-    label: "Claw S2S Key (for /scheduled-jobs auth)",
-    default: "",
-    required: false as const,
-    placeholder: "Shared secret between xyne-claw and xyne-claw-auth",
   },
 };
 
@@ -86,7 +80,6 @@ export const scheduleTask: ToolDefinition = {
 
     const authUrl =
       context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
-    const s2sKey = context.config["XYNE_CLAW_S2S_KEY"] ?? "";
     const type = params["type"] as string;
 
     const body: Record<string, unknown> = {
@@ -109,15 +102,14 @@ export const scheduleTask: ToolDefinition = {
     }
 
     try {
-      // claw-auth's /scheduled-jobs is gated by requireAuth — for an S2S call
-      // from xyne-claw the key is the only viable credential (we don't have
-      // a user JWT in this context). Without it, requireAuth rejects with 401
-      // and the tool returns "Authentication required" to the agent.
-      const res = await fetch(`${authUrl}/claw/api/v1/scheduled-jobs`, {
+      // claw-auth's /scheduled-jobs is gated by requireAuth: the runtime's
+      // service assertion plus this run's session token (which names the user).
+      const url = `${authUrl}/claw/api/v1/scheduled-jobs`;
+      const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+          ...(context.serviceAuth?.("POST", url) ?? {}),
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10_000),
@@ -175,7 +167,7 @@ type ListedScheduledJob = {
  */
 export async function listScheduledJobs(opts: {
   authUrl: string;
-  s2sKey: string;
+  serviceAuth?: ToolExecutionContext["serviceAuth"];
   userId: string;
   agentSlug: string;
   includeInactive: boolean;
@@ -184,9 +176,10 @@ export async function listScheduledJobs(opts: {
   const doFetch = opts.fetchImpl ?? fetch;
   const qs = new URLSearchParams({ userId: opts.userId, agentSlug: opts.agentSlug });
   try {
-    const res = await doFetch(`${opts.authUrl}/claw/api/v1/scheduled-jobs?${qs.toString()}`, {
+    const url = `${opts.authUrl}/claw/api/v1/scheduled-jobs?${qs.toString()}`;
+    const res = await doFetch(url, {
       method: "GET",
-      headers: { ...(opts.s2sKey ? { "x-s2s-key": opts.s2sKey } : {}) },
+      headers: { ...(opts.serviceAuth?.("GET", url) ?? {}) },
       signal: AbortSignal.timeout(10_000),
     });
     const data = (await res.json().catch(() => null)) as {
@@ -283,7 +276,7 @@ export const scheduledJobControl: ToolDefinition = {
     if (action === "list") {
       return listScheduledJobs({
         authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003",
-        s2sKey: context.config["XYNE_CLAW_S2S_KEY"] ?? "",
+        ...(context.serviceAuth ? { serviceAuth: context.serviceAuth } : {}),
         userId: String(userId),
         agentSlug: String(agentSlug),
         includeInactive: params["includeInactive"] === true,
@@ -314,16 +307,16 @@ export const scheduledJobControl: ToolDefinition = {
 
     const authUrl =
       context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
-    const s2sKey = context.config["XYNE_CLAW_S2S_KEY"] ?? "";
 
     try {
+      const controlUrl = `${authUrl}/claw/api/v1/scheduled-jobs/${encodeURIComponent(jobId)}/${action}`;
       const res = await fetch(
-        `${authUrl}/claw/api/v1/scheduled-jobs/${encodeURIComponent(jobId)}/${action}`,
+        controlUrl,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+            ...(context.serviceAuth?.("POST", controlUrl) ?? {}),
           },
           body: JSON.stringify({
             userId,

@@ -20,9 +20,8 @@ import { createLogger } from "../logger.js";
 const log = createLogger("mention-lookups");
 
 /**
- * DB-backed mention lookups — read `public.users` directly. Needs no token and
- * no workspace scope (email is @unique; names resolve only when EXACTLY one
- * active human matches). Requires SPACES_DB_URL to be configured.
+ * Directory-backed mention lookups — signed Spaces directory calls
+ * (lib/spaces-db.ts). Names resolve only when EXACTLY one active human matches.
  */
 export function buildSpacesMentionLookupsDb(workspaceId?: string): MentionLookups {
   log.info(`[mention-lookups] using db lookups workspaceId=${workspaceId ?? "(none)"}`);
@@ -35,7 +34,7 @@ export function buildSpacesMentionLookupsDb(workspaceId?: string): MentionLookup
     byName: (name) => getSpacesUsersByName(name, workspaceId),
     byEmail: (email) => getSpacesUserByEmail(email, workspaceId),
     byHandle: (handle) => getSpacesUsersByHandle(handle, workspaceId),
-    byGroupAlias: getSpacesGroupByAlias,
+    byGroupAlias: (alias) => getSpacesGroupByAlias(alias, workspaceId),
   };
 }
 

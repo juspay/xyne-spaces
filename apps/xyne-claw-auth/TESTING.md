@@ -48,7 +48,6 @@ SPACES_BACKEND_URL=http://localhost:3001
 
 # Leave these as-is for local dev (no real OAuth needed to test UI)
 XYNE_CLAW_URL=http://localhost:3002
-XYNE_CLAW_S2S_KEY=dev-s2s-key
 GOOGLE_CLIENT_ID=dev
 GOOGLE_CLIENT_SECRET=dev
 MICROSOFT_CLIENT_ID=dev
@@ -56,7 +55,9 @@ MICROSOFT_CLIENT_SECRET=dev
 MICROSOFT_REDIRECT_URI=http://localhost:5174/claw/
 MICROSOFT_TENANT_ID=common
 FAKE_GCS_HOST=http://localhost:4443
-INTERNAL_S2S_KEY=dev-internal-key
+CLAW_SERVICE_PRIVATE_KEY=<claw-auth dev key; see docs/setup/service-keys.md>
+SPACES_DELEGATION_PUBLIC_KEYS={"spaces-1":"<Spaces dev public key>"}
+CLAW_RUNTIME_PUBLIC_KEYS={"runtime-1":"<runtime dev public key>"}
 ```
 
 > ⚠️ `ENCRYPTION_KEY` must be exactly 64 hex characters (32 bytes). The all-zeros value above is fine for local testing — **never use it in production**.

@@ -63,7 +63,7 @@ async function processReflex(job: Job<AwakeningReflexJobData>): Promise<void> {
     where: { id: agentId },
     select: {
       id: true, slug: true, orgId: true, config: true,
-      spacesAppId: true, spacesAppUserId: true, spacesAppToken: true,
+      spacesAppId: true, spacesAppUserId: true,
     },
   });
   if (!agent) return;
@@ -73,7 +73,7 @@ async function processReflex(job: Job<AwakeningReflexJobData>): Promise<void> {
 
   try {
     const workspaceId = await resolveWorkspaceId(orgId, agent.spacesAppUserId, config.workspaceId);
-    const identity = resolveAgentIdentity(agent, workspaceId);
+    const identity = await resolveAgentIdentity(agent, workspaceId);
 
     const sinceMs = (state.reflexWatermarkAt ?? state.watermarkAt).getTime();
     const untilMs = Date.now() - config.cursor.replicaSafetyMs;

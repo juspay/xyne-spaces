@@ -61,6 +61,7 @@ const wwwAuthenticateFor = (code: AuthFailureCode, message: string): string => {
 /** Classify a jwtService.verifyToken failure. */
 export const classifyTokenError = (error: unknown): Exclude<AuthFailureCode, 'TOKEN_MISSING'> =>
   error instanceof Error && error.message === 'JWT token has expired' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID';
+import { authenticateClawAgentOnBehalfOf, looksLikeAgentToken } from '@/claw/tokens';
 
 export class AuthMiddleware {
   private reject(res: Response, code: AuthFailureCode, message: string, error = 'Authentication required'): void {
@@ -71,9 +72,19 @@ export class AuthMiddleware {
   /**
    * The only authentication for user routes. Reads the JWT from the `xyne_ws_<workspaceId>_token`
    * cookie (workspace from `x-workspace-id`, else `xyne_last_workspace`); an Authorization header
-   * is never read. The user and org member are re-checked on every request.
+   * is read only for a Claw agent token. The user and org member are re-checked on every request.
    */
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    // A Claw agent acting for a user (claw/tokens.ts): the one case that reads the
+    // Authorization header. Handled entirely there and never falls through to the
+    // cookie logic below; the typ header only routes it, it is fully verified,
+    // on-behalf-of only, and route-scope gated.
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ') && looksLikeAgentToken(authHeader.slice(7).trim())) {
+      await authenticateClawAgentOnBehalfOf(req, res, next);
+      return;
+    }
+
     const logPrefix = `[AUTH] [${req.method} ${req.path}]`;
     const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.[LAST_WORKSPACE_COOKIE];
 

@@ -21,7 +21,7 @@ import {
 const binding = { repoId: 'repo-1', workspaceId: 'ws-1', actorUserId: 'user-1' };
 const transport = {
   authUrl: 'https://claw-auth.example/',
-  s2sKey: 's2s-key',
+  serviceAuth: (method: string, url: string) => ({ 'x-service-assertion': `sig:${method}:${url}` }),
   runSessionId: 'wf-run-1',
   sessionToken: 'session-token',
 };
@@ -97,7 +97,7 @@ describe('installSdlcRepositoryAccess', () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://claw-auth.example/claw/api/v1/sessions/wf-run-1/sdlc/runtime-credentials/bootstrap');
     expect((init as RequestInit).headers).toMatchObject({
-      'x-s2s-key': 's2s-key',
+      'x-service-assertion': 'sig:POST:https://claw-auth.example/claw/api/v1/sessions/wf-run-1/sdlc/runtime-credentials/bootstrap',
       Authorization: 'Bearer session-token',
     });
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({
@@ -122,7 +122,7 @@ describe('installSdlcRepositoryAccess', () => {
     vi.stubGlobal('fetch', fetchMock);
     const session = mockSession('sandbox-1');
     await expect(installSdlcRepositoryAccess(session, binding, { ...transport, sessionToken: '' }))
-      .rejects.toThrow('Claw auth URL, S2S key or session token is unavailable');
+      .rejects.toThrow('Claw auth URL, service signer or session token is unavailable');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(session.commands.run).toHaveBeenLastCalledWith('rm -f /tmp/.sdlc-private-key', 5_000);
   });

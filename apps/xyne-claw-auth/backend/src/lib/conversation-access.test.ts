@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+vi.mock("./service-assertion.js", () => ({ serviceAuthHeaders: (aud: string, method: string) => ({ "x-service-assertion": `test:${aud}:${method}` }), serviceSigningConfigured: () => true }));
 
 vi.mock("../config.js", () => ({ CONFIG: { spacesInternalUrl: "http://spaces.test" } }));
 vi.mock("../logger.js", () => ({

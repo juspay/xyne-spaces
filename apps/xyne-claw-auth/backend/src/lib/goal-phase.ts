@@ -1,6 +1,7 @@
 import { emitAgentProgressWorking } from "../surfaces/spaces/agent-progress.js";
 import { spacesAppFetch } from "../surfaces/spaces/client.js";
 import { postAgentMessage } from "../surfaces/spaces/post-message.js";
+import type { BotRef } from "./spaces-bot.js";
 
 // Feature flag: when Spaces has the XYNE-12145 fix deployed
 // (POST /api/apps/chat/agentProgress with the authenticateApp middleware), flip
@@ -23,7 +24,7 @@ export const USE_EPHEMERAL_PROGRESS = true;
  * silently lost in that mode.
  */
 export async function postGoalPhase(
-  fields: { sessionId: string; conversationId: string; channelId?: string | undefined; agentSlug?: string | undefined; spacesAppUserId: string; appToken: string },
+  fields: { sessionId: string; conversationId: string; channelId?: string | undefined; agentSlug?: string | undefined; spacesAppUserId: string; bot: BotRef },
   label: string,
 ): Promise<void> {
   try {
@@ -36,11 +37,11 @@ export async function postGoalPhase(
         channelId: fields.channelId,
         agentSlug: fields.agentSlug,
         spacesAppUserId: fields.spacesAppUserId,
-        appToken: fields.appToken,
+        bot: fields.bot,
       }, label);
     } else if (fields.channelId) {
       await postAgentMessage(
-        { spacesAppUserId: fields.spacesAppUserId, appToken: fields.appToken },
+        { spacesAppUserId: fields.spacesAppUserId, bot: fields.bot },
         {
           channelId: fields.channelId,
           conversationId: fields.conversationId,
@@ -54,7 +55,7 @@ export async function postGoalPhase(
         markdownText: label,
         userId: fields.spacesAppUserId,
         metadata: { contentFormat: "markdown" },
-      }, fields.appToken);
+      }, fields.bot);
     }
   } catch {
     // Best-effort: a missed progress signal must never break the goal loop.

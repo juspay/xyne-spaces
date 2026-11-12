@@ -9,16 +9,13 @@ const redis = {
   }),
   del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
 };
-const spacesAppFetch = vi.fn(async (_path: string, _body: Record<string, unknown>, _token?: string): Promise<unknown> => ({}));
-const findUnique = vi.fn(async (_args: unknown): Promise<unknown> => ({ spacesAppToken: "enc-token", spacesAppUserId: "bot-1" }));
+const spacesAppFetch = vi.fn(async (_path: string, _body: Record<string, unknown>, _bot?: unknown): Promise<unknown> => ({}));
+const findUnique = vi.fn(async (_args: unknown): Promise<unknown> => ({ id: "agent-1", spacesAppUserId: "bot-1" }));
 
 vi.mock("../redis.js", () => ({ redisService: { getConnection: () => redis } }));
 vi.mock("../db.js", () => ({ prisma: { agent: { findUnique } } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
-vi.mock("../surfaces/spaces/client.js", () => ({
-  spacesAppFetch,
-  decryptStoredField: (value: string) => `dec:${value}`,
-}));
+vi.mock("../surfaces/spaces/client.js", () => ({ spacesAppFetch }));
 vi.mock("./message-queue.js", () => ({ QUEUE_CAP: 10 }));
 
 const {
@@ -37,7 +34,7 @@ const target = {
   channelId: "ch-1",
   orgId: "org-1",
   spacesAppUserId: "bot-1",
-  appToken: "tok",
+  bot: { clawAgentId: "agent-1", workspaceId: "ws-1" },
 };
 
 const calls = (path: string) => spacesAppFetch.mock.calls.filter(([p]) => p === path);
@@ -132,16 +129,16 @@ describe("refreshQueueNotice", () => {
     expect(spacesAppFetch).not.toHaveBeenCalled();
   });
 
-  it("edits the notice as the queue drains, using the agent's own token", async () => {
+  it("edits the notice as the queue drains, as the agent's own bot", async () => {
     await publishQueueNotice(target, { kind: "queued", depth: 2 });
     await refreshQueueNotice(scope, { kind: "queued", depth: 1 });
     const edit = calls("/chat/updateMessage").at(-1)!;
-    expect(edit[2]).toBe("dec:enc-token");
+    expect(edit[2]).toEqual({ clawAgentId: "agent-1", workspaceId: "ws-1" });
     expect(edit[1]).toMatchObject({ messageId: "notice-1", userId: "bot-1" });
     expect(String(edit[1]["markdownText"])).toContain("Queued (1)");
     expect(findUnique).toHaveBeenCalledWith({
       where: { orgId_slug: { orgId: "org-1", slug: "xyne" } },
-      select: { spacesAppToken: true },
+      select: { id: true },
     });
   });
 
@@ -191,13 +188,13 @@ describe("queueNoticeTargetFor", () => {
   };
 
   it("uses the identity a replayable message already carries", async () => {
-    const t = await queueNoticeTargetFor({ ...msg, sessionContext: { appToken: "ctx-token", spacesAppUserId: "ctx-bot" } });
-    expect(t).toMatchObject({ appToken: "ctx-token", spacesAppUserId: "ctx-bot", channelId: "ch-1" });
+    const t = await queueNoticeTargetFor({ ...msg, sessionContext: { bot: { clawAgentId: "ctx-agent" }, spacesAppUserId: "ctx-bot" } });
+    expect(t).toMatchObject({ bot: { clawAgentId: "ctx-agent" }, spacesAppUserId: "ctx-bot", channelId: "ch-1" });
     expect(findUnique).not.toHaveBeenCalled();
   });
 
   it("looks the agent up otherwise, and gives up without an org", async () => {
-    expect(await queueNoticeTargetFor(msg)).toMatchObject({ appToken: "dec:enc-token", spacesAppUserId: "bot-1", orgId: "org-1" });
+    expect(await queueNoticeTargetFor(msg)).toMatchObject({ bot: { clawAgentId: "agent-1" }, spacesAppUserId: "bot-1", orgId: "org-1" });
     const { orgId: _orgId, ...withoutOrg } = msg;
     expect(await queueNoticeTargetFor(withoutOrg)).toBeNull();
   });

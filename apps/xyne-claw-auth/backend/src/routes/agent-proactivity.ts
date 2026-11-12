@@ -13,7 +13,8 @@ import { randomUUID } from "crypto";
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
-import { requireInternalS2S } from "../middleware/require-auth.js";
+import { requireSpacesService } from "../lib/service-assertion.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { setSession } from "../lib/session-context.js";
 import { fetchConversationHistory, threadAwarenessContext } from "./webhook.js";
@@ -55,7 +56,7 @@ const str = (value: unknown) => (typeof value === "string" && value.trim() ? val
 /**
  * POST /proactivity/draft — the Spaces backend asks an agent for a draft.
  */
-agentProactivityRouter.post("/proactivity/draft", requireInternalS2S, async (req: Request, res: Response) => {
+agentProactivityRouter.post("/proactivity/draft", requireSpacesService, async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as DraftBody;
   const agentSlug = str(body.agentSlug);
   const workspaceId = str(body.workspaceId);
@@ -76,7 +77,7 @@ agentProactivityRouter.post("/proactivity/draft", requireInternalS2S, async (req
 
   const agent = await prisma.agent.findFirst({
     where: { slug: agentSlug, enabled: true, ...(str(body.agentUserId) ? { spacesAppUserId: str(body.agentUserId)! } : {}) },
-    select: { id: true, slug: true, name: true, orgId: true, config: true, spacesAppId: true, spacesAppUserId: true, spacesAppToken: true },
+    select: { id: true, slug: true, name: true, orgId: true, config: true, spacesAppId: true, spacesAppUserId: true },
   });
   if (!agent) {
     res.status(404).json({ success: false, error: "agent not found" });
@@ -91,7 +92,7 @@ agentProactivityRouter.post("/proactivity/draft", requireInternalS2S, async (req
   let identity;
   try {
     // Fail-closed, as for awakening: an unprompted run acts as the agent's own bot or not at all.
-    identity = resolveAgentIdentity(agent, workspaceId);
+    identity = await resolveAgentIdentity(agent, workspaceId);
   } catch (err) {
     res.status(409).json({ success: false, error: err instanceof AwakeningIdentityError ? err.message : "agent identity unavailable" });
     return;
@@ -106,7 +107,7 @@ agentProactivityRouter.post("/proactivity/draft", requireInternalS2S, async (req
   // answered, that it only adds.
   const senderName = str(body.senderName);
   const channelName = str(body.channelName);
-  const history = await fetchConversationHistory(conversationId, identity.appToken, identity.spacesAppUserId);
+  const history = await fetchConversationHistory(conversationId, identity.bot, identity.spacesAppUserId);
   const context = [
     `Channel: #${channelName ?? channelId} (id ${channelId})`,
     body.onlyAdd === true
@@ -144,7 +145,7 @@ agentProactivityRouter.post("/proactivity/draft", requireInternalS2S, async (req
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, { userId: identity.spacesAppUserId }),
     },
     body: JSON.stringify({
       userId: identity.spacesAppUserId,
@@ -204,7 +205,7 @@ agentProactivityRouter.post("/proactivity/draft", requireInternalS2S, async (req
       suppressThreadReply: true,
       // App mode: Spaces is served with the bot's token, never a person's.
       isAutomation: true,
-      appToken: identity.appToken,
+      bot: identity.bot,
       spacesAppId: identity.spacesAppId,
       spacesAppUserId: identity.spacesAppUserId,
       workspaceId,
@@ -266,7 +267,7 @@ function toolCallsOf(invocations: unknown) {
  */
 agentProactivityRouter.get(
   "/proactivity/episodes/:episodeId/drafts",
-  requireInternalS2S,
+  requireSpacesService,
   async (req: Request<{ episodeId: string }>, res: Response) => {
     const episodeId = str(req.params.episodeId);
     const channelId = str(req.query["channelId"]);

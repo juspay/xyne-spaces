@@ -23,6 +23,7 @@
 import type { AgentMessage, BeforeToolCallContext, BeforeToolCallResult } from "@earendil-works/pi-agent-core";
 import { SERVER } from "./config.js";
 import { createLogger } from "./logger.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("awakening-inbox");
 
@@ -65,13 +66,12 @@ function asInjectionMessage(text: string): AgentMessage {
 }
 
 async function drain(sessionId: string): Promise<InboxBatch[]> {
-  if (!SERVER.s2sKey) return [];
   const base = SERVER.authServiceUrl.replace(/\/$/, "");
   const url = `${base}/claw/api/v1/awakening/inbox/${encodeURIComponent(sessionId)}/drain`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
+    headers: { "Content-Type": "application/json", ...clawAuthHeaders("POST", url) },
     signal: AbortSignal.timeout(DRAIN_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`drain returned HTTP ${res.status}`);

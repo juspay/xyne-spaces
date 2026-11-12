@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../../lib/internal-call.js", () => ({ serviceCallsConfigured: () => true, runtimeAuthHeaders: () => ({}), selfAuthHeaders: () => ({ "x-service-assertion": "test" }), selfCallRunToken: () => "run" }));
 import type { NextFunction, Request, Response } from "express";
 import { ORG_LEVEL_TENANT_ID } from "../store.js";
 

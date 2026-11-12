@@ -1,7 +1,8 @@
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { createLogger } from "../logger.js";
-import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
+import { spacesAppFetch } from "../surfaces/spaces/client.js";
+import type { BotRef } from "./spaces-bot.js";
 import { errMsg } from "./errors.js";
 import { notice, pluralize } from "./notice-format.js";
 import { QUEUE_CAP, type EnqueueResult, type QueuedMessage } from "./message-queue.js";
@@ -21,7 +22,7 @@ export interface QueueNoticeTarget extends QueueNoticeScope {
   channelId: string;
   orgId?: string | null | undefined;
   spacesAppUserId: string;
-  appToken: string;
+  bot: BotRef;
 }
 
 interface QueueNoticeRef {
@@ -29,6 +30,7 @@ interface QueueNoticeRef {
   channelId: string;
   orgId?: string;
   spacesAppUserId: string;
+  workspaceId?: string;
 }
 
 export type QueueNoticeEvent =
@@ -104,12 +106,12 @@ async function postNotice(target: QueueNoticeTarget, markdownText: string): Prom
       userId: target.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     },
-    target.appToken,
+    target.bot,
   )) as { messageId?: string; data?: { messageId?: string } } | null;
   return resp?.messageId ?? resp?.data?.messageId;
 }
 
-async function editNotice(ref: QueueNoticeRef, appToken: string, markdownText: string): Promise<void> {
+async function editNotice(ref: QueueNoticeRef, bot: BotRef, markdownText: string): Promise<void> {
   await spacesAppFetch(
     "/chat/updateMessage",
     {
@@ -119,17 +121,17 @@ async function editNotice(ref: QueueNoticeRef, appToken: string, markdownText: s
       userId: ref.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     },
-    appToken,
+    bot,
   );
 }
 
-async function agentAppToken(orgId: string | null | undefined, agentSlug: string): Promise<string | null> {
-  if (!orgId) return null;
+async function agentBot(ref: QueueNoticeRef, agentSlug: string): Promise<BotRef | null> {
+  if (!ref.orgId) return null;
   const agent = await prisma.agent.findUnique({
-    where: { orgId_slug: { orgId, slug: agentSlug } },
-    select: { spacesAppToken: true },
+    where: { orgId_slug: { orgId: ref.orgId, slug: agentSlug } },
+    select: { id: true },
   });
-  return agent?.spacesAppToken ? decryptStoredField(agent.spacesAppToken) : null;
+  return agent ? { clawAgentId: agent.id, workspaceId: ref.workspaceId } : null;
 }
 
 export async function publishQueueNotice(target: QueueNoticeTarget, event: QueueNoticeEvent): Promise<void> {
@@ -139,7 +141,7 @@ export async function publishQueueNotice(target: QueueNoticeTarget, event: Queue
   try {
     if (ref) {
       try {
-        await editNotice(ref, target.appToken, text);
+        await editNotice(ref, target.bot, text);
         if (closing) await dropRef(target);
         return;
       } catch (err) {
@@ -155,6 +157,7 @@ export async function publishQueueNotice(target: QueueNoticeTarget, event: Queue
         channelId: target.channelId,
         spacesAppUserId: target.spacesAppUserId,
         ...(target.orgId ? { orgId: target.orgId } : {}),
+        ...(target.bot.workspaceId ? { workspaceId: target.bot.workspaceId } : {}),
       });
     }
   } catch (err) {
@@ -166,9 +169,9 @@ export async function refreshQueueNotice(scope: QueueNoticeScope, event: QueueNo
   const ref = await readRef(scope);
   if (!ref) return;
   try {
-    const appToken = await agentAppToken(ref.orgId, scope.agentSlug);
-    if (!appToken) return;
-    await editNotice(ref, appToken, queueNoticeText(event));
+    const bot = await agentBot(ref, scope.agentSlug);
+    if (!bot) return;
+    await editNotice(ref, bot, queueNoticeText(event));
   } catch (err) {
     log.warn("refreshQueueNotice failed", { conversationId: scope.conversationId, agentSlug: scope.agentSlug, error: errMsg(err) });
     await dropRef(scope);
@@ -188,23 +191,23 @@ export async function postDroppedNotice(target: QueueNoticeTarget, count: number
 
 export async function queueNoticeTargetFor(msg: QueuedMessage): Promise<QueueNoticeTarget | null> {
   const scope = { conversationId: msg.conversationId, agentSlug: msg.agentSlug, twinUserScopeId: msg.twinUserScopeId };
-  const ctx = msg.sessionContext as { appToken?: unknown; spacesAppUserId?: unknown } | undefined;
-  if (typeof ctx?.appToken === "string" && typeof ctx.spacesAppUserId === "string") {
-    return { ...scope, channelId: msg.channelId, orgId: msg.orgId, spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken };
+  const ctx = msg.sessionContext as { bot?: BotRef; spacesAppUserId?: unknown; workspaceId?: unknown } | undefined;
+  if (typeof ctx?.bot?.clawAgentId === "string" && typeof ctx.spacesAppUserId === "string") {
+    return { ...scope, channelId: msg.channelId, orgId: msg.orgId, spacesAppUserId: ctx.spacesAppUserId, bot: ctx.bot };
   }
   if (!msg.orgId) return null;
   try {
     const agent = await prisma.agent.findUnique({
       where: { orgId_slug: { orgId: msg.orgId, slug: msg.agentSlug } },
-      select: { spacesAppToken: true, spacesAppUserId: true },
+      select: { id: true, spacesAppUserId: true },
     });
-    if (!agent?.spacesAppToken || !agent.spacesAppUserId) return null;
+    if (!agent?.spacesAppUserId) return null;
     return {
       ...scope,
       channelId: msg.channelId,
       orgId: msg.orgId,
       spacesAppUserId: agent.spacesAppUserId,
-      appToken: decryptStoredField(agent.spacesAppToken),
+      bot: { clawAgentId: agent.id, workspaceId: typeof ctx?.workspaceId === "string" ? ctx.workspaceId : undefined },
     };
   } catch (err) {
     log.warn("queueNoticeTargetFor failed", { conversationId: msg.conversationId, agentSlug: msg.agentSlug, error: errMsg(err) });

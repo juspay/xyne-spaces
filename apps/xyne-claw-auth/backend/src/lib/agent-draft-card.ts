@@ -4,6 +4,7 @@ import { errMsg } from "./errors.js";
 import { postFlowCard } from "./flow-card-delivery.js";
 import { agentDraftTranscript, prepareAgentDraftCard, resolveDraftCapabilities } from "./agent-card-render.js";
 import { isValidAgentSlug, type DraftAgentSpec } from "./agent-card.js";
+import type { BotRef } from "./spaces-bot.js";
 
 /**
  * Where the draft card is posted and who it belongs to. Every caller already
@@ -18,7 +19,7 @@ export interface AgentDraftCardContext {
   conversationId: string;
   spacesAppUserId: string;
   spacesAppId?: string | undefined;
-  appToken: string;
+  bot: BotRef;
 }
 
 export type AgentDraftCardOutcome =
@@ -51,11 +52,11 @@ export async function postAgentDraftCard(args: {
   log: DraftCardLogger;
 }): Promise<AgentDraftCardOutcome> {
   const { spec, ctx, runOwnerId, log } = args;
-  const { agentOrgId: orgId, requesterId, appToken: token } = ctx;
+  const { agentOrgId: orgId, requesterId, bot } = ctx;
 
   const postPlain = async (markdownText: string): Promise<void> => {
     await postAgentMessage(
-      { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+      { spacesAppUserId: ctx.spacesAppUserId, bot },
       {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
@@ -93,7 +94,7 @@ export async function postAgentDraftCard(args: {
       channelId: ctx.channelId,
       conversationId: ctx.conversationId,
       spacesAppUserId: ctx.spacesAppUserId,
-      appToken: token,
+      bot,
     });
     log.info(`[agent-card] posted draft card slug=${spec.slug} request=${prepared.requestId} conv=${ctx.conversationId}`);
 

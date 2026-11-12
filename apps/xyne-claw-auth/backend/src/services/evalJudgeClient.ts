@@ -9,6 +9,7 @@
  * score. listModels() returns [] on failure.
  */
 import { CONFIG } from "../config.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../lib/internal-call.js";
 
 const JUDGE_TIMEOUT_MS = Number(process.env["EVAL_JUDGE_TIMEOUT_MS"] ?? 300_000);
 
@@ -27,14 +28,14 @@ export interface EvalJudgeResult {
 }
 
 export async function judgeEvalTurn(req: EvalJudgeRequest): Promise<EvalJudgeResult> {
-  if (!CONFIG.xyneClawS2sKey) {
+  if (!serviceCallsConfigured()) {
     return { score: null, reasoning: "judge_unavailable" };
   }
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/eval-judge`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
     });
@@ -68,12 +69,12 @@ export async function extractEvalPairs(
   model?: string,
   copilot?: { token: string; model: string },
 ): Promise<ExtractedPair[]> {
-  if (!CONFIG.xyneClawS2sKey) return [];
+  if (!serviceCallsConfigured()) return [];
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/eval-extract`;
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
       body: JSON.stringify({ messages, kind, ...(model ? { model } : {}), ...(copilot ? { copilot } : {}) }),
       signal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
     });
@@ -103,11 +104,11 @@ export interface EvalOptimizationSwitch {
 const NO_EVAL_MODELS: EvalModelList = { models: [], defaultModel: "", judgeBackends: [], judgeBackendLabels: {}, optimizations: [] };
 
 export async function listEvalModels(): Promise<EvalModelList> {
-  if (!CONFIG.xyneClawS2sKey) return { ...NO_EVAL_MODELS };
+  if (!serviceCallsConfigured()) return { ...NO_EVAL_MODELS };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/eval-models`;
   try {
     const res = await fetch(url, {
-      headers: { "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: runtimeAuthHeaders("GET", url),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) return { ...NO_EVAL_MODELS };

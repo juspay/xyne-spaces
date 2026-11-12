@@ -26,10 +26,10 @@ vi.mock("../config.js", () => ({
     xyneClawS2sKey: S2S_KEY,
     internalUrl: "http://claw.invalid",
     encryptionKey: "test-encryption-key-32-bytes-aaaaaa",
-    spacesEncryptionKey: "",
     selfUrl: "https://auth.example.internal",
     xyneClawUrl: "http://claw.local",
     clawSseTransport: false,
+    spacesDelegationPublicKeys: {},
   },
 }));
 
@@ -72,7 +72,6 @@ vi.mock("../repositories/index.js", () => ({
 
 vi.mock("../crypto.js", () => ({
   decrypt: vi.fn(() => "plaintext-test-secret"),
-  decryptSpacesCbc: vi.fn(() => "plaintext-test-secret"),
   encrypt: vi.fn(() => "aa:bb:cc"),
 }));
 
@@ -154,52 +153,26 @@ afterAll(async () => {
   if (listener) await new Promise<void>((resolve) => listener.close(() => resolve()));
 });
 
-describe("unsigned-S2S bypass is removed from webhook routes", () => {
-  it("rejects a valid s2s key with NO signature on /webhook/app/:spacesAppId", async () => {
-    const res = await fetch(`${baseUrl}/webhook/app/app-1`, {
+describe("Spaces webhooks: only the signed agent route remains", () => {
+  const post = (path: string, headers: Record<string, string> = {}) =>
+    fetch(`${baseUrl}${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-s2s-key": S2S_KEY },
+      headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify({ task: "run the thing" }),
     });
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("missing X-Xyne-Signature");
+
+  it("the old app-webhook routes are gone, even with a valid s2s key or a signature", async () => {
+    expect((await post("/webhook/app/app-1", { "x-s2s-key": S2S_KEY })).status).toBe(404);
+    expect((await post("/webhook/app/app-1", { "x-s2s-key": S2S_KEY, "x-xyne-signature": "deadbeef" })).status).toBe(404);
+    expect((await post("/webhook/legacy-agent", { "x-s2s-key": S2S_KEY })).status).toBe(404);
+    expect((await post("/webhook/legacy-agent")).status).toBe(404);
   });
 
-  it("rejects a valid s2s key with NO signature on /webhook/:agentSlug", async () => {
-    const res = await fetch(`${baseUrl}/webhook/legacy-agent`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-s2s-key": S2S_KEY },
-      body: JSON.stringify({ task: "run the thing" }),
-    });
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("missing X-Xyne-Signature");
-  });
-
-  it("still rejects a PRESENT but invalid signature (parity: the bypass never covered this)", async () => {
-    const res = await fetch(`${baseUrl}/webhook/app/app-1`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-s2s-key": S2S_KEY,
-        "x-xyne-signature": "deadbeef",
-      },
-      body: JSON.stringify({ task: "run the thing" }),
-    });
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("invalid signature");
-  });
-
-  it("still rejects a non-s2s caller with no signature (parity)", async () => {
-    const res = await fetch(`${baseUrl}/webhook/app/app-1`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ task: "run the thing" }),
-    });
-    expect(res.status).toBe(401);
-    const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("missing X-Xyne-Signature");
+  it("the agent route rejects a caller without a Spaces event token, s2s key or not", async () => {
+    for (const headers of [{ "x-s2s-key": S2S_KEY }, {}, { "x-spaces-event": "not-a-token" }]) {
+      const res = await post("/webhook/agent/p1", headers);
+      expect(res.status).toBe(401);
+      expect(((await res.json()) as { error?: string }).error).toBe("invalid event token");
+    }
   });
 });

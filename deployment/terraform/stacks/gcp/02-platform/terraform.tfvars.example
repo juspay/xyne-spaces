@@ -30,14 +30,18 @@ workers = [
 ]
 
 app_secrets = {
-  jwt_secret                  = "replace-with-32-or-more-random-characters"
-  zero_auth_secret            = "replace-with-32-or-more-random-characters"
-  zero_admin_password         = "replace-with-16-or-more-chars"
-  encryption_key              = "replace-with-64-hex-characters"
-  internal_s2s_key            = "replace-with-32-or-more-random-characters"
-  claw_s2s_key                = "replace-with-32-or-more-random-characters"
-  claw_auth_encryption_key    = "replace-with-64-hex-characters"
-  ysweet_auth                 = "replace-with-private_key-from-y-sweet-gen-auth"
-  ysweet_server_token         = "replace-with-server_token-from-y-sweet-gen-auth"
-  transcription_agent_api_key = "replace-with-32-or-more-random-characters"
+  jwt_secret                       = "replace-with-32-or-more-random-characters"
+  zero_auth_secret                 = "replace-with-32-or-more-random-characters"
+  zero_admin_password              = "replace-with-16-or-more-chars"
+  encryption_key                   = "replace-with-64-hex-characters"
+  spaces_signing_private_key       = "replace-with-pkcs8-p256-private-key-pem"
+  spaces_signing_public_key        = "replace-with-matching-spki-public-key-pem"
+  claw_auth_signing_private_key    = "replace-with-pkcs8-p256-private-key-pem"
+  claw_auth_signing_public_key     = "replace-with-matching-spki-public-key-pem"
+  claw_runtime_signing_private_key = "replace-with-pkcs8-p256-private-key-pem"
+  claw_runtime_signing_public_key  = "replace-with-matching-spki-public-key-pem"
+  claw_auth_encryption_key         = "replace-with-64-hex-characters"
+  ysweet_auth                      = "replace-with-private_key-from-y-sweet-gen-auth"
+  ysweet_server_token              = "replace-with-server_token-from-y-sweet-gen-auth"
+  transcription_agent_api_key      = "replace-with-32-or-more-random-characters"
 }

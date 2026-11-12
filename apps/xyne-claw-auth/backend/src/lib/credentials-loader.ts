@@ -35,7 +35,8 @@ import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getFreshCredentials, hasDedicatedRefresh } from "./credentials-refresh.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "./spaces-db.js";
+import { getWorkspaceIdForUser } from "./spaces-db.js";
+import { clawAgentIdForSlug, resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { resolveFreshOAuthCreds, TokenRefreshError, type OAuthTokenProvider } from "./oauth-token-endpoint.js";
 import { getOAuthProvider } from "../routes/oauth-token.js";
 
@@ -46,6 +47,8 @@ import { getOAuthProvider } from "../routes/oauth-token.js";
 import { OAUTH_SERVER_TYPES as STDIO_OAUTH_SERVER_TYPES } from "./oauth-server-types.js";
 
 import { createLogger } from "../logger.js";
+import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "./spaces-session-server-types.js";
+import { getAgentBotAuth } from "./spaces-bot.js";
 const log = createLogger("credentials-loader");
 
 export interface EffectiveCredentials {
@@ -146,22 +149,37 @@ async function resolveSpacesAppToolsWorkspaceId(
   return null;
 }
 
-/** Synthesize EffectiveCredentials from the user's live Spaces session —
- *  the ambient operating credential for the Spaces-session-backed server
- *  types (xyne-spaces, xyne-dashboard). Returns null when no session.
- *  `workspaceHint` disambiguates users holding two Spaces memberships —
- *  pass the request's verified workspace whenever one is in scope. */
-async function liveSpacesCredentials(userId: string, workspaceHint?: string | null): Promise<EffectiveCredentials | null> {
-  const live = await getSpacesAuthForUser(userId, "mcp-runner", workspaceHint);
+/** Synthesize EffectiveCredentials for the Spaces-session-backed server types
+ *  (xyne-spaces, xyne-dashboard): the run's agent acting for the user through
+ *  an on-behalf-of agent token (lib/spaces-agent-client.ts). The agent is the
+ *  `agentSlug` in scope, in `agentOrgId` (else the user's org). Returns null
+ *  with no agent in scope or when Spaces won't let the agent act for the user.
+ *  `workspaceHint` disambiguates users holding two Spaces memberships. */
+async function liveSpacesCredentials(
+  userId: string,
+  workspaceHint?: string | null,
+  agentSlug?: string,
+  agentOrgId?: string,
+): Promise<EffectiveCredentials | null> {
+  if (!agentSlug) return null;
+  const orgId = agentOrgId
+    ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }).catch(() => null))?.orgId
+    ?? undefined;
+  const clawAgentId = await clawAgentIdForSlug(agentSlug, orgId);
+  if (!clawAgentId) return null;
+  const live = await resolveAgentSpacesAuth({ clawAgentId, userId, workspaceId: workspaceHint ?? null, caller: "mcp-runner" });
   if (!live) return null;
   return {
     source: "user",
-    connectionId: `spaces-live:${userId}`,
+    connectionId: `spaces-agent:${clawAgentId}:${userId}`,
     credentials: {
       url: CONFIG.spacesInternalUrl,
-      token: live.token,
-      sessionId: live.sessionId,
+      agentToken: live.agentToken,
       workspaceId: live.workspaceId,
+      // The runner keys the child by principal and re-resolves the token
+      // through clawAgentId on every call (tokens refresh every ~9 min).
+      principalId: live.principalId,
+      clawAgentId,
       userId,
     },
     isUserOwned: true,
@@ -233,9 +251,9 @@ export async function loadEffectiveCredentials(
   // /mcp/tools lists the server for the agent) carries EMPTY creds by design,
   // and returning those would spawn the child with no url/token.
   if (serverType === "xyne-dashboard") {
-    const live = await liveSpacesCredentials(userId, workspaceHint);
+    const live = await liveSpacesCredentials(userId, workspaceHint, agentSlug, agentOrgId);
     if (live) return live;
-    log.info(`[creds-loader] xyne-dashboard userId=${userId} → no live Spaces session`);
+    log.info(`[creds-loader] xyne-dashboard userId=${userId} agent=${agentSlug ?? "(none)"} → no Spaces agent auth`);
     return null;
   }
 
@@ -248,8 +266,8 @@ export async function loadEffectiveCredentials(
   // apps-send-message) fails with "Spaces base URL is not configured".
   // Same short-circuit, same reason, as xyne-dashboard above.
   //
-  // The MCP server runs with the AGENT'S spacesAppToken
-  // (each agent has its own bot identity, set when the agent was created).
+  // The MCP server runs as the AGENT'S bot (a short-lived bot token for the
+  // agent in this workspace; lib/spaces-bot.ts).
   // We resolve using the agent in scope so cross-agent calls don't leak the
   // wrong bot's token. If no agentSlug is in context (admin / health-check
   // paths) we have no agent identity to act as — return null and let the
@@ -269,34 +287,28 @@ export async function loadEffectiveCredentials(
     const agent = await prisma.agent.findUnique({
       where: { orgId_slug: { orgId: credOrgId, slug: agentSlug } },
     });
-    if (agent?.spacesAppToken) {
-      const parts = agent.spacesAppToken.split(":");
-      if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
-        try {
-          const appToken = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
-          const workspaceId = await resolveSpacesAppToolsWorkspaceId(userId, credOrgId, agentSlug, workspaceHint);
-          log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved app_token from agent row workspaceId=${workspaceId ?? "(none)"}`);
-          return {
-            source: "agent",
-            connectionId: `app-tools:${agent.id}`,
-            credentials: {
-              url: CONFIG.spacesInternalUrl,
-              app_token: appToken,
-              // Identity the app-mode registry tools act as. Without it
-              // XYNE_USER_ID reaches the child empty and every tool that needs
-              // to know who it is — spaces-whoami first among them — fails with
-              // "Could not determine current user."
-              ...(agent.spacesAppUserId ? { userId: agent.spacesAppUserId } : {}),
-              ...(workspaceId ? { workspaceId } : {}),
-            },
-            isUserOwned: false,
-          };
-        } catch {
-          log.error(`[creds-loader] xyne-spaces-app-tools: failed to decrypt agent=${agentSlug} spacesAppToken`);
-        }
+    if (agent) {
+      const hintWorkspaceId = await resolveSpacesAppToolsWorkspaceId(userId, credOrgId, agentSlug, workspaceHint);
+      const bot = await getAgentBotAuth(agent.id, hintWorkspaceId ?? null);
+      if (bot) {
+        log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → bot token workspaceId=${bot.workspaceId}`);
+        return {
+          source: "agent",
+          connectionId: `app-tools:${agent.id}`,
+          credentials: {
+            url: CONFIG.spacesInternalUrl,
+            // 10-minute bot token, re-resolved per call; the runner respawns the
+            // child when it rotates.
+            app_token: bot.token,
+            // Identity the app-mode registry tools act as (spaces-whoami etc.).
+            userId: bot.botUserId,
+            workspaceId: bot.workspaceId,
+          },
+          isUserOwned: false,
+        };
       }
     }
-    log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → no spacesAppToken on agent; cannot resolve`);
+    log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → agent not added to this Spaces workspace; cannot resolve`);
     return null;
   }
 
@@ -438,18 +450,16 @@ export async function loadEffectiveCredentials(
     return null;
   }
 
-  // xyne-spaces priority order: live Spaces DB FIRST, cached
-  // userMcpConnection SECOND, global last. Rationale: the cached row in
-  // userMcpConnection goes stale every time Spaces' middleware refreshes
-  // the user's JWT, and that drift is the dominant 401 root cause. The
-  // live read either returns a hit or auto-refreshes via Spaces'
-  // /api/auth/refresh-session before returning. Falling through to the
-  // cached path only happens when SPACES_DB_URL is unset, the user has
-  // no active session, or the refresh hop itself failed — at which point
-  // the cached creds are no worse than nothing.
-  if (serverType === "xyne-spaces") {
-    const live = await liveSpacesCredentials(userId, workspaceHint);
+  // Spaces-session servers (xyne-spaces, xyne-dashboard): ONLY the run's agent
+  // acting for the user (on-behalf-of agent token). No cached copy of the
+  // user's Spaces credentials (userMcpConnection) and no global fallback: if
+  // no agent is in scope or Spaces won't let it act for the user, there is no
+  // connection.
+  if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
+    const live = await liveSpacesCredentials(userId, workspaceHint, agentSlug, agentOrgId);
     if (live) return live;
+    log.info(`[creds-loader] ${serverType} userId=${userId} agent=${agentSlug ?? "(none)"} → no agent auth; no connection`);
+    return null;
   }
 
   // heisenberg: shared/global stdio proxy with no per-user secret. The base

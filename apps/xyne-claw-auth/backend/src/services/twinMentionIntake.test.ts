@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findById: vi.fn(),
-  getSpacesAuthForUser: vi.fn(),
+  resolveAgentSpacesAuth: vi.fn(),
   shouldTwinRespond: vi.fn(),
   recordTwinSilence: vi.fn(),
   FAIL_CLOSED: {
@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../repositories/index.js", () => ({ userRepository: { findById: mocks.findById } }));
-vi.mock("../lib/spaces-db.js", () => ({ getSpacesAuthForUser: mocks.getSpacesAuthForUser }));
+vi.mock("../surfaces/spaces/user-auth.js", () => ({ resolveAgentSpacesAuth: mocks.resolveAgentSpacesAuth }));
 vi.mock("./twinRespondGate.js", () => ({
   shouldTwinRespond: mocks.shouldTwinRespond,
   recordTwinSilence: mocks.recordTwinSilence,
@@ -48,17 +48,22 @@ const PAYLOAD: TwinMentionPayload = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.findById.mockResolvedValue({ digitalTwinEnabled: true, digitalTwinRespondPolicy: "always" });
-  mocks.getSpacesAuthForUser.mockResolvedValue({ workspaceId: "ws-1" });
+  mocks.resolveAgentSpacesAuth.mockResolvedValue({ workspaceId: "ws-1" });
   mocks.recordTwinSilence.mockResolvedValue(undefined);
 });
 
 describe("findEligibleTwins", () => {
   it("returns an eligible user with its workspace and respond policy", async () => {
-    const out = await findEligibleTwins(["u1"], log);
+    const out = await findEligibleTwins(["u1"], log, { clawAgentId: "agent-1", workspaceId: "ws-1" });
 
     expect(out).toEqual([{ userId: "u1", workspaceId: "ws-1", respondPolicy: "always" }]);
     expect(mocks.findById).toHaveBeenCalledWith("u1");
-    expect(mocks.getSpacesAuthForUser).toHaveBeenCalledWith("u1", "webhook");
+    expect(mocks.resolveAgentSpacesAuth).toHaveBeenCalledWith({
+      clawAgentId: "agent-1",
+      userId: "u1",
+      workspaceId: "ws-1",
+      caller: "webhook",
+    });
     expect(info).not.toHaveBeenCalled();
   });
 
@@ -78,7 +83,7 @@ describe("findEligibleTwins", () => {
     expect(out).toEqual([]);
     expect(info).toHaveBeenCalledWith("Twin: skipping u1 — not registered in claw-auth");
     expect(info).toHaveBeenCalledWith("Twin: skipping u2 — not registered in claw-auth");
-    expect(mocks.getSpacesAuthForUser).not.toHaveBeenCalled();
+    expect(mocks.resolveAgentSpacesAuth).not.toHaveBeenCalled();
   });
 
   it("skips a user whose Digital Twin is disabled without resolving their workspace", async () => {
@@ -88,11 +93,11 @@ describe("findEligibleTwins", () => {
 
     expect(out).toEqual([]);
     expect(info).toHaveBeenCalledWith("Twin: skipping u1 — Digital Twin disabled");
-    expect(mocks.getSpacesAuthForUser).not.toHaveBeenCalled();
+    expect(mocks.resolveAgentSpacesAuth).not.toHaveBeenCalled();
   });
 
-  it("skips a user with no resolvable workspaceId (null auth, empty id or rejected lookup)", async () => {
-    mocks.getSpacesAuthForUser
+  it("skips a user the agent may not act for (null auth, empty id or rejected lookup)", async () => {
+    mocks.resolveAgentSpacesAuth
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ workspaceId: "" })
       .mockRejectedValueOnce(new Error("spaces down"));
@@ -101,7 +106,7 @@ describe("findEligibleTwins", () => {
 
     expect(out).toEqual([]);
     for (const uid of ["u1", "u2", "u3"]) {
-      expect(info).toHaveBeenCalledWith(`Twin: skipping ${uid} — no resolvable workspaceId (no active Spaces session)`);
+      expect(info).toHaveBeenCalledWith(`Twin: skipping ${uid} — agent may not act for this user in Spaces`);
     }
   });
 

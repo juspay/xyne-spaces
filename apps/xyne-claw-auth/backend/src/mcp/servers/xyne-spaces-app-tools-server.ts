@@ -70,7 +70,7 @@ async function prepareMessageContent(rawContent: string): Promise<string> {
 }
 
 async function spacesAppFetch(path: string, body: Record<string, unknown>): Promise<unknown> {
-  const url = `${SPACES_URL}/api/apps${path}`;
+  const url = `${SPACES_URL}/api/claw-agents/bot${path}`;
   const res = await fetch(url, {
     method: "POST",
     headers: {

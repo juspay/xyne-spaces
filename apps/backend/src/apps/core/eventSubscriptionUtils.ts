@@ -7,6 +7,7 @@ import { prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
 import { repositories } from '@/database/repositories';
+import { agentPrincipalsForUsers, dispatchAgentEvent } from '@/claw/events';
 
 const installedAppsRepository = new InstalledAppsRepository();
 
@@ -72,6 +73,30 @@ export async function handleEventSubscriptionsForUsers(
 ): Promise<void> {
     if (userIds.length === 0) {
         return;
+    }
+
+    const senderUserId = 'userId' in event.payload ? event.payload.userId : undefined;
+
+    // Claw agents (first-party principals): delivered to claw-auth with a Spaces-signed,
+    // body-bound event token instead of an app webhook + per-app secret.
+    try {
+        const agents = (await agentPrincipalsForUsers(userIds)).filter((p) => p.botUserId !== senderUserId);
+        agents.map(async (principal) => {
+            try {
+                await dispatchAgentEvent(principal, event);
+            } catch (error) {
+                logger.error('Failed to deliver event to Claw agent', {
+                    principalId: principal.id,
+                    eventType: event.eventType,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        });
+    } catch (error) {
+        logger.error('Failed to resolve Claw agent recipients', {
+            eventType: event.eventType,
+            error: error instanceof Error ? error.message : String(error),
+        });
     }
 
     const installedAppsWithWebhooks = await installedAppsRepository.findWithWebhooksByUserIds(userIds);

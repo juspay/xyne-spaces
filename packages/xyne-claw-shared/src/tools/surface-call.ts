@@ -22,11 +22,12 @@ export async function requestSurfaceCall(
     return { error: "Error: this run has no user, so there is no Xyne window to reach." };
   }
   try {
-    const res = await fetch(`${clawAuthUrl()}/claw/api/v1/internal/surface/call`, {
+    const url = `${clawAuthUrl()}/claw/api/v1/internal/surface/call`;
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(context?.s2sKey ? { "x-s2s-key": context.s2sKey } : {}),
+        ...(context?.serviceAuth?.("POST", url) ?? {}),
       },
       body: JSON.stringify({
         userId,

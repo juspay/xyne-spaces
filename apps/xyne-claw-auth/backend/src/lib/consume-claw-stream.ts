@@ -14,12 +14,13 @@
 //     the final `done` payload if we got one, else reject so the caller can
 //     decide whether to mark the run failed.
 //
-// Auth: same `x-s2s-key` header that the legacy POST path uses. No handshake.
+// Auth: a per-request service assertion for the target (lib/internal-service-auth.ts). No handshake.
 
 import { Agent } from "undici";
 import { errMsg } from "./errors.js";
 import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo, type UiWidget } from "xyne-claw-shared";
 import { ingestArtifactSignals, ingestSandboxPreviewSignals } from "./conversation-artifact-signals.js";
+import { internalServiceHeaders } from "./internal-service-auth.js";
 
 // An SSE run goes silent between frames while the model composes; undici's
 // default 300s bodyTimeout severs the socket mid-stream ("terminated"). Every
@@ -63,7 +64,6 @@ export interface StreamArtifactContext {
 export interface ConsumeClawStreamOptions {
   url: string;
   body: Record<string, unknown>;
-  s2sKey?: string | undefined;
   extraHeaders?: Record<string, string>;
   handlers: ClawStreamHandlers;
   signal?: AbortSignal;
@@ -97,8 +97,8 @@ export async function consumeClawStream(opts: ConsumeClawStreamOptions): Promise
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
-    ...(opts.s2sKey ? { "x-s2s-key": opts.s2sKey } : {}),
     ...(opts.extraHeaders ?? {}),
+    ...internalServiceHeaders("POST", opts.url),
   };
 
   const fetchInit = {
@@ -286,8 +286,6 @@ export interface BridgeOptions {
   url: string;
   /** Forward body — sessionId, sessionToken, task, etc. */
   body: Record<string, unknown>;
-  /** S2S key for claw + the caller's progress/callback endpoints. */
-  s2sKey?: string | undefined;
   /** Caller-supplied progress endpoint. Per-event POSTs land here. */
   progressUrl?: string | undefined;
   /** Caller-supplied final-result endpoint. The `done` SSE event POSTs here. */
@@ -302,10 +300,11 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
   const tag = opts.tag ?? "claw-bridge";
   const sid = (opts.body["sessionId"] as string | undefined) ?? "?";
 
-  const sharedHeaders: Record<string, string> = {
+  // Signed per request: each assertion is single use and bound to method + path.
+  const sharedHeaders = (url: string): Record<string, string> => ({
     "Content-Type": "application/json",
-    ...(opts.s2sKey ? { "x-s2s-key": opts.s2sKey } : {}),
-  };
+    ...internalServiceHeaders("POST", url),
+  });
 
   // Per-event POSTs are serial (the SSE consumer awaits each handler) so the
   // legacy receiver sees events in the exact same order they were produced —
@@ -315,7 +314,7 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
     try {
       await fetch(opts.progressUrl, {
         method: "POST",
-        headers: sharedHeaders,
+        headers: sharedHeaders(opts.progressUrl),
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(15_000),
       });
@@ -328,7 +327,6 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
     const result = await consumeClawStream({
       url: opts.url,
       body: opts.body,
-      ...(opts.s2sKey ? { s2sKey: opts.s2sKey } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       handlers: {
         onInvocation: async (sessionId, toolInvocation) => {
@@ -373,7 +371,7 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
       try {
         await fetch(opts.callbackUrl, {
           method: "POST",
-          headers: sharedHeaders,
+          headers: sharedHeaders(opts.callbackUrl),
           body: JSON.stringify({ ...result.result, sessionId: sid }),
         });
       } catch (err) {
@@ -389,7 +387,7 @@ export async function bridgeClawSseToLegacyPosts(opts: BridgeOptions): Promise<v
       try {
         await fetch(opts.callbackUrl, {
           method: "POST",
-          headers: sharedHeaders,
+          headers: sharedHeaders(opts.callbackUrl),
           body: JSON.stringify({
             sessionId: sid,
             status: "failed",

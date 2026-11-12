@@ -63,14 +63,6 @@ function authUrl(context: ToolExecutionContext): string {
   ).replace(/\/+$/, "");
 }
 
-function s2sKey(context: ToolExecutionContext): string {
-  return (
-    context.s2sKey ??
-    context.config["XYNE_CLAW_S2S_KEY"] ??
-    process.env["XYNE_CLAW_S2S_KEY"] ??
-    ""
-  );
-}
 
 export function currentSandbox(context: ToolExecutionContext): Session | undefined {
   const storeKey = buildSandboxStoreKey(
@@ -108,15 +100,13 @@ async function requestNarration(
   text: string,
   voice?: string,
 ): Promise<Buffer> {
-  const key = s2sKey(context);
-  if (!key) {
-    throw new Error(
-      "XYNE_CLAW_S2S_KEY is unavailable; create-video-explainer cannot authenticate to claw-auth.",
-    );
+  if (!context.serviceAuth) {
+    throw new Error("No service signer in the tool context; create-video-explainer cannot authenticate to claw-auth.");
   }
-  const response = await fetch(`${authUrl(context)}/claw/api/v1/internal/tts`, {
+  const ttsUrl = `${authUrl(context)}/claw/api/v1/internal/tts`;
+  const response = await fetch(ttsUrl, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-s2s-key": key },
+    headers: { "content-type": "application/json", ...context.serviceAuth("POST", ttsUrl) },
     body: JSON.stringify({ text, ...(voice ? { voice } : {}) }),
     signal: AbortSignal.timeout(35_000),
   });

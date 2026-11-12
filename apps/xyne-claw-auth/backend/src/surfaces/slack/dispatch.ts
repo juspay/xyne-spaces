@@ -8,6 +8,7 @@ import { CONFIG } from "../../config.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
 import { setSession } from "../../lib/session-context.js";
 import { fetch as httpFetch } from "undici";
+import { selfAuthHeaders } from "../../lib/internal-call.js";
 
 export interface BoundSlackSurfaceAgent {
   id: string;
@@ -96,7 +97,7 @@ export async function dispatchSlackRun(input: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, { userId: input.userId }),
     },
     // This mirrors the established mention dispatch contract. In particular,
     // provider resolution and the result callback must never be omitted.
@@ -144,7 +145,8 @@ export async function dispatchSlackRun(input: {
     agentOrgId: input.agent.orgId,
     agentSlug: input.agent.slug,
     responseMode: "conversation",
-    appToken: "",
+    // No Spaces workspace: replies go through slackDelivery.
+    bot: { clawAgentId: input.agent.id, workspaceId: null },
     spacesAppId: "",
     spacesAppUserId: "",
     rootAgentSlug: input.agent.slug,

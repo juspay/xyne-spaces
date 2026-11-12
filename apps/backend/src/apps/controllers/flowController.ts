@@ -8,6 +8,8 @@ import { decrypt } from '@/services/encryptionService';
 import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
 import { mintFlowToken, verifyFlowToken } from '@/apps/core/flowToken';
 import { incomingWebhookController } from './incomingWebhookController';
+import { findPrincipal, isActive } from '@/claw/principals';
+import { postAgentFlowAction } from '@/claw/events';
 import {
   validateActionRequest,
   validateFlowDefinition,
@@ -154,39 +156,11 @@ export class FlowController {
         return;
       }
 
-      // 4. Look up the installed app to get its webhook/action URL. Multiple InstalledApps
-      // rows can exist for the same appId (one per workspace) and only some carry a
-      // webhookUrl, so scope the lookup to the user's workspace and require a configured
-      // webhook.
       const workspaceId = req.user?.workspaceId;
       if (!workspaceId) {
         sendFlowError(res, 400, 'MISCONFIGURED', 'Workspace not found for user');
         return;
       }
-      const installedApp = await repositories.installedApps.findFirst({
-        where: {
-          appId,
-          webhookUrl: { not: null },
-          AND: [{ webhookUrl: { not: '' } }],
-          user: { workspaceId },
-        },
-      });
-      if (!installedApp?.webhookUrl) {
-        sendFlowError(res, 502, 'MISCONFIGURED', `No webhook URL configured for app: ${appId}`);
-        return;
-      }
-
-      // Flow actions are sent to the same app webhook as ordinary Spaces
-      // events, so they must carry the same app-level HMAC. claw-auth treats
-      // fields such as context.userId as authoritative; never forward the
-      // action unsigned when signing material is missing.
-      const app = await repositories.apps.findById(appId);
-      if (!app?.signingSecret) {
-        logger.error('[FLOW-ACTION] App signing secret is missing', { appId, messageId });
-        sendFlowError(res, 502, 'MISCONFIGURED', `No signing secret configured for app: ${appId}`);
-        return;
-      }
-
       // The token is Xyne's own capability, not the app's business — strip it so
       // it is neither logged nor stored downstream.
       let outboundFlowJSON = flowResult.data;
@@ -211,45 +185,87 @@ export class FlowController {
       };
       // Serialize exactly once: the HMAC must cover the same bytes fetch sends.
       const body = JSON.stringify(appPayload);
-      const signature = signWebhookPayload(body, decrypt(app.signingSecret));
 
-      logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
-
-      // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
-      const dispatchHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'X-Xyne-Event': 'flow_action',
-        'X-Xyne-Signature': signature,
-        'X-Source': 'XyneSpaces',
-      };
-      let dispatchUrl: string;
-      let dispatchIsInternal = false;
-      try {
-        const prepared = await prepareAppWebhookDispatch(installedApp.webhookUrl, dispatchHeaders);
-        dispatchUrl = prepared.url;
-        dispatchIsInternal = prepared.isInternal;
-      } catch (err) {
-        if (err instanceof SsrfBlockedError) {
-          logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
-        } else {
-          logger.error('[FLOW-ACTION] Could not resolve app webhook URL', { appId, error: err });
+      // A card posted by a Claw agent carries its principal id: send the click
+      // to that agent, only when it is active in the clicking user's workspace.
+      const principal = await findPrincipal(appId);
+      let appResponse: globalThis.Response;
+      if (principal) {
+        if (!isActive(principal) || principal.workspaceId !== workspaceId || !userId) {
+          sendFlowError(res, 404, 'NOT_FOUND', `Agent not available: ${appId}`, 'This agent is no longer available in this workspace.');
+          return;
         }
-        sendFlowError(res, 502, 'MISCONFIGURED', 'App webhook URL is not allowed');
-        return;
-      }
+        logger.info('[FLOW-ACTION] Calling Claw agent', { principalId: principal.id, actionId, type, messageId });
+        appResponse = await postAgentFlowAction(principal, userId, body);
+      } else {
+        // 4. Look up the installed app to get its webhook/action URL. Multiple InstalledApps
+        // rows can exist for the same appId (one per workspace) and only some carry a
+        // webhookUrl, so scope the lookup to the user's workspace and require a configured
+        // webhook.
+        const installedApp = await repositories.installedApps.findFirst({
+          where: {
+            appId,
+            webhookUrl: { not: null },
+            AND: [{ webhookUrl: { not: '' } }],
+            user: { workspaceId },
+          },
+        });
+        if (!installedApp?.webhookUrl) {
+          sendFlowError(res, 502, 'MISCONFIGURED', `No webhook URL configured for app: ${appId}`);
+          return;
+        }
 
-      // 6. Call the app backend synchronously. Internal = trusted-config pod URL
-      // (plain client); external = user-supplied, so pin the connection (rebinding-safe).
-      const dispatchInit: RequestInit = {
-        method: 'POST',
-        headers: dispatchHeaders,
-        body,
-        redirect: 'manual',
-        signal: AbortSignal.timeout(30_000),
-      };
-      const appResponse = dispatchIsInternal
-        ? await fetch(dispatchUrl, dispatchInit)
-        : await safeWebhookFetch(dispatchUrl, dispatchInit);
+        // Flow actions are sent to the same app webhook as ordinary Spaces
+        // events, so they must carry the same app-level HMAC. claw-auth treats
+        // fields such as context.userId as authoritative; never forward the
+        // action unsigned when signing material is missing.
+        const app = await repositories.apps.findById(appId);
+        if (!app?.signingSecret) {
+          logger.error('[FLOW-ACTION] App signing secret is missing', { appId, messageId });
+          sendFlowError(res, 502, 'MISCONFIGURED', `No signing secret configured for app: ${appId}`);
+          return;
+        }
+
+        const signature = signWebhookPayload(body, decrypt(app.signingSecret));
+
+        logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
+
+        // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
+        const dispatchHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'X-Xyne-Event': 'flow_action',
+          'X-Xyne-Signature': signature,
+          'X-Source': 'XyneSpaces',
+        };
+        let dispatchUrl: string;
+        let dispatchIsInternal = false;
+        try {
+          const prepared = await prepareAppWebhookDispatch(installedApp.webhookUrl, dispatchHeaders);
+          dispatchUrl = prepared.url;
+          dispatchIsInternal = prepared.isInternal;
+        } catch (err) {
+          if (err instanceof SsrfBlockedError) {
+            logger.warn('[FLOW-ACTION] Blocked SSRF-unsafe webhook URL', { appId, reason: err.message });
+          } else {
+            logger.error('[FLOW-ACTION] Could not resolve app webhook URL', { appId, error: err });
+          }
+          sendFlowError(res, 502, 'MISCONFIGURED', 'App webhook URL is not allowed');
+          return;
+        }
+
+        // 6. Call the app backend synchronously. Internal = trusted-config pod URL
+        // (plain client); external = user-supplied, so pin the connection (rebinding-safe).
+        const dispatchInit: RequestInit = {
+          method: 'POST',
+          headers: dispatchHeaders,
+          body,
+          redirect: 'manual',
+          signal: AbortSignal.timeout(30_000),
+        };
+        appResponse = dispatchIsInternal
+          ? await fetch(dispatchUrl, dispatchInit)
+          : await safeWebhookFetch(dispatchUrl, dispatchInit);
+      }
 
       if (!appResponse.ok) {
         const text = await appResponse.text().catch(() => 'unknown error');

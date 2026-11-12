@@ -7,7 +7,7 @@
  * picker.
  */
 import { Router, type Request, type Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { judgeSemanticMatch, listJudgeModels } from "../eval-judge.js";
 import { LITELLM } from "../config.js";
 import { xorEnabled } from "../xor.js";
@@ -15,7 +15,7 @@ import { OPTIMIZATIONS, OPTIMIZATION_KEYS } from "../optimizations.js";
 
 const router = Router();
 
-router.post("/eval-judge", validateS2SKey, async (req: Request, res: Response): Promise<void> => {
+router.post("/eval-judge", requireClawAuthService, async (req: Request, res: Response): Promise<void> => {
   const body = req.body as {
     expected?: unknown;
     generated?: unknown;
@@ -45,7 +45,7 @@ router.post("/eval-judge", validateS2SKey, async (req: Request, res: Response): 
   res.json({ success: true, ...result });
 });
 
-router.get("/eval-models", validateS2SKey, async (_req: Request, res: Response): Promise<void> => {
+router.get("/eval-models", requireClawAuthService, async (_req: Request, res: Response): Promise<void> => {
   const models = await listJudgeModels();
   const judgeBackends = xorEnabled() ? ["xor"] : [];
   const judgeBackendLabels: Record<string, string> = xorEnabled() ? { xor: "Xor (our Jev)" } : {};

@@ -543,22 +543,9 @@ async function main() {
 
   // Link Spaces default workspace → default org via SurfaceTenantLink.
   // This lets ensureUserExists() resolve the org from the user's workspaceId.
-  // Try to fetch the workspace ID from the Spaces DB; fall back to a known dev ID.
-  let spacesWorkspaceId = "";
-  const spacesDbUrl = process.env.SPACES_DB_URL;
-  if (spacesDbUrl) {
-    try {
-      const { PrismaClient: SpacesPrisma } = await import("@prisma/client");
-      const spacesDb = new SpacesPrisma({ datasourceUrl: spacesDbUrl });
-      const workspace = await spacesDb.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM workspaces WHERE name = 'Default Workspace' LIMIT 1
-      `;
-      spacesWorkspaceId = workspace[0]?.id ?? "";
-      await spacesDb.$disconnect();
-    } catch {
-      console.warn("[seed] Could not fetch workspace ID from Spaces DB — SurfaceTenantLink will use fallback");
-    }
-  }
+  // The workspace id comes from SPACES_DEFAULT_WORKSPACE_ID (claw-auth has no
+  // access to the Spaces database); otherwise keep any existing link.
+  let spacesWorkspaceId = (process.env.SPACES_DEFAULT_WORKSPACE_ID ?? "").trim();
   if (!spacesWorkspaceId) {
     // Fallback: query the claw-auth DB for any existing link, keep it as-is
     const existingLink = await prisma.surfaceTenantLink.findFirst({

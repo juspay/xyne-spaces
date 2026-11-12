@@ -20,8 +20,9 @@ import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../mi
 import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser, userIdAliasesFor } from "../lib/users-jit.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
-import { requireStrictS2S } from "../middleware/require-auth.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { callerService, requireRuntime } from "../lib/service-assertion.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import {
@@ -48,11 +49,23 @@ import { createLogger } from "../logger.js";
 import { notifyUser } from "../surfaces/messaging/agent-tools.js";
 import { WHATSAPP_REPLY_MODE } from "../surfaces/messaging/const.js";
 import { channelOfConversationId } from "../surfaces/messaging/ids.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
 
 const log = createLogger("scheduled-jobs");
 const { parseExpression } = cronParser;
 
 const router = Router();
+
+// A request with no user on it is a service call (requireAuth's service-only
+// branch). Several handlers then trust the body's userId, so only the runtime
+// and claw-auth may make such calls; the runtime's tools normally send the run
+// token, which makes the run's user the requester.
+router.use((req, res, next) => {
+  if (getRequesterId(req)) return next();
+  const service = callerService(req);
+  if (service === "xyne-claw" || service === "xyne-claw-auth") return next();
+  res.status(401).json({ success: false, error: "Unauthorized" });
+});
 
 /**
  * Read the `xyne_last_workspace` cookie to determine which Spaces workspace
@@ -123,7 +136,7 @@ function validateCronExpression(
  *
  * - Browser requests (JWT cookie or x-user-id header): always scoped to the requester.
  *   Admins may pass `?userId=<other>` to look at someone else's jobs.
- * - S2S requests (no requesterId set): no implicit filter; the caller decides.
+ * - Service requests (runtime / claw-auth, no requesterId): no implicit filter; the caller decides.
  */
 /**
  * READ-ONLY visibility over every schedule configured on an agent.
@@ -157,7 +170,7 @@ async function resolveScopedUserIdFilter(
 ): Promise<{ in: string[] } | undefined> {
   const requesterId = getRequesterId(req);
   if (!requesterId) {
-    // S2S — trust the caller's target user, still matching every id form.
+    // Runtime / claw-auth service call — trust the caller's target user, still matching every id form.
     return explicitUserId ? { in: await userIdAliasesFor(explicitUserId) } : undefined;
   }
   if (explicitUserId && !matchesAuthenticatedUserId(req, explicitUserId)) {
@@ -168,12 +181,6 @@ async function resolveScopedUserIdFilter(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-function decryptStoredField(stored: string): string {
-  const [ciphertext, iv, authTag] = stored.split(":");
-  if (!ciphertext || !iv || !authTag) throw new Error("Invalid encrypted field format");
-  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-}
 
 function isSessionLockedError(error?: string | null): boolean {
   return error === "session_locked" || error?.includes("session_locked") === true;
@@ -217,8 +224,8 @@ async function postScheduledFailureNotice(row: {
   const agent = await prisma.agent.findFirst({
     where: { slug: row.agentSlug, orgId: row.orgId },
   });
-  if (!agent?.spacesAppToken || !agent.spacesAppId) {
-    log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials for failure notice`);
+  if (!agent) {
+    log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} not found for failure notice`);
     return;
   }
 
@@ -238,8 +245,13 @@ async function postScheduledFailureNotice(row: {
     `Scheduled run failed: ${error?.trim() || "unknown error"}.`,
     ...(next ? [`Next run: ${next}.`] : []),
   ].join("\n");
-  const appToken = decryptStoredField(agent.spacesAppToken);
-  const spacesAppUserId = agent.spacesAppUserId ?? "";
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId: effectiveWorkspaceId };
+  const botAuth = await getAgentBotAuth(agent.id, effectiveWorkspaceId);
+  if (!botAuth) {
+    log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} is not added to workspace ${effectiveWorkspaceId}; failure notice not sent`);
+    return;
+  }
+  const spacesAppUserId = botAuth.botUserId;
 
   if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
     await spacesAppFetch("/chat/postMessage", {
@@ -248,7 +260,7 @@ async function postScheduledFailureNotice(row: {
       userId: spacesAppUserId,
       workspaceId: effectiveWorkspaceId,
       metadata: { contentFormat: "markdown" },
-    }, appToken);
+    }, bot);
     return;
   }
 
@@ -260,7 +272,7 @@ async function postScheduledFailureNotice(row: {
       userId: spacesAppUserId,
       workspaceId: effectiveWorkspaceId,
       metadata: { contentFormat: "markdown" },
-    }, appToken);
+    }, bot);
     return;
   }
 
@@ -269,14 +281,14 @@ async function postScheduledFailureNotice(row: {
   const dmResult = (await spacesAppFetch("/channel/openDm", {
     targetUserId: dmTarget,
     workspaceId: effectiveWorkspaceId,
-  }, appToken)) as { channelId: string };
+  }, bot)) as { channelId: string };
   await spacesAppFetch("/chat/postMessage", {
     channelId: dmResult.channelId,
     markdownText: message,
     userId: spacesAppUserId,
     workspaceId: effectiveWorkspaceId,
     metadata: { contentFormat: "markdown" },
-  }, appToken);
+  }, bot);
 }
 
 /**
@@ -294,9 +306,9 @@ async function postScheduledJobApprovalCard(opts: {
 }): Promise<void> {
   const { row, targetChannelId, scheduleSummary } = opts;
   const agent = await prisma.agent.findFirst({ where: { slug: row.agentSlug, orgId: row.orgId } });
-  if (!agent?.spacesAppToken || !agent.spacesAppId) {
-    log.error(`[scheduled-jobs/approval] Agent ${row.agentSlug} has no Spaces app credentials — cannot post approval card for job ${row.id}`);
-    throw new Error("Agent has no Spaces app credentials to post the approval card");
+  if (!agent) {
+    log.error(`[scheduled-jobs/approval] Agent ${row.agentSlug} not found — cannot post approval card for job ${row.id}`);
+    throw new Error("Agent not found to post the approval card");
   }
   let workspaceId = row.workspaceId;
   if (!workspaceId) workspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job").catch(() => null);
@@ -305,8 +317,13 @@ async function postScheduledJobApprovalCard(opts: {
     throw new Error("Missing workspaceId to post the approval card");
   }
 
-  const appToken = decryptStoredField(agent.spacesAppToken);
-  const spacesAppUserId = agent.spacesAppUserId ?? "";
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId };
+  const botAuth = await getAgentBotAuth(agent.id, workspaceId);
+  if (!botAuth) {
+    log.error(`[scheduled-jobs/approval] Agent ${row.agentSlug} is not added to workspace ${workspaceId} — cannot post approval card for job ${row.id}`);
+    throw new Error("Agent is not added to this Spaces workspace");
+  }
+  const spacesAppUserId = botAuth.botUserId;
 
   const flow = withSpacesAppId(buildScheduledJobApprovalFlow({
     scheduledJobId: row.id,
@@ -326,7 +343,7 @@ async function postScheduledJobApprovalCard(opts: {
       flow,
       userId: spacesAppUserId,
       workspaceId,
-    }, appToken);
+    }, bot);
     return;
   }
   // row.userId is Claw-canonical; Spaces keys DMs by its workspace-scoped ids.
@@ -334,13 +351,13 @@ async function postScheduledJobApprovalCard(opts: {
   const dmResult = (await spacesAppFetch("/channel/openDm", {
     targetUserId: dmTarget,
     workspaceId,
-  }, appToken)) as { channelId: string };
+  }, bot)) as { channelId: string };
   await spacesAppFetch("/chat/postMessage", {
     channelId: dmResult.channelId,
     flow,
     userId: spacesAppUserId,
     workspaceId,
-  }, appToken);
+  }, bot);
 }
 
 // ── POST / — create a scheduled job ─────────────────────────────────
@@ -370,14 +387,14 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
 
   // Spaces' app API requires workspaceId on postMessage / openDm. Capture
   // it now so the result handler can pass it through later. Priority:
-  //   1. Body (S2S callers may pass explicitly)
+  //   1. Body (service callers may pass explicitly)
   //   2. `xyne_last_workspace` cookie (browser flow)
   //   3. Spaces DB live read (works even when neither of the above is set —
   //      common for non-browser triggers or when the cookie can't cross
   //      the claw / spaces domain boundary)
   let workspaceId: string | undefined = bodyWorkspaceId?.trim() || readWorkspaceCookie(req);
 
-  // Force userId from the authed requester; only S2S (no requesterId) or admins
+  // Force userId from the authed requester; only a service call (no requesterId) or admins
   // can create jobs owned by someone else. The alias-aware compare matters: an
   // admin passing their OWN raw Spaces id must not be treated as a cross-user
   // create (which would store the raw form).
@@ -393,14 +410,13 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Canonicalize: the stored row and every downstream owner lookup must carry
-  // Claw's canonical id — S2S tool calls and admin creates may pass the raw
+  // Claw's canonical id — service tool calls and admin creates may pass the raw
   // Spaces workspace alias (fail-open to the supplied id when unresolvable).
   const ownerUserId = await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
 
-  // S2S callers (the runtime's schedule-task tool) send only the S2S key +
-  // body userId — no x-user-id header, so requireAuth attaches no org
-  // context. Derive the org from the job owner instead (User.orgId is
-  // required and 1:1), same pattern as the other S2S entry points.
+  // Service callers without a run token send only a service assertion + body
+  // userId, so requireAuth attaches no org context. Derive the org from the
+  // job owner instead (User.orgId is required and 1:1).
   let requestOrgId = getOrgId(req);
   if (!requestOrgId) {
     const owner = await prisma.user.findUnique({ where: { id: ownerUserId }, select: { orgId: true } }).catch(() => null);
@@ -419,22 +435,21 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw notFound("Agent not found");
   }
 
-  // Fallback: pull workspaceId from the user's active Spaces session row.
-  // Most browser callers don't currently send it in the body, and the
-  // `xyne_last_workspace` cookie can be absent in non-browser triggers.
-  // Without this fallback the row gets workspaceId=NULL and Spaces rejects
-  // the result-delivery call when the job fires.
-  if (!workspaceId) {
-    const live = await getSpacesAuthForUser(ownerUserId, "scheduled-job", requestWorkspaceHint(req));
-    if (live?.workspaceId) {
-      workspaceId = live.workspaceId;
-      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${ownerUserId}`);
+  // Fallback: a browser request carrying the user's own Spaces cookie — the
+  // workspace requireAuth verified for it (x-spaces-workspace-id). Most
+  // browser callers don't send workspaceId in the body, and the
+  // `xyne_last_workspace` cookie can be absent. Without a workspace the row
+  // gets workspaceId=NULL and Spaces rejects result delivery when it fires.
+  if (!workspaceId && req.headers.cookie) {
+    const verifiedWorkspaceId = requestWorkspaceHint(req);
+    if (verifiedWorkspaceId) {
+      workspaceId = verifiedWorkspaceId;
+      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from the verified browser request for userId=${ownerUserId}`);
     }
   }
 
   // Final fallback: read workspaceId straight off the user row (no live
-  // session required). getSpacesAuthForUser only resolves for currently
-  // logged-in users, so reminders typed hours earlier / S2S / automation
+  // session required). Reminders typed hours earlier / S2S / automation
   // triggers previously fell through to a NULL workspaceId — and Spaces then
   // silently rejected result delivery when the job fired ("missing
   // workspaceId on row"). The user row always carries the workspaceId.
@@ -444,7 +459,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       workspaceId = wsId;
       log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from users row for userId=${ownerUserId}`);
     } else {
-      log.warn(`[scheduled-jobs] no workspaceId from body/cookie/session/usersRow for userId=${ownerUserId} — row will be created with NULL and result delivery will fail`);
+      log.warn(`[scheduled-jobs] no workspaceId from body/cookie/request/usersRow for userId=${ownerUserId} — row will be created with NULL and result delivery will fail`);
     }
   }
 
@@ -1040,9 +1055,9 @@ router.post(
 
 // ── POST /:id/update — edit the prompt/task (and label) of a job ──────
 //
-// Companion to PATCH /:id for the S2S / agent path. PATCH authenticates via
+// Companion to PATCH /:id for the service / agent path. PATCH authenticates via
 // getRequesterId (browser session) and 401s an identity-less caller; the
-// scheduled-job-control tool instead posts userId+agentSlug over S2S. Reuse
+// scheduled-job-control tool instead posts userId+agentSlug as a service call. Reuse
 // assertCanControlScheduledJob so an agent can only edit its OWN job (owner +
 // agent clamp, plus the currentScheduledJobId clamp when it runs inside one).
 // Because the worker reads task/context live from the row, no Redis re-bind is
@@ -1105,7 +1120,7 @@ router.delete("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Res
   if (!row) {
     throw notFound("Not found");
   }
-  // Delete is restricted to the job owner or a CLAW_ADMIN — S2S callers
+  // Delete is restricted to the job owner or a CLAW_ADMIN — service callers
   // can't delete jobs on behalf of users.
   const requesterId = getRequesterId(req);
   if (!requesterId) {
@@ -1134,11 +1149,11 @@ router.delete("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Res
 
 // ── POST /:id/result — callback from xyne-claw after scheduled run ──
 
-// S2S-only: this is the run-result callback from xyne-claw. The router is
+// Runtime-only (service assertion): this is the run-result callback from xyne-claw. The router is
 // mounted under requireAuth (which accepts a browser cookie) for job
 // management, so without this an ordinary logged-in user could POST a forged
 // result that posts a message as the agent into the job owner's channel.
-router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>, res: Response) => {
+router.post("/:id/result", requireRuntime, async (req: Request<{ id: string }>, res: Response) => {
   const { id } = req.params;
   const payload = req.body as {
     sessionId?: string;
@@ -1323,13 +1338,11 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   const agent = await prisma.agent.findFirst({
     where: { slug: row.agentSlug, orgId: row.orgId },
   });
-  if (!agent?.spacesAppToken || !agent.spacesAppId) {
-    log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} has no Spaces app credentials`);
+  if (!agent) {
+    log.error(`[scheduled-jobs/result] Agent ${row.agentSlug} not found`);
     return;
   }
 
-  const appToken = decryptStoredField(agent.spacesAppToken);
-  const spacesAppUserId = agent.spacesAppUserId ?? "";
   let effectiveWorkspaceId = row.workspaceId;
 
   if (!effectiveWorkspaceId) {
@@ -1346,6 +1359,15 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     }
   }
 
+  // Posts as the agent's bot in the job's workspace (fresh token per call).
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId: effectiveWorkspaceId ?? null };
+  const botAuth = effectiveWorkspaceId ? await getAgentBotAuth(agent.id, effectiveWorkspaceId) : null;
+  if (effectiveWorkspaceId && !botAuth) {
+    log.error(`[scheduled-jobs/result] Job ${id}: agent ${row.agentSlug} is not added to workspace ${effectiveWorkspaceId}; result not delivered`);
+    return;
+  }
+  const spacesAppUserId = botAuth?.botUserId ?? "";
+
   // Deterministic tagging for scheduled results. This path used to post
   // payload.result raw, so agent-emitted mentions (`@bowmitha.c`,
   // `@Name[userId]`, even full HTML-span output) never became real,
@@ -1358,15 +1380,21 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   let resultText = payload.result ?? "";
   try {
     // No request here (job-owner session at fire time): see the note above.
+    // The job's agent acting for its creator (on-behalf-of agent token —
+    // works via a stored delegation; null → the DB-lookup fallback below).
     const senderAuth = row.userId
-      ? await getSpacesAuthForUser(row.userId, "scheduled-job", row.workspaceId).catch(() => null)
+      ? await resolveAgentSpacesAuth({
+          clawAgentId: agent.id,
+          userId: row.userId,
+          workspaceId: effectiveWorkspaceId ?? null,
+          caller: "scheduled-job",
+        })
       : null;
-    if (senderAuth?.token) {
+    if (senderAuth?.agentToken) {
       resultText = await resolveUnboundMentions(
         resultText,
         buildSpacesMentionLookups({
-          token: senderAuth.token,
-          sessionId: senderAuth.sessionId,
+          token: senderAuth.agentToken,
           workspaceId: senderAuth.workspaceId,
         }),
       );
@@ -1416,7 +1444,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         form.append("markdownText", resultText);
         form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
 
-        await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
+        await spacesAppFetchMultipart("/files/filesUpload", form, bot);
       } else {
         await spacesAppFetch("/chat/postMessage", {
           channelId: postChannelId,
@@ -1424,7 +1452,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
           userId: spacesAppUserId,
           workspaceId: effectiveWorkspaceId,
           metadata: { contentFormat: "markdown" },
-        }, appToken);
+        }, bot);
       }
 
       log.info(`[scheduled-jobs/result] Posted result to channel ${postChannelId}${row.targetChannelId ? " (override)" : ""}`);
@@ -1444,7 +1472,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         form.append("markdownText", resultText);
         form.append("metadata", JSON.stringify({ contentFormat: "markdown" }));
 
-        await spacesAppFetchMultipart("/files/filesUpload", form, appToken);
+        await spacesAppFetchMultipart("/files/filesUpload", form, bot);
       } else {
         await spacesAppFetch("/chat/postMessage", {
           channelId: row.channelId,
@@ -1453,7 +1481,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
           userId: spacesAppUserId,
           workspaceId: effectiveWorkspaceId,
           metadata: { contentFormat: "markdown" },
-        }, appToken);
+        }, bot);
       }
 
       log.info(`[scheduled-jobs/result] Posted result to thread ${row.conversationId}`);
@@ -1464,7 +1492,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       const dmResult = (await spacesAppFetch("/channel/openDm", {
         targetUserId: dmTarget,
         workspaceId: effectiveWorkspaceId,
-      }, appToken)) as { channelId: string };
+      }, bot)) as { channelId: string };
 
       await spacesAppFetch("/chat/postMessage", {
         channelId: dmResult.channelId,
@@ -1472,7 +1500,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         userId: spacesAppUserId,
         workspaceId: effectiveWorkspaceId,
         metadata: { contentFormat: "markdown" },
-      }, appToken);
+      }, bot);
 
       log.info(`[scheduled-jobs/result] DM'd result to user ${row.userId}`);
     }

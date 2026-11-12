@@ -1,8 +1,9 @@
 import { spacesAppFetch } from "./client.js";
+import type { BotRef } from "../../lib/spaces-bot.js";
 
 export interface AgentPostIdentity {
   spacesAppUserId: string;
-  appToken: string;
+  bot: BotRef;
 }
 
 export interface AgentPostMessageInput {
@@ -25,6 +26,6 @@ export async function postAgentMessage(
       userId: identity.spacesAppUserId,
       ...(msg.metadata !== undefined ? { metadata: msg.metadata } : {}),
     },
-    identity.appToken,
+    identity.bot,
   )) as { messageId?: string };
 }

@@ -15,6 +15,8 @@ import { join } from "node:path";
 import { createLogger } from "./logger.js";
 import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
 import { CREATE_AGENT_TOOL, checkCreateAgent, createAgentDroppedToolsNote, createAgentRefusedText, createAgentUnknownToolsText } from "./create-agent-check.js";
+import { clawAuthHeaders } from "./run-credentials.js";
+import { signerFor } from "./service-assertion.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -73,11 +75,13 @@ function resolveToolConfig(
     // doesn't declare in its schema (the second loop below only guards declared
     // keys). Skipping them here forces env/default sourcing and closes the
     // secret-exfil / SSRF / GIT_SSH_COMMAND-injection bypass.
-    if (PLATFORM_ONLY_CONFIG_KEYS.has(key)) continue;
+    if (PLATFORM_ONLY_CONFIG_KEYS.has(key) || key === "CLAW_RUNTIME_PRIVATE_KEY") continue;
     if (typeof value === "string") resolved[key] = value;
   }
   if (!toolConfigSchema) return resolved;
   for (const [key, field] of Object.entries(toolConfigSchema)) {
+    // The runtime's signing key never reaches a tool, whatever its schema declares.
+    if (key === "CLAW_RUNTIME_PRIVATE_KEY") continue;
     const agentVal = agentConfig[key];
     // Platform-only keys can never be overridden from agentConfig — env/default
     // only — so a hostile agent config can't redirect internal calls or
@@ -109,9 +113,9 @@ async function signWriteAction(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
-      // S2S key alongside the run's session token — claw-auth's
+      // Service assertion alongside the run's session token — claw-auth's
       // /sessions/:id/* routes require both (see routes/mcp.ts).
-      "x-s2s-key": SERVER.s2sKey,
+      ...clawAuthHeaders("POST", url, sessionToken),
     },
     body: JSON.stringify({ serverType, tool, params }),
   });
@@ -148,7 +152,6 @@ export function loadCustomTools(
   researchContext?: { type: string; id?: string; name: string; repositoryId?: string; productId?: string },
   progressUrl?: string,
   sessionId?: string,
-  s2sKey?: string,
   sessionToken?: string,
   parentToolCallId?: string,
   providerConfig?: ToolExecutionContext["providerConfig"],
@@ -244,7 +247,7 @@ export function loadCustomTools(
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+              ...clawAuthHeaders("POST", progressUrl, sessionToken),
             },
             body: JSON.stringify({
               sessionId,
@@ -302,7 +305,8 @@ export function loadCustomTools(
       ...(progressUrl ? { progressUrl } : {}),
       ...(publishUiWidget ? { emitUiWidget: publishUiWidget } : {}),
       ...(sessionId ? { sessionId } : {}),
-      ...(s2sKey ? { s2sKey } : {}),
+      // Tools sign calls through this; they never see a key.
+      serviceAuth: signerFor(sessionToken),
       ...(sessionToken ? { sessionToken } : {}),
     };
 

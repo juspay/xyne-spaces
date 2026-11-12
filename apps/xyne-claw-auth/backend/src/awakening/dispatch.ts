@@ -19,7 +19,6 @@
 
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
-import { decrypt } from "../crypto.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { ensureUserExists } from "../lib/users-jit.js";
 import { chatMessageRepository } from "../repositories/index.js";
@@ -31,6 +30,8 @@ import { buildWritePermissions } from "./write-policy.js";
 import { buildOperatingContract } from "./contract.js";
 import type { AgentSpacesIdentity, AwakeningWindow } from "./types.js";
 import { createLogger } from "../logger.js";
+import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 
 const log = createLogger("awakening-dispatch");
 
@@ -47,36 +48,17 @@ interface AgentIdentityRow {
   orgId: string;
   config: unknown;
   spacesAppId: string | null;
-  spacesAppUserId: string | null;
-  spacesAppToken: string | null;
 }
 
 /**
- * Decrypt and validate the agent's Spaces app identity.
+ * The agent's Spaces bot identity in `workspaceId` (its principal there).
  * Throws rather than degrading — see the fail-closed note above.
  */
-export function resolveAgentIdentity(agent: AgentIdentityRow, workspaceId: string): AgentSpacesIdentity {
-  if (!agent.spacesAppId) throw new AwakeningIdentityError(agent.slug, "no Spaces app is linked");
-  if (!agent.spacesAppUserId) throw new AwakeningIdentityError(agent.slug, "no Spaces app user id");
-  if (!agent.spacesAppToken) throw new AwakeningIdentityError(agent.slug, "no Spaces app token");
-
-  const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-  if (!ciphertext || !iv || !authTag) {
-    throw new AwakeningIdentityError(agent.slug, "app token is not in the expected encrypted format");
-  }
-
-  let appToken: string;
-  try {
-    appToken = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-  } catch (err) {
-    throw new AwakeningIdentityError(
-      agent.slug,
-      `app token failed to decrypt (${err instanceof Error ? err.message : "unknown"})`,
-    );
-  }
-  if (!appToken) throw new AwakeningIdentityError(agent.slug, "app token decrypted to an empty string");
-
-  return { appToken, spacesAppId: agent.spacesAppId, spacesAppUserId: agent.spacesAppUserId, workspaceId };
+export async function resolveAgentIdentity(agent: AgentIdentityRow, workspaceId: string): Promise<AgentSpacesIdentity> {
+  const bot: BotRef = { clawAgentId: agent.id, workspaceId };
+  const auth = await getAgentBotAuth(bot.clawAgentId, bot.workspaceId);
+  if (!auth) throw new AwakeningIdentityError(agent.slug, "the agent is not added to this Spaces workspace");
+  return { bot, agentToken: auth.token, spacesAppId: agent.spacesAppId ?? "", spacesAppUserId: auth.botUserId, workspaceId };
 }
 
 /** The task text the agent is woken with. The window artifact carries the data. */
@@ -189,7 +171,7 @@ export async function dispatchAwakening(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, dispatchPayload.userId ? { userId: String(dispatchPayload.userId) } : undefined),
     },
     body: JSON.stringify(dispatchPayload),
   });
@@ -240,7 +222,7 @@ export async function dispatchAwakening(
       // Its final answer is a report for the operator, not a channel message.
       suppressThreadReply: true,
       isAutomation: true,
-      appToken: identity.appToken,
+      bot: identity.bot,
       spacesAppId: identity.spacesAppId,
       spacesAppUserId: identity.spacesAppUserId,
       workspaceId: identity.workspaceId,

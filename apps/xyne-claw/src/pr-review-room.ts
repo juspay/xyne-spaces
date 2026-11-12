@@ -24,6 +24,7 @@ import {
 } from "./pr-evidence.js";
 import { coerceFindings, REVIEW_FINDINGS_JSON_SCHEMA, type ReviewFinding } from "./pr-review-findings.js";
 import { renderReviewRoom, type ReviewRoomMeta } from "./pr-review-room-template.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("pr-review-room");
 
@@ -652,7 +653,7 @@ async function deliverRoom(sessionId: string, roomConversationId: string, pr: Pr
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+      ...clawAuthHeaders("POST", url),
     },
     body: JSON.stringify({
       sessionId,
@@ -705,7 +706,7 @@ async function postReviewRoomNotice(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+        ...clawAuthHeaders("POST", url),
       },
       body: JSON.stringify(buildReviewRoomNoticeBody(sessionId, roomConversationId, pr, reason)),
       signal: AbortSignal.timeout(DELIVER_TIMEOUT_MS),

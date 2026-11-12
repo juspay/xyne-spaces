@@ -19,15 +19,14 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SERVER } from "./config.js";
 
 import { createLogger } from "./logger.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 const log = createLogger("memory-file-tools");
 
 const MAX_WRITE_CHARS = 20_000;
 
-function s2sHeaders(userId: string): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey, "x-user-id": userId } : {}),
-  };
+/** The run's session token names the user to claw-auth (userId is kept for callers' query strings). */
+function clawHeaders(_userId: string, method: string, url: string): Record<string, string> {
+  return { "Content-Type": "application/json", ...clawAuthHeaders(method, url) };
 }
 
 function baseUrl(): string {
@@ -64,8 +63,9 @@ export function buildMemoryFileTools(
       const name = typeof p["name"] === "string" ? p["name"].trim() : "";
       try {
         const qs = new URLSearchParams({ agentSlug, userId, ...(name ? { name } : {}) });
-        const res = await fetch(`${baseUrl()}/claw/api/v1/memory/agent-file?${qs.toString()}`, {
-          headers: s2sHeaders(userId),
+        const url = `${baseUrl()}/claw/api/v1/memory/agent-file?${qs.toString()}`;
+        const res = await fetch(url, {
+          headers: clawHeaders(userId, "GET", url),
           signal: AbortSignal.timeout(8_000),
         });
         if (!res.ok) {
@@ -135,9 +135,10 @@ export function buildMemoryFileTools(
         return { content: [{ type: "text" as const, text: "Error: name and content are required." }], details: {} };
       }
       try {
-        const res = await fetch(`${baseUrl()}/claw/api/v1/memory/agent-file`, {
+        const url = `${baseUrl()}/claw/api/v1/memory/agent-file`;
+        const res = await fetch(url, {
           method: "POST",
-          headers: s2sHeaders(userId),
+          headers: clawHeaders(userId, "POST", url),
           body: JSON.stringify({ agentSlug, userId, name, content: content.slice(0, MAX_WRITE_CHARS), mode }),
           signal: AbortSignal.timeout(8_000),
         });

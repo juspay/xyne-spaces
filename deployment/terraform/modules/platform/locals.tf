@@ -67,14 +67,18 @@ locals {
       JWT_SECRET                     = var.app_secrets.jwt_secret
       ZERO_AUTH_SECRET               = var.app_secrets.zero_auth_secret
       ENCRYPTION_KEY                 = var.app_secrets.encryption_key
-      INTERNAL_S2S_KEY               = var.app_secrets.internal_s2s_key
-      Y_SWEET_SERVER_TOKEN           = var.app_secrets.ysweet_server_token
-      GOOGLE_CLIENT_ID               = var.app_secrets.google_client_id
-      GOOGLE_CLIENT_SECRET           = var.app_secrets.google_client_secret
-      AWS_ACCESS_KEY_ID              = local.storage_access_key
-      AWS_SECRET_ACCESS_KEY          = local.storage_secret_key
-      LIVEKIT_API_KEY                = local.livekit_api_key
-      LIVEKIT_API_SECRET             = local.livekit_api_secret
+      # Spaces signs its tokens and service assertions with its own key; it holds
+      # only the public keys of claw-auth and the claw runtime.
+      CLAW_DELEGATION_PRIVATE_KEY = var.app_secrets.spaces_signing_private_key
+      CLAW_SERVICE_PUBLIC_KEYS    = jsonencode({ "claw-1" = var.app_secrets.claw_auth_signing_public_key })
+      CLAW_RUNTIME_PUBLIC_KEYS    = jsonencode({ "runtime-1" = var.app_secrets.claw_runtime_signing_public_key })
+      Y_SWEET_SERVER_TOKEN        = var.app_secrets.ysweet_server_token
+      GOOGLE_CLIENT_ID            = var.app_secrets.google_client_id
+      GOOGLE_CLIENT_SECRET        = var.app_secrets.google_client_secret
+      AWS_ACCESS_KEY_ID           = local.storage_access_key
+      AWS_SECRET_ACCESS_KEY       = local.storage_secret_key
+      LIVEKIT_API_KEY             = local.livekit_api_key
+      LIVEKIT_API_SECRET          = local.livekit_api_secret
     }
     "xyne-zero-secrets" = {
       ZERO_UPSTREAM_DB    = local.pg_urls.zero_app
@@ -84,20 +88,23 @@ locals {
       ZERO_ADMIN_PASSWORD = var.app_secrets.zero_admin_password
     }
     "xyne-claw-secrets" = {
-      XYNE_CLAW_S2S_KEY = var.app_secrets.claw_s2s_key
-      INTERNAL_S2S_KEY  = var.app_secrets.internal_s2s_key
-      LITELLM_API_KEY   = var.app_secrets.litellm_api_key
-      HINDSIGHT_API_KEY = var.app_secrets.hindsight_api_key
-      REDIS_PASSWORD    = local.redis_auth
+      # The runtime's own signing key; it verifies claw-auth with claw-auth's public key.
+      CLAW_RUNTIME_PRIVATE_KEY = var.app_secrets.claw_runtime_signing_private_key
+      CLAW_SERVICE_PUBLIC_KEYS = jsonencode({ "claw-1" = var.app_secrets.claw_auth_signing_public_key })
+      LITELLM_API_KEY          = var.app_secrets.litellm_api_key
+      HINDSIGHT_API_KEY        = var.app_secrets.hindsight_api_key
+      REDIS_PASSWORD           = local.redis_auth
     }
     "xyne-claw-auth-secrets" = {
-      DATABASE_URL         = local.pg_urls.claw_auth
-      ENCRYPTION_KEY       = var.app_secrets.claw_auth_encryption_key
-      XYNE_CLAW_S2S_KEY    = var.app_secrets.claw_s2s_key
-      INTERNAL_S2S_KEY     = var.app_secrets.internal_s2s_key
-      GOOGLE_CLIENT_ID     = var.app_secrets.google_client_id
-      GOOGLE_CLIENT_SECRET = var.app_secrets.google_client_secret
-      REDIS_PASSWORD       = local.redis_auth
+      DATABASE_URL   = local.pg_urls.claw_auth
+      ENCRYPTION_KEY = var.app_secrets.claw_auth_encryption_key
+      # claw-auth's own signing key; it verifies Spaces and the runtime with their public keys.
+      CLAW_SERVICE_PRIVATE_KEY      = var.app_secrets.claw_auth_signing_private_key
+      SPACES_DELEGATION_PUBLIC_KEYS = jsonencode({ "spaces-1" = var.app_secrets.spaces_signing_public_key })
+      CLAW_RUNTIME_PUBLIC_KEYS      = jsonencode({ "runtime-1" = var.app_secrets.claw_runtime_signing_public_key })
+      GOOGLE_CLIENT_ID              = var.app_secrets.google_client_id
+      GOOGLE_CLIENT_SECRET          = var.app_secrets.google_client_secret
+      REDIS_PASSWORD                = local.redis_auth
     }
     "xyne-ysweet-secrets" = {
       Y_SWEET_AUTH          = var.app_secrets.ysweet_auth

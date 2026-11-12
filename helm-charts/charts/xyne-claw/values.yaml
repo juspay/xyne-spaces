@@ -64,13 +64,13 @@ env:
   DRAIN_TIMEOUT: "900"
 
 secretEnv:
-  XYNE_CLAW_S2S_KEY:
+  # The runtime's own signing key (never passed to tools or sandboxes); claw-auth's public key.
+  CLAW_RUNTIME_PRIVATE_KEY:
     name: xyne-claw-secrets
-    key: XYNE_CLAW_S2S_KEY
-  INTERNAL_S2S_KEY:
+    key: CLAW_RUNTIME_PRIVATE_KEY
+  CLAW_SERVICE_PUBLIC_KEYS:
     name: xyne-claw-secrets
-    key: INTERNAL_S2S_KEY
-    optional: true
+    key: CLAW_SERVICE_PUBLIC_KEYS
   LITELLM_API_KEY:
     name: xyne-claw-secrets
     key: LITELLM_API_KEY

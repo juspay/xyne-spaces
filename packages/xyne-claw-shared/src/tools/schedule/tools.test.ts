@@ -10,20 +10,23 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const baseOpts = {
   authUrl: "http://auth",
-  s2sKey: "k",
+  serviceAuth: (method: string, url: string) => ({ "x-service-assertion": `sig:${method}:${url}`, "x-session-token": "run-tok" }),
   userId: "u1",
   agentSlug: "claw",
   includeInactive: false,
 };
 
 describe("listScheduledJobs", () => {
-  it("scopes the request to the user + agent and sends the S2S key", async () => {
+  it("scopes the request to the user + agent and signs it as the runtime", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ success: true, data: [] }));
     await listScheduledJobs({ ...baseOpts, fetchImpl: fetchImpl as unknown as typeof fetch });
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("http://auth/claw/api/v1/scheduled-jobs?userId=u1&agentSlug=claw");
     expect(init.method).toBe("GET");
-    expect((init.headers as Record<string, string>)["x-s2s-key"]).toBe("k");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["x-service-assertion"]).toBe("sig:GET:http://auth/claw/api/v1/scheduled-jobs?userId=u1&agentSlug=claw");
+    expect(headers["x-session-token"]).toBe("run-tok");
+    expect(headers["x-s2s-key"]).toBeUndefined();
   });
 
   it("returns job ids and hides cancelled/completed jobs by default", async () => {

@@ -42,7 +42,7 @@ export async function countEventsSince(
   identity: AgentSpacesIdentity,
 ): Promise<number> {
   if (channels.length === 0) return 0;
-  const auth = { token: identity.appToken, workspaceId: identity.workspaceId };
+  const auth = { agentToken: identity.agentToken, workspaceId: identity.workspaceId };
 
   const conversations = await boundedInteract<Array<{ conversationId: string }>>(
     {

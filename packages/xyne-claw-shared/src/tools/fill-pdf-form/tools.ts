@@ -115,7 +115,7 @@ function resolveSessionPath(relPath: string): string {
 function pushAttachmentViaProgress(
   progressUrl: string,
   sessionId: string,
-  s2sKey: string | undefined,
+  serviceAuth: ToolExecutionContext["serviceAuth"],
   attachment: { fileName: string; mimeType: string; data: string; metadata?: Record<string, unknown> },
 ): void {
   try {
@@ -132,7 +132,7 @@ function pushAttachmentViaProgress(
         headers: {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body),
-          ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+          ...(serviceAuth?.("POST", progressUrl) ?? {}),
         },
       },
       (res) => { res.resume(); }, // drain
@@ -365,7 +365,7 @@ export const fillPdfForm: ToolDefinition = {
     // attachment(s)" in run completion, agent told the user "PDF attached"
     // (it wasn't).
     if (context?.progressUrl && context.sessionId) {
-      pushAttachmentViaProgress(context.progressUrl, context.sessionId, context.s2sKey, {
+      pushAttachmentViaProgress(context.progressUrl, context.sessionId, context.serviceAuth, {
         fileName: outputFileName,
         mimeType: "application/pdf",
         data: Buffer.from(pdfBytes).toString("base64"),

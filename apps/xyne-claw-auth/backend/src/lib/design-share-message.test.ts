@@ -8,7 +8,7 @@ const redis = {
     return "OK";
   }),
 };
-const spacesAppFetch = vi.fn(async (_path: string, _body: Record<string, unknown>, _token?: string): Promise<unknown> => ({}));
+const spacesAppFetch = vi.fn(async (_path: string, _body: Record<string, unknown>, _bot?: unknown): Promise<unknown> => ({}));
 
 vi.mock("../redis.js", () => ({ redisService: { getConnection: () => redis } }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
@@ -16,7 +16,7 @@ vi.mock("../surfaces/spaces/client.js", () => ({ spacesAppFetch }));
 
 const { designShareMessageText, publishDesignShareMessage } = await import("./design-share-message.js");
 
-const target = { channelId: "ch-1", conversationId: "conv-1", spacesAppUserId: "bot-1", appToken: "tok" };
+const target = { channelId: "ch-1", conversationId: "conv-1", spacesAppUserId: "bot-1", bot: { clawAgentId: "agent-1", workspaceId: "ws-1" } };
 const share = { id: "share-1", link: "https://spaces.local/s/abc", command: "design" };
 const calls = (path: string) => spacesAppFetch.mock.calls.filter(([p]) => p === path);
 let posted = 0;

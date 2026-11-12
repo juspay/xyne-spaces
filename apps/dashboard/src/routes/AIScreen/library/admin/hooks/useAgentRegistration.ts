@@ -1,17 +1,13 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { clawErrorText } from '@/services/claw/clawRequest';
-import {
-  configureAgentWebhook,
-  createAgentApp,
-  grantAgentPermissions,
-  installAgentApp,
-  uploadAgentPicture,
-} from '@/services/claw/clawAdminService';
+import { registerAgentInSpaces, uploadAgentPicture } from '@/services/claw/clawAdminService';
 import { getClawAgentBySlug } from '@/services/claw/clawAdminService';
+import { listWorkspaceClawAgents } from '@/services/claw/clawAgentPrincipalsService';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 
-export type RegistrationStep = 'create' | 'install' | 'configure' | 'grant' | 'upload' | 'done';
+export type RegistrationStep = 'register' | 'upload' | 'done';
 
 export interface RegistrationFlow {
   agentSlug: string;
@@ -22,24 +18,24 @@ export interface RegistrationFlow {
 }
 
 const NEXT_STEP: Record<Exclude<RegistrationStep, 'done'>, RegistrationStep> = {
-  create: 'install',
-  install: 'configure',
-  configure: 'grant',
-  grant: 'upload',
+  register: 'upload',
   upload: 'done',
 };
 
 export const STEP_LABEL: Record<RegistrationStep, string> = {
-  create: 'Create app',
-  install: 'Install app',
-  configure: 'Configure webhook',
-  grant: 'Grant permissions',
+  register: 'Add to workspace',
   upload: 'Upload photo',
-  done: 'Registered',
+  done: 'Added',
 };
+
+const WORKSPACE_AGENTS_KEY = ['claw', 'workspace-agents'] as const;
 
 export interface AgentRegistration {
   flow: RegistrationFlow | null;
+  /** Is this Claw agent added to the current Spaces workspace? */
+  isRegistered: (agentId: string) => boolean;
+  /** False until the workspace's agent list has loaded. */
+  registrationKnown: boolean;
   start: (agent: Agent) => void;
   startForSlug: (userId: string, slug: string) => Promise<void>;
   dismiss: () => void;
@@ -56,28 +52,46 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
   const [flow, setFlow] = useState<RegistrationFlow | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const rowUploadSlug = useRef<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const start = useCallback((agent: Agent): void => {
-    setFlow({
-      agentSlug: agent.slug,
-      agentName: agent.name,
-      step: agent.spacesAppId ? 'install' : 'create',
-      busy: false,
-    });
-  }, []);
+  const workspaceAgents = useQuery({
+    queryKey: WORKSPACE_AGENTS_KEY,
+    queryFn: listWorkspaceClawAgents,
+    staleTime: 30_000,
+  });
+  const registeredIds = useMemo(
+    () => new Set((workspaceAgents.data ?? []).filter(p => p.status === 'ACTIVE').map(p => p.clawAgentId)),
+    [workspaceAgents.data],
+  );
+  const isRegistered = useCallback((agentId: string): boolean => registeredIds.has(agentId), [registeredIds]);
 
-  const startForSlug = useCallback(async (userId: string, slug: string): Promise<void> => {
-    let step: RegistrationStep = 'create';
-    let name = slug;
-    try {
-      const agent = await getClawAgentBySlug(userId, slug);
-      step = !agent.spacesAppId ? 'create' : agent.spacesAppTokenConfigured ? 'done' : 'install';
-      name = agent.name ?? slug;
-    } catch {
-      step = 'create';
-    }
-    setFlow({ agentSlug: slug, agentName: name, step, busy: false });
-  }, []);
+  const start = useCallback(
+    (agent: Agent): void => {
+      setFlow({
+        agentSlug: agent.slug,
+        agentName: agent.name,
+        step: registeredIds.has(agent.id) ? 'upload' : 'register',
+        busy: false,
+      });
+    },
+    [registeredIds],
+  );
+
+  const startForSlug = useCallback(
+    async (userId: string, slug: string): Promise<void> => {
+      let step: RegistrationStep = 'register';
+      let name = slug;
+      try {
+        const agent = await getClawAgentBySlug(userId, slug);
+        step = registeredIds.has(agent.id) ? 'done' : 'register';
+        name = agent.name ?? slug;
+      } catch {
+        step = 'register';
+      }
+      setFlow({ agentSlug: slug, agentName: name, step, busy: false });
+    },
+    [registeredIds],
+  );
 
   const dismiss = useCallback((): void => setFlow(null), []);
 
@@ -86,10 +100,8 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
     const { agentSlug, step } = flow;
     setFlow(current => (current ? { ...current, busy: true, error: undefined } : current));
     try {
-      if (step === 'create') await createAgentApp(agentSlug);
-      else if (step === 'install') await installAgentApp(agentSlug);
-      else if (step === 'configure') await configureAgentWebhook(agentSlug);
-      else await grantAgentPermissions(agentSlug);
+      await registerAgentInSpaces(agentSlug);
+      await queryClient.invalidateQueries({ queryKey: WORKSPACE_AGENTS_KEY });
 
       setFlow(current => (current ? { ...current, step: NEXT_STEP[step], busy: false } : current));
       onChanged();
@@ -104,7 +116,7 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
           : current,
       );
     }
-  }, [flow, onChanged]);
+  }, [flow, onChanged, queryClient]);
 
   const pickPicture = useCallback((): void => {
     rowUploadSlug.current = null;
@@ -164,6 +176,8 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
 
   return {
     flow,
+    isRegistered,
+    registrationKnown: workspaceAgents.isSuccess,
     start,
     startForSlug,
     dismiss,

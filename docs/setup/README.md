@@ -14,6 +14,7 @@ matches what you are doing.
 | Make the AI features actually respond | [AI Providers](ai-providers.md) |
 | Understand what each background service does | [Services](services.md) |
 | Receive Gmail notifications without a public endpoint | [Gmail Pub/Sub delivery](gmail-pubsub-delivery.md) |
+| Set up the keys Spaces, claw-auth and the claw runtime sign with | [Service keys](service-keys.md) |
 | Run the mobile app (iOS / Android) | [Mobile developer setup](../../apps/mobile/DEV_SETUP.md) |
 | Fix something that broke | [Troubleshooting](troubleshooting.md) |
 

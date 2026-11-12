@@ -814,10 +814,21 @@ if [ ! -f "apps/xyne-claw-auth/backend/.env" ]; then
     echo -e "${GREEN}  Created apps/xyne-claw-auth/backend/.env${NC}"
 fi
 
-# Ensure SPACES_DB_URL is set (links claw-auth to Spaces DB for JIT user mirroring)
-if ! grep -q "^SPACES_DB_URL=" apps/xyne-claw-auth/backend/.env 2>/dev/null; then
-    echo 'SPACES_DB_URL=postgresql://xyne:xyne123@localhost:5433/xyne_dev_db' >> apps/xyne-claw-auth/backend/.env
-    echo -e "${GREEN}  Added SPACES_DB_URL to apps/xyne-claw-auth/backend/.env${NC}"
+# claw-auth has no access to the Spaces database (it uses Spaces' signed
+# directory API). Drop the old setting, and give claw-auth's seed the default
+# workspace id, looked up here once with the developer's own psql.
+if grep -q "^SPACES_DB_URL=" apps/xyne-claw-auth/backend/.env 2>/dev/null; then
+    sed -i.bak '/^SPACES_DB_URL=/d' apps/xyne-claw-auth/backend/.env && rm -f apps/xyne-claw-auth/backend/.env.bak
+    echo -e "${GREEN}  Removed SPACES_DB_URL from apps/xyne-claw-auth/backend/.env (no longer used)${NC}"
+fi
+if ! grep -q "^SPACES_DEFAULT_WORKSPACE_ID=..*" apps/xyne-claw-auth/backend/.env 2>/dev/null; then
+    SPACES_WS_ID=$($COMPOSE_CMD -f "$COMPOSE_FILE" exec -T postgres \
+        psql --username xyne --dbname xyne_dev_db -tAc "SELECT id FROM workspaces WHERE name = 'Default Workspace' LIMIT 1" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$SPACES_WS_ID" ]; then
+        sed -i.bak '/^SPACES_DEFAULT_WORKSPACE_ID=/d' apps/xyne-claw-auth/backend/.env && rm -f apps/xyne-claw-auth/backend/.env.bak
+        echo "SPACES_DEFAULT_WORKSPACE_ID=$SPACES_WS_ID" >> apps/xyne-claw-auth/backend/.env
+        echo -e "${GREEN}  Set SPACES_DEFAULT_WORKSPACE_ID in apps/xyne-claw-auth/backend/.env${NC}"
+    fi
 fi
 
 # Point claw-auth at fake-gcs. Left empty, its GCS client falls back to real GCS

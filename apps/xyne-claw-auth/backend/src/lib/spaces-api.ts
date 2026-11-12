@@ -5,6 +5,7 @@
 
 import { CONFIG } from "../config.js";
 import { SpacesApiError } from "../mcp/servers/xyne-spaces-client.js";
+import { botBearer, spacesBotUrl, type BotRef } from "./spaces-bot.js";
 
 // Re-export so callers of these helpers can branch on `err.status` without
 // reaching across into the client module.
@@ -13,15 +14,14 @@ export { SpacesApiError };
 export async function spacesAppFetch(
   path: string,
   body: Record<string, unknown>,
-  appToken: string,
+  bot: BotRef,
 ): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  if (!appToken) throw new Error("No app token provided");
+  const url = spacesBotUrl(path);
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${appToken}`,
+      Authorization: `Bearer ${await botBearer(bot)}`,
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
@@ -37,12 +37,11 @@ export async function spacesAppFetch(
 
 export async function spacesAppFetchGet(
   path: string,
-  appToken: string,
+  bot: BotRef,
 ): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  if (!appToken) throw new Error("No app token provided");
+  const url = spacesBotUrl(path);
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${appToken}` },
+    headers: { Authorization: `Bearer ${await botBearer(bot)}` },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
@@ -55,14 +54,13 @@ export async function spacesAppFetchGet(
 export async function spacesAppFetchMultipart(
   path: string,
   form: FormData,
-  appToken: string,
+  bot: BotRef,
 ): Promise<unknown> {
-  const url = `${CONFIG.spacesInternalUrl}/api/apps${path}`;
-  if (!appToken) throw new Error("No app token provided");
+  const url = spacesBotUrl(path);
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${appToken}`,
+      Authorization: `Bearer ${await botBearer(bot)}`,
     },
     body: form,
     signal: AbortSignal.timeout(60_000),

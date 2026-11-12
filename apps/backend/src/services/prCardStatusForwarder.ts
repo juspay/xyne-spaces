@@ -4,6 +4,7 @@
 
 import { config } from '@/config/env';
 import { sanitizeForLog } from '@/git-providers/github/apis';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 import { logger } from '@/utils/logger';
 
 /** The PR card statuses a webhook can drive (subset of PrStatus in xyne-claw-shared/flow/pr-flow.ts). */
@@ -30,14 +31,19 @@ export interface PrCardStatusEvent {
  */
 export function forwardPrCardStatus(ev: PrCardStatusEvent, logPrefix: string): void {
   const base = config.xyneClaw?.webhookUrl;
-  const s2sKey = config.xyneClaw?.s2sKey;
-  if (!base || !s2sKey) return; // not wired in this env → skip silently
+  if (!base) return; // not wired in this env → skip silently
 
   const url = `${base.replace(/\/+$/, '')}/pr-event`;
+  let auth: Record<string, string>;
+  try {
+    auth = serviceAuthHeaders('xyne-claw-auth', 'POST', url);
+  } catch {
+    return; // Spaces can't sign in this env → skip silently, like an unwired URL
+  }
 
   void fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-s2s-key': s2sKey },
+    headers: { 'Content-Type': 'application/json', ...auth },
     body: JSON.stringify(ev),
     signal: AbortSignal.timeout(10_000),
   })

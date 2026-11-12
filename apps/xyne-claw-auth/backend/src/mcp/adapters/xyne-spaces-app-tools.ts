@@ -47,7 +47,6 @@ export const xyneSpacesAppToolsAdapter: StdioMcpAdapter = {
         XYNE_SPACES_TOKEN: appToken,
         XYNE_SPACES_AUTH_MODE: "app",
         XYNE_USER_ID: userId,
-        INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
       },
     };
   },

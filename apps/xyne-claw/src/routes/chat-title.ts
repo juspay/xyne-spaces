@@ -1,12 +1,12 @@
 import { Router, type Request, type Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { generateChatTitle, type ChatTitleInput } from "../chat-title.js";
 
 const router = Router();
 
 router.post(
   "/internal/chat-title/generate",
-  validateS2SKey,
+  requireClawAuthService,
   async (req: Request, res: Response): Promise<void> => {
     const body = req.body as Partial<ChatTitleInput> | undefined;
     if (!body || typeof body.firstUserMessage !== "string" || !body.firstUserMessage.trim()) {

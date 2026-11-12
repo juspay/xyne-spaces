@@ -1,4 +1,4 @@
-import express, { Application, Request, Response } from 'express';
+import express, { Application } from 'express';
 import { createServer, Server as HttpServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -159,14 +159,15 @@ import { tagRoutes } from '@/tags';
 // Disabled (LLM)
 // import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
-import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
-import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
-import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
-import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
-import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
-import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
-import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
-import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCallback.handler';
+// Disabled (Claw)
+// import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+// import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
+// import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
+// import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
+// import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
+// import { handleClawCallAiCallback } from '@/controllers/clawCallAiCallback.handler';
+// import { CLAW_CALL_AI_CALLBACK_PATH } from '@/services/callAi/clawCallAiRunner';
+// import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -220,10 +221,11 @@ import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
 import { appRoutes } from '@/apps';
-import { ChatController } from '@/apps/controllers/chatController';
-import { ReactionController } from '@/controllers/reactionController';
-import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
-import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
+// Disabled (Claw)
+// import { ChatController } from '@/apps/controllers/chatController';
+// import { ReactionController } from '@/controllers/reactionController';
+// import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
+// import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
 import { encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
@@ -234,8 +236,9 @@ import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
-import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
-import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
+// Disabled (Claw)
+// import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
+// import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
@@ -246,6 +249,8 @@ import proactivityRoutes from '@/routes/proactivity';
 // import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
 // import { publicChannels, roomAllows, type RoomRef } from '@/services/proactivity/roomScope';
 // import { decodeDraftContext, type DraftResult } from '@/services/proactivity/dispatch';
+import { clawAgentRoutes } from '@/claw/routes';
+import { agentQueryRoutes } from '@/claw/agentQuery';
 
 
 export class App {
@@ -549,150 +554,149 @@ export class App {
     // App routes
     this.app.use('/api/apps', appRoutes);
 
-    // Internal S2S endpoints (trusted service-to-service calls)
-    const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
-      const supplied = req.headers['x-s2s-key'];
-      const accepted = [config.internalS2sKey, config.xyneClaw.s2sKey].filter(Boolean);
-      if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
-        res.status(401).json({ error: 'Invalid or missing S2S key' });
-        return;
-      }
-      next();
-    };
+    // Claw agents as first-party principals (claw/routes.ts): grants, and agent tokens for claw-auth.
+    this.app.use('/api/claw-agents', clawAgentRoutes);
+    // Read queries for Claw agents acting for a user: per-model scopes, user's own ACL (claw/agentQuery.ts).
+    this.app.use('/api/agent-query', authMiddleware.authenticate, agentQueryRoutes);
 
-    this.app.post('/api/internal/postAsUser', validateS2SKey, (req: Request, res: Response) => {
-      // Mark this request so ChatController.postMessage persists the message as a
-      // USER message (posted on behalf of a real human) rather than a BOT message.
-      // Only the trusted S2S postAsUser route sets this; app-token callers never do.
-      (req as Request & { isPostAsUser?: boolean }).isPostAsUser = true;
-      void new ChatController().postMessage(req, res);
-    });
-    this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
-      void new ReactionController().reactAsUser(req, res);
-    });
-    this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
-      try {
-        const { userId, targetUserId, workspaceId } = (req.body ?? {}) as {
-          userId?: string; targetUserId?: string; workspaceId?: string;
-        };
-        if (!userId || !targetUserId || !workspaceId) {
-          res.status(400).json({ error: 'userId, targetUserId and workspaceId are required' });
-          return;
-        }
-        const channelId = await unifiedDMService.getOrCreateDirectMessage(userId, targetUserId, workspaceId);
-        res.json({ channelId });
-      } catch (err) {
-        logger.error('[getOrCreateDm] failed', err);
-        res.status(500).json({ error: 'Internal error' });
-      }
-    });
-    this.app.post('/api/internal/twin-reply-draft', validateS2SKey, async (req: Request, res: Response) => {
-      try {
-        const parsed = coerceTwinReplyDraft(req.body);
-        if ('error' in parsed) {
-          res.status(400).json({ error: parsed.error });
-          return;
-        }
-        const lookup = destinationNameLookup(parsed.draft);
-        if (lookup) {
-          try {
-            const prisma = DatabaseClient.getInstance();
-            if (lookup.field === 'destinationChannelName') {
-              const chan = await prisma.channel.findUnique({ where: { id: lookup.id }, select: { name: true } });
-              if (chan?.name) parsed.draft.destinationChannelName = chan.name;
-            } else {
-              const target = await prisma.user.findUnique({ where: { id: lookup.id }, select: { name: true, displayName: true } });
-              const name = target?.displayName || target?.name;
-              if (name) parsed.draft.destinationUserName = name;
-            }
-          } catch (err) {
-            logger.warn('[twin-reply-draft] destination name resolution failed', err);
-          }
-        }
-        await createTwinReplyDraft(parsed.draft);
-        res.json({ ok: true });
-      } catch (err) {
-        logger.error('[twin-reply-draft] create failed', err);
-        res.status(500).json({ error: 'Internal error' });
-      }
-    });
-    // Conversation-access check for claw: claw sessions are keyed by
-    // conversationId (not userId), so claw must verify the caller may access a
-    // conversation before binding its session. Returns whether the conversation
-    // exists and whether the user is a member of its channel (or it is a PUBLIC
-    // channel in the user's workspace). Spaces owns this ACL.
-    this.app.post('/api/internal/conversation-access', validateS2SKey, async (req: Request, res: Response) => {
-      try {
-        const { conversationId, userId } = (req.body ?? {}) as { conversationId?: string; userId?: string };
-        if (!conversationId || !userId) {
-          res.status(400).json({ error: 'conversationId and userId are required' });
-          return;
-        }
-        const prisma = DatabaseClient.getInstance();
-        const conv = await prisma.conversation.findUnique({
-          where: { conversationId },
-          select: { channelId: true },
-        });
-        if (!conv) {
-          res.json({ exists: false, canAccess: false });
-          return;
-        }
-        const participant = await prisma.channelParticipant.findUnique({
-          where: { channelId_userId: { channelId: conv.channelId, userId } },
-          select: { id: true },
-        });
-        let canAccess = participant !== null;
-        if (!canAccess) {
-          const channel = await prisma.channel.findUnique({
-            where: { id: conv.channelId },
-            select: { visibility: true, workspaceId: true },
-          });
-          if (channel?.visibility === 'PUBLIC') {
-            const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
-            canAccess = !!user?.workspaceId && user.workspaceId === channel.workspaceId;
-          }
-        }
-        res.json({ exists: true, canAccess });
-      } catch (err) {
-        logger.error('[conversation-access] failed', err);
-        res.status(500).json({ error: 'Internal error' });
-      }
-    });
-    this.app.post(
-      '/api/internal/automations/claw-callback/:executionId/:stepName',
-      validateS2SKey,
-      handleClawCallback,
-    );
-    this.app.post(
-      '/api/internal/email/autodraft-callback/:conversationId/:channelId',
-      validateS2SKey,
-      handleAutoDraftCallback,
-    );
-    this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
-    this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
-    this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
-    this.app.use(
-      '/api/internal/sdlc/artifact-versions',
-      validateS2SKey,
-      sdlcArtifactVersionsInternalRoutes
-    );
-    this.app.post(
-      '/api/internal/desk-report/callback/:channelId/:attachmentId',
-      validateS2SKey,
-      handleDeskReportCallback,
-    );
-    // Claw's terminal result for a call AI run (CALL_AI_USE_CLAW_AGENT); the
-    // dispatching worker picks it up from Redis.
-    this.app.post(
-      `${CLAW_CALL_AI_CALLBACK_PATH}/:runKey`,
-      validateS2SKey,
-      handleClawCallAiCallback,
-    );
-    this.app.post(
-      '/api/internal/desk-canvas/callback/:canvasId',
-      validateS2SKey,
-      handleDeskThreadCanvasCallback,
-    );
+    // Internal S2S endpoints (trusted service-to-service calls)
+    // Disabled (Claw)
+    // (The shared-key validator that guarded these routes was removed; service calls use claw/serviceAuth.ts.)
+
+    // Disabled (Claw)
+    // this.app.post('/api/internal/postAsUser', validateS2SKey, (req: Request, res: Response) => {
+      // // Mark this request so ChatController.postMessage persists the message as a
+      // // USER message (posted on behalf of a real human) rather than a BOT message.
+      // // Only the trusted S2S postAsUser route sets this; app-token callers never do.
+      // (req as Request & { isPostAsUser?: boolean }).isPostAsUser = true;
+      // void new ChatController().postMessage(req, res);
+    // });
+    // this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
+      // void new ReactionController().reactAsUser(req, res);
+    // });
+    // this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
+      // try {
+        // const { userId, targetUserId, workspaceId } = (req.body ?? {}) as {
+          // userId?: string; targetUserId?: string; workspaceId?: string;
+        // };
+        // if (!userId || !targetUserId || !workspaceId) {
+          // res.status(400).json({ error: 'userId, targetUserId and workspaceId are required' });
+          // return;
+        // }
+        // const channelId = await unifiedDMService.getOrCreateDirectMessage(userId, targetUserId, workspaceId);
+        // res.json({ channelId });
+      // } catch (err) {
+        // logger.error('[getOrCreateDm] failed', err);
+        // res.status(500).json({ error: 'Internal error' });
+      // }
+    // });
+    // this.app.post('/api/internal/twin-reply-draft', validateS2SKey, async (req: Request, res: Response) => {
+      // try {
+        // const parsed = coerceTwinReplyDraft(req.body);
+        // if ('error' in parsed) {
+          // res.status(400).json({ error: parsed.error });
+          // return;
+        // }
+        // const lookup = destinationNameLookup(parsed.draft);
+        // if (lookup) {
+          // try {
+            // const prisma = DatabaseClient.getInstance();
+            // if (lookup.field === 'destinationChannelName') {
+              // const chan = await prisma.channel.findUnique({ where: { id: lookup.id }, select: { name: true } });
+              // if (chan?.name) parsed.draft.destinationChannelName = chan.name;
+            // } else {
+              // const target = await prisma.user.findUnique({ where: { id: lookup.id }, select: { name: true, displayName: true } });
+              // const name = target?.displayName || target?.name;
+              // if (name) parsed.draft.destinationUserName = name;
+            // }
+          // } catch (err) {
+            // logger.warn('[twin-reply-draft] destination name resolution failed', err);
+          // }
+        // }
+        // await createTwinReplyDraft(parsed.draft);
+        // res.json({ ok: true });
+      // } catch (err) {
+        // logger.error('[twin-reply-draft] create failed', err);
+        // res.status(500).json({ error: 'Internal error' });
+      // }
+    // });
+    // // Conversation-access check for claw: claw sessions are keyed by
+    // // conversationId (not userId), so claw must verify the caller may access a
+    // // conversation before binding its session. Returns whether the conversation
+    // // exists and whether the user is a member of its channel (or it is a PUBLIC
+    // // channel in the user's workspace). Spaces owns this ACL.
+    // this.app.post('/api/internal/conversation-access', validateS2SKey, async (req: Request, res: Response) => {
+      // try {
+        // const { conversationId, userId } = (req.body ?? {}) as { conversationId?: string; userId?: string };
+        // if (!conversationId || !userId) {
+          // res.status(400).json({ error: 'conversationId and userId are required' });
+          // return;
+        // }
+        // const prisma = DatabaseClient.getInstance();
+        // const conv = await prisma.conversation.findUnique({
+          // where: { conversationId },
+          // select: { channelId: true },
+        // });
+        // if (!conv) {
+          // res.json({ exists: false, canAccess: false });
+          // return;
+        // }
+        // const participant = await prisma.channelParticipant.findUnique({
+          // where: { channelId_userId: { channelId: conv.channelId, userId } },
+          // select: { id: true },
+        // });
+        // let canAccess = participant !== null;
+        // if (!canAccess) {
+          // const channel = await prisma.channel.findUnique({
+            // where: { id: conv.channelId },
+            // select: { visibility: true, workspaceId: true },
+          // });
+          // if (channel?.visibility === 'PUBLIC') {
+            // const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
+            // canAccess = !!user?.workspaceId && user.workspaceId === channel.workspaceId;
+          // }
+        // }
+        // res.json({ exists: true, canAccess });
+      // } catch (err) {
+        // logger.error('[conversation-access] failed', err);
+        // res.status(500).json({ error: 'Internal error' });
+      // }
+    // });
+    // this.app.post(
+      // '/api/internal/automations/claw-callback/:executionId/:stepName',
+      // validateS2SKey,
+      // handleClawCallback,
+    // );
+    // this.app.post(
+      // '/api/internal/email/autodraft-callback/:conversationId/:channelId',
+      // validateS2SKey,
+      // handleAutoDraftCallback,
+    // );
+    // this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
+    // this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
+    // this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
+    // this.app.use(
+      // '/api/internal/sdlc/artifact-versions',
+      // validateS2SKey,
+      // sdlcArtifactVersionsInternalRoutes
+    // );
+    // this.app.post(
+      // '/api/internal/desk-report/callback/:channelId/:attachmentId',
+      // validateS2SKey,
+      // handleDeskReportCallback,
+    // );
+    // // Claw's terminal result for a call AI run (CALL_AI_USE_CLAW_AGENT); the
+    // // dispatching worker picks it up from Redis.
+    // this.app.post(
+      // `${CLAW_CALL_AI_CALLBACK_PATH}/:runKey`,
+      // validateS2SKey,
+      // handleClawCallAiCallback,
+    // );
+    // this.app.post(
+      // '/api/internal/desk-canvas/callback/:canvasId',
+      // validateS2SKey,
+      // handleDeskThreadCanvasCallback,
+    // );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);

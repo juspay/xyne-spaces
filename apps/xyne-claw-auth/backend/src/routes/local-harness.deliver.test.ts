@@ -9,6 +9,10 @@ const state = vi.hoisted(() => ({
   relayed: [] as Array<Record<string, unknown>>,
 }));
 
+vi.mock("../lib/service-assertion.js", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  serviceAuthHeaders: () => ({ "x-service-assertion": "test-assertion" }),
+}));
 vi.mock("../config.js", () => ({
   CONFIG: { localHarnessEnabled: true, localHarnessPollTimeoutMs: 1000, internalUrl: "http://auth.local", localHarnessRunTimeoutMs: 600000 },
 }));

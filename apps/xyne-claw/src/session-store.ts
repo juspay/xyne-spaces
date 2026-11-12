@@ -25,6 +25,8 @@ import { indexObjectName, listRunDirs, packRun, packedRunObjectName, readRun, ru
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
+import { clawAuthHeaders } from "./run-credentials.js";
+import { serviceSigningConfigured } from "./service-assertion.js";
 const log = createLogger("session-store");
 
 // Local session dirs are a CACHE, not the system of record: every run flushes
@@ -372,9 +374,9 @@ async function archiveSessionDirToGcs(
     return false;
   }
 
-  if (!SERVER.s2sKey) {
-    metric.count("session_archive", { result: "fail", path: "none", reason: "no_s2s" });
-    log.warn(`[session-store] No S2S key configured — cannot archive ${conversationId} via claw-auth fallback`);
+  if (!serviceSigningConfigured()) {
+    metric.count("session_archive", { result: "fail", path: "none", reason: "no_service_key" });
+    log.warn(`[session-store] No runtime signing key configured — cannot archive ${conversationId} via claw-auth fallback`);
     return false;
   }
 
@@ -398,7 +400,7 @@ async function archiveSessionDirToGcs(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-s2s-key": SERVER.s2sKey,
+        ...clawAuthHeaders("POST", url),
       },
       body: JSON.stringify({ conversationId, files }),
       signal: AbortSignal.timeout(ARCHIVE_TIMEOUT_MS),
@@ -594,9 +596,9 @@ export async function restoreSessionFromArchiveDetailed(conversationId: string):
     return "missing";
   }
 
-  if (!SERVER.s2sKey) {
-    metric.count("session_restore", { result: "fail", path: "none", reason: "no_s2s" });
-    log.error(`session_restore_failed conversationId=${conversationId} reason=gcs_restore_failed_no_s2s`);
+  if (!serviceSigningConfigured()) {
+    metric.count("session_restore", { result: "fail", path: "none", reason: "no_service_key" });
+    log.error(`session_restore_failed conversationId=${conversationId} reason=gcs_restore_failed_no_service_key`);
     return "failed";
   }
 
@@ -605,7 +607,7 @@ export async function restoreSessionFromArchiveDetailed(conversationId: string):
     log.warn(`[session-store] deprecated claw-auth restore fallback used for ${conversationId}`);
     const res = await fetch(url, {
       method: "GET",
-      headers: { "x-s2s-key": SERVER.s2sKey },
+      headers: clawAuthHeaders("GET", url),
       signal: AbortSignal.timeout(ARCHIVE_TIMEOUT_MS),
     });
 

@@ -5,6 +5,7 @@ import { createLogger } from "../logger.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { localHarnessRepository } from "../repositories/localHarnessRepository.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, readServerFallback } from "./local-harness.js";
+import { selfAuthHeaders } from "./internal-call.js";
 
 const log = createLogger("local-harness-approval");
 
@@ -102,7 +103,7 @@ async function fallbackToServerRun(run: LocalHarnessRun, task: string, toolResul
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, { userId: run.userId }),
       },
       body: JSON.stringify(resumeBody),
       signal: AbortSignal.timeout(30_000),

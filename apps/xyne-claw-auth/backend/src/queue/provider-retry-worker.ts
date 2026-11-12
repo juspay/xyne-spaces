@@ -19,9 +19,10 @@ import { errMsg } from "../lib/errors.js";
 import { redisService } from "../redis.js";
 import { CONFIG } from "../config.js";
 import { agentRepository } from "../repositories/index.js";
-import { decryptStoredField } from "../surfaces/spaces/client.js";
 import { buildCapacityRetryFlow } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
+import { getAgentBotAuth, spacesBotUrl } from "../lib/spaces-bot.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 
 const log = createLogger("provider-retry");
 
@@ -159,7 +160,7 @@ async function probe(job: ProviderRetryJob): Promise<"available" | "capacity" | 
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/provider-probe`),
       },
       body: JSON.stringify({
         provider: job.provider,
@@ -187,7 +188,7 @@ async function redispatch(job: ProviderRetryJob): Promise<boolean> {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, r.userId ? { userId: r.userId } : undefined),
       },
       body: JSON.stringify({
         userId: r.userId,
@@ -218,8 +219,9 @@ async function redispatch(job: ProviderRetryJob): Promise<boolean> {
 async function updateCard(job: ProviderRetryJob, phase: "retrying" | "exhausted" | "cancelled"): Promise<void> {
   if (!job.card?.messageId) return;
   const agent = await agentRepository.findBySlug(job.redispatch.agentSlug, job.redispatch.orgId).catch(() => null);
-  if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
-  const appToken = decryptStoredField(agent.spacesAppToken);
+  if (!agent) return;
+  const botAuth = await getAgentBotAuth(agent.id, null);
+  if (!botAuth) return;
   const flow = buildCapacityRetryFlow(job.provider, {
     agentSlug: job.redispatch.agentSlug,
     channelId: job.redispatch.channelId,
@@ -229,13 +231,13 @@ async function updateCard(job: ProviderRetryJob, phase: "retrying" | "exhausted"
     phase,
   });
   try {
-    await fetch(`${CONFIG.spacesInternalUrl}/api/apps/chat/updateMessage`, {
+    await fetch(spacesBotUrl("/chat/updateMessage"), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${botAuth.token}` },
       body: JSON.stringify({
         messageId: job.card.messageId,
         flowJSON: flow,
-        userId: agent.spacesAppUserId,
+        userId: botAuth.botUserId,
         ...(job.card.spacesAppId ? { appId: job.card.spacesAppId } : {}),
         conversationId: job.redispatch.conversationId,
       }),

@@ -1,6 +1,7 @@
 import { redisService } from "../redis.js";
 import { createLogger } from "../logger.js";
 import { spacesAppFetch } from "../surfaces/spaces/client.js";
+import type { BotRef } from "./spaces-bot.js";
 import { errMsg } from "./errors.js";
 
 const log = createLogger("design-share-message");
@@ -11,7 +12,7 @@ export interface DesignShareMessageTarget {
   channelId: string;
   conversationId: string;
   spacesAppUserId: string;
-  appToken: string;
+  bot: BotRef;
 }
 
 interface DesignShareMessageRef {
@@ -66,7 +67,7 @@ async function postShareMessage(target: DesignShareMessageTarget, markdownText: 
       userId: target.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     },
-    target.appToken,
+    target.bot,
   )) as { messageId?: string; data?: { messageId?: string } } | null;
   return resp?.messageId ?? resp?.data?.messageId;
 }
@@ -90,7 +91,7 @@ export async function publishDesignShareMessage(
           userId: target.spacesAppUserId,
           metadata: { contentFormat: "markdown" },
         },
-        target.appToken,
+        target.bot,
       );
       await writeRef(target.conversationId, share.id, { ...ref, revision });
       return "edited";

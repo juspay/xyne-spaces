@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("./service-assertion.js", () => ({ serviceAuthHeaders: (aud: string, method: string) => ({ "x-service-assertion": `test:${aud}:${method}` }), serviceSigningConfigured: () => true }));
 
 const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
@@ -49,7 +50,6 @@ const callTo = (path: string) => calls().find(([url]) => url === `${BASE}/${path
 const bodyOf = (path: string) => JSON.parse(callTo(path)![1].body as string) as Record<string, unknown>;
 
 beforeEach(() => {
-  vi.stubEnv("INTERNAL_S2S_KEY", "k");
   replies = {};
   fetchMock = vi.fn(async (url: string) => {
     const r = replies[url.slice(`${BASE}/`.length)] ?? {};
@@ -73,7 +73,7 @@ describe("executeTwinApprovalDelivery — react", () => {
     const [url, init] = calls()[0]!;
     expect(url).toBe(`${BASE}/reactAsUser`);
     expect(init.method).toBe("POST");
-    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-s2s-key": "k" });
+    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-service-assertion": "test:xyne-spaces:POST" });
     expect(init.body).toBe(JSON.stringify({ messageId: "msg_1", emojiName: "thumbsup", userId: "u_owner" }));
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
@@ -125,7 +125,7 @@ describe("executeTwinApprovalDelivery — reply", () => {
     const [url, init] = calls()[0]!;
     expect(url).toBe(`${BASE}/postAsUser`);
     expect(init.method).toBe("POST");
-    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-s2s-key": "k" });
+    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-service-assertion": "test:xyne-spaces:POST" });
     expect(init.body).toBe(
       JSON.stringify({
         channelId: "ch_origin",
@@ -242,7 +242,7 @@ describe("executeTwinApprovalDelivery — DM destinations", () => {
     expect(calls().map(([url]) => url)).toEqual([`${BASE}/getOrCreateDm`, `${BASE}/postAsUser`]);
     const [, init] = callTo("getOrCreateDm")!;
     expect(init.method).toBe("POST");
-    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-s2s-key": "k" });
+    expect(init.headers).toEqual({ "Content-Type": "application/json", "x-service-assertion": "test:xyne-spaces:POST" });
     expect(init.body).toBe(JSON.stringify({ userId: "u_owner", targetUserId: "u_sender", workspaceId: "ws_1" }));
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(bodyOf("postAsUser")).toMatchObject({ channelId: "ch_dm", userId: "u_owner", workspaceId: "ws_1" });

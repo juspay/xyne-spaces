@@ -15,13 +15,13 @@
  * Why on claw, not claw-auth: the converter pipeline lives here alongside the
  * agent runtime that already depends on it. claw-auth just proxies.
  *
- * S2S-protected via the shared x-s2s-key middleware. Reached through claw-auth's
+ * Only claw-auth may call it (signed service assertion, middleware/auth.ts). Reached through claw-auth's
  * `/attachments/ingest` proxy, never directly by a browser.
  */
 
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthService } from "../middleware/auth.js";
 import { ingestAttachments, type AttachmentInput } from "../attachment-ingest.js";
 import { createLogger } from "../logger.js";
 
@@ -175,7 +175,7 @@ export async function materializeIngestAttachments(raw: unknown): Promise<Attach
 
 attachmentsRouter.post(
   "/internal/attachments/ingest",
-  validateS2SKey,
+  requireClawAuthService,
   async (req: Request, res: Response) => {
     try {
       const attachments = await materializeIngestAttachments(

@@ -14,7 +14,6 @@
  *   - xyne-claw-auth `/run` forwarding strips them before sending to xyne-claw.
  */
 export const PLATFORM_ONLY_CONFIG_KEYS: ReadonlySet<string> = new Set<string>([
-  "XYNE_CLAW_S2S_KEY",
   "XYNE_CLAW_AUTH_URL",
   "CLAW_AUTH_URL",
   "KATA_ROUTER_URL",

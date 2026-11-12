@@ -6,6 +6,7 @@ import { redisService } from "../redis.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { errMsg } from "./errors.js";
 import { resolveFastMode } from "./fast-mode.js";
+import { selfAuthHeaders } from "./internal-call.js";
 
 const log = createLogger("xyne-ai-continuation");
 
@@ -109,7 +110,7 @@ export async function dispatchXyneAiContinuationRun(input: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, { userId: input.userId }),
       },
       body: JSON.stringify({
         userId: input.userId,

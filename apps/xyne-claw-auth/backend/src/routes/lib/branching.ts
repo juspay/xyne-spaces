@@ -11,6 +11,7 @@
  */
 
 import { CONFIG } from "../../config.js";
+import { serviceAuthHeaders } from "../../lib/service-assertion.js";
 
 export type ChatTreeMessage = {
   id: string;
@@ -85,7 +86,7 @@ export function resolvePiConversationIdForPath(
 }
 
 /**
- * POST /clone-session via the internal S2S proxy. Returns true on success.
+ * POST /clone-session via claw-auth's own route (service assertion). Returns true on success.
  * Callers are expected to mark the pre-created assistant placeholder as
  * "failed" and short-circuit the run dispatch on failure.
  */
@@ -94,13 +95,12 @@ export async function cloneSessionViaProxy(args: {
   targetConversationId: string;
   branchMode: BranchMode;
   internalUrl: string;
-  s2sKey?: string;
 }): Promise<{ success: boolean; error?: string; targetExisted?: boolean }> {
   const res = await fetch(`${args.internalUrl}/claw/api/v1/clone-session`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(args.s2sKey ? { "x-s2s-key": args.s2sKey } : {}),
+      ...serviceAuthHeaders("xyne-claw-auth", "POST", `${args.internalUrl}/claw/api/v1/clone-session`),
     },
     body: JSON.stringify({
       sourceConversationId: args.sourceConversationId,
@@ -132,6 +132,5 @@ export function cloneBranchSession(args: {
   return cloneSessionViaProxy({
     ...args,
     internalUrl: CONFIG.internalUrl,
-    ...(CONFIG.xyneClawS2sKey ? { s2sKey: CONFIG.xyneClawS2sKey } : {}),
   });
 }

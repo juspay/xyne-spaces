@@ -3,19 +3,44 @@ import { createServer, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import express from "express";
+import { randomUUID, sign as cryptoSign, type KeyObject } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env["ENCRYPTION_KEY"] = "00".repeat(32);
 
+const keys = await vi.hoisted(async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const pair = () => generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  return { spaces: pair(), runtime: pair(), claw: pair(), stranger: pair() };
+});
+const pem = (k: KeyObject, type: "pkcs8" | "spki") => k.export({ type, format: "pem" } as never).toString();
+
 const state = vi.hoisted(() => ({
   config: {
-    xyneClawS2sKey: "s2s-secret",
     spacesInternalUrl: "http://spaces.local",
     encryptionKey: Buffer.from("00".repeat(32), "hex"),
+    spacesDelegationPublicKeys: {} as Record<string, string>,
+    clawRuntimePublicKeys: {} as Record<string, string>,
+    clawServicePrivateKey: "",
+    clawServiceKeyId: "claw-1",
   },
 }));
+state.config.spacesDelegationPublicKeys = { "spaces-1": pem(keys.spaces.publicKey, "spki") };
+state.config.clawRuntimePublicKeys = { "runtime-1": pem(keys.runtime.publicKey, "spki") };
+state.config.clawServicePrivateKey = pem(keys.claw.privateKey, "pkcs8");
 
 vi.mock("../config.js", () => ({ CONFIG: state.config }));
+vi.mock("../redis.js", () => ({ redisService: { getConnection: () => ({ set: vi.fn(async () => "OK") }) } }));
+
+/** A service assertion as `iss` would sign it for `method path` (aud claw-auth). */
+function assertion(iss: string, method: string, path: string, opts: { key?: KeyObject; kid?: string } = {}): string {
+  const key = opts.key ?? (iss === "xyne-spaces" ? keys.spaces.privateKey : keys.runtime.privateKey);
+  const kid = opts.kid ?? (iss === "xyne-spaces" ? "spaces-1" : "runtime-1");
+  const now = Math.floor(Date.now() / 1000);
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const input = `${b64({ alg: "ES256", typ: "xyne-service+jwt", kid })}.${b64({ iss, aud: "xyne-claw-auth", htm: method, htu: path, iat: now, exp: now + 60, jti: randomUUID() })}`;
+  return `${input}.${cryptoSign("sha256", Buffer.from(input), { key, dsaEncoding: "ieee-p1363" }).toString("base64url")}`;
+}
 
 vi.mock("../db.js", () => ({
   prisma: {
@@ -36,7 +61,7 @@ let baseUrl: string;
 async function startApp(max: number, stripUserId = false): Promise<void> {
   const { createRequesterLimiter } = await import("./rate-limiters.js");
   const app = express();
-  // http/routes.ts deletes an inbound x-user-id for every non-S2S caller, and
+  // http/routes.ts deletes every inbound x-user-id, and
   // the limiter is mounted before any auth middleware puts it back. Tests that
   // set the header directly cannot see that, which is how the key silently
   // degraded to per IP in production.
@@ -75,24 +100,36 @@ describe("createRequesterLimiter", () => {
     expect(statuses.slice(3)).toEqual([429, 429]);
   });
 
-  it("never limits a caller presenting a valid x-s2s-key", async () => {
+  it("never limits a caller presenting a valid service assertion", async () => {
     await startApp(3);
     const statuses: number[] = [];
     for (let i = 0; i < 20; i += 1) {
-      const res = await fetch(`${baseUrl}/ping`, { headers: { "x-s2s-key": "s2s-secret" } });
+      const res = await fetch(`${baseUrl}/ping`, { headers: { "x-service-assertion": assertion("xyne-claw", "GET", "/ping") } });
       statuses.push(res.status);
     }
     expect(statuses.every((s) => s === 200)).toBe(true);
   });
 
-  it("still limits a caller presenting a wrong x-s2s-key", async () => {
+  it("still limits a caller whose assertion is signed by another key, or names another path", async () => {
     await startApp(2);
     const statuses: number[] = [];
     for (let i = 0; i < 4; i += 1) {
-      const res = await fetch(`${baseUrl}/ping`, { headers: { "x-s2s-key": "not-the-key" } });
+      const bad = i % 2 === 0
+        ? assertion("xyne-claw", "GET", "/ping", { key: keys.stranger.privateKey })
+        : assertion("xyne-claw", "GET", "/other");
+      const res = await fetch(`${baseUrl}/ping`, { headers: { "x-service-assertion": bad } });
       statuses.push(res.status);
     }
     expect(statuses).toEqual([200, 200, 429, 429]);
+  });
+
+  it("still limits a caller presenting the old shared-key header", async () => {
+    await startApp(2);
+    const statuses: number[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      statuses.push((await fetch(`${baseUrl}/ping`, { headers: { "x-s2s-key": "anything" } })).status);
+    }
+    expect(statuses).toEqual([200, 200, 429]);
   });
 
   it("keys separately per user id so one user cannot exhaust another", async () => {
@@ -141,7 +178,7 @@ async function startWith(pick: (mod: typeof import("./rate-limiters.js")) => exp
   const mod = await import("./rate-limiters.js");
   const app = express();
   app.use((req, _res, next) => {
-    if (req.headers["x-s2s-key"] !== "s2s-secret") delete req.headers["x-user-id"];
+    delete req.headers["x-user-id"];
     next();
   });
   app.use(pick(mod));
@@ -203,16 +240,14 @@ describe("forged session cookies cannot mint fresh buckets", () => {
   });
 });
 
-describe("isUnlimitedInternalS2S", () => {
-  const INTERNAL_KEY = "internal-secret";
-
+describe("isUnlimitedSpacesCall", () => {
   // Mirrors http/routes.ts: the skip runs inside app.use(BASE), so req.path is base-relative.
   async function startBaseApp(max: number): Promise<void> {
-    const { createRequesterLimiter, isUnlimitedInternalS2S } = await import("./rate-limiters.js");
+    const { createRequesterLimiter, isUnlimitedSpacesCall } = await import("./rate-limiters.js");
     const limiter = createRequesterLimiter({ windowMs: 60_000, max });
     const app = express();
     app.use("/claw/api/v1", (req, res, next) => {
-      if (isUnlimitedInternalS2S(req)) {
+      if (isUnlimitedSpacesCall(req)) {
         next();
         return;
       }
@@ -226,85 +261,86 @@ describe("isUnlimitedInternalS2S", () => {
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   }
 
-  async function statuses(path: string, key: string, n: number): Promise<number[]> {
+  /** n GETs, each with a fresh assertion from `sign(fullPath)` (or none). */
+  async function statuses(path: string, n: number, sign: ((fullPath: string) => string | undefined) | null): Promise<number[]> {
     const out: number[] = [];
     for (let i = 0; i < n; i += 1) {
-      const res = await fetch(`${baseUrl}/claw/api/v1${path}`, { headers: { "x-s2s-key": key } });
+      const full = `/claw/api/v1${path}`;
+      const token = sign ? sign(full) : undefined;
+      const res = await fetch(`${baseUrl}${full}`, { headers: token ? { "x-service-assertion": token } : {} });
       out.push(res.status);
     }
     return out;
   }
+  const fromSpaces = (full: string) => assertion("xyne-spaces", "GET", full);
 
-  beforeEach(() => {
-    process.env["INTERNAL_S2S_KEY"] = INTERNAL_KEY;
-  });
-
-  afterEach(() => {
-    delete process.env["INTERNAL_S2S_KEY"];
-  });
-
-  it("never limits the agent check with a valid INTERNAL_S2S_KEY", async () => {
+  it("never limits the agent check called by Spaces", async () => {
     await startBaseApp(2);
-    const got = await statuses("/internal/agents/by-spaces-app/app-1", INTERNAL_KEY, 10);
+    const got = await statuses("/internal/agents/by-spaces-app/app-1", 10, fromSpaces);
     expect(got.every((s) => s === 200)).toBe(true);
   });
 
-  it("still limits the agent check with a wrong key", async () => {
+  it("still limits the agent check with an assertion signed by another key", async () => {
     await startBaseApp(2);
-    expect(await statuses("/internal/agents/by-spaces-app/app-1", "not-the-key", 3)).toEqual([200, 200, 429]);
+    expect(await statuses("/internal/agents/by-spaces-app/app-1", 3, (f) => assertion("xyne-spaces", "GET", f, { key: keys.stranger.privateKey }))).toEqual([200, 200, 429]);
   });
 
-  it("still limits other internal routes with a valid INTERNAL_S2S_KEY", async () => {
+  it("still limits other internal routes called by Spaces", async () => {
     await startBaseApp(2);
-    expect(await statuses("/internal/app-connectors/tools", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+    expect(await statuses("/internal/app-connectors/tools", 3, fromSpaces)).toEqual([200, 200, 429]);
   });
 
   it("does not match a prefix that only starts with the same letters", async () => {
     await startBaseApp(2);
-    expect(await statuses("/internal/agentsx", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+    expect(await statuses("/internal/agentsx", 3, fromSpaces)).toEqual([200, 200, 429]);
   });
 
-  it("never limits the bare /internal/agents path with a valid INTERNAL_S2S_KEY", async () => {
+  it("never limits the bare /internal/agents path called by Spaces", async () => {
     await startBaseApp(2);
-    const got = await statuses("/internal/agents", INTERNAL_KEY, 5);
+    const got = await statuses("/internal/agents", 5, fromSpaces);
     expect(got.every((s) => s === 200)).toBe(true);
   });
 
   // Express routes case-insensitively, so this still reaches the agents router; it must stay limited.
   it("still limits a differently-cased path", async () => {
     await startBaseApp(2);
-    expect(await statuses("/INTERNAL/AGENTS/by-spaces-app/app-1", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+    expect(await statuses("/INTERNAL/AGENTS/by-spaces-app/app-1", 3, fromSpaces)).toEqual([200, 200, 429]);
   });
 
-  it("still limits a duplicated x-s2s-key header", async () => {
+  it("still limits a duplicated assertion header", async () => {
     await startBaseApp(2);
     const out: number[] = [];
     for (let i = 0; i < 3; i += 1) {
+      const full = "/claw/api/v1/internal/agents/by-spaces-app/app-1";
       const headers = new Headers();
-      headers.append("x-s2s-key", INTERNAL_KEY);
-      headers.append("x-s2s-key", INTERNAL_KEY);
-      out.push((await fetch(`${baseUrl}/claw/api/v1/internal/agents/by-spaces-app/app-1`, { headers })).status);
+      headers.append("x-service-assertion", fromSpaces(full));
+      headers.append("x-service-assertion", fromSpaces(full));
+      out.push((await fetch(`${baseUrl}${full}`, { headers })).status);
     }
     expect(out).toEqual([200, 200, 429]);
   });
 
-  it("fails closed when INTERNAL_S2S_KEY is unset", async () => {
-    delete process.env["INTERNAL_S2S_KEY"];
+  it("fails closed with no assertion, or the old shared-key header", async () => {
     await startBaseApp(2);
-    expect(await statuses("/internal/agents/by-spaces-app/app-1", "", 3)).toEqual([200, 200, 429]);
+    expect(await statuses("/internal/agents/by-spaces-app/app-1", 3, null)).toEqual([200, 200, 429]);
   });
 
-  it("fails closed for the old key once INTERNAL_S2S_KEY is unset", async () => {
-    delete process.env["INTERNAL_S2S_KEY"];
-    await startBaseApp(2);
-    expect(await statuses("/internal/agents/by-spaces-app/app-1", INTERNAL_KEY, 3)).toEqual([200, 200, 429]);
+  it("fails closed when Spaces' public key is not configured", async () => {
+    const saved = state.config.spacesDelegationPublicKeys;
+    state.config.spacesDelegationPublicKeys = {};
+    try {
+      await startBaseApp(2);
+      expect(await statuses("/internal/agents/by-spaces-app/app-1", 3, fromSpaces)).toEqual([200, 200, 429]);
+    } finally {
+      state.config.spacesDelegationPublicKeys = saved;
+    }
   });
 
   // The cases above mirror the mount; this pins the real one in http/routes.ts.
   it("is wired into routes.ts ahead of apiLimiter", () => {
     const source = readFileSync(fileURLToPath(new URL("../http/routes.ts", import.meta.url)), "utf8");
     const mount = source.slice(source.indexOf("app.use(BASE, (req: Request, res: Response, next: NextFunction)"));
-    const skip = mount.indexOf("if (isUnlimitedInternalS2S(req))");
+    const skip = mount.indexOf("if (isUnlimitedSpacesCall(req))");
     const limiter = mount.indexOf("apiLimiter(req, res, next)");
     expect(skip).toBeGreaterThan(0);
     expect(limiter).toBeGreaterThan(skip);

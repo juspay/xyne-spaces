@@ -7,6 +7,7 @@
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { errMsg } from "../lib/errors.js";
+import { serviceAuthHeaders } from "../lib/service-assertion.js";
 
 const log = createLogger("agent-proactivity-scope");
 
@@ -24,9 +25,10 @@ export interface BotUser {
 
 async function ask<T>(path: string, body: unknown, fallback: T): Promise<T> {
   try {
-    const res = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/proactivity/${path}`, {
+    const url = `${CONFIG.spacesInternalUrl}/api/internal/proactivity/${path}`;
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": process.env["INTERNAL_S2S_KEY"] ?? "" },
+      headers: { "Content-Type": "application/json", ...serviceAuthHeaders("xyne-spaces", "POST", url) },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5_000),
     });

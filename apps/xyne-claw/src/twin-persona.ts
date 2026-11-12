@@ -15,6 +15,7 @@ import type { XorAnswer, XorQuestion } from "./xor.js";
 import { runJudgeSite, type JudgeSiteDeps } from "./judge-site.js";
 import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("memory");
 
@@ -45,10 +46,11 @@ export async function fetchAgentPromptFiles(
   if (!SERVER.authServiceUrl || !userId) return [];
   try {
     const qs = new URLSearchParams({ agentSlug, userId, ...(opts.candidates ? { candidates: "1" } : {}) });
+    const url = `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/memory/agent-prompt-files?${qs.toString()}`;
     const res = await fetch(
-      `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/memory/agent-prompt-files?${qs.toString()}`,
+      url,
       {
-        headers: SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey, "x-user-id": userId } : {},
+        headers: clawAuthHeaders("GET", url),
         signal: AbortSignal.timeout(5_000),
       },
     );

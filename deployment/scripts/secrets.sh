@@ -77,6 +77,24 @@ hex64() {
   openssl rand -hex 32
 }
 
+# One P-256 key pair per service (Spaces, claw-auth, claw runtime). Each private
+# key goes only to its own service; the others get the public key. Printed as a
+# single line with \n escapes so it fits an HCL string.
+keypair() {
+  if [ "$DRY_RUN" = "1" ]; then
+    KP_PRIVATE="<pkcs8 p-256 private key>"
+    KP_PUBLIC="<spki public key>"
+    return
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "$tmp" 2>/dev/null \
+    || die "openssl could not generate a P-256 key"
+  KP_PRIVATE="$(awk '{printf "%s\\n", $0}' "$tmp")"
+  KP_PUBLIC="$(openssl ec -in "$tmp" -pubout 2>/dev/null | awk '{printf "%s\\n", $0}')"
+  rm -f "$tmp"
+}
+
 container_runtime() {
   if need_cmd docker && docker info >/dev/null 2>&1; then
     printf 'docker'
@@ -234,13 +252,21 @@ platform_secrets() {
   fi
   google_client
 
+  keypair; spaces_priv="$KP_PRIVATE"; spaces_pub="$KP_PUBLIC"
+  keypair; claw_auth_priv="$KP_PRIVATE"; claw_auth_pub="$KP_PUBLIC"
+  keypair; runtime_priv="$KP_PRIVATE"; runtime_pub="$KP_PUBLIC"
+
   content="app_secrets = {
   jwt_secret                  = \"$(rand 48)\"
   zero_auth_secret            = \"$(rand 48)\"
   zero_admin_password         = \"$(rand 24)\"
   encryption_key              = \"$(hex64)\"
-  internal_s2s_key            = \"$(rand 48)\"
-  claw_s2s_key                = \"$(rand 48)\"
+  spaces_signing_private_key       = \"$spaces_priv\"
+  spaces_signing_public_key        = \"$spaces_pub\"
+  claw_auth_signing_private_key    = \"$claw_auth_priv\"
+  claw_auth_signing_public_key     = \"$claw_auth_pub\"
+  claw_runtime_signing_private_key = \"$runtime_priv\"
+  claw_runtime_signing_public_key  = \"$runtime_pub\"
   claw_auth_encryption_key    = \"$(hex64)\"
   ysweet_auth                 = \"$ysweet_auth\"
   ysweet_server_token         = \"$ysweet_token\"

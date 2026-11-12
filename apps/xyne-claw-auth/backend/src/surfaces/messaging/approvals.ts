@@ -22,7 +22,7 @@ import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
 import { getSpacesPostTarget, looksLikeMemberIdList, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
 import { mentionShorthandToText } from "../../lib/mention-transform.js";
-import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
+import { resolveAgentSpacesAuth, agentSpacesAuthContext } from "../spaces/user-auth.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
 const log = createLogger("channel-approvals");
@@ -234,15 +234,25 @@ function parseSignedAction(raw: unknown): SignedWriteAction | null {
   };
 }
 
-async function lookupPostTarget(action: SignedWriteAction): Promise<SpacesPostTarget | null> {
-  const auth = await getSpacesAuthForUser(action.userId, "write-action").catch(() => null);
+async function lookupPostTarget(
+  action: SignedWriteAction,
+  agent: { clawAgentId?: string | undefined; workspaceId?: string | undefined },
+): Promise<SpacesPostTarget | null> {
+  // The run's agent acting for the user; no agent / no permission → no
+  // preview (the card falls back to the bare description).
+  const auth = await resolveAgentSpacesAuth({
+    clawAgentId: agent.clawAgentId,
+    userId: action.userId,
+    workspaceId: agent.workspaceId ?? null,
+    caller: "write-action",
+  });
   if (!auth) return null;
   return getSpacesPostTarget(
     {
       ...(str(action.params["channelId"]) ? { channelId: str(action.params["channelId"]) } : {}),
       ...(str(action.params["conversationId"]) ? { conversationId: str(action.params["conversationId"]) } : {}),
     },
-    auth,
+    agentSpacesAuthContext(auth),
     action.userId,
   ).catch(() => null);
 }
@@ -258,6 +268,10 @@ export async function enqueueApprovalCards(input: {
   pendingActions: unknown[];
   conversationId?: string;
   agentSlug?: string;
+  /** The run's Claw agent (prisma.agent.id) and Spaces workspace — used to
+   *  look up the post target for a `user-send-message` card preview. */
+  clawAgentId?: string;
+  workspaceId?: string;
 }): Promise<void> {
   for (const raw of input.pendingActions) {
     const action = parseSignedAction(raw);
@@ -281,7 +295,7 @@ export async function enqueueApprovalCards(input: {
     ];
     await parkOptions(input.target.connectedSurfaceId, parked);
 
-    const postTarget = action.tool === "user-send-message" ? await lookupPostTarget(action) : null;
+    const postTarget = action.tool === "user-send-message" ? await lookupPostTarget(action, { clawAgentId: input.clawAgentId, workspaceId: input.workspaceId }) : null;
     const card: InteractiveCard = {
       kind: "buttons",
       header: "Approval needed",

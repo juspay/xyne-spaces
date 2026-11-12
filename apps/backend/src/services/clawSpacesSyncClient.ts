@@ -1,5 +1,6 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { serviceAuthHeaders } from '@/claw/serviceAuth';
 
 export interface ClawSyncOrgPayload {
   spacesOrgId: string;
@@ -74,11 +75,6 @@ class ClawSpacesSyncClient {
       });
     }
 
-    if (!config.aiProvisioning.s2sKey) {
-      throw new ClawSpacesSyncError('XYNE_CLAW_S2S_KEY is not configured', {
-        retryable: false,
-      });
-    }
 
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -87,11 +83,12 @@ class ClawSpacesSyncClient {
     );
 
     try {
-      const response = await fetch(`${baseUrl}/claw/api/v1/internal/spaces-sync${path}`, {
+      const url = `${baseUrl}/claw/api/v1/internal/spaces-sync${path}`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-s2s-key': config.aiProvisioning.s2sKey,
+          ...serviceAuthHeaders('xyne-claw-auth', 'POST', url),
         },
         body: JSON.stringify(payload),
         signal: controller.signal,

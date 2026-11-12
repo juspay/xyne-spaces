@@ -103,6 +103,7 @@ export function applyTrustedMcpBindings(
 }
 
 import type { DeploymentConnectorMatch, DeploymentSearchResult, DeploymentToolMatch, UnresolvedConfiguredServer } from "./tool-catalog.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 export class McpAuthServiceError extends Error {
   readonly status: number;
@@ -145,7 +146,7 @@ async function authFetchEnvelope<T, Extra extends object = Record<string, unknow
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${sessionToken}`,
-      "x-s2s-key": SERVER.s2sKey,
+      ...clawAuthHeaders(init?.method ?? "GET", url, sessionToken),
       ...init?.headers,
     },
   } as unknown as RequestInit);

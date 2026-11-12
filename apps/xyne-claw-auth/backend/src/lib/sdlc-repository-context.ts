@@ -4,11 +4,12 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
-import { getSpacesAuthForUser } from "./spaces-db.js";
+import { resolveSpacesAccess, type SpacesAccess } from "../surfaces/spaces/user-auth.js";
 import { spacesUserIdForClawUser } from "./users-jit.js";
 import { SpacesApiError, spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
 import { agentRequestRepository } from "../repositories/index.js";
 import { writeAuditLog } from "./audit.js";
+import { serviceAuthHeaders, serviceSigningConfigured } from "./service-assertion.js";
 
 const log = createLogger("sdlc-repository-context");
 
@@ -25,6 +26,8 @@ export interface ResearchRepositoryContext {
   id?: unknown;
 }
 
+export type SdlcSpacesAccess = SpacesAccess;
+
 export type SdlcRepositoryResolution =
   | { ok: true; repository?: SdlcRepositoryContext }
   | { ok: false; status: number; error: string };
@@ -34,12 +37,13 @@ export async function resolveSdlcRepositoryForUser(
   researchContext: ResearchRepositoryContext | null | undefined,
   conversationId: string,
   workspaceId?: string,
+  access: SdlcSpacesAccess = {},
 ): Promise<SdlcRepositoryResolution> {
   if (researchContext?.type !== "repository" || typeof researchContext.id !== "string" || !researchContext.id.trim()) {
     return { ok: true };
   }
 
-  const auth = await getSpacesAuthForUser(userId, "agent-chat", workspaceId);
+  const auth = await resolveSpacesAccess(userId, workspaceId, access, "agent-chat");
   if (!auth) {
     return { ok: false, status: 401, error: "Spaces credentials are required to resolve the SDLC repository" };
   }
@@ -48,7 +52,7 @@ export async function resolveSdlcRepositoryForUser(
     const response = await spacesFetch(
       `/api/sdlc/repositories/${encodeURIComponent(researchContext.id.trim())}/context?conversationId=${encodeURIComponent(conversationId)}`,
       undefined,
-      { ...auth, baseUrl: CONFIG.spacesInternalUrl },
+      auth,
     ) as {
       success?: boolean;
       context?: {
@@ -102,9 +106,10 @@ export async function resolveSdlcHubContextForUser(
   workspaceId?: string,
   threadConversationId?: string,
   onFailure?: (reason: string) => void,
+  access: SdlcSpacesAccess = {},
 ): Promise<Record<string, unknown> | undefined> {
   if (!channelId || !conversationId) return undefined;
-  const auth = await getSpacesAuthForUser(userId, "agent-chat", workspaceId);
+  const auth = await resolveSpacesAccess(userId, workspaceId, access, "agent-chat");
   if (!auth) return undefined;
   try {
     const response = (await spacesFetch(
@@ -113,7 +118,7 @@ export async function resolveSdlcHubContextForUser(
       }`,
       // Runs at the start of every channel run, which the 30 s default would stall.
       { signal: AbortSignal.timeout(5_000) },
-      { ...auth, baseUrl: CONFIG.spacesInternalUrl },
+      auth,
     )) as { context?: Record<string, unknown> | null };
     return response.context ?? undefined;
   } catch (err) {
@@ -128,9 +133,10 @@ export async function resolveSdlcHubContextForUser(
   }
 }
 
-function s2sAuth(): { s2sKey: string; baseUrl: string } | undefined {
-  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  return s2sKey ? { s2sKey, baseUrl: CONFIG.spacesInternalUrl } : undefined;
+/** claw-auth calling Spaces' internal SDLC routes as itself (a signed service assertion per request). */
+function spacesServiceAuth(): { serviceSigner: (method: string, path: string) => Record<string, string>; baseUrl: string } | undefined {
+  if (!serviceSigningConfigured()) return undefined;
+  return { serviceSigner: (method, path) => serviceAuthHeaders("xyne-spaces", method, path), baseUrl: CONFIG.spacesInternalUrl };
 }
 
 export interface SdlcHubKnowledge {
@@ -143,7 +149,7 @@ export interface SdlcHubKnowledge {
 }
 
 export async function loadSdlcHubKnowledge(channelId: string, userId: string): Promise<SdlcHubKnowledge | undefined> {
-  const auth = s2sAuth();
+  const auth = spacesServiceAuth();
   if (!auth) return undefined;
   const response = (await spacesFetch(
     "/api/internal/sdlc/agent/hub-knowledge",
@@ -234,7 +240,7 @@ export async function loadHubRunContext(
  * no hub run loads it. A non-admin's skill, or one made outside a hub, stays personal with no request.
  */
 export async function linkSdlcHubSkill(channelId: string, userId: string, skillId: string): Promise<void> {
-  const auth = s2sAuth();
+  const auth = spacesServiceAuth();
   if (!auth) return;
   // Spaces checks hub membership by the Spaces user id. Callers pass it when they have it; a Claw id is converted.
   const actorUserId = await spacesUserIdForClawUser(userId);
@@ -269,7 +275,7 @@ export async function linkSdlcHubSkill(channelId: string, userId: string, skillI
 
 /** Tells Spaces an agent got its bot user, so an SDLC hub it was created in adds it right away. */
 export async function notifySdlcAgentRegistered(agentId: string, botUserId: string): Promise<void> {
-  const auth = s2sAuth();
+  const auth = spacesServiceAuth();
   if (!auth) return;
   await spacesFetch(
     "/api/internal/sdlc/agent/registered",

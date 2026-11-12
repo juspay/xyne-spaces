@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("./internal-call.js", () => ({ serviceCallsConfigured: () => true, runtimeAuthHeaders: (method: string) => ({ "x-service-assertion": `test:xyne-claw:${method}` }), selfAuthHeaders: (method: string, _url: string, user?: { userId?: string }) => ({ "x-service-assertion": `test:xyne-claw-auth:${method}`, ...(user?.userId ? { "x-session-token": `run:${user.userId}` } : {}) }), selfCallRunToken: (u: { userId: string }) => `run:${u.userId}` }));
 import type { LocalHarnessRun } from "@prisma/client";
 
 /**
@@ -47,7 +48,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("../config.js", () => ({
-  CONFIG: { internalUrl: "http://auth.local", xyneClawS2sKey: "s2s-secret" },
+  CONFIG: { internalUrl: "http://auth.local" },
 }));
 
 vi.mock("../logger.js", () => ({
@@ -215,7 +216,7 @@ describe("awaitTurnHandoff", () => {
     );
     expect(state.fetches[0]!.url).not.toContain(SELF);
     // The interrupt is posted as the interrupted run's OWNER, not the new caller.
-    expect(state.fetches[0]!.headers["x-user-id"]).toBe("owner-prev");
+    expect(state.fetches[0]!.headers["x-session-token"]).toBe("run:owner-prev");
     expect(labels).toEqual([TURN_HANDOFF_LABEL]);
   });
 
@@ -341,8 +342,9 @@ describe("awaitTurnHandoff", () => {
     expect(state.fetches[0]!.url).toBe(
       "http://auth.local/claw/api/v1/internal/run/sess-remote/interrupt-with-reply",
     );
-    expect(state.fetches[0]!.headers["x-s2s-key"]).toBe("s2s-secret");
-    expect(state.fetches[0]!.headers["x-user-id"]).toBe("owner-1");
+    expect(state.fetches[0]!.headers["x-service-assertion"]).toBe("test:xyne-claw-auth:POST");
+    expect(state.fetches[0]!.headers["x-session-token"]).toBe("run:owner-1");
+    expect(state.fetches[0]!.headers["x-user-id"]).toBeUndefined();
   });
 
   it("cancels the remote run when it never wraps up", async () => {

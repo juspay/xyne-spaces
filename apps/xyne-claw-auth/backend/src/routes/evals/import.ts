@@ -5,7 +5,9 @@
 import { Router, type Request, type Response } from "express";
 import { evalRepository } from "../../repositories/index.js";
 import { getRequesterId } from "../../middleware/agent-acl.js";
-import { getSpacesAuthForUser, requestWorkspaceHint } from "../../lib/spaces-db.js";
+import { requestWorkspaceHint } from "../../lib/spaces-db.js";
+import type { SpacesAuthContext } from "../../mcp/servers/xyne-spaces-client.js";
+import { CONFIG } from "../../config.js";
 import { listSpacesChannels, type ImportKind } from "../../services/spacesEvalImport.js";
 import {
   enqueueEvalImport,
@@ -15,9 +17,38 @@ import {
 } from "../../queue/eval-import-queue.js";
 
 import { createLogger } from "../../logger.js";
+import { primeAgentAuthFromCookie } from "../../lib/spaces-agent-client.js";
+
+/**
+ * The user is starting an import in their browser: a live interaction. Prime
+ * the evals agent from their cookie so the background job can read Spaces for
+ * them for the next 2 hours (lib/spaces-agent-client.ts). No-op when the evals
+ * agent isn't configured or the request has no verified Spaces identity.
+ */
+async function primeEvalImportAgent(req: Request): Promise<void> {
+  const cookie = req.headers.cookie;
+  const spacesUserId = req.headers["x-spaces-user-id"];
+  const workspaceId = req.headers["x-spaces-workspace-id"];
+  if (!CONFIG.evalImportAgentId || typeof cookie !== "string" || !cookie) return;
+  if (typeof spacesUserId !== "string" || !spacesUserId || typeof workspaceId !== "string" || !workspaceId) return;
+  await primeAgentAuthFromCookie({ cookie, workspaceId, clawAgentId: CONFIG.evalImportAgentId, spacesUserId });
+}
+
 const log = createLogger("import");
 
 const router = Router();
+
+/**
+ * Spaces auth for a request where the user is present in their browser: forward
+ * THEIR Spaces cookie from this request (Spaces validates it). Null when the
+ * request carries no cookie — callers treat that as "no Spaces session".
+ */
+function spacesAuthFromRequest(req: Request): SpacesAuthContext | null {
+  const cookie = req.headers.cookie;
+  if (typeof cookie !== "string" || !cookie.trim()) return null;
+  const workspaceId = requestWorkspaceHint(req);
+  return { cookie, baseUrl: CONFIG.spacesInternalUrl, ...(workspaceId ? { workspaceId } : {}) };
+}
 
 // GET /evals/spaces-channels — list the user's Spaces channels for the import
 // picker (ACL-scoped). Returns [] if the user has no active Spaces session.
@@ -28,16 +59,12 @@ router.get("/spaces-channels", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const spacesAuth = await getSpacesAuthForUser(userId, "unknown", requestWorkspaceHint(req));
+    const spacesAuth = spacesAuthFromRequest(req);
     if (!spacesAuth) {
       res.json({ success: true, channels: [], spacesAuth: false });
       return;
     }
-    const channels = await listSpacesChannels({
-      token: spacesAuth.token,
-      sessionId: spacesAuth.sessionId,
-      workspaceId: spacesAuth.workspaceId,
-    });
+    const channels = await listSpacesChannels(spacesAuth);
     res.json({ success: true, channels, spacesAuth: true });
   } catch (err) {
     log.error("[evals] spaces-channels error:", err);
@@ -86,11 +113,11 @@ router.post("/folders/:id/import-from-spaces", async (req: Request<{ id: string 
     return;
   }
   // Fail fast if there's no Spaces session — better than a job that errors later.
-  const spacesAuth = await getSpacesAuthForUser(userId, "scheduled-job", requestWorkspaceHint(req));
+  const spacesAuth = spacesAuthFromRequest(req);
   if (!spacesAuth) {
     res.status(400).json({
       success: false,
-      error: "No active Spaces session for this user (log into Spaces, or SPACES_DB_URL is not configured).",
+      error: "No active Spaces session on this request (log into Spaces).",
     });
     return;
   }
@@ -110,6 +137,7 @@ router.post("/folders/:id/import-from-spaces", async (req: Request<{ id: string 
       data.from = from.toISOString();
       data.to = to.toISOString();
     }
+    await primeEvalImportAgent(req);
     const jobId = await enqueueEvalImport(data);
     res.json({ success: true, jobId });
   } catch (err) {
@@ -142,21 +170,17 @@ router.post("/import-from-channel", async (req: Request, res: Response) => {
     res.status(401).json({ success: false, error: "Unauthenticated" });
     return;
   }
-  const spacesAuth = await getSpacesAuthForUser(userId, "scheduled-job", requestWorkspaceHint(req));
+  const spacesAuth = spacesAuthFromRequest(req);
   if (!spacesAuth) {
     res.status(400).json({
       success: false,
-      error: "No active Spaces session for this user (log into Spaces, or SPACES_DB_URL is not configured).",
+      error: "No active Spaces session on this request (log into Spaces).",
     });
     return;
   }
   try {
     // Resolve the channel's display name for the folder label (best-effort).
-    const channels = await listSpacesChannels({
-      token: spacesAuth.token,
-      sessionId: spacesAuth.sessionId,
-      workspaceId: spacesAuth.workspaceId,
-    });
+    const channels = await listSpacesChannels(spacesAuth);
     const name = channels.find((c) => c.id === channelId)?.name?.trim() || channelId;
     const folder = await evalRepository.findOrCreateChannelFolder({ channelId, name, sourceKind: kind, createdBy: userId });
 
@@ -171,6 +195,7 @@ router.post("/import-from-channel", async (req: Request, res: Response) => {
       ...(model ? { model } : {}),
       ...(requestWorkspaceHint(req) ? { workspaceId: requestWorkspaceHint(req) } : {}),
     };
+    await primeEvalImportAgent(req);
     const jobId = await enqueueEvalImport(data);
     res.json({ success: true, jobId, folderId: folder.id, folderName: folder.name });
   } catch (err) {

@@ -4,7 +4,6 @@ import type { AddressInfo } from "node:net";
 import {
   SafeFetchError,
   assertSafeOutboundUrl,
-  attachS2sKey,
   configOrigins,
   internalFetch,
   isConfigOrigin,
@@ -264,17 +263,17 @@ describe("safeFetch", () => {
         headers: {
           authorization: "Bearer secret",
           cookie: "xyne_session=abc",
-          "x-s2s-key": "fleet-key",
+          "x-service-assertion": "assertion",
         },
       },
       devLoopback,
     );
     const body = (await res.json()) as { headers: Record<string, string> };
     expect(body.headers["authorization"]).toBe("Bearer secret");
-    expect(body.headers["x-s2s-key"]).toBe("fleet-key");
+    expect(body.headers["x-service-assertion"]).toBe("assertion");
   });
 
-  it("strips Authorization, Cookie and x-s2s-key on a cross-origin redirect", async () => {
+  it("strips Authorization, Cookie and x-service-assertion on a cross-origin redirect", async () => {
     let caught: unknown;
     try {
       await safeFetch(
@@ -283,7 +282,7 @@ describe("safeFetch", () => {
           headers: {
             authorization: "Bearer secret",
             cookie: "xyne_session=abc",
-            "x-s2s-key": "fleet-key",
+            "x-service-assertion": "assertion",
             "x-session-token": "tok",
             "x-api-key": "k",
             "x-trace-id": "keep-me",
@@ -345,19 +344,6 @@ describe("config-origin policy", () => {
     expect(isConfigOrigin("http://evil.example.com/")).toBe(false);
     expect(isConfigOrigin("http://xyne-backend.default.svc.cluster.local/")).toBe(false);
     expect(isConfigOrigin("not a url")).toBe(false);
-  });
-
-  it("attachS2sKey attaches only for config origins", () => {
-    const origin = configOrigins()[0]!;
-    expect(attachS2sKey({ "Content-Type": "application/json" }, `${origin}/x`, "fleet-key")).toEqual({
-      "Content-Type": "application/json",
-      "x-s2s-key": "fleet-key",
-    });
-    expect(attachS2sKey({ "Content-Type": "application/json" }, "http://10.1.2.3:6379/", "fleet-key")).toEqual({
-      "Content-Type": "application/json",
-    });
-    expect(attachS2sKey({}, "http://attacker.example.com/", "fleet-key")).toEqual({});
-    expect(attachS2sKey({}, `${origin}/x`, "")).toEqual({});
   });
 
   it("internalFetch refuses a non-config origin", async () => {

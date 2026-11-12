@@ -33,7 +33,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { PATHS, SERVER } from "../config.js";
-import { validateS2SKey } from "../middleware/auth.js";
+import { requireClawAuthOrRuntime, requireClawAuthService } from "../middleware/auth.js";
 import { restoreSessionFromArchive } from "../session-store.js";
 import {
   gcsDirectConfigured,
@@ -70,6 +70,7 @@ import {
 
 import { createLogger } from "../logger.js";
 import { currentOwnerPod, podAddress, podName } from "../run-ownership.js";
+import { serviceAuthHeaders } from "../service-assertion.js";
 const log = createLogger("debug");
 
 const DEBUG_FORWARDED_HEADER = "x-debug-forwarded-from";
@@ -102,8 +103,10 @@ async function forwardToOwnerPod(req: Request, res: Response, sessionId: string)
     return false;
   }
   try {
-    const upstream = await fetch(`${base}${req.originalUrl}`, {
-      headers: { "x-s2s-key": SERVER.s2sKey, [DEBUG_FORWARDED_HEADER]: podName() },
+    const forwardUrl = `${base}${req.originalUrl}`;
+    const upstream = await fetch(forwardUrl, {
+      // Signed as the runtime, for the runtime: the owner pod accepts it on this route only.
+      headers: { ...serviceAuthHeaders("GET", forwardUrl, { aud: "xyne-claw" }), [DEBUG_FORWARDED_HEADER]: podName() },
       redirect: "error",
       signal: AbortSignal.timeout(DEBUG_FORWARD_TIMEOUT_MS),
     });
@@ -792,7 +795,7 @@ function fail(res: Response, status: number, error: string, code: "invalid_id" |
   res.status(status).json({ success: false, error, code, ...(extra ?? {}) });
 }
 
-router.get("/internal/sessions/:convId/debug", validateS2SKey, async (req: Request<{ convId: string }>, res: Response) => {
+router.get("/internal/sessions/:convId/debug", requireClawAuthOrRuntime, async (req: Request<{ convId: string }>, res: Response) => {
   try {
     const { convId } = req.params;
     const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
@@ -1018,7 +1021,7 @@ const BLOB_HASH_RE = /^[a-f0-9]{8,64}$/;
 
 router.get(
   "/internal/sessions/:convId/debug/blob/:hash",
-  validateS2SKey,
+  requireClawAuthService,
   async (req: Request<{ convId: string; hash: string }>, res: Response) => {
     try {
       const { convId, hash } = req.params;
@@ -1076,7 +1079,7 @@ router.get(
   },
 );
 
-router.get("/debug/loop-watchdog", validateS2SKey, async (req: Request, res: Response) => {
+router.get("/debug/loop-watchdog", requireClawAuthService, async (req: Request, res: Response) => {
   try {
     const dir = watchdogDir();
     const requested = typeof req.query["file"] === "string" ? req.query["file"] : undefined;

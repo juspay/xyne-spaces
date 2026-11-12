@@ -6,10 +6,15 @@ const state = vi.hoisted(() => ({
   toolResponse: {} as Record<string, unknown>,
 }));
 
+vi.mock("./service-assertion.js", () => ({
+  serviceAuthHeaders: (aud: string, method: string) => ({ "x-service-assertion": `test:${aud}:${method}` }),
+}));
+vi.mock("./internal-service-auth.js", () => ({
+  internalServiceHeaders: (method: string) => ({ "x-service-assertion": `test:internal:${method}` }),
+}));
 vi.mock("../config.js", () => ({
   CONFIG: {
     internalUrl: "http://auth.local",
-    xyneClawS2sKey: "s2s",
     localHarnessRunTimeoutMs: 600000,
     localHarnessEnabled: true,
   },

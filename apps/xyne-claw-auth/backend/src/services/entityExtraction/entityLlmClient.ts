@@ -19,6 +19,7 @@ import {
   type JsonCompletionRequest,
   type LlmClient,
 } from "./pipeline/index.js";
+import { runtimeAuthHeaders, serviceCallsConfigured } from "../../lib/internal-call.js";
 
 const logger = createLogger("entity-llm-client", createTraceId());
 
@@ -35,14 +36,14 @@ interface ChatMessage {
 
 /** One raw completion via claw's S2S endpoint. */
 async function completeViaClaw(messages: ChatMessage[], purpose?: string): Promise<string> {
-  if (!CONFIG.xyneClawS2sKey) {
-    throw new Error("XYNE_CLAW_S2S_KEY not set — entity extraction cannot reach claw");
+  if (!serviceCallsConfigured()) {
+    throw new Error("CLAW_SERVICE_PRIVATE_KEY not set — entity extraction cannot reach claw");
   }
 
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/entity-llm/complete`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+    headers: { "Content-Type": "application/json", ...runtimeAuthHeaders("POST", url) },
     body: JSON.stringify({ messages, ...(purpose ? { purpose } : {}) }),
     signal: AbortSignal.timeout(CLAW_TIMEOUT_MS),
   });

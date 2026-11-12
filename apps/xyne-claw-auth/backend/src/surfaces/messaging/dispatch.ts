@@ -14,6 +14,7 @@ import { channelAgentTools } from "./agent-tools.js";
 import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
 import { channelConversationId } from "./ids.js";
 import type { BoundAgent } from "./store.js";
+import { selfAuthHeaders } from "../../lib/internal-call.js";
 
 
 /**
@@ -260,7 +261,8 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
       agentOrgId: input.agent.orgId,
       agentSlug: input.agent.slug,
       responseMode: "conversation",
-      appToken: "",
+      // No Spaces workspace: replies go through channelDelivery.
+      bot: { clawAgentId: input.agent.id, workspaceId: null },
       spacesAppId: "",
       spacesAppUserId: "",
       rootAgentSlug: input.agent.slug,
@@ -275,7 +277,7 @@ export async function postChannelRun(run: ChannelRun): Promise<string> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...selfAuthHeaders("POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`, run.body.userId ? { userId: String(run.body.userId) } : undefined),
     },
     body: JSON.stringify(run.body),
   });

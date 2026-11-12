@@ -73,16 +73,16 @@ secretEnv:
   ENCRYPTION_KEY:
     name: xyne-claw-auth-secrets
     key: ENCRYPTION_KEY
-  XYNE_CLAW_S2S_KEY:
+  # claw-auth's own signing key; public keys of Spaces and the claw runtime.
+  CLAW_SERVICE_PRIVATE_KEY:
     name: xyne-claw-auth-secrets
-    key: XYNE_CLAW_S2S_KEY
-  INTERNAL_S2S_KEY:
+    key: CLAW_SERVICE_PRIVATE_KEY
+  SPACES_DELEGATION_PUBLIC_KEYS:
     name: xyne-claw-auth-secrets
-    key: INTERNAL_S2S_KEY
-  SPACES_DB_URL:
+    key: SPACES_DELEGATION_PUBLIC_KEYS
+  CLAW_RUNTIME_PUBLIC_KEYS:
     name: xyne-claw-auth-secrets
-    key: SPACES_DB_URL
-    optional: true
+    key: CLAW_RUNTIME_PUBLIC_KEYS
   REDIS_PASSWORD:
     name: xyne-claw-auth-secrets
     key: REDIS_PASSWORD
@@ -269,16 +269,14 @@ migrations:
   secretEnv:
     - name: DATABASE_URL
       secret: xyne-claw-auth-secrets
-    - name: SPACES_DB_URL
-      secret: xyne-backend-secrets
-      key: DATABASE_URL
-      optional: true
     - name: ENCRYPTION_KEY
       secret: xyne-claw-auth-secrets
   env:
     NODE_ENV: production
     NODE_OPTIONS: ""
     DEFAULT_ADMIN_EMAIL: admin@xyne.ai
+    # The Spaces workspace the default org links to. claw-auth has no access to the Spaces database.
+    SPACES_DEFAULT_WORKSPACE_ID: ""
   schemas:
     - path: prisma/schema.prisma
       reseed: true

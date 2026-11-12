@@ -12,6 +12,7 @@ import type {
   CallableAgentSpec,
 } from "./agent-delegation.js";
 import { createLogger } from "./logger.js";
+import { pinRunSessionToken } from "./run-credentials.js";
 
 const clog = createLogger("run-execution");
 
@@ -249,6 +250,8 @@ export async function executeRunFromPayload(
 
   beginJudgeRun();
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
+  // Calls to claw-auth inside this run carry its session token (run-credentials.ts).
+  pinRunSessionToken(trimmedSessionToken);
 
   try {
     // Process in background

@@ -107,7 +107,7 @@ async function loadRun(runId: string) {
 }
 
 const NO_WORKSPACE =
-  "Could not resolve a workspace: pass `workspaceId` explicitly, or configure SPACES_DB_URL so it can be derived from x-user-id.";
+  "Could not resolve a workspace: pass `workspaceId` explicitly, or call with a user so it can be looked up in the Spaces directory.";
 
 /**
  * POST /channels/:channelId/runs

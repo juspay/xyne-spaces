@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "./logger.js";
 import { SERVER } from "./config.js";
+import { clawAuthHeaders } from "./run-credentials.js";
 
 const log = createLogger("suggest-providers");
 
@@ -39,12 +40,13 @@ async function fetchAvailability(
   userId: string | undefined,
   providers: string[],
 ): Promise<ProviderAvailability> {
-  if (!userId || !SERVER.s2sKey || providers.length === 0) return UNKNOWN_AVAILABILITY;
+  if (!userId || providers.length === 0) return UNKNOWN_AVAILABILITY;
   try {
     const base = SERVER.authServiceUrl.replace(/\/$/, "");
-    const res = await fetch(`${base}/claw/api/v1/internal/providers/available`, {
+    const url = `${base}/claw/api/v1/internal/providers/available`;
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
+      headers: { "Content-Type": "application/json", ...clawAuthHeaders("POST", url) },
       body: JSON.stringify({ userId, providers }),
       signal: AbortSignal.timeout(AVAILABILITY_TIMEOUT_MS),
     });
