@@ -3,7 +3,7 @@ import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
 import { signPendingAuthToken, verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
-import { authSessionService, MissingDeviceKeyError } from '../services/authSessionService';
+import { authSessionService, AuthSessionRevokeReason, MissingDeviceKeyError } from '../services/authSessionService';
 import { completeLogin, respondDeviceKeyRequired, trackLogout, type ProviderTokens } from '../services/loginCompletionService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
@@ -20,11 +20,11 @@ import {
 } from '@/services/emailDomainPolicy';
 import { DatabaseClient } from '@/database/client';
 import {
+  clearAccessCookies,
   issueAccessCookies,
   readWorkspaceJwt,
   LAST_WORKSPACE_COOKIE,
   PENDING_AUTH_COOKIE,
-  WORKSPACE_TOKEN_COOKIE_PREFIX,
   type AccessCookieOverrides,
 } from '@/services/accessTokenService';
 import {
@@ -654,9 +654,19 @@ export class AuthV2Controller {
     try {
       logger.info(`[${requestId}] Refresh session endpoint called`);
 
-      const session = await authSessionService.validateRefresh(req);
-      if (!session) {
-        logger.warn(`[${requestId}] Refresh rejected: xs cookie missing, unknown, revoked or expired`);
+      // Validates the xs cookie, rotates it (single use) and sets the replacement cookie.
+      const refresh = await authSessionService.consumeRefresh(req, res);
+      if (refresh.status === 'busy') {
+        logger.warn(`[${requestId}] Refresh deferred: a concurrent refresh of the same xs is still running`);
+        res.status(503).set('Retry-After', '1').json({
+          error: 'Session refresh in progress',
+          code: 'REFRESH_BUSY',
+          message: 'Please retry shortly',
+        });
+        return;
+      }
+      if (refresh.status !== 'ok') {
+        logger.warn(`[${requestId}] Refresh rejected: xs cookie missing, unknown, revoked, expired or reused`);
         res.status(401).json({
           error: 'Session expired',
           code: 'REFRESH_INVALID',
@@ -664,6 +674,7 @@ export class AuthV2Controller {
         });
         return;
       }
+      const { session } = refresh;
 
       const lastWorkspaceCookie = req.cookies?.[LAST_WORKSPACE_COOKIE];
       const workspaceId =
@@ -687,6 +698,12 @@ export class AuthV2Controller {
           workspaceId,
           reason: !user ? 'no_user' : user.leftAt ? 'left' : 'inactive',
         });
+        // The session cannot be refreshed any more: end it and clear every auth cookie
+        // (including the xs consumeRefresh just rotated) so the client goes back to login
+        // instead of retrying with cookies that will keep earning 403s.
+        await authSessionService.revokeById(session.id, AuthSessionRevokeReason.WORKSPACE_ACCESS_LOST);
+        authSessionService.clearAuthSessionCookie(req, res);
+        clearAccessCookies(req, res);
         res.status(403).json({
           error: 'Workspace access denied',
           code: 'WORKSPACE_ACCESS_DENIED',
@@ -1367,15 +1384,8 @@ export class AuthV2Controller {
       // Revoke the device's org-scoped auth session (by sid and/or member + device) and clear xs.
       await authSessionService.revokeOnLogout(req, res, { orgMemberId: req.user?.memberId, sessionId });
 
-      // Clear all workspace-specific token cookies (session is now global)
-      for (const cookieName of Object.keys(req.cookies || {})) {
-        if (cookieName.startsWith(WORKSPACE_TOKEN_COOKIE_PREFIX) && cookieName.endsWith('_token')) {
-          res.clearCookie(cookieName, { path: '/' });
-        }
-      }
-
-      // Clear last workspace cookie
-      res.clearCookie(LAST_WORKSPACE_COOKIE, { path: '/' });
+      // Clear all workspace JWT cookies and the last-workspace pointer (session is now global)
+      clearAccessCookies(req, res);
 
       if (req.headers.accept?.includes('application/json')) {
         res.status(200).json({
