@@ -1096,7 +1096,9 @@ class MultiUserTranscriber:
                 room=self.ctx.room,
                 room_options=room_io.RoomOptions(
                     audio_input=True,
-                    text_output=True,  # Publish transcriptions to room
+                    # Off: captions go out on our own `transcriptions` topic. The SDK's legacy
+                    # transcription packets are never E2EE-encrypted, so they'd leak to LiveKit.
+                    text_output=False,
                     audio_output=False,  # Don't generate audio responses
                     participant_identity=participant.identity,  # Link to specific participant
                     # Text input not supported for multiple participants

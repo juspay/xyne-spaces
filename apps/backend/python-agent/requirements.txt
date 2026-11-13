@@ -448,19 +448,23 @@ jmespath==1.1.0 \
     # via
     #   boto3
     #   botocore
-livekit==1.1.20 \
-    --hash=sha256:253e4d15a78bbb408e926d0b317c7a47c2ca3f6bb9f9d2c7d10528a49f9b4fd9 \
-    --hash=sha256:64ea60b3293e3ce92c60592ff32c518bb7c278548b97de8026c1d0617510af4d \
-    --hash=sha256:83c0ea54d7ff505e92c3e88943e050e54825b0bf0f7e90652fb126eb447b3d76 \
-    --hash=sha256:93f0ed9e8ee9ef356da6cbf71f98edcc891678da6872946a87e34e1458528c9c \
-    --hash=sha256:a29120a0278a20ede380ac719cd084e39241546cfd3b415aa503c7b8a21afb4e \
-    --hash=sha256:c29a5f966806db961a0607ca8e2e4957e6900bbd44710f5f618b284043be584c
+json-repair==0.60.1 \
+    --hash=sha256:841661cdd2df507c9a4e189097f38ca6bc372e06d4b4e36d72e590f68176c290 \
+    --hash=sha256:ba6ff974f2a8bef2f7768144a7f03f870a816443f03da27a49cdd0ec31a78049
+    # via livekit-agents
+livekit==1.1.14 \
+    --hash=sha256:299146efefad5f67751cd15b8225bae759be0d7ad2f0b4ae1a22c15860d93cf9 \
+    --hash=sha256:47428e10ecf20d7db4ee9fde4009bf96578c003b1ae6e1c5e7e4837a55902393 \
+    --hash=sha256:5f671b1752c93b878cb241b84fd3f72a31f857c3927755d672cfb7656a84778c \
+    --hash=sha256:80962c4a22ddbf0e0ebd3563fc090fce42df66b39b90de68b161b7db01970f68 \
+    --hash=sha256:b8f8d38f131956297923e520bc4375bc9ebfa255cab7f125cb7755bfca71df24 \
+    --hash=sha256:efa16b9036b0b592e5399fdb858c1f04ec8a32c385184c705f030952f72174e8
     # via
     #   livekit-agents
     #   xyne-transcription-agent
-livekit-agents==1.3.11 \
-    --hash=sha256:795b043ca3839c71ae2a3daa025306a660d6cf1dccc3ea0d5b6e2a9c7a4315da \
-    --hash=sha256:a3eadf491332c73184201ab31f24058a698cee8086b47388d2732da1ef4609d1
+livekit-agents==1.6.8 \
+    --hash=sha256:c25666b35ff44f19186cc5247690f4d0ec0737c312cc3e530af54abaea03ce7e \
+    --hash=sha256:fefe45142f398895f3fcb37f381569c2f9ce98b7eb0d9dfe6698aa9774d0f355
     # via
     #   livekit-plugins-deepgram
     #   livekit-plugins-google
@@ -479,25 +483,32 @@ livekit-blingfire==1.1.0 \
     --hash=sha256:a0741a8abcfaa1f3af2313271f15ac0f79777681a8e3ab9a782a68d8eb121c89 \
     --hash=sha256:d99d7a34c9350da3a6ea738bc282a5f5b4ac4ffb7f8aa5251dfa96070ad845f6
     # via livekit-agents
-livekit-plugins-deepgram==1.3.11 \
-    --hash=sha256:645a78656ba400842fff636ea349333179f1ec412b0b94a8bad21afccfc9e02e \
-    --hash=sha256:eda453c06cbeb29584b26f3f6aca8f045e00b2db79b93af214198ec1011c23d6
+livekit-local-inference==0.3.1 \
+    --hash=sha256:2031b9e2eade0ca7457c568b7c8b2d2cd2b01bf3db534b964e912c53bc4892fa \
+    --hash=sha256:b283286c83bd905c410114336306950e085baebf0ce51c5296794bd7accb47ec \
+    --hash=sha256:b910df2ba5fed37de39cd819b0f72700c7c273a2608a9926bc83c1e0e715249e \
+    --hash=sha256:c2ed6354349bb813ad85fdb03ed0ee7b8b13815da88ebf1b2d6af2549dbde78a \
+    --hash=sha256:eddd13edbe1ab6e91c42b866befe58017aaa547f7a9ce518f14df49693ad0921
+    # via livekit-agents
+livekit-plugins-deepgram==1.6.8 \
+    --hash=sha256:649ac2abdee6e8fccbae2643a8c176d5e4f2e7cd28130c280c04460d7fda2d2a \
+    --hash=sha256:6906eebd82fd7be98e55fbc2d327e2d026e3312cf91d89cfa54a3cc648e4f310
     # via xyne-transcription-agent
-livekit-plugins-google==1.3.11 \
-    --hash=sha256:6142da1d33d278f8f9b187a8ec054b2d8775134019e8880e1e0f73a4e2b079df \
-    --hash=sha256:7ba1d3c064504738d06c4a23bb53280fdc1def40de7c7491ae8618123df60367
+livekit-plugins-google==1.6.8 \
+    --hash=sha256:61252e2d9290a76453b1dfb5e2dfd29fab9c4d35f54d17b80bb91899b1131d6e \
+    --hash=sha256:8645600a4c626cf953e92515cc82c6b9a3ad0be57b7b58ab6106677ec16c4728
     # via xyne-transcription-agent
-livekit-plugins-openai==1.3.11 \
-    --hash=sha256:61d77152f96213003b9bdea48c86a44a07a70456a41c664e82a2b5ae99a7f72a \
-    --hash=sha256:c54964cd987fa8a9e341f66bb30baeb02bfeea62a87eebaf19ae52b0486e8224
+livekit-plugins-openai==1.6.8 \
+    --hash=sha256:34c8d9599469fa3a32a6e852fef3c227f79880a8e2f586eb091606beeff75f2f \
+    --hash=sha256:cc26e0170042fde9b989dd130b41b4cf193f03bd27b5ace5b26cc6d42b0258a6
     # via xyne-transcription-agent
-livekit-plugins-silero==1.3.11 \
-    --hash=sha256:768418e0bc4bf0db0fa2a7d36e900397761452bdaa78b3f522d2690080269a23 \
-    --hash=sha256:8af33e3c6ede9dfdbe865595876765db0e3554dd05aa0ef3266b68523518a421
+livekit-plugins-silero==1.6.8 \
+    --hash=sha256:581ce44302c75f16dd01bdaa1f0f6ef92292034ca4cc387f58d8566c41a974f9 \
+    --hash=sha256:90ddf651b8e14b509bffde833d0ed17ef52f450aaba1884d1a2bf6af700efd61
     # via xyne-transcription-agent
-livekit-plugins-turn-detector==1.3.11 \
-    --hash=sha256:810ab55c41031730cb9686148959e00fefb1b8b48ed896e1754516fede99c1ef \
-    --hash=sha256:fc1c07d4e209e7e980f31a8441d3452cf330268fdff1a840843ce7d538f79f0e
+livekit-plugins-turn-detector==1.6.8 \
+    --hash=sha256:06f7d03c43f1e8803925f99808c7297673120e4e566a199adce17b8946eae88d \
+    --hash=sha256:652b5e9096bb51d91ffa1bd17c21e237659f16858160c98fe0778769b8d7e625
     # via livekit-agents
 livekit-protocol==1.1.27 \
     --hash=sha256:740a4c6e438da763d204f2a6b0fc8f7f33ca96e27b17ce9abc6557dbb0a28dbd \
@@ -852,6 +863,7 @@ pyyaml==6.0.3 \
     --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f
     # via
     #   huggingface-hub
+    #   livekit-agents
     #   transformers
 redis==8.1.0 \
     --hash=sha256:6e1a19beef9225c83efd689c7e6b7da2d5215b1f42cd13b7fc3714d0a09c7b25 \
