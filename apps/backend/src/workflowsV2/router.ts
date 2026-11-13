@@ -239,7 +239,7 @@ const mount = (
           await sendRouteResponse(res, response, route.path, name);
         } catch (err) {
           const status = (err as { statusCode?: number }).statusCode ?? 500;
-          const message = err instanceof Error ? err.message : 'Internal error';
+          const message = status < 500 && err instanceof Error ? err.message : 'Internal error';
           if (status >= 500) {
             logger.error(`[workflows] ${key} failed`, err);
           }
