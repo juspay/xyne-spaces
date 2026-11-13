@@ -93,10 +93,11 @@ variable "app_secrets" {
 
 variable "redis" {
   type = object({
-    mode = string
-    host = string
-    port = number
-    tls  = bool
+    mode     = string
+    host     = string
+    port     = number
+    tls      = bool
+    iam_auth = optional(bool, false)
   })
 
   validation {
@@ -162,6 +163,7 @@ variable "identities" {
     claw               = object({ annotations = map(string), labels = map(string) })
     claw_auth          = object({ annotations = map(string), labels = map(string) })
     transcription      = object({ annotations = map(string), labels = map(string) })
+    lighton            = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
     lb_controller      = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
     cluster_autoscaler = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
     external_dns       = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })

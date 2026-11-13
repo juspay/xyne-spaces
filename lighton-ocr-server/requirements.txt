@@ -7,6 +7,7 @@ httpx>=0.26.0
 # eMudhra emSign G3 CA compromise: certifi 2026.10.19 drops the compromised roots
 certifi>=2026.10.19
 redis>=5.0.0
+google-auth[requests]>=2.0.0
 pillow>=10.4,<11.0
 pymupdf>=1.24
 tokenizers>=0.15.0
