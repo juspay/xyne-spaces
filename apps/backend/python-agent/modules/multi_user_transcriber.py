@@ -27,11 +27,13 @@ from livekit.agents import (
     Agent,
     AgentSession,
     JobContext,
+    LanguageCode,
     StopResponse,
     llm,
     room_io,
     stt,
 )
+from livekit.agents import vad as agents_vad
 from livekit.plugins import openai, silero, google
 from livekit.plugins import deepgram
 from livekit.agents.types import NOT_GIVEN
@@ -234,7 +236,7 @@ class ChuteSTT(stt.STT):
             alternatives=[
                 stt.SpeechData(
                     text=text,
-                    language=detected_lang,
+                    language=LanguageCode(detected_lang),
                     confidence=1.0,
                 )
             ],
@@ -450,7 +452,7 @@ class MultiUserTranscriber:
         # Each speaker gets assigned a VAD instance via round-robin.
         cpu_count = os.cpu_count() or 4
         self._num_vad_instances = max(2, min(cpu_count, 6))  # 2-6 VAD instances
-        self._vad_instances: List[silero.VAD] = []
+        self._vad_instances: List[agents_vad.VAD] = []
         self._vad_round_robin = 0  # Counter for round-robin VAD assignment
         
         # Enlarge default thread pool so ONNX run_in_executor calls
@@ -657,7 +659,7 @@ class MultiUserTranscriber:
             f"min_silence={self._vad_min_silence_duration}"
         )
     
-    def _get_next_vad(self) -> silero.VAD:
+    def _get_next_vad(self) -> agents_vad.VAD:
         """Get next VAD instance via round-robin for even distribution across cores."""
         self._init_vad_pool()
         vad = self._vad_instances[self._vad_round_robin % self._num_vad_instances]
