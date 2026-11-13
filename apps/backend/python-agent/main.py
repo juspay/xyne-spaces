@@ -20,6 +20,7 @@ from transcription import (
     TranscriptionHandler,
 )
 from infra import WebhookNotifier, GCSBucketProvider, S3BucketProvider
+from infra.call_session import CallSessionError, fetch_call_session
 from history import ConversationStore
 from ai import AISessionManager
 from orchestration import CleanupManager, ParticipantTracker, RoomLifecycle
@@ -142,6 +143,16 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"room_name_sanitized | original={call_id}, sanitized={safe_call_id}")
 
     logger.info(f"agent_starting | node_env={config.node_env}, diarization_enabled={config.diarization_enabled}")
+
+    # The LiveKit job alone is not enough to join: the backend must also say yes, and it
+    # is the only source of the call key. No answer means no join (never join unencrypted).
+    try:
+        call_session = await fetch_call_session(config.backend_url, config.transcription_agent_api_key, call_id)
+    except CallSessionError as e:
+        logger.error(f"call_session_unavailable | error={e}, action=not_joining")
+        ctx.shutdown(reason="call_session_unavailable")
+        return
+    logger.info(f"call_session_ready | encrypted={call_session.call_key is not None}")
 
     # Initialize conversation store (Redis-backed, without OpenAI client yet)
     conversation_store = None
@@ -423,8 +434,8 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"Error handling data message: {e}")
 
     # Connect to room with auto-subscribe to audio only
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    logger.info(f"room_connected | auto_subscribe=AUDIO_ONLY")
+    await ctx.connect(encryption=call_session.encryption_options(), auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    logger.info(f"room_connected | auto_subscribe=AUDIO_ONLY, encrypted={call_session.call_key is not None}")
     # Set the participant name to "Xyne Automatic"
     await ctx.room.local_participant.set_name("Xyne Automatic")
 
