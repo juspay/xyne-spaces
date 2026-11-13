@@ -25,8 +25,12 @@ def download_models():
     # This uses LiveKit's official download mechanism
     print("Downloading Turn Detector model...")
     try:
+        from livekit.plugins.turn_detector.english import _EUORunnerEn
         from livekit.plugins.turn_detector.multilingual import _EUORunnerMultilingual
         _EUORunnerMultilingual._download_files()
+        # livekit-agents >=1.5 initializes the English runner too; without it the
+        # inference process fails at startup.
+        _EUORunnerEn._download_files()
         print("✓ Turn Detector model downloaded successfully")
     except Exception as e:
         print(f"⚠ Warning: Turn Detector download failed: {e}")

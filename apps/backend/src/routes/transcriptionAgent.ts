@@ -6,6 +6,9 @@ const router = Router();
 // Transcript ready notification from Python agent
 router.post('/:callId/transcript-ready', transcriptionAgentController.transcriptReady);
 
+// Call key + state for an agent job, before it joins the room
+router.post('/:callId/session', transcriptionAgentController.callSession);
+
 // Ticket creation tool from Python agent (AI assistant)
 router.post('/:callId/ticket', transcriptionAgentController.ticketTool);
 

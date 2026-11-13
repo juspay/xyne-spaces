@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CallType, TicketStatusV2 } from '@xyne/shared';
+import { CallStatus, CallType, TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -9,6 +9,8 @@ import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
+import { callEncryptionService } from '@/services/callEncryptionService';
+import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
 import { TicketController } from './ticketController';
 // import { CallController } from './callController';
 
@@ -16,6 +18,19 @@ import { TicketController } from './ticketController';
  * Controller for transcription agent webhooks and tool calls
  * Handles S2S (service-to-service) authenticated requests from Python transcription agent
  */
+/** A dispatched agent may still be joining before the webhook flips the call ACTIVE. */
+const SESSION_CALL_STATUSES = new Set<CallStatus>([
+  CallStatus.PENDING,
+  CallStatus.SCHEDULED,
+  CallStatus.ACTIVE,
+  CallStatus.IN_PROGRESS,
+]);
+
+/** Raw 32-byte X25519 public key, base64. */
+const callSessionBodySchema = z.object({
+  publicKey: z.string().refine((value) => Buffer.from(value, 'base64').length === 32, 'publicKey must be 32 bytes'),
+});
+
 class TranscriptionAgentController {
   private ticketController: TicketController;
   // private callController: CallController;
@@ -88,6 +103,50 @@ class TranscriptionAgentController {
     } catch (error) {
       logger.error(`[TranscriptReady] Failed to process transcript for call ${callId}:`, error);
       res.status(500).json({ success: false, error: 'Failed to process transcript' });
+    }
+  };
+
+  /**
+   * POST /api/transcriptionAgent/:callId/session
+   * The agent calls this after LiveKit hands it a job and before it joins the room: it
+   * joins an encrypted call only with the key from here, never anything LiveKit carried.
+   * The key is sealed to the job's one-time X25519 public key (body `publicKey`).
+   */
+  callSession = async (req: Request, res: Response): Promise<void> => {
+    const { callId } = req.params;
+    res.set('Cache-Control', 'no-store');
+
+    const parsed = callSessionBodySchema.safeParse(req.body);
+    if (!callId || !parsed.success) {
+      res.status(400).json({ success: false, error: 'callId and publicKey are required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!SESSION_CALL_STATUSES.has(call.status as CallStatus)) {
+        logger.warn(`[${callId}] agent_call_session_refused | reason=call_status, status=${call.status}`);
+        res.status(409).json({ success: false, error: 'Call is not running' });
+        return;
+      }
+
+      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion);
+      if (!encryption) {
+        logger.info(`[${callId}] agent_call_session_issued | encrypted=false`);
+        res.json({ success: true, encrypted: false });
+        return;
+      }
+
+      const sealedKey = callEncryptionService.sealKeyForAgent(callId, encryption.key, parsed.data.publicKey);
+      logger.info(`[${callId}] agent_call_session_issued | encrypted=true`);
+      res.json({ success: true, encrypted: true, sealedKey });
+    } catch (error) {
+      logger.error(`[${callId}] agent_call_session_failed`, error);
+      res.status(500).json({ success: false, error: 'Failed to open call session' });
     }
   };
 
