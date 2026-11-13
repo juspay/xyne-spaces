@@ -32,6 +32,7 @@ import { jwtService } from './jwtService';
 import { isRefreshAllowed } from './sessionRefreshValidator';
 import { SDK_SSO_REFRESH_TOKEN_PREFIX, UserSessionService } from './userSessionService';
 import { config } from '@/config/env';
+import { isEmailDomainAllowed } from '@/services/emailDomainPolicy';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 
@@ -451,7 +452,11 @@ class SdkSsoService {
       return { status: 'invalid' };
     }
 
-    if (!(await isRefreshAllowed(session)) || session.user.status !== UserStatus.ACTIVE) {
+    if (
+      !isEmailDomainAllowed(session.user.email) ||
+      !(await isRefreshAllowed(session)) ||
+      session.user.status !== UserStatus.ACTIVE
+    ) {
       return { status: 'invalid' };
     }
 
