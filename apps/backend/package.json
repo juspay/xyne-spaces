@@ -93,6 +93,7 @@
     "@xyne/shared": "workspace:*",
     "@xyne/storage": "workspace:*",
     "@xyne/vespa-ts": "1.6.0",
+    "@xyne/workflow-sdk": "3.2.65",
     "@y-sweet/sdk": "^0.9.1",
     "archiver": "^7.0.1",
     "axios": "1.18.1",
