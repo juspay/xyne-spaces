@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
+import { decryptManifestRequestBodyMiddleware } from '../middleware/decryptionMiddleware';
 
 const router = Router();
 const conversationController = new ConversationController();
@@ -14,7 +15,9 @@ router.post('/reply-drafts/:draftId/decline', conversationController.declineRepl
 router.get('/recent-visited', conversationController.getRecentVisitedConversations);
 
 // Keep replyToConversation for file upload handling
-router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
+// Multipart: the manifest rule check and session-key decryption run here, after multer
+// has filled req.body (it is still empty when the auth middleware runs).
+router.post('/:conversationId/messages', uploadMultiple, decryptManifestRequestBodyMiddleware, conversationController.replyToConversation);
 
 // Get a single conversation message by conversationId + messageId (for mobile background prefetch)
 router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);

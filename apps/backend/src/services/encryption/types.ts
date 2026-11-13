@@ -52,6 +52,29 @@ export type StorageObjectKey = {
   wrappedKey: string;
 };
 
+export type ClientManifestTransform = 'NONE' | 'MASTER_DEK';
+
+export type ClientManifestFieldRule = {
+  client: boolean;
+  transform: ClientManifestTransform;
+  storage: ClientManifestTransform;
+};
+
+export type ClientManifestRule = {
+  type: 'REQUEST' | 'MUTATOR';
+  value: string;
+  revision: number;
+  fields: Record<string, ClientManifestFieldRule>;
+};
+
+export type ClientEncryptionManifest = {
+  schemaKey: string;
+  version: number;
+  tag: string;
+  environment: string;
+  rules: ClientManifestRule[];
+};
+
 export interface EncryptionProvider {
   getPublicConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
@@ -66,4 +89,6 @@ export interface EncryptionProvider {
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;
   generateStorageKey(input: GenerateStorageKeyInput): Promise<StorageObjectKey>;
   unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]>;
+  /** Latest client manifest for (tag, environment); `null` when the encryption service has none (404). */
+  getClientManifest(params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null>;
 }

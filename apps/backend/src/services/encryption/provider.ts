@@ -1,6 +1,7 @@
 import { config } from '@/config/env';
 import type {
   ClientEncryptionConfig,
+  ClientEncryptionManifest,
   EncryptBatchItem,
   EncryptedFieldConfig,
   EncryptionProvider,
@@ -95,6 +96,11 @@ const provider: EncryptionProvider = {
   async unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]> {
     if (wrappedKeys.length === 0) return [];
     return unsupported('unwrapStorageKeys');
+  },
+
+  async getClientManifest(_params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null> {
+    if (!config.enc.apiClientEncryptionEnabled) return null;
+    return unsupported('getClientManifest');
   },
 };
 
