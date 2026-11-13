@@ -29,6 +29,7 @@ import { config as appConfig } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
+import { escapeYqlString } from '@/utils/yqlEscape';
 
 /**
  * Vespa document-summary class used when the caller does not ask for a specific one.
@@ -679,15 +680,15 @@ export class SearchService {
     // Build WHERE conditions
     const conditions: string[] = [
       `docType contains "ticket"`,
-      `workspaceId contains "${workspaceId}"`,
+      `workspaceId contains "${escapeYqlString(workspaceId)}"`,
     ];
 
     if (projectId) {
-      conditions.push(`projectId contains "${projectId}"`);
+      conditions.push(`projectId contains "${escapeYqlString(projectId)}"`);
     }
 
     if (boardIds && boardIds.length > 0) {
-      const boardConditions = boardIds.map(id => `boardId contains "${id}"`).join(' or ');
+      const boardConditions = boardIds.map(id => `boardId contains "${escapeYqlString(id)}"`).join(' or ');
       conditions.push(`(${boardConditions})`);
     }
 
@@ -697,7 +698,9 @@ export class SearchService {
 
     // YQL with grouping on the tags array
     // Vespa automatically expands array fields in grouping, returning each unique tag value with its count
-    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${limit}) order(-count()) each(output(count())))`;
+    // max() is grammar, not a bindable literal — coerce so a non-numeric limit can't inject YQL.
+    const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 1000) : 100;
+    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${safeLimit}) order(-count()) each(output(count())))`;
 
     try {
       const response = await this.vespa.search<VespaSearchResponse>({
