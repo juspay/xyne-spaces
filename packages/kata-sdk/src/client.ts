@@ -114,12 +114,12 @@ export class KataClient {
 
     await this.claimCreateSlot();
 
-    await this.k8sClient.createNamespacedCustomObject(
-      GROUP,
-      VERSION,
+    await this.k8sClient.createNamespacedCustomObject({
+      group: GROUP,
+      version: VERSION,
       namespace,
-      SANDBOX_CLAIMS_PLURAL,
-      {
+      plural: SANDBOX_CLAIMS_PLURAL,
+      body: {
         apiVersion: `${GROUP}/${VERSION}`,
         kind: "SandboxClaim",
         metadata: {
@@ -136,7 +136,7 @@ export class KataClient {
           },
         },
       },
-    );
+    });
 
     let sandboxName: string;
     try {
@@ -173,17 +173,15 @@ export class KataClient {
 
   private async deleteClaimQuietly(claimName: string, namespace: string): Promise<void> {
     try {
-      await this.k8sClient.deleteNamespacedCustomObject(
-        GROUP,
-        VERSION,
+      await this.k8sClient.deleteNamespacedCustomObject({
+        group: GROUP,
+        version: VERSION,
         namespace,
-        SANDBOX_CLAIMS_PLURAL,
-        claimName,
-      );
+        plural: SANDBOX_CLAIMS_PLURAL,
+        name: claimName,
+      });
     } catch (err) {
-      const status = err as { statusCode?: number; response?: { statusCode?: number } };
-      const code = status.statusCode ?? status.response?.statusCode;
-      if (code === 404) return;
+      if ((err as { code?: number }).code === 404) return;
       console.error(`Failed to delete orphaned SandboxClaim ${claimName} in ${namespace} after provisioning error:`, err);
     }
   }
@@ -192,14 +190,14 @@ export class KataClient {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-      const response = await this.k8sClient.getNamespacedCustomObject(
-        GROUP,
-        VERSION,
+      const claim = await this.k8sClient.getNamespacedCustomObject({
+        group: GROUP,
+        version: VERSION,
         namespace,
-        SANDBOX_CLAIMS_PLURAL,
-        claimName,
-      );
-      const sandboxName = getNestedString(response.body, ["status", "sandbox", "name"]);
+        plural: SANDBOX_CLAIMS_PLURAL,
+        name: claimName,
+      });
+      const sandboxName = getNestedString(claim, ["status", "sandbox", "name"]);
 
       if (sandboxName) {
         return sandboxName;
@@ -215,14 +213,14 @@ export class KataClient {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
-      const response = await this.k8sClient.getNamespacedCustomObject(
-        SANDBOXES_GROUP,
-        VERSION,
+      const sandbox = await this.k8sClient.getNamespacedCustomObject({
+        group: SANDBOXES_GROUP,
+        version: VERSION,
         namespace,
-        SANDBOXES_PLURAL,
-        sandboxName,
-      );
-      if (isSandboxReady(response.body)) {
+        plural: SANDBOXES_PLURAL,
+        name: sandboxName,
+      });
+      if (isSandboxReady(sandbox)) {
         return;
       }
 
