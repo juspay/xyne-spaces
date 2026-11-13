@@ -1059,8 +1059,15 @@ export class ConversationController {
         }
       }
 
-      // Check if this is a bot command (only for text content, not file uploads)
-      if (content && content.trim() && BotCommandParser.isBotCommand(content.trim())) {
+      // Check if this is a bot command (only for text content, not file uploads).
+      // Content that arrived as workspace-DEK ciphertext (client manifest MASTER_DEK,
+      // `ENC:` prefix) is opaque here, so bot commands cannot be detected on that path yet.
+      if (
+        content &&
+        content.trim() &&
+        !content.startsWith('ENC:') &&
+        BotCommandParser.isBotCommand(content.trim())
+      ) {
         await this.handleBotCommand(content.trim(), conversationId, userId, res);
         return;
       }

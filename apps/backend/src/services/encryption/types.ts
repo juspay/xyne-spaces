@@ -75,6 +75,21 @@ export type ClientEncryptionManifest = {
   rules: ClientManifestRule[];
 };
 
+/** Identity of a manifest rule; the encryption service re-reads the field spec by it. */
+export type ClientManifestRuleRef = Pick<ClientManifestRule, 'type' | 'value' | 'revision'>;
+
+export type TransformRequestInput<T> = {
+  body: T;
+  sessionId: string;
+  rule: ClientManifestRuleRef;
+  /**
+   * Owner of the row the request writes (the workspace whose DEK the Prisma extension would
+   * pick for it). Required when any `client: true` field in the rule is `MASTER_DEK`.
+   */
+  entityId?: string;
+  entityType?: string;
+};
+
 export interface EncryptionProvider {
   getPublicConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
@@ -91,4 +106,11 @@ export interface EncryptionProvider {
   unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]>;
   /** Latest client manifest for (tag, environment); `null` when the encryption service has none (404). */
   getClientManifest(params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null>;
+  /**
+   * Rule-driven counterpart of decryptRequest. Session-encrypted fields the rule marks
+   * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to
+   * store as-is) or plaintext (`transform: NONE`); everything else is returned as sent, so
+   * the backend never holds the plaintext of a MASTER_DEK field.
+   */
+  transformRequest<T>(input: TransformRequestInput<T>): Promise<T>;
 }

@@ -11,6 +11,7 @@ import type {
   RegisterSessionKeyInput,
   RegisterSessionKeyResult,
   StorageObjectKey,
+  TransformRequestInput,
 } from './types';
 
 function unsupported(operation: string): never {
@@ -65,6 +66,11 @@ const provider: EncryptionProvider = {
   async decryptRequest<T>(body: T, _sessionId: string): Promise<T> {
     if (!config.enc.apiClientEncryptionEnabled) return body;
     return unsupported('decryptRequest');
+  },
+
+  async transformRequest<T>(input: TransformRequestInput<T>): Promise<T> {
+    if (!config.enc.apiClientEncryptionEnabled) return input.body;
+    return unsupported('transformRequest');
   },
 
   async initializeOrg(_orgId: string): Promise<void> {
