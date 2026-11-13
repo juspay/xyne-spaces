@@ -1,0 +1,53 @@
+/*
+ * CSS custom properties — theme tokens for @xyne/workflow-ui.
+ *
+ * Override any token in your app:
+ *   [data-workflow-ui] { --wui-primary: #7c3aed; }
+ */
+
+:root,
+[data-workflow-ui] {
+  /* Surface */
+  --wui-bg: #ffffff;
+  --wui-bg-subtle: #f8fafc;
+  --wui-bg-muted: #f1f5f9;
+  --wui-fg: #0f172a;
+  --wui-fg-muted: #64748b;
+  --wui-border: #e2e8f0;
+  --wui-border-strong: #cbd5e1;
+
+  /* Brand */
+  --wui-primary: #6366f1;
+  --wui-primary-hover: #4f46e5;
+  --wui-primary-fg: #ffffff;
+  --wui-primary-light: #eef2ff;
+
+  /* Status */
+  --wui-status-pending: #94a3b8;
+  --wui-status-running: #3b82f6;
+  --wui-status-completed: #10b981;
+  --wui-status-failed: #ef4444;
+  --wui-status-paused: #f59e0b;
+  --wui-status-skipped: #cbd5e1;
+
+  /* Category colors */
+  --wui-cat-action: #6366f1;
+  --wui-cat-data: #0ea5e9;
+  --wui-cat-control: #f97316;
+  --wui-cat-core: #8b5cf6;
+  --wui-cat-default: #64748b;
+
+  /* Shape */
+  --wui-radius: 0.625rem;
+  --wui-radius-sm: 0.375rem;
+
+  /* Shadows */
+  --wui-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --wui-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --wui-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --wui-shadow-selected: 0 0 0 2px var(--wui-primary), 0 4px 6px -1px rgb(0 0 0 / 0.1);
+
+  /* Motion */
+  --wui-duration: 200ms;
+  --wui-pulse-duration: 2s;
+}

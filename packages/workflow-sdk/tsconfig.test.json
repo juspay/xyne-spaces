@@ -1,0 +1,60 @@
+// Typechecks the ACL test surface, which `tsconfig.json` excludes from the
+// build (tests must not emit into dist/).
+//
+// Without this, tests are transpile-only under vitest: a test can call a method
+// that no longer exists and stay green until it happens to run that line. That
+// is not hypothetical — the v2 ACL port left every test file calling the deleted
+// `permittedActions`/`Scope` API while `tsc` reported zero errors.
+//
+// SCOPE: deliberately narrow. The wider suite carries ~176 pre-existing type
+// errors from never having been checked (unrelated to authorization — agent
+// step config shapes, builder generics, service registry). Adopting those is its
+// own task; this config is a ratchet over the area we are actively rewriting, so
+// it must stay at zero. Widen it file-by-file as that debt gets paid down.
+//
+// `src/connectors/core/**` is in scope because those tests are new — no
+// inherited debt — and because one asserts a COMPILE-TIME guarantee with
+// `@ts-expect-error`. A directive in a file nobody typechecks proves nothing.
+// Deliberately not `src/connectors/**`: the built-in step tests moved in from
+// `steps/builtin/` carrying the same unchecked-test debt as the rest of the
+// suite, and adopting it is its own task.
+//
+// `src/testing/**` is in scope on purpose: the conformance kit ships as test
+// code for hosts to run against their own adapters, so it must not drift from
+// the port silently — the exact failure mode this ACL work exists to remove.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/authz/**/*.ts",
+    "src/testing/**/*.ts",
+    "src/runtime/authz-coverage.test.ts",
+    "src/runtime/authz-enforcement.test.ts",
+    "src/runtime/folder-acl.test.ts",
+    "src/runtime/attributes.test.ts",
+    "src/router/authz-router.test.ts",
+    "src/persistence/in-memory-adapter.test.ts",
+    "src/connectors/core/**/*.test.ts",
+    // The trigger surface: its generics exist to make a wrong payload or config a
+    // COMPILE error, and a `@ts-expect-error` in a file nobody typechecks proves
+    // nothing. In scope because these tests are new — no inherited debt.
+    "src/triggers/**/*.test.ts",
+    "src/ingest/**/*.test.ts",
+    "src/util/**/*.test.ts",
+    // The attachment surface: `Attachment` carries a handle rather than bytes,
+    // and the adapter is stream-only. Both are new or wholly rewritten, so
+    // there is no inherited debt — and a test that still builds the old shape
+    // is exactly the drift this file exists to stop. It already happened once:
+    // nine workflow-ui tests kept constructing `{ data }` after the rename and
+    // stayed green, because that package typechecked no tests at all. It
+    // does now — see `workflow-ui/tsconfig.test.json`.
+    "src/storage/**/*.ts",
+    "src/completion/**/*.ts",
+    "src/common/multipart-values.test.ts",
+    "src/connectors/builtin/steps/multipart-body.test.ts",
+    "src/engine/gate-addressing-in-loops.test.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

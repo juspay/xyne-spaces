@@ -1,0 +1,316 @@
+/**
+ * @xyne/workflow-ui — compiled stylesheet (Tailwind utilities + theme tokens).
+ *
+ * Import once in your app:
+ *   import '@xyne/workflow-ui/styles.css';
+ *
+ * Override tokens in your CSS:
+ *   [data-workflow-ui] { --wui-primary: #7c3aed; }
+ */
+
+/* pdf.js viewer styles, required by the PDF document preview (PdfView).
+   Must precede @tailwind so preflight can be re-overridden below. */
+@import 'pdfjs-dist/web/pdf_viewer.css';
+
+/* React Flow's structural styles (pan/zoom viewport, handles, minimap). Only
+   `base.css` — no colours — so the conversational-flow map is themed by our tokens. */
+@import '@xyflow/react/dist/base.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Theme Tokens ─── */
+
+:root,
+[data-workflow-ui] {
+  /* Surface */
+  --wui-bg: #ffffff;
+  /* Raised panels: dialogs, cards. */
+  --wui-surface: #ffffff;
+  --wui-bg-subtle: #f8fafc;
+  --wui-bg-muted: #f1f5f9;
+  --wui-fg: #0f172a;
+  --wui-fg-muted: #64748b;
+  --wui-fg-subtle: #94a3b8;
+  --wui-border: #e2e8f0;
+  --wui-border-strong: #cbd5e1;
+
+  /* ─── Base (shadcn) surface + brand tokens ───
+   * The package's Tailwind config maps `bg-surface*` / `bg-brand*` to these raw
+   * HSL-triplet vars (needed so the `<alpha-value>` forms — bg-surface-muted/60,
+   * bg-brand/40 — resolve). They are NOT --wui-* and were never defaulted here,
+   * so any host that maps its own `--card` / `--muted` / `--primary` but not
+   * `--surface-*` rendered every surface transparent. Reference the host's shadcn
+   * triplets first (so a themed host, including its dark theme, flows through),
+   * with a light literal fallback for standalone use. */
+  --surface-default: var(--card, 0 0% 100%);
+  --surface-page: var(--background, 210 40% 98%);
+  --surface-elevated: var(--card, 0 0% 100%);
+  --surface-hover: var(--muted, 210 40% 96%);
+  --surface-muted: var(--muted, 210 40% 96%);
+  --surface-brand: var(--primary, 239 84% 67%);
+  --surface-brand-subtle: var(--accent, 226 100% 97%);
+  --surface-brand-hover: var(--primary, 239 74% 60%);
+  --surface-brand-pressed: var(--primary, 239 74% 60%);
+
+  /* Brand */
+  --wui-primary: #6366f1;
+  --wui-primary-hover: #4f46e5;
+  --wui-primary-fg: #ffffff;
+  --wui-primary-light: #eef2ff;
+  --wui-primary-muted: #c7d2fe;
+
+  /* Category */
+  --wui-cat-data: #0ea5e9;
+  --wui-cat-data-light: #f0f9ff;
+  --wui-cat-integration: #8b5cf6;
+  --wui-cat-integration-light: #f5f3ff;
+  --wui-cat-control: #f97316;
+  --wui-cat-control-light: #fff7ed;
+  --wui-cat-flow: #14b8a6;
+  --wui-cat-flow-light: #f0fdfa;
+
+  /* Status */
+  --wui-status-pending: #94a3b8;
+  --wui-status-running: #6366f1;
+  --wui-status-completed: #10b981;
+  --wui-status-failed: #ef4444;
+  --wui-status-paused: #f59e0b;
+  /* A run that exists but has not started: waiting on its own clock. */
+  --wui-status-scheduled: #d97706;
+  --wui-status-skipped: #cbd5e1;
+
+  /* Shadow */
+  --wui-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --wui-shadow-md: 0 4px 8px rgba(15, 23, 42, 0.08);
+  --wui-shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+
+  /* Shape */
+  --wui-radius: 0.5rem;
+  --wui-radius-sm: 0.375rem;
+  --wui-radius-lg: 0.75rem;
+
+  /* Motion */
+  --wui-duration: 150ms;
+  --wui-duration-slow: 250ms;
+  --wui-pulse-duration: 2s;
+
+  /* Conversational flow — one hue per kind of screen. Mid-lightness so the text reads
+     on light and dark grounds; tints are derived with color-mix where used. */
+  --wui-cf-menu: var(--wui-primary);
+  --wui-cf-message: #0d9488;
+  --wui-cf-questions: #d97706;
+  --wui-cf-ai: #8b5cf6;
+  --wui-cf-end: #64748b;
+  /* Data, and every condition built from it: a condition is data being read, so
+     it is not given a hue of its own. */
+  --wui-cf-data: #0284c7;
+  --wui-cf-canvas: var(--wui-bg-subtle);
+  --wui-cf-dot: var(--wui-border-strong);
+}
+
+/* ─── Keyframe Animations ─── */
+
+@keyframes wui-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes wui-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes wui-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes wui-slide-in-right {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes wui-edge-dash {
+  to { stroke-dashoffset: -20; }
+}
+
+@keyframes wui-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+@keyframes wui-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.3); }
+  50% { box-shadow: 0 0 8px 2px rgba(99, 102, 241, 0.15); }
+}
+
+/* ─── Home dashboard layout ───
+   Deliberately a named component class rather than Tailwind grid utilities.
+
+   Hosts import this stylesheet BEFORE their own (see xyne-search's main.tsx),
+   and their Tailwind build also emits `.grid-cols-1`. Media queries carry no
+   specificity, so a plain `.grid-cols-1` appearing later in the cascade beats
+   `@media (min-width:1024px){ .lg\:grid-cols-* }` and silently collapses the
+   dashboard into a single column. A class the host never generates cannot lose
+   that race.
+
+   The side columns are reserved here but rendered empty for now; the analytics
+   and executions panels drop into them without touching this layout. */
+
+.wui-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+@media (min-width: 1024px) {
+  .wui-home-grid {
+    height: 100%;
+    /* analytics · approvals · executions */
+    grid-template-columns: 280px minmax(0, 1fr) 380px;
+  }
+}
+
+/* Below lg the queue leads, since it is the reason to open the page. */
+.wui-home-col-approvals { order: -1; min-height: 0; }
+.wui-home-col-stats { order: 0; min-height: 0; display: flex; flex-direction: column; gap: 1rem; }
+.wui-home-col-runs { order: 1; min-height: 0; }
+
+@media (min-width: 1024px) {
+  .wui-home-col-stats { order: 0; }
+  .wui-home-col-approvals { order: 1; }
+  .wui-home-col-runs { order: 2; height: 100%; }
+}
+
+/* ─── ReactFlow Overrides ─── */
+
+.react-flow__node {
+  transition: filter 150ms ease;
+}
+
+.react-flow__edge-path {
+  transition: stroke 150ms ease;
+}
+
+.react-flow__minimap {
+  border-radius: var(--wui-radius) !important;
+  border: 1px solid var(--wui-border) !important;
+  box-shadow: var(--wui-shadow) !important;
+  overflow: hidden !important;
+}
+
+/* ─── Recharts Overrides ─── */
+
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+/* ─── Auto-hiding scrollbar ─── */
+/* Thin, overlay-style scrollbar whose thumb is invisible until the area is
+   hovered or focused — so lists read as a clean surface, not a boxed scroller. */
+.wui-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.wui-scroll:hover,
+.wui-scroll:focus-within {
+  scrollbar-color: var(--wui-border-strong) transparent;
+}
+.wui-scroll::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.wui-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.wui-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color 150ms ease;
+}
+.wui-scroll:hover::-webkit-scrollbar-thumb,
+.wui-scroll:focus-within::-webkit-scrollbar-thumb,
+.wui-scroll:active::-webkit-scrollbar-thumb {
+  background-color: var(--wui-border-strong);
+}
+.wui-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--wui-fg-subtle);
+}
+
+/* ─── pdf.js viewer (PdfView) ───
+ *
+ * pdf.js sizes its layers (canvas, text, annotation) assuming the legacy
+ * `content-box` model: the `.page` wrapper has a 9px transparent border that
+ * pdf.js expects to ADD to the total box, so the canvas fills the inner
+ * content and the text layer overlays the same area. Tailwind's preflight
+ * applies `box-sizing: border-box` globally, which makes that border eat INTO
+ * the content — leaving the canvas 18px smaller than the text layer over it
+ * (visible ~9px glyph/highlight misalignment). Restore `content-box` inside
+ * the viewer subtree.
+ */
+[data-workflow-ui] .pdfViewer,
+[data-workflow-ui] .pdfViewer * {
+  box-sizing: content-box;
+}
+
+/* In-document search highlights. The text layer sits over the canvas with
+   `color: transparent`, so matches glow through without obscuring glyphs.
+   Override pdf.js's muted defaults with the SDK's own accent. */
+[data-workflow-ui] .pdfViewer .textLayer .highlight {
+  --highlight-bg-color: color-mix(in srgb, var(--wui-primary) 34%, transparent);
+  --highlight-selected-bg-color: color-mix(in srgb, var(--wui-primary) 55%, transparent);
+}
+
+/* No page drop-shadow. pdf.js's own defaults (--page-border: 9px solid
+   transparent, --page-margin: 1px auto -8px) already separate pages; adding a
+   box-shadow drew a grey band between them. Belt-and-braces in case a host
+   stylesheet reintroduces one. */
+[data-workflow-ui] .pdfViewer .page {
+  box-shadow: none;
+}
+
+/* PdfView toolbar: the host panel resizes from 280px up, so size the controls
+   against the *toolbar's own* width, not the viewport (a media query would be
+   wrong — the panel is narrow inside a wide window). Below ~430px the zoom
+   percentage is dropped: it's purely informational, and freeing its 44px lets
+   the Find / page-nav / zoom clusters stay on fewer rows. */
+[data-workflow-ui] .wui-pdf-toolbar {
+  container-type: inline-size;
+}
+@container (max-width: 430px) {
+  [data-workflow-ui] .wui-pdf-zoom-pct {
+    display: none;
+  }
+}
+
+/* Below the single-row threshold the clusters wrap, and a cluster separator
+   would be stranded at the start (or end) of a row. CSS has no
+   "first-in-wrapped-row" selector, so drop the separators in that regime.
+   NB: @container matches the container's CONTENT box, so 348px here
+   corresponds to a ~372px panel (24px of horizontal padding). */
+@container (max-width: 348px) {
+  [data-workflow-ui] .wui-pdf-sep {
+    display: none;
+  }
+}
+
+/* A `:::citation{…}` block — the statement plus its trailing source marker.
+   Inline so the marker sits at the end of the prose it backs rather than
+   breaking onto its own line. */
+[data-workflow-ui] .wui-citation {
+  display: inline;
+}
+
+/* Chat-message HTML: the host's unlayered reset flattens lists and quotes, and an
+   unlayered rule beats this layered sheet, so these are !important. */
+[data-workflow-ui] .wui-message :is(ul, ol) { margin: 0.5em 0 !important; padding-left: 1.4em !important; }
+[data-workflow-ui] .wui-message ul { list-style: disc !important; }
+[data-workflow-ui] .wui-message ol { list-style: decimal !important; }
+[data-workflow-ui] .wui-message blockquote { padding-left: 0.8em !important; border-left: 3px solid currentColor !important; opacity: 0.8; }

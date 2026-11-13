@@ -1,0 +1,21 @@
+// Typechecks the test files, which `tsconfig.json` excludes from the build
+// (tests must not emit into dist/).
+//
+// Without this, tests are transpile-only under vitest: a fixture can keep
+// building a shape the types no longer describe and stay green until the line
+// happens to run. That is not hypothetical — after `Attachment.data` became
+// `handle`, nine test files here kept writing `{ data }` and the suite passed,
+// because this package typechecked no tests at all.
+//
+// SCOPE: the whole suite, and it must stay that way. Unlike the SDK's ratchet
+// there is no inherited debt to work through — the 51 errors this first turned
+// up were all fixed when it was introduced. A new exclusion here is a hole of
+// exactly the kind described above, so widen the fixes, not the exclude list.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}
