@@ -1,4 +1,4 @@
-import { hkdfSync } from 'crypto';
+import { createCipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'crypto';
 import type { Call } from '@prisma/client';
 import { CallStatus, CallType, type CallEncryptionCredentials } from '@xyne/shared';
 import { config } from '@/config/env';
@@ -10,7 +10,8 @@ import { logger } from '@/utils/logger';
  *
  * Every AUDIO/VIDEO call is encrypted. All participants encrypt media frames with
  * one shared call key that only the backend derives and only authenticated HTTPS
- * responses carry (initiate, join, guest join). LiveKit forwards ciphertext it
+ * responses carry (initiate, join, guest join, and the transcription agent's
+ * session fetch, sealed to the job's key). LiveKit forwards ciphertext it
  * cannot read, so the key must never be placed in anything LiveKit sees: room or
  * participant metadata, token claims, data messages, dispatch metadata or egress
  * requests.
@@ -25,6 +26,11 @@ import { logger } from '@/utils/logger';
 
 const KEY_INFO_PREFIX = 'xyne-call-e2ee:v';
 const KEY_LENGTH_BYTES = 32;
+/** HKDF info for the key that wraps a call key on its way to the transcription agent. */
+const AGENT_SEAL_INFO = 'xyne-agent-call-key:v1';
+
+/** A call key encrypted to one agent job's X25519 public key (all fields base64). */
+export type SealedCallKey = { ephemeralPublicKey: string; nonce: string; ciphertext: string };
 /** Activated rows written before versions existed. */
 const LEGACY_KEY_VERSION = 1;
 
@@ -139,6 +145,33 @@ class CallEncryptionService {
   /** Same, for a call whose row is being written in the same request (not activated yet). */
   credentialsForState(roomName: string, state: CallEncryptionState | undefined): CallEncryptionCredentials | undefined {
     return this.credentials(roomName, state, undefined);
+  }
+
+  /**
+   * Encrypts a call key to the agent job's one-time X25519 public key, so the key
+   * never crosses the in-cluster hop in clear. X25519 -> HKDF-SHA256 -> AES-256-GCM,
+   * with the room name as AAD so a sealed key can't be replayed for another call.
+   */
+  sealKeyForAgent(roomName: string, key: string, agentPublicKeyB64: string): SealedCallKey {
+    const agentRaw = Buffer.from(agentPublicKeyB64, 'base64');
+    if (agentRaw.length !== 32) throw new Error('agent public key must be 32 bytes (raw X25519)');
+    const agentPublicKey = createPublicKey({
+      key: { kty: 'OKP', crv: 'X25519', x: agentRaw.toString('base64url') },
+      format: 'jwk',
+    });
+    const ephemeral = generateKeyPairSync('x25519');
+    const shared = diffieHellman({ privateKey: ephemeral.privateKey, publicKey: agentPublicKey });
+    const wrapKey = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), Buffer.from(AGENT_SEAL_INFO, 'utf8'), 32));
+    const nonce = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', wrapKey, nonce);
+    cipher.setAAD(Buffer.from(roomName, 'utf8'));
+    const ciphertext = Buffer.concat([cipher.update(key, 'utf8'), cipher.final(), cipher.getAuthTag()]);
+    const ephemeralX = ephemeral.publicKey.export({ format: 'jwk' }).x as string;
+    return {
+      ephemeralPublicKey: Buffer.from(ephemeralX, 'base64url').toString('base64'),
+      nonce: nonce.toString('base64'),
+      ciphertext: ciphertext.toString('base64'),
+    };
   }
 
   private credentials(
