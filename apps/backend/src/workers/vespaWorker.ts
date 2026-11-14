@@ -93,8 +93,12 @@ export class VespaWorker {
 			return;
 		}
 
-		// Process all jobs with a single queue processor to ensure only one job at a time across all schemas
-		this.queue.process('*', 1, async (job) => {
+		// One processor for all schemas. VESPA_WORKER_CONCURRENCY (default 1: one job at a time)
+		// lets a worker such as the backfill one run several jobs at once; each extra slot is
+		// another concurrent DB read and Vespa feed.
+		const concurrency = config.vespa.workerConcurrency;
+		logger.info(`[VESPA_WORKER] Processing up to ${concurrency} job(s) at a time`);
+		this.queue.process('*', concurrency, async (job) => {
 			return this.processJob(job);
 		});
 

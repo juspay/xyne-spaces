@@ -503,7 +503,7 @@ export const mapMessage = async (
   // Older messages still get the current thread fields on their own doc; they just don't
   // push them to the rest of the thread.
   const syncThread =
-    process.env.VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY !== 'true' ||
+    !config.vespa.backfillWorkerFanoutLastMessageOnly ||
     (await isLatestMessageInThread(args.messageId, args.conversationId));
   const threadInfo = syncThread
     ? await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId)
