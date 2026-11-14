@@ -241,6 +241,7 @@ platform_secrets() {
   encryption_key              = \"$(hex64)\"
   internal_s2s_key            = \"$(rand 48)\"
   claw_s2s_key                = \"$(rand 48)\"
+  ocr_s2s_key                 = \"$(rand 48)\"
   claw_auth_encryption_key    = \"$(hex64)\"
   ysweet_auth                 = \"$ysweet_auth\"
   ysweet_server_token         = \"$ysweet_token\"

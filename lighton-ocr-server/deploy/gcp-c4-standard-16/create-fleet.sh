@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Creates a c4-standard-16 Managed Instance Group behind an internal managed HTTP LB.
-# Run from this repository root after setting LIGHTON_OCR_IMAGE_URI and REDIS_URL.
+# Run from this repository root after setting LIGHTON_OCR_IMAGE_URI, REDIS_URL and INTERNAL_S2S_KEY
+# and/or OCR_S2S_KEY.
 
 PROJECT="${PROJECT:-xyne-spaces-sbx}"
 REGION="${REGION:-asia-southeast1}"
@@ -30,6 +31,15 @@ LB_IP="${LB_IP:-}"
 LIGHTON_OCR_IMAGE_URI="${LIGHTON_OCR_IMAGE_URI:?Set LIGHTON_OCR_IMAGE_URI, for example asia-southeast1-docker.pkg.dev/xyne-spaces-sbx/ocr/lighton-ocr-server:final}"
 REDIS_URL="${REDIS_URL:?Set REDIS_URL reachable from the fleet, for example redis://10.2.0.2:6379/0}"
 OCR_ASYNC_GLOBAL_MAX_INFLIGHT="${OCR_ASYNC_GLOBAL_MAX_INFLIGHT:-20}"
+# Callers send one of these as x-s2s-key: INTERNAL_S2S_KEY (same value as the xyne-spaces backend's,
+# which is what it sends) and/or OCR_S2S_KEY (for callers outside xyne-spaces). At least one is required.
+INTERNAL_S2S_KEY="${INTERNAL_S2S_KEY:-}"
+OCR_S2S_KEY="${OCR_S2S_KEY:-}"
+if [[ -z "${INTERNAL_S2S_KEY}" && -z "${OCR_S2S_KEY}" ]]; then
+  echo "Set INTERNAL_S2S_KEY (the backend's value) and/or OCR_S2S_KEY" >&2
+  exit 1
+fi
+export LIGHTON_OCR_IMAGE_URI REDIS_URL OCR_ASYNC_GLOBAL_MAX_INFLIGHT OCR_S2S_KEY INTERNAL_S2S_KEY
 
 GCLOUD="${GCLOUD:-python3 /usr/local/Caskroom/gcloud-cli/532.0.0/google-cloud-sdk/lib/gcloud.py}"
 
@@ -47,6 +57,8 @@ print(
         LIGHTON_OCR_IMAGE_URI=os.environ["LIGHTON_OCR_IMAGE_URI"],
         REDIS_URL=os.environ["REDIS_URL"],
         OCR_ASYNC_GLOBAL_MAX_INFLIGHT=os.environ["OCR_ASYNC_GLOBAL_MAX_INFLIGHT"],
+        OCR_S2S_KEY=os.environ["OCR_S2S_KEY"],
+        INTERNAL_S2S_KEY=os.environ["INTERNAL_S2S_KEY"],
     ),
     end="",
 )

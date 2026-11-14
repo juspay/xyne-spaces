@@ -345,6 +345,7 @@ export class PdfProcessor {
     try {
       resp = await fetch(`${url.replace(/\/+$/, '')}/process`, {
         method: 'POST',
+        headers: { 'x-s2s-key': config.internalS2sKey },
         body: form,
         signal: controller.signal,
       })
