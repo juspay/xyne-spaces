@@ -698,6 +698,9 @@ const envSchema = Joi.object({
   // 'shadow' records what archive inspection would refuse without blocking it;
   // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
   UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
+  // Comma-separated hostnames SDLC Hub may connect to as Bitbucket Server. Empty (default)
+  // refuses every Bitbucket connection.
+  SDLC_BITBUCKET_ALLOWED_HOSTS: Joi.string().allow('').default(''),
   SDK_API_ENABLED: Joi.boolean().default(false),
   // Migration routes (/api/migration/* and the /migrate/api/migration/* alias):
   // Slack/Jira/WhatsApp/Confluence migration, cleanup, backfills. Off by default:
@@ -1572,6 +1575,12 @@ export const config = {
   },
   uploads: {
     archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
+  },
+  sdlc: {
+    bitbucketAllowedHosts: (envVars.SDLC_BITBUCKET_ALLOWED_HOSTS as string)
+      .split(',')
+      .map((host: string) => host.trim().toLowerCase())
+      .filter(Boolean),
   },
   pyroscope: {
     enabled: envVars.PYROSCOPE_ENABLED as boolean,

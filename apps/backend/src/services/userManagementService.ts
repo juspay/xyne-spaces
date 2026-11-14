@@ -6,8 +6,7 @@ import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
-import axios from 'axios';
-import FormData from 'form-data';
+import { allowlistedFetch, createHttpClient, isHttpError } from '@/utils/ssrfGuard';
 import {
   User,
   UpdateUserInput,
@@ -36,6 +35,9 @@ const DIRECTORY_USER_SELECT = {
 } satisfies Prisma.UserSelect;
 
 export type DirectoryUser = Prisma.UserGetPayload<{ select: typeof DIRECTORY_USER_SELECT }>;
+
+// Only the configured Python agent.
+const agentHttp = createHttpClient(allowlistedFetch(() => [config.pythonAgentUrl]));
 
 /**
  * User Management Service
@@ -889,16 +891,12 @@ export class UserManagementService {
       }
 
       const form = new FormData();
-      form.append('audio', file.buffer, {
-        filename: file.originalname,
-        contentType: file.mimetype,
-      });
+      form.append('audio', new Blob([file.buffer], { type: file.mimetype }), file.originalname);
 
-      const embedResponse = await axios.post<{ embedding: number[]; dim: number }>(
+      const embedResponse = await agentHttp.post<{ embedding: number[]; dim: number }>(
         `${pythonAgentUrl}/embed-voice`,
         form,
         {
-          headers: form.getHeaders(),
           timeout: 60_000, // 60s — model loading + inference can be slow on first call
         },
       );
@@ -940,10 +938,10 @@ export class UserManagementService {
       return { hasVoiceSignature: true };
     } catch (error) {
       let msg = error instanceof Error ? error.message : String(error);
-      // Surface axios response body for easier debugging
-      if (axios.isAxiosError(error)) {
+      // Surface the response body for easier debugging
+      if (isHttpError(error)) {
         const status = error.response?.status;
-        const body = error.response?.data;
+        const body = error.response?.data as { detail?: string; error?: string } | undefined;
         const detail = body?.detail ? `\n${body.detail}` : '';
         const errMsg = body?.error ?? error.code ?? error.message;
         msg = `Python agent request failed (${status ?? error.code}): ${errMsg}${detail}`;

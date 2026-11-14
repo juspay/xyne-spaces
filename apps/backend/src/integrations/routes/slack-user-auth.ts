@@ -19,6 +19,9 @@ import { redisService } from '@/services/redisService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const slackFetch = allowlistedFetch(() => ['slack.com']);
 
 const TAG = '[SlackUserAuth]';
 const router = express.Router();
@@ -150,7 +153,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
     const redirectUri = `${getBackendUrl(req)}/api/integrations/slack-user/callback`;
 
     // Exchange code for token
-    const tokenResponse = await fetch('https://slack.com/api/oauth.v2.access', {
+    const tokenResponse = await slackFetch('https://slack.com/api/oauth.v2.access', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({

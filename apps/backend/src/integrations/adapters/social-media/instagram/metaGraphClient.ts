@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import axios from 'axios';
+import { allowlistedFetch, createHttpClient, type HttpError } from '@/utils/ssrfGuard';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { SenderNameCache } from '../shared/senderNameCache';
@@ -7,6 +7,7 @@ import { SenderNameCache } from '../shared/senderNameCache';
 const IG_API_VERSION = 'v25.0';
 const IG_REQUEST_TIMEOUT_MS = 10_000;
 const IG_BASE_URL = `https://graph.instagram.com/${IG_API_VERSION}`;
+const igHttp = createHttpClient(allowlistedFetch(() => ['instagram.com']));
 const IG_TOKEN_URL = 'https://api.instagram.com/oauth/access_token';
 const IG_LONG_LIVED_URL = 'https://graph.instagram.com/access_token';
 const IG_REFRESH_URL = 'https://graph.instagram.com/refresh_access_token';
@@ -48,7 +49,7 @@ export const metaGraphClient = {
     recipientIgsid: string,
     text: string
   ): Promise<SendDMResult> {
-    const response = await axios.post<SendDMResult>(
+    const response = await igHttp.post<SendDMResult>(
       `${IG_BASE_URL}/${senderIgsid}/messages`,
       {
         recipient: { id: recipientIgsid },
@@ -62,7 +63,7 @@ export const metaGraphClient = {
 
   // Refresh a long-lived IG User token (valid 60 days; can refresh after 24h).
   async refreshToken(accessToken: string): Promise<RefreshTokenResult> {
-    const response = await axios.get<RefreshTokenResult>(IG_REFRESH_URL, {
+    const response = await igHttp.get<RefreshTokenResult>(IG_REFRESH_URL, {
       params: {
         grant_type: 'ig_refresh_token',
         access_token: accessToken,
@@ -86,7 +87,7 @@ export const metaGraphClient = {
       code,
     };
     if (codeVerifier) params.code_verifier = codeVerifier;
-    const response = await axios.post<ExchangeTokenResult>(
+    const response = await igHttp.post<ExchangeTokenResult>(
       IG_TOKEN_URL,
       new URLSearchParams(params).toString(),
       {
@@ -99,7 +100,7 @@ export const metaGraphClient = {
 
   // Exchange a short-lived token for a long-lived IG User token (60 days).
   async getLongLivedToken(shortLivedToken: string): Promise<ExchangeTokenResult> {
-    const response = await axios.get<ExchangeTokenResult>(IG_LONG_LIVED_URL, {
+    const response = await igHttp.get<ExchangeTokenResult>(IG_LONG_LIVED_URL, {
       params: {
         grant_type: 'ig_exchange_token',
         client_secret: config.META_IG_APP_SECRET || config.META_APP_SECRET,
@@ -114,7 +115,7 @@ export const metaGraphClient = {
   // id (igsid)  = app-scoped IGSID — used ONLY for API calls: subscribeToWebhook, sendDM, getSenderUsername
   // user_id     = real Instagram user ID — equals webhook entry.id; used for source name and routing
   async getMe(accessToken: string): Promise<{ igUserId: string; igsid: string; username: string }> {
-    const response = await axios.get<{ id: string; user_id?: string; username?: string }>(
+    const response = await igHttp.get<{ id: string; user_id?: string; username?: string }>(
       `${IG_BASE_URL}/me`,
       {
         params: { fields: 'id,user_id,username' },
@@ -154,7 +155,7 @@ export const metaGraphClient = {
       return null;
     }
     try {
-      const response = await axios.get(`${IG_BASE_URL}/${mid}`, {
+      const response = await igHttp.get(`${IG_BASE_URL}/${mid}`, {
         params: { fields: 'id,message,from,to,attachments' },
         headers: { Authorization: `Bearer ${accessToken}` },
         timeout: IG_REQUEST_TIMEOUT_MS,
@@ -167,7 +168,7 @@ export const metaGraphClient = {
   },
 
   async getUserProfile(accessToken: string, igUserId: string): Promise<IgUserProfile> {
-    const response = await axios.get<IgUserProfile>(`${IG_BASE_URL}/${igUserId}`, {
+    const response = await igHttp.get<IgUserProfile>(`${IG_BASE_URL}/${igUserId}`, {
       params: { fields: 'name,username,profile_pic' },
       headers: { Authorization: `Bearer ${accessToken}` },
       timeout: IG_REQUEST_TIMEOUT_MS,
@@ -202,14 +203,14 @@ export const metaGraphClient = {
   // Both require instagram_manage_comments permission on the Meta app.
   async subscribeToWebhook(accessToken: string, igsid: string): Promise<void> {
     try {
-      await axios.post(`${IG_BASE_URL}/${igsid}/subscribed_apps`, null, {
+      await igHttp.post(`${IG_BASE_URL}/${igsid}/subscribed_apps`, null, {
         params: { subscribed_fields: 'messages,mentions,comments' },
         headers: { Authorization: `Bearer ${accessToken}` },
         timeout: IG_REQUEST_TIMEOUT_MS,
       });
       logger.info('[metaGraphClient] subscribeToWebhook succeeded', { igsid });
     } catch (err) {
-      const axiosErr = err as import('axios').AxiosError;
+      const axiosErr = err as HttpError;
       logger.error('[metaGraphClient] subscribeToWebhook FAILED', {
         igsid,
         status: axiosErr.response?.status,
@@ -223,7 +224,7 @@ export const metaGraphClient = {
   // Remove the app's webhook subscription for the IG account.
   // Call on disconnect so Meta stops delivering events for this account.
   async unsubscribeFromWebhook(accessToken: string, igsid: string): Promise<void> {
-    await axios.delete(`${IG_BASE_URL}/${igsid}/subscribed_apps`, {
+    await igHttp.delete(`${IG_BASE_URL}/${igsid}/subscribed_apps`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       timeout: IG_REQUEST_TIMEOUT_MS,
     });
@@ -233,7 +234,7 @@ export const metaGraphClient = {
   // After subscribeToWebhook, call this to confirm our app is the active subscriber.
   // igsid must be the app-scoped IGSID (not the real igUserId — Meta rejects it here).
   async getSubscribedApps(accessToken: string, igsid: string): Promise<unknown> {
-    const response = await axios.get(`${IG_BASE_URL}/${igsid}/subscribed_apps`, {
+    const response = await igHttp.get(`${IG_BASE_URL}/${igsid}/subscribed_apps`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       timeout: IG_REQUEST_TIMEOUT_MS,
     });
@@ -249,7 +250,7 @@ export const metaGraphClient = {
     commentId: string
   ): Promise<{ mentioned_comment?: { id: string; text?: string; timestamp?: string } } | null> {
     try {
-      const response = await axios.get<{
+      const response = await igHttp.get<{
         mentioned_comment?: { id: string; text?: string; timestamp?: string };
       }>(`${IG_BASE_URL}/${igsid}`, {
         params: { fields: 'mentioned_comment', comment_id: commentId },
@@ -276,7 +277,7 @@ export const metaGraphClient = {
     mentioned_media?: { id: string; caption?: string; owner?: { id: string }; timestamp?: string };
   } | null> {
     try {
-      const response = await axios.get<{
+      const response = await igHttp.get<{
         mentioned_media?: {
           id: string;
           caption?: string;
@@ -308,7 +309,7 @@ export const metaGraphClient = {
       return null;
     }
     try {
-      const response = await axios.get<{
+      const response = await igHttp.get<{
         id: string;
         text?: string;
         timestamp?: string;
@@ -332,7 +333,7 @@ export const metaGraphClient = {
     commentId: string,
     text: string
   ): Promise<{ id: string }> {
-    const response = await axios.post<{ id: string }>(
+    const response = await igHttp.post<{ id: string }>(
       `${IG_BASE_URL}/${commentId}/replies`,
       { message: text },
       { headers: { Authorization: `Bearer ${accessToken}` }, timeout: IG_REQUEST_TIMEOUT_MS }

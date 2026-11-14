@@ -3,9 +3,13 @@
  * Sends email replies via Zoho API with sourceId to prevent webhook loops
  */
 
-import axios, { AxiosInstance } from 'axios';
 import { decrypt } from './encryptionService';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch, createHttpClient } from '@/utils/ssrfGuard';
+
+// Only Zoho's own hosts (the Desk API and the accounts/token endpoint).
+const zohoFetch = allowlistedFetch(() => ['zoho.com']);
+const zohoHttp = createHttpClient(zohoFetch);
 
 interface ZohoCredentials {
   refreshToken: string;
@@ -33,7 +37,7 @@ interface SendReplyResponse {
 const tokenCache = new Map<string, { token: string; expiresAt: Date }>();
 
 export class ZohoService {
-  private client: AxiosInstance;
+  private client: ReturnType<typeof createHttpClient>;
   private credentials: ZohoCredentials;
 
   constructor(
@@ -41,7 +45,7 @@ export class ZohoService {
     private sourceId: string
   ) {
     this.credentials = credentials;
-    this.client = axios.create({
+    this.client = createHttpClient(zohoFetch, {
       baseURL: 'https://desk.zoho.com/api/v1',
       headers: {
         'Content-Type': 'application/json',
@@ -79,7 +83,7 @@ export class ZohoService {
       params.append('grant_type', 'refresh_token');
       params.append('scope', scope);
 
-      const response = await axios.post(
+      const response = await zohoHttp.post<{ access_token: string; expires_in?: number }>(
         'https://accounts.zoho.com/oauth/v2/token',
         params,
         {
@@ -150,7 +154,7 @@ export class ZohoService {
       payload.inReplyToThreadId = inReplyToThreadId;
     }
 
-    const response = await this.client.post(`/tickets/${ticketId}/sendReply`, payload, {
+    const response = await this.client.post<{ id: string }>(`/tickets/${ticketId}/sendReply`, payload, {
       headers: {
         'Authorization': `Zoho-oauthtoken ${accessToken}`,
       },
@@ -172,7 +176,7 @@ export class ZohoService {
     // Get fresh access token with READ scope
     const accessToken = await this.getAccessToken('Desk.tickets.READ');
 
-    const response = await this.client.get(`/tickets/${ticketId}/threads/${threadId}`, {
+    const response = await this.client.get<any>(`/tickets/${ticketId}/threads/${threadId}`, {
       headers: {
         'Authorization': `Zoho-oauthtoken ${accessToken}`,
       },

@@ -13,6 +13,7 @@ import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf } from "./users-jit.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "./http.js";
 import { createLogger } from "../logger.js";
+import { safeFetch } from "./safe-fetch.js";
 
 export interface McpOAuthConfig {
   type: string;
@@ -83,7 +84,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
   }
 
   async function registerClient(redirectUri: string): Promise<{ clientId: string; clientSecret?: string | undefined }> {
-    const res = await fetch(registerUrl, {
+    const res = await safeFetch(registerUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -201,7 +202,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
     authorize,
     async refresh(creds) {
       const c = creds as unknown as StoredTokens;
-      const refreshRes = await fetch(tokenUrl, {
+      const refreshRes = await safeFetch(tokenUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: tokenExchangeBody({ grantType: "refresh_token", clientId: c.clientId, clientSecret: c.clientSecret, refreshToken: c.refreshToken }),
@@ -259,7 +260,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
 
     const { clientId, clientSecret, codeVerifier, redirectUri } = statePayload;
 
-    const tokenRes = await fetch(tokenUrl, {
+    const tokenRes = await safeFetch(tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: tokenExchangeBody({ grantType: "authorization_code", clientId, clientSecret, code, codeVerifier, redirectUri }),
@@ -311,7 +312,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
       const { userId, clientId, clientSecret, codeVerifier, redirectUri } = statePayload;
       frontendUrl = resolveOAuthReturn(statePayload.returnTo);
 
-      const tokenRes = await fetch(tokenUrl, {
+      const tokenRes = await safeFetch(tokenUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: tokenExchangeBody({ grantType: "authorization_code", clientId, clientSecret, code, codeVerifier, redirectUri }),

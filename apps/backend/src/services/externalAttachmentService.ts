@@ -4,7 +4,7 @@ import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { decrypt } from './encryptionService';
-import { safeWebhookFetch } from '@/utils/ssrfGuard';
+import { assertUrlSyntaxSafe, safeWebhookFetch } from '@/utils/ssrfGuard';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { UploadedFileResult } from '@/services/fileUploadService';
@@ -331,6 +331,7 @@ export class ExternalAttachmentService {
       }
     } else {
       if (!fileUrl) throw new Error(`No URL or buffer for attachment: ${fileName}`);
+      assertUrlSyntaxSafe(fileUrl);
       logger.debug(`Downloading attachment: ${fileName} from ${fileUrl}`);
 
       const controller = new AbortController();

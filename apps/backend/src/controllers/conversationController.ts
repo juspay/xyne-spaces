@@ -24,6 +24,9 @@ import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { SendMessageResponse, GetMessagesResponse } from '../api/types/MessageTypes';
 import { config } from '../config/env';
+import { allowlistedFetch } from '../utils/ssrfGuard';
+
+const clawFetch = allowlistedFetch(() => [config.xyneClaw.authUrl]);
 import { z } from 'zod';
 import { logger } from '../utils/logger';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
@@ -2236,7 +2239,7 @@ export class ConversationController {
     const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
     const url = `${base}/claw/api/v1/internal/twin-draft/action`;
     try {
-      const resp = await fetch(url, {
+      const resp = await clawFetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

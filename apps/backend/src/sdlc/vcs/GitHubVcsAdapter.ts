@@ -14,8 +14,10 @@ import type {
 import { createHash } from 'crypto';
 import { VcsProviderError } from './types';
 import { defaultGitRunner, listFirstParentHistoryWithGit, type GitRunner } from './gitHistory';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 const API_URL = 'https://api.github.com';
+const githubFetch = allowlistedFetch(() => [API_URL]);
 const REPOSITORY_LIST_TTL_MS = 60_000;
 const REPOSITORY_LIST_MAX_PAGES = 5;
 const API_VERSION = '2026-03-10';
@@ -384,7 +386,7 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
   ): Promise<{ data: T; response: Response }> {
     let response: Response;
     try {
-      response = await fetch(`${API_URL}${path}`, {
+      response = await githubFetch(`${API_URL}${path}`, {
         ...init,
         headers: {
           Accept: 'application/vnd.github+json',

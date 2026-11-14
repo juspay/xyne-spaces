@@ -12,6 +12,10 @@
  */
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// Only the configured deep-research service.
+const researchFetch = allowlistedFetch(() => [config.deepResearchBaseUrl]);
 
 /** The xyne-ai-extended gateway. Set per deployment; there is no sensible default. */
 function baseUrl(): string {
@@ -62,7 +66,7 @@ async function jsonFetch<T>(url: string, init: RequestInit, outerSignal?: AbortS
     else outerSignal.addEventListener('abort', onAbort, { once: true });
   }
   try {
-    const res = await fetch(url, {
+    const res = await researchFetch(url, {
       ...init,
       headers: {
         'Content-Type': 'application/json',

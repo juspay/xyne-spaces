@@ -42,6 +42,9 @@ import {
 import { getBackendUrl } from '@/utils/publicUrls';
 import { MICROSOFT_OAUTH_SCOPES } from '@/services/microsoftDeskService';
 import { ChannelRole, DeskType } from '@xyne/shared';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const googleFetch = allowlistedFetch(() => ['googleapis.com']);
 
 const TAG = '[DeskIntegration]';
 const router = express.Router();
@@ -181,7 +184,7 @@ router.post(
           };
           const tokenToRevoke = creds.refreshToken || creds.accessToken;
           if (tokenToRevoke) {
-            const revokeRes = await fetch(
+            const revokeRes = await googleFetch(
               `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(tokenToRevoke)}`,
               { method: 'POST' },
             );

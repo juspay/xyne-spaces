@@ -9,6 +9,7 @@ import {
 vi.mock("../mcpgateway/services/http-client.js", () => ({
   assertSafeOutboundUrl: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("./safe-fetch.js", () => ({ safeFetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) }));
 
 const LITELLM_BASE = "https://grid.example.com";
 

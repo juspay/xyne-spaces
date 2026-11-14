@@ -22,6 +22,9 @@ import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { emailMatchesDl, parseDlAliases } from '@/services/dlResolver';
 import { normalizeRfcMessageId, normalizeRfcMessageIds } from '@/utils/emailRfcMessageId';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const graphApiFetch = allowlistedFetch(() => [config.microsoftGraph.baseUrl, 'graph.microsoft.com']);
 
 const TAG = '[MicrosoftRefetch]';
 const RANGE_MAX_MESSAGES = 2000;
@@ -366,7 +369,7 @@ export class MicrosoftRefetch extends BaseRefetch {
     let droppedNoMatch = 0;
 
     while (nextLink && (maxMessages === null || collected.length < maxMessages)) {
-      const response = await fetch(nextLink, {
+      const response = await graphApiFetch(nextLink, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!response.ok) {

@@ -1,11 +1,13 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 const CONFIG_SERVER_BASE = (
   appConfig.vespa.configServerUrl
 ).replace(/\/+$/, '');
 
+const configServerFetch = allowlistedFetch(() => [CONFIG_SERVER_BASE]);
 const SCHEMA_BASE_URL = `${CONFIG_SERVER_BASE}/application/v2/tenant/default/application/default/environment/default/region/default/instance/default/content/schemas`;
 
 if (!appConfig.vespa.configServerUrl) {
@@ -17,7 +19,7 @@ export const schemaHandler = async (req: Request, res: Response): Promise<void> 
   const url = `${SCHEMA_BASE_URL}/${schemaName}.sd`;
 
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const response = await configServerFetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       logger.error('[schemaHandler] Vespa config server returned error', { schemaName, status: response.status, text });

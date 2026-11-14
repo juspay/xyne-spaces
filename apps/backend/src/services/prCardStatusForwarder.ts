@@ -5,6 +5,9 @@
 import { config } from '@/config/env';
 import { sanitizeForLog } from '@/git-providers/github/apis';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const clawFetch = allowlistedFetch(() => [config.xyneClaw?.webhookUrl]);
 
 /** The PR card statuses a webhook can drive (subset of PrStatus in xyne-claw-shared/flow/pr-flow.ts). */
 export type PrCardStatus = 'created' | 'merged' | 'declined' | 'deleted';
@@ -35,7 +38,7 @@ export function forwardPrCardStatus(ev: PrCardStatusEvent, logPrefix: string): v
 
   const url = `${base.replace(/\/+$/, '')}/pr-event`;
 
-  void fetch(url, {
+  void clawFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-s2s-key': s2sKey },
     body: JSON.stringify(ev),

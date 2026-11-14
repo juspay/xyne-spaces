@@ -1,5 +1,8 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const clawFetch = allowlistedFetch(() => [config.aiProvisioning.xyneClawAuthInternalUrl]);
 
 export interface ClawSyncOrgPayload {
   spacesOrgId: string;
@@ -87,7 +90,7 @@ class ClawSpacesSyncClient {
     );
 
     try {
-      const response = await fetch(`${baseUrl}/claw/api/v1/internal/spaces-sync${path}`, {
+      const response = await clawFetch(`${baseUrl}/claw/api/v1/internal/spaces-sync${path}`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

@@ -6,6 +6,9 @@ import {
   type JsonCompletionRequest,
   type LlmClient,
 } from '@/services/entityExtraction/pipeline';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const llmFetch = allowlistedFetch(() => [config.litellm.baseUrl]);
 
 /**
  * The mention-extraction LlmClient: a direct LiteLLM /chat/completions caller
@@ -32,7 +35,7 @@ async function callLiteLLM(messages: Array<{ role: string; content: string }>): 
   const url = `${config.litellm.baseUrl.replace(/\/$/, '')}/chat/completions`;
 
   for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, {
+    const response = await llmFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

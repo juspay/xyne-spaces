@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import axios from 'axios';
 import { logger } from '@/utils/logger';
+import { isHttpError } from '@/utils/ssrfGuard';
 import { mettleTeamMembersService } from '@/services/mettleTeamMembersService';
 
 export class MettleTeamMembersController {
@@ -45,7 +45,7 @@ export class MettleTeamMembersController {
         pagination: { page: safePage, limit, total, totalPages },
       });
     } catch (error) {
-      if (axios.isAxiosError(error)) {
+      if (isHttpError(error)) {
         const upstreamStatus = error.response?.status;
         const data = error.response?.data ?? {
           error: 'Failed to fetch team members from Mettle',

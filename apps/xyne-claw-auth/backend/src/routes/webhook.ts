@@ -150,7 +150,7 @@ import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
-import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { safeFetch } from "../lib/safe-fetch.js";
 
 const clog = createLogger("webhook");
 
@@ -1372,11 +1372,10 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         let downloaded = false;
         for (const src of sources) {
           try {
-            if (src.external) await assertSafeOutboundUrl(src.url);
-            const dlRes = await fetch(src.url, {
-              signal: AbortSignal.timeout(CONFIG.attachmentDownloadTimeoutMs),
-              ...(src.headers ? { headers: src.headers } : {}),
-            });
+            const dlInit = src.headers ? { headers: src.headers } : {};
+            const dlRes = src.external
+              ? await safeFetch(src.url, dlInit, { timeoutMs: CONFIG.attachmentDownloadTimeoutMs, maxResponseBytes: 100 * 1024 * 1024 })
+              : await fetch(src.url, { signal: AbortSignal.timeout(CONFIG.attachmentDownloadTimeoutMs), ...dlInit });
             if (dlRes.ok) {
               const buffer = Buffer.from(await dlRes.arrayBuffer());
               const uploaded = refAttachments
@@ -1451,8 +1450,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       .join("\n\n");
 
     // Email auto-draft forward target — suppresses placeholder+DM (see /webhook/result).
-    const resultForwardUrl =
+    const requestedForwardUrl =
       ((payload as { metadata?: Record<string, unknown> }).metadata?.["resultForwardUrl"] as string | undefined) || undefined;
+    const resultForwardUrl =
+      requestedForwardUrl && (isInternalCallbackOrigin(requestedForwardUrl) || isAllowedExternalCallbackUrl(requestedForwardUrl))
+        ? requestedForwardUrl
+        : undefined;
 
     // Plan mode: interactive non-twin mentions only (twin never plans).
     const planModeSpread = planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {};
@@ -2877,7 +2880,7 @@ async function forwardResult(
     }
   }
   try {
-    const res = await fetch(deliveryUrl, {
+    const res = await (forwardToInternal ? fetch : safeFetch)(deliveryUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

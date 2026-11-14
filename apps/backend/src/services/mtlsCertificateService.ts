@@ -1,5 +1,6 @@
 import { config } from '@/config/env';
 import { logger as baseLogger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 const logger = baseLogger.child({ module: 'MtlsCertificateService' });
 
@@ -14,6 +15,9 @@ class MtlsCertificateService {
   private isConfigured(): boolean {
     return !!config.mtlsService.url && !!config.mtlsService.s2sSecret;
   }
+
+  // Only the configured certificate service.
+  private readonly mtlsFetch = allowlistedFetch(() => [this.baseUrl]);
 
   private get baseUrl(): string {
     return config.mtlsService.url.replace(/\/+$/, '');
@@ -42,7 +46,7 @@ class MtlsCertificateService {
     }
 
     try {
-      const response = await fetch(
+      const response = await this.mtlsFetch(
         `${this.baseUrl}/internal/users/${encodeURIComponent(userEmail)}/certificates/revoke-all`,
         {
           method: 'POST',

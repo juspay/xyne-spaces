@@ -5,6 +5,9 @@ const slackFiles = ["src/surfaces/slack/**/*.ts"];
 const SSRF_SAFE_FETCH_MESSAGE =
   "Raw fetch is not SSRF-safe: use safeFetch() for any URL a user, agent or stored config can influence, or internalFetch() for configured internal origins (lib/safe-fetch.ts)";
 
+const SSRF_HTTP_CLIENT_MESSAGE =
+  "HTTP client libraries bypass the SSRF guard: use safeFetch() for any URL a user, agent or stored config can influence, or internalFetch() for configured internal origins (lib/safe-fetch.ts)";
+
 export default [
   {
     ignores: ["dist/**", "**/*.test.ts", "**/*.spec.ts", "**/__tests__/**"],
@@ -24,12 +27,23 @@ export default [
     rules: {
       // SSRF: every outbound HTTP call goes through lib/safe-fetch.ts, which
       // resolves DNS once, blocks private/loopback/metadata addresses, pins the
-      // connection and re-validates redirects. Pre-existing raw calls are
-      // tracked in eslint-suppressions.json and may only shrink.
+      // connection and re-validates redirects.
       "no-restricted-globals": ["error", { name: "fetch", message: SSRF_SAFE_FETCH_MESSAGE }],
       "no-restricted-properties": [
         "error",
         { object: "globalThis", property: "fetch", message: SSRF_SAFE_FETCH_MESSAGE },
+      ],
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            { name: "axios", message: SSRF_HTTP_CLIENT_MESSAGE },
+            { name: "node-fetch", message: SSRF_HTTP_CLIENT_MESSAGE },
+            { name: "cross-fetch", message: SSRF_HTTP_CLIENT_MESSAGE },
+            { name: "got", message: SSRF_HTTP_CLIENT_MESSAGE },
+            { name: "undici", importNames: ["fetch", "request", "stream"], message: SSRF_HTTP_CLIENT_MESSAGE },
+          ],
+        },
       ],
     },
   },

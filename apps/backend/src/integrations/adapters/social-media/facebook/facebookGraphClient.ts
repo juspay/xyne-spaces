@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { allowlistedFetch, createHttpClient, type HttpError } from '@/utils/ssrfGuard';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { SenderNameCache } from '../shared/senderNameCache';
@@ -7,6 +7,7 @@ import { metaGraphErrorCode as graphErrorCode } from '../shared/metaTokenRejecti
 const FB_API_VERSION = 'v25.0';
 const FB_REQUEST_TIMEOUT_MS = 10_000;
 const FB_BASE_URL = `https://graph.facebook.com/${FB_API_VERSION}`;
+const fbHttp = createHttpClient(allowlistedFetch(() => ['facebook.com']));
 export const FB_DIALOG_URL = `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth`;
 
 const PAGE_SUBSCRIBED_FIELDS = 'messages,message_edits,feed,mention';
@@ -71,7 +72,7 @@ async function* iteratePages<T>(
     const data = page.data ?? [];
     yield data;
     if (!page.paging?.next || done(data) || fetched >= MAX_HISTORY_PAGES) return;
-    page = (await axios.get<Paged<T>>(page.paging.next, bearer(accessToken))).data;
+    page = (await fbHttp.get<Paged<T>>(page.paging.next, bearer(accessToken))).data;
   }
 }
 
@@ -113,7 +114,7 @@ export function isFacebookTagRejected(error: unknown): boolean {
 export const facebookGraphClient = {
   // Exchange the authorization code for a short-lived user token.
   async exchangeCodeForToken(code: string, redirectUri: string): Promise<string> {
-    const response = await axios.get<{ access_token: string }>(`${FB_BASE_URL}/oauth/access_token`, {
+    const response = await fbHttp.get<{ access_token: string }>(`${FB_BASE_URL}/oauth/access_token`, {
       params: {
         client_id: config.META_APP_ID,
         client_secret: config.META_APP_SECRET,
@@ -127,7 +128,7 @@ export const facebookGraphClient = {
 
   // Page tokens minted from a long-lived user token do not expire, so no refresh worker is needed.
   async getLongLivedUserToken(shortLivedToken: string): Promise<string> {
-    const response = await axios.get<{ access_token: string }>(`${FB_BASE_URL}/oauth/access_token`, {
+    const response = await fbHttp.get<{ access_token: string }>(`${FB_BASE_URL}/oauth/access_token`, {
       params: {
         grant_type: 'fb_exchange_token',
         client_id: config.META_APP_ID,
@@ -140,7 +141,7 @@ export const facebookGraphClient = {
   },
 
   async getUserId(userAccessToken: string): Promise<string> {
-    const response = await axios.get<{ id: string }>(`${FB_BASE_URL}/me`, {
+    const response = await fbHttp.get<{ id: string }>(`${FB_BASE_URL}/me`, {
       params: { fields: 'id' },
       ...bearer(userAccessToken),
     });
@@ -154,7 +155,7 @@ export const facebookGraphClient = {
     let params: Record<string, string> | undefined = { fields: 'id,name,access_token', limit: '100' };
     while (url) {
       const response: { data: { data?: FacebookPage[]; paging?: { next?: string } } } =
-        await axios.get(url, { params, ...bearer(userAccessToken) });
+        await fbHttp.get(url, { params, ...bearer(userAccessToken) });
       pages.push(...(response.data.data ?? []));
       // paging.next is a full URL that already carries the query string.
       url = response.data.paging?.next;
@@ -166,12 +167,12 @@ export const facebookGraphClient = {
   // Requires the app-level Page webhook to be configured in the Meta App Dashboard first.
   async subscribePage(pageAccessToken: string, pageId: string): Promise<void> {
     try {
-      await axios.post(`${FB_BASE_URL}/${pageId}/subscribed_apps`, null, {
+      await fbHttp.post(`${FB_BASE_URL}/${pageId}/subscribed_apps`, null, {
         params: { subscribed_fields: PAGE_SUBSCRIBED_FIELDS },
         ...bearer(pageAccessToken),
       });
     } catch (err) {
-      const axiosErr = err as import('axios').AxiosError;
+      const axiosErr = err as HttpError;
       logger.error('[facebookGraphClient] subscribePage FAILED', {
         pageId,
         status: axiosErr.response?.status,
@@ -183,7 +184,7 @@ export const facebookGraphClient = {
   },
 
   async unsubscribePage(pageAccessToken: string, pageId: string): Promise<void> {
-    await axios.delete(`${FB_BASE_URL}/${pageId}/subscribed_apps`, bearer(pageAccessToken));
+    await fbHttp.delete(`${FB_BASE_URL}/${pageId}/subscribed_apps`, bearer(pageAccessToken));
   },
 
   async sendMessage(
@@ -194,7 +195,7 @@ export const facebookGraphClient = {
     // Outside the 24h window a reply must carry the Human Agent tag.
     humanAgent = false,
   ): Promise<{ recipient_id: string; message_id: string }> {
-    const response = await axios.post<{ recipient_id: string; message_id: string }>(
+    const response = await fbHttp.post<{ recipient_id: string; message_id: string }>(
       `${FB_BASE_URL}/${pageId}/messages`,
       {
         recipient: { id: recipientPsid },
@@ -213,7 +214,7 @@ export const facebookGraphClient = {
     commentId: string,
     text: string,
   ): Promise<{ id: string }> {
-    const response = await axios.post<{ id: string }>(
+    const response = await fbHttp.post<{ id: string }>(
       `${FB_BASE_URL}/${commentId}/comments`,
       { message: text },
       bearer(pageAccessToken),
@@ -230,7 +231,7 @@ export const facebookGraphClient = {
     since: Date,
   ): AsyncGenerator<Array<{ id: string; messages: FacebookHistoryMessage[] }>> {
     type Conversation = { id: string; updated_time?: string; messages?: Paged<FacebookHistoryMessage> };
-    const first = await axios.get<Paged<Conversation>>(`${FB_BASE_URL}/${pageId}/conversations`, {
+    const first = await fbHttp.get<Paged<Conversation>>(`${FB_BASE_URL}/${pageId}/conversations`, {
       params: {
         platform: 'messenger',
         fields:
@@ -268,7 +269,7 @@ export const facebookGraphClient = {
     recentOnly = false,
   ): AsyncGenerator<Array<{ id: string; comments: FacebookHistoryComment[] }>> {
     type Post = { id: string; comments?: Paged<FacebookHistoryComment> };
-    const first = await axios.get<Paged<Post>>(`${FB_BASE_URL}/${pageId}/feed`, {
+    const first = await fbHttp.get<Paged<Post>>(`${FB_BASE_URL}/${pageId}/feed`, {
       params: {
         fields:
           'id,comments.filter(stream).order(reverse_chronological).limit(100){id,created_time,from,message,parent{id},permalink_url}',
@@ -298,7 +299,7 @@ export const facebookGraphClient = {
     pageId: string,
     since: Date,
   ): Promise<FacebookTaggedPost[]> {
-    const first = await axios.get<Paged<FacebookTaggedPost>>(`${FB_BASE_URL}/${pageId}/tagged`, {
+    const first = await fbHttp.get<Paged<FacebookTaggedPost>>(`${FB_BASE_URL}/${pageId}/tagged`, {
       params: { fields: 'id,created_time,from,message,permalink_url', limit: '50' },
       ...bearer(pageAccessToken),
     });
@@ -318,7 +319,7 @@ export const facebookGraphClient = {
   ): Promise<{ permalink_url?: string; from?: { id?: string; name?: string } } | null> {
     if (!/^[0-9_]{1,128}$/.test(objectId)) return null;
     try {
-      const response = await axios.get<{
+      const response = await fbHttp.get<{
         permalink_url?: string;
         from?: { id?: string; name?: string };
       }>(`${FB_BASE_URL}/${objectId}`, {
@@ -343,7 +344,7 @@ export const facebookGraphClient = {
     const cached = senderNameCache.get(cacheKey);
     if (cached !== undefined) return cached;
     try {
-      const response = await axios.get<{ name?: string }>(`${FB_BASE_URL}/${psid}`, {
+      const response = await fbHttp.get<{ name?: string }>(`${FB_BASE_URL}/${psid}`, {
         params: { fields: 'name' },
         ...bearer(pageAccessToken),
       });

@@ -5,6 +5,10 @@ import path from 'node:path'
 import { PDFDocument } from 'pdf-lib'
 import { config } from '@/config/env'
 import { logger } from '@/utils/logger'
+import { allowlistedFetch } from '@/utils/ssrfGuard'
+
+// Only the configured LightOnOCR service.
+const lightOnFetch = allowlistedFetch(() => [config.pdf.lightOnOcr.url])
 import {
   isAppSyncPdfLibSemaphoreTimeoutError,
   withAppSyncPdfLibPermit,
@@ -343,7 +347,7 @@ export class PdfProcessor {
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     let resp: Response
     try {
-      resp = await fetch(`${url.replace(/\/+$/, '')}/process`, {
+      resp = await lightOnFetch(`${url.replace(/\/+$/, '')}/process`, {
         method: 'POST',
         body: form,
         signal: controller.signal,

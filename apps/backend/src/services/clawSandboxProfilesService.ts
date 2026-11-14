@@ -5,6 +5,9 @@
 import type { SandboxProfileConfig } from '@xyne/shared';
 import { config } from '@/config/env';
 import { AppError } from '@/middleware/errorHandler';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const clawFetch = allowlistedFetch(() => [config.xyneClaw.authUrl]);
 
 export interface ClawSandboxProfile {
   key: string;
@@ -20,7 +23,7 @@ async function call<T>(method: 'GET' | 'PUT' | 'POST', path: string, body?: unkn
   const key = config.internalS2sKey;
   if (!key) throw new Error('[ClawSandboxProfiles] INTERNAL_S2S_KEY is not configured');
   const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/claw/api/v1/internal/sandbox-profiles${path}`, {
+  const res = await clawFetch(`${base}/claw/api/v1/internal/sandbox-profiles${path}`, {
     method,
     headers: { 'x-s2s-key': key, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
