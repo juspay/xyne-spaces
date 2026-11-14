@@ -7,6 +7,9 @@ export {
   getClientManifest,
   refreshClientManifest,
   clearClientManifest,
+  noteClientManifestVersion,
+  refreshClientManifestIfStale,
+  setClientManifestStorage,
   CLIENT_MANIFEST_VERSION_HEADER,
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_STALE_CODE,
@@ -26,3 +29,16 @@ export {
   findRuleViolations,
 } from './manifest-encrypt.js';
 export type { FieldEncryptor, RuleViolation } from './manifest-encrypt.js';
+export type { ClientManifestStorage } from './client-manifest.js';
+export {
+  registerTrustedManifestKeys,
+  getTrustedManifestKeys,
+  parseTrustedManifestKeys,
+} from './manifest-keys.js';
+export type { TrustedManifestKey } from './manifest-keys.js';
+export {
+  verifySignedClientManifest,
+  setManifestSignatureVerifier,
+  ManifestVerificationError,
+} from './manifest-verify.js';
+export type { ManifestSignatureVerifier, ManifestRejectReason } from './manifest-verify.js';

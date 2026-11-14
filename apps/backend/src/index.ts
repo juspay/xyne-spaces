@@ -3,7 +3,7 @@ import { App } from './app.js';
 import { describeRejection, logger } from '@/utils/logger';
 import { warnIfNoGoogleClientsConfigured } from '@/services/googleOAuthClients';
 import { assertJwtSecretConfigured } from '@/services/jwtService';
-import { assertEncContractsMatchManifest } from '@/services/encryption';
+import { assertEncContractsMatchManifest, startClientManifestWatcher } from '@/services/encryption';
 
 
 process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
@@ -44,6 +44,8 @@ async function startServer() {
     // After startup so an encryption-service outage cannot delay it; a contract mismatch
     // throws only in development (and then exits below).
     await assertEncContractsMatchManifest();
+    // Polls the encryption service for new manifest versions and announces them over the socket.
+    startClientManifestWatcher();
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);

@@ -5,3 +5,5 @@ export type { RequestContract, RequestBody, Method } from './define.js';
 export { matchesRoute, normalizeRequestPath } from './route-match.js';
 export { REQUEST_CONTRACTS, findRequestContract } from './registry.js';
 export { replyToConversation } from './contracts/conversations.js';
+export { CLIENT_MANIFEST_VERSION_EVENT } from './manifest.js';
+export type { SignedClientManifest, SignedClientManifestPayload, ClientManifestVersionEvent } from './manifest.js';

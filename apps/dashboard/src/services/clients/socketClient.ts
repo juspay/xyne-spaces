@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { CLIENT_MANIFEST_VERSION_EVENT, noteClientManifestVersion } from '@xyne/shared';
 import { API_BASE_URL } from '../../config';
 import { logger, Logger, NotificationSocketState } from '../../utils/logger';
 import { ensureFreshSession, refreshSessionOnce } from './sessionRefresh';
@@ -72,6 +73,10 @@ class WebSocketService {
         reconnectionDelayMax: 30000,
         randomizationFactor: 0.5,
       });
+
+      // Sent on every connect and when a new manifest version is published: refetch the
+      // encryption manifest (after a random delay) if it is newer than ours.
+      this.socket.on(CLIENT_MANIFEST_VERSION_EVENT, noteClientManifestVersion);
 
       this.socket.io.on('reconnect_attempt', (attempt: number) => {
         this.reconnectAttempts = attempt;

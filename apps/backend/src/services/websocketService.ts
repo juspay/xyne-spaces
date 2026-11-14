@@ -1,5 +1,5 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
-import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
+import { CLIENT_MANIFEST_VERSION_EVENT, NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
 import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent, LabelUnreadCountsEvent } from './redisService';
@@ -15,7 +15,12 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
-import { containsServerCiphertext, transformPayloadForSession } from '@/services/encryption';
+import {
+  containsServerCiphertext,
+  getKnownClientManifestVersion,
+  onClientManifestVersionChange,
+  transformPayloadForSession,
+} from '@/services/encryption';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -206,6 +211,8 @@ class WebSocketService {
 
     this.setupZeroFallbackConfigSubscription();
 
+    this.setupClientManifestVersionBroadcast();
+
     // Setup global presence subscription (for multi-server support)
     this.setupPresenceSubscription();
 
@@ -242,8 +249,31 @@ class WebSocketService {
     return 'web';
   }
 
+  /**
+   * Tell this pod's sockets when the client encryption manifest gets a new version, so
+   * clients refetch (with jitter) instead of polling. The version comes from this pod's
+   * own poll of the encryption service; no cross-pod fan-out is needed.
+   */
+  private setupClientManifestVersionBroadcast(): void {
+    if (!config.enc.apiClientEncryptionEnabled) return;
+    onClientManifestVersionChange((event) => {
+      this.io?.emit(CLIENT_MANIFEST_VERSION_EVENT, event);
+    });
+  }
+
+  /** On every (re)connect: a client that slept through a broadcast catches up here. */
+  private sendClientManifestVersion(socket: AuthenticatedSocket): void {
+    if (!config.enc.apiClientEncryptionEnabled) return;
+    const version = getKnownClientManifestVersion('default');
+    if (version !== undefined) {
+      socket.emit(CLIENT_MANIFEST_VERSION_EVENT, { tag: 'default', version });
+    }
+  }
+
   private async handleConnection(socket: AuthenticatedSocket): Promise<void> {
     const { userId, userEmail, userName } = socket;
+
+    this.sendClientManifestVersion(socket);
 
     logger.info(`🔌 [CONNECT] User ${userEmail} connected via WebSocket (Socket ID: ${socket.id})`);
 

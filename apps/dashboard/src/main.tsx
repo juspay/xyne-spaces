@@ -5,11 +5,18 @@ import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReporting } from './bootstrap/errorReporting';
 import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';
 import { logger, Event } from './utils/logger';
+import { parseTrustedManifestKeys, registerTrustedManifestKeys } from '@xyne/shared';
 
 // Expose app version to window for Electron access
 window.__APP_VERSION__ = __APP_VERSION__;
 
 installErrorReporting();
+
+// Manifest signing keys for this build (e.g. a local development key), on top of the
+// ones built into @xyne/shared. Build-time only: never fetched from the backend.
+registerTrustedManifestKeys(
+  parseTrustedManifestKeys(import.meta.env.VITE_ENC_MANIFEST_TRUSTED_KEYS),
+);
 
 // Register Service Worker for docs preview and push notifications
 // Note: Service Workers are not supported on custom protocols (xyne-spaces://, xyne-spaces-dev://, etc.)
