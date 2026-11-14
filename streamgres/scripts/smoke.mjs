@@ -33,7 +33,6 @@ import { createServer } from 'node:http';
 
 const PG = process.env.SMOKE_PG ?? 'postgresql://postgres:postgres@localhost:5432/postgres';
 const GATEWAY = process.env.SMOKE_GATEWAY ?? 'ws://localhost:4848/sync';
-const SHARD_SCHEMA = `${process.env.STREAMGRES_APP_ID ?? 'xyne'}_${process.env.STREAMGRES_SHARD ?? '0'}`;
 const METRICS_PREFIX = process.env.STREAMGRES_METRICS_PREFIX ?? 'xyne_sync';
 const metric = (name) => `${METRICS_PREFIX}_${name}`;
 const HTTP = process.env.SMOKE_HTTP ?? 'http://localhost:4848';
@@ -46,9 +45,7 @@ const fail = (why) => { console.error('FAIL:', why); process.exit(1); };
 const sql = (text) => execFileSync('psql', [PG, '-v', 'ON_ERROR_STOP=1', '-Atc', text]).toString().trim();
 
 if (process.argv.includes('--prepare')) {
-  sql(`CREATE SCHEMA IF NOT EXISTS ${SHARD_SCHEMA};
-       CREATE TABLE IF NOT EXISTS ${SHARD_SCHEMA}.clients ("clientGroupID" text, "clientID" text, "lastMutationID" bigint, "userID" text, PRIMARY KEY ("clientGroupID", "clientID"));
-       DROP TABLE IF EXISTS smoke_items;
+  sql(`DROP TABLE IF EXISTS smoke_items;
        CREATE TABLE smoke_items (id text PRIMARY KEY, status text NOT NULL, points integer NOT NULL, meta jsonb, tag jsonb, score jsonb, loose json, bucket text, "createdAt" timestamptz NOT NULL DEFAULT now());
        INSERT INTO smoke_items (id, status, points, meta, tag, score, loose, bucket) SELECT 'seed-' || n, 'OPEN', n, jsonb_build_object('n', n), to_jsonb('t' || (n % 5)), (CASE WHEN n % 5 = 0 THEN '1.50' ELSE '2' END)::jsonb, (CASE WHEN n % 5 = 0 THEN '{ "k":1.50,   "a":[1e1], "k": 1.50 }' ELSE '{"k":2}' END)::json, 'b' || (n % 10) FROM generate_series(1, ${SEEDED}) n;
        INSERT INTO smoke_items (id, status, points) VALUES ('closed-1', 'DONE', 0);`);
