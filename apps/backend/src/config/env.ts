@@ -767,6 +767,10 @@ const envSchema = Joi.object({
   VESPA_BACKFILL_QUEUE_NAMES: Joi.string().empty('').default('vespa-backfill-normal,vespa-backfill-file'),
   VESPA_BACKFILL_FILE_QUEUE_NAME: Joi.string().empty('').default('vespa-backfill-file'),
   VESPA_FILE_WORKER_CONCURRENCY: Joi.number().integer().min(1).empty('').default(1),
+  // Jobs one Vespa worker runs at once; raise it on the backfill worker.
+  VESPA_WORKER_CONCURRENCY: Joi.number().integer().min(1).empty('').default(1),
+  // Backfill worker only: just the thread's newest message fans thread fields out to the rest.
+  VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY: Joi.boolean().empty('').default(false),
   ZERO_UPSTREAM_DB: Joi.string().allow('').default(''),
   ZERO_MAX_REQUESTS: Joi.number().integer().empty('').default(300),
   ZERO_REQUEST_WINDOW: Joi.number().integer().empty('').default(60),
@@ -1642,6 +1646,8 @@ export const config = {
     backfillQueueNames: envVars.VESPA_BACKFILL_QUEUE_NAMES as string,
     backfillFileQueueName: envVars.VESPA_BACKFILL_FILE_QUEUE_NAME as string,
     fileWorkerConcurrency: envVars.VESPA_FILE_WORKER_CONCURRENCY as number,
+    workerConcurrency: envVars.VESPA_WORKER_CONCURRENCY as number,
+    backfillWorkerFanoutLastMessageOnly: envVars.VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY as boolean,
   },
   zero: {
     upstreamDb: envVars.ZERO_UPSTREAM_DB as string,
