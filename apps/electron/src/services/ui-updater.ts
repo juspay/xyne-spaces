@@ -6,6 +6,7 @@ import { createHash } from 'crypto';
 import path from 'path';
 import log from 'electron-log/main';
 import {config} from '../app/config';
+import { safeUnzip } from '../utils/safeUnzip';
 
 // Track if there's a staged update waiting to be applied when window loses focus
 let hasStagedUpdatePending = false;
@@ -430,9 +431,7 @@ export async function downloadUIUpdate(): Promise<boolean> {
     const extractPath = path.join(tempDownloadPath, 'extracted');
     mkdirSync(extractPath, { recursive: true });
     
-    // Dynamic import for extract-zip (ESM module)
-    const { default: extract } = await import('extract-zip');
-    await extract(zipPath, { dir: extractPath });
+    await safeUnzip(zipPath, extractPath);
     
     // Find the directory containing index.html (may be nested in a subfolder)
     let uiBundlePath = extractPath;

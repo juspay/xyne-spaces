@@ -77,8 +77,7 @@ import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger
 import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
-// Disabled (LLM)
-// import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 // Disabled (LLM)
 // import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
@@ -1398,15 +1397,14 @@ export class EmailService {
     // }
 
     // Enqueue AI classification as a Redis worker job
-    // Disabled (LLM)
-    // await emailClassificationQueue.getQueue().add('classify', {
-    //   ticketId: ticket.id,
-    //   channelId,
-    //   emailId: email.id,
-    //   groupId: groupId ?? null,
-    // }).catch((err: unknown) => {
-    //   logger.error(`[Classification] Failed to enqueue classification job for ticket ${ticket.id}`, err);
-    // });
+    await emailClassificationQueue.getQueue().add('classify', {
+      ticketId: ticket.id,
+      channelId,
+      emailId: email.id,
+      groupId: groupId ?? null,
+    }).catch((err: unknown) => {
+      logger.error(`[Classification] Failed to enqueue classification job for ticket ${ticket.id}`, err);
+    });
 
     // Enqueue tag generation for this email (fire-and-forget — must not block ingestion).
     // Priority 1 (high) so live inbound emails are always processed before bulk historical fetches.
@@ -2383,15 +2381,14 @@ export class EmailService {
       // }
 
       // Enqueue AI classification as a Redis worker job
-      // Disabled (LLM)
-      // await emailClassificationQueue.getQueue().add('classify', {
-      //   ticketId: txResult.ticketId,
-      //   channelId,
-      //   emailId: insertedEmails[0]!.id,
-      //   groupId: groupId ?? null,
-      // }).catch((err: unknown) => {
-      //   logger.error(`[Classification] Failed to enqueue classification job for ticket ${txResult.ticketId}`, err);
-      // });
+      await emailClassificationQueue.getQueue().add('classify', {
+        ticketId: txResult.ticketId,
+        channelId,
+        emailId: insertedEmails[0]!.id,
+        groupId: groupId ?? null,
+      }).catch((err: unknown) => {
+        logger.error(`[Classification] Failed to enqueue classification job for ticket ${txResult.ticketId}`, err);
+      });
     }
 
     for (const e of insertedEmails) {

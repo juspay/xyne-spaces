@@ -21,5 +21,8 @@
     "@earendil-works/pi-coding-agent": "^0.80.3",
     "@types/node": "^22",
     "typescript": "^5.8"
+  },
+  "overrides": {
+    "undici": "8.12.2"
   }
 }

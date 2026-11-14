@@ -2,12 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import type { CustomObjectsApi } from "@kubernetes/client-node";
 import { KataClient } from "./client.js";
 
-type CreateArgs = [string, string, string, string, { metadata: { name: string } }];
+type CreateArgs = [{ body: { metadata: { name: string } } }];
 
 function makeClient(overrides: Partial<Record<keyof CustomObjectsApi, unknown>> = {}) {
-  const createNamespacedCustomObject = vi.fn().mockResolvedValue({ body: {} });
-  const getNamespacedCustomObject = vi.fn().mockResolvedValue({ body: {} });
-  const deleteNamespacedCustomObject = vi.fn().mockResolvedValue({ body: {} });
+  const createNamespacedCustomObject = vi.fn().mockResolvedValue({});
+  const getNamespacedCustomObject = vi.fn().mockResolvedValue({});
+  const deleteNamespacedCustomObject = vi.fn().mockResolvedValue({});
   const k8sClient = {
     createNamespacedCustomObject,
     getNamespacedCustomObject,
@@ -24,7 +24,7 @@ function makeClient(overrides: Partial<Record<keyof CustomObjectsApi, unknown>> 
 
 function createdClaimName(createFn: ReturnType<typeof vi.fn>): string {
   const args = createFn.mock.calls[0] as CreateArgs;
-  return args[4].metadata.name;
+  return args[0].body.metadata.name;
 }
 
 describe("KataClient.createSession claim cleanup", () => {
@@ -37,14 +37,14 @@ describe("KataClient.createSession claim cleanup", () => {
 
     const claimName = createdClaimName(createNamespacedCustomObject);
     expect(deleteNamespacedCustomObject).toHaveBeenCalledTimes(1);
-    const deleteArgs = deleteNamespacedCustomObject.mock.calls[0]!;
-    expect(deleteArgs[4]).toBe(claimName);
+    const [deleteParams] = deleteNamespacedCustomObject.mock.calls[0]!;
+    expect(deleteParams.name).toBe(claimName);
   });
 
   it("does not mask the original error when the cleanup delete itself fails", async () => {
     const deleteNamespacedCustomObject = vi
       .fn()
-      .mockRejectedValue(Object.assign(new Error("boom"), { statusCode: 500 }));
+      .mockRejectedValue(Object.assign(new Error("boom"), { code: 500 }));
     const { client } = makeClient({ deleteNamespacedCustomObject });
 
     await expect(client.createSession({ readyTimeoutMs: 0 })).rejects.toThrow(
@@ -56,7 +56,7 @@ describe("KataClient.createSession claim cleanup", () => {
   it("treats a 404 on cleanup delete as success and still propagates the original error", async () => {
     const deleteNamespacedCustomObject = vi
       .fn()
-      .mockRejectedValue(Object.assign(new Error("not found"), { statusCode: 404 }));
+      .mockRejectedValue(Object.assign(new Error("not found"), { code: 404 }));
     const { client } = makeClient({ deleteNamespacedCustomObject });
 
     await expect(client.createSession({ readyTimeoutMs: 0 })).rejects.toThrow(

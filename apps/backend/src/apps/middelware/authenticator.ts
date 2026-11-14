@@ -112,7 +112,6 @@ export async function authenticateApp(
       permissions: effectiveNames,
       installedAppId: installedApp.id,
       permissionsStale: hasPendingChanges,
-      installedAppCreatedAt: installedApp.createdAt,
     };
 
     // Fetch user to get workspaceId for downstream controllers that expect req.user.

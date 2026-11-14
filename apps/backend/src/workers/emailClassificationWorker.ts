@@ -99,8 +99,10 @@ export class EmailClassificationWorker {
     }
     const systemActorId = await getAutomationsBotUserId(workspaceId);
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
-    const runClassification = job.data.runClassification ?? true;
-    const runPriority = job.data.runPriority ?? true;
+    // const runClassification = job.data.runClassification ?? true;
+    const runClassification = false; // Disabled (LLM) --- IGNORE ---
+    // const runPriority = job.data.runPriority ?? true;
+    const runPriority = false; // Disabled (LLM) --- IGNORE ---
     const runAssignment = job.data.runAssignment ?? false;
 
     logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority} runAssignment=${runAssignment}`);
