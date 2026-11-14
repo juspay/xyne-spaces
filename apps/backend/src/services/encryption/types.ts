@@ -113,4 +113,10 @@ export interface EncryptionProvider {
    * the backend never holds the plaintext of a MASTER_DEK field.
    */
   transformRequest<T>(input: TransformRequestInput<T>): Promise<T>;
+  /**
+   * DEK→CEK counterpart of encryptResponse: storage ciphertext (ENC:v1|<dekId>|…) in `body`
+   * comes back as session ciphertext (ENC:v1|sess|…) for `sessionId`; plaintext configured
+   * fields are session-encrypted as encryptResponse does; the backend never sees the plaintext.
+   */
+  transformResponse<T>(body: T, sessionId: string): Promise<T>;
 }

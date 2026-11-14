@@ -10,7 +10,7 @@ import {
   findRuleViolations,
 } from '@xyne/shared';
 import { config } from '@/config/env';
-import { getEncryptionProvider, getLatestClientManifest } from '@/services/encryption';
+import { getEncryptionProvider, getLatestClientManifest, isDekPassthrough } from '@/services/encryption';
 import type { ClientManifestRule } from '@/services/encryption';
 
 /** Entity type of the keys the Prisma encryption extension writes rows under. */
@@ -330,7 +330,14 @@ export function encryptResponseBodyMiddleware(
       return originalJson(body);
     }
 
-    void getEncryptionProvider().encryptResponse(body, sessionId)
+    // Under DEK passthrough the body still holds storage ciphertext; the encryption
+    // service turns it into session ciphertext without the backend seeing plaintext.
+    const provider = getEncryptionProvider();
+    const encrypted = isDekPassthrough()
+      ? provider.transformResponse(body, sessionId)
+      : provider.encryptResponse(body, sessionId);
+
+    void encrypted
       .then((encryptedBody) => originalJson(encryptedBody))
       .catch((error) => {
         logger.error('[decryptionMiddleware] failed to encrypt response body', {

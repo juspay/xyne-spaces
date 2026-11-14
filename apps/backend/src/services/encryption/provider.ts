@@ -73,6 +73,11 @@ const provider: EncryptionProvider = {
     return unsupported('transformRequest');
   },
 
+  async transformResponse<T>(body: T, _sessionId: string): Promise<T> {
+    if (!config.enc.apiClientEncryptionEnabled) return body;
+    return unsupported('transformResponse');
+  },
+
   async initializeOrg(_orgId: string): Promise<void> {
     if (!config.enc.orgProvisionEnabled) return;
     return unsupported('initializeOrg');

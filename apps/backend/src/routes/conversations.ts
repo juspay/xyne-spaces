@@ -4,6 +4,7 @@ import { uploadMultiple } from '../middleware/upload';
 import { manifestRequestBodyMiddleware } from '../middleware/decryptionMiddleware';
 import { AppError } from '../middleware/errorHandler';
 import { db } from '../database/client';
+import { dekPassthroughMiddleware } from '../services/encryption';
 
 const router = Router();
 const conversationController = new ConversationController();
@@ -35,7 +36,9 @@ router.get('/recent-visited', conversationController.getRecentVisitedConversatio
 // Multipart: the manifest rule check and session-key transform run here, after multer has
 // filled req.body (it is still empty when the auth middleware runs). With the manifest rule
 // active, `content` reaches the controller as workspace-DEK ciphertext, not plaintext.
-router.post('/:conversationId/messages', uploadMultiple, transformReplyBody, conversationController.replyToConversation);
+// dekPassthroughMiddleware goes first so the whole chain, including the response, runs in
+// passthrough: storage ciphertext stays encrypted on reads and the response is DEK→CEK.
+router.post('/:conversationId/messages', dekPassthroughMiddleware, uploadMultiple, transformReplyBody, conversationController.replyToConversation);
 
 // Get a single conversation message by conversationId + messageId (for mobile background prefetch)
 router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);
