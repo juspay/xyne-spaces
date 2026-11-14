@@ -1,27 +1,15 @@
 import { API_BASE_URL } from '../config.js';
+import type { ClientEncryptionManifest } from '../enc-contracts/manifest.js';
 
-export type ClientManifestTransform = 'NONE' | 'MASTER_DEK';
-
-export interface ClientManifestFieldRule {
-  client: boolean;
-  transform: ClientManifestTransform;
-  storage: ClientManifestTransform;
-}
-
-export interface ClientManifestRule {
-  type: 'REQUEST' | 'MUTATOR';
-  value: string;
-  revision: number;
-  fields: Record<string, ClientManifestFieldRule>;
-}
-
-export interface ClientEncryptionManifest {
-  schemaKey: string;
-  version: number;
-  tag: string;
-  environment: string;
-  rules: ClientManifestRule[];
-}
+// The manifest types are defined once, next to the contracts they are generated from.
+export type {
+  ClientManifestTransform,
+  ClientManifestFieldRule,
+  ClientManifestRule,
+  ClientEncryptionManifest,
+  PersistPolicy,
+  ExtractionPolicy,
+} from '../enc-contracts/manifest.js';
 
 export const CLIENT_MANIFEST_VERSION_HEADER = 'x-enc-manifest-version';
 export const CLIENT_MANIFEST_TAG_HEADER = 'x-enc-manifest-tag';

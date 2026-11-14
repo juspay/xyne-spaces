@@ -1060,15 +1060,19 @@ export class ConversationController {
       }
 
       // Check if this is a bot command (only for text content, not file uploads).
-      // Content that arrived as workspace-DEK ciphertext (client manifest MASTER_DEK,
-      // `ENC:` prefix) is opaque here, so bot commands cannot be detected on that path yet.
-      if (
-        content &&
-        content.trim() &&
-        !content.startsWith('ENC:') &&
-        BotCommandParser.isBotCommand(content.trim())
-      ) {
-        await this.handleBotCommand(content.trim(), conversationId, userId, res);
+      // Content that arrived as workspace-DEK ciphertext is opaque here; the encryption
+      // service's extracted command (req.derived) stands in for parsing it.
+      const derived = req.derived;
+      const isBotCommand = derived?.command
+        ? derived.command.isBot
+        : Boolean(content && content.trim() && BotCommandParser.isBotCommand(content.trim()));
+      if (isBotCommand) {
+        const commandText = derived?.command
+          ? derived.command.name
+            ? `/${derived.command.name} ${derived.command.args ?? ''}`
+            : '/'
+          : undefined;
+        await this.handleBotCommand(content.trim(), conversationId, userId, res, { commandText });
         return;
       }
 
@@ -1157,7 +1161,8 @@ export class ConversationController {
         channel?.scopeType === ChannelScopeType.DEFAULT
       ) {
         void processMeetLinksFromChatMessage(
-          message.content,
+          // Extracted Meet links stand in for encrypted content.
+          derived?.links ? derived.links.meet.join(' ') : message.content,
           req.user.workspaceId,
           conversationId,
           message.messageId,
@@ -1220,6 +1225,7 @@ export class ConversationController {
           entityId: message.messageId,
           entityType: 'messages',
           operation: 'insert',
+          ...(derived ? { derived } : {}),
         })
         .catch((err) => logger.error('Side-effect handler error: replyToConversation', err));
 
@@ -1406,15 +1412,21 @@ export class ConversationController {
       isNewConversation?: boolean;
       channelId?: string;
       initialMessageId?: string;
+      /**
+       * Command to parse when `content` is ciphertext (rebuilt from the encryption
+       * service's extracted command); `content` is still what gets stored.
+       */
+      commandText?: string;
     }
   ): Promise<void> {
     try {
+      const commandText = options?.commandText ?? content;
       // Parse and validate bot command
-      const parseResult = await BotCommandParser.parseAndValidate(content);
+      const parseResult = await BotCommandParser.parseAndValidate(commandText);
 
       if ('error' in parseResult) {
         // Get bot name for sender ID, fallback to bot-system
-        const botName = BotCommandParser.extractBotName(content);
+        const botName = BotCommandParser.extractBotName(commandText);
         const senderId = botName || 'bot-system';
 
         // Use FlowJson error if available, otherwise create simple error

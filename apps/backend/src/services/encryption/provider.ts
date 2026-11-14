@@ -12,6 +12,7 @@ import type {
   RegisterSessionKeyResult,
   StorageObjectKey,
   TransformRequestInput,
+  TransformRequestResult,
 } from './types';
 
 function unsupported(operation: string): never {
@@ -68,8 +69,8 @@ const provider: EncryptionProvider = {
     return unsupported('decryptRequest');
   },
 
-  async transformRequest<T>(input: TransformRequestInput<T>): Promise<T> {
-    if (!config.enc.apiClientEncryptionEnabled) return input.body;
+  async transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>> {
+    if (!config.enc.apiClientEncryptionEnabled) return { body: input.body };
     return unsupported('transformRequest');
   },
 

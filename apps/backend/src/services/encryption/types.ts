@@ -1,4 +1,9 @@
-import type { EncryptedTableConfig } from '@xyne/shared';
+import type {
+  ClientEncryptionManifest,
+  ClientManifestRule,
+  DerivedContentFacts,
+  EncryptedTableConfig,
+} from '@xyne/shared';
 
 export type EncryptedFieldConfig = EncryptedTableConfig;
 
@@ -52,28 +57,14 @@ export type StorageObjectKey = {
   wrappedKey: string;
 };
 
-export type ClientManifestTransform = 'NONE' | 'MASTER_DEK';
-
-export type ClientManifestFieldRule = {
-  client: boolean;
-  transform: ClientManifestTransform;
-  storage: ClientManifestTransform;
-};
-
-export type ClientManifestRule = {
-  type: 'REQUEST' | 'MUTATOR';
-  value: string;
-  revision: number;
-  fields: Record<string, ClientManifestFieldRule>;
-};
-
-export type ClientEncryptionManifest = {
-  schemaKey: string;
-  version: number;
-  tag: string;
-  environment: string;
-  rules: ClientManifestRule[];
-};
+// The manifest types are defined once in @xyne/shared, next to the contracts they are
+// generated from; re-exported here so provider code keeps importing them from this file.
+export type {
+  ClientManifestTransform,
+  ClientManifestFieldRule,
+  ClientManifestRule,
+  ClientEncryptionManifest,
+} from '@xyne/shared';
 
 /** Identity of a manifest rule; the encryption service re-reads the field spec by it. */
 export type ClientManifestRuleRef = Pick<ClientManifestRule, 'type' | 'value' | 'revision'>;
@@ -88,6 +79,15 @@ export type TransformRequestInput<T> = {
    */
   entityId?: string;
   entityType?: string;
+};
+
+export type TransformRequestResult<T> = {
+  body: T;
+  /**
+   * Facts the encryption service extracted from the plaintext of the rule's encrypted
+   * fields (rule extractionPolicy), so the backend can act on them without the plaintext.
+   */
+  derived?: DerivedContentFacts;
 };
 
 export interface EncryptionProvider {
@@ -110,9 +110,10 @@ export interface EncryptionProvider {
    * Rule-driven counterpart of decryptRequest. Session-encrypted fields the rule marks
    * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to
    * store as-is) or plaintext (`transform: NONE`); everything else is returned as sent, so
-   * the backend never holds the plaintext of a MASTER_DEK field.
+   * the backend never holds the plaintext of a MASTER_DEK field. `derived` carries the
+   * facts extracted from that plaintext, when the rule asks for any.
    */
-  transformRequest<T>(input: TransformRequestInput<T>): Promise<T>;
+  transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>>;
   /**
    * DEK→CEK counterpart of encryptResponse: storage ciphertext (ENC:v1|<dekId>|…) in `body`
    * comes back as session ciphertext (ENC:v1|sess|…) for `sessionId`; plaintext configured

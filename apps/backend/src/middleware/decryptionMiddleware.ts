@@ -6,6 +6,8 @@ import {
   CLIENT_MANIFEST_STALE_CODE,
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_VERSION_HEADER,
+  derivedContentFactsSchema,
+  findRequestContract,
   findRequestRule,
   findRuleViolations,
 } from '@xyne/shared';
@@ -178,6 +180,7 @@ async function decryptRequestBody(req: Request, next: NextFunction): Promise<voi
  */
 async function transformRequestBody(
   req: Request,
+  res: Response,
   next: NextFunction,
   rule: ClientManifestRule,
   options: ManifestRequestBodyOptions,
@@ -212,12 +215,40 @@ async function transformRequestBody(
       ? { entityId: await options.resolveWorkspaceId(req), entityType: WORKSPACE_ENTITY_TYPE }
       : {};
 
-    req.body = await getEncryptionProvider().transformRequest({
+    const { body, derived } = await getEncryptionProvider().transformRequest({
       body: req.body,
       sessionId,
       rule: { type: rule.type, value: rule.value, revision: rule.revision },
       ...owner,
     });
+    req.body = body;
+    req.encRule = rule;
+
+    // Facts the encryption service extracted from the plaintext; validated before any
+    // consumer trusts them in place of parsing `content`.
+    if (derived !== undefined) {
+      const parsedDerived = derivedContentFactsSchema.safeParse(derived);
+      if (!parsedDerived.success) {
+        logger.error('[decryptionMiddleware] encryption service returned invalid derived facts', {
+          method: sanitizeForLog(req.method),
+          path: sanitizeForLog(req.path),
+          route: sanitizeForLog(rule.value),
+          issues: parsedDerived.error.issues,
+        });
+        getCryptoOperations().add(1, {
+          operation: 'transform_request_body',
+          status: 'error',
+          reason: 'derived_invalid',
+          path: sanitizeForLog(req.path),
+        });
+        res.status(400).json({
+          error: 'Derived content facts from the encryption service are invalid',
+          code: 'ENC_DERIVED_INVALID',
+        });
+        return;
+      }
+      req.derived = parsedDerived.data;
+    }
 
     logger.info('[decryptionMiddleware] request body transformed by manifest rule', {
       method: sanitizeForLog(req.method),
@@ -303,10 +334,26 @@ export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOption
         });
         return;
       }
+    }
 
-      if (config.enc.enableDbEncryption) {
-        return transformRequestBody(req, next, rule, options);
+    // Shape check against the route's contract. passthrough() on purpose: keys the
+    // contract does not list are allowed for now. Only validates; req.body is not replaced
+    // with the parsed (coerced) value.
+    const contract = findRequestContract(req.method, req.originalUrl);
+    if (contract) {
+      const parsed = contract.schema.passthrough().safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Request body does not match its contract',
+          code: 'ENC_CONTRACT_VIOLATION',
+          issues: parsed.error.issues,
+        });
+        return;
       }
+    }
+
+    if (rule && config.enc.enableDbEncryption) {
+      return transformRequestBody(req, res, next, rule, options);
     }
 
     await decryptRequestBody(req, next);

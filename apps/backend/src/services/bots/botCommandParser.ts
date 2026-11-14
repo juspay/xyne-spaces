@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { botRegistry } from '@/bots/core/bot-registry';
+import { isBotCommandContent, parseBotCommandText, stripBotCommandContent } from '@xyne/shared';
 
 export interface BotCommand {
   botName: string;
@@ -14,14 +15,14 @@ export interface ParsedBotCommand {
   rawCommand: string;
 }
 
+// Command parsing lives in @xyne/shared (content-extractors/command) so the encryption
+// service's command extractor and this parser agree; this class keeps the logging and
+// the registry/validation step.
 export class BotCommandParser {
-  private static readonly BOT_COMMAND_REGEX = /\/([a-zA-Z-]+)\s+(.*)/;
-  private static readonly PARAM_REGEX = /--(\w+)\s+(?:"([^"]*)"|'([^']*)'|([^\s]+))/g;
-
   static parseMessage(content: string): BotCommand | null {
     try {
       // Strip HTML tags first, then trim
-      const strippedContent = content.replace(/<[^>]*>/g, '').trim();
+      const strippedContent = stripBotCommandContent(content);
       logger.info('🔍 [BOT-PARSER] parseMessage called with:', content, '-> stripped:', strippedContent);
 
       if (!strippedContent.startsWith('/')) {
@@ -29,31 +30,19 @@ export class BotCommandParser {
         return null;
       }
 
-      const match = strippedContent.match(this.BOT_COMMAND_REGEX);
-      if (!match) {
+      const parsed = parseBotCommandText(content);
+      if (!parsed) {
         logger.info('❌ [BOT-PARSER] Regex match failed, returning null');
         return null;
       }
 
-      const botName = match[1];
-      const paramString = match[2];
+      const { botName, parameters, paramString } = parsed;
       logger.info('✅ [BOT-PARSER] Parsed bot name:', botName, 'params:', paramString);
-
-      // Parse parameters as strings only
-      const parameters: Record<string, string> = {};
-      let paramMatch;
-
-      while ((paramMatch = this.PARAM_REGEX.exec(paramString)) !== null) {
-        const key = paramMatch[1];
-        // Get value from quoted or unquoted capture groups
-        const value = paramMatch[2] || paramMatch[3] || paramMatch[4];
-        parameters[key] = value;
-      }
 
       const result = {
         botName,
         parameters,
-        rawCommand: strippedContent  // Use stripped content for consistency
+        rawCommand: parsed.rawCommand  // Use stripped content for consistency
       };
       logger.info('✅ [BOT-PARSER] Final parsed result:', result);
       return result;
@@ -121,8 +110,8 @@ export class BotCommandParser {
 
   static isBotCommand(content: string): boolean {
     // Strip HTML tags first, then trim
-    const strippedContent = content.replace(/<[^>]*>/g, '').trim();
-    const isBot = strippedContent.startsWith('/');
+    const strippedContent = stripBotCommandContent(content);
+    const isBot = isBotCommandContent(content);
     logger.info('🔍 [BOT-PARSER] isBotCommand called with:', content, '-> stripped:', strippedContent, '-> result:', isBot);
     return isBot;
   }

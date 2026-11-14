@@ -1,26 +1,12 @@
 import { isEncryptedField } from './field-decrypt.js';
 import type { ClientEncryptionManifest, ClientManifestRule } from './client-manifest.js';
+import { matchesRoute, normalizeRequestPath } from '../enc-contracts/route-match.js';
 
 export type FieldEncryptor = (value: string, fieldName: string) => Promise<string>;
 
 export interface RuleViolation {
   path: string;
   expected: 'expected ciphertext' | 'expected plaintext';
-}
-
-// A REQUEST rule value is "<METHOD> <path>"; `:param` segments match any non-empty segment.
-function matchesRequestRule(rule: ClientManifestRule, method: string, path: string): boolean {
-  if (rule.type !== 'REQUEST') return false;
-  const [ruleMethod, rulePath] = rule.value.split(' ');
-  if (!rulePath || ruleMethod.toUpperCase() !== method) return false;
-
-  const ruleSegments = rulePath.split('/');
-  const pathSegments = path.split('/');
-  if (ruleSegments.length !== pathSegments.length) return false;
-
-  return ruleSegments.every((segment, i) =>
-    segment.startsWith(':') ? pathSegments[i] !== '' : segment === pathSegments[i],
-  );
 }
 
 /**
@@ -32,9 +18,10 @@ export function findRequestRule(
   method: string,
   path: string,
 ): ClientManifestRule | undefined {
-  const normalizedMethod = method.toUpperCase();
-  const normalizedPath = path.split('?')[0].replace(/^\/api(?=\/|$)/, '');
-  return manifest.rules.find(rule => matchesRequestRule(rule, normalizedMethod, normalizedPath));
+  const normalizedPath = normalizeRequestPath(path);
+  return manifest.rules.find(
+    rule => rule.type === 'REQUEST' && matchesRoute(rule.value, method, normalizedPath),
+  );
 }
 
 /**
