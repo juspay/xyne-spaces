@@ -1,5 +1,6 @@
 import type {
   ClientEncryptionManifest,
+  SignedClientManifest,
   ClientManifestRule,
   DerivedContentFacts,
   EncryptedTableConfig,
@@ -72,6 +73,7 @@ export type {
   ClientManifestFieldRule,
   ClientManifestRule,
   ClientEncryptionManifest,
+  SignedClientManifest,
 } from '@xyne/shared';
 
 /** Identity of a manifest rule; the encryption service re-reads the field spec by it. */
@@ -124,6 +126,13 @@ export interface EncryptionProvider {
   unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]>;
   /** Latest client manifest for (tag, environment); `null` when the encryption service has none (404). */
   getClientManifest(params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null>;
+  /**
+   * The latest client manifest as the encryption service signed it, to relay to clients
+   * unchanged. `null` when there is no manifest (404) or signing is not configured (503).
+   */
+  getSignedClientManifest(params: { tag: string; environment: string }): Promise<SignedClientManifest | null>;
+  /** Latest client manifest version, cheap enough to poll; `null` when there is none (404). */
+  getClientManifestVersion(params: { tag: string; environment: string }): Promise<number | null>;
   /**
    * Rule-driven counterpart of decryptRequest. Transit-encrypted fields the rule marks
    * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to

@@ -3,6 +3,7 @@ import { App } from './app.js';
 import { describeRejection, logger } from '@/utils/logger';
 import { warnIfNoGoogleClientsConfigured } from '@/services/googleOAuthClients';
 import { assertJwtSecretConfigured } from '@/services/jwtService';
+import { startClientManifestWatcher } from '@/services/encryption';
 
 
 process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
@@ -40,6 +41,8 @@ async function startServer() {
     warnIfNoGoogleClientsConfigured();
     app = new App();
     await app.listen();
+    // Polls the encryption service for new manifest versions and announces them over the socket.
+    startClientManifestWatcher();
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);

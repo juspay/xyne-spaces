@@ -29,3 +29,36 @@ export interface ClientEncryptionManifest {
   environment: string;
   rules: ClientManifestRule[];
 }
+
+/**
+ * The manifest as the encryption service signs it. The backend relays this envelope
+ * unchanged; clients verify `sig` over the exact `payload` bytes with a pinned public key
+ * (picked by `kid`) before parsing it. `tag`, `environment` and `version` outside the
+ * payload are unsigned hints for caches; clients trust only the verified payload.
+ */
+export interface SignedClientManifest {
+  kid: string;
+  /** ECDSA P-256 / SHA-256, raw 64-byte `r‖s` signature (as in JWS ES256). */
+  alg: 'ES256';
+  /** base64 of the UTF-8 JSON of a `SignedClientManifestPayload`. */
+  payload: string;
+  /** base64 of the signature over the decoded `payload` bytes. */
+  sig: string;
+  tag: string;
+  environment: string;
+  version: number;
+}
+
+/** What the signature covers: the manifest plus its validity window (ISO-8601). */
+export interface SignedClientManifestPayload extends ClientEncryptionManifest {
+  issuedAt: string;
+  expiresAt: string;
+}
+
+/** Socket.IO event the backend sends on connect and whenever the latest version changes. */
+export const CLIENT_MANIFEST_VERSION_EVENT = 'enc_manifest_version';
+
+export interface ClientManifestVersionEvent {
+  tag: string;
+  version: number;
+}

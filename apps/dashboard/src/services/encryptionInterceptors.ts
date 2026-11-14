@@ -6,6 +6,7 @@ import {
   decryptionCache,
   getClientManifest,
   refreshClientManifest,
+  refreshClientManifestIfStale,
   CLIENT_MANIFEST_VERSION_HEADER,
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_STALE_CODE,
@@ -175,6 +176,10 @@ export async function encryptionRequestInterceptor(
   if (!method || !['post', 'put', 'patch', 'delete'].includes(method)) {
     return config;
   }
+
+  // A newer manifest was announced over the socket and its jittered refetch has not run
+  // yet: fetch it now, so this write is encrypted with the latest rules.
+  await refreshClientManifestIfStale();
 
   // Stamp the manifest version on every mutating request, multipart included, so the
   // backend can reject writes made against a stale manifest.

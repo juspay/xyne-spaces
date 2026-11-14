@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_URL: string;
+  /** JSON array of { kid, environment, spki } manifest signing keys trusted by this build. */
+  readonly VITE_ENC_MANIFEST_TRUSTED_KEYS?: string;
   readonly VITE_API_TIMEOUT: string;
   readonly VITE_KEYCLOAK_URL: string;
   readonly VITE_KEYCLOAK_REALM: string;

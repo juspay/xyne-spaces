@@ -8,6 +8,7 @@ import type {
   GenerateStorageKeyInput,
   ProvisionEntityInput,
   ProvisionEntityResult,
+  SignedClientManifest,
   StorageObjectKey,
   TransformRequestInput,
   TransformRequestResult,
@@ -105,6 +106,16 @@ const provider: EncryptionProvider = {
   async getClientManifest(_params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null> {
     if (!config.enc.apiClientEncryptionEnabled) return null;
     return unsupported('getClientManifest');
+  },
+
+  async getSignedClientManifest(_params: { tag: string; environment: string }): Promise<SignedClientManifest | null> {
+    if (!config.enc.apiClientEncryptionEnabled) return null;
+    return unsupported('getSignedClientManifest');
+  },
+
+  async getClientManifestVersion(_params: { tag: string; environment: string }): Promise<number | null> {
+    if (!config.enc.apiClientEncryptionEnabled) return null;
+    return unsupported('getClientManifestVersion');
   },
 };
 
