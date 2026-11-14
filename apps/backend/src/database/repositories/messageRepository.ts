@@ -2,7 +2,7 @@ import { BaseRepository } from './base';
 import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
+import { getMessageContentLength, isEncryptedField, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -161,7 +161,12 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     // Validate content if provided
     if (data.content && data.content.trim() !== '') {
       await this.validateString(data.content, 'content');
-      this.validateContentLength(data.content); // Max 10k visible characters
+      // Content the client manifest already turned into workspace-DEK ciphertext has no
+      // visible length to measure (and base64 outgrows the plaintext); the client composer
+      // applied the limit to the plaintext.
+      if (!isEncryptedField(data.content)) {
+        this.validateContentLength(data.content); // Max 10k visible characters
+      }
     }
 
     if (data.msgType) {

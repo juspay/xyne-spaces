@@ -1,4 +1,5 @@
 import type { TableName } from '../acl/core/types';
+import type { DerivedContentFacts } from '@xyne/shared';
 export type SideEffectOperation = 'insert' | 'update' | 'delete' | 'upsert';
 
 export interface ConversationPreviousValue {
@@ -152,6 +153,12 @@ export interface SideEffectJobConfig {
   operation: SideEffectOperation;
   args?: any;
   previousValue?: PreviousValue;
+  /**
+   * Facts the encryption service extracted from the message's encrypted content (REST
+   * reply route under the client manifest). When present, consumers use these instead of
+   * parsing `content`, which is ciphertext.
+   */
+  derived?: DerivedContentFacts;
 }
 
 export type SideEffectJobsAccumulator = SideEffectJobConfig[];
