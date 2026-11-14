@@ -401,6 +401,23 @@ export const mapChannel = async (
     orgId: effectiveOrgId,
   };
 }
+
+/**
+ * True when no message in the thread is newer than this one. With
+ * VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY=true (set on the backfill worker only),
+ * only that message refreshes the thread's other messages and its ticket on feed: a backfill
+ * re-feeds every message, and doing it on each one costs N×(N−1) updates per thread. Live
+ * workers leave it off, so an edit to an older message still reaches the rest of its thread.
+ */
+const isLatestMessageInThread = async (messageId: string, conversationId: string): Promise<boolean> => {
+  const latest = await db.message.findFirst({
+    where: { conversationId },
+    orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
+    select: { messageId: true },
+  });
+  return !latest || latest.messageId === messageId;
+};
+
 export const mapAndUpdatePreviousMessagesMentions = async (
   messageId: string,
   conversationId: string,
@@ -483,7 +500,14 @@ export const mapMessage = async (
 
   const messageLinks = extractLinksFromContent(args.content || '');
 
-  const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
+  // Older messages still get the current thread fields on their own doc; they just don't
+  // push them to the rest of the thread.
+  const syncThread =
+    process.env.VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY !== 'true' ||
+    (await isLatestMessageInThread(args.messageId, args.conversationId));
+  const threadInfo = syncThread
+    ? await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId)
+    : await getThreadInfo(args.conversationId);
 
   // Tag names, denormalized onto the doc so search can filter on them. Everything on the
   // thread is indexed as soon as it lands — classifier or person, vocabulary or free-form —
@@ -495,7 +519,9 @@ export const mapMessage = async (
   const threadType = indexableTagNames(parseAppliedTags(conversation.threadType));
 
   // Update parent ticket thread fields if this is a ticket conversation
-  await updateTicketThreadFields(args.conversationId);
+  if (syncThread) {
+    await updateTicketThreadFields(args.conversationId);
+  }
 
   // Capturing signal for a new message  
   messageSignalService.captureCreateMessage({
