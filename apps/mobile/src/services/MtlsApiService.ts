@@ -52,6 +52,52 @@ export interface MtlsHealthResult {
 
 let isFetchGuardInstalled = false;
 
+/** 401 codes from the auth middleware that a session refresh can fix. */
+const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED', 'TOKEN_INVALID']);
+
+/**
+ * Renews the access JWT from the refresh cookie. `true` means the jar now holds a fresh
+ * JWT; `false` means the request should fail as it was. Registered by AuthServices,
+ * which imports this module and so cannot be imported from it.
+ */
+type SessionRefresher = () => Promise<boolean>;
+
+let sessionRefresher: SessionRefresher | null = null;
+
+export function setSessionRefresher(refresher: SessionRefresher): void {
+  sessionRefresher = refresher;
+}
+
+function isRefreshableAuthFailure(response: MtlsResponse): boolean {
+  if (response.statusCode !== 401) {
+    return false;
+  }
+  try {
+    const code = getResponseJson<{ code?: unknown } | null>(response)?.code;
+    return typeof code === 'string' && REFRESHABLE_AUTH_CODES.has(code);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sends the request; on a refreshable 401 renews the session and sends it once more.
+ * The JWT travels as a cookie, so the retry picks up the renewed one from the jar.
+ */
+async function fetchWithSessionRefresh(
+  url: string,
+  options: Parameters<typeof mtlsFetch>[1],
+): Promise<MtlsResponse> {
+  const response = await mtlsFetch(url, options);
+  if (!sessionRefresher || !isRefreshableAuthFailure(response)) {
+    return response;
+  }
+  if (!(await sessionRefresher())) {
+    return response;
+  }
+  return mtlsFetch(url, options);
+}
+
 function buildUrl(path: string): string {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
@@ -176,7 +222,7 @@ export async function mtlsRequestJson<T>(path: string, options?: MtlsRequestOpti
     requestOptions.timeoutMs = options.timeoutMs;
   }
 
-  const response = await mtlsFetch(url, requestOptions);
+  const response = await fetchWithSessionRefresh(url, requestOptions);
 
   // Fire-and-forget. This only mirrors cookies into the WebView store for Canvas;
   // no caller needs it to have finished. Awaiting it made every API response wait on
@@ -207,7 +253,7 @@ export async function mtlsRequestText(
 
   const headers: Record<string, string> = { ...(options?.headers ?? {}) };
 
-  const response = await mtlsFetch(url, {
+  const response = await fetchWithSessionRefresh(url, {
     method,
     headers,
     ...(options?.signal ? { signal: options.signal } : {}),

@@ -14,8 +14,6 @@ import {
 } from '@/src/services/authSessionLifecycle';
 import {
   GOOGLE_ACCESS_TOKEN_COOKIE,
-  USER_SESSION_ID_COOKIE,
-  XYNE_SESSION_COOKIE,
   XYNE_LAST_WORKSPACE_COOKIE,
 } from '@/src/utils/apiCookieHeader';
 
@@ -27,8 +25,6 @@ const SPLIT_COOKIE_REGEX = /,\s*(?=[^;,]+=)/g;
  */
 const WEBVIEW_COOKIE_NAMES = new Set<string>([
   GOOGLE_ACCESS_TOKEN_COOKIE,
-  USER_SESSION_ID_COOKIE,
-  XYNE_SESSION_COOKIE,
   XYNE_LAST_WORKSPACE_COOKIE,
 ]);
 

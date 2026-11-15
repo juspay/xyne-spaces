@@ -257,9 +257,16 @@ export interface MtlsFetchOptions {
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 
 async function prepareHeadersForTransport(
+  url: string,
   headers: Record<string, string> | undefined,
 ): Promise<Record<string, string>> {
-  const nextHeaders: Record<string, string> = { ...(headers ?? {}) };
+  // Callers spell some of these headers differently (`X-Platform`); drop those so the
+  // transport's value is the only one sent.
+  const nextHeaders: Record<string, string> = Object.fromEntries(
+    Object.entries(headers ?? {}).filter(
+      ([key]) => !['x-platform', 'x-device-id'].includes(key.toLowerCase()),
+    ),
+  );
   const appVersion =
     Platform.OS === 'web' ? (Constants.expoConfig?.version ?? '') : DeviceInfo.getVersion();
   if (appVersion !== '') {
@@ -267,7 +274,8 @@ async function prepareHeadersForTransport(
   }
 
   nextHeaders['x-request-id'] = uuidv4();
-  nextHeaders['x-platform'] = 'native';
+  // `mobile` selects the backend's native login branch and the mobile cookie options.
+  nextHeaders['x-platform'] = 'mobile';
 
   const zeroClientId = logger.zeroClientId;
   if (zeroClientId) {
@@ -279,9 +287,9 @@ async function prepareHeadersForTransport(
     nextHeaders['x-zero-client-group-id'] = zeroClientGroupId;
   }
 
-  const clientSessionId = logger.getClientSessionId();
-  if (clientSessionId) {
-    nextHeaders['x-client-session-id'] = clientSessionId;
+  const deviceId = await logger.getDeviceId();
+  if (deviceId) {
+    nextHeaders['x-device-id'] = deviceId;
   }
 
   const workspaceId = getActiveWorkspaceId();
@@ -298,7 +306,9 @@ async function prepareHeadersForTransport(
     return remainingHeaders;
   }
 
-  const jarCookies = await buildApiCookieHeader(API_ORIGIN);
+  // Read the jar for this URL rather than the origin: the refresh cookie (`xs`) is
+  // path-scoped to the refresh endpoint and only matches there.
+  const jarCookies = await buildApiCookieHeader(url.startsWith(API_ORIGIN) ? url : API_ORIGIN);
   const mergedCookie = mergeCookieHeader(jarCookies, nextHeaders['Cookie']);
   if (mergedCookie) {
     nextHeaders['Cookie'] = mergedCookie;
@@ -495,7 +505,7 @@ export async function mtlsDownloadToFile(
     throw new Error('Download destination is not allowed');
   }
 
-  const headers = await prepareHeadersForTransport(options?.headers);
+  const headers = await prepareHeadersForTransport(url, options?.headers);
 
   if (shouldUseNativeFileDownload(url) && CertificateModule?.downloadMtlsFile) {
     const nativePath = fileUriToNativePath(destinationPath);
@@ -539,7 +549,7 @@ export async function mtlsFetch(url: string, options?: MtlsFetchOptions): Promis
     throw new Error('[mTLS] Refusing request to unapproved destination');
   }
 
-  const headers = await prepareHeadersForTransport(options?.headers);
+  const headers = await prepareHeadersForTransport(url, options?.headers);
 
   // Check if body is FormData
   const bodyIsFormData = isFormData(options?.body);

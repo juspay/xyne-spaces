@@ -427,6 +427,17 @@ class LoggerService {
   }
 
   /**
+   * The per-install id, sent as `x-device-id`. Login requires it (one auth session per
+   * device), and a login can run before `initialize`, so this loads it on demand.
+   */
+  async getDeviceId(): Promise<string> {
+    if (!this.clientSessionId) {
+      this.clientSessionId = await this.getOrCreateClientSessionId();
+    }
+    return this.clientSessionId;
+  }
+
+  /**
    * Get current email ID
    */
   getEmailId(): string | null {

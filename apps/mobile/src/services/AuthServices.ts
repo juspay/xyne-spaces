@@ -1,7 +1,6 @@
-import CookieManager from '@react-native-cookies/cookies';
-import { Platform } from 'react-native';
 import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync } from 'expo-crypto';
 import { apiGet, apiPost, isMtlsRequestError } from './apiClient';
+import { setSessionRefresher } from './MtlsApiService';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 import { injectCookiesFromResponse } from '@/src/utils/cookie-injection';
 import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttpClient';
@@ -9,7 +8,6 @@ import { isLikelyOfflineOrTransientNetworkError } from '@/src/utils/networkConne
 import {
   getCookieValueFromJar,
   GOOGLE_ACCESS_TOKEN_COOKIE,
-  getSessionIdFromJar,
   XYNE_LAST_WORKSPACE_COOKIE,
 } from '@/src/utils/apiCookieHeader';
 import { getActiveWorkspaceId } from '../utils/activeWorkspace';
@@ -21,7 +19,6 @@ import {
   type RemoteLogoutOutcome,
 } from './remoteLogoutOutcome';
 import {
-  enqueueAuthCookieMutation,
   getAuthOperation,
   getAuthSessionGeneration,
   isAuthScopeCurrent,
@@ -147,9 +144,12 @@ export interface CreateOrgRequest {
   workspaceName: string;
 }
 
-/** Response shape from `GET /v2/auth/refresh-session` (JWT only via Set-Cookie). */
+/** Response shape from `GET /api/auth/refresh-session` (JWT only via Set-Cookie). */
 export interface RefreshSessionResponse {
   success: boolean;
+  workspaceId?: string;
+  /** Epoch milliseconds. */
+  accessTokenExpiresAt?: number;
   message?: string;
 }
 
@@ -199,6 +199,8 @@ interface ExchangeMobileResponse {
     picture?: string;
   };
   userId?: string;
+  /** The auth session the backend created; only sent when it logged straight into a single workspace. */
+  sessionId?: string;
   email?: string;
   name?: string;
   picture?: string;
@@ -356,12 +358,17 @@ interface CreateWorkspaceResponse {
   selfDmChannelId?: string;
 }
 
+/**
+ * The only URL the refresh cookie (`xs`) is sent to: the backend path-scopes it to
+ * `/api/auth/refresh-session`, so this must not move under `/v2`.
+ */
+const REFRESH_SESSION_URL = `${API_BASE_URL}/auth/refresh-session`;
+
 export type RefreshSessionResult =
   | { ok: true; token: string }
   | {
       ok: false;
-      kind:
-        'no_session_cookie' | 'unauthorized' | 'invalid_body' | 'missing_jwt_cookie' | 'transient';
+      kind: 'unauthorized' | 'invalid_body' | 'missing_jwt_cookie' | 'transient';
     };
 
 async function readJwtFromJarAfterInjection(workspaceId?: string): Promise<string | undefined> {
@@ -411,46 +418,6 @@ async function postAuthJson<T>(
   }
 
   return { data, headers: response.headers };
-}
-
-async function clearCookieByName(
-  origin: string,
-  name: string,
-  isCurrent: () => boolean = () => true,
-  generation = getAuthSessionGeneration(),
-  operation = getAuthOperation(),
-): Promise<void> {
-  const scopeCurrent = (): boolean => isCurrent() && isAuthScopeCurrent(generation, operation);
-  return enqueueAuthCookieMutation(
-    generation,
-    async (): Promise<void> => {
-      if (!scopeCurrent()) {
-        return;
-      }
-      try {
-        await CookieManager.clearByName(origin, name);
-      } catch {
-        // Best-effort cleanup; callers still have session-cookie fallback.
-      }
-
-      if (Platform.OS === 'ios' && scopeCurrent()) {
-        try {
-          await CookieManager.clearByName(origin, name, true);
-        } catch {
-          // Ignore WebKit cookie-store misses.
-        }
-      }
-
-      if (Platform.OS === 'android' && scopeCurrent()) {
-        try {
-          await CookieManager.flush();
-        } catch {
-          // Ignore flush failures.
-        }
-      }
-    },
-    scopeCurrent,
-  );
 }
 
 export async function getUserById(_userId: string, token: string): Promise<GetUserResponse> {
@@ -607,7 +574,7 @@ async function resolveMobileAuthExchangeResult(
   }
 
   const hasResolvedUser = typeof data.user?.id === 'string' || typeof data.userId === 'string';
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
+  const sessionId = data.sessionId;
 
   if (!hasResolvedUser && !sessionId) {
     if (workspaces.length > 0) {
@@ -828,17 +795,6 @@ export async function authenticateWithEmail(
   }
 
   if (workspaces.length > 1) {
-    const sessionId = await getSessionIdFromJar(API_ORIGIN);
-    if (sessionId && isAuthScopeCurrent(generation, operation)) {
-      await clearCookieByName(
-        API_ORIGIN,
-        GOOGLE_ACCESS_TOKEN_COOKIE,
-        () => isAuthScopeCurrent(generation, operation),
-        generation,
-        operation,
-      );
-    }
-
     return {
       success: true,
       kind: 'workspace_selection_required',
@@ -876,7 +832,6 @@ export async function authenticateWithEmail(
     },
     data.user?.id,
   );
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
 
   return {
     success: true,
@@ -885,7 +840,6 @@ export async function authenticateWithEmail(
     user,
     workspaces,
     profile,
-    ...(sessionId ? { sessionId } : {}),
     ...(userExistsButRemoved ? { userExistsButRemoved } : {}),
   };
 }
@@ -1562,13 +1516,8 @@ async function performRefreshTokenFromSessionCookie(
   if (!isAuthScopeCurrent(generation, operation)) {
     return undefined;
   }
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
-  if (!sessionId) {
-    return undefined;
-  }
 
-  const url = `${API_BASE_URL}/v2/auth/refresh-session`;
-  const response = await mtlsFetch(url, {
+  const response = await mtlsFetch(REFRESH_SESSION_URL, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -1703,15 +1652,11 @@ async function performRefreshAuthSession(
     return { ok: false, kind: 'transient' };
   }
   const activeWorkspaceIdAtStart = getActiveWorkspaceId();
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
-  if (!sessionId || !isAuthScopeCurrent(generation, operation)) {
-    return { ok: false, kind: 'no_session_cookie' };
-  }
 
-  const url = `${API_BASE_URL}/v2/auth/refresh-session`;
-
+  // No local check for the refresh cookie: `xs` is httpOnly and path-scoped, so only the
+  // backend can say whether it is there. A missing one comes back as 401 REFRESH_INVALID.
   try {
-    const response = await mtlsFetch(url, {
+    const response = await mtlsFetch(REFRESH_SESSION_URL, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
@@ -1722,6 +1667,9 @@ async function performRefreshAuthSession(
       return { ok: false, kind: 'transient' };
     }
 
+    // 401 REFRESH_INVALID (session gone) and 403 WORKSPACE_ACCESS_DENIED (left or
+    // deactivated) both end the session. 503 REFRESH_BUSY, any other 5xx and network
+    // errors keep it: the caller fails this attempt and tries later.
     if (response.statusCode === 401 || response.statusCode === 403) {
       return { ok: false, kind: 'unauthorized' };
     }
@@ -1768,3 +1716,39 @@ async function performRefreshAuthSession(
     return { ok: false, kind: 'transient' };
   }
 }
+
+type SessionEndedListener = () => void;
+
+const sessionEndedListeners = new Set<SessionEndedListener>();
+
+/**
+ * Fires when an API call's 401 led to a refresh the backend refused (401 REFRESH_INVALID or
+ * 403 WORKSPACE_ACCESS_DENIED): the session is over and the user has to sign in again.
+ */
+export function subscribeToSessionEnded(listener: SessionEndedListener): () => void {
+  sessionEndedListeners.add(listener);
+  return (): void => {
+    sessionEndedListeners.delete(listener);
+  };
+}
+
+// API calls that get a refreshable 401 renew the session here, then retry once.
+// refreshAuthSession is single-flight, so a burst of 401s shares one refresh.
+setSessionRefresher(async (): Promise<boolean> => {
+  const generation = getAuthSessionGeneration();
+  const operation = getAuthOperation();
+  const result = await refreshAuthSession(
+    getActiveWorkspaceId() ?? undefined,
+    generation,
+    operation,
+  );
+  if (result.ok) {
+    return true;
+  }
+  if (result.kind === 'unauthorized' && isAuthScopeCurrent(generation, operation)) {
+    for (const listener of sessionEndedListeners) {
+      listener();
+    }
+  }
+  return false;
+});

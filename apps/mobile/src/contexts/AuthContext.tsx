@@ -23,6 +23,7 @@ import {
   requestEnterpriseWorkspaceJoin,
   resendRegistrationCode,
   signOutUser,
+  subscribeToSessionEnded,
   switchToWorkspace,
   User,
   verifyEmailRegistration,
@@ -956,6 +957,28 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     user?.workspaceId ?? null,
     applyRefreshedToken,
   );
+
+  const clearStoredAuthRef = useRef(clearStoredAuth);
+  clearStoredAuthRef.current = clearStoredAuth;
+  const isSignedIn = user !== null;
+
+  // The backend refused to refresh after a 401 (session revoked, expired, or the user left the
+  // workspace): drop local auth and return to login. No remote logout; the session is
+  // already gone. Starting a new auth session makes a burst of these act only once.
+  useEffect(() => {
+    if (!isSignedIn) {
+      return undefined;
+    }
+    return subscribeToSessionEnded(() => {
+      logger.warn(Event.LOTUS_AUTH_CHECK, { stage: 'session_ended_after_refresh' });
+      const cleanupGeneration = beginAuthSession();
+      void clearStoredAuthRef.current({
+        generation: cleanupGeneration,
+        operation: getAuthOperation(),
+        waitForOperations: false,
+      });
+    });
+  }, [isSignedIn]);
 
   const applyAuthenticatedSession = async (
     nextUser: User,
