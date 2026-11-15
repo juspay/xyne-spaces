@@ -1,5 +1,5 @@
 import { InternalAxiosRequestConfig, AxiosResponse } from 'axios';
-import { encryptField, decryptField, isEncryptedField, decryptionCache } from '@xyne/shared';
+import { encryptField, decryptField, isEncryptedField, decryptionCache, TRANSIT_TICKET_HEADER } from '@xyne/shared';
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
 import { logger } from '../utils/logger';
 
@@ -87,6 +87,10 @@ export async function encryptionRequestInterceptor(
   if (!isEncryptionReady() || !getEncryptionState().apiClientEncryptionEnabled) {
     return config;
   }
+
+  // Every request names the ticket the response should be encrypted under.
+  const { ticket } = await getEncryptionState().keyring!.current();
+  config.headers.set(TRANSIT_TICKET_HEADER, ticket);
 
   // Only encrypt request bodies for mutating methods
   const method = config.method?.toLowerCase();

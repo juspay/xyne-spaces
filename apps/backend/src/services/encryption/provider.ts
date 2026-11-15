@@ -47,7 +47,7 @@ const provider: EncryptionProvider = {
     return unsupported('decryptBatch');
   },
 
-  async encryptResponse<T>(body: T, _subject: string): Promise<T> {
+  async encryptResponse<T>(body: T, _subject: string, _ticket?: string): Promise<T> {
     if (!config.enc.apiClientEncryptionEnabled) return body;
     return unsupported('encryptResponse');
   },

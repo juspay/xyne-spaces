@@ -36,10 +36,11 @@ export async function fetchEncryptionConfig(): Promise<EncryptionConfig> {
 }
 
 /**
- * Ephemeral ECDH with the server; the returned transit key is unwrapped locally and
- * imported non-extractable. Both ECDH keys are discarded afterwards.
+ * Ephemeral ECDH with the server; the traffic key comes back wrapped under the shared
+ * secret, is unwrapped locally and imported non-extractable. Both ECDH keys are discarded
+ * afterwards. With `ticket`, the server returns the key that ticket seals instead of a new one.
  */
-export async function handshake(epoch?: number): Promise<TransitKey> {
+export async function handshake(ticket?: string): Promise<TransitKey> {
   const ecdh = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, [
     'deriveBits',
   ]);
@@ -49,7 +50,7 @@ export async function handshake(epoch?: number): Promise<TransitKey> {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ publicKey: toBase64(clientPoint), epoch }),
+    body: JSON.stringify({ publicKey: toBase64(clientPoint), ticket }),
   });
   if (!response.ok) {
     throw new Error(`Transit handshake failed with status ${response.status}`);
@@ -57,10 +58,10 @@ export async function handshake(epoch?: number): Promise<TransitKey> {
   const data = (await response.json()) as {
     publicKey?: string;
     wrappedKey?: string;
-    epoch?: number;
-    epochSeconds?: number;
+    ticket?: string;
+    expiresAt?: number;
   };
-  if (!data.publicKey || !data.wrappedKey || data.epoch === undefined || !data.epochSeconds) {
+  if (!data.publicKey || !data.wrappedKey || !data.ticket || !Number.isSafeInteger(data.expiresAt)) {
     throw new Error('Transit handshake response is incomplete');
   }
 
@@ -96,5 +97,5 @@ export async function handshake(epoch?: number): Promise<TransitKey> {
     'decrypt',
   ]);
 
-  return { key, epoch: data.epoch, epochSeconds: data.epochSeconds };
+  return { key, ticket: data.ticket, expiresAt: data.expiresAt! };
 }

@@ -3,6 +3,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import { getEncryptionProvider } from '@/services/encryption';
+import { TRANSIT_TICKET_COOKIE, TRANSIT_TICKET_HEADER } from '@/services/encryption/types';
 
 function sanitizeForLog(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, '');
@@ -30,9 +31,9 @@ function hasEncryptedFields(obj: unknown): boolean {
 }
 
 /**
- * Decrypt `ENC:v1|tk-<epoch>|…` fields with the caller's transit key. The key is derived
- * from the auth session (JWT `sid`), so this runs after authentication: the auth middlewares
- * call it in place of `next()` once `req.user` is set, rather than it being mounted globally.
+ * Decrypt `ENC:v1|tk-<ticket>|…` fields. Each ticket seals its own key and is bound to the
+ * auth session (JWT `sid`), so this runs after authentication: the auth middlewares call it in
+ * place of `next()` once `req.user` is set, rather than it being mounted globally.
  */
 export async function decryptRequestBodyMiddleware(
   req: Request,
@@ -95,9 +96,16 @@ export async function decryptRequestBodyMiddleware(
   next();
 }
 
+function transitTicket(req: Request): string | undefined {
+  const header = req.header(TRANSIT_TICKET_HEADER);
+  if (header) return header;
+  const cookie: unknown = req.cookies?.[TRANSIT_TICKET_COOKIE];
+  return typeof cookie === 'string' && cookie.length > 0 ? cookie : undefined;
+}
+
 /**
- * Encrypt JSON responses under the caller's transit key. Mounted globally: `res.json` runs
- * after the route's auth middleware, so `req.user.sid` is already resolved by then.
+ * Encrypt JSON responses under the caller's current transit ticket. Mounted globally:
+ * `res.json` runs after the route's auth middleware, so `req.user.sid` is already resolved.
  */
 export function encryptResponseBodyMiddleware(
   req: Request,
@@ -112,7 +120,7 @@ export function encryptResponseBodyMiddleware(
       return originalJson(body);
     }
 
-    void getEncryptionProvider().encryptResponse(body, sessionId)
+    void getEncryptionProvider().encryptResponse(body, sessionId, transitTicket(req))
       .then((encryptedBody) => originalJson(encryptedBody))
       .catch((error) => {
         logger.error('[decryptionMiddleware] failed to encrypt response body', {
