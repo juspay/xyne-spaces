@@ -7,10 +7,10 @@ import {
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_VERSION_HEADER,
   derivedContentFactsSchema,
-  findRequestContract,
   findRequestRule,
   findRuleViolations,
 } from '@xyne/shared';
+import type { RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getEncryptionProvider, getLatestClientManifest, isDekPassthrough } from '@/services/encryption';
 import type { ClientManifestRule } from '@/services/encryption';
@@ -286,6 +286,8 @@ async function transformRequestBody(
 }
 
 export type ManifestRequestBodyOptions = {
+  /** This route's request shape. Its fields must match the manifest rule matched for it. */
+  contract: RequestContract;
   /**
    * Workspace whose DEK the rule's `MASTER_DEK` fields are re-encrypted under: the one the
    * row being written belongs to (what the Prisma extension resolves for it). Called only
@@ -294,6 +296,47 @@ export type ManifestRequestBodyOptions = {
    */
   resolveWorkspaceId: (req: Request) => Promise<string>;
 };
+
+/**
+ * Where the route's contract (body shape, code) and the manifest rule for its URL
+ * (encryption policy, DB) disagree on field names, in either direction. A rule field the
+ * schema lacks is a typo or a removed field; a schema field the rule lacks would go out
+ * without a policy.
+ */
+function contractFieldMismatches(contract: RequestContract, rule: ClientManifestRule): string[] {
+  const schemaFields = new Set(Object.keys(contract.schema.shape));
+  const ruleFields = new Set(Object.keys(rule.fields));
+  const mismatches: string[] = [];
+  const notInRule = [...schemaFields].filter((field) => !ruleFields.has(field));
+  const notInSchema = [...ruleFields].filter((field) => !schemaFields.has(field));
+  if (notInRule.length > 0) mismatches.push(`schema fields missing from the manifest rule: ${notInRule.join(', ')}`);
+  if (notInSchema.length > 0) mismatches.push(`manifest fields missing from the schema: ${notInSchema.join(', ')}`);
+  return mismatches;
+}
+
+/**
+ * The route's contract and the manifest disagree: no rule for a route that has a contract
+ * (the route moved or the rule was never written), or the field names differ. Fails the
+ * request in development; elsewhere it is logged and counted and the request continues.
+ */
+function reportContractDrift(req: Request, res: Response, problem: string): boolean {
+  logger.error('[decryptionMiddleware] request contract and client manifest disagree', {
+    method: sanitizeForLog(req.method),
+    path: sanitizeForLog(req.originalUrl.split('?')[0]),
+    problem: sanitizeForLog(problem),
+  });
+  getCryptoOperations().add(1, {
+    operation: 'enc_contract_mismatch',
+    status: 'error',
+  });
+  if (config.env !== 'development') return false;
+  res.status(500).json({
+    error: 'Request contract and client encryption manifest disagree',
+    code: 'ENC_CONTRACT_MISMATCH',
+    problem,
+  });
+  return true;
+}
 
 /**
  * Per-route counterpart of decryptRequestBodyMiddleware for multipart routes listed in
@@ -333,8 +376,20 @@ export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOption
       });
     }
 
+    const { contract } = options;
     const rule = latest ? findRequestRule(latest, req.method, req.originalUrl) : undefined;
+
+    // Only judged when the manifest loaded (an encryption-service outage is not drift) and
+    // the caller follows the manifest (it sends the version header). Callers that don't,
+    // such as apps through the /conversations/claw mount of this router, have no rule by
+    // design.
+    if (latest && !rule && req.get(CLIENT_MANIFEST_VERSION_HEADER)) {
+      if (reportContractDrift(req, res, 'no manifest rule for this route')) return;
+    }
     if (rule) {
+      const mismatches = contractFieldMismatches(contract, rule);
+      if (mismatches.length > 0 && reportContractDrift(req, res, mismatches.join('; '))) return;
+
       const violations = findRuleViolations(req.body, rule);
       if (violations.length > 0) {
         res.status(400).json({
@@ -349,17 +404,14 @@ export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOption
     // Shape check against the route's contract. passthrough() on purpose: keys the
     // contract does not list are allowed for now. Only validates; req.body is not replaced
     // with the parsed (coerced) value.
-    const contract = findRequestContract(req.method, req.originalUrl);
-    if (contract) {
-      const parsed = contract.schema.passthrough().safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({
-          error: 'Request body does not match its contract',
-          code: 'ENC_CONTRACT_VIOLATION',
-          issues: parsed.error.issues,
-        });
-        return;
-      }
+    const parsed = contract.schema.passthrough().safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: 'Request body does not match its contract',
+        code: 'ENC_CONTRACT_VIOLATION',
+        issues: parsed.error.issues,
+      });
+      return;
     }
 
     if (rule && config.enc.enableDbEncryption) {

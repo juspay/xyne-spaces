@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { defineRequestContract } from '../define.js';
 
+/** Body of the conversation reply API; attached to its route in the backend's routes/conversations.ts. */
 export const replyToConversation = defineRequestContract({
-  route: 'POST /conversations/:conversationId/messages',
   schema: z.object({
     content: z.string().optional(),
     msgType: z.enum(['USER', 'BOT']).optional(),

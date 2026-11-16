@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { replyToConversation } from '@xyne/shared';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
 import { manifestRequestBodyMiddleware } from '../middleware/decryptionMiddleware';
@@ -12,6 +13,7 @@ const conversationController = new ConversationController();
 // A reply is stored under its conversation's workspace (messageRepository.create resolves it
 // the same way), so that workspace's DEK is what the manifest's MASTER_DEK fields become.
 const transformReplyBody = manifestRequestBodyMiddleware({
+  contract: replyToConversation,
   resolveWorkspaceId: async (req) => {
     const conversation = await db.conversation.findUnique({
       where: { conversationId: req.params.conversationId },

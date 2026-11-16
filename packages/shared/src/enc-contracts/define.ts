@@ -1,17 +1,15 @@
 import type { z } from 'zod';
 
-export type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-
 /**
- * One API's request shape: its route and the zod schema of its body. Encryption policy
- * (which fields the client encrypts, how the encryption service transforms them, what it
- * extracts) is not here: it lives in the encryption service's database and reaches the
- * backend and clients through the manifest. The backend checks at startup that the two
- * agree on field names (assertEncContractsMatchManifest).
+ * One API's request shape: the zod schema of its body. The route that uses it attaches it
+ * where the route is registered (the path lives only there and, as the rule's `value`, in
+ * the encryption service's database). Encryption policy (which fields the client encrypts,
+ * how the encryption service transforms them, what it extracts) is not here either: it
+ * reaches the backend and clients through the manifest. The backend checks on each request
+ * that the attached contract and the matched rule agree on field names.
  */
 export interface RequestContract<S extends z.ZodObject = z.ZodObject> {
   kind: 'REQUEST';
-  route: `${Method} /${string}`;
   schema: S;
 }
 
