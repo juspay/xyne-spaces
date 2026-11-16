@@ -29,6 +29,7 @@ import {
   type V2ConversationPage,
 } from '../services/XyneAI/XyneAISessionsV2Service';
 import type { ConversationHistory } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { findSessionInCachedPages } from '../components/AIScreen/SidebarProjects/SidebarProjects.utils';
 
 // ============================================================================
 // Query Keys
@@ -140,6 +141,34 @@ export function useCachedV2ConversationTitle(sessionId: string | null | undefine
   return useSyncExternalStore(subscribe, read);
 }
 
+/**
+ * One chat's row from whichever cached history page holds it.
+ *
+ * Subscribed to the cache rather than memoised on the unfiltered list: that
+ * list holds only its first page, so a chat opened from a project's own list is
+ * routinely absent from it, and a memo keyed on it never re-ran when a move
+ * changed a different view. The badge then kept naming the old project, or
+ * vanished once the row left the only loaded list.
+ *
+ * Returns the cache's own object. Never build a new one here — useSyncExternalStore
+ * re-renders on every reference change, so deriving a value inside `read` loops
+ * forever. Overlay optimistic state at the call site instead.
+ */
+export function useCachedV2Session(
+  sessionId: string | null | undefined,
+): ConversationHistory | null {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
+    [queryClient],
+  );
+  const read = useCallback((): ConversationHistory | null => {
+    if (!sessionId) return null;
+    return findCachedSessionByConversation(queryClient, sessionId);
+  }, [queryClient, sessionId]);
+  return useSyncExternalStore(subscribe, read);
+}
+
 export function useV2SessionInvalidator() {
   const queryClient = useQueryClient();
 
@@ -226,6 +255,18 @@ function sessionsEntries(queryClient: QueryClient): SessionsEntry[] {
   return queryClient.getQueriesData<InfiniteData<V2ConversationPage>>({
     queryKey: V2_SESSIONS_KEY,
   });
+}
+
+/** Reads every cached list view. The search itself lives in the project utils
+ *  so it stays testable without loading the API client. */
+export function findCachedSessionByConversation(
+  queryClient: QueryClient,
+  conversationId: string,
+): ConversationHistory | null {
+  return findSessionInCachedPages(
+    sessionsEntries(queryClient).map(([, data]) => data?.pages),
+    conversationId,
+  );
 }
 
 function rollbackTo(queryClient: QueryClient, previous: SessionsEntry[]): () => void {
