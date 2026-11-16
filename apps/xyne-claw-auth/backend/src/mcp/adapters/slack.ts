@@ -93,6 +93,8 @@ interface SlackConversationsListResponse {
 export async function handleSlackFindChannel(
   credentials: Record<string, unknown>,
   params: Record<string, unknown>,
+  /** Set for Slack-surface runs: hide private channels the requester is not in. */
+  requester?: SlackRequester,
 ): Promise<string> {
   const botToken = credentials["botToken"] as string | undefined;
   if (!botToken) {
@@ -161,16 +163,22 @@ export async function handleSlackFindChannel(
     if (!cursor || all.length >= maxScan) break;
   }
 
-  if (!nameQuery) {
-    return JSON.stringify({ scanned: all.length, channels: all }, null, 2);
+  let visible = all;
+  if (requester) {
+    const requesterPrivate = await requesterPrivateChannelIds(botToken, requester.slackUserId);
+    visible = all.filter((c) => !c.is_private || requesterPrivate.has(c.id));
   }
 
-  const exact = all.filter((c) => c.name.toLowerCase() === nameQuery);
-  const matches = exact.length > 0 ? exact : all.filter((c) => c.name.toLowerCase().includes(nameQuery));
+  if (!nameQuery) {
+    return JSON.stringify({ scanned: visible.length, channels: visible }, null, 2);
+  }
+
+  const exact = visible.filter((c) => c.name.toLowerCase() === nameQuery);
+  const matches = exact.length > 0 ? exact : visible.filter((c) => c.name.toLowerCase().includes(nameQuery));
   return JSON.stringify(
     {
       query: nameQuery,
-      scanned: all.length,
+      scanned: visible.length,
       matchType: exact.length > 0 ? "exact" : matches.length > 0 ? "contains" : "none",
       matches,
       ...(matches.length === 0
@@ -180,4 +188,148 @@ export async function handleSlackFindChannel(
     null,
     2,
   );
+}
+
+// ── Requester scoping for Slack-surface runs ──
+//
+// A run started from Slack reads with the workspace bot's token, and the bot
+// can read every channel it was added to. Without these checks a user could
+// ask the bot to read a private channel or DM they are not part of. Every
+// channel read on a Slack-surface run is checked against the Slack user who
+// started the run. Any failed lookup denies the read.
+
+/** connectionId prefix for credentials resolved from the Slack surface bot. */
+export const SLACK_SURFACE_CONNECTION_PREFIX = "slack-surface:";
+
+/** Upstream server-slack tools that read a channel's messages. */
+const SLACK_CHANNEL_READ_TOOLS = new Set(["slack_get_channel_history", "slack_get_thread_replies"]);
+
+/** Bounds conversations.members / users.conversations paging (1000 per page). */
+const MAX_MEMBER_PAGES = 20;
+
+export interface SlackRequester {
+  /** Slack user who started the run; undefined when the run context lost it. */
+  slackUserId: string | undefined;
+}
+
+interface SlackApiResponse {
+  ok: boolean;
+  error?: string;
+  response_metadata?: { next_cursor?: string };
+  [key: string]: unknown;
+}
+
+async function slackApiGet(
+  botToken: string,
+  method: string,
+  params: Record<string, string>,
+): Promise<SlackApiResponse> {
+  const url = new URL(`https://slack.com/api/${method}`);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  let attempts = 0;
+  while (true) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${botToken}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (res.status === 429 && attempts < 3) {
+      const retryAfter = Math.min(Number(res.headers.get("retry-after") ?? "2") || 2, 10);
+      await new Promise((r) => setTimeout(r, retryAfter * 1000));
+      attempts++;
+      continue;
+    }
+    if (!res.ok) return { ok: false, error: `http_${res.status}` };
+    return (await res.json()) as SlackApiResponse;
+  }
+}
+
+/** Private channels the requester belongs to (that the bot can also see). Empty on any error. */
+async function requesterPrivateChannelIds(botToken: string, slackUserId: string | undefined): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!slackUserId) return ids;
+  let cursor = "";
+  for (let page = 0; page < MAX_MEMBER_PAGES; page++) {
+    const data = await slackApiGet(botToken, "users.conversations", {
+      user: slackUserId,
+      types: "private_channel",
+      exclude_archived: "true",
+      limit: "1000",
+      ...(cursor ? { cursor } : {}),
+    }).catch(() => null);
+    if (!data?.ok) return new Set();
+    for (const c of (data["channels"] as Array<{ id?: string }> | undefined) ?? []) {
+      if (c.id) ids.add(c.id);
+    }
+    cursor = data.response_metadata?.next_cursor ?? "";
+    if (!cursor) break;
+  }
+  return ids;
+}
+
+async function isChannelMember(botToken: string, channelId: string, slackUserId: string): Promise<boolean> {
+  let cursor = "";
+  for (let page = 0; page < MAX_MEMBER_PAGES; page++) {
+    const data = await slackApiGet(botToken, "conversations.members", {
+      channel: channelId,
+      limit: "1000",
+      ...(cursor ? { cursor } : {}),
+    });
+    if (!data.ok) return false;
+    if (((data["members"] as string[] | undefined) ?? []).includes(slackUserId)) return true;
+    cursor = data.response_metadata?.next_cursor ?? "";
+    if (!cursor) return false;
+  }
+  return false;
+}
+
+/**
+ * Whether the requester may read this channel, judged as Slack would judge it
+ * for that user: a DM only by its other party, a private channel or group DM
+ * only by its members, and a public channel by any full member of the
+ * workspace (guests only when they are in it).
+ */
+export async function canSlackRequesterReadChannel(
+  botToken: string,
+  slackUserId: string,
+  channelId: string,
+): Promise<boolean> {
+  const info = await slackApiGet(botToken, "conversations.info", { channel: channelId });
+  const channel = info["channel"] as
+    | { is_im?: boolean; is_mpim?: boolean; is_private?: boolean; is_group?: boolean; user?: string }
+    | undefined;
+  if (!info.ok || !channel) return false;
+
+  if (channel.is_im) return channel.user === slackUserId;
+  if (channel.is_private || channel.is_mpim || channel.is_group) {
+    return isChannelMember(botToken, channelId, slackUserId);
+  }
+
+  const userInfo = await slackApiGet(botToken, "users.info", { user: slackUserId });
+  const user = userInfo["user"] as { is_restricted?: boolean; is_ultra_restricted?: boolean } | undefined;
+  if (!userInfo.ok || !user) return false;
+  if (user.is_restricted || user.is_ultra_restricted) {
+    return isChannelMember(botToken, channelId, slackUserId);
+  }
+  return true;
+}
+
+/**
+ * For a Slack-surface run, the reason a channel read must be refused, or null
+ * when the call may go ahead. Non-read tools pass through unchanged.
+ */
+export async function slackSurfaceReadBlockReason(
+  credentials: Record<string, unknown>,
+  requester: SlackRequester,
+  tool: string,
+  params: Record<string, unknown>,
+): Promise<string | null> {
+  if (!SLACK_CHANNEL_READ_TOOLS.has(tool)) return null;
+  const botToken = credentials["botToken"] as string | undefined;
+  const channelId = typeof params["channel_id"] === "string" ? params["channel_id"].trim() : "";
+  if (!botToken || !channelId || !requester.slackUserId) {
+    return `Blocked: ${tool} could not confirm that the Slack user who asked can read this channel.`;
+  }
+  const allowed = await canSlackRequesterReadChannel(botToken, requester.slackUserId, channelId).catch(() => false);
+  if (allowed) return null;
+  return `Blocked: the Slack user who asked is not a member of channel ${channelId}, so ${tool} cannot read it. Only channels that user can see in Slack can be read.`;
 }
