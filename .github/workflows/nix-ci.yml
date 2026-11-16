@@ -12,9 +12,13 @@ name: Nix CI
 # Actions): use nix-quick-install-action (NOT the DeterminateSystems installer),
 # because only its store layout is snapshotted by cache-nix-action.
 
-# Disabled — pull_request/push triggers commented out. nix-quick-install-action
-# needs sudo to bootstrap /nix, which self-hosted runner pods block
-# (allowPrivilegeEscalation: false) — staying on GitHub-hosted for now.
+# Enabled on pull requests and protected-branch pushes. The `nix` job runs on
+# GitHub-hosted runners unless vars.USE_SELF_HOSTED_CI is true, in which case it
+# moves to the self-hosted Nix pool and skips the installer + actions cache (the
+# runner image supplies both). Installer choice on GitHub-hosted runners follows
+# juspay/skills `nix-ci` (Option 1): nix-quick-install-action, NOT the
+# DeterminateSystems installer, because only its store layout is snapshotted by
+# cache-nix-action.
 on:
   workflow_dispatch:
     inputs:
@@ -24,14 +28,14 @@ on:
         description: Push the dev image to GHCR (non-main refs push :sha-<short>)
         type: boolean
         default: false
-  # pull_request:
-  # push:
-  #   branches:
-  #     - main
-  #     - master
-  #     - staging
-  #     - "release**"
-  #     - "fix/nix-**"
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - staging
+      - "release**"
+      - "fix/nix-**"
 
 permissions:
   contents: read
@@ -49,22 +53,24 @@ concurrency:
 jobs:
   nix:
     name: Nix build + runtime smoke test
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-nix' || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
       - uses: nixbuild/nix-quick-install-action@2c9db80fb984ceb1bcaa77cdda3fdf8cfba92035 # v34
+        if: vars.USE_SELF_HOSTED_CI != 'true'
         with:
           nix_conf: |
-            substituters = https://cache.nixos.org https://cache.nixos.asia/juspay
-            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= juspay:5aHaNForWL03wKOGhUn/al4BZd3HqZDWZ3hrVTcf6Fg=
+            substituters = https://cache.nixos.org https://cache.nixos.asia/oss
+            trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= oss:KO872wNJkCDgmGN3xy9dT89WAhvv13EiKncTtHDItVU=
             accept-flake-config = true
 
       # Cache /nix/store across runs — a cold closure for this stack is minutes;
       # a warm restore is ~1 min. Keyed on the Nix inputs so it invalidates when
       # the flake, project.nix, or nix/ tree changes.
       - uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6
+        if: vars.USE_SELF_HOSTED_CI != 'true'
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/flake.nix', 'project.nix', 'nix/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -73,6 +79,15 @@ jobs:
           purge-prefixes: nix-${{ runner.os }}-
           purge-last-accessed: 604800
           purge-primary-key: never
+
+      # Push every store path this job realises to the shared OSS Attic cache
+      # (https://cache.nixos.asia/oss). The action's post hook does the push —
+      # there is no explicit push step. Works on both runner flavours.
+      - uses: ryanccn/attic-action@5635a15ef0c5462194ffbd05d1daeddc74625c3a # v0.5.0
+        with:
+          endpoint: https://cache.nixos.asia
+          cache: oss
+          token: ${{ secrets.ATTIC_TOKEN }}
 
       # 1. Evaluate outputs and build source guards and script tests.
       - name: nix flake check
