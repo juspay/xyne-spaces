@@ -35,6 +35,7 @@ import { userActivityTrackingService } from './userActivityTrackingService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { isEmailDomainAllowed } from './emailDomainPolicy';
 
 /**
  * Marks an auth session minted by Xyne SSO for the Spaces SDK, MCP or CLI. Its
@@ -498,7 +499,14 @@ class SdkSsoService {
           },
         })
       : null;
-    if (!user || user.status !== UserStatus.ACTIVE || user.leftAt || !user.orgMember || user.orgMember.leftAt) {
+    if (
+      !user ||
+      !isEmailDomainAllowed(user.email) ||
+      user.status !== UserStatus.ACTIVE ||
+      user.leftAt ||
+      !user.orgMember ||
+      user.orgMember.leftAt
+    ) {
       return { status: 'invalid' };
     }
 
