@@ -5,11 +5,7 @@ import { API_BASE_URL, API_ORIGIN } from '../config';
 import { injectCookiesFromResponse } from '@/src/utils/cookie-injection';
 import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttpClient';
 import { isLikelyOfflineOrTransientNetworkError } from '@/src/utils/networkConnectivityErrors';
-import {
-  getCookieValueFromJar,
-  GOOGLE_ACCESS_TOKEN_COOKIE,
-  XYNE_LAST_WORKSPACE_COOKIE,
-} from '@/src/utils/apiCookieHeader';
+import { getCookieValueFromJar, XYNE_LAST_WORKSPACE_COOKIE } from '@/src/utils/apiCookieHeader';
 import { getActiveWorkspaceId } from '../utils/activeWorkspace';
 import { CommunityJoinResultStatus } from './CommunityServices';
 import {
@@ -389,7 +385,7 @@ async function readJwtFromJarAfterInjection(workspaceId?: string): Promise<strin
       return workspaceToken;
     }
   }
-  return getCookieValueFromJar(API_ORIGIN, GOOGLE_ACCESS_TOKEN_COOKIE);
+  return undefined;
 }
 
 async function postAuthJson<T>(
@@ -636,7 +632,7 @@ async function resolveMobileAuthExchangeResult(
     );
   } catch (err) {
     if (!hasResolvedUser) {
-      // Token present but /me returned 401 — likely a stale google_access_token from a
+      // Token present but /me returned 401 — likely a stale workspace token from a
       // previous session. Direct the user through workspace/org selection instead of
       // showing "Unable to resolve authenticated user profile".
       if (workspaces.length > 0) {
@@ -919,7 +915,7 @@ export async function resendRegistrationCode(email: string): Promise<string> {
 /**
  * Completes registration with the emailed code.
  *
- * On success the backend sets the `google_access_token` pending-auth cookie — the same cookie the
+ * On success the backend sets the `xyne_pending_auth` pending-auth cookie — the same cookie the
  * OAuth callback issues — which is what lets `joinCommunityWorkspace()` authenticate immediately
  * afterwards without a separate sign-in. That cookie is short-lived (10 minutes, single-use), so
  * the caller should complete the join promptly.
@@ -1085,8 +1081,8 @@ export async function loginToWorkspace(
  * Joins a public community workspace.
  *
  * Identity comes from the cookie jar: the backend accepts either the short-lived
- * `google_access_token` pending-auth cookie (brand-new user, not yet in any workspace) or the
- * `user_session_id` session cookie (returning user). On success the response sets the same
+ * `xyne_pending_auth` pending-auth cookie (brand-new user, not yet in any workspace) or a
+ * workspace JWT cookie (returning user). On success the response sets the same
  * workspace cookies as `POST /auth/login-workspace`, so the token is resolved the same way.
  *
  * An empty body is sent deliberately, matching the dashboard, so the workspace's own
@@ -1150,7 +1146,7 @@ export async function joinCommunityWorkspace(workspaceId: string): Promise<Commu
  *
  * Same endpoint as a community join, but `workspaceType: 'ENTERPRISE'` makes the backend queue a
  * join request for admin review rather than granting membership. Identity comes from the
- * short-lived `google_access_token` pending-auth cookie already in the jar, so this must run while
+ * short-lived `xyne_pending_auth` pending-auth cookie already in the jar, so this must run while
  * that cookie is still valid (10 minutes from sign-in).
  */
 export async function requestEnterpriseWorkspaceJoin(
@@ -1229,6 +1225,8 @@ export async function createWorkspaceInExistingOrg(workspaceName: string): Promi
 export async function switchToWorkspace(
   workspaceId: string,
   token: string,
+  /** The workspace the caller is signed in to; its cookie authenticates the switch. */
+  currentWorkspaceId: string | undefined,
   generation = getAuthSessionGeneration(),
   operation = getAuthOperation(),
 ): Promise<AuthResponse> {
@@ -1241,6 +1239,7 @@ export async function switchToWorkspace(
       'X-Platform': 'mobile',
       'X-Requested-With': 'XMLHttpRequest',
       Authorization: `Bearer ${token}`,
+      ...(currentWorkspaceId ? { 'x-workspace-id': currentWorkspaceId } : {}),
     },
     body: JSON.stringify({ workspaceId }),
   });
@@ -1608,7 +1607,7 @@ const inFlightRefreshes = new Map<
 >();
 
 /**
- * Refresh JWT using session + API cookies (same as dashboard: `Set-Cookie` for `google_access_token`).
+ * Refresh the workspace JWT using the `xs` refresh cookie (same endpoint as the dashboard).
  * Does not rely on JWT in the JSON body.
  *
  * Concurrent callers (proactive keep-alive, `needs-auth` recovery, access-token

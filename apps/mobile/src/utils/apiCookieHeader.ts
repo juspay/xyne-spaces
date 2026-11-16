@@ -1,6 +1,7 @@
 import CookieManager from '@react-native-cookies/cookies';
 
-export const GOOGLE_ACCESS_TOKEN_COOKIE = 'google_access_token';
+/** Short-lived (10 min) identity cookie set at sign-in, before a workspace is chosen. Not an access token. */
+export const PENDING_AUTH_COOKIE = 'xyne_pending_auth';
 export const XYNE_LAST_WORKSPACE_COOKIE = 'xyne_last_workspace';
 
 function cookieEntryToValue(

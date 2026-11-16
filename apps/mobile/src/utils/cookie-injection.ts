@@ -12,10 +12,7 @@ import {
   getAuthSessionGeneration,
   isAuthScopeCurrent,
 } from '@/src/services/authSessionLifecycle';
-import {
-  GOOGLE_ACCESS_TOKEN_COOKIE,
-  XYNE_LAST_WORKSPACE_COOKIE,
-} from '@/src/utils/apiCookieHeader';
+import { PENDING_AUTH_COOKIE, XYNE_LAST_WORKSPACE_COOKIE } from '@/src/utils/apiCookieHeader';
 
 const SPLIT_COOKIE_REGEX = /,\s*(?=[^;,]+=)/g;
 
@@ -23,10 +20,7 @@ const SPLIT_COOKIE_REGEX = /,\s*(?=[^;,]+=)/g;
  * The only cookies the WebView itself reads. Mirroring anything else into the
  * WKWebView store costs a main-thread round trip per cookie for no benefit.
  */
-const WEBVIEW_COOKIE_NAMES = new Set<string>([
-  GOOGLE_ACCESS_TOKEN_COOKIE,
-  XYNE_LAST_WORKSPACE_COOKIE,
-]);
+const WEBVIEW_COOKIE_NAMES = new Set<string>([PENDING_AUTH_COOKIE, XYNE_LAST_WORKSPACE_COOKIE]);
 
 /**
  * Normalize Set-Cookie header for local dev (http, different ports).

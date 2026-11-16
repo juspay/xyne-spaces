@@ -1427,9 +1427,18 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     const generation = getAuthSessionGeneration();
     const previousWorkspaceId = getActiveWorkspaceId();
     setIsLoading(true);
-    setActiveWorkspaceId(workspaceId);
+    // Cleared rather than set to the target: the backend authenticates the switch with the
+    // current workspace's cookie, and an active target would label the request with a
+    // workspace that has no token yet.
+    setActiveWorkspaceId(null);
     try {
-      const response = await switchToWorkspace(workspaceId, currentToken, generation, operation);
+      const response = await switchToWorkspace(
+        workspaceId,
+        currentToken,
+        user?.workspaceId ?? previousWorkspaceId ?? undefined,
+        generation,
+        operation,
+      );
       if (!isAuthSessionCurrent(generation) || !isAuthOperationCurrent(operation)) return;
       if (!response.success || !response.user || !response.token) {
         throw new Error('Workspace switch failed');
