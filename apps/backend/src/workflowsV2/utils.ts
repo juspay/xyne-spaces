@@ -227,7 +227,8 @@ export const toCredentialSummary = (row: {
   createdAt: Date;
   updatedAt: Date;
   allowedWorkflowIds: string[];
-}): CredentialSummary => ({
+  // `allowedWorkflowIds` is on `CredentialSummary` from the SDK release that adds it.
+}): CredentialSummary & { allowedWorkflowIds: string[] } => ({
   name: row.name,
   credType: row.credType,
   authType: row.authType as CredentialAuthType,

@@ -72,7 +72,7 @@ import {
   TERMINAL_EXECUTION_STATUSES,
   WORKFLOWS_TYPE,
 } from '../constants';
-import type { XyneFilter, XyneResourceAttrs } from '../types';
+import type { XyneFilter } from '../types';
 import {
   attrsOf,
   credentialAttributes,
@@ -833,9 +833,12 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     if (!ownerId) {
       throw new Error('createCredential called without attributes.createdByUserId');
     }
+    // `allowedWorkflowIds` is on the input from the SDK release that adds it; the
+    // widening lets this compile against the pin until that release is adopted.
     const allowedWorkflowIds = await this.requireWorkflowsInWorkspace(
       workspaceId,
-      input.allowedWorkflowIds ?? [],
+      (input as CreateCredentialInput & { allowedWorkflowIds?: readonly string[] })
+        .allowedWorkflowIds ?? [],
     );
 
     const now = new Date();
