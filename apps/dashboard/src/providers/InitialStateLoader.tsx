@@ -26,13 +26,8 @@ import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
 import { usePendingQueue } from '@xyne/shared/messages';
-import {
-  SharedAuthProvider,
-  HttpClientProvider,
-  ChannelServiceProvider,
-  AffinityServiceProvider,
-} from '@xyne/shared/hooks';
-import { axiosHttpClient, affinityService } from '../services/affinityService';
+import { SharedAuthProvider, HttpClientProvider, ChannelServiceProvider } from '@xyne/shared/hooks';
+import { axiosHttpClient } from '../services/affinityService';
 import { channelService } from '../services/Chat/channelService';
 
 interface InitialStateLoaderProps {
@@ -508,16 +503,14 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({
     return (
       <SharedAuthProvider value={context}>
         <HttpClientProvider client={axiosHttpClient}>
-          <AffinityServiceProvider value={affinityService}>
-            <ChannelServiceProvider
-              getVespaParticipants={(id): Promise<string[]> =>
-                channelService.getVespaParticipants(id)
-              }
-            >
-              {areAllQueriesCompleted && <DeferredLoader />}
-              {children}
-            </ChannelServiceProvider>
-          </AffinityServiceProvider>
+          <ChannelServiceProvider
+            getVespaParticipants={(id): Promise<string[]> =>
+              channelService.getVespaParticipants(id)
+            }
+          >
+            {areAllQueriesCompleted && <DeferredLoader />}
+            {children}
+          </ChannelServiceProvider>
         </HttpClientProvider>
       </SharedAuthProvider>
     );

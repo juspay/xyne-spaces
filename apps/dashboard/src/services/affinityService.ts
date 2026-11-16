@@ -1,4 +1,4 @@
-import { AffinityService, type HttpClient } from '@xyne/shared/hooks';
+import { AffinityService, registerAffinityService, type HttpClient } from '@xyne/shared/hooks';
 import { apiInstance } from './clients/apiClient';
 
 export const axiosHttpClient: HttpClient = {
@@ -29,3 +29,6 @@ export const axiosHttpClient: HttpClient = {
 };
 
 export const affinityService = new AffinityService(axiosHttpClient);
+
+// Shared rankers (rankUsers, rankChannelsByAffinity, …) read affinity from this one instance.
+registerAffinityService(affinityService);

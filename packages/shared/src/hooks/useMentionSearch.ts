@@ -27,7 +27,7 @@ import { useChannelRecentSenders } from "./useChannelRecentSenders.js";
 import { useVespaChannelParticipants } from "./useVespaChannelParticipants.js";
 import { useDmAffinityRank } from "./useDmAffinityRank.js";
 import { useCacConfig } from "./useCacConfig.js";
-import { useAffinityService } from "./useAffinityService.js";
+import { affinityService } from "../services/affinityService.js";
 import { useCachedQuery } from "./useCachedQuery.js";
 
 export interface UseMentionSearchResult {
@@ -168,8 +168,6 @@ export const useMentionSearch = (
     fallbackConfig: DEFAULT_MENTION_RANKING_CAC_CONFIG,
   });
 
-  const affinityService = useAffinityService();
-
   // Bumped when async affinity weights finish loading, so the ranking memos
   // recompute with the real scores (getUserWeight is otherwise non-reactive).
   const [affinityVersion, setAffinityVersion] = useState(0);
@@ -185,7 +183,7 @@ export const useMentionSearch = (
     return (): void => {
       cancelled = true;
     };
-  }, [isMentionRequested, affinityService]);
+  }, [isMentionRequested]);
 
   // Active users in the workspace – drives the empty-state picker (recent DM
   // partners / channel members). Deactivated users are excluded here too.

@@ -1,9 +1,11 @@
 import { useSelector } from "@xstate/react";
+import Fuse from "fuse.js";
 import { useMemo } from "react";
 import { stateMachineActor } from "../machines/stateMachine.js";
 import type { User } from "../machines/stateMachine.js";
 import { useSharedAuthContext } from "./context.js";
 import {
+  USER_FUSE_OPTIONS,
   searchUsers as _searchUsers,
   searchUsersWithScores as _searchUsersWithScores,
 } from "../utils/search.js";
@@ -155,9 +157,40 @@ export const useSelf = (): User | undefined => {
   return me;
 };
 
+// One fuzzy-search index per user list, built on the first search and reused until the list is
+// replaced (the store hands out a new array whenever a user changes), so typing searches the index
+// instead of rebuilding it on every keystroke. Same matches as `searchUsers` building its own.
+const userSearchIndexes = new WeakMap<readonly User[], Fuse<User>>();
+
+function userSearchIndex(users: readonly User[]): Fuse<User> {
+  let index = userSearchIndexes.get(users);
+  if (!index) {
+    index = new Fuse(users, USER_FUSE_OPTIONS);
+    userSearchIndexes.set(users, index);
+  }
+  return index;
+}
+
+/** `searchUsers` with the matches from the user list's cached index. */
+function searchIndexedUsers(
+  users: User[],
+  query: string,
+  limit: number,
+): User[] {
+  return _searchUsers(
+    users,
+    query,
+    limit,
+    query.trim() ? userSearchIndex(users).search(query) : undefined,
+  );
+}
+
 export const useUserSearch = (query: string, limit: number): User[] => {
   const users = useUsers();
-  return useMemo(() => searchUsers(users, query, limit), [users, query, limit]);
+  return useMemo(
+    () => searchIndexedUsers(users, query, limit),
+    [users, query, limit],
+  );
 };
 
 /**
@@ -178,5 +211,8 @@ export const useActiveUsers = (): User[] => {
  */
 export const useActiveUserSearch = (query: string, limit: number): User[] => {
   const users = useActiveUsers();
-  return useMemo(() => searchUsers(users, query, limit), [users, query, limit]);
+  return useMemo(
+    () => searchIndexedUsers(users, query, limit),
+    [users, query, limit],
+  );
 };

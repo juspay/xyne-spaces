@@ -8,14 +8,15 @@ export {
 } from "./HttpClientContext.js";
 export type { HttpClient } from "./HttpClientContext.js";
 
-export {
-  useAffinityService,
-  AffinityServiceProvider,
-} from "./useAffinityService.js";
-export { AffinityService } from "../services/affinityService.js";
+export { AffinityService, registerAffinityService } from "../services/affinityService.js";
+export { useAffinityCallback } from "./useAffinityCallback.js";
 export type { AffinityWeights } from "../services/affinityService.js";
 
 export { useCacConfig, useOptionalCacConfig } from "./useCacConfig.js";
+export {
+  useCmdkDefaultRankProfiles,
+  useCmdkFlatAllRankProfiles,
+} from "./useCmdkSearchConfig.js";
 
 export { useChannelRecentSenders } from "./useChannelRecentSenders.js";
 export { useDmAffinityRank } from "./useDmAffinityRank.js";
