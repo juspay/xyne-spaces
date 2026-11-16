@@ -16,6 +16,9 @@
  * envelope; everything else is a plain Error and surfaces as `internal`.
  */
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const clawFetch = allowlistedFetch(() => [config.xyneClaw.authUrl]);
 
 export interface Connector {
   type: string;
@@ -107,7 +110,7 @@ async function post<T>(
   }
 
   const base = config.xyneClaw.authUrl.replace(/\/+$/, '');
-  const res = await fetch(`${base}/claw/api/v1/internal/app-connectors/${op}`, {
+  const res = await clawFetch(`${base}/claw/api/v1/internal/app-connectors/${op}`, {
     method: 'POST',
     headers: { 'x-s2s-key': key, 'content-type': 'application/json' },
     body: JSON.stringify(body),

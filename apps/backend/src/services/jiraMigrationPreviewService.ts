@@ -3,9 +3,13 @@ import { currentWorkspaceId } from '@/database/tenant/context';
 import { FormContextType, FormEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch, assertUrlSyntaxSafe } from '@/utils/ssrfGuard';
 import { JiraMigrationClient } from '@/services/jira/client';
 import { jiraMigrationProjectIndexService, type JiraMigrationFilterOptions, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
 import { queryBoardTicketFormFields } from '@/bypassAcl/formServices';
+
+// Same policy as the Jira client: only the configured Jira host.
+const jiraFetch = allowlistedFetch(() => [config.jira.baseUrl]);
 
 const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const JIRA_MAX_RETRY_ATTEMPTS = 5;
@@ -331,6 +335,7 @@ export class JiraMigrationPreviewService {
     if (!config.jira.baseUrl || !migrationBotEmail || !migrationBotAuthToken) {
       throw new Error('Jira migration preview requires JUSPAY_JIRA_BASEURL, JIRA_MIGRATION_BOT_EMAIL, and JIRA_MIGRATION_BOT_AUTH_TOKEN');
     }
+    assertUrlSyntaxSafe(config.jira.baseUrl);
 
     return {
       Accept: 'application/json',
@@ -390,7 +395,7 @@ export class JiraMigrationPreviewService {
 
     for (let attempt = 1; attempt <= JIRA_MAX_RETRY_ATTEMPTS; attempt += 1) {
       try {
-        const response = await fetch(url, init);
+        const response = await jiraFetch(url, { ...init, redirect: 'manual' });
 
         if (response.ok) {
           return response;

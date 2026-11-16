@@ -1,6 +1,8 @@
-import axios from 'axios';
 import { config as appConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch, createHttpClient } from '@/utils/ssrfGuard';
+
+const http = createHttpClient(allowlistedFetch(() => [appConfig.mettleApiBaseUrl]));
 
 export type MettleTeamGoalTrack = '2X' | '5X' | '10X' | string;
 
@@ -60,7 +62,7 @@ class MettleTeamGoalsService {
         url,
       });
 
-      const response = await axios.get<unknown>(url, {
+      const response = await http.get<unknown>(url, {
         headers: {
           mettleToken: this.token,
           'Content-Type': 'application/json',

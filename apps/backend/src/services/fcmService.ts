@@ -11,6 +11,9 @@ import { Prisma } from '@prisma/client';
 import { AuthSessionStatus } from './authSessionService';
 import { getOrgMemberIdForUserQuery } from '@/bypassAcl/notificationServices';
 import { getNotificationPushSessionSource, type PushSessionFallbackReason } from '@/services/otel/notificationMetrics';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const fcmFetch = allowlistedFetch(() => ['googleapis.com']);
 
 type CachedAccessToken = {
   accessToken: string;
@@ -645,7 +648,7 @@ class FcmPushService {
 
     const doRequest = async () => {
       const accessToken = await manager.getAccessToken();
-      return fetch(url, {
+      return fcmFetch(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,

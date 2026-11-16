@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const mettleFetch = allowlistedFetch(() => [config.mettleApiBaseUrl]);
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { teamIntelligenceUserDashboardService } from '@/services/teamIntelligenceUserDashboardService';
@@ -154,7 +157,7 @@ export class TeamIntelligenceUserController {
       const encodedEmail = encodeURIComponent(parseResult.data.email.trim());
       const upstreamUrl = `${config.mettleApiBaseUrl}/api/external/employees/info/extended?email=${encodedEmail}`;
 
-      const upstreamResponse = await fetch(upstreamUrl, {
+      const upstreamResponse = await mettleFetch(upstreamUrl, {
         method: 'GET',
         headers: {
           Accept: 'application/json',

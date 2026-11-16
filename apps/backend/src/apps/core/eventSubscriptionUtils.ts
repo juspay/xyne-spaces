@@ -3,7 +3,7 @@ import { isValidUrl } from '@/utils/urlUtils';
 import { BaseAppEvent } from '@/apps/types';
 import { logger } from '@/utils/logger';
 import { decrypt } from '@/services/encryptionService';
-import { prepareAppWebhookDispatch } from './appUrlResolver';
+import { internalAppFetch, prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
 import { repositories } from '@/database/repositories';
@@ -43,7 +43,7 @@ export async function sendWebhookNotification(
         // Internal targets are trusted-config pod URLs (plain client); external
         // targets are user-supplied, so validate + pin the connection (rebinding-safe).
         const response = isInternal
-            ? await fetch(url, init)
+            ? await internalAppFetch(url, init)
             : await safeWebhookFetch(url, init);
 
         const text = await response.text().catch(() => '');

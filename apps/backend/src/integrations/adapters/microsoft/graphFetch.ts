@@ -1,4 +1,8 @@
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const graphApiFetch = allowlistedFetch(() => [config.microsoftGraph.baseUrl, 'graph.microsoft.com']);
 
 const TAG = '[MicrosoftGraph]';
 const MAX_RETRIES = 5;
@@ -12,7 +16,7 @@ export async function graphFetchWithRetry(
 ): Promise<Response> {
   let lastResponse: Response | null = null;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
-    const response = await fetch(url, {
+    const response = await graphApiFetch(url, {
       ...init,
       signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });

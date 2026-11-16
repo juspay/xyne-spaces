@@ -12,7 +12,7 @@ import {
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
-import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
+import { internalAppFetch, prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { ConversationParticipation, MessageType } from '@xyne/shared';
 
 /**
@@ -661,7 +661,7 @@ export class CommandController {
         signal: AbortSignal.timeout(30_000),
       };
       const appResponse = dispatchIsInternal
-        ? await fetch(dispatchUrl, dispatchInit)
+        ? await internalAppFetch(dispatchUrl, dispatchInit)
         : await safeWebhookFetch(dispatchUrl, dispatchInit);
 
       if (!appResponse.ok) {

@@ -19,7 +19,7 @@
 import { Readable } from 'node:stream';
 import { Router, type Request, type Response } from 'express';
 import { Agent } from 'undici';
-import { getClawBaseUrl } from '@/services/clawAgentService';
+import { clawFetch, getClawBaseUrl } from '@/services/clawAgentService';
 import { SdkApiError, type ErrorCode } from '../errors';
 import { handle } from '../handler';
 import { isClawRouteAllowed } from './allowlist';
@@ -146,7 +146,7 @@ async function relay(req: Request, res: Response, path: string): Promise<void> {
 
   let upstream: globalThis.Response;
   try {
-    upstream = await fetch(url, {
+    upstream = await clawFetch(url, {
       method: req.method,
       headers,
       ...(body === undefined

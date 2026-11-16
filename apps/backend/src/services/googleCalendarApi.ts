@@ -7,6 +7,9 @@
 
 import { type GCalEvent, type GCalListResponse } from '@/services/googleCalendarCallStore';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const googleFetch = allowlistedFetch(() => ['googleapis.com']);
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][API]';
 
@@ -35,7 +38,7 @@ export class GoogleCalendarEventGoneError extends Error {
 export type GoogleSendUpdates = 'all' | 'externalOnly' | 'none';
 
 export async function getGoogleEventById(accessToken: string, eventId: string): Promise<GCalEvent> {
-  const res = await fetch(
+  const res = await googleFetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -84,7 +87,7 @@ export async function patchGoogleEvent(
     headers['If-Match'] = options.etag;
   }
 
-  const res = await fetch(
+  const res = await googleFetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}?${params.toString()}`,
     {
       method: 'PATCH',
@@ -124,7 +127,7 @@ export async function insertGoogleEvent(
 ): Promise<GCalEvent> {
   const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'none' });
 
-  const res = await fetch(
+  const res = await googleFetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
     {
       method: 'POST',
@@ -157,7 +160,7 @@ export async function deleteGoogleEvent(
 ): Promise<void> {
   const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'none' });
 
-  const res = await fetch(
+  const res = await googleFetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}?${params.toString()}`,
     {
       method: 'DELETE',
@@ -221,7 +224,7 @@ export async function fetchGoogleEventsInRange(
       ...(pageToken ? { pageToken } : {}),
     });
 
-    const res = await fetch(
+    const res = await googleFetch(
       `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -258,7 +261,7 @@ export async function fetchGoogleIncrementalChanges(
     ...(options?.pageToken ? { pageToken: options.pageToken } : {}),
   });
 
-  const res = await fetch(
+  const res = await googleFetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -305,7 +308,7 @@ export async function fetchAllGoogleEventsForBaseline(
       ...(pageToken ? { pageToken } : {}),
     });
 
-    const res = await fetch(
+    const res = await googleFetch(
       `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },

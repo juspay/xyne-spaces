@@ -1,6 +1,7 @@
 import type { McpToolInfo } from "../types.js";
 import { createLogger } from "../../logger.js";
 import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
+import { safeFetch } from "../../lib/safe-fetch.js";
 
 const log = createLogger("postman-custom");
 
@@ -102,13 +103,12 @@ export async function handleRunMonitor(
   // baseUrl is a user-stored credential; refuse internal / private / metadata
   // destinations before sending the API key.
   await assertSafeOutboundUrl(url);
-  const res = await fetch(url, {
+  // Sync monitor runs can take minutes; async returns fast. Cap sync waits so
+  // we never exceed the MCP request timeout.
+  const res = await safeFetch(url, {
     method: "POST",
     headers: { "X-Api-Key": apiKey, Accept: "application/json" },
-    // Sync monitor runs can take minutes; async returns fast. Cap sync waits so
-    // we never exceed the MCP request timeout.
-    signal: AbortSignal.timeout(wait ? 290_000 : 30_000),
-  });
+  }, { timeoutMs: wait ? 290_000 : 30_000 });
 
   const bodyText = await res.text().catch(() => "");
   if (!res.ok) {

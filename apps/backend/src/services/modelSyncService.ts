@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 const EXCLUDED_MODEL_PATTERNS = /^(claude|gemini)/i;
 
@@ -29,7 +30,8 @@ class ModelSyncService {
       }
 
       logger.info('Fetching models from LiteLLM...');
-      const response = await fetch(`${credential.baseUrl}/models`, {
+      const response = await safeWebhookFetch(`${credential.baseUrl}/models`, {
+        redirect: 'manual',
         headers: { 'Authorization': `Bearer ${credential.apiKey}` },
         signal: AbortSignal.timeout(10000)
       });

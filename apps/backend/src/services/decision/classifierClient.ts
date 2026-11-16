@@ -10,6 +10,10 @@ import type {
   TokenUsage,
   YesNoQuestion,
 } from './types';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+// The configured classifier services (Jev and XOR).
+const classifierFetch = allowlistedFetch(() => [envConfig.jev.url, envConfig.xor.url]);
 
 /**
  * Client for typed classifiers (XOR, Jev): POST a state plus questions, get probabilities
@@ -203,7 +207,7 @@ export const requestClassifierAnswers = async (
   const logContext = { engine, model, host: hostOf(url) };
 
   try {
-    const response = await fetch(url, {
+    const response = await classifierFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, state, questions }),

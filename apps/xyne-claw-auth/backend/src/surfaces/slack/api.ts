@@ -8,6 +8,7 @@
  */
 import { WebClient, type WebClientOptions } from "@slack/web-api";
 import { createLogger } from "../../logger.js";
+import { safeFetch } from "../../lib/safe-fetch.js";
 import { RESPONSE_URL_RETRY_DELAY_MS, SLACK_API_MAX_RETRIES, SLACK_API_TIMEOUT_MS } from "./const.js";
 
 const log = createLogger("slack-api");
@@ -52,6 +53,18 @@ export async function postResponseUrl(
   responseUrl: string,
   message: { text: string; responseType?: "ephemeral" | "in_channel" },
 ): Promise<boolean> {
+  // The URL rides in on the event payload; Slack only ever issues these on hooks.slack.com.
+  let target: URL;
+  try {
+    target = new URL(responseUrl);
+  } catch {
+    return false;
+  }
+  if (target.protocol !== "https:" || target.hostname !== "hooks.slack.com") {
+    log.warn("[slack-api] response_url refused: not a hooks.slack.com URL");
+    return false;
+  }
+
   const body = JSON.stringify({
     response_type: message.responseType ?? "ephemeral",
     text: message.text,
@@ -59,13 +72,11 @@ export async function postResponseUrl(
 
   for (let attempt = 1; attempt <= SLACK_API_MAX_RETRIES; attempt += 1) {
     try {
-      // eslint-disable-next-line no-restricted-globals -- documented response_url exemption
-      const response = await fetch(responseUrl, {
+      const response = await safeFetch(responseUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
-        signal: AbortSignal.timeout(SLACK_API_TIMEOUT_MS),
-      });
+      }, { timeoutMs: SLACK_API_TIMEOUT_MS });
       if (response.ok) return true;
       // 4xx means the URL is spent or malformed — retrying cannot help.
       if (response.status < 500 && response.status !== 429) {

@@ -1,10 +1,12 @@
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 import PDFDocument from 'pdfkit';
 import { storageService } from './storage/index.js';
 import type { UploadedFileResult } from './fileUploadService.js';
 
 const VERIFICATION_API_BASE = `${config.genius.apiUrl}/api/v3/analytics/list_genuine_outages`;
+const geniusFetch = allowlistedFetch(() => [config.genius.apiUrl]);
 const POLLING_INTERVAL_MS = 2000;       // initial backoff base (2 s)
 const MAX_POLLING_INTERVAL_MS = 10000;  // backoff cap (10 s)
 const MAX_POLLING_ATTEMPTS = 60;        // ~2 minutes total
@@ -263,7 +265,7 @@ class OutageAlertService {
 
     let response: Response;
     try {
-      response = await fetch(VERIFICATION_API_BASE, {
+      response = await geniusFetch(VERIFICATION_API_BASE, {
         method: 'POST',
         signal: controller.signal,
         headers: {
@@ -309,7 +311,7 @@ class OutageAlertService {
       const controller = new AbortController();
       const timerId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       try {
-        const response = await fetch(`${VERIFICATION_API_BASE}/status/${sessionId}`, {
+        const response = await geniusFetch(`${VERIFICATION_API_BASE}/status/${sessionId}`, {
           method: 'GET',
           signal: controller.signal,
           headers: {

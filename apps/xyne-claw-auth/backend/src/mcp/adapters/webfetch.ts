@@ -22,6 +22,7 @@ import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
 import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
+import { safeFetch } from "../../lib/safe-fetch.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("webfetch");
@@ -182,15 +183,13 @@ export async function handleWebfetch(
     let response: Response;
     for (;;) {
       await assertSafeOutboundUrl(currentUrl);
-      response = await fetch(currentUrl, {
-        signal: AbortSignal.timeout(fetchTimeoutMs),
+      response = await safeFetch(currentUrl, {
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
           Accept: "text/html, text/plain;q=0.9, */*;q=0.1",
         },
-        redirect: "manual",
-      });
+      }, { maxRedirects: 0, timeoutMs: fetchTimeoutMs, maxResponseBytes: HIGH_LIMIT_DOWNLOAD_MAX_BYTES });
 
       const status = response.status;
       if (status === 301 || status === 302 || status === 303 || status === 307 || status === 308) {

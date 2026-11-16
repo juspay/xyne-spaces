@@ -11,6 +11,7 @@ import {
   type UpdateSdlcVcsCredentialInput,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { config } from '@/config/env';
 import { AppError } from '@/middleware/errorHandler';
 import { logger } from '@/utils/logger';
 import type { SdlcActor } from '../types';
@@ -213,6 +214,9 @@ export class SdlcVcsService implements SdlcVcs {
   async createCredential(actor: SdlcActor, input: CreateSdlcVcsCredentialInput): Promise<unknown> {
     await this.requireWorkspaceAdmin(actor);
     const host = input.provider === 'GITHUB' ? SDLC_GITHUB_HOST : input.host;
+    if (input.provider === 'BITBUCKET_SERVER' && !config.sdlc.bitbucketAllowedHosts.includes(host)) {
+      throw new AppError(`${host} is not an allowed Bitbucket host`, 400);
+    }
     let validation;
     try {
       validation = await this.adapter(input.provider, host).validateCredential(input.token);

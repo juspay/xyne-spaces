@@ -1,6 +1,10 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 import type { AgentCard, DraftContext, Snapshot } from './types';
+
+// Every call here goes to claw-auth; refuse any other host (see utils/ssrfGuard.ts).
+const clawAuthFetch = allowlistedFetch(() => [config.xyneClaw.authUrl]);
 
 export interface DraftRequest {
   episodeId: string;
@@ -77,7 +81,7 @@ export async function requestDraft(request: DraftRequest): Promise<{ sessionId: 
     `${encodeURIComponent(request.episodeId)}/${encodeURIComponent(request.agent.slug)}` +
     `?context=${encodeDraftContext(request.context)}`;
   try {
-    const response = await fetch(`${config.xyneClaw.authUrl}/claw/api/v1/proactivity/draft`, {
+    const response = await clawAuthFetch(`${config.xyneClaw.authUrl}/claw/api/v1/proactivity/draft`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-s2s-key': config.internalS2sKey },
       body: JSON.stringify({
@@ -151,7 +155,7 @@ export async function fetchDrafts(episodeId: string, channelId: string): Promise
     `${config.xyneClaw.authUrl}/claw/api/v1/proactivity/episodes/${encodeURIComponent(episodeId)}/drafts`
   );
   url.searchParams.set('channelId', channelId);
-  const response = await fetch(url, {
+  const response = await clawAuthFetch(url, {
     headers: { 'x-s2s-key': config.internalS2sKey },
     signal: AbortSignal.timeout(10_000),
   });

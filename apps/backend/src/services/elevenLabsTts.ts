@@ -1,6 +1,9 @@
 import { config } from '@/config/env';
 import type { SynthesizedSpeechResult } from '@/services/clawAgentService';
 import { defaultVoiceId } from '@/services/elevenLabsVoices';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
+
+const elevenLabsFetch = allowlistedFetch(() => [config.elevenLabs.apiUrl]);
 
 // Past this, fall back to Azure rather than stall the reply.
 const TTS_TIMEOUT_MS = 5_000;
@@ -19,7 +22,7 @@ export async function synthesizeWithElevenLabs(
 ): Promise<SynthesizedSpeechResult> {
   const { apiKey, apiUrl, ttsModel } = config.elevenLabs;
   const url = `${apiUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_64`;
-  const response = await fetch(url, {
+  const response = await elevenLabsFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'xi-api-key': apiKey },
     body: JSON.stringify({ text, model_id: ttsModel }),

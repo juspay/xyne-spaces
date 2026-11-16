@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { validateS2SKey } from '@/middleware/validateS2SKey';
-import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
+import { internalAppFetch, prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 
 const router = Router();
@@ -97,7 +97,7 @@ async function sendVarysWebhook(
   // Internal = trusted-config pod URL (plain client); external = user-supplied,
   // so validate + pin the connection (rebinding-safe).
   const response = isInternal
-    ? await fetch(url, init)
+    ? await internalAppFetch(url, init)
     : await safeWebhookFetch(url, init);
 
   if (!response.ok) {

@@ -1,6 +1,7 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import type { LotusCacContext, ResolvedLotusConfig } from './types';
+import { allowlistedFetch } from '@/utils/ssrfGuard';
 
 type CacheEntry = {
   value: ResolvedLotusConfig;
@@ -19,6 +20,8 @@ export class LotusSuperpositionClient {
   private static instance: LotusSuperpositionClient | null = null;
 
   private readonly endpoint: string;
+  // Only the configured Lotus/Superposition endpoint.
+  private readonly lotusFetch = allowlistedFetch(() => [this.endpoint]);
   private readonly token: string;
   private readonly orgId: string;
   private readonly workspaceId: string;
@@ -58,7 +61,7 @@ export class LotusSuperpositionClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const response = await fetch(`${this.endpoint}/config/resolve`, {
+      const response = await this.lotusFetch(`${this.endpoint}/config/resolve`, {
         method: 'POST',
         headers: {
           Accept: 'application/json',
