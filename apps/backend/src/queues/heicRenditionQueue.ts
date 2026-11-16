@@ -4,6 +4,8 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { storageService } from '@/services/storage';
 import { generateHeicRenditions } from '@/services/heicRenditionService';
+import { currentWorkspaceId } from '@/database/tenant/context';
+import { generateHeicRenditionsInWorkspace } from '@/bypassAcl/attachmentRenditionServices';
 import {
   HEIC_RENDITION_THREAD_COUNT,
   shutdownHeicRenditionPool,
@@ -14,6 +16,8 @@ const JOB_NAME = 'generate-heic-renditions';
 
 export type HeicRenditionJob = {
   storagePath: string;
+  /** Workspace of the enqueuing request; renditions are written under its storage key. */
+  workspaceId?: string;
 };
 
 // In-flight jobs are one-to-one with pool threads: the libheif decode is
@@ -72,7 +76,8 @@ class HeicRenditionQueue {
       if (!this.isInitialized) await this.initialize();
       if (!this.queue) return;
       const jobId = createHash('sha256').update(job.storagePath).digest('hex');
-      await this.queue.add(JOB_NAME, job, { jobId });
+      const workspaceId = job.workspaceId ?? currentWorkspaceId() ?? undefined;
+      await this.queue.add(JOB_NAME, { ...job, workspaceId }, { jobId });
     } catch (err) {
       logger.warn('[HeicRenditionQueue] Failed to enqueue rendition job', {
         storagePath: job.storagePath,
@@ -87,7 +92,12 @@ class HeicRenditionQueue {
     this.processorRegistered = true;
 
     void this.queue.process(JOB_NAME, concurrency, async job => {
-      await generateHeicRenditions(storageService, job.data.storagePath);
+      const { storagePath, workspaceId } = job.data;
+      if (workspaceId) {
+        await generateHeicRenditionsInWorkspace(workspaceId, storagePath);
+      } else {
+        await generateHeicRenditions(storageService, storagePath);
+      }
     });
 
     logger.info('[HeicRenditionQueue] Processor registered', { concurrency });

@@ -122,21 +122,22 @@ timeout 50 s; ServiceMonitor port `http`, path `/metrics`.
 
 ## xyne-worker
 
-The backend codebase started with its worker entrypoint (`pnpm run start:worker`). One install
+The backend codebase started with its worker entrypoint (`dist/main-worker.js`). One install
 runs one set of roles; install the chart once per role.
 
 **Image.** `ghcr.io/juspay/xyne-spaces-backend`, release-stamped; there is no separate worker
-image. `command: [pnpm, run, start:worker]`.
+image. The image is distroless (entrypoint `node`, no shell or pnpm), so the chart leaves
+`command` empty and sets `args: [--import, tsx, dist/main-worker.js]`.
 
 **Ports.** Container `http` 3001 and a Service with `http` 80 and `http-app` 3001 exist for
 parity only; worker mode starts no HTTP server, nothing listens.
 
 **Health.** All probes are empty on purpose. Use an exec probe if you need one.
 
-**Secrets.** `xyne-backend-secrets`: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`,
-`INTERNAL_S2S_KEY`. The last three are required because the backend's env validation is loaded
-even though the worker does not serve requests. Add `REDIS_PASSWORD` and the storage keys the
-same way as on the backend.
+**Secrets.** `xyne-backend-secrets`: `DATABASE_URL`, `REDIS_URL`, `ENCRYPTION_KEY`,
+`INTERNAL_S2S_KEY`. `JWT_SECRET` is optional: only the API and the automation CSAT step sign
+with it, so a worker that runs neither does not mount it. Add `REDIS_PASSWORD` and the storage
+keys the same way as on the backend.
 
 **Environment.** The same Redis, storage and Vespa settings as the backend (`REDIS_HOST=redis`,
 `STORAGE_PROVIDER=s3`, `VESPA_FEED_URL`, `VESPA_QUERY_URL`, `ENABLE_OTEL_METRICS="false"`), plus
@@ -225,10 +226,6 @@ the image CMD writes `/etc/nginx/nginx.conf`, and nginx writes `/tmp` and `/var/
 **Gotchas.**
 
 - Leave `command` empty: the image CMD renders `nginx.conf` from its template and starts nginx.
-- The image's nginx config proxies requests whose user agent matches `devqa-xyne-<branch>` to
-  `http://xyne-backend.xyne-apps.svc.cluster.local:3001` (`/api/bundles/<branch>/...`), so that
-  test-only path assumes namespace `xyne-apps`. Nothing else in the image depends on the
-  namespace.
 
 ## xyne-dashboard-external
 

@@ -95,6 +95,66 @@ export function sanitizeMessageContent(content: string): string {
   });
 }
 
+const SCRIPT_CAPABLE_TAGS = new Set([
+  'script',
+  'iframe',
+  'frame',
+  'frameset',
+  'object',
+  'embed',
+  'applet',
+  'form',
+  'input',
+  'textarea',
+  'style',
+  'link',
+  'meta',
+  'base',
+  'svg',
+  'math',
+  'template',
+  'noscript',
+  'noembed',
+  'noframes',
+  'xmp',
+  'plaintext',
+]);
+
+const SCRIPT_URI = /^(?:javascript|vbscript|data):/i;
+
+interface RemovedNode {
+  nodeType: number;
+  nodeName: string;
+  attributes?: ArrayLike<{ name: string; value: string }>;
+}
+
+const isScriptCapableAttribute = ({ name, value }: { name: string; value: string }): boolean =>
+  name.toLowerCase().startsWith('on') ||
+  name.toLowerCase() === 'srcdoc' ||
+  value.includes('<') ||
+  // Browsers ignore whitespace and control characters inside a URL scheme ("java\tscript:").
+  SCRIPT_URI.test(Array.from(value).filter(ch => ch.charCodeAt(0) > 0x20).join(''));
+
+// A removed node is harmless only when it is an ordinary element (our custom tags such as
+// <ticket>, <call>, <hi> or forwarded-message XML) carrying no script-capable attribute.
+// Every removed attribute, comment and script-capable tag counts as dangerous.
+const isDangerousRemoval = (entry: (typeof DOMPurify.removed)[number]): boolean => {
+  if ('attribute' in entry) return true;
+  const node = entry.element as unknown as RemovedNode;
+  if (node.nodeType !== 1) return true;
+  if (SCRIPT_CAPABLE_TAGS.has(node.nodeName.toLowerCase())) return true;
+  return Array.from(node.attributes ?? []).some(isScriptCapableAttribute);
+};
+
+// Cleans message HTML only when it carries script-capable markup. A full DOMPurify pass on
+// ordinary content would drop our custom tags, break forwarded-message XML and re-escape a
+// literal "<" in text, so content DOMPurify finds nothing dangerous in is stored untouched.
+export function stripDangerousMessageMarkup(content: string): string {
+  if (!content) return content;
+  const sanitized = sanitizeMessageContent(content);
+  return DOMPurify.removed.some(isDangerousRemoval) ? sanitized : content;
+}
+
 export function cleanEmailBodyHtml(html: string): string {
   if (!html?.trim()) return html;
 

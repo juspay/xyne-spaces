@@ -1,11 +1,10 @@
 import crypto from 'crypto';
 import { AuthProvider } from '@xyne/shared';
-import jwt from 'jsonwebtoken';
+import { signPendingAuthToken } from '@/utils/pendingAuthToken';
 import { Request, Response } from 'express';
-import { UserSessionService } from '../services/userSessionService';
-import { authSessionService } from '../services/authSessionService';
+import { authSessionService, AuthSessionRevokeReason } from '../services/authSessionService';
+import { completeLogin, respondDeviceKeyRequired } from '../services/loginCompletionService';
 import { UserService } from '../services/userService';
-import { jwtService } from '../services/jwtService';
 import {
   hashPassword,
   validatePasswordComplexity,
@@ -15,12 +14,18 @@ import {
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
+import {
+  EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+  EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+  isEmailDomainAllowed,
+} from '@/services/emailDomainPolicy';
 import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
 import { setPasswordHash, getPasswordHash } from '@/services/orgMemberCredentialService';
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { logger } from '@/utils/logger';
+import { PENDING_AUTH_COOKIE } from '@/services/accessTokenService';
 
 const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
 const workspaceOutcome = (count: number): string =>
@@ -30,18 +35,50 @@ interface ResetCodePayload {
   code: string;
 }
 
-const LOGIN_MAX_FAILED_ATTEMPTS = 5;
-const LOGIN_LOCKOUT_SECONDS = 5 * 60;
-const LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS = 5 * 60;
+interface LoginLimit {
+  scope: 'email' | 'global';
+  lockKey: string;
+  attemptKey: string;
+  maxFailedAttempts: number;
+  windowSeconds: number;
+  lockoutSeconds: number;
+}
+
+// Per-email stops guessing one account; the global limit stops spraying a few passwords across every account.
+const loginLimits = (normalizedEmail: string): LoginLimit[] => [
+  {
+    scope: 'email',
+    lockKey: `emaillogin:lock:${normalizedEmail}`,
+    attemptKey: `emaillogin:attempts:${normalizedEmail}`,
+    maxFailedAttempts: 5,
+    windowSeconds: 5 * 60,
+    lockoutSeconds: 5 * 60,
+  },
+  {
+    scope: 'global',
+    lockKey: 'emaillogin:lock:global',
+    attemptKey: 'emaillogin:attempts:global',
+    maxFailedAttempts: 20,
+    windowSeconds: 60 * 60,
+    lockoutSeconds: 60 * 60,
+  },
+];
 const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
+const MAX_RESET_CODE_ATTEMPTS = 3;
+const MAX_RESET_CODES_PER_DAY = 5;
+
+const resetCodeMatches = (expected: string, presented: unknown): boolean => {
+  if (typeof presented !== 'string') return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(presented);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
 
 export class EmailAuthController {
-  private userSessionService: UserSessionService;
   private userService: UserService;
   private prisma = DatabaseClient.getInstance();
 
   constructor() {
-    this.userSessionService = new UserSessionService();
     this.userService = new UserService();
   }
 
@@ -80,21 +117,59 @@ export class EmailAuthController {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
-      const loginLockKey = `emaillogin:lock:${normalizedEmail}`;
-      const loginAttemptKey = `emaillogin:attempts:${normalizedEmail}`;
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        logger.warn(`${tag()} Email login rejected (reason=email_domain_not_allowed)`);
+        res.status(403).json({
+          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+        });
+        return;
+      }
 
-      const existingLock = await redisService.get(loginLockKey);
-      if (existingLock) {
-        const retryAfterSeconds = Math.max(await redisService.getClient().ttl(loginLockKey), 0);
+      const redis = redisService.getClient();
+      const limits = loginLimits(normalizedEmail);
+      const [emailLimit, globalLimit] = limits;
+
+      const rateLimited = (scope: LoginLimit['scope'], retryAfterSeconds: number): void => {
         if (retryAfterSeconds > 0) {
           res.setHeader('Retry-After', retryAfterSeconds.toString());
         }
-
-        logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
+        logger.warn(`${tag()} Email login rejected (reason=rate_limited, scope=${scope})`);
         res.status(429).json({
           error: 'Rate limited',
           message: 'Too many failed login attempts. Please try again later.',
         });
+      };
+
+      for (const limit of limits) {
+        if (await redisService.get(limit.lockKey)) {
+          rateLimited(limit.scope, Math.max(await redis.ttl(limit.lockKey), 0));
+          return;
+        }
+      }
+
+      // Locks every limit that has reached its max; returns false when none has.
+      const lockOutReached = async (atOrAbove: (attempts: number, max: number) => boolean): Promise<boolean> => {
+        const reached = limits.filter((limit, i) => atOrAbove(attempts[i], limit.maxFailedAttempts));
+        if (reached.length === 0) return false;
+        await Promise.all(reached.map(limit => redisService.set(limit.lockKey, '1', limit.lockoutSeconds)));
+        rateLimited(reached[0].scope, Math.max(...reached.map(limit => limit.lockoutSeconds)));
+        return true;
+      };
+
+      // Count the attempt before checking the password: INCR is atomic, so a burst of
+      // concurrent guesses can't all pass the lock check above before the counter moves.
+      // A successful login takes it back off below.
+      const attempts = await Promise.all(
+        limits.map(async limit => {
+          const count = await redis.incr(limit.attemptKey);
+          if (count === 1) {
+            await redis.expire(limit.attemptKey, limit.windowSeconds);
+          }
+          return count;
+        }),
+      );
+      if (await lockOutReached((count, max) => count > max)) {
         return;
       }
 
@@ -102,23 +177,7 @@ export class EmailAuthController {
       // ends here, so the attempt counter, the lockout and the response are identical
       // whichever it was, keeping registered and unregistered emails indistinguishable.
       const rejectLogin = async (): Promise<void> => {
-        const redis = redisService.getClient();
-        const failedAttempts = await redis.incr(loginAttemptKey);
-        if (failedAttempts === 1) {
-          await redis.expire(loginAttemptKey, LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS);
-        }
-
-        if (failedAttempts >= LOGIN_MAX_FAILED_ATTEMPTS) {
-          await Promise.all([
-            redisService.set(loginLockKey, '1', LOGIN_LOCKOUT_SECONDS),
-            redisService.del(loginAttemptKey),
-          ]);
-          logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
-          res.setHeader('Retry-After', LOGIN_LOCKOUT_SECONDS.toString());
-          res.status(429).json({
-            error: 'Rate limited',
-            message: 'Too many failed login attempts. Please try again later.',
-          });
+        if (await lockOutReached((count, max) => count >= max)) {
           return;
         }
 
@@ -175,11 +234,13 @@ export class EmailAuthController {
 
       logger.info(`${tag()} Email auth success for: ${normalizedEmail}`);
 
-      // Password is correct — immediately clear rate-limit state so a
-      // subsequent network/DB failure doesn't leave the user locked out.
+      // Password is correct — clear this email's state so a later network/DB failure doesn't
+      // leave the user locked out. The global counter only drops this attempt: one
+      // user's success must not wipe failures others have racked up.
       await Promise.all([
-        redisService.del(loginAttemptKey),
-        redisService.del(loginLockKey),
+        redisService.del(emailLimit.attemptKey),
+        redisService.del(emailLimit.lockKey),
+        redis.decr(globalLimit.attemptKey),
       ]);
 
       // 3. Find user's active workspace(s)
@@ -231,19 +292,15 @@ export class EmailAuthController {
         const userName = normalizedEmail.split('@')[0];
 
         res.cookie(
-          'google_access_token',
-          jwt.sign(
-            {
-              email: normalizedEmail,
-              name: userName,
-              providerUserId: `email-${normalizedEmail}`,
-              provider: 'EMAIL',
-              refreshToken: null,
-              accessToken: null,
-            },
-            config.jwt.secret,
-            { expiresIn: '10m' },
-          ),
+          PENDING_AUTH_COOKIE,
+          signPendingAuthToken({
+            email: normalizedEmail,
+            name: userName,
+            providerUserId: `email-${normalizedEmail}`,
+            provider: 'EMAIL',
+            refreshToken: null,
+            accessToken: null,
+          }),
           {
             ...cookieBase,
             maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -266,19 +323,15 @@ export class EmailAuthController {
       const userName = workspaceUser.name || normalizedEmail.split('@')[0];
 
       res.cookie(
-        'google_access_token',
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-          },
-          config.jwt.secret,
-          { expiresIn: '10m' },
-        ),
+        PENDING_AUTH_COOKIE,
+        signPendingAuthToken({
+          email: normalizedEmail,
+          name: userName,
+          providerUserId: `email-${normalizedEmail}`,
+          provider: 'EMAIL',
+          refreshToken: null,
+          accessToken: null,
+        }),
         {
           ...cookieBase,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -293,50 +346,12 @@ export class EmailAuthController {
       }));
 
       if (workspaceUsers.length === 1) {
-        const refreshToken = crypto.randomUUID();
-        const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-        const session = await this.userSessionService.createSession({
-          userId: workspaceUser.id,
-          refreshToken,
-          refreshTokenExpiry,
-          deviceInfo: JSON.stringify({
-            userAgent: req.headers['user-agent'],
-            timestamp: new Date().toISOString(),
-          }),
-          ipAddress: req.ip || req.connection.remoteAddress || undefined,
-          // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password.
+        // Auth session (xs) + JWT cookies. The user row may still say GOOGLE/MICROSOFT for an
+        // SSO account that set a password, so the method is pinned to EMAIL.
+        await completeLogin(req, res, {
+          user: workspaceUser,
           loginMethod: AuthProvider.EMAIL,
-        });
-
-        const jwtToken = jwtService.generateToken({
-          sub: workspaceUser.id,
-          email: workspaceUser.email,
-          name: workspaceUser.name,
-          workspaceId: workspaceUser.workspaceId,
-          memberId: workspaceUser.orgMemberId,
-          providerUserId: `email-${workspaceUser.email}`,
-          provider: AuthProvider.EMAIL,
-        });
-
-        res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
-          ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
-        });
-        res.cookie('user_session_id', session.id, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
-        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
-        await authSessionService.issueOnLogin(req, res, {
-          orgMemberId: workspaceUser.orgMemberId,
-          workspaceId: workspaceUser.workspaceId ?? undefined,
+          cookieOptions: { sameSite: cookieBase.sameSite, secure: cookieBase.secure },
         });
 
         logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);
@@ -358,6 +373,7 @@ export class EmailAuthController {
         userExistsButRemoved: false,
       });
     } catch (error) {
+      if (respondDeviceKeyRequired(res, error)) return;
       logger.error(`${tag()} Email login failed:`, error);
       res.status(500).json({
         error: 'Login failed',
@@ -434,8 +450,8 @@ export class EmailAuthController {
       const newHash = await hashPassword(newPassword);
       await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
-      // Revoke all active sessions for this user — forces re-auth everywhere
-      await this.userSessionService.revokeAllUserSessions(userId, 'PASSWORD_CHANGED');
+      // Revoke every device's auth session for this org member — forces re-auth everywhere
+      await authSessionService.revokeAllForOrgMember(orgMember.memberId, AuthSessionRevokeReason.PASSWORD_CHANGED);
 
       res.status(200).json({ success: true, message: 'Password changed successfully. Please log in again.' });
     } catch (error) {
@@ -458,6 +474,11 @@ export class EmailAuthController {
 
       const normalizedEmail = email.toLowerCase().trim();
 
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
+        return;
+      }
+
       // Rate-limit before account lookup so the public response stays uniform.
       const rateLimitKey = `pwdreset:ratelimit:${normalizedEmail}`;
       const rateLimited = await redisService.get(rateLimitKey);
@@ -472,6 +493,19 @@ export class EmailAuthController {
       });
 
       if (!orgMember || orgMember.leftAt) {
+        res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
+        return;
+      }
+
+      // Each new code resets the attempt counter, so cap how many codes an account gets per day.
+      const dailyKey = `pwdreset:daily:${normalizedEmail}`;
+      const redis = redisService.getClient();
+      const codesToday = await redis.incr(dailyKey);
+      if (codesToday === 1) {
+        await redis.expire(dailyKey, 24 * 60 * 60);
+      }
+      if (codesToday > MAX_RESET_CODES_PER_DAY) {
+        logger.warn('[AUTH] Password reset code request rejected (reason=daily_cap)');
         res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
         return;
       }
@@ -545,10 +579,28 @@ export class EmailAuthController {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        res.status(400).json({ error: 'Invalid or expired code' });
+        return;
+      }
+
       const redisKey = `pwdreset:code:${normalizedEmail}`;
       const attemptsKey = `pwdreset:attempts:${normalizedEmail}`;
 
-      // Retrieve and verify code from Redis
+      // Count the attempt before reading the code: INCR is atomic, so concurrent guesses can't
+      // all compare before the cap applies. The counter is left to expire on exhaustion (not
+      // deleted), or in-flight requests would start a fresh count.
+      const redis = redisService.getClient();
+      const attempts = await redis.incr(attemptsKey);
+      if (attempts === 1) {
+        await redis.expire(attemptsKey, 15 * 60);
+      }
+      if (attempts > MAX_RESET_CODE_ATTEMPTS) {
+        await redisService.del(redisKey);
+        res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
+        return;
+      }
+
       const raw = await redisService.get(redisKey);
       if (!raw) {
         res.status(400).json({ error: 'Invalid or expired code' });
@@ -563,18 +615,9 @@ export class EmailAuthController {
         return;
       }
 
-      if (payload.code !== code) {
-        const redis = redisService.getClient();
-        const attempts = await redis.incr(attemptsKey);
-        if (attempts === 1) {
-          await redis.expire(attemptsKey, 15 * 60);
-        }
-
-        if (attempts >= 3) {
-          await Promise.all([
-            redisService.del(redisKey),
-            redisService.del(attemptsKey),
-          ]);
+      if (!resetCodeMatches(payload.code, code)) {
+        if (attempts >= MAX_RESET_CODE_ATTEMPTS) {
+          await redisService.del(redisKey);
           res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
           return;
         }
@@ -610,14 +653,8 @@ export class EmailAuthController {
       const newHash = await hashPassword(newPassword);
       await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
-      // Find all workspace users tied to this orgMember and revoke their sessions
-      const affectedUsers = await this.prisma.user.findMany({
-        where: { orgMemberId: orgMember.memberId },
-        select: { id: true },
-      });
-      for (const u of affectedUsers) {
-        await this.userSessionService.revokeAllUserSessions(u.id, 'PASSWORD_RESET');
-      }
+      // Auth sessions are org-level: one revoke covers every workspace and device.
+      await authSessionService.revokeAllForOrgMember(orgMember.memberId, AuthSessionRevokeReason.PASSWORD_RESET);
 
       // Delete the code from Redis (it's been consumed)
       await Promise.all([

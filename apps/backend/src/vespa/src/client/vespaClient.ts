@@ -13,6 +13,16 @@ type VespaConfigValues = {
   userId?: string;
 };
 
+const documentPathSegment = (name: string, value: string | undefined): string => {
+  if (!value || value === '.' || value === '..' || /[/?#\\\s]/.test(value)) {
+    throw new Error(`Invalid Vespa document ${name}`);
+  }
+  return encodeURIComponent(value);
+};
+
+const documentPath = (namespace: string | undefined, schema: string | undefined, docId: string | undefined): string =>
+  `/document/v1/${documentPathSegment('namespace', namespace)}/${documentPathSegment('schema', schema)}/docid/${documentPathSegment('docId', docId)}`;
+
 export interface BatchResult {
   docId: string;
   success: boolean;
@@ -25,6 +35,9 @@ class VespaClient {
   private feedTimeoutMs: number;
   private feedEndpoint: string;
   private queryEndpoint: string;
+  // Bearer tokens for an encryption gateway in front of Vespa (empty: none sent). Never logged.
+  private queryToken: string;
+  private feedToken: string;
   private logger: ILogger;
   private feedDispatcher: Agent;
   private queryDispatcher: Agent;
@@ -41,6 +54,8 @@ class VespaClient {
       maxConnections?: number;
       maxConcurrentRequests?: number;
       feedTimeoutMs?: number;
+      queryToken?: string;
+      feedToken?: string;
     },
   ) {
     this.logger = logger || consoleLogger;
@@ -51,6 +66,8 @@ class VespaClient {
     // published on 8083 (see vespa-core/deployment/docker-compose.dev.yml).
     this.feedEndpoint = config?.feedEndpoint || `http://localhost:8083`;
     this.queryEndpoint = config?.queryEndpoint || `http://localhost:8081`;
+    this.queryToken = config?.queryToken ?? appConfig.vespa.queryToken ?? '';
+    this.feedToken = config?.feedToken ?? appConfig.vespa.feedToken ?? '';
 
     const maxConnections = config?.maxConnections || 16;
     const agentOptions = {
@@ -85,10 +102,14 @@ class VespaClient {
     retryCount = 0,
     timeoutMs?: number,
   ): Promise<Response> {
-    const nonRetryableStatusCodes = [404];
-    const dispatcher = url.startsWith(this.queryEndpoint)
-      ? this.queryDispatcher
-      : this.feedDispatcher;
+    // 401/403: a missing or wrong gateway token does not get better on retry
+    const nonRetryableStatusCodes = [401, 403, 404];
+    const isQuery = url.startsWith(this.queryEndpoint);
+    const dispatcher = isQuery ? this.queryDispatcher : this.feedDispatcher;
+    const token = isQuery ? this.queryToken : this.feedToken;
+    if (token) {
+      options = { ...options, headers: { ...(options.headers as Record<string, string>), Authorization: `Bearer ${token}` } };
+    }
     // Opt-in per-attempt timeout (used by `insert`): a fresh abort signal each attempt
     // so retries get the full budget. Callers that pass no timeoutMs are untouched.
     if (timeoutMs) {
@@ -165,7 +186,7 @@ class VespaClient {
       // Clean document fields to remove Unicode replacement characters before insertion
       const cleanedDocument = cleanDocumentFields(document);
 
-      const url = `${this.feedEndpoint}/document/v1/${options.namespace}/${options.schema}/docid/${document.docId}`;
+      const url = `${this.feedEndpoint}${documentPath(options.namespace, options.schema, document.docId)}`;
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: {
@@ -193,7 +214,7 @@ class VespaClient {
 
   async getDocument(options: VespaConfigValues & { docId: string }): Promise<any> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}${documentPath(namespace, schema, docId)}`;
     try {
       const response = await this.fetchWithRetry(url, {
         method: 'GET',
@@ -230,7 +251,7 @@ class VespaClient {
     const { docId, namespace, schema, create } = options;
     // create=true upserts: Vespa builds the doc from these assign ops when it
     // doesn't exist yet, instead of silently no-oping the partial update.
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}${
+    const url = `${this.feedEndpoint}${documentPath(namespace, schema, docId)}${
       create ? '?create=true' : ''
     }`;
 
@@ -274,7 +295,7 @@ class VespaClient {
 
   async deleteDocument(options: VespaConfigValues & { docId: string }): Promise<void> {
     const { docId, namespace, schema } = options;
-    const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
+    const url = `${this.feedEndpoint}${documentPath(namespace, schema, docId)}`;
 
     try {
       const response = await this.fetchWithRetry(url, {

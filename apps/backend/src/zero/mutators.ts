@@ -1,5 +1,7 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
+import { toDisplayFilename } from '@/utils/filename';
+import { buildAutomationMetadata, parseAutomationMetadata } from '../automations/types/workflow-adapter';
 import {
   ChannelRole,
   AgentProactivityMode,
@@ -188,6 +190,8 @@ import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
+import { callEncryptionService } from '@/services/callEncryptionService';
+import type { CallEncryptionState } from '@/database/repositories/callRepository';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -5017,6 +5021,8 @@ export function createMutators(
         }),
         async ({ tx, args: { channelId, callType, targetUserIds, externalId, roomLink, timestamp, callId, creatorParticipantId, targetParticipantIds = {} } }) => {
           const now = timestamp;
+          // Written ACTIVE straight away, so the key version is pinned here too.
+          const e2ee = callEncryptionService.stateAtActivation(callEncryptionService.stateForNewCall({ callType }));
 
           // Create system message for the call (will be shown as overlay while active)
           const { messageId: systemMessageId, conversationId } = await sendCallSystemMessage(tx, {
@@ -5050,6 +5056,7 @@ export function createMutators(
             metadata: {
               systemMessageId,
               conversationId,
+              ...(e2ee && { e2ee }),
             },
           });
 
@@ -5144,7 +5151,9 @@ export function createMutators(
 
           // If call is SCHEDULED, create system message and mark as ACTIVE
           if (call.status === CallStatus.SCHEDULED) {
-            const callMetadata = call.metadata as { systemMessageId?: string; conversationId?: string } | null;
+            const callMetadata = call.metadata as { systemMessageId?: string; conversationId?: string; e2ee?: CallEncryptionState } | null;
+            // Activation pins the key version; a rejoin keeps the one its first session used.
+            const e2ee = callEncryptionService.stateAtActivation(callMetadata?.e2ee);
 
             // Only create system message if conversationId doesn't exist
             if (!callMetadata?.conversationId) {
@@ -5160,9 +5169,12 @@ export function createMutators(
                 startedAt: now,
                 lastActivityAt: now,
                 updatedAt: now,
+                // Merge, so encryption state and calendar fields survive activation.
                 metadata: {
+                  ...((call.metadata as Record<string, unknown> | null) ?? {}),
                   systemMessageId: result.messageId,
                   conversationId: result.conversationId,
+                  ...(e2ee && { e2ee }),
                 },
               });
             } else {
@@ -5177,6 +5189,9 @@ export function createMutators(
                 startedAt: call.endedAt ? call.startedAt : now,
                 lastActivityAt: now,
                 updatedAt: now,
+                ...(e2ee && e2ee !== callMetadata?.e2ee && {
+                  metadata: { ...((call.metadata as Record<string, unknown> | null) ?? {}), e2ee },
+                }),
               });
             }
           }
@@ -12371,7 +12386,7 @@ export function createMutators(
           }
           await tx.mutate.message_attachments.update({
             id: args.itemId,
-            originalFilename: withKeptExtension(attachment.originalFilename, args.name),
+            originalFilename: toDisplayFilename(withKeptExtension(attachment.originalFilename, args.name)),
           });
         },
       ),
@@ -14433,6 +14448,7 @@ export function createMutators(
               ext = rawName.substring(lastDotIdx);
               nameWithoutExt = rawName.substring(0, lastDotIdx);
             }
+            ext = ext.replace(/[^a-zA-Z0-9._-]/g, '_');
 
             const maxBaseLength = Math.max(1, 255 - ext.length);
 
@@ -16638,6 +16654,8 @@ export function createMutators(
           tx,
           args: { orgId, orgName, orgDescription, workspaceId, workspaceOrgId, memberId, timestamp },
         }) => {
+          // Organization creation is off unless ENABLE_ORG_CREATION=true.
+          if (!config.enableOrgCreation) throw new Error('Organization creation is disabled');
           const admin = await tx.run(
             zql.users
               .where('id', authData.sub)
@@ -18464,6 +18482,27 @@ export function createMutators(
           tx,
           args: { id, name, configJson, metadataJson, eventType, automationSeriesId, timestamp },
         }) => {
+          if (automationSeriesId !== undefined && automationSeriesId !== id) {
+            const inWorkspace = (row: { workspaceId: string; workflowType: string | null } | undefined) =>
+              !!row && row.workspaceId === ctx.workspaceId && row.workflowType === 'Automations';
+            const root = await tx.run(zql.workflows.where('id', automationSeriesId).one());
+            const member = inWorkspace(root)
+              ? root
+              : await tx.run(
+                  zql.workflows
+                    .where('automationSeriesId', automationSeriesId)
+                    .where('workspaceId', ctx.workspaceId)
+                    .where('workflowType', 'Automations')
+                    .one(),
+                );
+            if (!inWorkspace(member)) throw new Error(`Automation series "${automationSeriesId}" not found`);
+          }
+          const clientMetadata = parseAutomationMetadata(metadataJson);
+          const metadata = buildAutomationMetadata({
+            description: clientMetadata.description,
+            createdById: ctx.userID,
+            ...(clientMetadata.priority ? { priority: true } : {}),
+          });
           await tx.mutate.workflows.insert({
             id,
             workflowType: 'Automations',
@@ -18472,7 +18511,7 @@ export function createMutators(
             status: 'DRAFT',
             automationSeriesId: automationSeriesId ?? id,
             context: configJson,
-            metadata: metadataJson,
+            metadata: metadata,
             ticketId: null,
             workspaceId: ctx.workspaceId,
             configuration: null,
@@ -18492,6 +18531,7 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({
+          ctx,
           tx,
           args: { id, name, configJson, metadataJson, eventType, timestamp },
         }) => {
@@ -18504,12 +18544,23 @@ export function createMutators(
               `Automation "${id}" is ${existing.status}; only DRAFT proposals can be edited.`,
             );
           }
+          const existingMetadata = parseAutomationMetadata(existing.metadata);
+          if (existingMetadata.createdById !== ctx.userID) {
+            throw new Error(`Automation "${id}" can only be edited by its author`);
+          }
+          const metadata =
+            metadataJson !== undefined
+              ? buildAutomationMetadata({
+                  ...existingMetadata,
+                  description: parseAutomationMetadata(metadataJson).description,
+                })
+              : undefined;
 
           await tx.mutate.workflows.update({
             id,
             updatedAt: timestamp,
             ...(name !== undefined && { workflowName: name }),
-            ...(metadataJson !== undefined && { metadata: metadataJson }),
+            ...(metadata !== undefined && { metadata }),
             ...(configJson !== undefined && { context: configJson }),
             ...(configJson !== undefined && eventType !== undefined && { eventType }),
           });
@@ -18715,9 +18766,17 @@ export function createMutators(
               `Automation "${id}" is ${existing.status}; only LIVE rows can be disabled.`,
             );
           }
+          // adminDisabled must commit with the status flip, else a non-admin can re-activate
+          // before (or after a failure of) the async toggleLive below. An author turning off
+          // their own automation is not an admin kill-switch, so they can turn it back on.
+          const existingMetadata = parseAutomationMetadata(existing.metadata);
           await tx.mutate.workflows.update({
             id,
             status: 'DISABLED',
+            metadata: buildAutomationMetadata({
+              ...existingMetadata,
+              ...(existingMetadata.createdById !== authData.sub && { adminDisabled: true }),
+            }),
             updatedAt: timestamp,
           });
           logger.info(`[Mutator] automations.disable OPTIMISTIC id=${id} status=DISABLED`);

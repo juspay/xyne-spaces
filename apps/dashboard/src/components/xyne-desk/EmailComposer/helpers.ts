@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify';
 import { parseSingleEmailAddress } from '../../../utils/emailAddress';
+import { htmlToPlainText } from '../../../utils/sanitizer';
 
 // Match Gmail's 25MB per-message ceiling.
 export const MAX_EMAIL_ATTACHMENT_FILES = 10;
@@ -35,9 +36,7 @@ export const parseFromField = (raw: string): { name: string; email: string | nul
 export const stripHtml = (html: string): string => {
   if (!html) return '';
   if (typeof document === 'undefined') return html;
-  const tmp = document.createElement('DIV');
-  tmp.innerHTML = html;
-  return tmp.textContent || tmp.innerText || '';
+  return htmlToPlainText(html);
 };
 
 /** Sanitize signature HTML before rendering via dangerouslySetInnerHTML. */

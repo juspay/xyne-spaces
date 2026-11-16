@@ -11,8 +11,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import axios from 'axios';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
-// Disabled (Claw)
-// import { XyneAIStar } from '../../components/icons/xyne-ai';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import {
@@ -384,10 +383,9 @@ const RecordingsV2Screen = (): ReactElement => {
     }
   }, [deleteRecording]);
 
-  // Disabled (Claw)
-  // const handleOpenAskAI = useCallback((): void => {
-  //   setShowAskAIContextModal(true);
-  // }, []);
+  const handleOpenAskAI = useCallback((): void => {
+    setShowAskAIContextModal(true);
+  }, []);
 
   const handleConfirmAskAIContext = useCallback((selected: OatsRecordingEntry[]): void => {
     // Attach each recording's documents alongside the recording itself, the same
@@ -587,8 +585,6 @@ const RecordingsV2Screen = (): ReactElement => {
                   //   <span className='hidden sm:inline'>Templates</span>
                   // </Button>
                 }
-                {/* Disabled (Claw) */}
-                {/*
                 <Button
                   type='button'
                   variant='outline'
@@ -600,7 +596,6 @@ const RecordingsV2Screen = (): ReactElement => {
                   <XyneAIStar size={15} />
                   Ask AI
                 </Button>
-                */}
               </div>
             </div>
           </header>

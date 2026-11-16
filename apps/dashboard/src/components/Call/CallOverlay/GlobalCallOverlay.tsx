@@ -53,6 +53,7 @@ export function GlobalCallOverlay({
   const isCallWindowMode = useSelector(roomActor, state => state.context.isCallWindowMode);
   const token = useSelector(roomActor, state => state.context.token);
   const serverUrl = useSelector(roomActor, state => state.context.serverUrl);
+  const encryption = useSelector(roomActor, state => state.context.encryption);
   const callType = useSelector(roomActor, state => state.context.callType);
   const externalId = useSelector(roomActor, state => state.context.externalId);
   const room = useSelector(roomActor, state => state.context.room);
@@ -133,6 +134,7 @@ export function GlobalCallOverlay({
         <CustomLiveKitRoom
           token={token}
           serverUrl={serverUrl}
+          encryption={encryption}
           callId={externalId}
           callType={callType}
           externalId={externalId}

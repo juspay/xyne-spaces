@@ -11,3 +11,7 @@ export default router;
 export const ysweetValidateRouter = Router();
 
 ysweetValidateRouter.post('/', ysweetController.validateAccess.bind(ysweetController));
+
+export const ysweetStorageKeyRouter = Router();
+
+ysweetStorageKeyRouter.post('/', ysweetController.getStorageKey.bind(ysweetController));

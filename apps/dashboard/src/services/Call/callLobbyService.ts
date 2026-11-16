@@ -1,7 +1,8 @@
 import { CallType, InvitationResponse } from '@xyne/shared';
-import type { CallChatMessage } from '@xyne/shared';
+import type { CallChatMessage, CallEncryptionCredentials } from '@xyne/shared';
 import axios from 'axios';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
+import { refreshSessionOnce } from '../clients/sessionRefresh';
 
 export interface CallInfo {
   title: string | null;
@@ -61,11 +62,16 @@ export interface ExternalJoinResponse {
   externalId: string;
   callType: CallType;
   participantId: string;
+  /** Present on end-to-end encrypted calls; the media key for this guest. */
+  encryption?: CallEncryptionCredentials;
 }
 
 export type InternalCallRouteResolution =
   | { result: 'internal'; workspaceId: string }
   | { result: 'external' };
+
+/** Backend may also answer that the call workspace's JWT cookie is present but expired. */
+type InternalCallRouteProbe = InternalCallRouteResolution | { result: 'needs-refresh' };
 
 const BASE = '/call-lobby';
 
@@ -97,12 +103,23 @@ export const callLobbyService = {
   async resolveInternalRoute(externalId: string): Promise<InternalCallRouteResolution> {
     // Keep this public probe isolated from the dashboard client's global 401
     // redirect behavior. Expected misses are normal external-lobby traffic.
-    const response = await axios.post<InternalCallRouteResolution>(
-      `${BASE_URL}${BASE}/${encodeURIComponent(externalId)}/resolve-internal`,
-      undefined,
-      { withCredentials: true },
-    );
-    return response.data;
+    const probe = async (): Promise<InternalCallRouteProbe> => {
+      const response = await axios.post<InternalCallRouteProbe>(
+        `${BASE_URL}${BASE}/${encodeURIComponent(externalId)}/resolve-internal`,
+        undefined,
+        { withCredentials: true },
+      );
+      return response.data;
+    };
+
+    const first = await probe();
+    if (first.result !== 'needs-refresh') return first;
+
+    // Signed-in member whose workspace JWT expired: the refresh token is only sent
+    // to /auth/refresh-session, so refresh there and probe once more.
+    if ((await refreshSessionOnce()) !== 'ok') return { result: 'external' };
+    const second = await probe();
+    return second.result === 'needs-refresh' ? { result: 'external' } : second;
   },
 
   /**

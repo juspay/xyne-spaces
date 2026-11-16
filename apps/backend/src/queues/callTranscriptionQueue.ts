@@ -2,6 +2,7 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { TranscriptionAgentError, describeTranscriptionAgentError } from '@/services/transcriptionAgentClient';
+import { runCallTranscriptionJob } from '@/bypassAcl/callServices';
 
 export interface CallTranscriptionJobData {
   /** Call email id (the Ozonetel call message in the ticket thread). */
@@ -106,9 +107,7 @@ class CallTranscriptionQueue {
     this.consuming = true;
     const queue = this.ensureQueue();
     queue.process(CALL_TRANSCRIPTION_JOB, concurrency, async (job) => {
-      // Lazy import keeps the producer (API) free of the service's dependencies.
-      const { callTranscriptionService } = await import('@/services/ozonetel/callTranscriptionService');
-      return callTranscriptionService.process(job.data, job.attemptsMade + 1, job.opts.attempts ?? 1);
+      return runCallTranscriptionJob(job.data, job.attemptsMade + 1, job.opts.attempts ?? 1);
     });
     queue.on('failed', async (job, error) => {
       if (!job?.data) return;

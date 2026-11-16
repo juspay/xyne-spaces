@@ -12,9 +12,7 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runGitHubWebhook } from '@/bypassAcl/webhookIngestServices';
-// Disabled (Claw)
-// import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
-import { type PrCardStatus } from '@/services/prCardStatusForwarder';
+import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
 // Disabled (LLM)
 // import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
 
@@ -213,18 +211,17 @@ export class GitHubWebhookService {
       // to the ticket sync, so a PR whose title fails validation still updates.
       const cardStatus = this.prCardStatusFor(action, pr);
       if (cardStatus) {
-        // Disabled (Claw)
-        // forwardPrCardStatus(
-        //   {
-        //     provider: 'github',
-        //     status: cardStatus,
-        //     prUrl: context.prUrl,
-        //     number: context.prId,
-        //     repo: `${context.projectName}/${context.repoName}`,
-        //     title: pr.title,
-        //   },
-        //   '[GitHub-Webhook]',
-        // );
+        forwardPrCardStatus(
+          {
+            provider: 'github',
+            status: cardStatus,
+            prUrl: context.prUrl,
+            number: context.prId,
+            repo: `${context.projectName}/${context.repoName}`,
+            title: pr.title,
+          },
+          '[GitHub-Webhook]',
+        );
       }
 
       // Validate PR title (same validation as Bitbucket)

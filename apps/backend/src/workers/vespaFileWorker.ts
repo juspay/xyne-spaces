@@ -1,17 +1,16 @@
 import Bull from 'bull';
-import { IngestionStatus, VespaInsertionStatus } from '@xyne/shared';
+import { IngestionStatus } from '@xyne/shared';
 import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
 import { InsertDocument, fileSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
-import { NAMESPACE } from '@/vespa/vespaConfig';
-import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, computeCanvasPermissions, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, computeCanvasPermissions } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
-import { superpositionClient } from '@/services/superpositionClient';
 // Disabled (LLM)
 // import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
 import { config } from '@/config/env';
+import { validateVespaJob } from '@/zero/vespa-injection/core/jobValidation';
 import { SubApp } from '@/vespa/src/types';
 import { maybeNotifyCollectionIngestionComplete } from '@/services/collectionIngestionNotifier';
 
@@ -19,12 +18,6 @@ export class VespaFileWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
 	private isInitialized = false;
 	private isInitializing = false;
-	private namespace: string;
-
-	constructor(namespace: string = NAMESPACE) {
-		this.namespace = namespace;
-	}
-
 	async initialize(): Promise<void> {
 		// Prevent concurrent initialization attempts
 		if (this.isInitialized || this.isInitializing) {
@@ -58,6 +51,7 @@ export class VespaFileWorker {
 						delay: 2000,
 					},
 					removeOnComplete: 1000,
+					removeOnFail: 5000,
 				},
 				settings: {
 					stalledInterval: 30 * 1000,
@@ -86,6 +80,9 @@ export class VespaFileWorker {
 		if (!this.isInitialized) {
 			await this.initialize();
 		}
+		if (!this.isInitialized) {
+			throw new Error('[VESPA_FILE_WORKER] Failed to initialize queue consumer');
+		}
 		logger.info('[VESPA_FILE_WORKER] VespaFileWorker started successfully');
 	}
 
@@ -113,62 +110,19 @@ export class VespaFileWorker {
 
 		// Event: Job failed
 		this.queue.on('failed', async (job, err) => {
-			// After max retries, record in database
+			if (this.invalidJobReason(job.data)) {
+				return;
+			}
+
+			// After max retries the job stays in Bull's failed set (bounded by removeOnFail);
+			// the collection item is marked FAILED so the UI stops showing it as processing.
 			if (job.attemptsMade >= (job.opts.attempts || 3)) {
-				await this.recordFailedJob(job, err);
+				await this.updateCollectionItemStatus(job.data.docId, job.data.app, IngestionStatus.FAILED);
 				logger.warn(
-					`[VESPA_FILE_WORKER] Recorded failed job ${job.id} to database after ${job.attemptsMade} failed attempts`
+					`[VESPA_FILE_WORKER] Job ${job.id} (${job.data.schema}/${job.data.docId}) failed after ${job.attemptsMade} attempts: ${err.message}`
 				);
 			}
 		});
-	}
-
-	/**
-	 * Record a failed job in the database
-	 */
-	private async recordFailedJob(job: Bull.Job<VespaJob>, error: Error): Promise<void> {
-		// Mark collection item as FAILED
-		if (job.data.schema === fileSchema) {
-			await this.updateCollectionItemStatus(job.data.docId, job.data.app, IngestionStatus.FAILED);
-		}
-
-		try {
-			const entityId = job.data.docId;
-			const entityType = job.data.schema;
-			const userId = job.data.userId || null;
-			const workspaceId = job.data.workspaceId;
-			if (!workspaceId) {
-				throw new Error('workspaceId required: vespa job missing workspaceId');
-			}
-			await db.vespaInsertionLogs.create({
-				data: {
-					entityId,
-					entityType,
-					workspaceId,
-					type: VespaOperationType[job.data.jobType],
-					status: VespaInsertionStatus.FAILED,
-					namespace: this.namespace,
-					errorMessage: `Job ${job.id} failed after ${job.attemptsMade} attempts: ${error.message}`,
-					errorDetails: JSON.stringify({
-						jobId: job.id,
-						jobName: job.name,
-						jobType: job.data.jobType,
-						attemptsMade: job.attemptsMade,
-						error: error.message,
-						stack: error.stack,
-						jobData: job.data,
-						timestamp: Date.now(),
-					}),
-					userId,
-					retryCount: job.attemptsMade || 0,
-					createdAt: new Date(),
-				},
-			});
-
-			logger.info(`[VESPA_FILE_WORKER] ✓ Recorded failed job ${job.id} in database`);
-		} catch (dbError) {
-			logger.error(`[VESPA_FILE_WORKER] Failed to record job ${job.id} failure in database:`, dbError);
-		}
 	}
 
 	/**
@@ -203,7 +157,23 @@ export class VespaFileWorker {
 	/**
 	 * Process a single job from the queue
 	 */
+	private invalidJobReason(data: unknown): string | null {
+		const reason = validateVespaJob(data, { allowFileSchema: true });
+		if (reason) return reason;
+		const job = data as VespaJob;
+		if (job.schema !== fileSchema) return 'only file schema accepted here';
+		if (job.data != null) return 'pre-built data not accepted for file jobs';
+		return null;
+	}
+
 	private async processJob(job: Bull.Job<VespaJob>): Promise<any> {
+		const invalidReason = this.invalidJobReason(job.data);
+		if (invalidReason) {
+			logger.warn(`[VESPA_FILE_WORKER] Rejected job ${job.id} (${job.name}): ${invalidReason}`);
+			await job.discard();
+			throw new Error(`Rejected invalid Vespa file job: ${invalidReason}`);
+		}
+
 		const { schema, docId, jobType, app } = job.data;
 
 		logger.info(
@@ -241,11 +211,7 @@ export class VespaFileWorker {
 
 			// Check if file indexing is enabled
 			if (jobType === 'feed' && schema === fileSchema) {
-				const isFileIndexingEnabled = await superpositionClient.getBooleanValue(
-					'enable_file_indexing',
-					config.enableFileIndexing,
-				);
-				if (!isFileIndexingEnabled) {
+				if (!config.enableFileIndexing) {
 					await job.discard();
 					throw new Error(`File indexing is disabled. Skipping feed for ${schema}/${docId}`);
 				}
@@ -256,14 +222,8 @@ export class VespaFileWorker {
 
 			let mappedData: InsertDocument | Partial<InsertDocument>;
 
-			const preTransformedData = job.data.data;
-
 			if (jobType === 'delete') {
 				mappedData = {};
-			} else if (preTransformedData) {
-				// Use pre-transformed data if available (e.g., from SAM transcripts)
-				logger.info(`[VESPA_FILE_WORKER] Using pre-transformed data for ${docId}`);
-				mappedData = preTransformedData as InsertDocument;
 			} else if (jobType === 'update' && job.data.fields?.length) {
 				// Field-scoped partial update: send only the requested fields. Because
 				// `chunks` isn't sent, Vespa does not re-embed — this is what keeps the

@@ -532,6 +532,37 @@ export const userSessionTable = table("user_sessions")
   })
   .primaryKey("id");
 
+export const authSessionTable = table("auth_sessions")
+  .columns({
+    id: string(),
+    orgMemberId: string(),
+    orgId: string(),
+    refreshToken: string(),
+    deviceKey: string(),
+    status: string(),
+    platform: string(),
+    refreshTokenExpiry: number(),
+    deviceInfo: string().optional(),
+    fcmToken: string().optional(),
+    voipToken: string().optional(),
+    revokedAt: number().optional(),
+    revokeReason: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const authSessionWorkspaceAccessTable = table("auth_session_workspace_access")
+  .columns({
+    id: string(),
+    authSessionId: string(),
+    workspaceId: string(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const userTable = table("users")
   .columns({
     id: string(),
@@ -1149,6 +1180,7 @@ export const channelTable = table("channels")
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(),
+    agentProactivityMode: string(),
     connectId: string().optional(),
   })
   .primaryKey("id");
@@ -1472,6 +1504,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
     metricsGuestVisibility: string().optional(),
+    metricsMinAccess: string().optional(),
     appWebhookDeliveryEnabled: boolean(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
@@ -1886,6 +1919,7 @@ export const callParticipantTable = table("call_participants")
     email: string().optional(),
     isExternal: boolean(),
     ringStatus: string().optional(),
+    ringNotification: string().optional(),
   })
   .primaryKey("id");
 
@@ -1951,6 +1985,7 @@ export const recurringCallParticipantTable = table("recurring_call_participants"
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringNotification: string().optional(),
   })
   .primaryKey("id");
 
@@ -3279,6 +3314,56 @@ export const radarRuleTable = table("radar_rules")
   })
   .primaryKey("id");
 
+export const agentProactivityDecisionTable = table("agent_proactivity_decisions")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    channelId: string(),
+    senderId: string(),
+    kind: string(),
+    mode: string(),
+    messageIds: json<string[]>(),
+    conversationId: string().optional(),
+    parentEpisodeId: string().optional(),
+    gate: string(),
+    agentSlug: string().optional(),
+    outcome: string().optional(),
+    reason: string().optional(),
+    score: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const agentProactivityXorCallTable = table("agent_proactivity_xor_calls")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    decisionId: string(),
+    channelId: string(),
+    step: string(),
+    agentSlug: string().optional(),
+    input: string(),
+    durationMs: number(),
+    failed: boolean(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const agentProactivityXorQuestionTable = table("agent_proactivity_xor_questions")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    callId: string(),
+    channelId: string(),
+    key: string(),
+    instructions: string(),
+    criteriaTrue: string().optional(),
+    criteriaFalse: string().optional(),
+    probability: number().optional(),
+  })
+  .primaryKey("id");
+
 
 // Define relationships
 
@@ -3785,6 +3870,22 @@ export const userSessionTableRelationships = relationships(userSessionTable, ({ 
     sourceField: ["userId"],
     destField: ["id"],
     destSchema: userTable,
+  })
+}));
+
+export const authSessionTableRelationships = relationships(authSessionTable, ({ many }) => ({
+  workspaceAccess: many({
+    sourceField: ["id"],
+    destField: ["authSessionId"],
+    destSchema: authSessionWorkspaceAccessTable,
+  })
+}));
+
+export const authSessionWorkspaceAccessTableRelationships = relationships(authSessionWorkspaceAccessTable, ({ one }) => ({
+  authSession: one({
+    sourceField: ["authSessionId"],
+    destField: ["id"],
+    destSchema: authSessionTable,
   })
 }));
 
@@ -5480,6 +5581,8 @@ export const schema = createSchema(
       roleTable,
       userRoleMappingTable,
       userSessionTable,
+      authSessionTable,
+      authSessionWorkspaceAccessTable,
       userTable,
       userPreferenceTable,
       userSkillTable,
@@ -5641,6 +5744,9 @@ export const schema = createSchema(
       executionRunLogTable,
       radarPrLinkTable,
       radarRuleTable,
+      agentProactivityDecisionTable,
+      agentProactivityXorCallTable,
+      agentProactivityXorQuestionTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5670,6 +5776,8 @@ export const schema = createSchema(
       roleTableRelationships,
       userRoleMappingTableRelationships,
       userSessionTableRelationships,
+      authSessionTableRelationships,
+      authSessionWorkspaceAccessTableRelationships,
       userTableRelationships,
       userGroupMappingTableRelationships,
       userAssignmentStateTableRelationships,
@@ -5802,6 +5910,8 @@ export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type Role = Row<typeof schema.tables.roles>;
 export type UserRoleMapping = Row<typeof schema.tables.user_role_mappings>;
 export type UserSession = Row<typeof schema.tables.user_sessions>;
+export type AuthSession = Row<typeof schema.tables.auth_sessions>;
+export type AuthSessionWorkspaceAccess = Row<typeof schema.tables.auth_session_workspace_access>;
 export type User = Row<typeof schema.tables.users>;
 export type UserPreference = Row<typeof schema.tables.user_preferences>;
 export type UserSkill = Row<typeof schema.tables.user_skills>;
@@ -5963,3 +6073,6 @@ export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_muta
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
 export type RadarPrLink = Row<typeof schema.tables.radar_pr_links>;
 export type RadarRule = Row<typeof schema.tables.radar_rules>;
+export type AgentProactivityDecision = Row<typeof schema.tables.agent_proactivity_decisions>;
+export type AgentProactivityXorCall = Row<typeof schema.tables.agent_proactivity_xor_calls>;
+export type AgentProactivityXorQuestion = Row<typeof schema.tables.agent_proactivity_xor_questions>;

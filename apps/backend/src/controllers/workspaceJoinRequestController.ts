@@ -1,18 +1,15 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
+import { verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import {
   WorkspaceJoinRequestAction,
   type WorkspaceJoinRequestAction as WorkspaceJoinRequestActionType,
   WorkspaceJoinRequestStatus,
 } from '@xyne/shared';
 import { workspaceJoinRequestService } from '@/services/workspaceJoinRequestService';
-import { UserSessionService } from '@/services/userSessionService';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
+import { PENDING_AUTH_COOKIE, readWorkspaceJwt } from '@/services/accessTokenService';
 
 export class WorkspaceJoinRequestController {
-  private userSessionService = new UserSessionService();
-
   requestJoin = async (req: Request, res: Response): Promise<void> => {
     try {
       const { workspaceId } = req.params;
@@ -143,30 +140,14 @@ export class WorkspaceJoinRequestController {
   };
 
   private async resolveRequesterEmail(req: Request): Promise<string | null> {
-    const pendingAuthCookie = req.cookies?.google_access_token;
-    if (pendingAuthCookie) {
-      try {
-        const decoded = jwt.verify(pendingAuthCookie, config.jwt.secret) as { email?: string };
-        return decoded.email || null;
-      } catch (_error) {
-        return null;
-      }
-    }
+    const pendingAuthCookie = req.cookies?.[PENDING_AUTH_COOKIE];
+    const pendingEmail = pendingAuthCookie ? verifyPendingAuthToken(pendingAuthCookie)?.email : undefined;
+    if (pendingEmail) return pendingEmail;
 
-    const sessionId = req.cookies?.user_session_id;
-    if (!sessionId) return null;
-
-    const session = await this.userSessionService.getSessionById(sessionId);
-    if (
-      !session ||
-      !session.user ||
-      session.status !== 'ACTIVE' ||
-      new Date() > session.refreshTokenExpiry
-    ) {
-      return null;
-    }
-
-    return session.user.email;
+    // Already signed in: the workspace JWT cookie identifies the member (xs is only sent to
+    // /auth/refresh-session). An expired JWT reads as not signed in; the client refreshes on 401.
+    const jwtRead = readWorkspaceJwt(req);
+    return jwtRead.status === 'valid' ? jwtRead.payload.email : null;
   }
 }
 

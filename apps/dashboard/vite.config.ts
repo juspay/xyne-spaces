@@ -122,12 +122,11 @@ export default defineConfig(({ command, mode }) => {
         // Same-origin proxy so the dashboard can call the claw-auth backend
         // (which sets no CORS headers) during local dev, mirroring
         // xyne-claw-auth/frontend/vite.config.ts.
-        // Disabled (Claw)
-        // '/claw/api/v1': {
-        // target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
-        // changeOrigin: true,
-        // secure: false,
-        // },
+        '/claw/api/v1': {
+        target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
+        changeOrigin: true,
+        secure: false,
+        },
         ...(env.VITE_ENVIRONMENT === 'test' || env.VITE_DEV_PROXY === 'true'
           ? {
               '/api': {
@@ -153,12 +152,11 @@ export default defineConfig(({ command, mode }) => {
       proxy: {
         // Keep the same-origin routes used by browser tests when the test image
         // serves its prebuilt bundle with `vite preview`.
-        // Disabled (Claw)
-        // '/claw/api/v1': {
-        // target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
-        // changeOrigin: true,
-        // secure: false,
-        // },
+        '/claw/api/v1': {
+        target: env.VITE_CLAW_BACKEND_URL || 'http://localhost:3003',
+        changeOrigin: true,
+        secure: false,
+        },
         ...(env.VITE_ENVIRONMENT === 'test'
           ? {
               '/api': {

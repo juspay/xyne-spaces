@@ -65,6 +65,7 @@ RUN addgroup --system --gid 1001 frontend && \
 
 # Minimal SPA-only nginx config (no bundle-branch proxy, no migration service)
 COPY --chown=frontend:frontend apps/dashboard-external/nginx.conf /etc/nginx/nginx.conf
+COPY --chown=frontend:frontend apps/dashboard/nginx-security-headers.conf /etc/nginx/security-headers.conf
 
 COPY --from=builder --chown=frontend:frontend /repo/apps/dashboard-external/dist /usr/share/nginx/html/external
 COPY --chown=frontend:frontend apps/dashboard/public/sounds /usr/share/nginx/html/external/sounds

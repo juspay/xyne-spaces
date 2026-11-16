@@ -24,11 +24,11 @@ strategy:
     maxSurge: 25%
     maxUnavailable: 0
 
-command:
-  - pnpm
-  - run
-  - start:worker
-args: []
+command: []
+args:
+  - --import
+  - tsx
+  - dist/main-worker.js
 
 containerPorts:
   - name: http
@@ -61,6 +61,7 @@ env:
   ENABLE_VESPA_FILE_WORKER: "false"
   ENABLE_NOTIFICATION_WORKER: "false"
   ENABLE_AUTOMATION_WORKER: "false"
+  ENABLE_WORKFLOWS_WORKER: "false"
   ENABLE_DATA_SOURCE_INGESTION_WORKER: "false"
   ENABLE_SCHEDULED_MESSAGE_WORKER: "false"
   ENABLE_DELAYED_MESSAGE_WORKER: "false"
@@ -79,9 +80,6 @@ secretEnv:
   REDIS_URL:
     name: xyne-backend-secrets
     key: REDIS_URL
-  JWT_SECRET:
-    name: xyne-backend-secrets
-    key: JWT_SECRET
   ENCRYPTION_KEY:
     name: xyne-backend-secrets
     key: ENCRYPTION_KEY

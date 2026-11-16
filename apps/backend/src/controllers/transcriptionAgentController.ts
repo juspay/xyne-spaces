@@ -3,6 +3,7 @@ import { CallType, TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { runWithContext } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { transcriptService } from '@/services/transcriptService';
@@ -24,6 +25,26 @@ class TranscriptionAgentController {
     this.ticketController = new TicketController();
     // this.callController = new CallController();
   }
+
+  /**
+   * The agent's key is shared across tenants, so scope every query in `handler` to the
+   * workspace of the call named in the URL.
+   */
+  inCallWorkspace =
+    (handler: (req: Request, res: Response) => Promise<void>) =>
+    async (req: Request, res: Response): Promise<void> => {
+      try {
+        const call = await repositories.calls.findByExternalId(req.params.callId);
+        if (!call) {
+          res.status(404).json({ success: false, error: 'Call not found' });
+          return;
+        }
+        await runWithContext({ userId: call.createdByUserId, workspaceId: call.workspaceId }, () => handler(req, res));
+      } catch (error) {
+        logger.error(`[TranscriptionAgent] Failed to resolve call ${req.params.callId}:`, error);
+        if (!res.headersSent) res.status(500).json({ success: false, error: 'Internal error' });
+      }
+    };
 
   /**
    * POST /api/transcriptionAgent/:callId/transcript-ready
@@ -175,7 +196,11 @@ class TranscriptionAgentController {
           where: { id: boardId },
           select: { projectId: true },
         });
-        boardProjectId = board?.projectId ?? undefined;
+        if (!board) {
+          res.status(404).json({ success: false, error: 'Board not found' });
+          return;
+        }
+        boardProjectId = board.projectId ?? undefined;
       }
 
       // 5. Create ticket using shared method

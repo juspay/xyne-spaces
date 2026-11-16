@@ -8,37 +8,44 @@ import { CommonDatabaseClient } from '@/database/commonClient'
 import { describeRejection, logger } from '@/utils/logger'
 import { vespaWorker } from './workers/vespaWorker'
 import { vespaFileWorker } from './workers/vespaFileWorker'
-import {
-  startDriveImportWorker,
-  closeDriveImportQueue,
-} from '@/services/driveImport/driveImportWorker'
+// import {
+//   startDriveImportWorker,
+//   closeDriveImportQueue,
+// } from '@/services/driveImport/driveImportWorker'
 // Disabled (LLM)
 // import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 // import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 // import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 // import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
-import { notificationWorker } from '@/notification-service/consumers/notificationWorker'
-import { notificationService, notificationService as realTimeNotificationService } from '@/notification-service'
-import { redisService } from '@/services/redisService'
-//import { vespaWorker } from '@/workers/vespaWorker'
-import { workerScheduler } from './workers';
+// Disabled (not yet brought up)
+// import { notificationWorker } from '@/notification-service/consumers/notificationWorker'
+import { notificationService } from '@/notification-service'
+// import { redisService } from '@/services/redisService'
+import type Bull from 'bull';
+import {
+  removeRetiredQueues,
+  schedulerRedisConfig,
+  startPersonalizationSyncQueue,
+} from './workers/personalizationSchedule';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
-import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
-import { callValidationWorker } from '@/workers/callValidationWorker';
+// Disabled (not yet brought up)
+// import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
+// import { callValidationWorker } from '@/workers/callValidationWorker';
 import { initializeBotRegistry } from '@/bots/registry';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { dataSourceIngestionWorker } from '@/workers/dataSourceIngestionWorker';
 import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
-import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
-import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
+// import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
+// import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
+import { gmailPubSubPullWorker } from '@/workers/gmailPubSubPullWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 // Disabled (LLM)
 // import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
-// import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
 // import { decisionEvaluationWorker } from '@/workers/decisionEvaluationWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 // Disabled (LLM)
@@ -49,8 +56,10 @@ import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 // import { emitTagGenerated } from '@/automations/triggers/tag-generated.trigger';
 // import { aiProvisioningWorker } from '@/workers/aiProvisioningWorker';
 import { socialMediaSyncWorker } from '@/workers/socialMediaSyncWorker';
-import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
-import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
+import { workflowsWorker } from '@/workers/workflowsWorker';
+import { conversationalFlowWorker } from '@/workers/conversationalFlowWorker';
+// import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
+// import { heicRenditionQueue } from '@/queues/heicRenditionQueue';
 import { videoRenditionQueue } from '@/queues/videoRenditionQueue';
 config()
 
@@ -64,6 +73,7 @@ process.on('uncaughtException', error => {
 
 class WorkerService {
   private isShuttingDown = false
+  private personalizationQueue: Bull.Queue | null = null
   private automationTemplateCleanupTimer: NodeJS.Timeout | null = null
 
   async start(): Promise<void> {
@@ -79,7 +89,7 @@ class WorkerService {
       })
 
       initializeBotRegistry()
-
+      //
       logger.info('Initializing Vespa queue (producer)...')
       await vespaQueue.initialize()
 
@@ -89,12 +99,15 @@ class WorkerService {
       // const activityClassificationEnabled =
       //   appConfig.activityClassificationWorkerEnabled
       // const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
-      const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
+      // Disabled (not yet brought up)
+      // const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       // Disabled (LLM)
       // const proactiveNudgeWorkerEnabled = appConfig.proactiveNudgeWorkerEnabled
-      const callValidationEnabled = appConfig.callValidationWorkerEnabled
+      // Disabled (not yet brought up)
+      // const callValidationEnabled = appConfig.callValidationWorkerEnabled
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       // Disabled (LLM)
       // const messageClassificationEnabled = appConfig.messageClassificationEnabled
       const enableNotificationProducer = appConfig.notificationProducerEnabled;
@@ -102,23 +115,27 @@ class WorkerService {
       if (vespaEnabled) {
         await vespaWorker.start()
         if (workerSchedulerEnabled) {
-          await workerScheduler.start()
+          const redis = schedulerRedisConfig()
+          this.personalizationQueue = await startPersonalizationSyncQueue(redis)
+          await removeRetiredQueues(redis)
         } else {
           logger.info('Worker scheduler is disabled (ENABLE_WORKER_SCHEDULER=false)')
         }
-      } else if (notificationWorkerEnabled) {
-        logger.info('Starting notification worker service...')
-        // Redis connection is required for notification worker checks
-        await redisService.connect()
-        
-        // Initialize real-time notification service (Producer) for CallTimeoutWorker
-        await realTimeNotificationService.initialize()
-
-        await notificationWorker.startWorker()
-        
-        logger.info('Starting call timeout worker service...')
-        await callTimeoutWorker.startWorker()
-      } 
+      }
+      // Disabled (not yet brought up)
+      // else if (notificationWorkerEnabled) {
+      //   logger.info('Starting notification worker service...')
+      //   // Redis connection is required for notification worker checks
+      //   await redisService.connect()
+      //
+      //   // Initialize real-time notification service (Producer) for CallTimeoutWorker
+      //   await realTimeNotificationService.initialize()
+      //
+      //   await notificationWorker.startWorker()
+      //
+      //   logger.info('Starting call timeout worker service...')
+      //   await callTimeoutWorker.startWorker()
+      // }
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.start()
@@ -126,10 +143,11 @@ class WorkerService {
 
       // Google Drive import worker. When disabled, the API process runs imports
       // in-process as a fallback (see collectionController.uploadFromDriveLink).
-      if (appConfig.enableDriveImportWorker) {
-        logger.info('Starting Drive import worker...')
-        startDriveImportWorker()
-      }
+      // Disabled (not yet brought up)
+      // if (appConfig.enableDriveImportWorker) {
+      //   logger.info('Starting Drive import worker...')
+      //   startDriveImportWorker()
+      // }
 
       // Async OCR (Docling/LightOn) scheduler roles — fire-and-forget loops.
       // Disabled (LLM)
@@ -160,10 +178,11 @@ class WorkerService {
       //   await proactiveNudgeWorker.start()
       // }
 
-      if (callValidationEnabled) {
-        logger.info('Starting call validation worker service...');
-        await callValidationWorker.start();
-      }
+      // Disabled (not yet brought up)
+      // if (callValidationEnabled) {
+      //   logger.info('Starting call validation worker service...');
+      //   await callValidationWorker.start();
+      // }
 
       if (socialMediaSyncEnabled) {
         logger.info('Initializing email classification queue (producer)...');
@@ -172,6 +191,15 @@ class WorkerService {
         socialMediaSyncWorker.start();
       }
 
+      if (workflowsEnabled) {
+        logger.info('Starting workflows worker...');
+        await workflowsWorker.start();
+      }
+
+      if (appConfig.workflows.conversationalFlow.workerEnabled) {
+        logger.info('Starting conversations worker...');
+        await conversationalFlowWorker.start();
+      }
       // LLM auto-tagging of messages (message act + thread type). The API process enqueues,
       // this worker consumes. Both sides call initialize(), which no-ops when the flag is
       // off — so with it off nothing is produced either, and no backlog builds up.
@@ -188,36 +216,41 @@ class WorkerService {
       //   await decisionEvaluationWorker.start();
       // }
 
-      logger.info('Initializing scheduled message queue...');
-      const { scheduledMessageQueue } = await import('@/queues/scheduledMessageQueue');
-      await scheduledMessageQueue.initialize();
+      // Disabled (not yet brought up)
+      // logger.info('Initializing scheduled message queue...');
+      // const { scheduledMessageQueue } = await import('@/queues/scheduledMessageQueue');
+      // await scheduledMessageQueue.initialize();
 
       // Initialize recording cleanup queue (daily cron to delete expired recordings)
-      logger.info('Initializing recording cleanup queue...');
-      const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');
-      await recordingCleanupQueue.initialize();
+      // Disabled (not yet brought up)
+      // logger.info('Initializing recording cleanup queue...');
+      // const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');
+      // await recordingCleanupQueue.initialize();
 
       // HLS → MP4 stitch worker. Queue-based and CPU/disk-heavy (ffmpeg), so it
       // is isolated behind its own flag: deploy a dedicated stitch node by enabling
       // ONLY ENABLE_STITCH_WORKER. The API never consumes (enqueue is producer-only).
-      if (appConfig.enableStitchWorker) {
-        logger.info('Starting recording stitch worker...');
-        const { stitchWorker } = await import('@/workers/stitchWorker');
-        stitchWorker.start();
-      }
+      // Disabled (not yet brought up)
+      // if (appConfig.enableStitchWorker) {
+      //   logger.info('Starting recording stitch worker...');
+      //   const { stitchWorker } = await import('@/workers/stitchWorker');
+      //   stitchWorker.start();
+      // }
 
       // Ozonetel call-recording transcription consumer. Holds a Bull job for up to ~45 min
       // while the Python agent works, so it runs only on pods with this flag set.
-      if (appConfig.enableCallTranscriptionWorker) {
-        logger.info('Starting call transcription worker...');
-        callTranscriptionQueue.startConsumer();
-      }
+      // Disabled (not yet brought up)
+      // if (appConfig.enableCallTranscriptionWorker) {
+      //   logger.info('Starting call transcription worker...');
+      //   callTranscriptionQueue.startConsumer();
+      // }
 
       // HEIC → WebP renditions. Always consumed here: the decode runs on a
       // worker_threads pool
-      logger.info('Starting HEIC rendition worker...');
-      await heicRenditionQueue.initialize();
-      heicRenditionQueue.startProcessing();
+      // Disabled (not yet brought up)
+      // logger.info('Starting HEIC rendition worker...');
+      // await heicRenditionQueue.initialize();
+      // heicRenditionQueue.startProcessing();
 
       // Compatible video renditions (ffmpeg H.264 SDR). CPU-heavy and needs the
       // ffmpeg binary, so opt-in per deployment like the stitch worker.
@@ -234,60 +267,74 @@ class WorkerService {
         await scheduledMessageWorker.start();
       }
 
-      if (appConfig.enableStageEtaDeadlineWorker) {
-        logger.info('Starting stage ETA deadline worker...');
-        await stageEtaDeadlineWorker.start();
-      }
-
-      if (appConfig.enableEtaDeadlineWorker) {
-        logger.info('Starting ETA deadline worker...');
-        await etaDeadlineWorker.start();
-      }
-
-      // Disabled (Automations)
-      // if (appConfig.enableAutomationWorker) {
-      //   logger.info('Initializing notification service for automation worker...');
-      //   await notificationService.initialize();
-      //   logger.info('Initializing automations module...');
-      //   const { initializeAutomations } = await import('@/automations');
-      //   await initializeAutomations();
-      //   const { automationWorker } = await import('@/automations/queue/automation.worker');
-      //   logger.info('Starting automation run worker...');
-      //   await automationWorker.start();
-      //   const { automationScheduleWorker } = await import(
-      //     '@/automations/queue/automation-schedule.worker'
-      //   );
-      //   logger.info('Starting automation schedule worker...');
-      //   await automationScheduleWorker.start();
-
-      //   const { deskLabelBackfillWorker } = await import(
-      //     '@/automations/queue/desk-label-backfill.worker'
-      //   );
-      //   logger.info('Starting desk auto-label backfill worker...');
-      //   await deskLabelBackfillWorker.start();
-
-      //   const { cleanupUnreferencedAutomationTemplates } = await import(
-      //     '@/automations/services/automation-template.service'
-      //   );
-      //   const cleanupTemplates = (): void => {
-      //     void cleanupUnreferencedAutomationTemplates()
-      //       .then((removed) => {
-      //         if (removed > 0) {
-      //           logger.info(`[automations] Cleaned up ${removed} unreferenced templates`);
-      //         }
-      //       })
-      //       .catch((error) => logger.error('[automations] Template cleanup failed', error));
-      //   };
-      //   cleanupTemplates();
-      //   this.automationTemplateCleanupTimer = setInterval(cleanupTemplates, 60 * 60 * 1000);
-      //   this.automationTemplateCleanupTimer.unref();
+      // Disabled (not yet brought up)
+      // if (appConfig.enableStageEtaDeadlineWorker) {
+      //   logger.info('Starting stage ETA deadline worker...');
+      //   await stageEtaDeadlineWorker.start();
       // }
+
+      // Disabled (not yet brought up)
+      // if (appConfig.enableEtaDeadlineWorker) {
+      //   logger.info('Starting ETA deadline worker...');
+      //   await etaDeadlineWorker.start();
+      // }
+
+      if (appConfig.enableAutomationWorker) {
+        logger.info('Initializing notification service for automation worker...');
+        await notificationService.initialize();
+        logger.info('Initializing automations module...');
+        const { initializeAutomations } = await import('@/automations');
+        await initializeAutomations();
+        const { automationWorker } = await import('@/automations/queue/automation.worker');
+        logger.info('Starting automation run worker...');
+        await automationWorker.start();
+        const { automationScheduleWorker } = await import(
+          '@/automations/queue/automation-schedule.worker'
+        );
+        logger.info('Starting automation schedule worker...');
+        await automationScheduleWorker.start();
+
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        logger.info('Starting desk auto-label backfill worker...');
+        await deskLabelBackfillWorker.start();
+
+        // Disabled (deletes objects from the chat-documents bucket; the worker SA has no delete grant)
+        // const { cleanupUnreferencedAutomationTemplates } = await import(
+        //   '@/automations/services/automation-template.service'
+        // );
+        // const cleanupTemplates = (): void => {
+        //   void cleanupUnreferencedAutomationTemplates()
+        //     .then((removed) => {
+        //       if (removed > 0) {
+        //         logger.info(`[automations] Cleaned up ${removed} unreferenced templates`);
+        //       }
+        //     })
+        //     .catch((error) => logger.error('[automations] Template cleanup failed', error));
+        // };
+        // cleanupTemplates();
+        // this.automationTemplateCleanupTimer = setInterval(cleanupTemplates, 60 * 60 * 1000);
+        // this.automationTemplateCleanupTimer.unref();
+      }
 
       if (appConfig.enableEmailFetchWorker) {
         logger.info('Initializing notification service for email refetch worker...');
         await notificationService.initialize();
         logger.info('Starting email refetch worker...');
         await emailFetchWorker.start();
+      }
+
+      // Gmail notifications over Pub/Sub StreamingPull (no public push endpoint).
+      if (appConfig.enableGmailPullWorker) {
+        if (appConfig.google.pubsubDeliveryMode === 'pull') {
+          logger.info('Initializing notification service for Gmail pull worker...');
+          await notificationService.initialize();
+          logger.info('Starting Gmail Pub/Sub pull worker...');
+          await gmailPubSubPullWorker.start();
+        } else {
+          logger.warn('ENABLE_GMAIL_PULL_WORKER is set but GOOGLE_PUBSUB_DELIVERY_MODE is push; not starting the Gmail pull worker');
+        }
       }
 
       // Calendar sync consumers. The API owns the Google/Microsoft webhook
@@ -312,11 +359,10 @@ class WorkerService {
       //   await teamIntelligenceWorker.start();
       // }
 
-      // Disabled (LLM)
-      // if (appConfig.enableEmailClassificationWorker) {
-      //   logger.info('Starting email classification worker...');
-      //   await emailClassificationWorker.start();
-      // }
+      if (appConfig.enableEmailClassificationWorker) {
+        logger.info('Starting email classification worker...');
+        await emailClassificationWorker.start();
+      }
 
       // Disabled (LLM)
       // if (appConfig.radar.enabled) {
@@ -416,32 +462,37 @@ class WorkerService {
       // const activityClassificationEnabled =
       //   appConfig.activityClassificationWorkerEnabled
       // const ticketCleanupEnabled = appConfig.ticketCleanupWorkerEnabled
-      const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
-      const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
+      // Disabled (not yet brought up)
+      // const notificationWorkerEnabled = appConfig.notificationWorkerEnabled
       // Disabled (LLM)
       // const proactiveNudgeWorkerEnabled = appConfig.proactiveNudgeWorkerEnabled
-      const callValidationEnabled = appConfig.callValidationWorkerEnabled
+      // Disabled (not yet brought up)
+      // const callValidationEnabled = appConfig.callValidationWorkerEnabled
       const socialMediaSyncEnabled = appConfig.enableSocialMediaSyncWorker
+      const workflowsEnabled = appConfig.workflows.workerEnabled
       // Disabled (LLM)
       // const messageClassificationEnabled = appConfig.messageClassificationEnabled
 
       if (vespaEnabled) {
         await vespaWorker.shutdown()
-        if (workerSchedulerEnabled) {
-          await workerScheduler.stop()
+        if (this.personalizationQueue) {
+          await this.personalizationQueue.close()
+          this.personalizationQueue = null
         }
-      } else if (notificationWorkerEnabled) {
-        await notificationWorker.shutdown()
-        await callTimeoutWorker.shutdown()
-        await redisService.disconnect()
       }
+      // Disabled (not yet brought up)
+      // else if (notificationWorkerEnabled) {
+      //   await notificationWorker.shutdown()
+      //   await callTimeoutWorker.shutdown()
+      //   await redisService.disconnect()
+      // }
 
       if (vespaFileWorkerEnabled) {
         await vespaFileWorker.shutdown()
       }
-      if (appConfig.enableDriveImportWorker) {
-        await closeDriveImportQueue()
-      }
+      // if (appConfig.enableDriveImportWorker) {
+      //   await closeDriveImportQueue()
+      // }
       // Disabled (LLM)
       // if (activityClassificationEnabled) {
       //   await activityClassificationWorkerService.stop()
@@ -455,9 +506,10 @@ class WorkerService {
       //   await proactiveNudgeWorker.shutdown()
       // }
 
-      if (callValidationEnabled) {
-        await callValidationWorker.stop();
-      }
+      // Disabled (not yet brought up)
+      // if (callValidationEnabled) {
+      //   await callValidationWorker.stop();
+      // }
 
       if (socialMediaSyncEnabled) {
         socialMediaSyncWorker.stop();
@@ -474,24 +526,38 @@ class WorkerService {
       //   await decisionEvaluationWorker.shutdown();
       // }
 
-      await heicRenditionQueue.shutdown();
-      await videoRenditionQueue.shutdown();
+      if (appConfig.workflows.conversationalFlow.workerEnabled) {
+        await conversationalFlowWorker.stop()
+      }
+
+      if (workflowsEnabled) {
+        await workflowsWorker.stop()
+        const { shutdownWorkflows } = await import('@/workflowsV2/runtime')
+        await shutdownWorkflows()
+      }
+
+      // Disabled (not yet brought up)
+      // await heicRenditionQueue.shutdown();
 
       if (appConfig.enableScheduledMessageWorker) {
         await scheduledMessageWorker.shutdown();
       }
 
-      if (appConfig.enableStageEtaDeadlineWorker) {
-        await stageEtaDeadlineWorker.shutdown();
-      }
+      // Disabled (not yet brought up)
+      // if (appConfig.enableStageEtaDeadlineWorker) {
+      //   await stageEtaDeadlineWorker.shutdown();
+      // }
 
-      if (appConfig.enableEtaDeadlineWorker) {
-        await etaDeadlineWorker.shutdown();
-      }
+      // Disabled (not yet brought up)
+      // if (appConfig.enableEtaDeadlineWorker) {
+      //   await etaDeadlineWorker.shutdown();
+      // }
 
       if (appConfig.enableEmailFetchWorker) {
         await emailFetchWorker.shutdown();
       }
+
+      await gmailPubSubPullWorker.shutdown();
 
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();
@@ -504,14 +570,14 @@ class WorkerService {
       //   await teamIntelligenceWorker.shutdown();
       // }
 
-      // Disabled (LLM)
-      // if (appConfig.enableEmailClassificationWorker) {
-      //   await emailClassificationWorker.shutdown();
-      // }
-
-      if (appConfig.enableCallTranscriptionWorker) {
-        await callTranscriptionQueue.close();
+      if (appConfig.enableEmailClassificationWorker) {
+        await emailClassificationWorker.shutdown();
       }
+
+      // Disabled (not yet brought up)
+      // if (appConfig.enableCallTranscriptionWorker) {
+      //   await callTranscriptionQueue.close();
+      // }
 
       // Disabled (LLM)
       // if (appConfig.radar.enabled) {
@@ -564,6 +630,4 @@ class WorkerService {
 }
 
 const worker = new WorkerService()
-// Disabled (all workers)
-// worker.start()
-if ((false as boolean)) void worker.start()
+worker.start()

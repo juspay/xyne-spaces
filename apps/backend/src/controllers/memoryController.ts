@@ -403,7 +403,7 @@ export class MemoryController {
       const { sessionId } = payload;
 
       // Build Redis key
-      const redisKey = buildSessionRecordingKey(sessionId);
+      const redisKey = buildSessionRecordingKey(userId, sessionId);
 
       // Store batch with all session info needed for GCS reconstruction
       const batchData: Record<string, any> = {

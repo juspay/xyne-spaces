@@ -27,6 +27,7 @@ export function approveProposalTx(self: WorkflowRepository, proposalId: string) 
     const siblings = await tx.workflow.findMany({
       where: {
         workflowType: 'Automations',
+        workspaceId: proposal.workspaceId,
         automationSeriesId: rootId,
         status: 'PENDING_APPROVAL',
         id: { not: proposal.id },

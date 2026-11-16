@@ -53,6 +53,26 @@ import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { buildFormFields, type TicketDynamicFieldValue } from './form-fields';
 import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 
+const MAX_INDEXABLE_OBJECT_BYTES = 100 * 1024 * 1024;
+
+type ObjectSizeReader = { headObject(path: string): Promise<{ size?: number } | null> };
+
+const toStorageKey = (key: string, label: string): string => {
+  const trimmed = key.trim();
+  if (!trimmed || trimmed.startsWith('/') || trimmed.split('/').some((s) => s === '..' || s === '.')) {
+    throw new Error(`${label}: refusing storage key "${trimmed}"`);
+  }
+  return trimmed;
+};
+
+const assertIndexableSize = async (storage: ObjectSizeReader, key: string, label: string): Promise<void> => {
+  const info = await storage.headObject(key);
+  if (!info) throw new Error(`${label}: object ${key} not found`);
+  if (info.size != null && info.size > MAX_INDEXABLE_OBJECT_BYTES) {
+    throw new Error(`${label}: object ${key} is ${info.size} bytes, above the ${MAX_INDEXABLE_OBJECT_BYTES} byte indexing limit`);
+  }
+};
+
 type ChannelsSchema = Schema['tables']['channels'];
 type MessagesSchema = Schema['tables']['messages'];
 type ProjectsSchema = Schema['tables']['projects'];
@@ -381,6 +401,23 @@ export const mapChannel = async (
     orgId: effectiveOrgId,
   };
 }
+
+/**
+ * True when no message in the thread is newer than this one. With
+ * VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY=true (set on the backfill worker only),
+ * only that message refreshes the thread's other messages and its ticket on feed: a backfill
+ * re-feeds every message, and doing it on each one costs N×(N−1) updates per thread. Live
+ * workers leave it off, so an edit to an older message still reaches the rest of its thread.
+ */
+const isLatestMessageInThread = async (messageId: string, conversationId: string): Promise<boolean> => {
+  const latest = await db.message.findFirst({
+    where: { conversationId },
+    orderBy: [{ createdAt: 'desc' }, { messageId: 'desc' }],
+    select: { messageId: true },
+  });
+  return !latest || latest.messageId === messageId;
+};
+
 export const mapAndUpdatePreviousMessagesMentions = async (
   messageId: string,
   conversationId: string,
@@ -463,7 +500,14 @@ export const mapMessage = async (
 
   const messageLinks = extractLinksFromContent(args.content || '');
 
-  const threadInfo = await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId);
+  // Older messages still get the current thread fields on their own doc; they just don't
+  // push them to the rest of the thread.
+  const syncThread =
+    !config.vespa.backfillWorkerFanoutLastMessageOnly ||
+    (await isLatestMessageInThread(args.messageId, args.conversationId));
+  const threadInfo = syncThread
+    ? await mapAndUpdatePreviousMessagesMentions(args.messageId, args.conversationId)
+    : await getThreadInfo(args.conversationId);
 
   // Tag names, denormalized onto the doc so search can filter on them. Everything on the
   // thread is indexed as soon as it lands — classifier or person, vocabulary or free-form —
@@ -475,7 +519,9 @@ export const mapMessage = async (
   const threadType = indexableTagNames(parseAppliedTags(conversation.threadType));
 
   // Update parent ticket thread fields if this is a ticket conversation
-  await updateTicketThreadFields(args.conversationId);
+  if (syncThread) {
+    await updateTicketThreadFields(args.conversationId);
+  }
 
   // Capturing signal for a new message  
   messageSignalService.captureCreateMessage({
@@ -810,7 +856,9 @@ export const mapCollection = async (
   } else if (attachment?.url) {
     try {
       const storageService = getStorageService();
-      const buffer = await storageService.getFileBuffer(attachment!.url);
+      const canvasKey = toStorageKey(attachment!.url, `canvas ${args.id}`);
+      await assertIndexableSize(storageService, canvasKey, `canvas ${args.id}`);
+      const buffer = await storageService.getFileBuffer(canvasKey);
 
       // Multi-engine fallback ladder (PDFs: Docling/Paddle → Gemini → PdfJs;
       // other types: Docling → local strategy).
@@ -1058,7 +1106,9 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>, worksp
 
       // Use transcript bucket for fetching
       const storageService = getStorageService(config.gcs.transcriptionBucketName);
-      const buffer = await storageService.getFileBuffer(gcsPath);
+      const transcriptKey = toStorageKey(gcsPath, `transcript ${args.id}`);
+      await assertIndexableSize(storageService, transcriptKey, `transcript ${args.id}`);
+      const buffer = await storageService.getFileBuffer(transcriptKey);
       fileSize = buffer.length;
 
       const textStrategy = new TextStrategy();
@@ -1128,8 +1178,8 @@ export const mapCall = async (args: Call, workspaceId?: string, orgId?: string):
     : null;
 
   const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
-    workspaceId,
-    () => Promise.resolve(channel?.workspaceId),
+    args.workspaceId || channel?.workspaceId || workspaceId,
+    undefined,
     orgId,
   );
 
@@ -1370,7 +1420,9 @@ export const mapFile = async (
       }
 
       const storageService = getStorageService();
-      const buffer = await storageService.getFileBuffer(gcsPath);
+      const fileKey = toStorageKey(gcsPath, `file ${args.id}`);
+      await assertIndexableSize(storageService, fileKey, `file ${args.id}`);
+      const buffer = await storageService.getFileBuffer(fileKey);
       fileSize = buffer.length;
 
       // Use FileProcessor with Docling fallback support
@@ -1476,8 +1528,10 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
   const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
 
   const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
-    workspaceId,
-    channelId ? () => db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } }).then(r => r?.workspaceId) : undefined,
+    email.workspaceId ||
+      (channelId ? await db.channel.findUnique({ where: { id: channelId }, select: { workspaceId: true } }).then(r => r?.workspaceId) : undefined) ||
+      workspaceId,
+    undefined,
     orgId
   );
 

@@ -7,9 +7,16 @@ import {
   MAX_RETRIES,
   isLocalhost,
   ENABLE_REMOTE_LOGGING,
-  API_BASE_URL,
 } from '../config';
 import axios from 'axios';
+import {
+  claimAxiosRetry,
+  isBackendUrl,
+  isRefreshSessionUrl,
+  refreshSessionOnce,
+  resolveAxiosUrl,
+  type RetryableRequestConfig,
+} from '../services/clients/sessionRefresh';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -610,41 +617,56 @@ setReactNativeBridgeLogger(logger);
 // Every request to our own backend carries the persistent device key, whatever the
 // transport: bare `axios` (bypasses apiInstance's interceptor) and `fetch`. Matching is
 // by resolved URL prefix so third-party requests (presigned uploads, CDNs) never get it.
+//
+// The same two hooks also do the session refresh for those transports: a 401 from our
+// backend → one shared /auth/refresh-session call → the request is sent again once. The
+// backend never refreshes on its own, so without this every bare-axios / fetch call would
+// fail after the JWT cookie expired. (apiInstance has the same logic in its own
+// interceptor.) A refresh that fails leaves the 401 to the caller; nothing here logs out.
 const DEVICE_KEY_HEADER = 'x-device-id';
-
-const isBackendUrl = (rawUrl: string): boolean => {
-  try {
-    const base = new URL(API_BASE_URL, window.location.href).href.replace(/\/+$/, '');
-    const target = new URL(rawUrl, window.location.href).href;
-    return target === base || target.startsWith(`${base}/`) || target.startsWith(`${base}?`);
-  } catch {
-    return false;
-  }
-};
 
 axios.interceptors.request.use(config => {
   const deviceKey = logger.clientSessionId;
-  const url =
-    config.baseURL && config.url && !/^[a-z][a-z\d+.-]*:|^\/\//i.test(config.url)
-      ? `${config.baseURL.replace(/\/+$/, '')}/${config.url.replace(/^\/+/, '')}`
-      : (config.url ?? '');
+  const url = resolveAxiosUrl(config);
   if (deviceKey && isBackendUrl(url) && !config.headers[DEVICE_KEY_HEADER]) {
     config.headers[DEVICE_KEY_HEADER] = deviceKey;
   }
   return config;
 });
 
-const nativeFetch = window.fetch.bind(window);
-window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const deviceKey = logger.clientSessionId;
-  const url = input instanceof Request ? input.url : String(input);
-  if (!deviceKey || !isBackendUrl(url)) return nativeFetch(input, init);
+axios.interceptors.response.use(
+  response => response,
+  async (error: unknown) => {
+    if (!axios.isAxiosError(error)) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    const config = error.config as (typeof error.config & RetryableRequestConfig) | undefined;
+    if (!claimAxiosRetry(error.response?.status, config) || !config) return Promise.reject(error);
+    if ((await refreshSessionOnce()) !== 'ok') return Promise.reject(error);
+    return axios(config);
+  },
+);
 
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = input instanceof Request ? input.url : String(input);
+  if (!isBackendUrl(url)) return nativeFetch(input, init);
+
+  const deviceKey = logger.clientSessionId;
   const headers = new Headers(
     init?.headers ?? (input instanceof Request ? input.headers : undefined),
   );
-  if (!headers.has(DEVICE_KEY_HEADER)) headers.set(DEVICE_KEY_HEADER, deviceKey);
-  return nativeFetch(input, { ...init, headers });
+  if (deviceKey && !headers.has(DEVICE_KEY_HEADER)) headers.set(DEVICE_KEY_HEADER, deviceKey);
+
+  // A Request body can be read once; keep a clone so the request can be re-sent after a
+  // refresh. (A ReadableStream body in `init` cannot be replayed; those requests get no retry.)
+  const retryInput = input instanceof Request ? input.clone() : input;
+  const response = await nativeFetch(input, { ...init, headers });
+  if (response.status !== 401 || isRefreshSessionUrl(url) || init?.body instanceof ReadableStream) {
+    return response;
+  }
+  if ((await refreshSessionOnce()) !== 'ok') return response;
+  return nativeFetch(retryInput, { ...init, headers });
 };
 
 export const cleanupLogger = (): void => {

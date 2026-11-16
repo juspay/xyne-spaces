@@ -86,6 +86,8 @@ const App = (): ReactElement => {
           zero: null,
           viewMode: detectPlatform() === 'mobile' ? 'full' : 'mini',
           externalLobbyUrl: anchor.href,
+          // A link can come from anyone, so it never joins with a live mic or camera.
+          joinMediaOverrides: { mic: false, camera: false },
         });
         return;
       }

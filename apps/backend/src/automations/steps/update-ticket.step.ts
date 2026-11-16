@@ -1,3 +1,4 @@
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { TicketStatusV2, TicketPriority, BoardType, ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
@@ -47,13 +48,20 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     const prisma = DatabaseClient.getInstance();
 
     if (config.assignedTo !== undefined) {
-      const assignedTo = config.assignedTo as string;
+      const assigneeId = config.assignedTo as string;
+      const assignee = await DatabaseClient.getInstance().user.findFirst({
+        where: { id: assigneeId, workspaceId: context.automation.workspaceId },
+        select: { id: true },
+      });
+      if (!assignee) {
+        throw new Error(`UPDATE_TICKET: assignee ${assigneeId} is not a member of this workspace`);
+      }
       const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true, userGroupId: true, boardId: true } });
-      await repositories.tickets.updateTicketAssignee(ticketId, assignedTo, updatedBy);
+      await repositories.tickets.updateTicketAssignee(ticketId, assigneeId, updatedBy);
 
       // Same as ASSIGN_TICKET: the repository does not touch the workload counters.
       if (prev?.userGroupId) {
-        await handleTicketAssignmentChange(assignedTo, prev.assignedTo, prev.userGroupId, prev.boardId, updatedBy);
+        await handleTicketAssignmentChange(assigneeId, prev.assignedTo, prev.userGroupId, prev.boardId, updatedBy);
       }
     }
 
@@ -94,8 +102,14 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     }
 
     const fields: Parameters<typeof repositories.tickets.updateTicketFields>[1] = {};
-    if (config.title !== undefined) fields.title = config.title as string;
-    if (config.description !== undefined) fields.description = config.description as string;
+    if (config.title !== undefined) {
+      const title = extractPlainTextFromHtml(config.title as string).trim();
+      if (!title) {
+        throw new Error('UPDATE_TICKET: title must contain text');
+      }
+      fields.title = title;
+    }
+    if (config.description !== undefined) fields.description = sanitizeMessageContent(config.description as string);
     if (config.priority !== undefined) {
       const normalized = (config.priority as string).toUpperCase();
       if (Object.values(TicketPriority).includes(normalized as TicketPriority)) {

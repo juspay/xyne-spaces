@@ -8,7 +8,9 @@ import { redisService } from './redisService';
 import { sendLocalIosPush } from './localIosPush';
 import { getNotificationFcmPayloadTruncated } from '@/services/otel';
 import { Prisma } from '@prisma/client';
-import { SessionStatus } from '@xyne/shared';
+import { AuthSessionStatus } from './authSessionService';
+import { getOrgMemberIdForUserQuery } from '@/bypassAcl/notificationServices';
+import { getNotificationPushSessionSource, type PushSessionFallbackReason } from '@/services/otel/notificationMetrics';
 
 type CachedAccessToken = {
   accessToken: string;
@@ -159,7 +161,20 @@ export type MobilePushRegistration = {
   voipToken?: string;
   platform?: string;
   deviceId?: string;
+  /** auth_sessions.id (JWT `sid`) the token is registered against. */
   sessionId: string;
+  appVersion?: string;
+  /** Org-scoped device identity (req.user.memberId + x-device-id): fallback lookup of the auth session when `sessionId` does not resolve. */
+  orgMemberId?: string;
+  deviceKey?: string;
+};
+
+export type PushSessionTarget = {
+  /** auth_sessions.id */
+  id: string;
+  token: string;
+  voipToken?: string;
+  platform: string;
   appVersion?: string;
 };
 
@@ -235,6 +250,15 @@ class FcmPushService {
     return this.sendEnabled && !!this.projectId && !!this.accessTokenManager;
   }
 
+  /**
+   * Push tokens live on the org-level auth session (one per device sign-in), so every
+   * per-user operation resolves the user's org member first. Runs as system: delivery
+   * happens in workers with no tenant context and the recipient's workspace is unknown.
+   */
+  private orgMemberIdOf(userId: string): Promise<string | null> {
+    return getOrgMemberIdForUserQuery(userId);
+  }
+
   async registerToken(userId: string, payload: MobilePushRegistration): Promise<void> {
     const fcmTokenPreview = payload.fcmToken
       ? `${payload.fcmToken.slice(0, 10)}...${payload.fcmToken.slice(-8)}`
@@ -266,28 +290,50 @@ class FcmPushService {
       userId,
       fcmTokenPreview,
     });
-    const sessionEntry = await db.userSession.findFirst({
-      where: { id: payload.sessionId, userId },
-      select: {
-        id: true,
-        deviceId: true,
-        status: true,
-        refreshTokenExpiry: true,
-      },
+    const orgMemberId = await this.orgMemberIdOf(userId);
+    if (!orgMemberId) {
+      logger.warn('[FCM] registerToken step=user_not_found', { userId, fcmTokenPreview });
+      return;
+    }
+    const sessionSelect = { id: true, deviceKey: true, status: true, refreshTokenExpiry: true } as const;
+    let sessionEntry = await db.authSession.findFirst({
+      where: { id: payload.sessionId, orgMemberId },
+      select: sessionSelect,
     });
+
+    // Fallback: the device's active auth session by (orgMemberId, deviceKey) when the JWT's
+    // session id does not resolve (e.g. a token minted before the session was replaced).
+    if (!sessionEntry && payload.orgMemberId && payload.deviceKey) {
+      sessionEntry = await db.authSession.findFirst({
+        where: {
+          orgMemberId: payload.orgMemberId,
+          deviceKey: payload.deviceKey,
+          status: AuthSessionStatus.ACTIVE,
+          refreshTokenExpiry: { gt: new Date() },
+        },
+        select: sessionSelect,
+      });
+      if (sessionEntry) {
+        logger.info('[FCM] registerToken step=session_resolved_by_device', {
+          userId,
+          deviceKey: payload.deviceKey,
+        });
+      }
+    }
 
     if (!sessionEntry) {
       logger.warn('[FCM] registerToken step=session_not_found', {
         userId,
         fcmTokenPreview,
         voipTokenPreview,
+        hasDeviceKey: !!payload.deviceKey,
       });
       return;
     }
 
     // Pushes skip dead rows; writing here would also clear this token from the user's live sessions.
     const isSessionLive =
-      sessionEntry.status === SessionStatus.ACTIVE && sessionEntry.refreshTokenExpiry > new Date();
+      sessionEntry.status === AuthSessionStatus.ACTIVE && sessionEntry.refreshTokenExpiry > new Date();
     if (!isSessionLive) {
       logger.warn('[FCM] registerToken step=session_not_live', {
         userId,
@@ -301,7 +347,7 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=session_resolved', {
       userId,
-      sessionDeviceId: sessionEntry.deviceId ?? null,
+      sessionDeviceKey: sessionEntry.deviceKey,
     });
 
     const composedToken = this.composeStoredToken(payload.platform, payload.fcmToken);
@@ -323,13 +369,15 @@ class FcmPushService {
       composedVoipTokenPreview,
     });
 
-    const nextDeviceId = payload.deviceId ?? sessionEntry.deviceId ?? null;
+    // The auth session is already keyed by the device (deviceKey); the client's deviceId is
+    // informational only and is not stored.
+    const nextDeviceId = payload.deviceId ?? sessionEntry.deviceKey;
 
     // Merge appVersion into deviceInfo if provided
     let deviceInfoUpdate: string | undefined;
     if (payload.appVersion) {
       try {
-        const existing = await db.userSession.findUnique({
+        const existing = await db.authSession.findUnique({
           where: { id: sessionEntry.id },
           select: { deviceInfo: true },
         });
@@ -346,18 +394,17 @@ class FcmPushService {
       composedTokenPreview,
       composedVoipTokenPreview,
     });
-    await db.userSession.update({
+    await db.authSession.update({
       where: { id: sessionEntry.id },
       data: {
         fcmToken: composedToken,
         voipToken: composedVoipToken,
-        deviceId: nextDeviceId,
         ...(deviceInfoUpdate ? { deviceInfo: deviceInfoUpdate } : {}),
         updatedAt: new Date(),
       },
     });
 
-    const duplicateConditions: Prisma.UserSessionWhereInput[] = [{ fcmToken: composedToken }];
+    const duplicateConditions: Prisma.AuthSessionWhereInput[] = [{ fcmToken: composedToken }];
 
     if (composedVoipToken) {
       logger.info('[FCM] registerToken step=add_duplicate_condition_voip', {
@@ -374,16 +421,15 @@ class FcmPushService {
       composedTokenPreview,
       composedVoipTokenPreview,
     });
-    const duplicateCleanupResult = await db.userSession.updateMany({
+    const duplicateCleanupResult = await db.authSession.updateMany({
       where: {
-        userId,
+        orgMemberId,
         id: { not: sessionEntry.id },
         OR: duplicateConditions,
       },
       data: {
         fcmToken: null,
         voipToken: null,
-        deviceId: null,
       },
     });
 
@@ -402,9 +448,11 @@ class FcmPushService {
 
     this.buildTokenCandidates(token);
 
-    await db.userSession.updateMany({
+    const orgMemberId = await this.orgMemberIdOf(userId);
+    if (!orgMemberId) return;
+    await db.authSession.updateMany({
       where: {
-        userId,
+        orgMemberId,
         ...(sessionId ? { id: sessionId } : {}),
         OR: [
           { fcmToken: token },
@@ -416,27 +464,29 @@ class FcmPushService {
       data: {
         fcmToken: null,
         voipToken: null,
-        deviceId: null,
       },
     });
   }
 
   async unregisterUserTokens(userId: string): Promise<void> {
-    await db.userSession.updateMany({
-      where: { userId },
+    const orgMemberId = await this.orgMemberIdOf(userId);
+    if (!orgMemberId) return;
+    await db.authSession.updateMany({
+      where: { orgMemberId },
       data: {
         fcmToken: null,
         voipToken: null,
-        deviceId: null,
       },
     });
   }
 
   async hasActiveTokens(userId: string): Promise<boolean> {
-    const activeCount = await db.userSession.count({
+    const orgMemberId = await this.orgMemberIdOf(userId);
+    if (!orgMemberId) return false;
+    const activeCount = await db.authSession.count({
       where: {
-        userId,
-        status: SessionStatus.ACTIVE,
+        orgMemberId,
+        status: AuthSessionStatus.ACTIVE,
         refreshTokenExpiry: { gt: new Date() },
         OR: [{ fcmToken: { not: null } }, { voipToken: { not: null } }],
       },
@@ -449,18 +499,19 @@ class FcmPushService {
       return;
     }
 
-    const sessions = await db.userSession.findMany({
+    const orgMemberId = await this.orgMemberIdOf(userId);
+    if (!orgMemberId) return;
+    const sessions = await db.authSession.findMany({
       where: {
-        userId,
-        status: SessionStatus.ACTIVE,
+        orgMemberId,
+        status: AuthSessionStatus.ACTIVE,
         refreshTokenExpiry: { gt: new Date() },
         fcmToken: { not: null },
       },
       select: {
         id: true,
-        userId: true,
         fcmToken: true,
-        deviceId: true,
+        deviceKey: true,
       },
       orderBy: { updatedAt: 'desc' },
     });
@@ -473,10 +524,10 @@ class FcmPushService {
         }
         return {
           sessionId: session.id,
-          userId: session.userId,
+          userId,
           token: parsed.token,
           platform: parsed.platform,
-          deviceId: session.deviceId,
+          deviceId: session.deviceKey,
         } as SessionPushTarget;
       })
       .filter((target): target is SessionPushTarget => target !== null);
@@ -497,7 +548,7 @@ class FcmPushService {
     );
 
     if (successfulSessionIds.length > 0) {
-      await db.userSession.updateMany({
+      await db.authSession.updateMany({
         where: { id: { in: successfulSessionIds } },
         data: { updatedAt: new Date() },
       });
@@ -777,61 +828,96 @@ class FcmPushService {
 
   async clearSessionPushToken(sessionId: string): Promise<void> {
     try {
-      await db.userSession.update({
+      await db.authSession.update({
         where: { id: sessionId },
-        data: { fcmToken: null, voipToken: null, deviceId: null },
+        data: { fcmToken: null, voipToken: null },
       });
     } catch (error) {
       logger.debug('Failed to clear session push token', { error });
     }
   }
 
-  /**
-   * Get active sessions with FCM tokens for a user
-   * Used by notification service to queue mobile push jobs
-   */
-  async getActiveSessionsWithTokens(
-    userId: string
-  ): Promise<Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }>> {
-    const sessions = await db.userSession.findMany({
-      where: {
-        userId,
-        status: SessionStatus.ACTIVE,
-        refreshTokenExpiry: { gt: new Date() },
-        OR: [{ fcmToken: { not: null } }, { voipToken: { not: null } }],
-      },
-      select: { id: true, fcmToken: true, voipToken: true, deviceInfo: true },
-      orderBy: { updatedAt: 'desc' },
+  /** Clear the push tokens of the device's auth session (explicit unregister). */
+  async clearDevicePushToken(orgMemberId: string, deviceKey: string): Promise<void> {
+    await db.authSession.updateMany({
+      where: { orgMemberId, deviceKey, status: AuthSessionStatus.ACTIVE },
+      data: { fcmToken: null, voipToken: null },
     });
+  }
 
-    const results: Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }> = [];
+  /**
+   * Get active sessions with FCM tokens for a user. Used by the notification service to queue
+   * mobile push jobs.
+   *
+   * userId -> orgMemberId -> the member's active auth_sessions with a token (one per device,
+   * independent of workspace). Every lookup is counted with the reason when it comes up empty.
+   */
+  async getActiveSessionsWithTokens(userId: string): Promise<PushSessionTarget[]> {
+    const counter = getNotificationPushSessionSource();
+    let reason: PushSessionFallbackReason;
 
-    for (const session of sessions) {
-      const parsedFcm = session.fcmToken ? this.parseStoredToken(session.fcmToken) : null;
-      const parsedVoip = session.voipToken ? this.parseStoredToken(session.voipToken) : null;
+    const orgMemberId = await this.orgMemberIdOf(userId);
+    if (!orgMemberId) {
+      reason = 'no_org_member';
+    } else {
+      const rows = await db.authSession.findMany({
+        where: {
+          orgMemberId,
+          status: AuthSessionStatus.ACTIVE,
+          refreshTokenExpiry: { gt: new Date() },
+        },
+        select: { id: true, platform: true, fcmToken: true, voipToken: true, deviceInfo: true },
+        orderBy: { updatedAt: 'desc' },
+      });
 
-      if (!parsedFcm) continue;
-
-      let appVersion: string | undefined;
-      if (session.deviceInfo) {
-        try {
-          const deviceInfo = JSON.parse(session.deviceInfo);
-          appVersion = deviceInfo.appVersion;
-        } catch {
-          // ignore malformed deviceInfo
-        }
+      const targets = rows
+        .filter((row) => row.fcmToken)
+        .map((row) => this.toPushTarget(row))
+        .filter((target): target is PushSessionTarget => target !== null);
+      if (targets.length > 0) {
+        counter.add(1, { method: 'new', reason: 'none' });
+        return targets;
       }
 
-      results.push({
-        id: session.id,
-        token: parsedFcm?.token || '',
-        voipToken: parsedVoip?.token,
-        platform: parsedFcm?.platform || parsedVoip?.platform || 'unknown',
-        appVersion,
-      });
+      if (rows.length === 0) {
+        reason = 'no_auth_session';
+      } else if (rows.some((row) => row.platform === 'android' || row.platform === 'ios')) {
+        reason = 'no_fcm_token';
+      } else {
+        reason = 'no_mobile_session';
+      }
     }
 
-    return results;
+    counter.add(1, { method: 'new', reason });
+    return [];
+  }
+
+  private toPushTarget(session: {
+    id: string;
+    fcmToken: string | null;
+    voipToken: string | null;
+    deviceInfo: string | null;
+  }): PushSessionTarget | null {
+    const parsedFcm = session.fcmToken ? this.parseStoredToken(session.fcmToken) : null;
+    const parsedVoip = session.voipToken ? this.parseStoredToken(session.voipToken) : null;
+    if (!parsedFcm) return null;
+
+    let appVersion: string | undefined;
+    if (session.deviceInfo) {
+      try {
+        appVersion = JSON.parse(session.deviceInfo).appVersion;
+      } catch {
+        // ignore malformed deviceInfo
+      }
+    }
+
+    return {
+      id: session.id,
+      token: parsedFcm.token || '',
+      voipToken: parsedVoip?.token,
+      platform: parsedFcm.platform || parsedVoip?.platform || 'unknown',
+      appVersion,
+    };
   }
   /**
    * Direct dispatch to FCM - exposed for worker usage

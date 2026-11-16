@@ -10,7 +10,7 @@ import { buildAttachmentPrompt } from './attachments';
 
 const MCP_STARTUP_TIMEOUT_MS = 60000;
 const MCP_TOOL_TIMEOUT_MS = 600000;
-const SANDBOX_TOOLS = 'Read,Write,Edit,Glob,Grep,Bash';
+const SANDBOX_TOOLS = 'Read,Write,Edit,Glob,Grep';
 
 export function buildClaudeCodeArgs(input: {
   systemPrompt: string;
@@ -36,7 +36,9 @@ export function buildClaudeCodeArgs(input: {
     '--allowedTools',
     `mcp__${input.mcpServerName}`,
     '--permission-mode',
-    input.writable ? 'acceptEdits' : 'bypassPermissions',
+    // Never bypassPermissions: the default mode keeps file tools inside the working directory
+    // (where attachments are written) and denies anything else in non-interactive -p runs.
+    input.writable ? 'acceptEdits' : 'default',
   ];
 }
 

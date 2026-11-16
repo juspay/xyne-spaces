@@ -13,6 +13,10 @@ jest.mock('../triggers/trigger-registry', () => ({
   triggerRegistry: { has: () => false, get: () => null },
 }));
 // marked ships ESM that jest's transform ignores — stub the two calls the resolver makes.
+jest.mock('../util/author-access', () => ({
+  authorCanSeeChannel: async () => true,
+  isActiveWorkspaceAuthor: async () => true,
+}));
 jest.mock('marked', () => ({
   marked: { parse: (t: string) => t, parseInline: (t: string) => t },
 }));
@@ -172,6 +176,19 @@ describe('AutomationExecutor — pause and resume inside a control-flow branch',
         update: async ({ data }: { data: { status: string } }) => {
           execution = { ...execution, ...data };
           return execution;
+        },
+        updateMany: async ({
+          where,
+          data,
+        }: {
+          where: { id: string; status: { in: string[] } };
+          data: { status: string };
+        }) => {
+          if (where.id !== execution.id || !where.status.in.includes(execution.status)) {
+            return { count: 0 };
+          }
+          execution = { ...execution, ...data };
+          return { count: 1 };
         },
       },
       workflowStep: {

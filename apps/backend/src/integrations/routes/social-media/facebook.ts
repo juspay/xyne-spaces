@@ -1,7 +1,7 @@
 import express, { type Request, type Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ChannelType } from '@xyne/shared';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { createMetaDeskTx, addMetaSourcesToChannelTx } from '@/bypassAcl/transactions/metaDesk';
 import { decrypt, encrypt } from '@/services/encryptionService';
@@ -123,7 +123,7 @@ async function subscribePages(pages: FacebookPage[]): Promise<FacebookPage[]> {
 // POST /facebook/oauth/start
 router.post(
   '/facebook/oauth/start',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const parsed = oauthDeskStartSchema.safeParse(req.body);
@@ -161,7 +161,7 @@ router.post(
 // Connects further Pages to an existing Facebook desk; the callback creates only ExternalSource rows.
 router.post(
   '/:channelId/facebook/add-page',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
@@ -196,7 +196,7 @@ router.post(
 // POST /:channelId/facebook/:sourceId/reconnect
 router.post(
   '/:channelId/facebook/:sourceId/reconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId, sourceId } = req.params;
@@ -412,7 +412,7 @@ router.get(
 // POST /:channelId/facebook/:sourceId/disconnect
 router.post(
   '/:channelId/facebook/:sourceId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId, sourceId } = req.params;

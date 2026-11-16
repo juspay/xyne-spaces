@@ -5,6 +5,7 @@ import { db } from '@/database/client';
 import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
+import { validateVespaJob } from '@/zero/vespa-injection/core/jobValidation';
 
 class VespaQueue {
 	private queues: Map<string, Bull.Queue<VespaJob>> = new Map();
@@ -75,6 +76,7 @@ class VespaQueue {
 						delay: 2000,
 					},
 					removeOnComplete: 1000,
+					removeOnFail: 5000,
 				},
 				settings: {
 					stalledInterval: 30 * 1000,    // 30 seconds
@@ -127,6 +129,11 @@ class VespaQueue {
 	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>[]> {
 		if (this.queues.size === 0 || !this.isInitialized) {
 			throw new Error('Vespa queue not initialized Properly');
+		}
+
+		const invalidReason = validateVespaJob(vespaJob, { allowFileSchema: true });
+		if (invalidReason) {
+			throw new Error(`Invalid Vespa job (${invalidReason}): ${String(vespaJob?.schema)}/${String(vespaJob?.jobType)}`);
 		}
 
 		const { schema, jobType, docId } = vespaJob;

@@ -3,16 +3,8 @@ import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
+import { extractEmailDomain, isDomainAllowlisted, isEmailDomainAllowed } from '@/services/emailDomainPolicy';
 import { OrganizationDomainVerificationStatus, Status, WorkspaceType } from '@xyne/shared';
-
-const PERSONAL_EMAIL_DOMAINS = new Set([
-  'gmail.com',
-  'yahoo.com',
-  'outlook.com',
-  'hotmail.com',
-  'icloud.com',
-  'proton.me',
-]);
 
 const MATCHABLE_DOMAIN_STATUSES = [
   OrganizationDomainVerificationStatus.PENDING,
@@ -60,25 +52,23 @@ export class OrgMemberLimitError extends Error {
   }
 }
 
-export class PublicEmailDomainError extends Error {
-  readonly code = 'PUBLIC_EMAIL_DOMAIN_BLOCKED';
+export class EmailDomainNotAllowedError extends Error {
+  readonly code = 'EMAIL_DOMAIN_NOT_ALLOWED';
   readonly statusCode = 403;
 
-  constructor(readonly domain: string) {
-    super(
-      `Public email domains (${domain}) cannot create enterprise workspaces. Please use your work email.`,
-    );
-    this.name = 'PublicEmailDomainError';
+  constructor(readonly domain: string | null) {
+    super(`This email domain${domain ? ` (${domain})` : ''} is not allowed.`);
+    this.name = 'EmailDomainNotAllowedError';
   }
 }
 
 export function isOrganizationPolicyError(
   error: unknown,
-): error is OrganizationDomainConflictError | OrgMemberLimitError | PublicEmailDomainError {
+): error is OrganizationDomainConflictError | OrgMemberLimitError | EmailDomainNotAllowedError {
   return (
     error instanceof OrganizationDomainConflictError ||
     error instanceof OrgMemberLimitError ||
-    error instanceof PublicEmailDomainError
+    error instanceof EmailDomainNotAllowedError
   );
 }
 
@@ -91,37 +81,18 @@ export class OrganizationDomainService {
   }
 
   extractEmailDomain(email: string): string | null {
-    const normalizedEmail = email.trim().toLowerCase();
-    const atIndex = normalizedEmail.lastIndexOf('@');
-    if (atIndex < 0 || atIndex === normalizedEmail.length - 1) {
-      return null;
-    }
-    return normalizedEmail.slice(atIndex + 1);
+    return extractEmailDomain(email);
   }
 
+  /** Only allowlisted domains are ever matched to, or mapped onto, an organization. */
   shouldLookupDomain(email: string): boolean {
-    const domain = this.extractEmailDomain(email);
-    return !!domain && !PERSONAL_EMAIL_DOMAINS.has(domain);
-  }
-
-  /**
-   * Fails fast when the email uses a public/personal provider (gmail.com etc.).
-   * Use this on its own when only the public-domain rule applies — unlike
-   * assertCanCreateOrgForEmail it does not run the existing-org conflict check.
-   */
-  async assertNotPublicEmailDomain(email: string): Promise<void> {
-    const domain = this.extractEmailDomain(email);
-    if (!domain) {
-      return;
-    }
-
-    if (PERSONAL_EMAIL_DOMAINS.has(domain)) {
-      throw new PublicEmailDomainError(domain);
-    }
+    return isDomainAllowlisted(this.extractEmailDomain(email));
   }
 
   async assertCanCreateOrgForEmail(email: string): Promise<void> {
-    await this.assertNotPublicEmailDomain(email);
+    if (!isEmailDomainAllowed(email)) {
+      throw new EmailDomainNotAllowedError(this.extractEmailDomain(email));
+    }
 
     const existingOrg = await this.findExistingOrgByEmailDomain(email);
     if (existingOrg) {
@@ -131,7 +102,7 @@ export class OrganizationDomainService {
 
   async findExistingOrgByEmailDomain(email: string): Promise<ExistingOrganizationForDomain | null> {
     const domain = this.extractEmailDomain(email);
-    if (!domain || PERSONAL_EMAIL_DOMAINS.has(domain)) {
+    if (!domain || !this.shouldLookupDomain(email)) {
       return null;
     }
 

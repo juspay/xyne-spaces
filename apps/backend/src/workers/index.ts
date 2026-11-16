@@ -1,5 +1,5 @@
 import Bull from 'bull';
-import { personalizationSyncWorker } from './personalizationSyncWorker';
+import { removeRetiredQueues, schedulerRedisConfig, startPersonalizationSyncQueue } from './personalizationSchedule';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -34,42 +34,9 @@ export class WorkerScheduler {
 
         logger.info('[WORKER_SCHEDULER] Starting workers...');
 
-        // Initialize Bull Queue
-        const workerRedisConfig = {
-            ...redisService.getRedisConfig(),
-            lazyConnect: false,
-        };
-        
-        this.personalizationQueue = new Bull('personalization-sync', {redis:workerRedisConfig});
+        const workerRedisConfig = schedulerRedisConfig();
 
-        // Define worker process
-        this.personalizationQueue.process(async (job) => {
-            logger.info(`[BULL_WORKER] Processing job ${job.id} for personalization sync...`);
-            try {
-                await personalizationSyncWorker.syncAllUsers();
-                logger.info(`[BULL_WORKER] Job ${job.id} completed successfully`);
-            } catch (error) {
-                logger.error(`[BULL_WORKER] Job ${job.id} failed:`, error);
-                throw error; // Rethrow so Bull can handle retries
-            }
-        });
-
-        // Schedule repeatable job (every 1 hour)
-        await this.personalizationQueue.add(
-            {},
-            {
-                repeat: { cron: '0 * * * *' },
-                jobId: 'personalization-sync-repeatable',
-                attempts: 3,
-                backoff: {
-                type: 'exponential',
-                delay: 5000,
-                },
-                removeOnComplete: true,
-            }
-        );
-
-        logger.info('[WORKER_SCHEDULER] Personalization sync scheduled via Bull (every 6 hours)');
+        this.personalizationQueue = await startPersonalizationSyncQueue(workerRedisConfig);
 
         // Initialize Recap Generation Queue
         if (config.recapScheduler.enabled) {
@@ -363,7 +330,7 @@ export class WorkerScheduler {
         } else {
             logger.info('[WORKER_SCHEDULER] Instagram token refresh worker is disabled (ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER=false)');
         }
-        await this.removeRetiredQueues(workerRedisConfig);
+        await removeRetiredQueues(workerRedisConfig);
 
         // Facebook Page catch-up — runs hourly at minute 7; pulls what a webhook missed
         if (config.enableSocialMediaSyncWorker) {
@@ -395,28 +362,6 @@ export class WorkerScheduler {
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
     }
-
-    /**
-     * Queues whose worker was removed. Bull keeps a repeatable job's repeat key
-     * and next delayed job in Redis until something deletes them, so drop the
-     * whole queue once on startup. Safe to repeat: obliterating an empty queue
-     * is a no-op. Remove an entry once every environment has run it.
-     */
-    private async removeRetiredQueues(redis: Bull.QueueOptions['redis']): Promise<void> {
-        const retiredQueueNames = ['product-insights-recluster'];
-        for (const name of retiredQueueNames) {
-            const queue = new Bull(name, { redis });
-            try {
-                await queue.obliterate({ force: true });
-                logger.info(`[WORKER_SCHEDULER] Removed retired queue ${name}`);
-            } catch (error) {
-                logger.error(`[WORKER_SCHEDULER] Failed to remove retired queue ${name}:`, error);
-            } finally {
-                await queue.close();
-            }
-        }
-    }
-
 
     /**
      * Stop all workers

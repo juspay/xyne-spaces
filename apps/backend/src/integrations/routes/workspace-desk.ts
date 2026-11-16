@@ -16,7 +16,7 @@
 import express, { Request, Response } from 'express';
 import { WorkspaceRole } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { decrypt } from '@/services/encryptionService';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
@@ -37,7 +37,7 @@ interface MailboxStatus {
 
 router.get(
   '/status',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId;
@@ -62,7 +62,7 @@ router.get(
 
 router.get(
   '/channel-email-status',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId;
@@ -83,7 +83,7 @@ router.get(
  */
 router.post(
   '/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const workspaceId = req.user!.workspaceId;
     const role = req.user!.role as WorkspaceRole;

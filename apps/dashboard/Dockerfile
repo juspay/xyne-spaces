@@ -131,6 +131,7 @@ COPY --from=builder /repo/apps/dashboard/releases /usr/share/nginx/html/releases
 # nginx.conf as a template; ONLY ${ENABLE_MIGRATION} is substituted at startup
 # (nginx's own $variables are left untouched by the explicit envsubst arg).
 COPY apps/dashboard/nginx.conf /etc/nginx/nginx.conf.template
+COPY apps/dashboard/nginx-security-headers.conf /etc/nginx/security-headers.conf
 
 # Migration feature flag (nginx.conf proxies /migration/ only when true).
 ENV ENABLE_MIGRATION=false

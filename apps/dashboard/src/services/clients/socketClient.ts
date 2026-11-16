@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { API_BASE_URL } from '../../config';
 import { logger, Logger, NotificationSocketState } from '../../utils/logger';
+import { ensureFreshSession, refreshSessionOnce } from './sessionRefresh';
 import {
   socketConnectionAttemptDuration,
   socketConnectionTotalDuration,
@@ -25,6 +26,8 @@ class WebSocketService {
   private connectionAttemptStartTime: number | null = null;
   private sessionStartTime: number | null = null;
   private firstConnectionAttemptTime: number | null = null;
+  /** One refresh-and-reconnect per rejected handshake, so a non-auth rejection cannot loop. */
+  private authRetryPending = false;
 
   connect(): Promise<void> {
     // If already connected, return immediately
@@ -37,7 +40,13 @@ class WebSocketService {
       return this.connectionPromise;
     }
 
-    this.connectionPromise = new Promise((resolve, reject) => {
+    this.authRetryPending = false;
+    this.connectionPromise = ensureFreshSession().then(() => this.openSocket());
+    return this.connectionPromise;
+  }
+
+  private openSocket(): Promise<void> {
+    return new Promise((resolve, reject) => {
       // Tokens are in HTTP-only cookies and sent automatically
       // Socket.io will include cookies with the handshake request
       if (!this.firstConnectionAttemptTime) {
@@ -104,6 +113,7 @@ class WebSocketService {
         });
 
         this.isConnected = true;
+        this.authRetryPending = false;
         this.reconnectAttempts = 0;
         this.connectionStartTime = Date.now();
         this.sessionStartTime = Date.now();
@@ -153,7 +163,6 @@ class WebSocketService {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         this.isConnected = false;
-        this.connectionPromise = null; // Clear the promise on error
 
         logger.setNotificationSocketState(NotificationSocketState.DISCONNECTED);
         logger.error(Logger.Event.WEBSOCKET_CONNECTION_FAILED, { reason: error });
@@ -166,6 +175,21 @@ class WebSocketService {
           });
         });
 
+        const socket = this.socket;
+        if (socket && !socket.active && !this.authRetryPending) {
+          this.authRetryPending = true;
+          void refreshSessionOnce().then(outcome => {
+            if (outcome === 'ok' && this.socket === socket) {
+              socket.connect();
+              return;
+            }
+            this.connectionPromise = null;
+            reject(error);
+          });
+          return;
+        }
+
+        this.connectionPromise = null; // Clear the promise on error
         reject(error);
       });
 
@@ -195,8 +219,6 @@ class WebSocketService {
         }
       });
     });
-
-    return this.connectionPromise;
   }
 
   disconnect(): void {

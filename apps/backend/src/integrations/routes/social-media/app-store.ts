@@ -4,7 +4,7 @@ import {
   IOS_BUNDLE_ID_PATTERN,
 } from '@xyne/shared';
 import { z } from 'zod';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { encrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
@@ -184,7 +184,7 @@ function handleRouteError(res: Response, error: unknown, fallback: string): void
 
 router.post(
   '/app-store/connect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -242,7 +242,7 @@ router.post(
 
 router.post(
   '/:channelId/app-store/apps',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
@@ -330,20 +330,20 @@ async function setAppConnection(req: Request, res: Response, isActive: boolean):
 
 router.post(
   '/:channelId/app-store/apps/:sourceId/disconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   (req: Request, res: Response) => setAppConnection(req, res, false),
 );
 
 router.post(
   '/:channelId/app-store/apps/:sourceId/reconnect',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   (req: Request, res: Response) => setAppConnection(req, res, true),
 );
 
 /** Replaces Play's "Reauthorize" redirect: Apple keys are rotated by pasting a new one. */
 router.post(
   '/:channelId/app-store/credentials',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;

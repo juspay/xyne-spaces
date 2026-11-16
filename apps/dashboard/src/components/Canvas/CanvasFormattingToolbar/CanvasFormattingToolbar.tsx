@@ -5,20 +5,16 @@ import {
   CreateLinkButton,
   type FormattingToolbarProps,
   TextAlignButton,
-  // Disabled (Claw)
-  // useBlockNoteEditor,
+  useBlockNoteEditor,
   useComponentsContext,
 } from '@blocknote/react';
-// Disabled (Claw)
-// import { TextSelection, type Selection } from '@tiptap/pm/state';
+import { TextSelection, type Selection } from '@tiptap/pm/state';
 import { MessageSquarePlus, Ticket } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { FC, ReactElement } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
-// Disabled (Claw)
-// import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine';
-// Disabled (Claw)
-// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 
 /**
  * Whether cells of a table are selected.
@@ -27,8 +23,7 @@ import { useCallback, useEffect, useRef } from 'react';
  * loaded once by BlockNote and again through @tiptap/pm, and a class compared
  * across two copies of a module never matches.
  */
-// Disabled (Claw)
-// const isCellSelection = (selection: Selection): boolean => '$anchorCell' in selection;
+const isCellSelection = (selection: Selection): boolean => '$anchorCell' in selection;
 
 type CanvasFormattingToolbarOptions = {
   canvasId?: string;
@@ -50,11 +45,9 @@ type AttachedAction = 'ask' | 'comment' | 'ticket';
 export function CanvasToolbarAttachedActions({
   onAddComment,
   canvasId,
-  // Disabled (Claw)
-  // canvasTitle,
+  canvasTitle,
   canComment = true,
-  // Disabled (Claw)
-  // selectionText,
+  selectionText,
   canCreateTicket = false,
   onCreateTicket,
   onLinkTicket,
@@ -62,8 +55,7 @@ export function CanvasToolbarAttachedActions({
   onAddComment: () => void;
 } & CanvasFormattingToolbarOptions): ReactElement | null {
   const selectedTextRef = useRef('');
-  // Disabled (Claw)
-  // const editor = useBlockNoteEditor();
+  const editor = useBlockNoteEditor();
 
   useEffect(() => {
     const updateSelectedText = (): void => {
@@ -78,79 +70,77 @@ export function CanvasToolbarAttachedActions({
     return (): void => document.removeEventListener('selectionchange', updateSelectedText);
   }, []);
 
-  // Disabled (Claw)
-  // /**
-  //  * What the reader has picked out, as the AI should read it.
-  //  *
-  //  * The document's own selection is the source of truth rather than the
-  //  * browser's: selecting cells in a table leaves the DOM selection inside a
-  //  * single cell, so a table went to Ask AI as one cell of it, and selecting a
-  //  * whole block leaves no DOM range at all. Anything wider than one paragraph
-  //  * goes as markdown, which is the only form that keeps a table's rows and
-  //  * columns and a code block's fence intact.
-  //  */
-  // const readSelection = useCallback((): string => {
-  //   const state = editor?._tiptapEditor?.view?.state;
-  //   if (!state || state.selection.empty) return '';
+  /**
+   * What the reader has picked out, as the AI should read it.
+   *
+   * The document's own selection is the source of truth rather than the
+   * browser's: selecting cells in a table leaves the DOM selection inside a
+   * single cell, so a table went to Ask AI as one cell of it, and selecting a
+   * whole block leaves no DOM range at all. Anything wider than one paragraph
+   * goes as markdown, which is the only form that keeps a table's rows and
+   * columns and a code block's fence intact.
+   */
+  const readSelection = useCallback((): string => {
+    const state = editor?._tiptapEditor?.view?.state;
+    if (!state || state.selection.empty) return '';
 
-  //   const { selection } = state;
-  //   const withinOneTextblock =
-  //     selection instanceof TextSelection &&
-  //     selection.$from.parent === selection.$to.parent &&
-  //     selection.$from.parent.isTextblock;
+    const { selection } = state;
+    const withinOneTextblock =
+      selection instanceof TextSelection &&
+      selection.$from.parent === selection.$to.parent &&
+      selection.$from.parent.isTextblock;
 
-  //   if (!withinOneTextblock) {
-  //     try {
-  //       // Cells are selected by rectangle, not by range, and the slice cut from
-  //       // that range collapses to a single cell — which is why a table used to
-  //       // arrive as one of its cells. Picking cells out of a table means the
-  //       // table, so the whole block is what goes.
-  //       const blocks = isCellSelection(selection)
-  //         ? [editor.getTextCursorPosition().block]
-  //         : editor.getSelectionCutBlocks().blocks;
-  //       const markdown = editor
-  //         .blocksToMarkdownLossy(blocks as Parameters<typeof editor.blocksToMarkdownLossy>[0])
-  //         .trim();
-  //       if (markdown) return markdown;
-  //     } catch {
-  //       // Custom blocks without a markdown form fall through to their text.
-  //     }
-  //   }
+    if (!withinOneTextblock) {
+      try {
+        // Cells are selected by rectangle, not by range, and the slice cut from
+        // that range collapses to a single cell — which is why a table used to
+        // arrive as one of its cells. Picking cells out of a table means the
+        // table, so the whole block is what goes.
+        const blocks = isCellSelection(selection)
+          ? [editor.getTextCursorPosition().block]
+          : editor.getSelectionCutBlocks().blocks;
+        const markdown = editor
+          .blocksToMarkdownLossy(blocks as Parameters<typeof editor.blocksToMarkdownLossy>[0])
+          .trim();
+        if (markdown) return markdown;
+      } catch {
+        // Custom blocks without a markdown form fall through to their text.
+      }
+    }
 
-  //   return state.doc.textBetween(selection.from, selection.to, '\n', ' ').trim();
-  // }, [editor]);
+    return state.doc.textBetween(selection.from, selection.to, '\n', ' ').trim();
+  }, [editor]);
 
-  // Disabled (Claw)
-  // const handleAskAI = useCallback((): void => {
-  //   if (!canvasId) return;
+  const handleAskAI = useCallback((): void => {
+    if (!canvasId) return;
 
-  //   const selectedText =
-  //     selectionText ||
-  //     readSelection() ||
-  //     window.getSelection()?.toString().trim() ||
-  //     selectedTextRef.current;
-  //   if (!selectedText) return;
+    const selectedText =
+      selectionText ||
+      readSelection() ||
+      window.getSelection()?.toString().trim() ||
+      selectedTextRef.current;
+    if (!selectedText) return;
 
-  //   const preview = selectedText.length > 50 ? `${selectedText.substring(0, 50)}...` : selectedText;
-  //   const selectionInfo: SelectionInfo = {
-  //     text: selectedText,
-  //     preview,
-  //     canvasId,
-  //     ...(canvasTitle && { canvasTitle }),
-  //   };
+    const preview = selectedText.length > 50 ? `${selectedText.substring(0, 50)}...` : selectedText;
+    const selectionInfo: SelectionInfo = {
+      text: selectedText,
+      preview,
+      canvasId,
+      ...(canvasTitle && { canvasTitle }),
+    };
 
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'canvas_toolbar',
-  //     canvasInfo: {
-  //       canvasId,
-  //       ...(canvasTitle && { title: canvasTitle }),
-  //     },
-  //     selectionInfo,
-  //   });
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'canvas_toolbar',
+      canvasInfo: {
+        canvasId,
+        ...(canvasTitle && { title: canvasTitle }),
+      },
+      selectionInfo,
+    });
 
-  //   window.getSelection()?.removeAllRanges();
-  // }, [selectionText, readSelection, canvasId, canvasTitle]);
+    window.getSelection()?.removeAllRanges();
+  }, [selectionText, readSelection, canvasId, canvasTitle]);
 
   const handleCreateTicket = useCallback((): void => {
     const selectedText = window.getSelection()?.toString().trim() || selectedTextRef.current;
@@ -164,12 +154,10 @@ export function CanvasToolbarAttachedActions({
     onLinkTicket?.(selectedText);
   }, [onLinkTicket]);
 
-  // Disabled (Claw)
-  // // Ask AI is left out where the host screen turns it off (the related-context popup).
-  // const askAIAvailable = useAskAIAvailable();
+  // Ask AI is left out where the host screen turns it off (the related-context popup).
+  const askAIAvailable = useAskAIAvailable();
   const actions = [
-    // Disabled (Claw)
-    // askAIAvailable && 'ask',
+    askAIAvailable && 'ask',
     canComment && 'comment',
     canCreateTicket && 'ticket',
   ].filter((action): action is AttachedAction => Boolean(action));
@@ -193,8 +181,6 @@ export function CanvasToolbarAttachedActions({
 
   return (
     <div className='canvas-formatting-menu__attached-actions'>
-      {/* Disabled (Claw) */}
-      {/*
       {askAIAvailable && (
         <button
           type='button'
@@ -210,7 +196,6 @@ export function CanvasToolbarAttachedActions({
           <span>Ask AI</span>
         </button>
       )}
-      */}
       {canComment && (
         <button
           type='button'
@@ -274,16 +259,13 @@ export const createCanvasFormattingToolbar = (
     blockTypeSelectItems,
   }: FormattingToolbarProps): ReactElement | null => {
     const Components = useComponentsContext();
-    // Disabled (Claw)
-    // const askAIAvailable = useAskAIAvailable();
+    const askAIAvailable = useAskAIAvailable();
     const canComment = options.canComment ?? true;
     const canCreateTicket = options.canCreateTicket ?? false;
     const hasEditorActions = canComment || canCreateTicket;
 
-    // Disabled (Claw)
-    // // Nothing to offer: no editing, and Ask AI left out by the host screen.
-    // if (!Components || (!hasEditorActions && !askAIAvailable)) return null;
-    if (!Components || !hasEditorActions) return null;
+    // Nothing to offer: no editing, and Ask AI left out by the host screen.
+    if (!Components || (!hasEditorActions && !askAIAvailable)) return null;
 
     return (
       <Components.FormattingToolbar.Root

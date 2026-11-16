@@ -54,10 +54,9 @@ export type AIFeaturesSubTabId =
   | 'ai-sync';
 
 export const AI_FEATURES_SUB_TABS: { id: AIFeaturesSubTabId; label: string }[] = [
-  // Disabled (Claw)
-  // { id: 'ai-draft', label: 'AI Draft' },
-  // { id: 'knowledge', label: 'Knowledge' },
-  // { id: 'desk-report', label: 'Desk Report' },
+  { id: 'ai-draft', label: 'AI Draft' },
+  { id: 'knowledge', label: 'Knowledge' },
+  { id: 'desk-report', label: 'Desk Report' },
   { id: 'attribution', label: 'Attribution' },
   // Disabled (LLM)
   // { id: 'ai-sync', label: 'AI Sync' },
@@ -69,9 +68,8 @@ export const AI_FEATURES_SUB_TABS: { id: AIFeaturesSubTabId; label: string }[] =
 export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, channelId, userID }) => {
   const [activeTab, setActiveTab] = useState<TabId>('inbox');
   const [activeAIFeaturesSubTab, setActiveAIFeaturesSubTab] =
-    // Disabled (Claw)
-    // useState<AIFeaturesSubTabId>('ai-draft');
-    useState<AIFeaturesSubTabId>('attribution');
+    useState<AIFeaturesSubTabId>('ai-draft');
+  useState<AIFeaturesSubTabId>('attribution');
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
   // The audit-log API is ANALYTICS-admin only; hide the tab rather than show a dead error.
   const canViewHistory = useCanViewAnalytics();

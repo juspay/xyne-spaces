@@ -871,7 +871,7 @@ export class MicrosoftDeskService {
 
         // 1. Primary: lookup by internetMessageId.
         const searchResponse = await fetch(
-          `${config.microsoftGraph.baseUrl}/me/messages?$filter=internetMessageId eq '${encodeURIComponent(latestExternalMessageId)}'&$select=id`,
+          `${config.microsoftGraph.baseUrl}/me/messages?$filter=internetMessageId eq '${encodeURIComponent(latestExternalMessageId.replace(/'/g, "''"))}'&$select=id`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         if (searchResponse.ok) {
@@ -882,7 +882,7 @@ export class MicrosoftDeskService {
         // 2. Fallback: look up any message in the conversation.
         if (!graphMessageId && threadId) {
           const conversationResponse = await fetch(
-            `${config.microsoftGraph.baseUrl}/me/messages?$filter=conversationId eq '${encodeURIComponent(threadId)}'&$orderby=receivedDateTime desc&$top=1&$select=id`,
+            `${config.microsoftGraph.baseUrl}/me/messages?$filter=conversationId eq '${encodeURIComponent(threadId.replace(/'/g, "''"))}'&$orderby=receivedDateTime desc&$top=1&$select=id`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           );
           if (conversationResponse.ok) {

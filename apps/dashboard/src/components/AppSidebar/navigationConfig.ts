@@ -19,6 +19,8 @@ import {
   QuestionMarkCircle,
   BuildingApartmentTwo,
   LightningThunderElectricOn,
+  GitBranch,
+  Atom,
   LayoutGridTwoVertical,
   type PikaIconProps,
   // Disabled (LLM)
@@ -32,16 +34,13 @@ import {
   // ListAiGenerated,
   KeySlant,
 } from '@xyne/icons';
-// Disabled (Claw)
-// import { AudioLines, Radar, Store } from 'lucide-react';
-import { AudioLines } from 'lucide-react';
+import { AudioLines, Store } from 'lucide-react';
 
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
 import type { usePermissions } from '../../hooks/usePermissions';
 import { AccessType } from '@xyne/shared';
-// Disabled (Claw)
-// import { XyneAISidebarIcon } from '../icons/xyne-ai';
+import { XyneAISidebarIcon } from '../icons/xyne-ai';
 import { organisationsAccess } from '../../routes/OrganisationsModule/organisationsAccess';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
@@ -56,9 +55,8 @@ const AudioWaveIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactEle
 // const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
 // createElement(Radar, props);
 
-// Disabled (Claw)
-// const StoreNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
-// createElement(Store, props);
+const StoreNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
+  createElement(Store, props);
 
 export type ChatNavKey =
   | 'new-message'
@@ -186,33 +184,31 @@ export interface NavigationItem {
   popout?: boolean;
 }
 
-// Disabled (Claw)
-// // Adapts XyneAISidebarIcon — a plain {color?, size?: number} SVG component,
-// // not a pika-icon — to the PikaIcon shape NavigationItem.icon requires.
-// // PikaIconProps.size is `number | string`, so it's coerced rather than
-// // widening XyneAISidebarIcon's own signature. Pika-only props (variant/
-// // strokeWidth/...) are dropped: this glyph has no stroke/variant concept and
-// // renders identically regardless of active state, unlike every other item.
-// const XyneAINavIcon: PikaIcon = ({ size, color }) =>
-// createElement(XyneAISidebarIcon, {
-// // exactOptionalPropertyTypes rejects an explicit `undefined` for an
-// // optional prop — omit the key entirely instead of assigning it.
-// ...(typeof size === 'number' ? { size } : {}),
-// ...(color !== undefined ? { color } : {}),
-// });
+// Adapts XyneAISidebarIcon — a plain {color?, size?: number} SVG component,
+// not a pika-icon — to the PikaIcon shape NavigationItem.icon requires.
+// PikaIconProps.size is `number | string`, so it's coerced rather than
+// widening XyneAISidebarIcon's own signature. Pika-only props (variant/
+// strokeWidth/...) are dropped: this glyph has no stroke/variant concept and
+// renders identically regardless of active state, unlike every other item.
+const XyneAINavIcon: PikaIcon = ({ size, color }) =>
+  createElement(XyneAISidebarIcon, {
+    // exactOptionalPropertyTypes rejects an explicit `undefined` for an
+    // optional prop — omit the key entirely instead of assigning it.
+    ...(typeof size === 'number' ? { size } : {}),
+    ...(color !== undefined ? { color } : {}),
+  });
 
 // Items are listed toolbar-first: the default toolbar paths come first in the
 // order they should appear in the rail, followed by everything that lives in
 // the "More" menu by default. Toggling is handled per-path by useToolbarItems.
 export const NAVIGATION_ITEMS: NavigationItem[] = [
-  // Disabled (Claw)
-  // {
-  // path: '/ai',
-  // label: 'Xyne AI',
-  // description: 'Also called Ask AI: AI chats, agents and knowledge',
-  // icon: XyneAINavIcon,
-  // popout: true,
-  // },
+  {
+    path: '/ai',
+    label: 'Xyne AI',
+    description: 'Also called Ask AI: AI chats, agents and knowledge',
+    icon: XyneAINavIcon,
+    popout: true,
+  },
   {
     path: '/chat/dir',
     label: 'Chat',
@@ -234,14 +230,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: NotificationBellOn,
     popout: true,
   },
-  // Disabled (Claw)
-  // {
-  // path: '/apps-marketplace',
-  // label: 'Apps Marketplace',
-  // description: 'Apps built on Xyne data, and creating your own',
-  // icon: StoreNavIcon,
-  // popout: true,
-  // },
+  {
+    path: '/apps-marketplace',
+    label: 'Apps Marketplace',
+    description: 'Apps built on Xyne data, and creating your own',
+    icon: StoreNavIcon,
+    popout: true,
+  },
   {
     path: '/streams',
     label: 'Streams',
@@ -271,6 +266,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   {
+    path: '/sdlc',
+    label: 'SDLC',
+    description: 'Development hubs: tracks, wikis and repositories',
+    icon: Atom,
+    popout: true,
+  },
+  {
     path: '/support',
     label: 'Support',
     description: 'Also called the Desk or Xyne Desk',
@@ -289,6 +291,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     label: 'Automations',
     description: 'Automation rules, runs and approvals',
     icon: LightningThunderElectricOn,
+    popout: true,
+  },
+  {
+    path: '/workflows',
+    label: 'Workflows',
+    description: 'Workflows, their runs and variables',
+    icon: GitBranch,
     popout: true,
   },
   // Administration (the /organisations module) holds Workspace Management,
@@ -442,17 +451,16 @@ export const NON_RAIL_TOOLBAR_ITEMS: NavigationItem[] = [
 
 // Paths shown in the toolbar by default (before any user customization).
 export const DEFAULT_TOOLBAR_PATHS: string[] = [
-  // Disabled (Claw)
-  // '/ai',
+  '/ai',
   '/chat/dir',
   '/chat/dm',
   '/calls',
   '/recordings',
   '/projects',
+  '/sdlc',
   '/support',
   '/chat/activity',
-  // Disabled (Claw)
-  // '/apps-marketplace',
+  '/apps-marketplace',
 ];
 
 // One-line description per toolbar-manageable path, shown under the label in

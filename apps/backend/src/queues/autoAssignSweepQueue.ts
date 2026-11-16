@@ -278,8 +278,7 @@ class AutoAssignSweepQueue {
       }
 
       if (jobs.length > 0) {
-        // Disabled (LLM)
-        // await emailClassificationQueue.getQueue().addBulk(jobs);
+        await emailClassificationQueue.getQueue().addBulk(jobs);
       }
 
       if (page.length < SCAN_PAGE_SIZE) break;

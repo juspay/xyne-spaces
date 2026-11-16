@@ -1,3 +1,4 @@
+import { isInstallWebhookHostAllowed } from './appUrlResolver';
 import { repositories } from '@/database/repositories';
 import { AuthProvider, UserType, OrgRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -9,8 +10,7 @@ import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { claimAppSigningSecret } from '@/bypassAcl/appServices';
 import { syncInstalledCommandsTx } from '@/bypassAcl/transactions/appUtils';
-// Disabled (Claw)
-// import { isSpacesAppClawAgent } from '@/services/clawAgentService';
+import { isSpacesAppClawAgent } from '@/services/clawAgentService';
 
 /**
  * Install an external app
@@ -99,9 +99,7 @@ export async function installApp(appId: string, workspaceId: string) {
     let appUser = await repositories.users.findByEmail(email, workspaceId);
     if (!appUser) {
       // AGENT vs APP is set once at creation; a failed lookup throws so the install can be retried.
-      // Disabled (Claw)
-      // const userType = (await isSpacesAppClawAgent(appId)) ? UserType.AGENT : UserType.APP;
-      const userType = UserType.APP;
+      const userType = (await isSpacesAppClawAgent(appId)) ? UserType.AGENT : UserType.APP;
       appUser = await repositories.users.create({
         name: app.name,
         email,
@@ -158,6 +156,9 @@ export async function configureWebhook(appId: string, webhookUrl: string, worksp
 
     if (!installedApp) {
       throw new Error(`[CONFIGURE-WEBHOOK] Installed app with appId ${appId} not found in workspace ${workspaceId}`);
+    }
+    if (!(await isInstallWebhookHostAllowed(webhookUrl, installedApp.appId))) {
+      throw new Error('[CONFIGURE-WEBHOOK] This webhook host is reserved for the app it belongs to');
     }
 
     const updatedInstalledApp = await repositories.installedApps.update(

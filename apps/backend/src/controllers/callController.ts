@@ -32,6 +32,8 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
+import { callEncryptionService } from '@/services/callEncryptionService';
+import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
 import { isRecording, isRecordingType } from '@/utils/callTypeUtils';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { config } from '@/config/env';
@@ -404,6 +406,8 @@ export class CallController {
     let callExternalId: string | undefined;
     let headlessNotesCanvasId: string | undefined;
     let headlessDetailedSummaryCanvasId: string | undefined;
+    // The PENDING Call row written before room creation; deleted again if the room never comes up.
+    let pendingCallId: string | undefined;
     // Tracks which stage was active when an error is thrown; used in catch log.
     let stage = 'setup';
 
@@ -536,6 +540,32 @@ export class CallController {
           ...(recordingType && { recordingType }),
           ...(channelId && conversationId ? { channelId, conversationId } : {}),
           ...(headlessAgentName && { agentName: headlessAgentName }),
+        });
+
+        // The Call row is the webhook's only source of truth for this recording.
+        // Written PENDING here; noteTakerWebhookController activates it on first join.
+        stage = 'pending_call_record';
+        pendingCallId = uuidv4();
+        await repositories.calls.createPendingCall({
+          id: pendingCallId,
+          externalId: callExternalId,
+          workspaceId: req.user!.workspaceId!,
+          createdByUserId: userId,
+          channelId: null,
+          callType: CallType.HEADLESS,
+          callOrigin: CallOrigin.CHANNEL,
+          roomLink,
+          intent: {
+            createdBy: userId,
+            workspaceId: req.user!.workspaceId!,
+            callType: CallType.HEADLESS,
+            notesCanvasId,
+            detailedSummaryCanvasId,
+            ...(recordingType && { recordingType }),
+            ...(channelId && conversationId ? { channelId, conversationId } : {}),
+            ...(headlessAgentName && { agentName: headlessAgentName }),
+          },
+          now: new Date(),
         });
 
         stage = 'livekit_room_creation';
@@ -720,6 +750,8 @@ export class CallController {
           });
 
           // Return credentials for existing call
+          const existingEncryption = await callEncryptionService.credentialsForJoin(existingCall, pinCallEncryptionKeyVersion);
+          if (existingEncryption) res.set('Cache-Control', 'no-store');
           res.json({
             success: true,
             token,
@@ -729,17 +761,20 @@ export class CallController {
             roomLink: existingCall.roomLink,
             channelId: finalChannelId,
             scopeType: channel.scopeType, // Add scopeType for CallKit filtering
+            ...(existingEncryption && { encryption: existingEncryption }),
           });
           return;
         } else {
           // Room doesn't exist but call is marked as active - mark it as ended
+          // (a PENDING row nobody ever joined is cancelled, not ended).
           logger.info(`[${existingCall.externalId}] existing_call_room_stale | marked_as=${existingCall.status}, room_exists=false`);
           stage = 'stale_room_cleanup';
+          const staleStatus = existingCall.status === CallStatus.PENDING ? CallStatus.CANCELLED : CallStatus.ENDED;
           await repositories.calls.update(existingCall.id, {
-            status: CallStatus.ENDED,
+            status: staleStatus,
             endedAt: new Date(),
           });
-          logger.info(`[${existingCall.externalId}] call_status_updated | from=${existingCall.status}, to=ENDED, reason=room_not_found`);
+          logger.info(`[${existingCall.externalId}] call_status_updated | from=${existingCall.status}, to=${staleStatus}, reason=room_not_found`);
         }
       }
 
@@ -807,6 +842,43 @@ export class CallController {
         ...(invitedUserIds && invitedUserIds.length > 0 && { invitedUserIds }),
         ...(validatedSdlcLink && { sdlcLink: validatedSdlcLink }),
         ...(agentName && { agentName }),
+      });
+
+      // The Call row is the webhook's only source of truth for this call. Written
+      // PENDING here with the full intent; the webhook activates it on first join
+      // and never reads the LiveKit room metadata above.
+      stage = 'pending_call_record';
+      const callOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
+      const callWorkspaceId = channel.workspaceId ?? req.user!.workspaceId!;
+      // Pinned now, not at activation: this response hands out the key, and a master key
+      // rotation before the first join must not give later joiners a different one.
+      const e2eeState = callEncryptionService.stateAtActivation(
+        callEncryptionService.stateForNewCall({ callType: callType as CallType }),
+      );
+      pendingCallId = uuidv4();
+      await repositories.calls.createPendingCall({
+        id: pendingCallId,
+        externalId: callExternalId,
+        workspaceId: callWorkspaceId,
+        createdByUserId: userId,
+        channelId: channel.id,
+        callType: callType as CallType,
+        callOrigin,
+        roomLink,
+        intent: {
+          createdBy: userId,
+          workspaceId: callWorkspaceId,
+          callType: callType as CallType,
+          callOrigin,
+          channelId: channel.id,
+          ...(conversationId && { conversationId }),
+          ...(linkedArtifactMessageId && { artifactMessageId: linkedArtifactMessageId }),
+          ...(Array.isArray(invitedUserIds) && invitedUserIds.length > 0 && { invitedUserIds }),
+          ...(validatedSdlcLink && { sdlcLink: validatedSdlcLink }),
+          ...(agentName && { agentName }),
+        },
+        e2ee: e2eeState,
+        now: new Date(),
       });
 
       stage = 'livekit_room_creation';
@@ -887,7 +959,10 @@ export class CallController {
         callType,
       });
 
-      // Return credentials - DB records will be created by webhook
+      // Return credentials - the webhook activates the PENDING row on first join.
+      // The media key travels only here, over the authenticated response; never via LiveKit.
+      const newCallEncryption = callEncryptionService.credentialsForState(callExternalId, e2eeState);
+      if (newCallEncryption) res.set('Cache-Control', 'no-store');
       res.json({
         success: true,
         token,
@@ -897,10 +972,18 @@ export class CallController {
         roomLink,
         channelId: finalChannelId,
         scopeType: channel.scopeType, // Add scopeType for CallKit filtering
+        ...(newCallEncryption && { encryption: newCallEncryption }),
       });
     } catch (error) {
       const callIdForLog = callExternalId ?? correlationId;
       logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error, stack: error instanceof Error ? error.stack : undefined });
+      // Past room creation the webhook owns the row (room_finished cancels it);
+      // before that nothing else references it, so take it back out.
+      if (pendingCallId && stage === 'livekit_room_creation') {
+        await repositories.calls.delete(pendingCallId).catch((cleanupError) => {
+          logger.error(`[${callIdForLog}] pending_call_cleanup_failed`, { pendingCallId, cleanupError });
+        });
+      }
       if (headlessNotesCanvasId) {
         try {
           await db.$transaction([
@@ -1152,6 +1235,8 @@ export class CallController {
       });
 
       // Return credentials - participant record will be handled by webhook
+      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion);
+      if (encryption) res.set('Cache-Control', 'no-store');
       res.json({
         success: true,
         token,
@@ -1160,6 +1245,7 @@ export class CallController {
         roomLink: call?.roomLink,
         channelId: call?.channelId,
         scopeType, // Channel scope type for CallKit filtering
+        ...(encryption && { encryption }),
       });
     } catch (error) {
       logger.error('Failed to join call:', error);
@@ -3075,6 +3161,16 @@ export class CallController {
 
       if (!(await this.assertCallParticipant(callId, userId))) {
         res.status(403).json({ success: false, error: 'Only call participants can start recording' });
+        return;
+      }
+
+      // The recording workers sit outside the trust boundary and cannot decrypt E2EE media.
+      if (callEncryptionService.isCallEncrypted(call)) {
+        res.status(409).json({
+          success: false,
+          error: 'Recording is not available on end-to-end encrypted calls',
+          code: 'CALL_ENCRYPTED',
+        });
         return;
       }
 

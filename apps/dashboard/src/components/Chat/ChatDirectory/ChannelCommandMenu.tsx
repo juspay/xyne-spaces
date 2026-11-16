@@ -136,6 +136,7 @@ import type { SlashSelectionType } from '../../../types/slashCommandEvents';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
+import { htmlToPlainText } from '../../../utils/sanitizer';
 import SearchResultItem from './SearchResultItem';
 import SearchSectionSkeleton, { type SkeletonVariant } from './SearchSectionSkeleton';
 import {
@@ -197,9 +198,7 @@ const dateOptionHint = (value: string): string | null => {
 type TabDefinition = { id: TabType; label: string; icon?: ReactElement };
 
 function stripHtmlTags(html: string): string {
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  return div.textContent || html;
+  return htmlToPlainText(html) || html;
 }
 /**
  * Bring a clicked tab to the middle of its own strip — and nothing else.
@@ -6018,15 +6017,12 @@ const ChannelCommandMenuContent = ({
           <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-card to-transparent' />
           {/* Left: Ask AI hint and the Feedback button */}
           <span className='flex items-center gap-5'>
-            {/* Disabled (Claw) */}
-            {/*
             <span className='flex items-center gap-2.5'>
               <span className='flex items-center justify-center px-1.5 py-1 bg-muted rounded-lg leading-none'>
                 /
               </span>
               <span>Ask AI</span>
             </span>
-            */}
             {canPostFeedback && (
               <button
                 type='button'

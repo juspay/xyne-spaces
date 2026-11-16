@@ -77,6 +77,12 @@ export class FormEntityValuesACL extends BaseACL<'form_entity_values'> {
       }
       return;
     }
+    // Release env-diff and migration rows are written only by the backend
+    // commit-analysis pipeline (bypass repositories). No client may create,
+    // change or delete them.
+    if (entityType === FormEntityType.RELEASE_ENV_FORM || entityType === FormEntityType.RELEASE_MIGRATION_FORM) {
+      throw new MutationACLError('Form entity value failed: release change values are managed by the system', 'form_entity_values');
+    }
     // Other non-ticket entity types are not channel-gated here.
   }
 

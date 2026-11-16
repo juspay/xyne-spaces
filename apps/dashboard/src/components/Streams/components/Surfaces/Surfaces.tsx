@@ -434,8 +434,7 @@ export const SURFACES: Record<SurfaceKind, SurfaceDef> = {
     needsRouterScope: true,
     scopePath: (_source, workspaceId) => `/${workspaceId}/ai/chat/new`,
     scopeParams: (_source, workspaceId) => ({ workspaceId }),
-    // Disabled (Claw)
-    // appPath: (_source, workspaceId) => `/${workspaceId}/ai/chat/new`,
+    appPath: (_source, workspaceId) => `/${workspaceId}/ai/chat/new`,
     // The first surface that takes anything. A thread dragged here becomes a
     // question about that thread, waiting in the composer.
     accepts: kind => kind === 'conversation',

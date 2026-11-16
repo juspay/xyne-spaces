@@ -1,4 +1,5 @@
 import { config } from '@/config/env';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { assertWebhookUrlSafe } from '@/utils/ssrfGuard';
 
@@ -59,4 +60,25 @@ export async function prepareAppWebhookDispatch(
     await assertWebhookUrlSafe(url);
   }
   return { url, headers, isInternal };
+}
+
+/**
+ * An install may point its webhook at an internally mapped host (dispatched in-cluster
+ * with the S2S key, no SSRF guard) only when its app's own webhook URL uses that host.
+ */
+export async function isInstallWebhookHostAllowed(webhookUrl: string, appId: string): Promise<boolean> {
+  let host: string;
+  try {
+    host = new URL(webhookUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!isInternalMappedHost(host)) return true;
+  const app = await db.apps.findUnique({ where: { id: appId }, select: { webhookUrl: true } });
+  if (!app?.webhookUrl) return false;
+  try {
+    return new URL(app.webhookUrl).hostname.toLowerCase() === host;
+  } catch {
+    return false;
+  }
 }
