@@ -109,12 +109,13 @@ function sendUnauthorized(res: Response): void {
   res.status(401).json({ success: false, error: 'Unauthorized' });
 }
 
-function prepareConfigForSave(
+async function prepareConfigForSave(
   config: AutomationConfig,
   res: Response,
   seriesId: string,
-): { config: AutomationConfig; context: string; eventType: ReturnType<typeof triggerTypeToEventType> } | null {
-  const validation = automationService.validateConfig(config);
+  access?: { userId: string; workspaceId: string },
+): Promise<{ config: AutomationConfig; context: string; eventType: ReturnType<typeof triggerTypeToEventType> } | null> {
+  const validation = await automationService.validateConfig(config, access);
   if (!validation.valid) {
     res.status(400).json({ success: false, error: 'Invalid automation config', data: validation });
     return null;
@@ -282,13 +283,14 @@ router.get('/schema/steps/:type', (req: Request, res: Response) => {
   });
 });
 
-router.post('/validate', (req: Request, res: Response) => {
+router.post('/validate', async (req: Request, res: Response) => {
   const body = req.body as { config?: AutomationConfig };
   if (!body?.config) {
     res.status(400).json({ success: false, error: 'Missing `config` in request body' });
     return;
   }
-  const result = automationService.validateConfig(body.config);
+  const auth = getAuthContext(req);
+  const result = await automationService.validateConfig(body.config, auth ?? undefined);
   res.json({ success: true, data: result, timestamp: new Date().toISOString() });
 });
 
@@ -516,7 +518,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const newId = createId();
-    const prepared = prepareConfigForSave(parsed.data.config, res, newId);
+    const prepared = await prepareConfigForSave(parsed.data.config, res, newId, auth);
     if (!prepared) return;
 
     const workflow = await postTx(prepared, auth, parsed, newId);
@@ -672,7 +674,7 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
     const existingAutomation = workflowToAutomation(existing);
     const prepared = parsed.data.config !== undefined
-      ? prepareConfigForSave(parsed.data.config, res, existing.automationSeriesId ?? existing.id)
+      ? await prepareConfigForSave(parsed.data.config, res, existing.automationSeriesId ?? existing.id, auth)
       : null;
     if (parsed.data.config !== undefined && !prepared) return;
 
