@@ -25,22 +25,17 @@ const PRODUCT_KEYTERMS = [
   'Xyne Scribe',
   'Xyne Search',
   'Xyne Calls',
-  'Namma Cloud',
   'Xyne Chats',
   'Xyne Tickets',
   'Xyne Support',
-  'Namma Yatri',
   'Xyne Spaces',
   'Xyne Code',
   'Xyne Training',
-  'Namma Bengaluru',
   'Xyne Automatic',
   'Xyne AI',
   'Xyne Assistant',
-  'Namma Shuttle',
   'Xyne Agent',
   'Xyne Bot',
-  'Namma Switch',
 ];
 
 type NamesEntry = { names: string[]; expiresAt: number };

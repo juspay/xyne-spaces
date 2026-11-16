@@ -20,7 +20,7 @@ export function ElectronEnrollmentSteps({
   const steps = [
     {
       title: 'Sign In',
-      description: 'Sign in with your Xyne Google account.',
+      description: 'Sign in with your work Google account.',
     },
     {
       title: 'Device Enrollment',

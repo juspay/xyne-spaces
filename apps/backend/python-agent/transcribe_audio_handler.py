@@ -102,13 +102,13 @@ def _transcribe_file_with_azure(path: str, model: str, language: Optional[str]):
 
 # Domain-specific hot words — kept in sync with multi_user_transcriber.py
 _HOT_WORDS = [
-    "Xyne Calls", "Namma Cloud", "Xyne Chats",
+    "Xyne Calls", "Xyne Chats",
     "Xyne Tickets", "Xyne Support",
-    "Namma Yatri", "Xyne Spaces", "Xyne Code",
-    "Xyne Training", "Namma Bengaluru", "Xyne Automatic",
+    "Xyne Spaces", "Xyne Code",
+    "Xyne Training", "Xyne Automatic",
     "Xyne AI",
-    "Xyne Assistant", "Namma Shuttle", "Xyne Agent",
-    "Xyne Bot", "Namma Switch",
+    "Xyne Assistant", "Xyne Agent",
+    "Xyne Bot",
 ]
 
 # Provider-enforced hard limits on the adaptation/keyword list, in priority order

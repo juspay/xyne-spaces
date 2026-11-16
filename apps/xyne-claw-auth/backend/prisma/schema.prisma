@@ -481,7 +481,7 @@ model SurfaceAccessToken {
 /// tenant links (a Spaces org has several workspaces), so this is a table, not
 /// a column. Used by JIT (users-jit.ts) to place a newly-mirrored user in the
 /// RIGHT claw org instead of the hardcoded default — the prerequisite for a
-/// second tenant (e.g. NammaYatri) sharing one Spaces DB.
+/// second tenant sharing one Spaces DB.
 /// `surfaceType` generalizes it: Slack/Teams later = an INSERT with a new
 /// surfaceType, not a schema migration. Narrow forerunner of plan.md's
 /// ConnectedSurface (which adds per-surface credentials — needed only for

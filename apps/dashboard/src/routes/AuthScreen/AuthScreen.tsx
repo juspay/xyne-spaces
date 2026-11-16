@@ -652,7 +652,7 @@ const AuthScreen = (): ReactElement | null => {
                             clearError();
                           }
                         }}
-                        placeholder='Xyne Inc'
+                        placeholder='Acme Inc'
                         className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
                           isOrganizationNameTakenError
                             ? 'border-amber-400 focus:ring-amber-500'
