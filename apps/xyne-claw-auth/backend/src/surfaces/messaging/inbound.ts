@@ -49,6 +49,7 @@ import {
   type AnswerOutcome,
 } from "./questions.js";
 import { sendConnectorLink } from "./widgets.js";
+import { agentPlanModeOn, redeemPlanDecision } from "./plans.js";
 import { runSerialized } from "./serialize.js";
 import { accountForSender } from "./shared-number.js";
 import { isAudio, transcribeAudio, transcriptionEnabled } from "./transcribe.js";
@@ -277,6 +278,9 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       log.info(`[inbound] stale menu choice account=${account.id} sender=${msg.senderId}`);
     } else if (option.action.kind === "approve-write" || option.action.kind === "decline-write") {
       await redeemApproval({ account, option, senderId: msg.senderId, chatId: msg.chatId });
+      return;
+    } else if (option.action.kind === "plan") {
+      await redeemPlanDecision({ account, option, target: chatTarget(account, msg) });
       return;
     } else if (option.action.kind === "connect") {
       await sendConnectorLink({
@@ -625,6 +629,9 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       idempotencyKey: `${account.channel}:${account.id}:${msg.messageId}`,
       ...(msg.senderName ? { senderName: msg.senderName } : {}),
       ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
+      // Plan mode, as for a Spaces mention: a fresh request from the person,
+      // never a command's run or the answer to a question already asked.
+      ...(!commandRun && !answered && agentPlanModeOn(agent.config) ? { plan: { phase: "propose" as const } } : {}),
       target,
     });
     if (outcome.kind === "queued") {

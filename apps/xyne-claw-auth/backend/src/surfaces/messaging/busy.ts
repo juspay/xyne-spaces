@@ -85,6 +85,8 @@ export async function continueInChat(input: {
   agentSlug?: string;
   task: string;
   idempotencyKey: string;
+  /** An approved plan's execution run (plans.ts). */
+  plan?: ChannelRunInput["plan"];
 }): Promise<void> {
   const { target } = input;
   const row = await getAccount(target.connectedSurfaceId);
@@ -112,6 +114,7 @@ export async function continueInChat(input: {
     eventType: target.isGroup ? "APP_MENTIONED" : "DIRECT_MESSAGE",
     idempotencyKey: `${account.channel}:${account.id}:${input.idempotencyKey}`,
     target,
+    ...(input.plan ? { plan: input.plan } : {}),
   });
   if (outcome.kind === "queued") {
     await enqueueOutbound(account.id, { kind: "text", chatId: target.chatId, text: outcome.notice });
@@ -132,6 +135,8 @@ export async function dispatchGoalTurn(input: {
   agentSlug: string;
   task: string;
   idempotencyKey: string;
+  /** A trivial plan run straight after it was proposed (plans.ts). */
+  plan?: ChannelRunInput["plan"];
 }): Promise<string | null> {
   const { target } = input;
   const row = await getAccount(target.connectedSurfaceId);
@@ -149,6 +154,7 @@ export async function dispatchGoalTurn(input: {
       eventType: target.isGroup ? "APP_MENTIONED" : "DIRECT_MESSAGE",
       idempotencyKey: `${account.channel}:${account.id}:${input.idempotencyKey}`,
       target,
+      ...(input.plan ? { plan: input.plan } : {}),
     }),
   );
   await attachSlotSession(conversationId, agent.slug, sessionId).catch(() => undefined);

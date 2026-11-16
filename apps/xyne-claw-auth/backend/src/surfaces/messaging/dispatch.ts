@@ -86,7 +86,10 @@ export function channelSurfaceInstructions(channel: MessagingChannelKey): string
     "- suggest-connectors works here: the person gets a Connect link that opens the sign-in, and once they finish you're asked to carry on. Say in one line what connecting will let you do. Never paste a sign-in link yourself.",
     "- Code, diffs and charts posted with the presentation tools arrive as a code block, a file or a few lines of numbers. Don't repeat them in your text.",
     "- describe-agent works here: an agent or a roster of agents arrives as a list they can tap to start talking to one. Keep your text to a line about why.",
-    "- Nothing else card-like exists here — no other pickers, plan cards, agent drafts or tables. A tool that says such a card \"will be shown with your reply\" is wrong here: don't call it again, write the content out in a few short lines instead, and never refer to something the text itself does not contain (\"see below\", \"click Connect\" when nothing was sent).",
+    tappable
+      ? "- propose-plan works here: the steps arrive as a numbered list with Approve/Reject buttons, and nothing runs until they tap Approve. Don't repeat the steps in your text."
+      : "- propose-plan works here: the steps arrive as a numbered list with a numbered Approve/Reject choice, and nothing runs until they approve. Don't repeat the steps in your text.",
+    "- Nothing else card-like exists here — no other pickers, agent drafts or tables. A tool that says such a card \"will be shown with your reply\" is wrong here: don't call it again, write the content out in a few short lines instead, and never refer to something the text itself does not contain (\"see below\", \"click Connect\" when nothing was sent).",
     tappable
       ? '- EXCEPTION — actions that need approval. A tool answering "Action queued for approval" really did pause, and an Approve/Decline prompt is sent right after your reply. Say in one line what you are about to do and that it needs their OK. Do NOT call the tool again, do NOT say it is done, and do NOT send them to another app.'
       : '- EXCEPTION — actions that need approval. A tool answering "Action queued for approval" really did pause, and a numbered Approve/Decline choice is sent right after your reply. Say in one line what you are about to do and that it needs their OK. Do NOT call the tool again, do NOT say it is done, and do NOT send them to another app.',
@@ -133,15 +136,20 @@ export function notificationSurfaceInstructions(): string {
  * orchestrator, which is unrestricted — so only the orchestrator is left
  * alone; for anyone else "no selection" plus these tools is still additive.
  *
- * Plan cards and the citation-reflection nudge are off: neither has anything
- * to show here, and the nudge rewrites a finished answer to add [clf-…]
- * tokens that are only stripped again on the way out. `replyFormat` carries
- * the chat's section limits, which claw enforces on the final answer.
+ * The live step list (planTracking) is off by default: every list update is
+ * one more message on someone's phone, and the bookkeeping turns cost a slow
+ * model up to half its wall clock. It stays on where it was asked for — an
+ * owner who set planTracking explicitly, and the run executing a plan the
+ * person just approved, whose progress is the point (plans.ts). The
+ * citation-reflection nudge is off: it rewrites a finished answer to add
+ * [clf-…] tokens that are only stripped again on the way out. `replyFormat`
+ * carries the chat's section limits, which claw enforces on the final answer.
  */
 export function channelAgentConfig(
   config: unknown,
   channel: MessagingChannelKey,
   delegationTier?: string,
+  opts: { planExecution?: boolean } = {},
 ): Record<string, unknown> {
   const base = config && typeof config === "object" && !Array.isArray(config) ? (config as Record<string, unknown>) : {};
   const stored = base["tools"] && typeof base["tools"] === "object" && !Array.isArray(base["tools"])
@@ -154,13 +162,21 @@ export function channelAgentConfig(
   };
   return {
     ...base,
-    planTracking: false,
+    planTracking: channelPlanTracking(base["planTracking"], opts.planExecution === true),
     citationReflection: false,
     // claw holds the final answer to the chat's section format (≤N sections
     // of ≤M words) and nudges a rewrite when it does not fit.
     ...replyFormatFor(channel),
     ...(tools ? { tools: { ...tools, direct: direct(tools["direct"]) } } : {}),
   };
+}
+
+/** The owner's explicit choice wins; absent means off in a chat, except for
+ *  an approved plan's own run, where it means on (as it does in Spaces). */
+function channelPlanTracking(stored: unknown, planExecution: boolean): unknown {
+  if (stored === false || stored === "false") return false;
+  if (stored === true || stored === "always") return stored;
+  return planExecution;
 }
 
 export const CHANNEL_RUN_OPTIMIZATIONS = "+subagent_direct_only,+interim_messages";
@@ -206,6 +222,24 @@ export interface ChannelRunInput {
   providerOverride?: { provider: string; model?: string };
   /** /queue <message>: wait behind the active run instead of interrupting it. */
   explicitQueueOnly?: boolean;
+  /** Plan mode, as in a Spaces thread. "propose" is Turn 1 (read-only, ends
+   *  in propose-plan and waits for Approve); "execute" is Turn 2, running the
+   *  steps the person approved (plans.ts). Absent ⇒ an ordinary run. */
+  plan?: { phase: "propose" } | { phase: "execute"; todos: Array<{ id: string; title: string }> };
+}
+
+/** The run-body and session fields a plan phase adds — the same values
+ *  routes/flow-action.ts sends for a Spaces plan approval. */
+function planRunFields(plan: ChannelRunInput["plan"]): {
+  body: Record<string, unknown>;
+  session: Pick<SessionContext, "mode" | "pendingPlan">;
+} {
+  if (!plan) return { body: {}, session: {} };
+  if (plan.phase === "propose") return { body: { mode: "plan" }, session: { mode: "plan" } };
+  return {
+    body: { mode: "auto", planContinuation: true },
+    session: { mode: "auto", pendingPlan: { todos: plan.todos } },
+  };
 }
 
 export interface ChannelRun {
@@ -222,6 +256,7 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
   const runAttachments = await toRunAttachments(input.conversationId, input.idempotencyKey, input.attachments ?? []);
 
   const providers = await resolveAgentProviderConfigs({ id: input.agent.id, config: input.agent.config });
+  const plan = planRunFields(input.plan);
   return {
     body: {
       userId: input.userId,
@@ -244,7 +279,10 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
       optimizations: CHANNEL_RUN_OPTIMIZATIONS,
-      agentConfig: channelAgentConfig(input.agent.config, input.target.channel, input.agent.delegationTier),
+      agentConfig: channelAgentConfig(input.agent.config, input.target.channel, input.agent.delegationTier, {
+        planExecution: input.plan?.phase === "execute",
+      }),
+      ...plan.body,
     },
     sessionContext: {
       mentionedUserId: input.userId,
@@ -266,6 +304,7 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
       rootAgentSlug: input.agent.slug,
       triggerSource: input.target.channel,
       channelDelivery: input.target,
+      ...plan.session,
     },
   };
 }

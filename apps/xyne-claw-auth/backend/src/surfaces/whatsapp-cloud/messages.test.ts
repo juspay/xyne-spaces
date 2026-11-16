@@ -78,3 +78,19 @@ describe("parseCloudWebhook forms", () => {
     expect(parseCloudWebhook(flowReply(JSON.stringify({ q0_one: "1" })))).toEqual([]);
   });
 });
+
+describe("parseCloudWebhook button taps", () => {
+  // A plan's Approve/Reject (and a write approval) comes back this way: the
+  // id is the parked token the core redeems, the title is only for show.
+  it("carries the tapped button's id as the card reply", () => {
+    const [msg] = parseCloudWebhook(
+      wrap({
+        ...base,
+        type: "interactive",
+        interactive: { type: "button_reply", button_reply: { id: "plan-approve-token", title: "Approve" } },
+        context: { id: "wamid.card" },
+      }),
+    );
+    expect(msg).toMatchObject({ cardReplyId: "plan-approve-token", text: "Approve", replyToSelf: true });
+  });
+});

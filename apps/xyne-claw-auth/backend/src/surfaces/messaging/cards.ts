@@ -45,7 +45,10 @@ export type CardAction =
   | { kind: "answer"; questionId: string; index: number; value: string }
   /** "Connect this one" on a multi-connector list: answered with that
    *  connector's own sign-in link (widgets.ts). */
-  | { kind: "connect"; serverType: string };
+  | { kind: "connect"; serverType: string }
+  /** Approve / Reject on a proposed plan (plans.ts). Bound to one proposal,
+   *  so a tap on a plan the agent has since replaced does nothing. */
+  | { kind: "plan"; decision: "approve" | "reject"; planId: string };
 
 export interface ParkedOption {
   action: CardAction;

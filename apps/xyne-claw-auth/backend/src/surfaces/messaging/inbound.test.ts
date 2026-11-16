@@ -37,6 +37,25 @@ vi.mock("../../redis.js", () => ({
       expire: async () => 1,
       lrange: async () => [],
       ltrim: async () => undefined,
+      // parkOptions writes a card's options in one MULTI…
+      multi: () => {
+        const ops: Array<[string, string]> = [];
+        const pipe = {
+          set: (k: string, v: string) => {
+            ops.push([k, v]);
+            return pipe;
+          },
+          exec: async () => ops.map(([k, v]) => redisStore.set(k, v)),
+        };
+        return pipe;
+      },
+      // …and consumeOption claims one with a script: read the first key,
+      // delete them all, return what was read.
+      eval: async (_script: string, count: number, ...keys: string[]) => {
+        const raw = redisStore.get(keys[0]!) ?? null;
+        if (raw !== null) keys.slice(0, count).forEach((key) => redisStore.delete(key));
+        return raw;
+      },
     }),
   },
 }));
@@ -52,8 +71,9 @@ vi.mock("./busy.js", () => ({ dispatchOrQueueChannelRun: dispatchChannelRun }));
 vi.mock("./approvals.js", () => ({ redeemApproval: vi.fn() }));
 vi.mock("./agent-tools.js", () => ({ agentActionGatesOf: () => ({ sendToOtherChats: false, reactions: true, listGroups: true }) }));
 vi.mock("./identity.js", () => ({ resolveIdentity }));
+let defaultAgentConfig: Record<string, unknown> | null = null;
 vi.mock("./store.js", () => ({
-  findDefaultAgent: async () => ({ agent: { id: "a1", slug: "assistant", name: "Assistant", enabled: true, config: null } }),
+  findDefaultAgent: async () => ({ agent: { id: "a1", slug: "assistant", name: "Assistant", enabled: true, config: defaultAgentConfig } }),
   findOrgAgentBySlug: async () => null,
   listOrgAgents: async () => [],
 }));
@@ -91,8 +111,16 @@ vi.mock("../../services/goalRelooper.js", () => ({ persistGoalStart: vi.fn(async
 // The connector half pulls the whole MCP catalogue in at import.
 const sendConnectorLink = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("./widgets.js", () => ({ sendConnectorLink }));
+// plans.ts reaches the session store and the dispatch path; only the hand-off
+// to it is under test here (plans.test.ts covers the rest).
+const redeemPlanDecision = vi.fn(async (..._args: unknown[]) => undefined);
+vi.mock("./plans.js", () => ({
+  redeemPlanDecision,
+  agentPlanModeOn: (config: unknown) => (config as { planMode?: unknown } | null)?.planMode === true,
+}));
 
 const { handleInbound, menuChoiceOf } = await import("./inbound.js");
+const { parkOptions } = await import("./cards.js");
 
 const account = {
   id: "acc-1",
@@ -410,5 +438,122 @@ describe("handleInbound", () => {
     await handleInbound(ctx, msg({ isGroup: true, chatId: "120@g.us", text: "", loadAttachments }));
     await settle();
     expect(loadAttachments).not.toHaveBeenCalled();
+  });
+});
+
+describe("plan Approve/Reject", () => {
+  const cloudPlugin = {
+    key: "whatsapp-cloud",
+    accountScope: "org",
+    capabilities: {
+      groups: false,
+      reactions: true,
+      typing: true,
+      media: true,
+      maxTextChars: 4096,
+      interactive: { buttons: 3, buttonTitleChars: 20, listRows: 10, rowTitleChars: 24, rowDescriptionChars: 72, bodyChars: 1024, headerChars: 60, footerChars: 60, cta: true },
+    },
+  } as never;
+  const cloudCtx = { account, plugin: cloudPlugin } as never;
+
+  /** What plans.ts parks: Approve first, Reject second, for this chat and sender. */
+  async function parkPlanChoice(chatId = "919@s.whatsapp.net", senderId = "919"): Promise<void> {
+    const common = { chatId, senderId, userId: "user-1", conversationId: "conv-1", agentSlug: "assistant" };
+    await parkOptions("acc-1", [
+      { token: "approve-tok", option: { ...common, action: { kind: "plan", decision: "approve", planId: "plan-1" } } },
+      { token: "reject-tok", option: { ...common, action: { kind: "plan", decision: "reject", planId: "plan-1" } } },
+    ]);
+  }
+  const decisionOf = (call: number) =>
+    (redeemPlanDecision.mock.calls[call]?.[0] as { option: { action: { decision: string } } }).option.action.decision;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    redisStore.clear();
+    enqueueOutbound.mockClear();
+    dispatchChannelRun.mockClear();
+    redeemPlanDecision.mockClear();
+    resolveIdentity.mockResolvedValue("user-1");
+    pendingQuestion.mockResolvedValue(null);
+    defaultAgentConfig = null;
+  });
+
+  it("Baileys: a typed 2 rejects and a typed 1 behind the agent's name approves, without starting a run", async () => {
+    await parkPlanChoice();
+    await handleInbound(ctx, msg({ text: "2" }));
+    await settle();
+    expect(redeemPlanDecision).toHaveBeenCalledTimes(1);
+    expect(decisionOf(0)).toBe("reject");
+    expect(redeemPlanDecision.mock.calls[0]?.[0]).toMatchObject({ target: { chatId: "919@s.whatsapp.net", senderId: "919" } });
+
+    await parkPlanChoice();
+    await handleInbound(ctx, msg({ text: "/assistant 1" }));
+    await settle();
+    expect(decisionOf(1)).toBe("approve");
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+  });
+
+  it("Baileys: answering one option spends the other, so a later 1 is just a message", async () => {
+    await parkPlanChoice();
+    await handleInbound(ctx, msg({ text: "2" }));
+    await handleInbound(ctx, msg({ text: "1" }));
+    await settle();
+    expect(redeemPlanDecision).toHaveBeenCalledTimes(1);
+    expect(dispatchChannelRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("Baileys group: a bystander's 1 does not approve someone else's plan", async () => {
+    await parkPlanChoice("120@g.us", "919");
+    await handleInbound(ctx, msg({ isGroup: true, chatId: "120@g.us", senderId: "918", text: "1" }));
+    await settle();
+    expect(redeemPlanDecision).not.toHaveBeenCalled();
+  });
+
+  it("Cloud: the Approve and Reject buttons come back as taps and are redeemed", async () => {
+    await parkPlanChoice();
+    await handleInbound(cloudCtx, msg({ text: "Approve", cardReplyId: "approve-tok" }));
+    await settle();
+    expect(decisionOf(0)).toBe("approve");
+
+    await parkPlanChoice();
+    await handleInbound(cloudCtx, msg({ text: "Reject", cardReplyId: "reject-tok" }));
+    await settle();
+    expect(decisionOf(1)).toBe("reject");
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+  });
+
+  it("Cloud: a typed 1 never stands in for the buttons", async () => {
+    await parkPlanChoice();
+    await handleInbound(cloudCtx, msg({ text: "1" }));
+    await settle();
+    expect(redeemPlanDecision).not.toHaveBeenCalled();
+    expect(dispatchChannelRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("Cloud: a second tap on a spent plan card is told it has been used", async () => {
+    await parkPlanChoice();
+    await handleInbound(cloudCtx, msg({ text: "Approve", cardReplyId: "approve-tok" }));
+    await handleInbound(cloudCtx, msg({ text: "Reject", cardReplyId: "reject-tok" }));
+    await settle();
+    expect(redeemPlanDecision).toHaveBeenCalledTimes(1);
+    expect(enqueueOutbound.mock.calls.at(-1)?.[1]).toMatchObject({ text: expect.stringContaining("already been used") });
+  });
+
+  it("starts a plan-mode agent's fresh request in plan mode, and nothing else", async () => {
+    await handleInbound(ctx, msg({ text: "summarise my tickets" }));
+    await settle();
+    expect(dispatchChannelRun.mock.calls[0]?.[0]).not.toHaveProperty("plan");
+
+    defaultAgentConfig = { planMode: true };
+    await handleInbound(ctx, msg({ text: "summarise my tickets" }));
+    await settle();
+    expect(dispatchChannelRun.mock.calls[1]?.[0]).toMatchObject({ plan: { phase: "propose" } });
+
+    // The answer to a question the run asked continues that run's work.
+    pendingQuestion.mockResolvedValueOnce({ questionId: "qs", index: 0, questions: [{ id: "q1", question: "Which week?", type: "open_ended" }] });
+    answerPendingQuestion.mockResolvedValueOnce({ kind: "done", task: "The user answered your questions." });
+    await handleInbound(ctx, msg({ text: "this week" }));
+    await settle();
+    expect(dispatchChannelRun.mock.calls[2]?.[0]).not.toHaveProperty("plan");
   });
 });
