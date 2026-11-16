@@ -19,7 +19,7 @@ import { ConversationRepository } from '../../database/repositories/conversation
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
-import { ExternalSource, ExternalMessage } from '@prisma/client';
+import { ExternalSource, ExternalMessage, Prisma } from '@prisma/client';
 import { isDeskChannelType, ExternalEntityType, EmailType, EmailMergeMode, ChannelType, MessageDirection, MessageType, DeskType } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
@@ -130,6 +130,15 @@ export class ExternalSourceCore {
           const results = await this.sync(adapter, sourceName, normalizedData, source);
           allResults.push(...results);
         } catch (error) {
+          if (isDuplicateEmailInsert(error)) {
+            // Another worker stored this email between our duplicate check and our insert, and the
+            // unique key rolled our transaction back. It is ingested; failing would only nack and retry.
+            logger.info(`Skipped email already ingested concurrently from ${sourceName}`, {
+              externalId: normalizedData.externalId,
+            });
+            allResults.push({ success: true, conversationId: '', entityId: '', action: 'duplicate' });
+            continue;
+          }
           failedExternalIds.push(normalizedData.externalId);
           firstFailureMessage ??= error instanceof Error ? error.message : String(error);
           logger.error(`Failed to sync interaction from ${sourceName}`, {
@@ -1021,6 +1030,17 @@ export class ExternalSourceCore {
     };
   }
 
+}
+
+/**
+ * True for the unique-key violation on Email(externalMessageId, channelId): the email was
+ * inserted by a concurrent ingest. Any other unique violation is still a real failure.
+ */
+export function isDuplicateEmailInsert(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return false;
+  const target = (error.meta as { target?: unknown } | undefined)?.target;
+  const fields = Array.isArray(target) ? target.map(String) : typeof target === 'string' ? [target] : [];
+  return fields.some(field => field.includes('externalMessageId'));
 }
 
 // Export singleton
