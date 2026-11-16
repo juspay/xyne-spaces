@@ -18,6 +18,7 @@ import { config } from '@/config/env';
 import {
   containsServerCiphertext,
   getKnownClientManifestVersion,
+  manifestEnvironmentForHandshake,
   onClientManifestVersionChange,
   transformPayloadForSession,
   TRANSIT_TICKET_COOKIE,
@@ -255,22 +256,30 @@ class WebSocketService {
 
   /**
    * Tell this pod's sockets when the client encryption manifest gets a new version, so
-   * clients refetch (with jitter) instead of polling. The version comes from this pod's
-   * own poll of the encryption service; no cross-pod fan-out is needed.
+   * clients refetch (with jitter) instead of polling. Each socket sits in the room of its
+   * lane (production / playground / ...), so a pre-prod change only reaches pre-prod users.
+   * The version comes from this pod's own poll of the encryption service; no cross-pod
+   * fan-out is needed.
    */
   private setupClientManifestVersionBroadcast(): void {
     if (!config.enc.apiClientEncryptionEnabled) return;
     onClientManifestVersionChange((event) => {
-      this.io?.emit(CLIENT_MANIFEST_VERSION_EVENT, event);
+      this.io?.to(`enc-manifest:${event.environment}`).emit(CLIENT_MANIFEST_VERSION_EVENT, event);
     });
   }
 
-  /** On every (re)connect: a client that slept through a broadcast catches up here. */
+  /**
+   * On every (re)connect: join the lane's room and send the lane's current version. A client
+   * that slept through a broadcast, or was just moved between prod and pre-prod (it
+   * reconnects with the new x-route-env), catches up here.
+   */
   private sendClientManifestVersion(socket: AuthenticatedSocket): void {
     if (!config.enc.apiClientEncryptionEnabled) return;
-    const version = getKnownClientManifestVersion('default');
+    const environment = manifestEnvironmentForHandshake(socket.handshake.headers);
+    void socket.join(`enc-manifest:${environment}`);
+    const version = getKnownClientManifestVersion('default', environment);
     if (version !== undefined) {
-      socket.emit(CLIENT_MANIFEST_VERSION_EVENT, { tag: 'default', version });
+      socket.emit(CLIENT_MANIFEST_VERSION_EVENT, { tag: 'default', environment, version });
     }
   }
 

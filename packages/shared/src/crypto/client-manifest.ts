@@ -8,7 +8,11 @@ import type {
 } from '../enc-contracts/manifest.js';
 import { getCryptoLogger } from './crypto-logger.js';
 import { getTrustedManifestKeys } from './manifest-keys.js';
-import { ManifestVerificationError, verifySignedClientManifest } from './manifest-verify.js';
+import {
+  ManifestVerificationError,
+  getAllowedManifestEnvironments,
+  verifySignedClientManifest,
+} from './manifest-verify.js';
 
 // The manifest types are defined once, next to the contracts they are generated from.
 export type {
@@ -23,9 +27,18 @@ export type {
 export const CLIENT_MANIFEST_VERSION_HEADER = 'x-enc-manifest-version';
 export const CLIENT_MANIFEST_TAG_HEADER = 'x-enc-manifest-tag';
 export const CLIENT_MANIFEST_STALE_CODE = 'ENC_MANIFEST_STALE';
+/** Environment of the manifest a write was encrypted with ('production', 'playground', ...). */
+export const CLIENT_MANIFEST_ENVIRONMENT_HEADER = 'x-enc-manifest-environment';
 
 /** Upper bound of the random delay before refetching after a version announcement. */
 const REFRESH_JITTER_MS = 30_000;
+/**
+ * Upper bound after a move between prod and pre-prod. Short, because until the refetch the
+ * client holds the other lane's rules; it fits inside the switch overlay (central-service's
+ * loadingSeconds, 3s by default). Moves already arrive in timed batches; the jitter only
+ * spreads an abort, which reverts every moved user at once.
+ */
+const LANE_CHANGE_JITTER_MS = 3_000;
 
 /**
  * Where the signed envelope and the highest version seen are kept between app starts.
@@ -68,7 +81,11 @@ export function setClientManifestStorage(next: ClientManifestStorage): void {
   storage = next;
 }
 
-const envelopeKey = (tag: string) => `xyne.enc.manifest.envelope:${tag}`;
+// Kept per environment: a user moved from prod to pre-prod and back keeps both copies and
+// both counters, so moving back is not mistaken for a rollback.
+const envelopeKey = (environment: string, tag: string) => `xyne.enc.manifest.envelope:${environment}:${tag}`;
+/** Environment of the copy accepted last, which an offline start restores. */
+const laneKey = (tag: string) => `xyne.enc.manifest.lane:${tag}`;
 const highestKey = (environment: string, tag: string) => `xyne.enc.manifest.highest:${environment}:${tag}`;
 
 // Module-level store: the manifest is independent of the transit keyring, so it
@@ -80,6 +97,8 @@ let warnedUnsigned = false;
 /** Latest version the backend announced over the socket, if newer than ours. */
 let announced: ClientManifestVersionEvent | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+/** Set when the user was moved between lanes and the new lane's manifest is not loaded yet. */
+let laneChangePending = false;
 
 export function getClientManifest(): ClientEncryptionManifest | null {
   return currentManifest;
@@ -117,7 +136,8 @@ async function acceptEnvelope(
     );
   }
   const store = getStorage();
-  await store.setItem(envelopeKey(tag), JSON.stringify(envelope));
+  await store.setItem(envelopeKey(payload.environment, tag), JSON.stringify(envelope));
+  await store.setItem(laneKey(tag), payload.environment);
   if (payload.version > highest) {
     await store.setItem(highestKey(payload.environment, tag), String(payload.version));
   }
@@ -134,7 +154,9 @@ async function acceptEnvelope(
 /** The stored envelope, re-verified (signature, expiry, rollback), or null. */
 async function restoreStoredManifest(tag: string): Promise<SignedClientManifestPayload | null> {
   try {
-    const raw = await getStorage().getItem(envelopeKey(tag));
+    const environment = await getStorage().getItem(laneKey(tag));
+    if (!environment) return null;
+    const raw = await getStorage().getItem(envelopeKey(environment, tag));
     if (!raw) return null;
     return await acceptEnvelope(JSON.parse(raw) as SignedClientManifest, tag);
   } catch (error) {
@@ -219,9 +241,8 @@ export function refreshClientManifest(tag = 'default'): Promise<ClientEncryption
     return currentManifest;
   })().finally(() => {
     inFlight = null;
-    if (announced && currentManifest && announced.tag === currentManifest.tag && announced.version <= currentManifest.version) {
-      announced = null;
-    }
+    laneChangePending = false;
+    if (announced && !isBehind(announced)) announced = null;
   });
 
   return inFlight;
@@ -229,7 +250,19 @@ export function refreshClientManifest(tag = 'default'): Promise<ClientEncryption
 
 function isBehind(event: ClientManifestVersionEvent): boolean {
   const current = currentManifest;
-  return !current || current.tag !== event.tag || event.version > current.version;
+  if (!current || current.tag !== event.tag) return true;
+  // Another lane's announcement (the socket reconnected after a move): versions of
+  // different environments are not comparable, so it is behind by definition.
+  if (event.environment && current.environment !== event.environment) return true;
+  return event.version > current.version;
+}
+
+function scheduleRefresh(tag: string, maxDelayMs: number): void {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void refreshClientManifest(tag).catch(() => undefined);
+  }, Math.random() * maxDelayMs);
 }
 
 /**
@@ -239,34 +272,45 @@ function isBehind(event: ClientManifestVersionEvent): boolean {
  */
 export function noteClientManifestVersion(event: ClientManifestVersionEvent): void {
   if (!event || typeof event.tag !== 'string' || typeof event.version !== 'number') return;
+  const allowed = getAllowedManifestEnvironments();
+  if (allowed && event.environment && !allowed.includes(event.environment)) return;
   if (!isBehind(event)) return;
   announced = event;
-  if (refreshTimer) return;
-  refreshTimer = setTimeout(() => {
-    refreshTimer = null;
-    const pending = announced;
-    if (!pending || !isBehind(pending)) return;
-    void refreshClientManifest(pending.tag).catch(() => undefined);
-  }, Math.random() * REFRESH_JITTER_MS);
+  // A different lane means the user was moved: use the short window, not the long one.
+  const laneChanged = !!event.environment && !!currentManifest && currentManifest.environment !== event.environment;
+  if (refreshTimer && !laneChanged) return;
+  scheduleRefresh(event.tag, laneChanged ? LANE_CHANGE_JITTER_MS : REFRESH_JITTER_MS);
 }
 
 /**
- * Before a write: if a newer version was announced and its jittered refetch has not run
- * yet, refetch now so the write is encrypted with the latest rules.
+ * The user was moved between prod and pre-prod (central-service pushed a new x-route-env;
+ * the dashboard fires `xyne:dynamic-headers-changed`). The backend now answers with the
+ * other lane's manifest, so refetch within 0–3s. Until then the old lane's copy stays in
+ * place, and any write in between refetches first (refreshClientManifestIfStale).
+ */
+export function noteClientManifestLaneChanged(tag = currentManifest?.tag ?? 'default'): void {
+  laneChangePending = true;
+  scheduleRefresh(tag, LANE_CHANGE_JITTER_MS);
+}
+
+/**
+ * Before a write: if a newer version was announced, or the user changed lanes, and the
+ * delayed refetch has not run yet, refetch now so the write uses the current lane's rules.
  */
 export async function refreshClientManifestIfStale(): Promise<void> {
-  const pending = announced;
-  if (!pending || !isBehind(pending)) return;
+  const pending = announced && isBehind(announced) ? announced : null;
+  if (!pending && !laneChangePending) return;
   if (refreshTimer) {
     clearTimeout(refreshTimer);
     refreshTimer = null;
   }
-  await refreshClientManifest(pending.tag).catch(() => undefined);
+  await refreshClientManifest(pending?.tag ?? currentManifest?.tag ?? 'default').catch(() => undefined);
 }
 
 export function clearClientManifest(): void {
   currentManifest = null;
   announced = null;
+  laneChangePending = false;
   if (refreshTimer) {
     clearTimeout(refreshTimer);
     refreshTimer = null;

@@ -58,6 +58,22 @@ const webCryptoVerifier: ManifestSignatureVerifier = async (spki, data, signatur
 
 let verifier: ManifestSignatureVerifier = webCryptoVerifier;
 
+/**
+ * Environments this build accepts a manifest for: the production apps accept 'production'
+ * and 'playground' (pre-prod is a lane of the same deployment, chosen per request by
+ * x-route-env, so the server picks between them), a sandbox build only 'sandbox', a local
+ * build only 'development'. `null` = not configured, any environment.
+ */
+let allowedEnvironments: readonly string[] | null = null;
+
+export function setAllowedManifestEnvironments(environments: readonly string[] | null): void {
+  allowedEnvironments = environments && environments.length > 0 ? [...environments] : null;
+}
+
+export function getAllowedManifestEnvironments(): readonly string[] | null {
+  return allowedEnvironments;
+}
+
 export function setManifestSignatureVerifier(next: ManifestSignatureVerifier): void {
   verifier = next;
 }
@@ -125,10 +141,16 @@ export async function verifySignedClientManifest(
   }
   if (!isPayload(payload)) throw new ManifestVerificationError('malformed_payload');
 
-  if (payload.environment !== key.environment) {
+  if (key.environments && !key.environments.includes(payload.environment)) {
     throw new ManifestVerificationError(
       'wrong_environment',
-      `Manifest for "${payload.environment}" signed with the "${key.environment}" key`,
+      `Key "${key.kid}" is not valid for environment "${payload.environment}"`,
+    );
+  }
+  if (allowedEnvironments && !allowedEnvironments.includes(payload.environment)) {
+    throw new ManifestVerificationError(
+      'wrong_environment',
+      `This build does not accept a manifest for "${payload.environment}"`,
     );
   }
   if (payload.tag !== expectedTag) throw new ManifestVerificationError('wrong_tag');

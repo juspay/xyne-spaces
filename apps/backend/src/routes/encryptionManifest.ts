@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { config } from '@/config/env';
-import { getLatestClientManifests } from '@/services/encryption';
+import { getLatestClientManifests, manifestEnvironmentForRequest } from '@/services/encryption';
 import { logger } from '@/utils/logger';
 
 const router = Router();
@@ -24,9 +24,12 @@ router.get('/', async (req: Request, res: Response) => {
   }
 
   const tag = typeof req.query.tag === 'string' && req.query.tag !== '' ? req.query.tag : 'default';
+  // The lane this request is routed on (x-route-env header/cookie), so a user moved to
+  // pre-prod gets the playground manifest from whichever side serves them.
+  const environment = manifestEnvironmentForRequest(req);
 
   try {
-    const { manifest, signed } = await getLatestClientManifests(tag);
+    const { manifest, signed } = await getLatestClientManifests(tag, environment);
     if (!manifest) {
       res.status(404).json({ error: 'Not found', message: 'No client encryption manifest for this environment' });
       return;
@@ -41,6 +44,7 @@ router.get('/', async (req: Request, res: Response) => {
     logger.error('Failed to fetch client encryption manifest', {
       userId: req.user.id,
       tag,
+      environment,
       error: err instanceof Error ? err.message : String(err),
     });
     res.status(502).json({ error: 'Encryption service unavailable' });
