@@ -110,6 +110,9 @@ export const TASK_COMMANDS: TaskCommand[] = [
       "sandbox-pw-evaluate",
       "sandbox-pw-wait-for",
       "sandbox-pw-close",
+      // Repo extraction (XYNE-66819): clone read-only, then parse the files in
+      // the runtime rather than asking the model to eyeball them.
+      "brand-parse-repo-tokens",
     ],
     // brand-skills is /brand's own folder. The extraction skills used to sit in
     // design-skills, which /design and /dashboard also load wholesale — so those
@@ -120,7 +123,13 @@ export const TASK_COMMANDS: TaskCommand[] = [
     sandboxProfile: "browser",
     instruction:
       "This is a Xyne brand-extraction run. The /brand prefix is an internal command, not part of the user's " +
-      "request. Follow the brand-extraction skill exactly. Extract a design system from the URL the user gave, " +
+      "request. " +
+      "CHOOSE THE SOURCE FIRST. A GitHub target — a github.com URL, or a bare owner/repo — means a REPOSITORY " +
+      "extraction: follow the repo-extraction skill, clone read-only, and parse the sources. Any other URL means " +
+      "a LIVE SITE: follow the brand-extraction skill and read computed styles in the browser. Neither, with an " +
+      "image attached, means a SCREENSHOT. If the target is ambiguous, ask which one rather than guessing — the " +
+      "two produce different evidence and a wrong choice silently yields a weaker system. " +
+      "Extract a design system from the URL the user gave, " +
       "or from the image they attached when there is no URL. " +
       "MEASURE, DO NOT GUESS: read real computed styles with sandbox-pw-evaluate rather than eyeballing a " +
       "screenshot, and when a value genuinely cannot be determined, record it in brand.json's `gaps` array " +

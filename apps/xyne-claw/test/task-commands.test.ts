@@ -399,3 +399,41 @@ describe("skill isolation between /brand and /design", () => {
     ]);
   });
 });
+
+describe("/brand repo extraction (XYNE-66819)", () => {
+  it("carries the repo parser alongside the browser tools", () => {
+    const command = parseTaskCommand("/brand github.com/acme/web");
+    expect(command?.command).toBe("/brand");
+    expect(command?.autoTools).toContain("brand-parse-repo-tokens");
+    // The same command still serves live sites — one command, three sources.
+    expect(command?.autoTools).toContain("sandbox-pw-evaluate");
+  });
+
+  it("actually mounts the repo parser, not just lists it", () => {
+    const command = parseTaskCommand("/brand acme/web");
+    const loaded = loadCustomTools(
+      { tools: { custom: [] } },
+      { userId: "u1", conversationId: "c1", agentSlug: "ordinary-agent", taskCommand: "/brand" },
+      undefined,
+      undefined,
+      undefined,
+      "session-1",
+      "s2s-key",
+      "session-token",
+      undefined,
+      undefined,
+      undefined,
+      command?.autoTools,
+    );
+    expect(loaded.tools.map((tool) => tool.name)).toContain("brand-parse-repo-tokens");
+  });
+
+  it("tells the model to pick a source and to ask when it cannot", () => {
+    // The three sources produce different evidence; guessing silently yields a
+    // weaker system, so the instruction must require a choice.
+    const instruction = parseTaskCommand("/brand x")?.instruction ?? "";
+    expect(instruction).toContain("github.com");
+    expect(instruction).toContain("owner/repo");
+    expect(instruction.toLowerCase()).toContain("ask which one");
+  });
+});
