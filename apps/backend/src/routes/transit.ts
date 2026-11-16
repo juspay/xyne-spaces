@@ -8,7 +8,7 @@ import { logger } from '@/utils/logger';
 const router = Router();
 
 // Base64 of a 65-byte uncompressed P-256 point.
-const P256_POINT_BASE64 = /^[A-Za-z0-9+/]{86}==$/;
+const P256_POINT_BASE64 = /^[A-Za-z0-9+/]{87}=$/;
 // `tk-` plus the base64 of a sealed ticket.
 const TICKET = /^tk-[A-Za-z0-9+/]{80,120}={0,2}$/;
 
