@@ -21,7 +21,6 @@ import { webhookLimiter } from '@/middleware/rateLimiters';
 import { authMiddleware } from '@/middleware/auth';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
-import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
 import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
@@ -542,50 +541,6 @@ router.post(
           error:
             'No fetchable sources for this channel: ' +
             skippedUnsupported.map(s => `${s.sourceId} (${s.reason})`).join('; '),
-        });
-      }
-
-      if (!appConfig.enableEmailFetchWorker) {
-        // The app export is paginated over up to 500 sequential requests —
-        // far beyond one HTTP response's lifetime, so it requires the worker.
-        const mailboxTarget = actionable.find(t => t.source.sourceType !== 'app-desk');
-        if (!mailboxTarget) {
-          return res.status(409).json({
-            success: false,
-            error: 'App desk history fetch requires ENABLE_EMAIL_FETCH_WORKER=true',
-          });
-        }
-        // A call pull waits 31s between Ozonetel requests, far too long to hold an HTTP request open.
-        if (mailboxTarget.source.sourceType === 'ozonetel') {
-          return res.status(503).json({ success: false, error: 'Call fetch needs the background fetch worker, which is turned off.' });
-        }
-        if (mailboxTarget !== actionable[0] || actionable.length > 1) {
-          logger.info('Worker disabled — skipping app targets, fetching mailbox inline', {
-            channelId,
-            skippedSources: actionable.filter(t => t !== mailboxTarget).map(t => t.source.id),
-          });
-        }
-        // Surface the deferred app targets the same way adapter-unsupported
-        // skips are — otherwise the client shows a plain success toast while
-        // app history was never pulled.
-        for (const deferred of actionable) {
-          if (deferred === mailboxTarget) continue;
-          skippedUnsupported.push({
-            sourceId: deferred.source.id,
-            sourceType: deferred.source.sourceType,
-            reason: 'App history fetch requires ENABLE_EMAIL_FETCH_WORKER=true',
-          });
-        }
-        const adapter = adapterRegistry.getAdapter(mailboxTarget.source.sourceType);
-        const result = await adapter.refetch!(mailboxTarget.source, {
-          startDate,
-          endDate,
-          ...mailboxTarget.jobData,
-        });
-        return res.json({
-          success: true,
-          ...result,
-          ...(skippedUnsupported.length > 0 && { skippedUnsupported }),
         });
       }
 
