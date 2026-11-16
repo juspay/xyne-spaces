@@ -15,6 +15,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
+import { containsServerCiphertext, transformPayloadForSession } from '@/services/encryption';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -1388,6 +1389,16 @@ class WebSocketService {
       if (subscribedSockets && subscribedSockets.size > 0) {
         logger.info(`📤 [REDIS-RELAY] Relaying to ${subscribedSockets.size} sockets:`, Array.from(subscribedSockets));
 
+        if (this.requiresRecipientTransform(message)) {
+          void this.emitPerRecipient(Array.from(subscribedSockets), 'session_activity', message, (recipientMessage) => ({
+            sessionId,
+            message: recipientMessage,
+            type: 'new_message',
+            timestamp: new Date()
+          }));
+          return;
+        }
+
         // Send to each subscribed socket
         for (const socketId of subscribedSockets) {
           this.io?.to(socketId).emit('session_activity', {
@@ -1416,7 +1427,66 @@ class WebSocketService {
 
     const roomName = `session:${sessionId}`;
 
+    if (this.requiresRecipientTransform(data)) {
+      // Room membership is this pod's in-memory adapter, the same sockets io.to(room) reaches.
+      const socketIds = Array.from(this.io.sockets.adapter.rooms.get(roomName) ?? []);
+      await this.emitPerRecipient(socketIds, event, data, (recipientData) => recipientData);
+      return;
+    }
+
     this.io.to(roomName).emit(event, data);
+  }
+
+  /**
+   * A payload carrying storage ciphertext (`ENC:v1|<dekId>|…`, left in place by DEK
+   * passthrough) must be re-encrypted per recipient before it reaches a socket: each
+   * client only holds its own session key. Payloads without it (every broadcast except
+   * passthrough routes) skip this and never call the encryption service.
+   */
+  private requiresRecipientTransform(data: unknown): boolean {
+    return (
+      config.enc.enableDbEncryption &&
+      config.enc.apiClientEncryptionEnabled &&
+      containsServerCiphertext(data)
+    );
+  }
+
+  /**
+   * DEK→CEK per recipient socket, using the `sid` its handshake authenticated with. One
+   * encryption-service call per recipient, run concurrently, so a busy room costs N calls
+   * per message. A socket with no `sid`, or whose transform fails, gets nothing: sending
+   * the payload as-is would leak storage ciphertext it cannot (and must not) decrypt.
+   */
+  private async emitPerRecipient<T>(
+    socketIds: string[],
+    event: string,
+    data: T,
+    wrap: (recipientData: T) => unknown,
+  ): Promise<void> {
+    await Promise.all(
+      socketIds.map(async (socketId) => {
+        const socket = this.io?.sockets.sockets.get(socketId) as
+          | (Socket & { user?: { sid?: string } })
+          | undefined;
+        // Not connected to this pod any more; a plain emit would be a no-op too.
+        if (!socket) return;
+
+        const sid = socket.user?.sid;
+        if (!sid) {
+          logger.warn(`[WS-ENC] Socket ${socketId} has no session id; not sending ${event} with storage ciphertext`);
+          return;
+        }
+
+        try {
+          const transformed = await transformPayloadForSession(data, sid);
+          socket.emit(event, wrap(transformed));
+        } catch (error) {
+          logger.warn(`[WS-ENC] DEK→CEK transform failed for socket ${socketId}; not sending ${event}`, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }),
+    );
   }
 
   /**

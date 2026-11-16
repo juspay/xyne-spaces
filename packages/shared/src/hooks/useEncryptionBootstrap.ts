@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { fetchEncryptionConfig, registerClientKey } from '../crypto/key-exchange.js';
 import { decryptionCache } from '../crypto/decryption-cache.js';
+import { refreshClientManifest, clearClientManifest } from '../crypto/client-manifest.js';
 import { consoleLogger, Event } from '../logger/index.js';
 import type { EncryptedTableConfig } from '../zero/query-validation.js';
 
@@ -93,6 +94,21 @@ async function performBootstrap(options: BootstrapOptions = {}): Promise<Encrypt
     };
   }
 
+  // With API client encryption on, the manifest loads alongside the key so bootstrap is
+  // not ready until both are in place. The manifest lives in its own module store.
+  if (result.apiClientEncryptionEnabled) {
+    const [state] = await Promise.all([resolveKey(config, result, options), refreshClientManifest()]);
+    return state;
+  }
+
+  return resolveKey(config, result, options);
+}
+
+async function resolveKey(
+  config: EncryptionConfig,
+  result: Awaited<ReturnType<typeof fetchEncryptionConfig>>,
+  options: BootstrapOptions,
+): Promise<EncryptionBootstrapState> {
   const sessionFingerprint = result.sessionFingerprint ?? null;
 
   if (sessionFingerprint && options.getStoredKey) {
@@ -157,12 +173,14 @@ export function useEncryptionBootstrapInit(
     currentScopeKey.current = scopeKey;
     requestVersion.current += 1;
     decryptionCache.clear();
+    clearClientManifest();
   }
 
   const reset = useCallback(() => {
     globalFetch = null;
     requestVersion.current += 1;
     decryptionCache.clear();
+    clearClientManifest();
     setScopedState({ scopeKey, state: initialState() });
     setBootstrapVersion(version => version + 1);
   }, [scopeKey]);

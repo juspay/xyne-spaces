@@ -1,6 +1,7 @@
 import { config } from '@/config/env';
 import type {
   ClientEncryptionConfig,
+  ClientEncryptionManifest,
   EncryptBatchItem,
   EncryptedFieldConfig,
   EncryptionProvider,
@@ -10,6 +11,8 @@ import type {
   RegisterSessionKeyInput,
   RegisterSessionKeyResult,
   StorageObjectKey,
+  TransformRequestInput,
+  TransformRequestResult,
 } from './types';
 
 function unsupported(operation: string): never {
@@ -66,6 +69,16 @@ const provider: EncryptionProvider = {
     return unsupported('decryptRequest');
   },
 
+  async transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>> {
+    if (!config.enc.apiClientEncryptionEnabled) return { body: input.body };
+    return unsupported('transformRequest');
+  },
+
+  async transformResponse<T>(body: T, _sessionId: string): Promise<T> {
+    if (!config.enc.apiClientEncryptionEnabled) return body;
+    return unsupported('transformResponse');
+  },
+
   async initializeOrg(_orgId: string): Promise<void> {
     if (!config.enc.orgProvisionEnabled) return;
     return unsupported('initializeOrg');
@@ -95,6 +108,11 @@ const provider: EncryptionProvider = {
   async unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]> {
     if (wrappedKeys.length === 0) return [];
     return unsupported('unwrapStorageKeys');
+  },
+
+  async getClientManifest(_params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null> {
+    if (!config.enc.apiClientEncryptionEnabled) return null;
+    return unsupported('getClientManifest');
   },
 };
 

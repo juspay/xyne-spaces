@@ -66,6 +66,8 @@ export * from './types/research';
 export * from './tickets';
 export * from './nudges';
 export * from './crypto/index.js';
+export * from './enc-contracts/index.js';
+export * from './content-extractors/index.js';
 export * from './templates/callInvitation';
 export * from './templates/callInvitationIcs';
 export * from './templates/callSummary';

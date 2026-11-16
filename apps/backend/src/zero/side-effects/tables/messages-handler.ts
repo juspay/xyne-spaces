@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
+import type { DerivedContentFacts } from '@xyne/shared';
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
@@ -14,6 +15,7 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
   extractAllUsersForNotification,
+  extractAllUsersForNotificationFromDerived,
   getChannelParticipantsForMention,
   getOnlineChannelParticipants,
   extractSpecialMentions,
@@ -236,7 +238,7 @@ export function formatDmChannelName(names: string[], maxVisible: number = 2): st
 
 export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
-    const { entityId: messageId } = job;
+    const { entityId: messageId, derived } = job;
 
     logger.info('[SIDE-EFFECT] Message insert side effect triggered', { messageId });
 
@@ -291,8 +293,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
-    if (message.content && message.msgType === MessageType.USER) {
-      this.resolveLinkPreview(message.messageId, message.conversationId, message.content).catch(error => {
+    // With derived facts (encrypted content) the preview resolves from the extracted first URL.
+    const linkPreviewSource = derived?.links ? derived.links.first : message.content;
+    if (linkPreviewSource && message.msgType === MessageType.USER) {
+      this.resolveLinkPreview(message.messageId, message.conversationId, linkPreviewSource).catch(error => {
         logger.error('[MessagesSideEffect] Failed to resolve link preview:', {
           messageId,
           error: error,
@@ -398,7 +402,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       sender.userType !== UserType.APP &&
       sender.userType !== UserType.AGENT &&
       channel?.scopeType === ChannelScopeType.DEFAULT &&
-      content?.includes('/pull-requests/')
+      (derived?.links ? derived.links.pr.length > 0 : content?.includes('/pull-requests/'))
     ) {
       prCheckApprovalService
         .postApprovalButtonForPrLinkMessage({
@@ -406,7 +410,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           conversationId,
           channelId,
           senderId,
-          content,
+          // Extracted PR URLs stand in for the encrypted content; the host check still runs.
+          content: derived?.links ? derived.links.pr.join(' ') : content,
           workspaceId: this.ctx.workspaceId,
         })
         .catch(error => {
@@ -454,7 +459,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const allowBroadcastExpansion =
       artifactBroadcastsToChannel || !isReply || allowThreadBroadcastMentions;
     const specialMentions = allowBroadcastExpansion
-      ? extractSpecialMentions(contentForMentions)
+      ? derived?.mentions
+        ? { hasChannel: derived.mentions.channel, hasHere: derived.mentions.here }
+        : extractSpecialMentions(contentForMentions)
       : { hasChannel: false, hasHere: false };
     // Reuses the @channel pipeline wholesale: mention-tier notification
     // filtering, per-user activities, and thread-aware action URLs all follow.
@@ -576,6 +583,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channel.scopeType as ChannelScopeType,
         message.hasAttachment,
         dmPrefetchedData,
+        derived,
       );
       return;
     }
@@ -583,11 +591,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const workspaceId = await channelRepository.getWorkspaceId(channelId);
     // In thread replies, disable @channel/@here expansion by not passing channelId.
     // contentForMentions is already computed above (the note for forwards, flow text for FlowJSON, raw HTML otherwise)
-    const mentionedUsers = await extractAllUsersForNotification(
+    const mentionedUsers = await this.resolveMentionedUsers(
       contentForMentions,
       workspaceId,
       allowBroadcastExpansion ? channelId : undefined,
-      artifactBroadcastsToChannel
+      artifactBroadcastsToChannel,
+      derived,
     );
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
 
@@ -1550,6 +1559,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     scopeType: ChannelScopeType,
     hasAttachment: boolean,
     prefetchedData?: PrefetchedFilterData,
+    derived?: DerivedContentFacts,
   ): Promise<void> {
     const isReply = !!(initialMessageId && initialMessageId !== messageId);
     if (mentionType) {
@@ -1593,7 +1603,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           // @channel/@here in GROUP_DM thread: use 'thread_mention' context.
           // Personally mentioned members are sent without mentionType so the
           // @channel/@here toggle can't suppress their mention.
-          const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId);
+          const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId, derived);
           const personalSet = new Set(personalIds);
           const sendThreadMentions = async (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) => {
             if (userIds.length === 0) return [];
@@ -1631,10 +1641,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           const flowRawText = getFlowJsonRawTextForMentions(htmlContent);
           const contentForMentions = flowRawText ?? htmlContent;
           const participantSet = new Set(channelParticipants.map(p => p.userId));
-          const mentioned = await extractAllUsersForNotification(
+          const mentioned = await this.resolveMentionedUsers(
             contentForMentions,
             this.ctx.workspaceId,
             channelId,
+            undefined,
+            derived,
           );
           const groupDMThreadMentionedUsers = mentioned
             .filter(u => (u.mentionSource === 'direct' || u.mentionSource === 'group')
@@ -1769,7 +1781,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         // Case 1: GROUP_DM @channel/@here — route through createMentionNotifications.
         // Personally mentioned members are sent without mentionType so the
         // @channel/@here toggle can't suppress their mention.
-        const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId);
+        const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId, derived);
         const personalSet = new Set(personalIds);
         const sendMentions = async (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) => {
           if (userIds.length === 0) return [];
@@ -1810,10 +1822,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           const flowRawText = getFlowJsonRawTextForMentions(htmlContent);
           const contentForMentions = flowRawText ?? htmlContent;
           const participantSet = new Set(channelParticipants.map(p => p.userId));
-          const mentioned = await extractAllUsersForNotification(
+          const mentioned = await this.resolveMentionedUsers(
             contentForMentions,
             this.ctx.workspaceId,
             channelId,
+            undefined,
+            derived,
           );
           groupDMMentionedUsers = mentioned
             .filter(u => (u.mentionSource === 'direct' || u.mentionSource === 'group')
@@ -1996,14 +2010,34 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     htmlContent: string,
     channelParticipants: Array<{ userId: string }>,
     senderId: string,
+    derived?: DerivedContentFacts,
   ): Promise<string[]> {
     // No channelId: @channel/@here expansion isn't needed here.
-    const mentioned = await extractAllUsersForNotification(
+    const mentioned = await this.resolveMentionedUsers(
       getFlowJsonRawTextForMentions(htmlContent) ?? htmlContent,
       this.ctx.workspaceId,
+      undefined,
+      undefined,
+      derived,
     );
     const participantIds = new Set(channelParticipants.map(p => p.userId));
     return mentionRecipients(mentioned, { participantIds, senderId }).map(u => u.userId);
+  }
+
+  /**
+   * Mentioned users from the encryption service's extracted facts when the content is
+   * ciphertext, else parsed from the content as before.
+   */
+  private resolveMentionedUsers(
+    contentForMentions: string,
+    workspaceId: string,
+    channelId: string | undefined,
+    forceChannelMention: boolean | undefined,
+    derived: DerivedContentFacts | undefined,
+  ) {
+    return derived?.mentions
+      ? extractAllUsersForNotificationFromDerived(derived.mentions, workspaceId, channelId, forceChannelMention)
+      : extractAllUsersForNotification(contentForMentions, workspaceId, channelId, forceChannelMention);
   }
 
   private async handleSpecialMentionActivities(
