@@ -80,6 +80,9 @@ const AGENT_DISPATCH_RECORD_TTL_SECONDS = 60 * 60;
 /** How long after createDispatch we check whether any worker actually claimed the job. */
 const DISPATCH_CLAIM_CHECK_DELAY_MS = 9 * 1000;
 
+/** By then a claimed agent has fetched its session and connected (normally ~2s after claiming). */
+const AGENT_JOIN_CHECK_DELAY_MS = 45 * 1000;
+
 function nextRedispatchDelayMs(retryIndex: number): number {
   const backoffMs = Math.min(REDISPATCH_RETRY_INITIAL_MS * 2 ** retryIndex, REDISPATCH_RETRY_MAX_MS);
   const jitterMs = REDISPATCH_JITTER_MIN_MS + Math.random() * (REDISPATCH_JITTER_MAX_MS - REDISPATCH_JITTER_MIN_MS);
@@ -364,14 +367,28 @@ export class LiveKitService {
       const dispatch = await this.agentDispatch.createDispatch(roomName, agentName);
       logger.info(`[${roomName}] transcription_agent_dispatched | dispatch_id=${dispatch.id}, agent=${agentName}`);
       // The agent's /session call must name a dispatch recorded here; LiveKit can't invent one.
-      await redisService
-        .recordAgentDispatch(dispatch.id, roomName, AGENT_DISPATCH_RECORD_TTL_SECONDS)
-        .catch((error) => logger.error(`[${roomName}] agent_dispatch_record_failed | dispatch_id=${dispatch.id}, error=${error}`));
+      // An unrecorded dispatch would be refused forever, so it counts as a failed dispatch.
+      if (!(await this.recordDispatch(roomName, dispatch.id))) {
+        await this.agentDispatch.deleteDispatch(dispatch.id, roomName).catch(() => undefined);
+        return null;
+      }
       return dispatch;
     } catch (error) {
       logger.error(`[${roomName}] transcription_agent_dispatch_failed | agent=${agentName}, error=${error}`);
       return null;
     }
+  }
+
+  private async recordDispatch(roomName: string, dispatchId: string): Promise<boolean> {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await redisService.recordAgentDispatch(dispatchId, roomName, AGENT_DISPATCH_RECORD_TTL_SECONDS);
+        return true;
+      } catch (error) {
+        logger.error(`[${roomName}] agent_dispatch_record_failed | dispatch_id=${dispatchId}, attempt=${attempt}, error=${error}`);
+      }
+    }
+    return false;
   }
 
   /**
@@ -398,6 +415,13 @@ export class LiveKitService {
       });
     }, DISPATCH_CLAIM_CHECK_DELAY_MS);
     timer.unref?.();
+
+    // A claimed job can still fail to join (no call session, crash before connecting). The
+    // claim check can't see that, so look for the agent in the room itself; presence-gated.
+    const joinTimer = setTimeout(() => {
+      void this.ensureTranscriptionAgent(roomName, agentName, { reason: 'dispatched_agent_not_in_room' });
+    }, AGENT_JOIN_CHECK_DELAY_MS);
+    joinTimer.unref?.();
   }
 
   /**

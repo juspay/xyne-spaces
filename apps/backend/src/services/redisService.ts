@@ -295,17 +295,20 @@ class RedisService {
   }
 
   /**
-   * Binds a recorded dispatch to the first agent public key that claims it. Returns the
-   * dispatch's room for that key (also on retries with the same key, so a lost response
-   * doesn't strand the agent), or null if the dispatch is unknown or bound to another key.
+   * Binds a recorded dispatch to the first agent public key that claims it. A retry with
+   * the same key gets the same answer, so a lost response doesn't strand the agent.
    */
-  async claimAgentDispatch(dispatchId: string, agentPublicKey: string, ttlSeconds: number): Promise<string | null> {
+  async claimAgentDispatch(
+    dispatchId: string,
+    agentPublicKey: string,
+    ttlSeconds: number,
+  ): Promise<{ room: string } | { refused: 'unknown' | 'claimed' }> {
     if (!this.redis) throw new Error('Redis not initialized');
     const room = await this.redis.get(`agent-dispatch:${dispatchId}`);
-    if (!room) return null;
+    if (!room) return { refused: 'unknown' };
     const claimKey = `agent-dispatch-claim:${dispatchId}`;
     await this.redis.set(claimKey, agentPublicKey, 'EX', ttlSeconds, 'NX');
-    return (await this.redis.get(claimKey)) === agentPublicKey ? room : null;
+    return (await this.redis.get(claimKey)) === agentPublicKey ? { room } : { refused: 'claimed' };
   }
 
   // Session subscription management

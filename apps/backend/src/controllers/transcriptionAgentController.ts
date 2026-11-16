@@ -171,11 +171,13 @@ class TranscriptionAgentController {
       }
 
       const { dispatchId, publicKey } = parsed.data;
-      const dispatchedRoom = await redisService.claimAgentDispatch(dispatchId, publicKey, AGENT_DISPATCH_CLAIM_TTL_SECONDS);
-      if (dispatchedRoom !== callId) {
-        // Unknown, expired, claimed by another key, or recorded for another room.
-        logger.warn(`[${callId}] agent_call_session_refused | reason=dispatch_not_claimable, dispatch_id=${dispatchId}`);
-        res.status(403).json({ success: false, error: 'Dispatch not recognised' });
+      const claim = await redisService.claimAgentDispatch(dispatchId, publicKey, AGENT_DISPATCH_CLAIM_TTL_SECONDS);
+      if (!('room' in claim) || claim.room !== callId) {
+        // `unknown` may just mean the record hasn't landed yet (the agent retries it briefly);
+        // `claimed` (another key, or another room) is final.
+        const reason = 'refused' in claim ? claim.refused : 'claimed';
+        logger.warn(`[${callId}] agent_call_session_refused | reason=dispatch_${reason}, dispatch_id=${dispatchId}`);
+        res.status(403).json({ success: false, error: 'Dispatch not recognised', reason: `dispatch_${reason}` });
         return;
       }
 

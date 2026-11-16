@@ -92,10 +92,17 @@ async def fetch_call_session(backend_url: str, api_key: str, room_name: str, dis
                         if not data.get("encrypted"):
                             return CallSession(call_key=None)
                         return CallSession(call_key=_unseal(room_name, private_key, data["sealedKey"]))
-                    last_error = f"status={response.status}"
-                    # 403 can mean the backend hasn't finished recording the dispatch yet; retry it.
-                    if 400 <= response.status < 500 and response.status != 403:
-                        break  # refused: retrying won't change the answer
+                    reason = ""
+                    if response.status == 403:
+                        try:
+                            reason = (await response.json()).get("reason", "")
+                        except Exception:  # noqa: BLE001
+                            pass
+                    last_error = f"status={response.status} {reason}".strip()
+                    # Only an unknown dispatch is worth retrying: the backend records it right after
+                    # creating it. Any other 4xx (claimed by another key, call ended) is final.
+                    if 400 <= response.status < 500 and reason != "dispatch_unknown":
+                        break
         except (asyncio.TimeoutError, aiohttp.ClientError) as e:
             last_error = type(e).__name__
         except Exception as e:  # malformed response or unseal failure
