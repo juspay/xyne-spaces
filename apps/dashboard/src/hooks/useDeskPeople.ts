@@ -10,6 +10,8 @@ export interface DeskPerson {
 export interface DeskPeople {
   senders: DeskPerson[];
   recipients: DeskPerson[];
+  /** `idle` until an answer for the requested channel arrives; `failed` if it never does. */
+  status: 'idle' | 'ready' | 'failed';
 }
 
 interface DeskPeopleResponse {
@@ -17,7 +19,11 @@ interface DeskPeopleResponse {
   recipients?: DeskPerson[];
 }
 
-const EMPTY: DeskPeople = { senders: [], recipients: [] };
+const EMPTY: DeskPeople = { senders: [], recipients: [], status: 'idle' };
+// Empty too, but no longer waiting: the request failed or took too long.
+const FAILED: DeskPeople = { senders: [], recipients: [], status: 'failed' };
+// A request still unanswered after this long is reported as failed; a late answer still lands.
+const LOAD_TIMEOUT_MS = 10_000;
 
 // Sentinel for the aggregate endpoint (all the user's desk channels), used by the
 // global Cmd+K Desk tab where no single channel is selected.
@@ -68,17 +74,23 @@ export const useDeskPeople = (channelId: string | undefined): DeskPeople => {
         const next: DeskPeople = {
           senders: response.data?.senders ?? [],
           recipients: response.data?.recipients ?? [],
+          status: 'ready',
         };
         cache.set(channelId, { people: next, expiresAt: Date.now() + TTL_MS });
         setPeople(next);
       } catch {
         // Silent — empty is the graceful fallback (contacts + free-typed still work).
+        if (!cancelled) setPeople(FAILED);
       }
     };
 
     void fetchAndSet();
+    const timeout = setTimeout(() => {
+      setPeople(prev => (prev.status === 'ready' ? prev : FAILED));
+    }, LOAD_TIMEOUT_MS);
     return (): void => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, [channelId]);
 

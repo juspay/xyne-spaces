@@ -165,6 +165,7 @@ export function FiltersModal({
             onChange={write}
             placeholder={control.placeholder}
             track={entry.id.toUpperCase()}
+            syntax={entry.syntax}
           />
         );
       case 'channels':
@@ -175,6 +176,7 @@ export function FiltersModal({
             placeholder={control.placeholder}
             track={entry.id.toUpperCase()}
             excludeDMs={control.excludeDMs ?? false}
+            deskTab={draft.docType === 'desk'}
           />
         );
       case 'mentions':

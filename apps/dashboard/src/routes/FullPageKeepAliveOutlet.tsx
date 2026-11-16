@@ -32,6 +32,7 @@ import {
 } from '../components/Chat/ChatDirectory/cmdkFullPage';
 import { useScope } from '../shortcuts';
 import { OVERLAY_STATE_KEY } from '../hooks/useHistoryBackedOverlay';
+import { APP_NO_DRAG_STYLE } from '../utils/electronApp';
 import {
   createPageCoverage,
   PageCoveredContext,
@@ -412,6 +413,12 @@ function FullPageLayer({ children }: { children: ReactNode }): ReactElement {
       {...{ [RESULTS_PAGE_ATTR]: '' }}
       // Over the page underneath; under the palette, dialogs and popovers.
       className='fixed z-40 overflow-hidden bg-background'
+      // Desktop app: the page underneath is still drawn, window-drag header and all, and the window
+      // turns a click on a drag strip into a drag whatever is stacked over it. Full page opts its
+      // whole box out, so its controls get their clicks; its header marks its own drag strip. The
+      // window applies drag and no-drag rects in document order, so this layer has to stay after the
+      // kept page in the tree for its no-drag to win.
+      style={APP_NO_DRAG_STYLE}
     >
       {children}
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { detectMentionTrigger } from '../../../search/mentionCandidates';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
   COMMAND_PRIORITY_LOW,
@@ -13,7 +14,6 @@ import {
   $isRangeSelection,
   $getRoot,
 } from 'lexical';
-import { TicketPriority } from '@xyne/shared';
 import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
 import { $removeExistingPriorityChips, $spliceFilterChip } from './FilterChipNode';
 import { ChipType, type ChipData } from './ChannelCommandMenu.types';
@@ -41,14 +41,6 @@ export type BoardTriggerType = 'board:';
  * the chip's type comes from the picked candidate rather than from the trigger.
  */
 export type MentionsTriggerType = 'mentions:';
-
-// Gate the `priority:` dropdown: open only for an empty value or a prefix of a real
-// TicketPriority, so natural language ("High Priority: Refund rock") can't hijack it.
-function priorityQueryHasMatch(query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return Object.values(TicketPriority).some(value => value.toLowerCase().startsWith(q));
-}
 
 /**
  * A typeahead trigger → the prefix its finished chip carries. Only the triggers that
@@ -238,7 +230,13 @@ export function MentionPlugin({
         const textContent = anchorNode.getTextContent();
         const cursorOffset = selection.anchor.offset;
         // Bail if the trigger moved out from under us (same guard insertMention uses).
-        if (textContent.substring(mentionStart, mentionStart + trigger.length) !== trigger) return;
+        // Prefixes match in any letter case (`From:`), so this check does too.
+        if (
+          textContent.substring(mentionStart, mentionStart + trigger.length).toLowerCase() !==
+          trigger.toLowerCase()
+        ) {
+          return;
+        }
 
         // Chips in order, each followed by a space, so they read as separate pills.
         $spliceFilterChip(anchorNode, mentionStart, cursorOffset, chips, {
@@ -312,7 +310,7 @@ export function MentionPlugin({
               mentionStart,
               mentionStart + trigger.length,
             );
-            if (triggerAtStart !== trigger) {
+            if (triggerAtStart.toLowerCase() !== trigger.toLowerCase()) {
               isInsertingMention.current = false;
               return;
             }
@@ -344,7 +342,7 @@ export function MentionPlugin({
 
         // Verify trigger is still at the expected position
         const triggerAtStart = textContent.substring(mentionStart, mentionStart + trigger.length);
-        if (triggerAtStart !== trigger) return;
+        if (triggerAtStart.toLowerCase() !== trigger.toLowerCase()) return;
 
         const mentionData = buildMentionData(item, type, trigger);
         // Priority is the exclusive filter — drop any existing priority chip first.
@@ -638,157 +636,11 @@ export function MentionPlugin({
           return;
         }
 
-        // Check for "from:", "to:", "with:", or "@" (user triggers).
-        const fromMatch = textBeforeCursor.match(/\bfrom:\s*(.*)$/i);
-        const toMatch = enableToTrigger ? textBeforeCursor.match(/\bto:\s*(.*)$/i) : null;
-        const withMatch = textBeforeCursor.match(/\bwith:\s*(.*)$/i);
-        // `(?:^|\s)@` ignores an embedded `@` (email/URL won't hijack mention mode); the query
-        // allows spaces (so a demoted multi-word chip re-arms) but not a leading space, may be empty.
-        const atMatch = textBeforeCursor.match(/(?:^|\s)@([^@\s][^@]*)?$/);
-
-        const assigneeMatch = textBeforeCursor.match(/\bassignee:\s*(.*)$/i);
-
-        // Check for "in:" or "#" (channel triggers)
-        // Safe alongside the `@`/`#` triggers: both of those need a space or start-of-line
-        // before the sigil, and here it follows a colon.
-        const mentionsMatch = textBeforeCursor.match(/\bmentions:\s*(.*)$/i);
-        const inMatch = textBeforeCursor.match(/\bin:\s*(.*)$/i);
-        const hashMatch = textBeforeCursor.match(/(?:^|\s)#(\S*)$/);
-
-        // `priority:` trigger. Prefix is case-sensitive (no /i) so it stays in sync with
-        // the lowercase `lastIndexOf('priority:')` insert offset; the value is matched
-        // case-insensitively (priorityQueryHasMatch).
-        const priorityMatch = textBeforeCursor.match(/\bpriority:\s*(.*)$/);
-
-        // Date triggers. The value is a partial date or a preset name, so anything is a
-        // valid in-progress query — no gate like priorityQueryHasMatch.
-        const boardMatch = textBeforeCursor.match(/\bboard:\s*(.*)$/i);
-        const onMatch = textBeforeCursor.match(/\bon:\s*(.*)$/i);
-        const afterMatch = textBeforeCursor.match(/\bafter:\s*(.*)$/i);
-        const beforeMatch = textBeforeCursor.match(/\bbefore:\s*(.*)$/i);
-
-        let trigger: { type: TriggerType; text: string; query: string; index: number } | null =
-          null;
-
-        if (fromMatch) {
-          trigger = {
-            type: 'user',
-            text: 'from:',
-            query: (fromMatch[1] || '').replace(/^@/, '').trim(),
-            index: textBeforeCursor.lastIndexOf('from:'),
-          };
-        } else if (toMatch) {
-          trigger = {
-            type: 'user',
-            text: 'to:',
-            query: (toMatch[1] || '').replace(/^@/, '').trim(),
-            index: textBeforeCursor.lastIndexOf('to:'),
-          };
-        } else if (withMatch) {
-          trigger = {
-            type: 'user',
-            text: 'with:',
-            query: (withMatch[1] || '').replace(/^@/, '').trim(),
-            index: textBeforeCursor.lastIndexOf('with:'),
-          };
-        } else if (assigneeMatch) {
-          trigger = {
-            type: 'user',
-            text: 'assignee:',
-            query: (assigneeMatch[1] || '').replace(/^@/, '').trim(),
-            index: textBeforeCursor.lastIndexOf('assignee:'),
-          };
-        } else if (priorityMatch && priorityQueryHasMatch(priorityMatch[1] || '')) {
-          trigger = {
-            type: ChipType.PRIORITY,
-            text: 'priority:',
-            query: (priorityMatch[1] || '').trim(),
-            index: textBeforeCursor.lastIndexOf('priority:'),
-          };
-        } else if (boardMatch) {
-          trigger = {
-            type: ChipType.BOARD,
-            text: 'board:',
-            query: (boardMatch[1] || '').trim(),
-            index: textBeforeCursor.toLowerCase().lastIndexOf('board:'),
-          };
-        } else if (onMatch) {
-          trigger = {
-            type: ChipType.DATE,
-            text: 'on:',
-            query: (onMatch[1] || '').trim(),
-            index: textBeforeCursor.toLowerCase().lastIndexOf('on:'),
-          };
-        } else if (afterMatch) {
-          trigger = {
-            type: ChipType.DATE,
-            text: 'after:',
-            query: (afterMatch[1] || '').trim(),
-            index: textBeforeCursor.toLowerCase().lastIndexOf('after:'),
-          };
-        } else if (beforeMatch) {
-          trigger = {
-            type: ChipType.DATE,
-            text: 'before:',
-            query: (beforeMatch[1] || '').trim(),
-            index: textBeforeCursor.toLowerCase().lastIndexOf('before:'),
-          };
-        } else if (mentionsMatch) {
-          trigger = {
-            type: ChipType.MENTIONS,
-            text: 'mentions:',
-            query: (mentionsMatch[1] || '').replace(/^[@#]/, '').trim(),
-            index: textBeforeCursor.toLowerCase().lastIndexOf('mentions:'),
-          };
-        } else if (inMatch) {
-          const inQuery = (inMatch[1] || '').trim();
-          // "in:@" compound trigger — search DMs (not users!) with in: prefix
-          if (inQuery.startsWith('@')) {
-            trigger = {
-              type: 'channel',
-              text: 'in:@',
-              query: inQuery.substring(1).trim(),
-              index: textBeforeCursor.lastIndexOf('in:'),
-            };
-          } else if (inQuery.startsWith('#')) {
-            // "in:#" compound trigger — search only channels
-            trigger = {
-              type: 'channel',
-              text: 'in:#',
-              query: inQuery.substring(1).trim(),
-              index: textBeforeCursor.lastIndexOf('in:'),
-            };
-          } else {
-            trigger = {
-              type: 'channel',
-              text: 'in:',
-              query: inQuery.trim(),
-              index: textBeforeCursor.lastIndexOf('in:'),
-            };
-          }
-        } else if (atMatch) {
-          // Strip trailing punctuation from mention query to avoid breaking
-          // Fuse.js fuzzy search (e.g., typing "@john." should still match "john.doe")
-          const rawQuery = atMatch[1] || '';
-          const normalizedQuery = rawQuery.replace(/[.,!?:;)]*$/, '');
-          // @channel / @here are reserved broadcast keywords, never users — skip user-mention mode
-          // (first token, so "@channel test" counts too) so the message search runs, not a picker.
-          if (!/^(channel|here)(\s|$)/i.test(normalizedQuery)) {
-            trigger = {
-              type: 'user',
-              text: '@',
-              query: normalizedQuery,
-              index: textBeforeCursor.lastIndexOf('@'),
-            };
-          }
-        } else if (hashMatch) {
-          trigger = {
-            type: 'channel',
-            text: '#',
-            query: hashMatch[1] || '',
-            index: textBeforeCursor.lastIndexOf('#'),
-          };
-        }
+        // The prefix being typed (`from:`, `@`, `in:#`, `priority:`…) — shared with the full-page
+        // search box, so both recognise the same prefixes the same way.
+        const trigger = detectMentionTrigger(textBeforeCursor, {
+          enableToTrigger: !!enableToTrigger,
+        });
 
         if (trigger) {
           setSearchTerm(trigger.query);
