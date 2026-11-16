@@ -253,7 +253,9 @@ kubectl -n xyne create secret generic xyne-transcription-agent-secrets \
 
 kubectl -n xyne create secret generic xyne-lighton-ocr-secrets \
   --from-literal=LIGHTON_ACCESS_TOKEN="<ocr model endpoint token>" \
-  --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}"
+  --from-literal=REDIS_PASSWORD="${REDIS_PASSWORD}" \
+  --from-literal=INTERNAL_S2S_KEY="${INTERNAL_S2S_KEY}" \
+  --from-literal=OCR_S2S_KEY="$(openssl rand -hex 32)"   # only for callers outside xyne-spaces
 ```
 
 | Secret | Required keys | Optional keys |
@@ -261,7 +263,7 @@ kubectl -n xyne create secret generic xyne-lighton-ocr-secrets \
 | `xyne-claw-secrets` | `XYNE_CLAW_S2S_KEY`, `LITELLM_API_KEY` | `INTERNAL_S2S_KEY`, `REDIS_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-claw-auth-secrets` | `DATABASE_URL`, `ENCRYPTION_KEY` (64 hex), `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY` | `SPACES_DB_URL`, `REDIS_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `xyne-transcription-agent-secrets` | `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `TRANSCRIPTION_AGENT_API_KEY` | `REDIS_PASSWORD`, `AZURE_OPENAI_STT_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_TTS_API_KEY`, `DEEPGRAM_API_KEY`, `CHUTES_STT_API_KEY`, `GOOGLE_VOICE_CREDENTIALS_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `xyne-lighton-ocr-secrets` | - | `LIGHTON_ACCESS_TOKEN`, `REDIS_PASSWORD` |
+| `xyne-lighton-ocr-secrets` | `INTERNAL_S2S_KEY` (same value as in `xyne-backend-secrets`; the backend sends it as `x-s2s-key`, and without it every OCR call gets 401) | `OCR_S2S_KEY` (for callers outside xyne-spaces), `LIGHTON_ACCESS_TOKEN`, `REDIS_PASSWORD` |
 
 Anything else you need in a pod's environment goes through the same two keys on any chart:
 `secretEnv` (one variable from one Secret key) or `envFromSecrets` (every key of a Secret).

@@ -49,7 +49,14 @@ export const submitDoclingAsyncJob = async (input: SubmitDoclingAsyncJobInput): 
     try {
       const controller = new AbortController()
       submitTimer = setTimeout(() => controller.abort(), timeoutMs)
-      const response = await fetch(apiUrl, { method: 'POST', body: formData, signal: controller.signal })
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        // Same internal key the backend sends to its other services; the OCR
+        // wrapper accepts it as the fallback to its own OCR_S2S_KEY.
+        headers: { 'x-s2s-key': config.internalS2sKey },
+        body: formData,
+        signal: controller.signal,
+      })
       clearTimeout(submitTimer)
       submitTimer = null
 

@@ -21,6 +21,9 @@ write_files:
           environment:
             - PYTHONUNBUFFERED=1
             - PORT=8000
+            # Service-to-service auth: callers send one of these as x-s2s-key.
+            - OCR_S2S_KEY=${OCR_S2S_KEY}
+            - INTERNAL_S2S_KEY=${INTERNAL_S2S_KEY}
 
             # External LightOn inference fleet.
             - LIGHTON_URL=http://10.2.0.101/v1/chat/completions
