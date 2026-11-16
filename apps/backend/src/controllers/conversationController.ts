@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import type { replyToConversation } from '@xyne/shared';
+import type { ContractRequest } from '@/types/express';
 import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
   ConversationRepository,
@@ -950,20 +952,13 @@ export class ConversationController {
   };
 
   // POST /api/conversations/{conversationId}/messages - Reply to conversation (with optional file attachments)
-  replyToConversation = async (req: Request, res: Response): Promise<void> => {
+  replyToConversation = async (
+    req: ContractRequest<typeof replyToConversation>,
+    res: Response,
+  ): Promise<void> => {
     try {
       const { conversationId } = req.params;
-      const {
-        content,
-        msgType,
-        visibleTo,
-        fileMetadata: fileMetadataJson,
-      }: {
-        content: string;
-        msgType?: MessageType;
-        visibleTo?: string | null;
-        fileMetadata?: string;
-      } = req.body;
+      const { content, msgType, visibleTo, fileMetadata: fileMetadataJson } = req.body;
       const reqFiles =
         (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } })
           .files || {};
@@ -1072,7 +1067,7 @@ export class ConversationController {
             ? `/${derived.command.name} ${derived.command.args ?? ''}`
             : '/'
           : undefined;
-        await this.handleBotCommand(content.trim(), conversationId, userId, res, { commandText });
+        await this.handleBotCommand((content ?? '').trim(), conversationId, userId, res, { commandText });
         return;
       }
 

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { ClientManifestRule, DerivedContentFacts } from '@xyne/shared';
+import type { ClientManifestRule, DerivedContentFacts, RequestBody, RequestContract } from '@xyne/shared';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -73,6 +73,16 @@ declare global {
 export interface RawBodyRequest extends Request {
   rawBody: string;
 }
+
+/**
+ * What a handler on a contracted route receives: `body` is the route's contract body as the
+ * client sends it (RequestBody), and `derived` holds the facts the encryption service
+ * extracted from its encrypted fields (each extractor optional: which ones run is the
+ * manifest rule's extraction policy).
+ */
+export type ContractRequest<C extends RequestContract> = Request<Request['params'], unknown, RequestBody<C>> & {
+  derived?: DerivedContentFacts;
+};
 
 // ---------------------------------------------------------------------------
 // Call Lobby — shared between routes/callLobby.ts and controllers/callLobbyController.ts

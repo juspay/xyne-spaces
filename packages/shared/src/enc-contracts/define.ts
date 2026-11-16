@@ -19,4 +19,9 @@ export function defineRequestContract<S extends z.ZodObject>(
   return { kind: 'REQUEST', ...contract };
 }
 
-export type RequestBody<C> = C extends RequestContract<infer S> ? z.infer<S> : never;
+/**
+ * The body as the client sends it (the schema's input type, before transforms such as
+ * `'true'` → `true`). Handlers see this type because the body is validated against the
+ * schema only while API client encryption is on and is never replaced by the parsed value.
+ */
+export type RequestBody<C> = C extends RequestContract<infer S> ? z.input<S> : never;

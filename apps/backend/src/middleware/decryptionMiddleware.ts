@@ -196,7 +196,9 @@ async function transformRequestBody(
   options: ManifestRequestBodyOptions,
 ): Promise<void> {
   try {
-    if (!req.body || typeof req.body !== 'object' || !hasEncryptedFields(req.body)) {
+    // Called whenever the route has a rule, encrypted fields or not: the encryption service
+    // is what rejects a body that sends a client field in plaintext, so it must see it.
+    if (!req.body || typeof req.body !== 'object') {
       return next();
     }
 
@@ -225,10 +227,17 @@ async function transformRequestBody(
       ? { entityId: await options.resolveWorkspaceId(req), entityType: WORKSPACE_ENTITY_TYPE }
       : {};
 
+    // The client's manifest goes along so the encryption service checks the version itself.
+    const versionHeader = req.get(CLIENT_MANIFEST_VERSION_HEADER);
     const { body, derived } = await getEncryptionProvider().transformRequest({
       body: req.body,
       subject,
       rule: { type: rule.type, value: rule.value, revision: rule.revision },
+      manifest: {
+        tag: req.get(CLIENT_MANIFEST_TAG_HEADER) || 'default',
+        environment: config.env,
+        version: versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : null,
+      },
       ...owner,
     });
     req.body = body;
@@ -268,6 +277,23 @@ async function transformRequestBody(
   } catch (error) {
     if (error instanceof AppError) {
       return next(error);
+    }
+    // The encryption service's own verdicts on the request: surface them as such (the
+    // client refreshes its manifest and retries on 409) instead of as an outage.
+    const status = (error as { status?: unknown }).status;
+    if (status === 409 || status === 400) {
+      getCryptoOperations().add(1, {
+        operation: 'transform_request_body',
+        status: 'error',
+        reason: status === 409 ? 'manifest_stale' : 'rule_violation',
+        path: sanitizeForLog(req.path),
+      });
+      res.status(status).json(
+        status === 409
+          ? { error: 'Client encryption manifest is stale', code: CLIENT_MANIFEST_STALE_CODE }
+          : { error: 'Request violates the client encryption manifest', code: 'ENC_MANIFEST_VIOLATION' },
+      );
+      return;
     }
     logger.error('[decryptionMiddleware] failed to transform request body', {
       method: sanitizeForLog(req.method),

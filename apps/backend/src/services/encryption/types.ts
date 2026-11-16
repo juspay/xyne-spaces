@@ -85,6 +85,12 @@ export type TransformRequestInput<T> = {
   subject: string;
   rule: ClientManifestRuleRef;
   /**
+   * The manifest the client encrypted with (its tag and version headers, and this
+   * backend's environment). The encryption service rejects a version older than its latest
+   * for that tag and environment, or a missing one (`version: null`), with 409.
+   */
+  manifest: { tag: string; environment: string; version: number | null };
+  /**
    * Owner of the row the request writes (the workspace whose DEK the Prisma extension would
    * pick for it). Required when any `client: true` field in the rule is `MASTER_DEK`.
    */
