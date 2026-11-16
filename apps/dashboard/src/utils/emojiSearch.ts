@@ -18,6 +18,19 @@ export function unifiedToNative(unified: string): string {
     .join('');
 }
 
+/**
+ * The token this result is tracked under by the frequent-emoji store — the same format the
+ * reaction layer records (a unicode char, or `custom:<emojiId>:<name>`), so the colon flow
+ * and reactions feed one ranking. The custom name is the emoji's first alias, matching the
+ * reaction token even when the user picked the emoji by one of its other aliases.
+ */
+export function emojiUsageToken(emoji: EmojiSearchResult): string {
+  if (emoji.isCustom && emoji.customEmojiId) {
+    return `custom:${emoji.customEmojiId}:${emoji.shortName}`;
+  }
+  return emoji.native ?? '';
+}
+
 let unicodeIndex: EmojiSearchResult[] | null = null;
 
 async function getUnicodeIndex(): Promise<EmojiSearchResult[]> {
@@ -35,22 +48,37 @@ async function getUnicodeIndex(): Promise<EmojiSearchResult[]> {
   return unicodeIndex;
 }
 
+/**
+ * `usageRanks` maps a frequent-emoji token (see `emojiUsageToken`) to its rank, 0 = most used.
+ * When given, matches are ordered by usage *within* each tier — custom-emoji prefix matches,
+ * then unicode prefix matches, then substring matches — and unranked matches keep the dataset
+ * order after the ranked ones. Omitting it (or passing an empty map) keeps the plain dataset
+ * order.
+ */
 export async function searchEmojis(
   query: string,
   customEmojis: EmojiPickerEmoji[],
   maxResults: number = 8,
+  usageRanks?: Map<string, number>,
 ): Promise<EmojiSearchResult[]> {
   const lowerQuery = query.toLowerCase();
   if (lowerQuery.length < 2) return [];
 
+  const byUsageRank = (a: EmojiSearchResult, b: EmojiSearchResult): number => {
+    const rankA = usageRanks?.get(emojiUsageToken(a)) ?? Number.POSITIVE_INFINITY;
+    const rankB = usageRanks?.get(emojiUsageToken(b)) ?? Number.POSITIVE_INFINITY;
+    return rankA - rankB;
+  };
+  const hasRanks = !!usageRanks && usageRanks.size > 0;
+
   const results: EmojiSearchResult[] = [];
 
   // Search custom emojis first
+  const customMatches: EmojiSearchResult[] = [];
   for (const ce of customEmojis) {
-    if (results.length >= maxResults) break;
     const matches = ce.names.some(n => n.toLowerCase().startsWith(lowerQuery));
     if (matches && ce.names.length > 0) {
-      results.push({
+      customMatches.push({
         id: `custom-${ce.id}`,
         shortName: ce.names[0]!,
         allNames: ce.names,
@@ -60,6 +88,8 @@ export async function searchEmojis(
       });
     }
   }
+  if (hasRanks) customMatches.sort(byUsageRank);
+  results.push(...customMatches.slice(0, maxResults));
 
   if (results.length >= maxResults) return results;
 
@@ -78,8 +108,14 @@ export async function searchEmojis(
         containsMatches.push(entry);
       }
     }
-    // Early exit once we have enough candidates
-    if (prefixMatches.length + containsMatches.length >= maxResults * 3) break;
+    // No early exit: a frequently used emoji late in the dataset must still be found —
+    // the full scan stays sub-millisecond.
+  }
+
+  if (hasRanks) {
+    // Array#sort is stable, so equal ranks keep the dataset order.
+    prefixMatches.sort(byUsageRank);
+    containsMatches.sort(byUsageRank);
   }
 
   const remaining = maxResults - results.length;

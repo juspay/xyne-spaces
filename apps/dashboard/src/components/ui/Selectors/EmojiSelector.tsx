@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Editor } from '@tiptap/react';
 import type { PluginKey } from '@tiptap/pm/state';
 import { BasePopoverSelector } from './BasePopoverSelector';
 import type { BaseSelectorPluginState } from './BasePopoverSelector';
 import { emojiSelectorPluginKey } from '../TipTapExtensions/EmojiSelectorExtension';
 import { detectEmojiTrigger, createVirtualAnchor } from './Selectors.utils';
-import { searchEmojis } from '../../../utils/emojiSearch';
+import { searchEmojis, emojiUsageToken } from '../../../utils/emojiSearch';
 import type { EmojiSearchResult } from '../../../utils/emojiSearch';
 import type { EmojiPickerEmoji } from '../../../hooks/useCustomEmojis';
+import { useFrequentEmojiScope, useFrequentEmojis } from '../../../hooks/useFrequentEmojis';
+import { recordEmojiUse } from '../../../utils/frequentEmojis';
+import { FREQUENT_EMOJIS_MAX_TRACKED } from '../../../constants/settings';
 
 interface EmojiSelectorProps {
   editor: Editor | null;
@@ -19,6 +22,17 @@ export function EmojiSelector({
   customEmojis,
 }: EmojiSelectorProps): React.JSX.Element | null {
   const [query, setQuery] = useState('');
+
+  const frequentEmojiScope = useFrequentEmojiScope();
+  const frequentEmojis = useFrequentEmojis(FREQUENT_EMOJIS_MAX_TRACKED);
+
+  // Token → rank (0 = most used): orders the popover by how often this user actually
+  // inserts each emoji, within the existing match tiers.
+  const usageRanks = useMemo(() => {
+    const ranks = new Map<string, number>();
+    frequentEmojis.forEach((token, index) => ranks.set(token, index));
+    return ranks;
+  }, [frequentEmojis]);
 
   const detectTriggerWithSearch = useCallback((editorInstance: Editor) => {
     const trigger = detectEmojiTrigger(editorInstance);
@@ -36,13 +50,13 @@ export function EmojiSelector({
       return;
     }
     let cancelled = false;
-    void searchEmojis(query, customEmojis, 8).then(results => {
+    void searchEmojis(query, customEmojis, 8, usageRanks).then(results => {
       if (!cancelled) setFilteredEmojis(results);
     });
     return () => {
       cancelled = true;
     };
-  }, [query, customEmojis]);
+  }, [query, customEmojis, usageRanks]);
 
   const handleSelect = useCallback(
     (emoji: EmojiSearchResult) => {
@@ -76,6 +90,7 @@ export function EmojiSelector({
               },
             })
             .run();
+          recordEmojiUse(frequentEmojiScope, emojiUsageToken(emoji));
         } else if (emoji.native) {
           editor
             .chain()
@@ -83,10 +98,11 @@ export function EmojiSelector({
             .deleteRange({ from: colonStart, to: matchEnd })
             .insertContent(emoji.native)
             .run();
+          recordEmojiUse(frequentEmojiScope, emojiUsageToken(emoji));
         }
       }
     },
-    [editor],
+    [editor, frequentEmojiScope],
   );
 
   const renderItem = useCallback(
