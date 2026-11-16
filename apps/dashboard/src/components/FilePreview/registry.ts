@@ -168,6 +168,8 @@ export const PREVIEWERS: readonly Previewer[] = [
   },
   // Documents and slides as the PDFs the server makes of them, in the PDF
   // previewer. Read whole because that is what the conversion endpoint takes.
+  // Legacy .ppt is not here: no converter draws it faithfully, so it is offered
+  // for download instead.
   {
     id: 'word',
     label: 'Word document',
@@ -181,11 +183,8 @@ export const PREVIEWERS: readonly Previewer[] = [
   {
     id: 'slides',
     label: 'Slides',
-    extensions: ['pptx', 'ppt'],
-    mimeTypes: [
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'application/vnd.ms-powerpoint',
-    ],
+    extensions: ['pptx'],
+    mimeTypes: ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
     reads: { kind: 'file' },
     maxBytes: OFFICE_CONVERSION_MAX_BYTES,
     skeleton: 'document',
