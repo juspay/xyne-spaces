@@ -277,6 +277,8 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   assignedTo: string;
   createdBy: string;
   closedBy: string;
+  // Optional: documents fed before the mapper set it have no value (read as not archived).
+  isArchived?: boolean;
   title: string;
   workflowType: string;
   description: string;

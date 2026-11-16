@@ -2071,6 +2071,8 @@ export class TicketController {
       }
 
       const mapping = await mergeTicketTx(ticketId, targetTicketId, userId, source, target);
+      // The merge archived the source ticket in Prisma (not through Zero); re-feed it so Vespa's isArchived follows.
+      await this.pushVespaJobForTicket(ticketId, userId, source.workspaceId);
 
       // Create Zero-side notification activities (fire-and-forget)
       TicketsSideEffectHandler.handleTicketMerged({
@@ -2110,6 +2112,8 @@ export class TicketController {
       if (!mapping) { res.status(400).json({ error: 'Ticket is not merged into another ticket' }); return; }
 
       await unmergeTicketTx(mapping, ticketId, userId, ticket);
+      // The unmerge unarchived the source ticket in Prisma (not through Zero); re-feed it so Vespa's isArchived follows.
+      await this.pushVespaJobForTicket(ticketId, userId, ticket.workspaceId);
 
       // Create Zero-side notification activities (fire-and-forget)
       TicketsSideEffectHandler.handleTicketUnmerged({

@@ -707,6 +707,8 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     assignedTo: args.assignedTo || "",
     createdBy: args.createdBy,
     closedBy: args.closedBy || "",
+    // Fed from the row so search can filter archived tickets on the Vespa doc instead of Postgres.
+    isArchived: !!args.isArchived,
     title: args.title,
     workflowType: "",// later we should populate workflow type
     description: args.description,
