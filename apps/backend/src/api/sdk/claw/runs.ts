@@ -13,7 +13,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { getClawBaseUrl } from '@/services/clawAgentService';
+import { clawFetch, getClawBaseUrl } from '@/services/clawAgentService';
 import { SdkApiError } from '../errors';
 import { handle } from '../handler';
 import { upstreamError } from './proxy';
@@ -35,7 +35,7 @@ async function startRun(req: Request, res: Response): Promise<void> {
 
   let upstream: globalThis.Response;
   try {
-    upstream = await fetch(`${getClawBaseUrl()}/claw/api/v1/run`, {
+    upstream = await clawFetch(`${getClawBaseUrl()}/claw/api/v1/run`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

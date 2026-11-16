@@ -373,7 +373,7 @@ export function getClawBaseUrl(): string {
 }
 
 // Every call here goes to the claw-auth service (its base URL, or the automation webhook root).
-const clawFetch = allowlistedFetch(() => [
+export const clawFetch = allowlistedFetch(() => [
   config.xyneClaw.authUrl,
   config.xyneClaw.clawAuthCallbackUrlAutomation,
 ]);
@@ -1743,7 +1743,7 @@ async function clawProjectRequest<T>(
   init: { method: string; body?: unknown },
   failure: string
 ): Promise<T> {
-  const response = await fetch(`${getClawBaseUrl()}${path}`, {
+  const response = await clawFetch(`${getClawBaseUrl()}${path}`, {
     method: init.method,
     headers: {
       ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
