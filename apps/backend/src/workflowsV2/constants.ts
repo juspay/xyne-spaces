@@ -13,4 +13,6 @@ export const CREDENTIAL_SUMMARY_SELECT = {
   status: true,
   createdAt: true,
   updatedAt: true,
+  ownerId: true,
+  allowedWorkflowIds: true,
 } as const;

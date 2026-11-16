@@ -123,7 +123,10 @@ export const toWorkflowRecord = (row: Workflow): WorkflowRecord => ({
   folderId: row.folderId ?? DEFAULT_FOLDER_ID,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
-  attributes: { workspaceId: row.workspaceId } satisfies XyneResourceAttrs,
+  // The workflow's own id rides in its attributes so every credential lookup
+  // that carries them (activation, webhook ingest, trigger hooks) can be checked
+  // against the credential's allow-list, not only the executor's.
+  attributes: { workspaceId: row.workspaceId, workflowId: row.id } satisfies XyneResourceAttrs,
 });
 
 export const toFolderRecord = (row: WorkflowFolder): FolderRecord => ({
@@ -223,6 +226,7 @@ export const toCredentialSummary = (row: {
   status: string;
   createdAt: Date;
   updatedAt: Date;
+  allowedWorkflowIds: string[];
 }): CredentialSummary => ({
   name: row.name,
   credType: row.credType,
@@ -230,7 +234,35 @@ export const toCredentialSummary = (row: {
   status: row.status as CredentialStatus,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
+  allowedWorkflowIds: row.allowedWorkflowIds,
 });
+
+/** The attributes a credential record carries: its tenant and its owner. */
+export const credentialAttributes = (row: {
+  workspaceId: string;
+  ownerId: string | null;
+}): XyneResourceAttrs => ({
+  workspaceId: row.workspaceId,
+  ...(row.ownerId !== null ? { ownerId: row.ownerId } : {}),
+});
+
+/**
+ * Narrow a credential query to the rows the caller may see: the ones they own,
+ * plus unowned ones when the filter says so (admins). No `ownerId` in the filter
+ * means no narrowing — the caller is a trusted server-side path.
+ */
+export const credentialOwnerWhere = (filter: {
+  ownerId?: string;
+  includeUnowned?: boolean;
+}): { OR: Array<{ ownerId: string | null }> } | Record<string, never> =>
+  filter.ownerId === undefined
+    ? {}
+    : {
+        OR: [
+          { ownerId: filter.ownerId },
+          ...(filter.includeUnowned === true ? [{ ownerId: null }] : []),
+        ],
+      };
 
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
