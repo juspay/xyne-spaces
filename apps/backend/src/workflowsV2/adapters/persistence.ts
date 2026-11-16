@@ -734,8 +734,8 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   }
 
   async getStep(executionId: string, stepName: string): Promise<StepRecord | null> {
-    const row = await db.workflowStep.findUnique({
-      where: { workflowExecutionId_stepName: { workflowExecutionId: executionId, stepName } },
+    const row = await db.workflowStep.findFirst({
+      where: { workflowExecutionId: executionId, stepName },
       select: { stepName: true, status: true, stepExecutorType: true, data: true, stepSubType: true },
     });
     return row ? toStepRecord(row) : null;
