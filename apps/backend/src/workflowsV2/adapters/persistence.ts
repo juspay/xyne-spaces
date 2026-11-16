@@ -55,7 +55,6 @@ import type { ResumePayload } from '@xyne/workflow-sdk/common';
 import type { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import { decrypt, encrypt } from '@/services/encryptionService';
-import { logger } from '@/utils/logger';
 import {
   findActiveWorkflowsQuery,
   listAllActiveWorkflowsQuery,
@@ -978,12 +977,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
       workflowOrAttributes && typeof workflowOrAttributes === 'object' && 'attributes' in workflowOrAttributes
         ? (workflowOrAttributes as WorkflowContext['workflow']).id
         : attrsOf(attributes)?.workflowId;
-    if (!workflowId || !row.allowedWorkflowIds.includes(workflowId)) {
-      logger.warn(
-        `[workflows] credential "${name}" refused: workflow ${workflowId ?? '(none)'} is not on its allow-list`,
-      );
-      return null;
-    }
+    if (!workflowId || !row.allowedWorkflowIds.includes(workflowId)) return null;
 
     const values = JSON.parse(decrypt(row.data)) as unknown;
     const auth = validateCredentialAuth(row.authType as CredentialAuthType, values);

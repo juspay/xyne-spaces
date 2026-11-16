@@ -702,7 +702,7 @@ model WorkflowCredential {
   status      String // ACTIVE | REVOKED — set explicitly, see WorkflowFolder
   createdAt   DateTime
   updatedAt   DateTime
-  /// Member who created the credential. Only they see and manage it. Null for rows that predate ownership: admins only.
+  /// Member who created the credential. Only they see and manage it. Null on rows that predate ownership: nobody.
   ownerId            String?
   /// Workflows allowed to use the credential. Empty means no workflow can.
   allowedWorkflowIds String[] @default([])

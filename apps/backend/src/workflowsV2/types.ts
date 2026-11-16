@@ -8,8 +8,6 @@ export type XyneFilter = {
   workspaceId: string;
   /** Credentials only: the caller, who sees the credentials they own. */
   ownerId?: string;
-  /** Credentials only: also show rows with no owner (admins). */
-  includeUnowned?: boolean;
 };
 
 export type XyneResourceAttrs = {

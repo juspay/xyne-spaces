@@ -81,7 +81,7 @@ describe('XyneWorkflowAuthorizer', () => {
       await expect(authorizer.permissions(inA, ref)).resolves.toEqual([]);
     });
 
-    it('leaves an unowned credential to admins, so a plain member is denied', async () => {
+    it('denies everyone an unowned credential', async () => {
       const ref = credential({ workspaceId: 'ws_a' });
       await expect(authorizer.permissions(inA, ref)).resolves.toEqual([]);
     });

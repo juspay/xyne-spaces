@@ -246,23 +246,9 @@ export const credentialAttributes = (row: {
   ...(row.ownerId !== null ? { ownerId: row.ownerId } : {}),
 });
 
-/**
- * Narrow a credential query to the rows the caller may see: the ones they own,
- * plus unowned ones when the filter says so (admins). No `ownerId` in the filter
- * means no narrowing — the caller is a trusted server-side path.
- */
-export const credentialOwnerWhere = (filter: {
-  ownerId?: string;
-  includeUnowned?: boolean;
-}): { OR: Array<{ ownerId: string | null }> } | Record<string, never> =>
-  filter.ownerId === undefined
-    ? {}
-    : {
-        OR: [
-          { ownerId: filter.ownerId },
-          ...(filter.includeUnowned === true ? [{ ownerId: null }] : []),
-        ],
-      };
+/** Narrow a credential query to the caller's own rows. */
+export const credentialOwnerWhere = (filter: { ownerId?: string }): { ownerId?: string } =>
+  filter.ownerId === undefined ? {} : { ownerId: filter.ownerId };
 
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
