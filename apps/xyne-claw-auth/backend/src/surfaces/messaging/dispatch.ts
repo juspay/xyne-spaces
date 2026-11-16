@@ -40,7 +40,7 @@ function replyFormatFor(channel: MessagingChannelKey): { replyFormat: { maxSecti
 
 export function channelSurfaceInstructions(channel: MessagingChannelKey): string {
   const plugin = getChannel(channel);
-  const name = channel.startsWith("whatsapp") ? "WhatsApp" : channel;
+  const name = channel.startsWith("whatsapp") ? "WhatsApp" : (plugin?.displayName ?? channel);
   const caps = plugin?.capabilities;
   const tappable = !!caps?.interactive;
   const lines = [
@@ -74,7 +74,7 @@ export function channelSurfaceInstructions(channel: MessagingChannelKey): string
     "- Those lines are already on their screen. Your final answer gives the conclusion; it doesn't repeat them.",
     "",
     "**Formatting**",
-    "- Write markdown: **bold**, _italic_, ~~strike~~, `code`, code blocks and `- ` bullets. It's converted to WhatsApp styling on the way out. No # headings (a bold line is the heading), no tables, no markdown links — write the URL itself.",
+    `- Write markdown: **bold**, _italic_, ~~strike~~, \`code\`, code blocks and \`- \` bullets. It's converted to ${name} styling on the way out. No # headings (a bold line is the heading), no tables, no markdown links — write the URL itself.`,
     "- Bold only the few names they'll scan for: a person, a ticket, a file.",
     "- Don't write citation tokens like [clf-…] or a sources section. They can't be shown here and are removed.",
     `- Replies longer than ${caps?.maxTextChars ?? 4000} characters are split into several messages — one more reason to keep them short.`,

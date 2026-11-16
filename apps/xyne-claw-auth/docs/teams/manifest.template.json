@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "{{MICROSOFT_APP_ID}}",
+  "developer": {
+    "name": "Xyne",
+    "websiteUrl": "{{XYNE_WEBSITE_URL}}",
+    "privacyUrl": "{{XYNE_PRIVACY_URL}}",
+    "termsOfUseUrl": "{{XYNE_TERMS_URL}}"
+  },
+  "name": {
+    "short": "{{BOT_NAME}}",
+    "full": "{{BOT_NAME}} (Xyne Claw)"
+  },
+  "description": {
+    "short": "Talk to your Xyne Claw agents from Teams.",
+    "full": "Message the bot in a 1:1 chat, or @mention it in a channel or group chat, and a Xyne Claw agent answers in the same chat or thread. Send /help for the commands."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#FFFFFF",
+  "bots": [
+    {
+      "botId": "{{MICROSOFT_APP_ID}}",
+      "scopes": ["personal", "team", "groupChat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}

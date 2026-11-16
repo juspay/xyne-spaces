@@ -306,6 +306,24 @@ describe("handleInbound", () => {
     expect(texts.some((t) => t?.includes("isn't linked"))).toBe(false);
   });
 
+  it("tells an unlinked sender on an org channel what the channel says, and runs nothing", async () => {
+    // Teams: identities come from Entra sign-in, so "add your number" would
+    // send them to a door that does not exist.
+    resolveIdentity.mockResolvedValue(null);
+    const orgPlugin = {
+      key: "teams",
+      accountScope: "org",
+      unlinkedText: "not linked yet (teams)",
+      capabilities: { groups: true, reactions: false, typing: true, media: false, maxTextChars: 8000 },
+    } as never;
+    await handleInbound({ account, plugin: orgPlugin } as never, msg({ text: "/status", mentionedSelf: true }));
+    await settle();
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+    expect(runChatSlashCommand).not.toHaveBeenCalled();
+    const texts = enqueueOutbound.mock.calls.map((c) => (c[1] as { text?: string } | undefined)?.text);
+    expect(texts).toContain("not linked yet (teams)");
+  });
+
   it("starts typing before paying for the attachment, not after", async () => {
     // A slow download used to happen first, so nothing showed until it was
     // done — exactly the wait that needs a signal.
