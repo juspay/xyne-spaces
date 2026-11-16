@@ -1,19 +1,22 @@
 /**
  * Self-service number linking: "here is my WhatsApp number, make it me."
  *
- * One step. The signed-in session says who the person is, and the number they
- * type says which sender id that identity answers to — so the link exists the
- * moment they submit, and the very next message they send is answered as them.
- * Nothing is asked of the phone.
+ * Two steps. The signed-in session says who the person is; the number they
+ * type is sent a one-time code on WhatsApp, and the link exists once they type
+ * that code back here — so only whoever holds the phone can link it. From then
+ * on, the next message they send is answered as them.
  *
  * The number belongs to the person, not to one assistant, so there is nothing
- * to pick: it is linked on every channel passed in, and any assistant in the
- * org — a business number or a colleague's personal one — knows who they are.
+ * to pick: one confirmed code links it on every channel the org runs, and any
+ * assistant in the org — a business number or a colleague's personal one —
+ * knows who they are.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
-  linkChannelNumber,
+  ApiError,
+  confirmChannelNumber,
   listMyChannelNumbers,
+  requestChannelNumberCode,
   unlinkMyChannelNumber,
   type ChannelNumberLink,
   type MessagingChannelKey,
@@ -28,6 +31,12 @@ function formatNumber(senderId: string): string {
 interface Mine {
   display: string;
   entries: Array<{ channel: MessagingChannelKey; senderId: string }>;
+}
+
+/** A code is on its way to `phone`; `channel` is the route that sent it. */
+interface Pending {
+  phone: string;
+  channel: MessagingChannelKey;
 }
 
 export function LinkNumberPanel({
@@ -47,6 +56,8 @@ export function LinkNumberPanel({
   const channelKey = channels.join(",");
   const [linked, setLinked] = useState<Mine[]>([]);
   const [phone, setPhone] = useState("");
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [code, setCode] = useState("");
   const [justLinked, setJustLinked] = useState<ChannelNumberLink | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,27 +89,54 @@ export function LinkNumberPanel({
     void refresh();
   }, [refresh]);
 
-  const submit = useCallback(async () => {
+  /** One code, whichever channel takes the request: a channel this deployment
+   *  does not run refuses with 404, and the next one is tried. */
+  const sendCode = useCallback(
+    async (number: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        let failure: unknown = null;
+        for (const key of channels) {
+          try {
+            await requestChannelNumberCode(key, number);
+            setPending({ phone: number, channel: key });
+            setCode("");
+            return;
+          } catch (err) {
+            // Keep the first real refusal over a "not on this channel".
+            if (!failure || (failure instanceof ApiError && failure.status === 404)) failure = err;
+            if (!(err instanceof ApiError) || err.status !== 404) break;
+          }
+        }
+        throw failure ?? new Error("Could not send a code. Please try again.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not send a code. Please try again.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [channelKey],
+  );
+
+  const confirm = useCallback(async () => {
+    if (!pending) return;
     setBusy(true);
     setError(null);
     try {
-      // A channel this deployment does not run refuses; that is fine as long
-      // as one of them took it.
-      const results = await Promise.allSettled(channels.map((key) => linkChannelNumber(key, phone)));
-      const ok = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-      if (ok.length === 0) {
-        const first = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
-        throw first?.reason ?? new Error("Could not link this number. Please try again.");
-      }
-      setJustLinked(ok.find((link) => link.sendTo) ?? ok[0]!);
+      const link = await confirmChannelNumber(pending.channel, pending.phone, code);
+      setJustLinked(link);
+      setPending(null);
       setPhone("");
+      setCode("");
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not link this number. Please try again.");
+      setError(err instanceof Error ? err.message : "Could not verify this code. Please try again.");
     } finally {
       setBusy(false);
     }
-  }, [channels, phone, refresh]);
+  }, [pending, code, refresh]);
 
   const unlink = useCallback(
     async (mine: Mine) => {
@@ -134,23 +172,71 @@ export function LinkNumberPanel({
     <div className="space-y-2">
       {!loaded && <p className="text-[12px] text-xyne-fg-muted">Loading…</p>}
 
-      <div className="flex items-center gap-2">
-        <input
-          value={phone}
-          onChange={(event) => setPhone(event.target.value)}
-          placeholder="+91 98765 43210"
-          inputMode="tel"
-          className="h-8 min-w-0 flex-1 rounded-md border border-xyne-border-subtle bg-transparent px-2.5 font-mono text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted"
-        />
-        <button
-          onClick={submit}
-          disabled={busy || phone.trim().length < 6}
-          className="h-8 shrink-0 rounded-md bg-xyne-brand px-3 text-[12px] font-medium text-xyne-fg-inverse transition hover:opacity-90 disabled:opacity-60"
-        >
-          {busy ? "Connecting…" : "Connect"}
-        </button>
-      </div>
-      <p className="text-[11px] text-xyne-fg-muted">+91 assumed unless you add a country code.</p>
+      {pending ? (
+        <>
+          <p className="text-[12px] text-xyne-fg-secondary">
+            We sent a code to <span className="font-mono text-xyne-fg-primary">{pending.phone}</span> on {channelName}. Enter it
+            to link the number.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              placeholder="6-digit code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={7}
+              className="h-8 min-w-0 flex-1 rounded-md border border-xyne-border-subtle bg-transparent px-2.5 font-mono text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted"
+            />
+            <button
+              onClick={confirm}
+              disabled={busy || code.replace(/\s/g, "").length !== 6}
+              className="h-8 shrink-0 rounded-md bg-xyne-brand px-3 text-[12px] font-medium text-xyne-fg-inverse transition hover:opacity-90 disabled:opacity-60"
+            >
+              {busy ? "Verifying…" : "Verify"}
+            </button>
+          </div>
+          <p className="text-[11px] text-xyne-fg-muted">
+            <button
+              onClick={() => void sendCode(pending.phone)}
+              disabled={busy}
+              className="underline-offset-2 hover:underline disabled:opacity-60"
+            >
+              Send a new code
+            </button>
+            {" · "}
+            <button
+              onClick={() => {
+                setPending(null);
+                setError(null);
+              }}
+              className="underline-offset-2 hover:underline"
+            >
+              Use a different number
+            </button>
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            <input
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="+91 98765 43210"
+              inputMode="tel"
+              className="h-8 min-w-0 flex-1 rounded-md border border-xyne-border-subtle bg-transparent px-2.5 font-mono text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-muted"
+            />
+            <button
+              onClick={() => void sendCode(phone)}
+              disabled={busy || phone.trim().length < 6}
+              className="h-8 shrink-0 rounded-md bg-xyne-brand px-3 text-[12px] font-medium text-xyne-fg-inverse transition hover:opacity-90 disabled:opacity-60"
+            >
+              {busy ? "Sending…" : "Send code"}
+            </button>
+          </div>
+          <p className="text-[11px] text-xyne-fg-muted">+91 assumed unless you add a country code.</p>
+        </>
+      )}
 
       {error && <p className="text-[12px] text-xyne-error-fg">{error}</p>}
 

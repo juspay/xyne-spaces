@@ -2,10 +2,11 @@
  * "My number" — self-service linking for every org member, not admins.
  *
  * One question, asked by someone already signed in to Claw: "here is my phone
- * number, make messages from it run as me." No admin approval and no
- * confirmation from the phone — the session says who the caller is, and the
- * number they type is taken at face value (see linkNumber in identity.ts for
- * what that does and does not protect).
+ * number, make messages from it run as me." No admin approval, but the phone
+ * has to confirm it: POST /my-numbers sends a one-time code to the number, and
+ * POST /my-numbers/confirm links it once that code comes back (see
+ * requestNumberCode / confirmNumber in identity.ts). A typed number alone
+ * proves nothing, and a link decides whose data a message runs against.
  *
  * The link belongs to the person, not to an assistant: it is recognised by
  * every account on the channel in their org, including a colleague's personal
@@ -16,8 +17,8 @@
  */
 import { Router, type Request, type Response } from "express";
 import { getOrgId, getRequesterId } from "../../../middleware/agent-acl.js";
-import { linkNumber, LinkError } from "../identity.js";
-import { linkNumberBodySchema } from "../schema.js";
+import { auditNumberLink, confirmNumber, LinkError, requestNumberCode } from "../identity.js";
+import { confirmNumberBodySchema, linkNumberBodySchema } from "../schema.js";
 import { channelOf } from "./context.js";
 import { getSurface, listIdentitiesForUser, unlinkOwnIdentity } from "../store.js";
 
@@ -47,6 +48,14 @@ async function surfaceIdOf(req: Request, res: Response): Promise<string | null> 
   return surface.id;
 }
 
+function sendLinkError(res: Response, err: unknown): void {
+  if (err instanceof LinkError) {
+    res.status(err.status).json({ success: false, error: err.message });
+    return;
+  }
+  throw err;
+}
+
 /** The numbers the caller has linked on this channel. */
 router.get("/my-numbers", async (req: Request, res: Response) => {
   const caller = callerOf(req, res);
@@ -69,8 +78,7 @@ router.get("/my-numbers", async (req: Request, res: Response) => {
   });
 });
 
-/** "This is my number." Links it to the caller immediately — the signed-in
- *  session is the identity, and the number says which sender id it answers to. */
+/** "This is my number." Sends a one-time code to it; nothing is linked yet. */
 router.post("/my-numbers", async (req: Request, res: Response) => {
   const caller = callerOf(req, res);
   if (!caller) return;
@@ -82,11 +90,36 @@ router.post("/my-numbers", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const linked = await linkNumber({
+    const pending = await requestNumberCode({
       plugin: channelOf(req)!,
       surfaceId,
       orgId: caller.orgId,
       phone: body.data.phone,
+      userId: caller.userId,
+    });
+    res.status(202).json({ success: true, verification: { expiresAt: pending.expiresAt.toISOString() } });
+  } catch (err) {
+    sendLinkError(res, err);
+  }
+});
+
+/** "Here is the code." Links the number to the caller once it checks out. */
+router.post("/my-numbers/confirm", async (req: Request, res: Response) => {
+  const caller = callerOf(req, res);
+  if (!caller) return;
+  const surfaceId = await surfaceIdOf(req, res);
+  if (!surfaceId) return;
+  const body = confirmNumberBodySchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ success: false, error: body.error.issues[0]?.message ?? body.error.message });
+    return;
+  }
+  try {
+    const linked = await confirmNumber({
+      plugin: channelOf(req)!,
+      orgId: caller.orgId,
+      phone: body.data.phone,
+      code: body.data.code,
       userId: caller.userId,
     });
     res.json({
@@ -94,11 +127,7 @@ router.post("/my-numbers", async (req: Request, res: Response) => {
       linked: { senderId: linked.senderId, sendTo: linked.sendTo, linkedAt: linked.linkedAt.toISOString() },
     });
   } catch (err) {
-    if (err instanceof LinkError) {
-      res.status(err.status).json({ success: false, error: err.message });
-      return;
-    }
-    throw err;
+    sendLinkError(res, err);
   }
 });
 
@@ -111,5 +140,15 @@ router.delete("/my-numbers/:senderId", async (req: Request, res: Response) => {
   if (!surfaceId) return;
   const senderId = typeof req.params["senderId"] === "string" ? decodeURIComponent(req.params["senderId"]) : "";
   const result = await unlinkOwnIdentity({ surfaceId, senderId, userId: caller.userId, orgId: caller.orgId });
+  if (result.count > 0) {
+    await auditNumberLink({
+      event: "CHANNEL_NUMBER_UNLINKED",
+      actorUserId: caller.userId,
+      channel: channelOf(req)!.key,
+      orgId: caller.orgId,
+      senderId,
+      description: "Unlinked own number",
+    });
+  }
   res.json({ success: true, removed: result.count });
 });

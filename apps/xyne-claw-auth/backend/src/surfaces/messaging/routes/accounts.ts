@@ -12,6 +12,7 @@ import { createLogger } from "../../../logger.js";
 import { prisma } from "../../../db.js";
 import { accountManager, getLoginArtifact } from "../account-manager.js";
 import { enqueueAndWait } from "../delivery.js";
+import { auditNumberLink } from "../identity.js";
 import { leaseHolder, publishControl } from "../placement.js";
 import { type AnyChannelPlugin } from "../plugin.js";
 import {
@@ -393,6 +394,17 @@ router.delete("/accounts/:id/identities/:senderId", async (req: Request, res: Re
   const senderId = typeof req.params["senderId"] === "string" ? decodeURIComponent(req.params["senderId"]) : "";
   const result = await unlinkIdentity({ surfaceId: account.surfaceId, orgId: account.orgId, senderId });
   log.info(`[channels] identity unlinked account=${account.id} sender=${senderId} by=${resolved.userId}`);
+  if (result.count > 0) {
+    await auditNumberLink({
+      event: "CHANNEL_NUMBER_UNLINKED",
+      actorUserId: resolved.userId,
+      channel: account.channel,
+      orgId: account.orgId,
+      senderId,
+      description: "Admin unlinked a member's number",
+      metadata: { accountId: account.id },
+    });
+  }
   res.json({ success: true, removed: result.count });
 });
 

@@ -16,6 +16,7 @@ const dataEncryptionKey = derivePurposeKey(rootEncryptionKey, "data-encryption/a
 const actionSigningKey = derivePurposeKey(rootEncryptionKey, "action-approval/hmac-sha256/v1");
 const sessionSigningKey = derivePurposeKey(rootEncryptionKey, "session-token/hmac-sha256/v1");
 const oauthStateSigningKey = derivePurposeKey(rootEncryptionKey, "oauth-state/hmac-sha256/v1");
+const numberVerificationKey = derivePurposeKey(rootEncryptionKey, "number-verification/hmac-sha256/v1");
 const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("xyne-claw-auth/session-token/v1").digest();
 
 // Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
@@ -44,6 +45,8 @@ export const CONFIG = {
   actionSigningKey,
   sessionSigningKey,
   oauthStateSigningKey,
+  /** Hashes one-time number-verification codes before they go to Redis. */
+  numberVerificationKey,
   legacyActionSigningKey: rootEncryptionKey,
   legacySessionSigningKey,
   legacyOauthStateSigningKey: rootEncryptionKey,

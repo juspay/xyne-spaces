@@ -155,6 +155,14 @@ export const linkNumberBodySchema = z.object({
   phone: z.string().trim().min(6).max(24),
 });
 
+/** The code sent to that number, typed back. Spaces people put in are dropped. */
+export const confirmNumberBodySchema = linkNumberBodySchema.extend({
+  code: z
+    .string()
+    .transform((value) => value.replace(/\s/g, ""))
+    .pipe(z.string().regex(/^\d{6}$/, "The code is 6 digits.")),
+});
+
 /** Conversation ids flow into filesystem paths in claw; keep them to the safe
  *  charset that /internal/run enforces. */
 export function sanitizeId(value: string): string {

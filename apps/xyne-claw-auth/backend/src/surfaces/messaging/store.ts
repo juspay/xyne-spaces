@@ -325,18 +325,22 @@ export function authStateFor(connectedSurfaceId: string): AuthStateStore {
 
 // ── identities ──
 
+export type VerifiedLink = { ok: true; linkedAt: Date } | { ok: false; reason: "linked_elsewhere" };
+
 /**
- * Link a sender id to a user for the whole org. The self-service path: the
- * signed-in session is the only proof, and there is nothing to approve.
- * Keyed by org rather than by account, so one link is recognised by every
- * account on the channel. Upsert so re-adding your own number is idempotent.
+ * Link a sender id to a user for the whole org, once they have proved the
+ * number is theirs (number-verification.ts). Keyed by org rather than by
+ * account, so one link is recognised by every account on the channel.
+ * Somebody else's link on the number is never overwritten — unlinking it is
+ * an admin's call. Upsert so re-verifying your own number is idempotent.
  */
-export async function linkSenderToUser(input: {
+export async function linkVerifiedSender(input: {
   surfaceId: string;
   senderId: string;
   orgId: string;
   userId: string;
-}): Promise<Date> {
+}): Promise<VerifiedLink> {
+  if (await isLinkedToAnotherUser(input)) return { ok: false, reason: "linked_elsewhere" };
   const now = new Date();
   const row = await prisma.userSurfaceIdentity.upsert({
     where: {
@@ -359,7 +363,27 @@ export async function linkSenderToUser(input: {
     update: { orgId: input.orgId, userId: input.userId, status: "ACTIVE", linkedAt: now },
     select: { linkedAt: true },
   });
-  return row.linkedAt ?? now;
+  return { ok: true, linkedAt: row.linkedAt ?? now };
+}
+
+/** Is this number already linked to someone else in the org? */
+export async function isLinkedToAnotherUser(input: {
+  surfaceId: string;
+  senderId: string;
+  orgId: string;
+  userId: string;
+}): Promise<boolean> {
+  const row = await prisma.userSurfaceIdentity.findFirst({
+    where: {
+      surfaceId: input.surfaceId,
+      surfaceUserId: input.senderId,
+      orgId: input.orgId,
+      status: "ACTIVE",
+      userId: { not: input.userId },
+    },
+    select: { id: true },
+  });
+  return row !== null;
 }
 
 /** Every number this user has linked on one channel, newest first. */
