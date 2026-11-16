@@ -1,3 +1,4 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 /**
  * Conversation Service
  * Extracted common logic for creating conversations and messages
@@ -460,7 +461,9 @@ export class ConversationService {
         conversationId,
         workspaceId: channel.workspaceId,
         senderId: userId,
-        content: messageContent,
+        content: (resolvedMessageMetadata as { contentFormat?: string } | null | undefined)?.contentFormat === 'markdown'
+          ? sanitizeMessageContent(messageContent)
+          : messageContent,
         msgType: resolvedMsgType,
         hasAttachment: processedFiles.length > 0,
         createdAt: messageCreatedAt.getTime(),

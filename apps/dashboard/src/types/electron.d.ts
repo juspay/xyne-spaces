@@ -170,15 +170,6 @@ export interface ElectronAPI {
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
   onReloadActiveBrowserTab: (callback: () => void) => () => void;
-  onOpenXyneAIWithContext: (
-    callback: (data: {
-      text: string;
-      url: string;
-      domain: string;
-      title: string;
-      timestamp: number;
-    }) => void,
-  ) => () => void;
   onAuthSuccess: (callback: () => void) => void;
   onTokenExpired: (callback: (payload?: { url?: string; resourceType?: string }) => void) => void;
   showBrowserView: (config: {

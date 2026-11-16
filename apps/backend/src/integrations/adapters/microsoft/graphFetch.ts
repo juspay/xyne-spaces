@@ -3,6 +3,8 @@ import { logger } from '@/utils/logger';
 const TAG = '[MicrosoftGraph]';
 const MAX_RETRIES = 5;
 const BACKOFF_BASE_MS = 1000;
+const MAX_RETRY_AFTER_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export async function graphFetchWithRetry(
   url: string,
@@ -10,16 +12,20 @@ export async function graphFetchWithRetry(
 ): Promise<Response> {
   let lastResponse: Response | null = null;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
-    const response = await fetch(url, init);
+    const response = await fetch(url, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (response.status !== 429 && response.status !== 503) {
       return response;
     }
     lastResponse = response;
     if (attempt === MAX_RETRIES) break;
 
-    const waitMs =
-      parseRetryAfterMs(response.headers.get('Retry-After')) ??
-      BACKOFF_BASE_MS * 2 ** attempt;
+    const waitMs = Math.min(
+      parseRetryAfterMs(response.headers.get('Retry-After')) ?? BACKOFF_BASE_MS * 2 ** attempt,
+      MAX_RETRY_AFTER_MS,
+    );
     logger.warn(
       `${TAG} ${response.status} throttled; sleeping ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`,
     );

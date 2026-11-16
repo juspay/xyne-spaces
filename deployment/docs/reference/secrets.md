@@ -86,7 +86,7 @@ All in the install namespace, labelled `app.kubernetes.io/managed-by: terraform`
 
 | Secret | Keys | Created |
 |---|---|---|
-| `xyne-backend-secrets` | `DATABASE_URL`, `COMMON_DATABASE_URL`, `DATABASE_READ_REPLICA_POOL_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `REDIS_PASSWORD`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY`, `Y_SWEET_SERVER_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | always |
+| `xyne-backend-secrets` | `DATABASE_URL`, `COMMON_DATABASE_URL`, `DATABASE_READ_REPLICA_POOL_URL`, `ZERO_UPSTREAM_DB`, `REDIS_URL`, `REDIS_PASSWORD`, `JWT_SECRET`, `ZERO_AUTH_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_S2S_KEY`, `Y_SWEET_SERVER_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `CALL_E2EE_MASTER_KEY` (required by the backend, so the chart mounts it as a non-optional key), `CALL_E2EE_MASTER_KEY_VERSION`, `CALL_E2EE_PREVIOUS_MASTER_KEYS` | always |
 | `xyne-zero-secrets` | `ZERO_UPSTREAM_DB`, `ZERO_CVR_DB`, `ZERO_CHANGE_DB`, `ZERO_AUTH_SECRET`, `ZERO_ADMIN_PASSWORD` | always |
 | `xyne-claw-secrets` | `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY`, `LITELLM_API_KEY`, `HINDSIGHT_API_KEY`, `REDIS_PASSWORD` | always |
 | `xyne-claw-auth-secrets` | `DATABASE_URL`, `ENCRYPTION_KEY`, `XYNE_CLAW_S2S_KEY`, `INTERNAL_S2S_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `REDIS_PASSWORD` | always |
@@ -155,10 +155,34 @@ restarts exactly the apps that read it.
 | `storage_credentials` | both stages | restart MinIO in `incluster` mode |
 | `livekit_api_key`, `livekit_api_secret` | both stages | on GCP and Azure restart the LiveKit groups ([calls](../features/calls.md#changing-the-configuration-or-the-keys)); AWS replaces them itself |
 | `hindsight_llm_api_key` | `--only platform` | `kubectl -n hindsight rollout restart deploy/hindsight-api` |
+| `CALL_E2EE_MASTER_KEY` | `--only platform` | see below: bump the version and keep the old key until its calls end |
 
 Some rotations have consequences beyond a restart: a new `zero_auth_secret` or `jwt_secret` signs
 every user out, and `encryption_key` and `claw_auth_encryption_key` cannot be rotated at all
 without re-encrypting stored data, for which the application has no tooling.
+
+### Rotating the call encryption master key
+
+Every end-to-end encrypted call derives its key from `CALL_E2EE_MASTER_KEY` with HKDF, and
+pins the master key *version* it was activated with in `Call.metadata.e2ee.keyVersion`. A
+participant who joins later must derive the same key, so the old master key has to stay
+readable until every call activated with it has ended. The three keys form a ring:
+
+1. Move the current key into `CALL_E2EE_PREVIOUS_MASTER_KEYS` under its version, e.g.
+   `{"1":"<old base64 key>"}` (a JSON object; versions are positive integers).
+2. Set `CALL_E2EE_MASTER_KEY` to 32 new random bytes, base64, and bump
+   `CALL_E2EE_MASTER_KEY_VERSION` (`2`).
+3. Re-apply `--only platform`. New activations pin version 2; calls already live keep
+   deriving from version 1. Scheduled and recurring calls pin their version when they
+   start, so none of them is tied to the old key.
+4. Once no call activated under version 1 is live (a day is plenty; calls run hours, not
+   days), drop `"1"` from `CALL_E2EE_PREVIOUS_MASTER_KEYS` and re-apply. A join to a call
+   whose version is no longer in the ring fails with
+   `No master key for call key version N`, which is the signal that step 4 ran too early.
+
+Under KMS (`SECRETS_KMS_KEY_NAME`), `CALL_E2EE_MASTER_KEY` and
+`CALL_E2EE_PREVIOUS_MASTER_KEYS` are KMS ciphertext like `LIVEKIT_API_SECRET`; the version is
+plain.
 
 ## What never to commit
 

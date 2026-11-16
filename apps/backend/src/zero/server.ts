@@ -118,6 +118,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
     }
 
     const decoded = jwt.verify(encodedJWT, secret, {
+      algorithms: ['HS256'],
       issuer: 'xyne',
       audience: 'xyne-user',
     }) as AuthData & { iat?: number };

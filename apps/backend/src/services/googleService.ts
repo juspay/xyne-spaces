@@ -7,7 +7,7 @@
 import { google, gmail_v1 } from 'googleapis';
 import { DeskType } from '@xyne/shared';
 import { OAuth2Client } from 'google-auth-library';
-import { PubSub } from '@google-cloud/pubsub';
+import { PubSub, type ClientConfig } from '@google-cloud/pubsub';
 import { decrypt, encrypt } from './encryptionService';
 import { logger } from '@/utils/logger';
 import {
@@ -28,6 +28,9 @@ const TAG = '[GoogleService]';
 const SOURCE_NAME_PREFIX = 'google-';
 const DEFAULT_PUBSUB_TOPIC = 'gmail-notifications';
 const PUBSUB_ACK_DEADLINE_SECONDS = 600;
+const PUBSUB_MESSAGE_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+// gRPC status codes from @google-cloud/pubsub errors.
+const GRPC_ALREADY_EXISTS = 6;
 const DEFAULT_BACKEND_URL = 'http://localhost:3000';
 // One shared Pub/Sub subscription per env handles every Google source — body's
 // emailAddress routes to the right ExternalSource at request time. Env suffix
@@ -621,13 +624,23 @@ export class GoogleService {
   }
 
   /**
-   * Ensure the single shared Pub/Sub subscription exists for this env.
+   * Ensure the env's shared subscription for the configured delivery mode
+   * (GOOGLE_PUBSUB_DELIVERY_MODE) exists. Called on every Gmail source setup.
+   */
+  static async setupPubSubSubscription(): Promise<string> {
+    return appConfig.google.pubsubDeliveryMode === 'pull'
+      ? GoogleService.setupPullSubscription()
+      : GoogleService.setupPushSubscription();
+  }
+
+  /**
+   * Ensure the single shared push subscription exists for this env.
    * Idempotent: creates on first call, refreshes pushConfig only when the
    * webhookUrl/audience has drifted (e.g. BACKEND_URL changed across deploys),
    * no-ops otherwise. Source-level routing happens at request time via the
    * payload's emailAddress in GoogleFlow.getSourceNameFromDB.
    */
-  static async setupPubSubSubscription(): Promise<string> {
+  static async setupPushSubscription(): Promise<string> {
     const webhookUrl = GoogleService.generateWebhookUrl();
     if (webhookUrl.includes('localhost') || webhookUrl.includes('127.0.0.1')) {
       logger.warn(`${TAG} Skipping Pub/Sub subscription setup — push endpoint is localhost and cannot be reached by Google Cloud (local dev mode)`);
@@ -679,12 +692,93 @@ export class GoogleService {
     return subscriptionName;
   }
 
+  /**
+   * Ensure the env's shared pull subscription exists (idempotent). The
+   * gmailPubSubPullWorker reads it over StreamingPull, so no public endpoint is
+   * needed. Never touches the push subscription: retire that by hand once pull
+   * is confirmed working. An existing subscription is left as it is.
+   */
+  static async setupPullSubscription(): Promise<string> {
+    const pubsub = GoogleService.createPubSubClient();
+    const topicName = appConfig.google.pubsubTopic || DEFAULT_PUBSUB_TOPIC;
+    const subscriptionName = GoogleService.getPullSubscriptionName();
+    const topic = pubsub.topic(topicName);
+    const subscription = topic.subscription(subscriptionName);
+
+    const [exists] = await subscription.exists();
+    if (exists) {
+      const [meta] = await subscription.getMetadata();
+      if (meta.pushConfig?.pushEndpoint) {
+        throw new Error(
+          `Pub/Sub subscription ${subscriptionName} is a push subscription; pull mode needs a pull subscription`,
+        );
+      }
+      logger.info(`${TAG} Shared Pub/Sub pull subscription already exists`, { subscriptionName });
+      return subscriptionName;
+    }
+
+    const { pubsubDeadLetterTopic, pubsubMaxDeliveryAttempts } = appConfig.google;
+    try {
+      await topic.createSubscription(subscriptionName, {
+        ackDeadlineSeconds: PUBSUB_ACK_DEADLINE_SECONDS,
+        messageRetentionDuration: { seconds: PUBSUB_MESSAGE_RETENTION_SECONDS },
+        // Back off nacked messages instead of redelivering them at once.
+        retryPolicy: { minimumBackoff: { seconds: 10 }, maximumBackoff: { seconds: 600 } },
+        ...(pubsubDeadLetterTopic && {
+          deadLetterPolicy: {
+            deadLetterTopic: pubsub.topic(pubsubDeadLetterTopic).name,
+            maxDeliveryAttempts: pubsubMaxDeliveryAttempts,
+          },
+        }),
+      });
+      logger.info(`${TAG} Shared Pub/Sub pull subscription created`, {
+        subscriptionName,
+        topicName,
+        deadLetterTopic: pubsubDeadLetterTopic || undefined,
+      });
+    } catch (error) {
+      // Another pod created it between exists() and here.
+      if ((error as { code?: number }).code !== GRPC_ALREADY_EXISTS) throw error;
+      logger.info(`${TAG} Shared Pub/Sub pull subscription created concurrently`, { subscriptionName });
+    }
+    return subscriptionName;
+  }
+
+  /**
+   * Pub/Sub client for pull mode. Uses the GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 key
+   * when set, otherwise Application Default Credentials (Workload Identity), so a
+   * stack can run without a key. grpc-js would send its channel through a
+   * lower-case https_proxy/grpc_proxy (it ignores the upper-case ones);
+   * 'grpc.enable_http_proxy': 0 keeps Pub/Sub on the direct private path.
+   */
+  static createPubSubClient(): PubSub {
+    const credentials = GoogleService.loadOptionalPubSubServiceAccount();
+    // gax passes 'grpc.*' keys through to the channel; ClientConfig doesn't type them.
+    const options: ClientConfig & { 'grpc.enable_http_proxy': number } = {
+      projectId: appConfig.google.cloudProjectId || undefined,
+      ...(credentials && { credentials }),
+      'grpc.enable_http_proxy': 0,
+    };
+    return new PubSub(options);
+  }
+
   static generateWebhookUrl(): string {
     const baseUrl = appConfig.backendUrl || DEFAULT_BACKEND_URL;
     return `${baseUrl}${SHARED_GOOGLE_WEBHOOK_PATH}`;
   }
 
   static getSharedSubscriptionName(): string {
+    return `${SHARED_SUBSCRIPTION_BASE}-${GoogleService.subscriptionEnvSuffix()}-push`;
+  }
+
+  static getPullSubscriptionName(): string {
+    return (
+      appConfig.google.pubsubPullSubscription
+      || `${SHARED_SUBSCRIPTION_BASE}-${GoogleService.subscriptionEnvSuffix()}-pull`
+    );
+  }
+
+  private static subscriptionEnvSuffix(): string {
     // Env classification from BACKEND_URL — keeps detection in sync with how
     // urlUtils.ts already distinguishes deployments, and avoids needing a new
     // dedicated env var:
@@ -705,7 +799,7 @@ export class GoogleService {
     } else {
       suffix = 'prod';
     }
-    return `${SHARED_SUBSCRIPTION_BASE}-${suffix}-push`;
+    return suffix;
   }
 
   /**
@@ -806,7 +900,7 @@ export class GoogleService {
     const [sharedExists] = await sharedSub.exists();
     if (!sharedExists) {
       if (!dryRun) {
-        await GoogleService.setupPubSubSubscription();
+        await GoogleService.setupPushSubscription();
         sharedSubscriptionCreated = true;
       } else {
         sharedSubscriptionCreated = true; // would-create
@@ -873,7 +967,12 @@ export class GoogleService {
       throw new Error('Google channel email mailbox requires GOOGLE_PUBSUB_TOPIC to be configured');
     }
 
-    GoogleService.loadPubSubServiceAccount();
+    // Pull mode can run on Workload Identity; push needs the key for its OIDC token.
+    if (appConfig.google.pubsubDeliveryMode === 'pull') {
+      GoogleService.loadOptionalPubSubServiceAccount();
+    } else {
+      GoogleService.loadPubSubServiceAccount();
+    }
   }
 
   // ─── Email sender (reply) ────────────────────────────────────────────────
@@ -1085,10 +1184,17 @@ export class GoogleService {
   }
 
   private static loadPubSubServiceAccount(): ServiceAccountCredentials {
-    const base64Json = appConfig.google.pubsubServiceAccountBase64;
-    if (!base64Json) {
+    const credentials = GoogleService.loadOptionalPubSubServiceAccount();
+    if (!credentials) {
       throw new Error('GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 is not set');
     }
+    return credentials;
+  }
+
+  /** The key from GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64, or undefined when unset (use ADC). */
+  private static loadOptionalPubSubServiceAccount(): ServiceAccountCredentials | undefined {
+    const base64Json = appConfig.google.pubsubServiceAccountBase64;
+    if (!base64Json) return undefined;
 
     try {
       const decoded = Buffer.from(base64Json, 'base64').toString('utf8');

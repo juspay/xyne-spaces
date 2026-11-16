@@ -8,9 +8,8 @@ const conversationController = new ConversationController();
 // Static route must be registered before any /:conversationId routes.
 router.get('/threads', conversationController.getUserThreads);
 
-// Disabled (Claw)
-// router.post('/reply-drafts/:draftId/approve', conversationController.approveReplyDraft);
-// router.post('/reply-drafts/:draftId/decline', conversationController.declineReplyDraft);
+router.post('/reply-drafts/:draftId/approve', conversationController.approveReplyDraft);
+router.post('/reply-drafts/:draftId/decline', conversationController.declineReplyDraft);
 // Latest conversations + full threads for every channel the user visited in the last N days.
 router.get('/recent-visited', conversationController.getRecentVisitedConversations);
 
@@ -33,8 +32,7 @@ router.get('/:conversationId/agent-progress', conversationController.getAgentPro
 // router.get('/:conversationId/recommendation', conversationController.getRecommendation);
 
 // Cancel an in-flight agent run for the given conversation
-// Disabled (Claw)
-// router.post('/:conversationId/agent-cancel', conversationController.cancelAgentRun);
+router.post('/:conversationId/agent-cancel', conversationController.cancelAgentRun);
 
 // Update message content (for ticket suggestion → ticket created flow)
 // Disabled (LLM)

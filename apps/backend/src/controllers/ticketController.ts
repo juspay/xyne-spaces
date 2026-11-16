@@ -99,8 +99,7 @@ const AddAttachmentsFromConversationBodySchema = z.object({
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { unifiedBotUserService } from '@/bots/unified';
 import { ticketService } from '@/services/ticketService';
-// Disabled (Claw)
-// import { emailService } from '@/services/emailService';
+import { emailService } from '@/services/emailService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { createTicketWithConversationTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { createTicketTx, TicketCreateAccessError } from '@/bypassAcl/transactions/controllersTicketController';
@@ -917,7 +916,7 @@ export class TicketController {
       // Wrap all database operations in a transaction for data integrity
       let ticket: Awaited<ReturnType<typeof createTicketTx>>['ticket'];
       try {
-        ({ ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, effectiveChannelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds, (req.user.isApiKeyUser && req.user.role === 'admin') ? undefined : {
+        ({ ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, effectiveChannelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds, {
           workspaceId: req.user.workspaceId,
           channelId: effectiveChannelId,
           boardId,
@@ -964,21 +963,20 @@ export class TicketController {
         // No-ops unless the channel has auto-draft switched on; fire-and-forget,
         // because a draft is a convenience and must never fail or delay the
         // ticket.
-        // Disabled (Claw)
-        // void emailService
-        //   .triggerOpeningAutoDraft({
-        //     ticketId: ticket.id,
-        //     conversationId: ticket.conversationId,
-        //     channelId: ticketChannelId,
-        //     title: ticket.title,
-        //     description: description ?? '',
-        //   })
-        //   .catch(err =>
-        //     logger.warn('[createTicket] opening auto-draft failed', {
-        //       ticketId: ticket.id,
-        //       error: err instanceof Error ? err.message : String(err),
-        //     }),
-        //   );
+        void emailService
+          .triggerOpeningAutoDraft({
+            ticketId: ticket.id,
+            conversationId: ticket.conversationId,
+            channelId: ticketChannelId,
+            title: ticket.title,
+            description: description ?? '',
+          })
+          .catch(err =>
+            logger.warn('[createTicket] opening auto-draft failed', {
+              ticketId: ticket.id,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
       }
 
       // Create TicketTag records for each tag

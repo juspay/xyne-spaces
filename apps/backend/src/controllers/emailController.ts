@@ -53,6 +53,7 @@ import { emailService } from '@/services/emailService';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { v4 as uuidv4 } from 'uuid';
+import { escapeYqlString } from '@/utils/yqlEscape';
 
 interface ReplyEmailRequest {
   body: string;
@@ -767,10 +768,9 @@ export class EmailController {
         }
       }
 
-      const esc = (v: string): string => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const cond =
-        (channelId ? `channelId contains "${esc(channelId)}" and ` : '') +
-        `entity contains "support_desk" and permissions contains "${esc(userId)}"`;
+        (channelId ? `channelId contains "${escapeYqlString(channelId)}" and ` : '') +
+        `entity contains "support_desk" and permissions contains "${escapeYqlString(userId)}"`;
 
       const dedupeByEmail = (
         raws: Array<{ value: string; count: number }>,

@@ -1,12 +1,12 @@
 import { Request, Response } from 'express';
 import { AccessType, AuthProvider, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
-import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
 import { getEncryptionProvider } from '@/services/encryption';
 import { config } from '@/config/env';
 import { UserService } from '@/services/userService';
-import { UserSessionService } from '@/services/userSessionService';
-import { jwtService } from '@/services/jwtService';
+import { authSessionService, AuthSessionRevokeReason } from '@/services/authSessionService';
+import { completeLogin, respondDeviceKeyRequired } from '@/services/loginCompletionService';
+import { readWorkspaceJwt } from '@/services/accessTokenService';
 import { DatabaseClient } from '@/database/client';
 import { TestAuthSeeder } from '@/controllers/testAuthSeeder';
 
@@ -26,7 +26,6 @@ interface TestUserData {
  */
 export class TestAuthController {
   private userService: UserService;
-  private userSessionService: UserSessionService;
   private static readonly TEST_USER_EMAIL_REGEX = /^test-(user|admin)-email-(\d+)@xyne-test\.local$/;
 
   private static parseBooleanFlag(value: unknown): boolean | undefined {
@@ -126,7 +125,6 @@ export class TestAuthController {
 
   constructor() {
     this.userService = new UserService();
-    this.userSessionService = new UserSessionService();
   }
 
   private buildFixedTestUser(): TestUserData {
@@ -440,44 +438,15 @@ export class TestAuthController {
         throw new Error(`User ${user.email} is not a member of any organization`);
       }
 
-      const customToken = jwtService.generateToken({
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        picture: testUserData.picture,
-        workspaceId: user.workspaceId,
-        memberId: orgMember.memberId,
+      // Auth session (xs) + workspace JWT cookie + last-workspace pointer, exactly like a real
+      // login. Test traffic runs over http, so the cookies are not marked secure.
+      logger.info(`[${requestId}] Creating test auth session`);
+      const { sessionId } = await completeLogin(req, res, {
+        user: { ...user, picture: testUserData.picture ?? user.picture, orgMemberId: orgMember.memberId },
+        orgId: orgMember.orgId,
+        loginMethod: 'TEST',
+        cookieOptions: { secure: false, sameSite: 'strict' },
       });
-
-      let sessionId = null;
-      try {
-        logger.info(`[${requestId}] Creating test user session`);
-
-        const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-        const deviceInfo = JSON.stringify({
-          userAgent: req.headers['user-agent'] || 'Test Automation',
-          timestamp: new Date().toISOString(),
-          platform: 'test',
-        });
-
-        const refreshToken = `test-${randomBytes(32).toString('hex')}-${Date.now()}`;
-
-        const session = await this.userSessionService.createSession({
-          userId: user.id,
-          refreshToken,
-          refreshTokenExpiry,
-          deviceInfo,
-          ipAddress: req.ip || '127.0.0.1',
-          loginMethod: 'TEST',
-        });
-
-        sessionId = session.id;
-        logger.info(`[${requestId}] Session created`);
-      } catch (sessionError) {
-        logger.error(`[${requestId}] Session creation failed:`, sessionError);
-      }
 
       const cookieOptions = {
         httpOnly: true,
@@ -486,31 +455,10 @@ export class TestAuthController {
         path: '/',
       };
 
-      // Set workspace-scoped JWT token (matches authV2Middleware expectation)
-      res.cookie(`xyne_ws_${user.workspaceId}_token`, customToken, {
-        ...cookieOptions,
-        maxAge: 24 * 60 * 60 * 1000,
-      });
-
-      // Set last workspace pointer so authV2Middleware can find the right token
-      res.cookie('xyne_last_workspace', user.workspaceId, {
+      res.cookie('xyne_session', sessionId, {
         ...cookieOptions,
         maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
-
-      if (sessionId) {
-        res.cookie('xyne_session', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
-        // Session cookie the auth middleware and session-scoped routes require
-        // (real login controllers set it too); without it session-gated routes 401.
-        res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
 
       if (effectiveIsNewUser) {
         res.cookie('is_new_user', 'true', {
@@ -540,6 +488,7 @@ export class TestAuthController {
         sessionId,
       });
     } catch (error) {
+      if (respondDeviceKeyRequired(res, error)) return;
       logger.error(`[${requestId}] Test login failed:`, error);
 
       res.status(500).json({
@@ -555,18 +504,20 @@ export class TestAuthController {
     try {
       logger.info(`[${requestId}] Test logout initiated`);
 
-      // Mirror the real logout: revoke the global session + its encryption key and clear the
-      // cookie, otherwise the browser keeps a valid user_session_id and re-login sees stale data.
-      const sessionId = req.cookies?.user_session_id;
+      // Mirror the real logout: revoke the auth session (from the JWT's sid; xs is only sent
+      // to /auth/refresh-session) + its encryption key and clear the cookies, otherwise the
+      // browser keeps a valid xs and re-login sees stale data.
+      const jwtRead = readWorkspaceJwt(req);
+      const sessionId = jwtRead.status === 'valid' ? jwtRead.payload.sid : undefined;
       if (sessionId) {
-        await this.userSessionService.revokeSession(sessionId, 'TEST_CLEANUP').catch((err: unknown) =>
+        await authSessionService.revokeById(sessionId, AuthSessionRevokeReason.TEST_CLEANUP).catch((err: unknown) =>
           logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
         );
         await getEncryptionProvider().revokeSessionKey(sessionId).catch((err: unknown) =>
           logger.warn(`[${requestId}] Session key revoke failed: ${err instanceof Error ? err.message : String(err)}`)
         );
       }
-      res.clearCookie('user_session_id', { path: '/' });
+      await authSessionService.revokeOnLogout(req, res, { sessionId });
 
       // Clear all workspace-scoped token cookies
       for (const cookieName of Object.keys(req.cookies || {})) {

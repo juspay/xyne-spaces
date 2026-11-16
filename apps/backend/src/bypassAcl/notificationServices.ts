@@ -8,6 +8,19 @@ const prisma = DatabaseClient.getInstance();
  * Relocated from services/notificationService.ts's getWorkspaceNotificationCounts. Spans the
  * caller's own identities across workspaces.
  */
+/** orgMemberId for a workspace user id. Push tokens live on the org-scoped auth session, which is
+ *  keyed by orgMemberId, so the recipient's workspace is not known (or needed) at send time. */
+export function getOrgMemberIdForUserQuery(userId: string): Promise<string | null> {
+  return asSystem(
+    ['User'],
+    'push delivery: resolving the recipient\'s orgMemberId to find their org-scoped auth sessions; workspace is unknown at send time',
+    async () => {
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } });
+      return user?.orgMemberId ?? null;
+    },
+  );
+}
+
 export function getWorkspaceNotificationCountsQuery(memberId: string): Promise<
   Array<{
     workspaceId: string;

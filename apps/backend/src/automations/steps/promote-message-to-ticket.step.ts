@@ -1,3 +1,4 @@
+import { assertAssignableUser, assertGroupInWorkspace, automationRequestUser } from '../util/author-access';
 import { z } from 'zod';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import type { Request, Response } from 'express';
@@ -7,7 +8,7 @@ import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { TicketController } from '@/controllers/ticketController';
 import { logger } from '@/utils/logger';
-import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 
 const PromoteMessageToTicketConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)),
@@ -19,7 +20,6 @@ const PromoteMessageToTicketConfigSchema = z.object({
   userGroupId: variableRef(z.string()).optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
   status: z.nativeEnum(TicketStatusV2).optional(),
-  createdById: variableRef(z.string()).optional(),
 });
 
 const PromoteMessageToTicketOutputSchema = z.object({
@@ -54,11 +54,12 @@ export class PromoteMessageToTicketStep extends BaseActionStep<
     config: z.infer<typeof PromoteMessageToTicketConfigSchema>,
     context: AutomationContext,
   ): Promise<PromoteMessageToTicketOutput> {
-    const createdBy =
-      (config.createdById as string | undefined) ?? context.automation.createdById;
-    const rawTitle = config.title as string;
-    const title = extractPlainTextFromHtml(rawTitle).trim() || rawTitle;
-    const description = (config.description as string | undefined) ?? title;
+    const createdBy = context.automation.createdById;
+    const title = extractPlainTextFromHtml(config.title as string).trim();
+    if (!title) {
+      throw new Error('[PROMOTE_MESSAGE_TO_TICKET] Title must contain text');
+    }
+    const description = sanitizeMessageContent((config.description as string | undefined) ?? title);
 
     // The channel is derived from the source conversation by the controller.
     const reqBody: Record<string, unknown> = {
@@ -70,6 +71,12 @@ export class PromoteMessageToTicketStep extends BaseActionStep<
       projectId: config.projectId as string,
       boardId: config.boardId as string,
     };
+    if (config.assigneeId !== undefined) {
+      await assertAssignableUser(config.assigneeId as string, context.automation.workspaceId, 'PROMOTE_MESSAGE_TO_TICKET');
+    }
+    if (config.userGroupId !== undefined) {
+      await assertGroupInWorkspace(config.userGroupId as string, context.automation.workspaceId, 'PROMOTE_MESSAGE_TO_TICKET');
+    }
     if (config.assigneeId !== undefined) reqBody.assignedTo = config.assigneeId;
     if (config.userGroupId !== undefined) reqBody.userGroupId = config.userGroupId;
     if (config.priority !== undefined) reqBody.priority = config.priority;
@@ -78,7 +85,7 @@ export class PromoteMessageToTicketStep extends BaseActionStep<
     const fakeReq = {
       body: reqBody,
       headers: {},
-      user: { id: createdBy, workspaceId: context.automation.workspaceId },
+      user: await automationRequestUser(createdBy, context.automation.workspaceId),
       files: {},
     } as unknown as Request;
 

@@ -3,9 +3,9 @@
  * Routes migration requests to appropriate handlers (slack, jira, zoho, etc.)
  */
 
-import express, { Router, Request, Response } from 'express';
+import express, { Router } from 'express';
 import { workspaceScopedRoute } from '@/database/tenant/context';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { authMiddleware } from '@/middleware/auth';
 import slackRoutes from './slack';
 import selfServeSlackRoutes from './self-serve';
 import jiraRoutes from './jira';
@@ -34,7 +34,7 @@ router.use(express.urlencoded({ extended: true, limit: '50mb', verify: rawBodyCa
 router.use('/slack', workspaceScopedRoute, slackRoutes);
 
 // Self-serve Slack migration dashboard API (auth-gated, tenant-scoped) — migration pod at /migrate/api/migration/slack-migration/*.
-router.use('/slack-migration', authV2Middleware.authenticate, workspaceScopedRoute, selfServeSlackRoutes);
+router.use('/slack-migration', authMiddleware.authenticate, workspaceScopedRoute, selfServeSlackRoutes);
 
 // Route to Jira migration
 router.use('/jira', workspaceScopedRoute, jiraRoutes);
@@ -60,14 +60,5 @@ router.use('/role-framework-backfill', workspaceScopedRoute, roleFrameworkBackfi
 
 // Admin migration utilities
 router.use('/admin', workspaceScopedRoute, adminRoutes);
-
-// Handle unknown migration routes
-router.use('*', (req: Request, res: Response) => {
-  const path = req.path;
-  return res.status(404).json({
-    error: 'Migration route not found',
-    message: `Migration route '${path}' does not exist. `,
-  });
-});
 
 export default router;

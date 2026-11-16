@@ -7,11 +7,12 @@ import { triggerTypeToEventType, AUTOMATION_WORKFLOW_TYPE, buildAutomationMetada
 import { db } from '@/database/client';
 
 
-export function postTx(prepared: { config: AutomationConfig; context: string; eventType: ReturnType<typeof triggerTypeToEventType>; }, auth: { userId: string; workspaceId: string; }, parsed: z.ZodSafeParseSuccess<{ name: string; config: AutomationConfig; description?: string | null | undefined; }>) {
+export function postTx(prepared: { config: AutomationConfig; context: string; eventType: ReturnType<typeof triggerTypeToEventType>; }, auth: { userId: string; workspaceId: string; }, parsed: z.ZodSafeParseSuccess<{ name: string; config: AutomationConfig; description?: string | null | undefined; }>, id?: string) {
   return transaction(['MessageAttachment', 'Workflow'], 'post: template claim and automation workflow creation must commit atomically; tx is not ACL-wrapped', db, async tx => {
     await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
     return tx.workflow.create({
       data: {
+        ...(id ? { id } : {}),
         workflowType: AUTOMATION_WORKFLOW_TYPE,
         workflowName: parsed.data.name,
         workspaceId: auth.workspaceId,

@@ -1,4 +1,3 @@
-import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
 import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -16,7 +15,7 @@ export type NotifyLinkType = (typeof NOTIFY_LINK_TYPES)[number];
 
 async function chatRouteBase(workspaceId: string, channelId: string): Promise<string> {
   const channel = await db.channel
-    .findUnique({ where: { id: channelId }, select: { scopeType: true } })
+    .findFirst({ where: { id: channelId, workspaceId }, select: { scopeType: true } })
     .catch((err: unknown) => { logger.error(`[notify-action-url] CHANNEL lookup failed id=${channelId}`, err); return null; });
   const isDM = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
   return `/${workspaceId}/chat/${isDM ? 'dm' : 'dir'}/${channelId}`;
@@ -39,8 +38,8 @@ export async function buildNotifyActionUrl(
   switch (linkType) {
     case 'TICKET': {
       const ticket = await db.ticket
-        .findUnique({
-          where: { id },
+        .findFirst({
+          where: { id, workspaceId },
           select: {
             xyneId: true,
             channelId: true,
@@ -60,25 +59,27 @@ export async function buildNotifyActionUrl(
         ? `/${workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${id}&conversationId=${ticket.conversationId}`
         : `/${workspaceId}/tickets?tickets=${id}`;
     }
-    case 'CHANNEL':
-      return chatRouteBase(workspaceId, id);
+    case 'CHANNEL': {
+      const channel = await db.channel.findFirst({ where: { id, workspaceId }, select: { id: true } }).catch(() => null);
+      return channel ? chatRouteBase(workspaceId, id) : undefined;
+    }
     case 'CONVERSATION': {
-      const conv = await repositories.conversations.findById(id).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${id}`, err); return null; });
+      const conv = await db.conversation.findFirst({ where: { conversationId: id, workspaceId }, select: { channelId: true } }).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${id}`, err); return null; });
       return conv?.channelId ? `${await chatRouteBase(workspaceId, conv.channelId)}#origin=${id}` : undefined;
     }
     case 'MESSAGE': {
       const msg = await db.message
-        .findUnique({ where: { messageId: id }, select: { conversationId: true } })
+        .findFirst({ where: { messageId: id, workspaceId }, select: { conversationId: true } })
         .catch((err: unknown) => { logger.error(`[notify-action-url] MESSAGE lookup failed id=${id}`, err); return null; });
       if (!msg?.conversationId) return undefined;
-      const conv = await repositories.conversations.findById(msg.conversationId).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${msg.conversationId}`, err); return null; });
+      const conv = await db.conversation.findFirst({ where: { conversationId: msg.conversationId, workspaceId }, select: { channelId: true } }).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${msg.conversationId}`, err); return null; });
       return conv?.channelId
         ? `${await chatRouteBase(workspaceId, conv.channelId)}#origin=${msg.conversationId}&messageId=${id}`
         : undefined;
     }
     case 'EMAIL': {
       const email = await db.email
-        .findUnique({ where: { id }, select: { conversationId: true, channelId: true } })
+        .findFirst({ where: { id, workspaceId }, select: { conversationId: true, channelId: true } })
         .catch((err: unknown) => { logger.error(`[notify-action-url] EMAIL lookup failed id=${id}`, err); return null; });
       return email?.channelId && email?.conversationId
         ? `/${workspaceId}/chat/dir/${email.channelId}#origin=${email.conversationId}`

@@ -13,8 +13,7 @@ import { uploadMultiple } from '../middleware/upload';
 // import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
 // import { ticketBoardSuggestionSchema, ticketFieldSuggestionsSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
-// Disabled (Claw)
-// import { DeskThreadCanvasController } from '@/controllers/deskThreadCanvasController';
+import { DeskThreadCanvasController } from '@/controllers/deskThreadCanvasController';
 // Disabled (LLM)
 // import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { authorize } from '@/middleware/authorize';
@@ -31,8 +30,7 @@ const releaseReportController = new ReleaseReportController();
 // Disabled (LLM)
 // const releaseInsightsController = new ReleaseInsightsController();
 const flowRunExportController = new FlowRunExportController();
-// Disabled (Claw)
-// const deskThreadCanvasController = new DeskThreadCanvasController();
+const deskThreadCanvasController = new DeskThreadCanvasController();
 
 // Note: Authentication and ACL middleware are applied at the app level
 
@@ -101,7 +99,6 @@ router.post('/:ticketId/merge', ticketController.mergeTicket);
 router.post('/:ticketId/unmerge', ticketController.unmergeTicket);
 
 // Desk: synthesize the ticket's chat/email thread into a canvas
-// Disabled (Claw)
-// router.post('/:ticketId/canvas', deskThreadCanvasController.createCanvasFromThread);
+router.post('/:ticketId/canvas', deskThreadCanvasController.createCanvasFromThread);
 
 export default router;

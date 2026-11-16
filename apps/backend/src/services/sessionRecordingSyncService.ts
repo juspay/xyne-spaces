@@ -70,12 +70,13 @@ class SessionRecordingSyncService {
    * Reads from Redis and directly uploads to GCS (overwrites existing file).
    */
   private async syncSessionRecording(redisKey: string): Promise<void> {
-    const sessionId = parseSessionRecordingKey(redisKey);
+    const parsed = parseSessionRecordingKey(redisKey);
 
-    if (!sessionId) {
+    if (!parsed) {
       logger.warn(`[SESSION-RECORDING-SYNC] Invalid Redis key format: ${redisKey}`);
       return;
     }
+    const { sessionId } = parsed;
 
     // Read all batches from Redis atomically using Lua script
     // Deletes the key and removes from tracking set after reading

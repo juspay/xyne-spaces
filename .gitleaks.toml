@@ -89,6 +89,9 @@ regexes = [
   '''^(mod|cmd|ctrl|alt|shift|meta)\+[a-z0-9+]+$''',
   # UI local-storage key, not a credential (ErrorPipelinePageV3.tsx).
   '''^errpipe-detail-width-v2$''',
+  # Fixed local-dev CALL_E2EE_MASTER_KEY: base64 of "localdeve2eemasterkey01234567890", the
+  # sibling of localdevkey/localdevsecret (apps/backend/.env.example, .env.test, scripts/sandbox.sh).
+  '''^bG9jYWxkZXZlMmVlbWFzdGVya2V5MDEyMzQ1Njc4OTA=$''',
 ]
 
 # ---------------------------------------------------------------------------

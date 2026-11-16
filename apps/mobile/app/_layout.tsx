@@ -660,9 +660,11 @@ function RootLayoutNav(): ReactElement {
       // or the Android in-process broadcast's defensive fallback). Dispatch
       // first — recordingStore's state is synchronous and the recordings
       // screen reads it on mount via useSyncExternalStore, so no race.
-      sendRecordingAction({
-        type: recordingLink.action === 'start' ? 'requestAutoStart' : 'requestStop',
-      });
+      // Start only opens the screen: this URL can come from any website or app,
+      // so turning the microphone on needs the user's own tap on Start.
+      if (recordingLink.action === 'stop') {
+        sendRecordingAction({ type: 'requestStop' });
+      }
       router.push({ pathname: '/(protected)/(shortcuts)/recordings' as never });
       pendingDeepLinkRef.current = null;
       return;

@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
-// Disabled (Claw)
-// import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -83,8 +82,7 @@ import {
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
-// Disabled (Claw)
-// import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
+import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import DOMPurify from 'dompurify';
 import { CallParticipantsSelectionModal } from '../../Call/CallParticipantsSelectionModal';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
@@ -166,8 +164,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isTicketThread = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
-  // Disabled (Claw)
-  // disableAskAI = false,
+  disableAskAI = false,
   searchItemView = false,
   onUserClick,
   spawnedTicketMessageIds,
@@ -181,9 +178,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   showIntentSuggestion = false,
 }) => {
   const { user } = useAuthContext();
-  // Disabled (Claw)
-  // // Off inside hosts that embed chat for one purpose (the related-context popup).
-  // const askAIAvailable = useAskAIAvailable();
+  // Off inside hosts that embed chat for one purpose (the related-context popup).
+  const askAIAvailable = useAskAIAvailable();
   const { copyImage } = useClipboard();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
@@ -382,53 +378,52 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setIsSubTicketModalOpen(true);
   };
 
-  // Disabled (Claw)
-  // const handleAskAI = (): void => {
-  //   // Get conversation ID from message context
-  //   const conversationId = conversation?.conversationId || message.conversationId;
-  //   if (!conversationId) return;
+  const handleAskAI = (): void => {
+    // Get conversation ID from message context
+    const conversationId = conversation?.conversationId || message.conversationId;
+    if (!conversationId) return;
 
-  //   // Extract plain text from message content
-  //   let previewText = '';
-  //   const content = message.content;
+    // Extract plain text from message content
+    let previewText = '';
+    const content = message.content;
 
-  //   if (content && typeof content === 'string') {
-  //     const parser = new DOMParser();
-  //     const doc = parser.parseFromString(content, 'text/html');
-  //     const textContent = doc.body.textContent || '';
-  //     previewText = textContent.trim().substring(0, 100);
-  //   }
+    if (content && typeof content === 'string') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content, 'text/html');
+      const textContent = doc.body.textContent || '';
+      previewText = textContent.trim().substring(0, 100);
+    }
 
-  //   // Get attachment IDs from the message (if any)
-  //   const attachmentIds = message.attachments?.map((att: { id: string }) => att.id) || [];
+    // Get attachment IDs from the message (if any)
+    const attachmentIds = message.attachments?.map((att: { id: string }) => att.id) || [];
 
-  //   // If no text content but has attachments, show "Attachment"
-  //   if (!previewText && attachmentIds.length > 0) {
-  //     previewText =
-  //       attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
-  //   }
+    // If no text content but has attachments, show "Attachment"
+    if (!previewText && attachmentIds.length > 0) {
+      previewText =
+        attachmentIds.length === 1 ? 'Attachment' : `${attachmentIds.length} Attachments`;
+    }
 
-  //   const threadInfo: ThreadInfo = {
-  //     conversationId,
-  //     channelId,
-  //     senderName: sender?.name || 'Unknown',
-  //     previewText,
-  //     ...(message.senderId && { senderId: message.senderId }),
-  //     ...(message.messageId && { messageId: message.messageId }),
-  //     isThreadMessage: context === 'thread',
-  //     ...(attachmentIds.length > 0 && { attachmentIds }),
-  //   };
+    const threadInfo: ThreadInfo = {
+      conversationId,
+      channelId,
+      senderName: sender?.name || 'Unknown',
+      previewText,
+      ...(message.senderId && { senderId: message.senderId }),
+      ...(message.messageId && { messageId: message.messageId }),
+      isThreadMessage: context === 'thread',
+      ...(attachmentIds.length > 0 && { attachmentIds }),
+    };
 
-  //   // Open XyneAI with thread context but always start a fresh chat
-  //   // This shows the thread header but doesn't load old conversation
-  //   xyneAIActor.send({
-  //     type: 'OPEN',
-  //     trackSource: 'message_bubble',
-  //     channelId,
-  //     threadInfo,
-  //     startFreshChat: true,
-  //   });
-  // };
+    // Open XyneAI with thread context but always start a fresh chat
+    // This shows the thread header but doesn't load old conversation
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'message_bubble',
+      channelId,
+      threadInfo,
+      startFreshChat: true,
+    });
+  };
 
   const handleEditInCanvas = (): void => {
     try {
@@ -1164,12 +1159,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
           onPinMessage: handlePinMessage,
         }),
-      // Disabled (Claw)
-      // ...(!disableAskAI &&
-      //   askAIAvailable &&
-      //   ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
-      //   (!isSystemMessage || isCallMessage) &&
-      //   !isMessageDeleted && { onAskAI: handleAskAI }),
+      ...(!disableAskAI &&
+        askAIAvailable &&
+        ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
+        (!isSystemMessage || isCallMessage) &&
+        !isMessageDeleted && { onAskAI: handleAskAI }),
       ...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {}),
       ...(messageShortcuts.length > 0 &&
         !isSystemMessage &&
@@ -1529,12 +1523,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
-              // Disabled (Claw)
-              // {...(!disableAskAI &&
-              //   askAIAvailable &&
-              //   ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
-              //   (!isSystemMessage || isCallMessage) &&
-              //   !isMessageDeleted && { onAskAI: handleAskAI })}
+              {...(!disableAskAI &&
+                askAIAvailable &&
+                ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
+                (!isSystemMessage || isCallMessage) &&
+                !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
               isChannelArchived={channel?.isArchived ?? false}
               {...(imageAttachments.length > 0 &&

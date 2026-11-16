@@ -9,9 +9,7 @@ import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
 import { logger } from '@/utils/logger';
 import { GoogleService } from '@/services/googleService';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalSourcePlatform } from '../core/types';
-import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import { BACKFILL_ADMIN_RESOURCE } from '@/middleware/backfillAdminAuth';
@@ -26,7 +24,6 @@ import {
 import { encrypt } from '@/services/encryptionService';
 import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
-import { pubSubWatchService } from '@/pubsub';
 import { getAuthCallbackTx } from '@/bypassAcl/transactions/googleAuth';
 import { config } from '@/config/env';
 
@@ -385,7 +382,7 @@ async function createGoogleRecordingDocAuthUrl(
   });
 }
 
-router.post('/connect/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/connect/init', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   try {
     const { name, description, visibility, projectId, assigneeUserGroupId, boardId } = req.body;
@@ -420,7 +417,7 @@ router.post('/connect/init', authV2Middleware.authenticate, async (req: Request,
 
 // GET /api/integrations/google/connect
 // Initiates Google OAuth flow for email channel creation (mirrors Microsoft /connect)
-router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/connect', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   try {
@@ -461,7 +458,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
   }
 });
 
-router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/connect/workspace/init', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   try {
     const authUrl = await createGoogleWorkspaceConnectAuthUrl(
@@ -486,7 +483,7 @@ router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req
 // DL desks ride on. No channel/preference is created — only an ExternalSource scoped
 // to the workspace (channelId: null, workspaceId set). Only one shared mailbox per
 // workspace is permitted (enforced by ExternalSource.workspaceId @unique).
-router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/connect/workspace', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   try {
@@ -516,7 +513,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
   }
 });
 
-router.post('/connect/channel-email-workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/connect/channel-email-workspace/init', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   const returnPath = sanitizeReturnPath(req.body.returnPath);
   try {
@@ -538,7 +535,7 @@ router.post('/connect/channel-email-workspace/init', authV2Middleware.authentica
   }
 });
 
-router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/connect/channel-email-workspace', authMiddleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
   const returnPath = sanitizeReturnPath(req.query.returnPath);
@@ -582,7 +579,7 @@ router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, as
 
 router.post(
   '/connect/recording-email/init',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const returnPath = sanitizeReturnPath(req.body.returnPath);
     const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
@@ -613,7 +610,7 @@ router.post(
 
 router.post(
   '/connect/recording-doc/init',
-  authV2Middleware.authenticate,
+  authMiddleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     const returnPath = sanitizeReturnPath(req.body.returnPath);
     const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
@@ -1298,32 +1295,6 @@ router.post('/admin/migrate-to-shared-sub', authMiddleware.authenticate, async (
   } catch (error: any) {
     logger.error(`${TAG} migration failed`, error);
     res.status(500).json({ success: false, error: error?.message ?? 'Unknown error' });
-  }
-});
-
-// POST /api/integrations/google/watch/renew/:sourceName
-router.post('/watch/renew/:sourceName', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { sourceName } = req.params;
-    const repo = new ExternalSourceRepository();
-    const source = await repo.findByName(sourceName);
-
-    if (!source) { res.status(404).json({ error: 'External source not found' }); return; }
-    if (source.sourceType !== ExternalSourcePlatform.GOOGLE) {
-      res.status(400).json({ error: 'Source is not a Google integration' }); return;
-    }
-
-    // Renew the exact source row; Gmail source names are not reversible from email.
-    const result = await pubSubWatchService.renewSubscription('gmail', {
-      id: source.id,
-      email: source.displayName,
-    });
-
-    logger.info(`${TAG} Gmail watch renewed`, { sourceName });
-    res.json({ success: true, historyId: result.historyId, expiration: result.expiration });
-  } catch (error: any) {
-    logger.error(`${TAG} Error renewing Gmail watch:`, error);
-    res.status(500).json({ error: 'Failed to renew Gmail watch', details: error.message });
   }
 });
 

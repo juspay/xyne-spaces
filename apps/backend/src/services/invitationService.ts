@@ -20,7 +20,8 @@ import { emailService } from './email/factory';
 import { reconcileUserPermissions } from './permissionMatrix';
 import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
-import { organizationDomainService } from './organizationDomainService';
+import { EmailDomainNotAllowedError, organizationDomainService } from './organizationDomainService';
+import { isEmailDomainAllowed } from './emailDomainPolicy';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { aiProvisioningService } from './aiProvisioningService';
 import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
@@ -89,6 +90,9 @@ export class InvitationService {
   async createInvitation(params: CreateInvitationParams): Promise<InvitationWithDetails> {
     const { role, workspaceId, invitedBy, orgId: explicitOrgId } = params;
     const email = params.email.toLowerCase();
+    if (!isEmailDomainAllowed(email)) {
+      throw new EmailDomainNotAllowedError(organizationDomainService.extractEmailDomain(email));
+    }
 
     let orgId: string;
     // null = flow skips the in-org check (read as approved), false = pending admin approval

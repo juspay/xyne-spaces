@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Zero } from '@rocicorp/zero';
-import { CallType, InvitationResponse } from '@xyne/shared';
+import { CallType, InvitationResponse, type CallEncryptionCredentials } from '@xyne/shared';
 import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
@@ -58,6 +58,7 @@ import {
 export interface CustomLiveKitRoomProps {
   token: string;
   serverUrl: string;
+  encryption: CallEncryptionCredentials | null;
   callId: string;
   callType: CallType;
   externalId: string;
@@ -67,6 +68,7 @@ export interface CustomLiveKitRoomProps {
 export function CustomLiveKitRoom({
   token,
   serverUrl,
+  encryption,
   callId,
   callType,
   externalId,
@@ -201,12 +203,13 @@ export function CustomLiveKitRoom({
         type: 'CONNECT',
         token,
         serverUrl,
+        encryption,
         callType,
         externalId,
         zero,
       });
     }
-  }, [token, serverUrl, callType, externalId, zero]);
+  }, [token, serverUrl, encryption, callType, externalId, zero]);
   // Toggle microphone via XState
   const toggleMicrophone = useCallback(() => {
     roomActor.send({ type: 'TOGGLE_MIC' });

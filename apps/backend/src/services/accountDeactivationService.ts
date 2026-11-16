@@ -1,4 +1,4 @@
-import { UserSessionService } from '@/services/userSessionService';
+import { authSessionService, AuthSessionRevokeReason } from '@/services/authSessionService';
 import { fcmPushService } from '@/services/fcmService';
 import { mtlsCertificateService } from '@/services/mtlsCertificateService';
 import { logger } from '@/utils/logger';
@@ -33,7 +33,12 @@ export interface UserDeactivationResult {
  * down as much access as possible.
  */
 class AccountDeactivationService {
-  private userSessionService = new UserSessionService();
+  /** Auth sessions are org-level: revoke every device of the org member owning this user row. */
+  private async revokeAuthSessions(userId: string): Promise<void> {
+    const user = await db.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } });
+    if (!user) return;
+    await authSessionService.revokeAllForOrgMember(user.orgMemberId, AuthSessionRevokeReason.ACCOUNT_DEACTIVATED);
+  }
 
   /**
    * Resolve every user row owning `email` and clean each one up.
@@ -99,7 +104,7 @@ class AccountDeactivationService {
       // Revoke any mTLS certificates issued to the user (s2s call).
       { name: 'revokeCertificates', run: () => mtlsCertificateService.revokeUserCertificates(email) },
       // Revoke every session so the user cannot refresh into a new token.
-      { name: 'revokeSessions', run: () => this.userSessionService.revokeAllUserSessions(userId, 'PROVIDER_REVOKED') },
+      { name: 'revokeSessions', run: () => this.revokeAuthSessions(userId) },
       // Stop notifications: clear mobile push tokens and browser subscriptions.
       { name: 'unregisterPushTokens', run: () => fcmPushService.unregisterUserTokens(userId) },
     ];

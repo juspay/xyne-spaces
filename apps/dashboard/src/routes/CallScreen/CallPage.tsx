@@ -36,6 +36,8 @@ export default function CallPage(): null {
         zero,
         viewMode: isMobile ? 'full' : 'mini',
         ...(callInviteUrl && { externalLobbyUrl: callInviteUrl }),
+        // A link can come from anyone, so it never joins with a live mic or camera.
+        joinMediaOverrides: { mic: false, camera: false },
       });
 
       // Redirect to home - GlobalCallOverlay will render the call UI

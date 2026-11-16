@@ -161,12 +161,6 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('navigate-to-ticket-thread', listener);
   },
 
-  onOpenXyneAIWithContext: (callback: (data: { text: string; url: string; domain: string; title: string; timestamp: number }) => void) => {
-    const listener = (_event: unknown, data: { text: string; url: string; domain: string; title: string; timestamp: number }) => callback(data);
-    ipcRenderer.on('open-xyne-ai-with-context', listener);
-    return () => ipcRenderer.removeListener('open-xyne-ai-with-context', listener);
-  },
-
   onAppWindowLimitReached: (callback: (limit: number) => void) => {
     const listener = (_event: unknown, limit: number) => callback(limit);
     ipcRenderer.on('app-window-limit-reached', listener);

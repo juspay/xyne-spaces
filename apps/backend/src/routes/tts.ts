@@ -1,6 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-// Disabled (Claw)
-// import { synthesizeSpeech } from '@/services/clawAgentService';
+import { synthesizeSpeech } from '@/services/clawAgentService';
 import { isElevenLabsTtsConfigured, synthesizeWithElevenLabs } from '@/services/elevenLabsTts';
 import { getElevenLabsVoices, isElevenLabsVoiceId } from '@/services/elevenLabsVoices';
 import { logger } from '@/utils/logger';
@@ -42,16 +41,15 @@ router.post('/', async (req: Request, res: Response) => {
       );
     }
   }
-  // Disabled (Claw)
-  // try {
-  //   const data = await synthesizeSpeech({
-  //     text: body.text,
-  //     ...(voice && !elevenLabsVoice ? { voice } : {}),
-  //   });
-  //   res.json({ success: true, data });
-  // } catch {
-  //   res.status(502).json({ success: false, error: 'TTS synthesis failed' });
-  // }
+  try {
+    const data = await synthesizeSpeech({
+      text: body.text,
+      ...(voice && !elevenLabsVoice ? { voice } : {}),
+    });
+    res.json({ success: true, data });
+  } catch {
+    res.status(502).json({ success: false, error: 'TTS synthesis failed' });
+  }
   res.status(502).json({ success: false, error: 'TTS synthesis failed' });
 });
 

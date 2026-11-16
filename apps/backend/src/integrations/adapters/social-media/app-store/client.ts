@@ -179,7 +179,12 @@ export class AppStoreClient {
     credentials: AppStoreCredentials,
     init?: { method?: string; body?: unknown; cacheKey?: string },
   ): Promise<T> {
-    const response = await fetch(url.startsWith('http') ? url : `${APP_STORE_API_BASE}${url}`, {
+    const target = url.startsWith('http') ? url : `${APP_STORE_API_BASE}${url}`;
+    const origin = new URL(target).origin;
+    if (origin !== APP_STORE_API_BASE) {
+      throw new Error(`App Store Connect: refusing request to ${origin}`);
+    }
+    const response = await fetch(target, {
       method: init?.method ?? 'GET',
       headers: {
         Authorization: `Bearer ${this.mintToken(credentials, init?.cacheKey)}`,

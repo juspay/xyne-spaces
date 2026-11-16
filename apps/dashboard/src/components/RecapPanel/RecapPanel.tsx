@@ -22,12 +22,9 @@ import { RecapCalendarView } from './RecapCalendarView';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
-// Disabled (Claw)
-// import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
-// Disabled (Claw)
-// import { XyneAIStar } from '../icons/xyne-ai';
-// Disabled (Claw)
-// import { Tooltip } from '../ui/Tooltip';
+import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
+import { XyneAIStar } from '../icons/xyne-ai';
+import { Tooltip } from '../ui/Tooltip';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 
 // Random greetings for the recap header
@@ -339,52 +336,51 @@ const RecapPanel = (): ReactElement => {
     });
   };
 
-  // Disabled (Claw)
-  // const buildAskAIThreadInfo = useCallback(
-  //   (
-  //     card: RecapCard,
-  //     pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
-  //     drilldown?: { conversationId: string | null; messageId: string | null },
-  //   ): ThreadInfo | null => {
-  //     const firstCitation = Object.values(pointCitations ?? {}).find(
-  //       citation => citation.conversationId,
-  //     );
-  //     const conversationId =
-  //       firstCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
-  //     if (!conversationId) return null;
+  const buildAskAIThreadInfo = useCallback(
+    (
+      card: RecapCard,
+      pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
+      drilldown?: { conversationId: string | null; messageId: string | null },
+    ): ThreadInfo | null => {
+      const firstCitation = Object.values(pointCitations ?? {}).find(
+        citation => citation.conversationId,
+      );
+      const conversationId =
+        firstCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
+      if (!conversationId) return null;
 
-  //     const messageId = firstCitation?.messageId ?? drilldown?.messageId ?? undefined;
-  //     return {
-  //       conversationId,
-  //       channelId: card.channelId,
-  //       senderName: card.channelName,
-  //       previewText: `${card.channelName} recap reference`,
-  //       ...(messageId && { messageId }),
-  //       isThreadMessage: true,
-  //     };
-  //   },
-  //   [],
-  // );
+      const messageId = firstCitation?.messageId ?? drilldown?.messageId ?? undefined;
+      return {
+        conversationId,
+        channelId: card.channelId,
+        senderName: card.channelName,
+        previewText: `${card.channelName} recap reference`,
+        ...(messageId && { messageId }),
+        isThreadMessage: true,
+      };
+    },
+    [],
+  );
 
-  // const handleAskAIAboutRecapReference = useCallback(
-  //   (
-  //     card: RecapCard,
-  //     pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
-  //     drilldown?: { conversationId: string | null; messageId: string | null },
-  //   ): void => {
-  //     const threadInfo = buildAskAIThreadInfo(card, pointCitations, drilldown);
-  //     if (!threadInfo) return;
+  const handleAskAIAboutRecapReference = useCallback(
+    (
+      card: RecapCard,
+      pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
+      drilldown?: { conversationId: string | null; messageId: string | null },
+    ): void => {
+      const threadInfo = buildAskAIThreadInfo(card, pointCitations, drilldown);
+      if (!threadInfo) return;
 
-  //     xyneAIActor.send({
-  //       type: 'OPEN',
-  //       channelId: card.channelId,
-  //       threadInfo,
-  //       startFreshChat: true,
-  //       trackSource: 'recap_panel',
-  //     });
-  //   },
-  //   [buildAskAIThreadInfo],
-  // );
+      xyneAIActor.send({
+        type: 'OPEN',
+        channelId: card.channelId,
+        threadInfo,
+        startFreshChat: true,
+        trackSource: 'recap_panel',
+      });
+    },
+    [buildAskAIThreadInfo],
+  );
 
   // Render recap cards content (left/center panel)
   const renderRecapCards = (): ReactElement => {
@@ -559,8 +555,6 @@ const RecapPanel = (): ReactElement => {
               {displayMessageCount} {isMobile ? 'messages' : 'messages summarized'}
             </span>
             <div className='flex items-center gap-2'>
-              {/* Disabled (Claw) */}
-              {/*
               {buildAskAIThreadInfo(card, displayPointCitations, displayDrilldown) && (
                 <Tooltip content='Ask AI about the referenced thread'>
                   <button
@@ -577,7 +571,6 @@ const RecapPanel = (): ReactElement => {
                   </button>
                 </Tooltip>
               )}
-              */}
               {!isHistoricalView && (
                 <button
                   onClick={() => void handleToggleRead(card.channelId, isRead)}

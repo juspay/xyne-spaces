@@ -2255,8 +2255,7 @@ const ChatDirectory = ({
       </Dialog>
 
       <ChannelCommandMenu
-        // Disabled (Claw)
-        // aiOverview
+        aiOverview
         globalShortcuts={false}
         channels={channels}
         starred={starred}

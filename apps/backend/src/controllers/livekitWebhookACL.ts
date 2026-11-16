@@ -1,5 +1,4 @@
 import { DatabaseClient } from '@/database/client';
-import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { Call } from '@prisma/client';
 
@@ -10,60 +9,6 @@ import { Call } from '@prisma/client';
 export class LiveKitWebhookACL {
   private get db() {
     return DatabaseClient.getInstance();
-  }
-
-  /**
-   * Validate call creation via webhook
-   * Equivalent to CallsACL.canInsert
-   */
-  async canCreateCall(params: {
-    channelId: string;
-    createdBy: string;
-    joiningUserId: string;
-  }): Promise<{ valid: true } | { valid: false; reason: string }> {
-    const { channelId, createdBy, joiningUserId } = params;
-
-    // Verify channel exists
-    const channel = await this.db.channel.findUnique({
-      where: { id: channelId },
-    });
-
-    if (!channel) {
-      logger.error(`[Webhook ACL] Call creation failed: channel ${channelId} does not exist`);
-      return {
-        valid: false,
-        reason: `Channel ${channelId} does not exist`,
-      };
-    }
-
-    // Get channel participants
-    const channelParticipants = await repositories.channelParticipants.getChannelParticipants(channelId);
-
-    // Verify call creator is a channel participant
-    const creatorIsParticipant = channelParticipants.some((cp) => cp.userId === createdBy);
-    if (!creatorIsParticipant) {
-      logger.error(
-        `[Webhook ACL] Call creation failed: user ${createdBy} is not a participant of channel ${channelId}`
-      );
-      return {
-        valid: false,
-        reason: `User ${createdBy} is not a participant of channel ${channelId}`,
-      };
-    }
-
-    // Verify joining user is a channel participant
-    const joinerIsParticipant = channelParticipants.some((cp) => cp.userId === joiningUserId);
-    if (!joinerIsParticipant) {
-      logger.error(
-        `[Webhook ACL] Call join failed: user ${joiningUserId} is not a participant of channel ${channelId}`
-      );
-      return {
-        valid: false,
-        reason: `User ${joiningUserId} is not a participant of channel ${channelId}`,
-      };
-    }
-
-    return { valid: true };
   }
 
   /**

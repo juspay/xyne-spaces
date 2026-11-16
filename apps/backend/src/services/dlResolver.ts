@@ -29,6 +29,10 @@ export interface DlTarget {
  */
 const PLAIN_ADDRESS = /^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/;
 
+export function isPlainAddress(value: string): boolean {
+  return PLAIN_ADDRESS.test(value);
+}
+
 /**
  * Parse the JSON-serialised alias list. Anything unparseable is treated as
  * "no aliases" — a malformed column must not take a desk offline.

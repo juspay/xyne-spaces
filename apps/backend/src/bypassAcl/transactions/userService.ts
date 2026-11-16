@@ -31,6 +31,11 @@ export function createOrganizationWithUserTx(self: UserService, orgId: string, o
       orgId: workspace.orgId,
       entityType: 'WORKSPACE',
     });
+    await getEncryptionProvider().provisionEntity({
+      entityId: workspace.id,
+      orgId: workspace.orgId,
+      entityType: 'WORKSPACE_STORAGE',
+    });
     return { organization, workspace };
   });
 }

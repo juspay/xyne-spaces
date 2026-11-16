@@ -10,6 +10,12 @@ const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
+  // Required in production so the allowlist can never be switched off by a missing or blank value.
+  ALLOWED_EMAIL_DOMAINS: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.string().pattern(/[^,\s@]/).required(),
+    otherwise: Joi.string().allow('').default(''),
+  }),
   RESEARCH_AGENT_URL: Joi.string().default('http://localhost:8000'),
   // Python transcription agent (health server also exposes /embed-voice)
   PYTHON_AGENT_URL: Joi.string().default('http://localhost:8080'),
@@ -41,8 +47,6 @@ const envSchema = Joi.object({
   COMMON_DATABASE_POOL_SIZE: Joi.number().default(2),
   COMMON_DATABASE_POOL_TIMEOUT_SECONDS: Joi.number().default(10),
   ENABLE_COMMON_DB_TICKET_SEQUENCE: Joi.boolean().default(false),
-  API_KEYS_ENABLED: Joi.boolean().default(false),
-  API_KEYS_CONFIG: Joi.string().default('{}'),
   // Digital Twin: the email of the Digital Twin app's bot user (unique per
   // workspace). USER_MENTIONED is delivered to THIS app at workspace scope (in
   // addition to the existing channel-scoped app delivery) so the twin fires for
@@ -59,8 +63,12 @@ const envSchema = Joi.object({
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default('Xyne Spaces'),
-  JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
+  // Optional HTTP CONNECT proxy for the SMTP connection (e.g. http://proxy.internal:3128).
+  // nodemailer opens raw sockets and ignores HTTPS_PROXY, so it needs this set explicitly.
+  // Empty = connect to smtp.gmail.com directly (default).
+  EMAIL_PROXY_URL: Joi.string().uri({ scheme: ['http'] }).allow('').default(''),
+  JWT_SECRET: Joi.string().allow('').default(''),
+  JWT_EXPIRATION_SECONDS: Joi.number().default(900), // 15 minutes; clients renew via /auth/refresh-session
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
@@ -89,7 +97,6 @@ const envSchema = Joi.object({
   MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   MIGRATION_INGEST_CONTROL: Joi.boolean().default(false), // kill-switch: gates the start/stop-ingestion routes (and the dashboard button). Off = ingestion queue can't be toggled.
   MIGRATION_APP_CREATOR_EMAIL: Joi.string().allow('').default(''), // existing user's email to own bot/app rows created during migration (alert/webhook channels)
-  GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_MAX_FILE_SIZE_MB: Joi.number().default(1024),
@@ -104,6 +111,9 @@ const envSchema = Joi.object({
   AUTOMATION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(10).default(1),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
+  // Gmail Pub/Sub streaming-pull subscriber. Runs only when this is set AND
+  // GOOGLE_PUBSUB_DELIVERY_MODE=pull; set it on one worker role.
+  ENABLE_GMAIL_PULL_WORKER: Joi.boolean().default(false),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
   ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
 
@@ -176,8 +186,6 @@ const envSchema = Joi.object({
   TRUSTED_ORIGINAL_HOST_DOMAINS: Joi.string().default(''),
   INTERNAL_APP_HOSTS: Joi.string().allow('').default(''),
   ORG_EMAIL_DOMAIN: Joi.string().allow('').default(''),
-  API_KEY_USER_EMAIL_DOMAIN: Joi.string().allow('').default(''),
-  API_KEY_DEFAULT_USER_EMAIL: Joi.string().allow('').default(''),
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
@@ -225,6 +233,40 @@ const envSchema = Joi.object({
   LIVEKIT_URL: Joi.string().default('ws://localhost:7880'),
   LIVEKIT_CLIENT_URL: Joi.string().default('http://localhost:7880'),
   LIVEKIT_SERVER_URL: Joi.string().default('ws://localhost:7880'),
+  // 32 random bytes, base64. Master secret that per-call end-to-end encryption keys
+  // are derived from (callEncryptionService). Required wherever LiveKit is configured:
+  // every AUDIO/VIDEO call is encrypted, so without it no call can be joined.
+  CALL_E2EE_MASTER_KEY: Joi.when('LIVEKIT_API_SECRET', {
+    is: Joi.string().min(1),
+    then: Joi.string().base64().required(),
+    otherwise: Joi.string().allow('').base64().default(''),
+  }),
+  // Version of CALL_E2EE_MASTER_KEY. Calls pin the version current when they activate.
+  CALL_E2EE_MASTER_KEY_VERSION: Joi.number().integer().min(1).default(1),
+  // Rotation: JSON object of version -> base64 master key for versions that calls still
+  // in progress were activated with, e.g. {"1":"<old key>"}. Remove a version once no
+  // call activated with it is live.
+  CALL_E2EE_PREVIOUS_MASTER_KEYS: Joi.string()
+    .allow('')
+    .default('')
+    .custom((value: string, helpers) => {
+      if (!value) return value;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      for (const [version, key] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!/^[1-9]\d*$/.test(version) || typeof key !== 'string' || !key) {
+          return helpers.message({ custom: `CALL_E2EE_PREVIOUS_MASTER_KEYS has an invalid entry for version "${version}"` });
+        }
+      }
+      return value;
+    }),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
@@ -294,6 +336,14 @@ const envSchema = Joi.object({
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
 
+  // @xyne/workflow-sdk
+  ENABLE_WORKFLOWS_WORKER: Joi.boolean().default(false),
+  WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
+  WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
+  WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
+  ENABLE_CONVERSATIONAL_FLOW_WORKER: Joi.boolean().default(false),
+  CONVERSATIONAL_FLOW_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(50),
+  CONVERSATIONAL_FLOW_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(60_000),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -452,6 +502,8 @@ const envSchema = Joi.object({
   API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
   ENABLE_DB_DECRYPTION: Joi.boolean().default(false),
+  ENABLE_STORAGE_ENCRYPTION: Joi.boolean().default(false),
+  ENABLE_STORAGE_DECRYPTION: Joi.boolean().default(false),
   // How long the encrypted-fields config fetched from the encryption service is
   // cached before a background refresh; the rollout latency of a config change.
   ENCRYPTED_FIELDS_CACHE_TTL_MS: Joi.number().integer().min(1000).default(15 * 60 * 1000),
@@ -489,10 +541,16 @@ const envSchema = Joi.object({
   // 8083, not 8080: y-sweet owns 8080, so docker-compose.dev.yml publishes Vespa's feed port on 8083.
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8083'),
   VESPA_QUERY_URL: Joi.string().uri().default('http://127.0.0.1:8081'),
+  // Bearer tokens of the encryption gateways behind VESPA_QUERY_URL / VESPA_FEED_URL (the gateway's auth_token secret).
+  // Empty: no Authorization header, for a Vespa reached directly.
+  VESPA_QUERY_TOKEN: Joi.string().min(32).allow('').default(''),
+  VESPA_FEED_TOKEN: Joi.string().min(32).allow('').default(''),
   VESPA_CONFIG_SERVER_URL: Joi.string().uri().default('http://127.0.0.1:19071'),
+  // When Vespa holds hashed values (encryption gateway), search hits are refilled from Postgres before they are shown.
+  VESPA_HYDRATE_RESULTS_FROM_DB: Joi.boolean().default(true),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
-  MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(true),
+  MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(false),
   // XYNE Claw Integration (Ask AI v2)
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
@@ -511,6 +569,9 @@ const envSchema = Joi.object({
   // Comma-separated host suffixes refused for outbound external fetches (e.g. link
   // preview). Include the leading dot, e.g. ".internal.example.net,.svc.cluster.local".
   SSRF_BLOCKED_HOST_SUFFIXES: Joi.string().allow('').default(''),
+  // Egress proxy (Squid) every deployed stack routes outbound internet calls through.
+  // safeWebhookFetch sends through it when set; empty = direct, pinned connection (local dev).
+  HTTPS_PROXY: Joi.string().allow('').default(''),
   // Optional forward-proxy for the link-preview outbound fetch. When set, the preview
   // fetch is routed through it instead of connecting directly. Empty = direct (default).
   LINK_PREVIEW_EGRESS_PROXY_URL: Joi.string().allow('').default(''),
@@ -645,12 +706,11 @@ const envSchema = Joi.object({
   // 'shadow' records what archive inspection would refuse without blocking it;
   // 'enforce' blocks it. Start in shadow, switch to enforce once the logs are clean.
   UPLOAD_ARCHIVE_SCREENING: Joi.string().valid('shadow', 'enforce').default('shadow'),
-  // When true (default), the webhook SSRF guard allows private / internal
-  // destinations but still refuses loopback and link-local / cloud-metadata
-  // (169.254.x). Set false to keep outbound webhooks external-only. Link previews
-  // are unaffected either way (always strict).
-  WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
+  // Migration routes (/api/migration/* and the /migrate/api/migration/* alias):
+  // Slack/Jira/WhatsApp/Confluence migration, cleanup, backfills. Off by default:
+  // the router is not mounted at all unless this is true.
+  MIGRATION_ROUTES_ENABLED: Joi.boolean().default(false),
   // Continuous CPU + heap profiling pushed to Grafana Pyroscope. Off by default;
   // needs PYROSCOPE_SERVER_ADDRESS (e.g. http://localhost:4040) to do anything.
   PYROSCOPE_ENABLED: Joi.boolean().default(false),
@@ -661,11 +721,11 @@ const envSchema = Joi.object({
 
   // ── Keys previously read straight from process.env ──
   ENABLE_DEV_AUTH: Joi.boolean().empty('').default(false),
+  ENABLE_ORG_CREATION: Joi.boolean().empty('').default(false),
   ALLOWED_REDIRECT_ORIGINS: Joi.string().allow('').default(''),
   DEFAULT_ADMIN_EMAIL: Joi.string().allow('').default(''),
   TEST_AUTH_EMAIL: Joi.string().empty('').default('test-user@xyne-test.local'),
   TEST_AUTH_NAME: Joi.string().empty('').default('Test User'),
-  API_KEY: Joi.string().allow('').default(''),
   API_BASE_URL: Joi.string().allow('').default(''),
   APP_JWT_KEY: Joi.string().allow('').default(''),
   SUDO_QUERY_TOKEN: Joi.string().allow('').default(''),
@@ -676,6 +736,18 @@ const envSchema = Joi.object({
   GOOGLE_CLOUD_PROJECT_ID: Joi.string().allow('').default(''),
   GOOGLE_PUBSUB_TOPIC: Joi.string().allow('').default(''),
   GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_PUSH_SUBSCRIPTION: Joi.string().allow('').default(''),
+  // push: Pub/Sub POSTs to the public webhook. pull: a worker reads the subscription
+  // over an outbound StreamingPull connection (no public endpoint needed).
+  GOOGLE_PUBSUB_DELIVERY_MODE: Joi.string().valid('push', 'pull').default('push'),
+  // Pull subscription name; empty means gmail-google-shared-<env>-pull.
+  GOOGLE_PUBSUB_PULL_SUBSCRIPTION: Joi.string().allow('').default(''),
+  // Optional dead-letter topic for the pull subscription (short name or full path).
+  GOOGLE_PUBSUB_DEAD_LETTER_TOPIC: Joi.string().allow('').default(''),
+  GOOGLE_PUBSUB_MAX_DELIVERY_ATTEMPTS: Joi.number().integer().min(5).max(100).default(10),
+  // Messages one subscriber holds unacked at a time.
+  GOOGLE_PUBSUB_PULL_MAX_MESSAGES: Joi.number().integer().min(1).max(1000).default(16),
   MICROSOFT_CLIENT_ID: Joi.string().allow('').default(''),
   MICROSOFT_CLIENT_SECRET: Joi.string().allow('').default(''),
   MICROSOFT_TENANT_ID: Joi.string().allow('').default(''),
@@ -703,6 +775,10 @@ const envSchema = Joi.object({
   VESPA_BACKFILL_QUEUE_NAMES: Joi.string().empty('').default('vespa-backfill-normal,vespa-backfill-file'),
   VESPA_BACKFILL_FILE_QUEUE_NAME: Joi.string().empty('').default('vespa-backfill-file'),
   VESPA_FILE_WORKER_CONCURRENCY: Joi.number().integer().min(1).empty('').default(1),
+  // Jobs one Vespa worker runs at once; raise it on the backfill worker.
+  VESPA_WORKER_CONCURRENCY: Joi.number().integer().min(1).empty('').default(1),
+  // Backfill worker only: just the thread's newest message fans thread fields out to the rest.
+  VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY: Joi.boolean().empty('').default(false),
   ZERO_UPSTREAM_DB: Joi.string().allow('').default(''),
   ZERO_MAX_REQUESTS: Joi.number().integer().empty('').default(300),
   ZERO_REQUEST_WINDOW: Joi.number().integer().empty('').default(60),
@@ -748,6 +824,10 @@ export const config = {
   isTestEnv: envVars.NODE_ENV === 'test',
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
+  allowedEmailDomains: (envVars.ALLOWED_EMAIL_DOMAINS as string)
+    .split(',')
+    .map((domain) => domain.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean),
   research_agent_url: envVars.RESEARCH_AGENT_URL,
   bitbot_base_url: envVars.BITBOT_BASE_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
@@ -797,6 +877,10 @@ export const config = {
   database: {
     url: envVars.DATABASE_URL,
     readReplicaPoolUrl: envVars.DATABASE_READ_REPLICA_POOL_URL,
+  },
+  migrationRoutes: {
+    /** Master switch. The /api/migration router is not mounted at all when false. */
+    enabled: envVars.MIGRATION_ROUTES_ENABLED,
   },
   sdk: {
     /** Master switch. The router is not mounted at all when false. */
@@ -888,7 +972,6 @@ export const config = {
     projectId: envVars.GCS_PROJECT_ID,
     bucketName: envVars.GCS_BUCKET_NAME,
     migrationBucketName: envVars.MIGRATION_GCS_BUCKET,
-    bundleBucketName: envVars.GCS_BUNDLE_BUCKET_NAME,
     canvasBucketName: envVars.GCS_CANVAS_BUCKET_NAME,
     docsBucketName: envVars.GCS_DOCS_BUCKET_NAME,
     sessionRecordingBucketName: envVars.GCS_SESSION_RECORDING_BUCKET_NAME,
@@ -903,6 +986,7 @@ export const config = {
   enableAutomationWorker: envVars.ENABLE_AUTOMATION_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
+  enableGmailPullWorker: envVars.ENABLE_GMAIL_PULL_WORKER as boolean,
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
@@ -995,8 +1079,6 @@ export const config = {
     .map((host: string) => host.trim().toLowerCase())
     .filter(Boolean),
   orgEmailDomain: (envVars.ORG_EMAIL_DOMAIN as string).trim().toLowerCase(),
-  apiKeyUserEmailDomain: (envVars.API_KEY_USER_EMAIL_DOMAIN as string).trim().toLowerCase(),
-  apiKeyDefaultUserEmail: (envVars.API_KEY_DEFAULT_USER_EMAIL as string).trim().toLowerCase(),
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
@@ -1047,6 +1129,11 @@ export const config = {
     url: envVars.LIVEKIT_URL,
     clientUrl: envVars.LIVEKIT_CLIENT_URL,
     serverUrl: envVars.LIVEKIT_SERVER_URL,
+    e2eeMasterKey: envVars.CALL_E2EE_MASTER_KEY as string,
+    e2eeMasterKeyVersion: envVars.CALL_E2EE_MASTER_KEY_VERSION as number,
+    e2eePreviousMasterKeys: (envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS
+      ? JSON.parse(envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS as string)
+      : {}) as Record<string, string>,
   },
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,
@@ -1205,6 +1292,17 @@ export const config = {
     workerConcurrency: envVars.AUTOMATION_WORKER_CONCURRENCY as number,
   },
 
+  workflows: {
+    workerEnabled: envVars.ENABLE_WORKFLOWS_WORKER as boolean,
+    workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
+    lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
+    baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
+    conversationalFlow: {
+      workerEnabled: envVars.ENABLE_CONVERSATIONAL_FLOW_WORKER as boolean,
+      workerConcurrency: envVars.CONVERSATIONAL_FLOW_WORKER_CONCURRENCY as number,
+      lockDurationMs: envVars.CONVERSATIONAL_FLOW_LOCK_DURATION_MS as number,
+    },
+  },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
   messageClassificationEnabled: envVars.ENABLE_MESSAGE_CLASSIFICATION,
@@ -1303,6 +1401,8 @@ export const config = {
     apiClientEncryptionEnabled: envVars.API_CLIENT_ENCRYPTION_ENABLED as boolean,
     enableDbEncryption: envVars.ENABLE_DB_ENCRYPTION as boolean,
     enableDbDecryption: envVars.ENABLE_DB_DECRYPTION as boolean,
+    enableStorageEncryption: envVars.ENABLE_STORAGE_ENCRYPTION as boolean,
+    enableStorageDecryption: envVars.ENABLE_STORAGE_DECRYPTION as boolean,
     encryptedFieldsCacheTtlMs: envVars.ENCRYPTED_FIELDS_CACHE_TTL_MS as number,
     orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
@@ -1331,6 +1431,7 @@ export const config = {
     refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,
     fromEmail: envVars.EMAIL_FROM as string,
     fromName: envVars.EMAIL_FROM_NAME as string,
+    proxyUrl: (envVars.EMAIL_PROXY_URL as string).trim(),
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
@@ -1374,6 +1475,7 @@ export const config = {
       .split(',')
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean),
+    egressProxyUrl: (envVars.HTTPS_PROXY as string).trim(),
   },
   linkPreview: {
     // Optional forward-proxy for the link-preview fetch.
@@ -1488,9 +1590,6 @@ export const config = {
   uploads: {
     archiveScreening: envVars.UPLOAD_ARCHIVE_SCREENING as 'shadow' | 'enforce',
   },
-  webhooks: {
-    allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
-  },
   pyroscope: {
     enabled: envVars.PYROSCOPE_ENABLED as boolean,
     serverAddress: envVars.PYROSCOPE_SERVER_ADDRESS as string,
@@ -1499,13 +1598,13 @@ export const config = {
   deepResearchBaseUrl: envVars.DEEP_RESEARCH_BASE_URL as string,
   // ── Formerly read straight from process.env ──
   enableDevAuth: envVars.ENABLE_DEV_AUTH as boolean,
+  enableOrgCreation: envVars.ENABLE_ORG_CREATION as boolean,
   allowedRedirectOrigins: envVars.ALLOWED_REDIRECT_ORIGINS as string,
   defaultAdminEmail: envVars.DEFAULT_ADMIN_EMAIL as string,
   testAuth: {
     email: envVars.TEST_AUTH_EMAIL as string,
     name: envVars.TEST_AUTH_NAME as string,
   },
-  apiKey: envVars.API_KEY as string,
   apiBaseUrl: envVars.API_BASE_URL as string,
   appJwtKey: envVars.APP_JWT_KEY as string,
   sudoQueryToken: envVars.SUDO_QUERY_TOKEN as string,
@@ -1513,6 +1612,13 @@ export const config = {
     cloudProjectId: envVars.GOOGLE_CLOUD_PROJECT_ID as string,
     pubsubTopic: envVars.GOOGLE_PUBSUB_TOPIC as string,
     pubsubServiceAccountBase64: envVars.GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 as string,
+    pubsubPushServiceAccountEmail: envVars.GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL as string,
+    pubsubPushSubscription: envVars.GOOGLE_PUBSUB_PUSH_SUBSCRIPTION as string,
+    pubsubDeliveryMode: envVars.GOOGLE_PUBSUB_DELIVERY_MODE as 'push' | 'pull',
+    pubsubPullSubscription: envVars.GOOGLE_PUBSUB_PULL_SUBSCRIPTION as string,
+    pubsubDeadLetterTopic: envVars.GOOGLE_PUBSUB_DEAD_LETTER_TOPIC as string,
+    pubsubMaxDeliveryAttempts: envVars.GOOGLE_PUBSUB_MAX_DELIVERY_ATTEMPTS as number,
+    pubsubPullMaxMessages: envVars.GOOGLE_PUBSUB_PULL_MAX_MESSAGES as number,
   },
   microsoft: {
     clientId: envVars.MICROSOFT_CLIENT_ID as string,
@@ -1543,13 +1649,18 @@ export const config = {
     backfillAgeDays: envVars.VESPA_BACKFILL_AGE_DAYS as number,
     feedUrl: envVars.VESPA_FEED_URL as string,
     queryUrl: envVars.VESPA_QUERY_URL as string,
+    queryToken: envVars.VESPA_QUERY_TOKEN as string,
+    feedToken: envVars.VESPA_FEED_TOKEN as string,
     configServerUrl: envVars.VESPA_CONFIG_SERVER_URL as string,
+    hydrateResultsFromDb: envVars.VESPA_HYDRATE_RESULTS_FROM_DB as boolean,
     queueNames: envVars.VESPA_QUEUE_NAMES as string,
     fileQueueName: envVars.VESPA_FILE_QUEUE_NAME as string,
     workerQueueName: envVars.VESPA_WORKER_QUEUE_NAME as string,
     backfillQueueNames: envVars.VESPA_BACKFILL_QUEUE_NAMES as string,
     backfillFileQueueName: envVars.VESPA_BACKFILL_FILE_QUEUE_NAME as string,
     fileWorkerConcurrency: envVars.VESPA_FILE_WORKER_CONCURRENCY as number,
+    workerConcurrency: envVars.VESPA_WORKER_CONCURRENCY as number,
+    backfillWorkerFanoutLastMessageOnly: envVars.VESPA_BACKFILL_WORKER_FANOUT_LAST_MESSAGE_ONLY as boolean,
   },
   zero: {
     upstreamDb: envVars.ZERO_UPSTREAM_DB as string,

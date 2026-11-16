@@ -17,7 +17,12 @@ import {
   MediaDeviceFailure,
 } from 'livekit-client';
 import type { Zero } from '@rocicorp/zero';
-import type { Call } from '@xyne/shared';
+import type { Call, CallEncryptionCredentials } from '@xyne/shared';
+import {
+  applyRoomEncryption,
+  attachRoomEncryption,
+  createRoomEncryptionOptions,
+} from '../utils/callEncryption';
 import {
   parseAIDataMessage,
   decodeDataPayload,
@@ -113,6 +118,8 @@ export interface RoomContext {
   room: Room | null;
   token: string | null;
   serverUrl: string | null;
+  /** Media key of an end-to-end encrypted call; null for an unencrypted one. Never logged. */
+  encryption: CallEncryptionCredentials | null;
   callType: CallType;
   initialMicrophoneEnabled: boolean;
   initialCameraEnabled: boolean;
@@ -165,6 +172,7 @@ export type RoomMachineEvent =
       type: 'CONNECT';
       token: string;
       serverUrl: string;
+      encryption?: CallEncryptionCredentials | null;
       callType: CallType;
       externalId: string;
       zero: Zero | null;
@@ -198,6 +206,7 @@ export type RoomMachineEvent =
       callId: string;
       token: string;
       serverUrl: string;
+      encryption?: CallEncryptionCredentials;
       channelId?: string;
       callType?: CallType;
       viewMode?: 'mini' | 'full';
@@ -311,6 +320,7 @@ export const roomMachine = setup({
           externalId: result.externalId,
           token: result.token,
           livekitUrl: result.livekitUrl,
+          encryption: result.encryption ?? null,
           callType,
           roomLink: result.roomLink,
           channelId: result.channelId, // Use channelId from backend response (may be resolved from invitedUserId)
@@ -333,6 +343,7 @@ export const roomMachine = setup({
         externalId: result.externalId,
         token: result.token,
         livekitUrl: result.livekitUrl,
+        encryption: result.encryption ?? null,
         callId: callId, // Pass through the externalId for DB writes
         roomLink: result.roomLink,
         channelId: result.channelId,
@@ -710,6 +721,7 @@ export const roomMachine = setup({
           room: Room;
           token: string;
           serverUrl: string;
+          encryption: CallEncryptionCredentials | null;
           callType: CallType;
           initialMicrophoneEnabled: boolean;
           initialCameraEnabled: boolean;
@@ -726,6 +738,7 @@ export const roomMachine = setup({
           room,
           token,
           serverUrl,
+          encryption,
           callType,
           initialMicrophoneEnabled,
           initialCameraEnabled,
@@ -754,6 +767,7 @@ export const roomMachine = setup({
           reactNativeBridge.livekitConnect({
             token,
             serverUrl,
+            ...(encryption && { encryption }),
             callType: callType,
             externalId,
             initialMicrophoneEnabled,
@@ -814,6 +828,11 @@ export const roomMachine = setup({
         };
 
         const MAX_RETRIES = 5;
+
+        // The key must be in the provider before the first frame goes out or comes in.
+        if (encryption) {
+          await applyRoomEncryption(room, encryption);
+        }
 
         let lastError: Error | null = null;
 
@@ -1088,15 +1107,17 @@ export const roomMachine = setup({
   },
   actions: {
     createRoom: assign({
-      room: () => {
+      room: ({ context }) => {
         // Check dynamically - context.isNativeMode is stale from module init
         if (isNativeCallSupported()) {
           return null;
         }
 
+        const encryptionOptions = context.encryption ? createRoomEncryptionOptions() : null;
         const room = new Room({
           adaptiveStream: false, // Disable adaptive streaming for consistent screen share quality
           dynacast: true,
+          ...(encryptionOptions && { encryption: encryptionOptions }),
           videoCaptureDefaults: {
             resolution: VideoPresets.h2160.resolution,
           },
@@ -1117,6 +1138,7 @@ export const roomMachine = setup({
             degradationPreference: 'maintain-resolution',
           },
         });
+        if (encryptionOptions) attachRoomEncryption(room, encryptionOptions);
         return room;
       },
     }),
@@ -1191,6 +1213,12 @@ export const roomMachine = setup({
     storeConnectionParams: assign({
       token: ({ event }) => (event.type === 'CONNECT' ? event.token : null),
       serverUrl: ({ event }) => (event.type === 'CONNECT' ? event.serverUrl : null),
+      encryption: ({ event, context }) =>
+        event.type === 'CONNECT'
+          ? event.encryption === undefined
+            ? context.encryption
+            : event.encryption
+          : null,
       callType: ({ event }) => (event.type === 'CONNECT' ? event.callType : CallType.VIDEO),
       initialMicrophoneEnabled: () => true,
       initialCameraEnabled: ({ event }) =>
@@ -1273,6 +1301,7 @@ export const roomMachine = setup({
     room: null,
     token: null,
     serverUrl: null,
+    encryption: null,
     callType: CallType.VIDEO,
     initialMicrophoneEnabled: true,
     initialCameraEnabled: true,
@@ -1405,6 +1434,8 @@ export const roomMachine = setup({
                 event.type === 'JOIN_CALL_WITH_CREDENTIALS' ? event.token : null,
               serverUrl: ({ event }) =>
                 event.type === 'JOIN_CALL_WITH_CREDENTIALS' ? event.serverUrl : null,
+              encryption: ({ event }) =>
+                event.type === 'JOIN_CALL_WITH_CREDENTIALS' ? (event.encryption ?? null) : null,
               channelId: ({ event }) =>
                 event.type === 'JOIN_CALL_WITH_CREDENTIALS' ? (event.channelId ?? null) : null,
               callType: ({ event }) =>
@@ -1498,6 +1529,7 @@ export const roomMachine = setup({
               externalId: ({ event }) => event.output.externalId,
               token: ({ event }) => event.output.token,
               serverUrl: ({ event }) => event.output.livekitUrl,
+              encryption: ({ event }) => event.output.encryption,
               callType: ({ event }) => event.output.callType,
               roomLink: ({ event }) => event.output.roomLink,
               channelId: ({ event }) => event.output.channelId,
@@ -1560,6 +1592,7 @@ export const roomMachine = setup({
               externalId: ({ event }) => event.output.externalId,
               token: ({ event }) => event.output.token,
               serverUrl: ({ event }) => event.output.livekitUrl,
+              encryption: ({ event }) => event.output.encryption,
               callType: () => CallType.AUDIO,
               callId: ({ event }) => event.output.callId,
               roomLink: ({ event }) => event.output.roomLink,
@@ -1613,6 +1646,7 @@ export const roomMachine = setup({
             room: context.room!,
             token: context.token!,
             serverUrl: context.serverUrl!,
+            encryption: context.encryption,
             callType: context.callType,
             initialMicrophoneEnabled: context.initialMicrophoneEnabled,
             initialCameraEnabled: context.initialCameraEnabled,

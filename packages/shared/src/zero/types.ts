@@ -440,7 +440,18 @@ export enum CallOrigin {
 }
 
 // @ts-ignore TS1294
+/**
+ * Media key for an end-to-end encrypted call, issued only in authenticated
+ * initiate/join responses. Never travels through LiveKit.
+ */
+export interface CallEncryptionCredentials {
+  /** 32-byte key, base64. */
+  key: string;
+}
+
 export enum CallStatus {
+  /** Written at /initiate before anyone joins; the LiveKit webhook flips it to ACTIVE. */
+  PENDING = 'PENDING',
   SCHEDULED = 'SCHEDULED',
   ACTIVE = 'ACTIVE',
   IN_PROGRESS = 'IN_PROGRESS',

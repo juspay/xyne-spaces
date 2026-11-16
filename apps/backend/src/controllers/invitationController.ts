@@ -3,7 +3,7 @@
  * Handles HTTP requests for invitation operations
  */
 
-import jwt from 'jsonwebtoken';
+import { verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
@@ -19,6 +19,7 @@ import {
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE, isEmailDomainAllowed } from '@/services/emailDomainPolicy';
 import { ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -70,6 +71,7 @@ export async function buildInvitationLink(params: {
 import { createId } from '@paralleldrive/cuid2';
 import { provisionOrgTx } from '@/bypassAcl/transactions/invitationController';
 import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
+import { PENDING_AUTH_COOKIE } from '@/services/accessTokenService';
 
 export class InvitationController {
   /**
@@ -240,9 +242,25 @@ export class InvitationController {
   };
 
   /**
+   * Email from the httpOnly xyne_pending_auth cookie set after login, or null
+   * when absent or invalid. Used by verifyInvitation only to report whether the
+   * logged-in identity matches the invitation; acceptInvitation does its own
+   * full decode because it needs the provider fields too.
+   */
+  private readPendingAuthEmail(req: Request): string | null {
+    const raw = req.cookies?.[PENDING_AUTH_COOKIE] as string | undefined;
+    if (!raw) return null;
+    return verifyPendingAuthToken(raw)?.email ?? null;
+  }
+
+  /**
    * GET /api/invitations/:id/verify
    * Verify if an invitation is valid (not expired/revoked)
-   * Public endpoint - no authentication required
+   * Public endpoint - no authentication required. The only credential is the
+   * invitation token in the URL, so the response is limited to what the accept
+   * screen needs: role, workspace name, entity title and whether the
+   * pending-auth cookie (if any) belongs to the invited address. Internal ids
+   * and the invited email are never returned here.
    */
   verifyInvitation = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -287,12 +305,10 @@ export class InvitationController {
 
       // Build entity info
       let entityType: string | undefined;
-      let entityId: string | undefined;
       let entityTitle: string | null = null;
 
       if (invitation.entityType && invitation.entityId) {
         entityType = invitation.entityType;
-        entityId = invitation.entityId;
 
         const prisma = DatabaseClient.getInstance();
         if (invitation.entityType === 'CANVAS') {
@@ -316,17 +332,21 @@ export class InvitationController {
         }
       }
 
+      // Compare against the pending-auth cookie server-side so the client
+      // never needs the invited address to run its email-match guard.
+      const sessionEmail = this.readPendingAuthEmail(req);
+      const emailMatchesSession = sessionEmail
+        ? sessionEmail.toLowerCase() === invitation.email.toLowerCase()
+        : undefined;
+
       // Invitation is valid
       res.status(200).json({
         valid: true,
         invitation: {
-          id: invitation.id,
-          email: invitation.email,
+          emailMatchesSession,
           role: invitation.role,
           workspaceName: invitation.workspace?.name,
-          organizationName: invitation.organization?.name,
           entityType,
-          entityId,
           entityTitle,
           pendingApproval: invitation.isOrgApproved === false,
         },
@@ -351,9 +371,9 @@ export class InvitationController {
         return;
       }
 
-      // Read identity from the httpOnly google_access_token cookie.
+      // Read identity from the httpOnly xyne_pending_auth cookie.
       // Supports both signed-JWT (new email/OAuth flows) and legacy JSON shapes.
-      const pendingAuthRaw = req.cookies?.google_access_token as string | undefined;
+      const pendingAuthRaw = req.cookies?.[PENDING_AUTH_COOKIE] as string | undefined;
       if (!pendingAuthRaw) {
         res.status(401).json({ error: 'Not authenticated. Please login first.' });
         return;
@@ -363,17 +383,8 @@ export class InvitationController {
       let provider: string;
 
       try {
-        const decoded = jwt.verify(pendingAuthRaw, config.jwt.secret) as {
-          email?: string;
-          name?: string;
-          providerUserId?: string;
-          picture?: string;
-          googleId?: string;
-          provider?: string;
-          refreshToken?: string | null;
-          accessToken?: string | null;
-        };
-        if (!decoded.email) throw new Error('Invalid JWT payload');
+        const decoded = verifyPendingAuthToken(pendingAuthRaw);
+        if (!decoded?.email) throw new Error('Invalid JWT payload');
 
 
         oauthUser = {
@@ -386,6 +397,11 @@ export class InvitationController {
         provider = decoded.provider || 'GOOGLE';
       } catch {
         res.status(401).json({ error: 'Invalid authentication session. Please login again.' });
+        return;
+      }
+
+      if (!isEmailDomainAllowed(oauthUser.email)) {
+        res.status(403).json({ error: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE });
         return;
       }
 
@@ -412,8 +428,9 @@ export class InvitationController {
       }
 
       if (invitation.email.toLowerCase() !== oauthUser.email.toLowerCase()) {
+        // Do not echo the invited address: the caller only holds the link token.
         res.status(403).json({
-          error: `This invitation is for ${invitation.email}, but you are logged in as ${oauthUser.email}.`,
+          error: `This invitation was sent to a different email address. You are logged in as ${oauthUser.email}.`,
         });
         return;
       }

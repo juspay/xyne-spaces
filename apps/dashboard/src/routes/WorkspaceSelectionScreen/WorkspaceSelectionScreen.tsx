@@ -7,6 +7,7 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { useAuth } from '../../hooks/useAuth';
 import { preserveWebDeviceKey } from '../../utils/logger';
 import type { Workspace } from '../../machines/authMachine';
+import { clearDynamicHeaders } from '../../services/clients/dynamicHeaders';
 // import { WorkspaceType } from '@xyne/shared';
 
 interface WorkspaceWithMeta extends Workspace {
@@ -156,7 +157,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     Cookies.remove('user_data');
     Cookies.remove('user_name');
     Cookies.remove('user_email');
-    Cookies.remove('user_session_id');
+    clearDynamicHeaders();
     // The device key (`xd`) must survive logout.
     preserveWebDeviceKey(() => localStorage.clear());
     logout();

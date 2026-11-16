@@ -595,7 +595,8 @@ export function setClawOverlayEnabled(enabled: boolean): void {
   }
 }
 
-const AUTH_COOKIE_NAME = "user_session_id";
+// The org-level refresh session cookie; present exactly while the user is signed in.
+const AUTH_COOKIE_NAME = "xs";
 
 let authGateInitialized = false;
 

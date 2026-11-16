@@ -57,10 +57,16 @@ function randomHex(bytes) {
   return randomBytes(bytes).toString("hex");
 }
 
+function randomBase64(bytes) {
+  return randomBytes(bytes).toString("base64");
+}
+
 setValue(backendPath, "JWT_SECRET", randomHex(48));
 
 setValue(backendPath, "ZERO_AUTH_SECRET", randomHex(48));
 setValue(backendPath, "ENCRYPTION_KEY", randomHex(32));
+// Master key that per-call end-to-end encryption keys are derived from (32 bytes, base64).
+setValue(backendPath, "CALL_E2EE_MASTER_KEY", randomBase64(32));
 
 // Nix reads these credentials at runtime. Legacy Docker configs still use the
 // fixed sample pair, so opt in only when the service consumes generated keys.

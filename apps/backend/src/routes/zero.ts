@@ -4,9 +4,8 @@ import { Router } from "express";
 
 const router = Router();
 
-// Use authenticateZero middleware for Zero endpoints (no auto-refresh)
-router.post('/push', authMiddleware.authenticateZero, handlePush);
-router.post('/query', authMiddleware.authenticateZero, handleGetQueries);
+router.post('/push', authMiddleware.authenticate, handlePush);
+router.post('/query', authMiddleware.authenticate, handleGetQueries);
 
 // Fallback endpoints
 router.post('/query-fallback', authMiddleware.authenticate, handleGetQueriesFallback);
