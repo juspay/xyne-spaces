@@ -1,21 +1,16 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { fetchEncryptionConfig, registerClientKey } from '../crypto/key-exchange.js';
+import { fetchEncryptionConfig, handshake } from '../crypto/handshake.js';
+import type { EncryptionConfig } from '../crypto/handshake.js';
+import { TransitKeyring } from '../crypto/keyring.js';
 import { decryptionCache } from '../crypto/decryption-cache.js';
 import { refreshClientManifest, clearClientManifest } from '../crypto/client-manifest.js';
 import { consoleLogger, Event } from '../logger/index.js';
-import type { EncryptedTableConfig } from '../zero/query-validation.js';
 
-export interface EncryptionConfig {
-  encryptedFields: Record<string, EncryptedTableConfig>;
-  clientEncryptionEnabled: boolean;
-  apiClientEncryptionEnabled: boolean;
-  publicKey: string;
-}
+export type { EncryptionConfig };
 
 export interface EncryptionBootstrapState {
   config: EncryptionConfig | null;
-  key: CryptoKey | null;
-  sessionFingerprint: string | null;
+  keyring: TransitKeyring | null;
   isReady: boolean;
   error: Error | null;
 }
@@ -26,8 +21,7 @@ export interface EncryptionBootstrapContextValue extends EncryptionBootstrapStat
 
 export const EncryptionBootstrapContext = createContext<EncryptionBootstrapContextValue>({
   config: null,
-  key: null,
-  sessionFingerprint: null,
+  keyring: null,
   isReady: false,
   error: null,
   reset: () => {},
@@ -36,12 +30,6 @@ export const EncryptionBootstrapContext = createContext<EncryptionBootstrapConte
 export const EncryptionBootstrapProvider = EncryptionBootstrapContext.Provider;
 export const useEncryptionBootstrap = (): EncryptionBootstrapContextValue =>
   useContext(EncryptionBootstrapContext);
-
-interface BootstrapOptions {
-  getStoredKey?: (fingerprint: string) => Promise<CryptoKey | null>;
-  storeKey?: (fingerprint: string, key: CryptoKey) => Promise<void>;
-  clearStoredKey?: (fingerprint: string) => Promise<void>;
-}
 
 export interface EncryptionBootstrapScope {
   workspaceId: string | null;
@@ -60,105 +48,42 @@ let globalFetch: {
 
 const initialState = (): EncryptionBootstrapState => ({
   config: null,
-  key: null,
-  sessionFingerprint: null,
+  keyring: null,
   isReady: false,
   error: null,
 });
 
-async function performBootstrap(options: BootstrapOptions = {}): Promise<EncryptionBootstrapState> {
-  const result = await fetchEncryptionConfig();
+async function performBootstrap(): Promise<EncryptionBootstrapState> {
+  const config = await fetchEncryptionConfig();
 
   consoleLogger.info(Event.ENCRYPTION_KEY_REGISTRATION_START, {
     message: '[encryptionlog] Encryption config fetched',
-    clientEncryptionEnabled: result.clientEncryptionEnabled,
-    apiClientEncryptionEnabled: result.apiClientEncryptionEnabled,
+    clientEncryptionEnabled: config.clientEncryptionEnabled,
+    apiClientEncryptionEnabled: config.apiClientEncryptionEnabled,
   });
 
-  const config: EncryptionConfig = {
-    publicKey: result.publicKey,
-    encryptedFields: result.encryptedFields,
-    clientEncryptionEnabled: result.clientEncryptionEnabled,
-    apiClientEncryptionEnabled: result.apiClientEncryptionEnabled,
-  };
-
-  const keyRegistrationRequired = result.clientEncryptionEnabled || result.apiClientEncryptionEnabled;
-
-  if (!keyRegistrationRequired) {
-    return {
-      config,
-      key: null,
-      sessionFingerprint: null,
-      isReady: true,
-      error: null,
-    };
+  if (!config.clientEncryptionEnabled && !config.apiClientEncryptionEnabled) {
+    return { config, keyring: null, isReady: true, error: null };
   }
 
-  // With API client encryption on, the manifest loads alongside the key so bootstrap is
-  // not ready until both are in place. The manifest lives in its own module store.
-  if (result.apiClientEncryptionEnabled) {
-    const [state] = await Promise.all([resolveKey(config, result, options), refreshClientManifest()]);
-    return state;
+  // With API client encryption on, the manifest loads alongside the first ticket, so
+  // bootstrap is not ready until both are in place. The manifest lives in its own module store.
+  const keyring = new TransitKeyring(handshake);
+  if (config.apiClientEncryptionEnabled) {
+    await Promise.all([keyring.init(), refreshClientManifest()]);
+  } else {
+    await keyring.init();
   }
 
-  return resolveKey(config, result, options);
-}
+  consoleLogger.info(Event.ENCRYPTION_KEY_REGISTRATION_SUCCESS, {
+    message: '[encryptionlog] Transit key established',
+  });
 
-async function resolveKey(
-  config: EncryptionConfig,
-  result: Awaited<ReturnType<typeof fetchEncryptionConfig>>,
-  options: BootstrapOptions,
-): Promise<EncryptionBootstrapState> {
-  const sessionFingerprint = result.sessionFingerprint ?? null;
-
-  if (sessionFingerprint && options.getStoredKey) {
-    try {
-      const storedKey = await options.getStoredKey(sessionFingerprint);
-      if (storedKey) {
-        consoleLogger.info(Event.ENCRYPTION_KEY_REGISTRATION_START, {
-          message: '[encryptionlog] Encryption key restored from storage',
-        });
-        return {
-          config,
-          key: storedKey,
-          sessionFingerprint,
-          isReady: true,
-          error: null,
-        };
-      }
-    } catch (err) {
-      consoleLogger.warn(Event.ENCRYPTION_CONFIG_FETCH_FAILED, {
-        message: '[encryptionlog] Failed to restore encryption key from storage',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  const registration = await registerClientKey(result.publicKey);
-
-  if (registration.sessionFingerprint && options.storeKey) {
-    try {
-      await options.storeKey(registration.sessionFingerprint, registration.key);
-    } catch (err) {
-      consoleLogger.warn(Event.ENCRYPTION_CONFIG_FETCH_FAILED, {
-        message: '[encryptionlog] Failed to persist encryption key',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  return {
-    config,
-    key: registration.key,
-    sessionFingerprint: registration.sessionFingerprint,
-    isReady: true,
-    error: null,
-  };
+  return { config, keyring, isReady: true, error: null };
 }
 
 export function useEncryptionBootstrapInit(
   scope: EncryptionBootstrapScope,
-  options: BootstrapOptions = {},
 ): EncryptionBootstrapContextValue {
   const scopeKey = JSON.stringify([scope.workspaceId, scope.userId]);
   const [bootstrapVersion, setBootstrapVersion] = useState(0);
@@ -192,10 +117,7 @@ export function useEncryptionBootstrapInit(
     );
 
     if (!globalFetch || globalFetch.scopeKey !== scopeKey) {
-      globalFetch = {
-        scopeKey,
-        promise: performBootstrap(options),
-      };
+      globalFetch = { scopeKey, promise: performBootstrap() };
     }
 
     globalFetch.promise
@@ -216,13 +138,12 @@ export function useEncryptionBootstrapInit(
             scopeKey,
             state: {
               ...initialState(),
-              isReady: false,
               error: err instanceof Error ? err : new Error(String(err)),
             },
           });
         }
       });
-  }, [options, bootstrapVersion, scopeKey]);
+  }, [bootstrapVersion, scopeKey]);
 
   const state = scopedState.scopeKey === scopeKey ? scopedState.state : initialState();
   return { ...state, reset };

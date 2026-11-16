@@ -8,22 +8,30 @@ import type {
 export type EncryptedFieldConfig = EncryptedTableConfig;
 
 export type ClientEncryptionConfig = {
-  publicKey: string;
   encryptedFields: Record<string, EncryptedFieldConfig>;
   clientEncryptionEnabled: boolean;
   apiClientEncryptionEnabled: boolean;
 };
 
-export type RegisterSessionKeyInput = {
-  wrappedKey: string;
-  sessionId: string;
-  userId: string;
-  orgId: string;
+/** Header the client sends its current ticket in; the cookie is the fallback for websockets. */
+export const TRANSIT_TICKET_HEADER = 'x-transit-ticket';
+export const TRANSIT_TICKET_COOKIE = 'xt';
+
+export type TransitHandshakeInput = {
+  /** Who the ticket is issued to: the auth session id (JWT `sid`). */
+  subject: string;
+  /** Client's ephemeral P-256 public key, base64 uncompressed point. */
+  publicKey: string;
+  /** A ticket of the same session to resume instead of minting a new key. */
+  ticket?: string;
 };
 
-export type RegisterSessionKeyResult = {
-  ok: boolean;
-  sessionFingerprint: string;
+export type TransitHandshakeResult = {
+  publicKey: string;
+  wrappedKey: string;
+  ticket: string;
+  /** Unix seconds. */
+  expiresAt: number;
 };
 
 export type EncryptBatchItem = {
@@ -71,7 +79,8 @@ export type ClientManifestRuleRef = Pick<ClientManifestRule, 'type' | 'value' | 
 
 export type TransformRequestInput<T> = {
   body: T;
-  sessionId: string;
+  /** Session the tickets inside `body` must have been issued to. */
+  subject: string;
   rule: ClientManifestRuleRef;
   /**
    * Owner of the row the request writes (the workspace whose DEK the Prisma extension would
@@ -90,15 +99,24 @@ export type TransformRequestResult<T> = {
   derived?: DerivedContentFacts;
 };
 
+export type TransitEncryptResult<T> = {
+  body: T;
+  /**
+   * Ticket the encrypted fields are under; absent when nothing needed encrypting. When the
+   * caller presents no ticket that opens for the subject, the service mints one, which the
+   * client resumes on first sight.
+   */
+  ticket?: string;
+};
+
 export interface EncryptionProvider {
-  getPublicConfig(): Promise<ClientEncryptionConfig>;
+  getClientConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
-  registerSessionKey(input: RegisterSessionKeyInput): Promise<RegisterSessionKeyResult>;
-  revokeSessionKey(sessionId: string): Promise<void>;
+  transitHandshake(input: TransitHandshakeInput): Promise<TransitHandshakeResult>;
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
   decryptBatch(values: string[]): Promise<string[]>;
-  encryptResponse<T>(body: T, sessionId: string): Promise<T>;
-  decryptRequest<T>(body: T, sessionId: string): Promise<T>;
+  encryptResponse<T>(body: T, subject: string, ticket?: string): Promise<TransitEncryptResult<T>>;
+  decryptRequest<T>(body: T, subject: string): Promise<T>;
   initializeOrg(orgId: string): Promise<void>;
   provisionEntity(input: ProvisionEntityInput): Promise<void>;
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;
@@ -107,7 +125,7 @@ export interface EncryptionProvider {
   /** Latest client manifest for (tag, environment); `null` when the encryption service has none (404). */
   getClientManifest(params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null>;
   /**
-   * Rule-driven counterpart of decryptRequest. Session-encrypted fields the rule marks
+   * Rule-driven counterpart of decryptRequest. Transit-encrypted fields the rule marks
    * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to
    * store as-is) or plaintext (`transform: NONE`); everything else is returned as sent, so
    * the backend never holds the plaintext of a MASTER_DEK field. `derived` carries the
@@ -115,9 +133,10 @@ export interface EncryptionProvider {
    */
   transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>>;
   /**
-   * DEK→CEK counterpart of encryptResponse: storage ciphertext (ENC:v1|<dekId>|…) in `body`
-   * comes back as session ciphertext (ENC:v1|sess|…) for `sessionId`; plaintext configured
-   * fields are session-encrypted as encryptResponse does; the backend never sees the plaintext.
+   * DEK-to-ticket counterpart of encryptResponse: storage ciphertext (ENC:v1|<dekId>|…) in
+   * `body` comes back as transit ciphertext (ENC:v1|tk-…|…) under `ticket`; plaintext
+   * configured fields are transit-encrypted as encryptResponse does; the backend never sees
+   * the plaintext.
    */
-  transformResponse<T>(body: T, sessionId: string): Promise<T>;
+  transformResponse<T>(body: T, subject: string, ticket?: string): Promise<TransitEncryptResult<T>>;
 }

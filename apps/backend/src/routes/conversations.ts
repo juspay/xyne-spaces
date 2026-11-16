@@ -33,11 +33,12 @@ router.post('/reply-drafts/:draftId/decline', conversationController.declineRepl
 router.get('/recent-visited', conversationController.getRecentVisitedConversations);
 
 // Keep replyToConversation for file upload handling
-// Multipart: the manifest rule check and session-key transform run here, after multer has
+// Multipart: the manifest rule check and ticket transform run here, after multer has
 // filled req.body (it is still empty when the auth middleware runs). With the manifest rule
 // active, `content` reaches the controller as workspace-DEK ciphertext, not plaintext.
 // dekPassthroughMiddleware goes first so the whole chain, including the response, runs in
-// passthrough: storage ciphertext stays encrypted on reads and the response is DEK→CEK.
+// passthrough: storage ciphertext stays encrypted on reads and the response is re-encrypted
+// from the DEK to the caller's ticket.
 router.post('/:conversationId/messages', dekPassthroughMiddleware, uploadMultiple, transformReplyBody, conversationController.replyToConversation);
 
 // Get a single conversation message by conversationId + messageId (for mobile background prefetch)

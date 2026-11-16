@@ -15,7 +15,7 @@ export const CLIENT_MANIFEST_VERSION_HEADER = 'x-enc-manifest-version';
 export const CLIENT_MANIFEST_TAG_HEADER = 'x-enc-manifest-tag';
 export const CLIENT_MANIFEST_STALE_CODE = 'ENC_MANIFEST_STALE';
 
-// Module-level store: the manifest is independent of the long-lived session key, so it
+// Module-level store: the manifest is independent of the transit keyring, so it
 // is kept here rather than in EncryptionConfig or key storage.
 let currentManifest: ClientEncryptionManifest | null = null;
 let inFlight: Promise<ClientEncryptionManifest | null> | null = null;

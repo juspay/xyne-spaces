@@ -12,6 +12,7 @@ import {
   findRequestRule,
   encryptBodyWithRule,
   encryptFormDataWithRule,
+  TRANSIT_TICKET_HEADER,
 } from '@xyne/shared';
 import type { ClientManifestRule } from '@xyne/shared';
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
@@ -41,13 +42,13 @@ async function encryptObject(obj: unknown): Promise<unknown> {
     return Promise.all(obj.map(item => encryptObject(item)));
   }
 
-  const key = getEncryptionState().key!;
+  const keyring = getEncryptionState().keyring!;
   const record = obj as Record<string, unknown>;
   const encrypted: Record<string, unknown> = {};
 
   for (const [fieldName, value] of Object.entries(record)) {
     if (typeof value === 'string' && value.length > 0) {
-      encrypted[fieldName] = await encryptField(value, key, fieldName);
+      encrypted[fieldName] = await encryptField(value, keyring, fieldName);
     } else if (typeof value === 'object' && value !== null) {
       encrypted[fieldName] = await encryptObject(value);
     } else {
@@ -74,8 +75,8 @@ async function decryptObject(obj: unknown): Promise<unknown> {
       return cached;
     }
 
-    const key = getEncryptionState().key!;
-    const decrypted = await decryptField(obj, key);
+    const keyring = getEncryptionState().keyring!;
+    const decrypted = await decryptField(obj, keyring);
     decryptionCache.set(obj, decrypted);
     return decrypted;
   }
@@ -125,8 +126,8 @@ async function encryptWithRule(
   config: ClientManifestRetryConfig,
   rule: ClientManifestRule,
 ): Promise<void> {
-  const key = getEncryptionState().key!;
-  const encrypt = (value: string, fieldName: string) => encryptField(value, key, fieldName);
+  const keyring = getEncryptionState().keyring!;
+  const encrypt = (value: string, fieldName: string) => encryptField(value, keyring, fieldName);
 
   if (config._encOriginalData === undefined) {
     config._encOriginalData = config.data;
@@ -165,6 +166,11 @@ export async function encryptionRequestInterceptor(
     return config;
   }
 
+  // Every request names the ticket the response should be encrypted under.
+  const { ticket } = await getEncryptionState().keyring!.current();
+  config.headers.set(TRANSIT_TICKET_HEADER, ticket);
+
+  // Only encrypt request bodies for mutating methods
   const method = config.method?.toLowerCase();
   if (!method || !['post', 'put', 'patch', 'delete'].includes(method)) {
     return config;

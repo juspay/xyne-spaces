@@ -14,6 +14,7 @@ import {
 import { config } from '@/config/env';
 import { getEncryptionProvider, getLatestClientManifest, isDekPassthrough } from '@/services/encryption';
 import type { ClientManifestRule } from '@/services/encryption';
+import { TRANSIT_TICKET_COOKIE, TRANSIT_TICKET_HEADER } from '@/services/encryption/types';
 
 /** Entity type of the keys the Prisma encryption extension writes rows under. */
 const WORKSPACE_ENTITY_TYPE = 'WORKSPACE';
@@ -24,7 +25,7 @@ function sanitizeForLog(value: unknown): string {
 
 function hasEncryptedFields(obj: unknown): boolean {
   if (typeof obj === 'string') {
-    return obj.startsWith('ENC:v1|sess|');
+    return obj.startsWith('ENC:v1|tk-');
   }
 
   if (Array.isArray(obj)) {
@@ -96,9 +97,9 @@ export async function enforceClientManifestVersion(
 }
 
 /**
- * Decrypt `ENC:v1|sess|…` fields with the caller's session key. The key is scoped to the
- * auth session (JWT `sid`), so this runs after authentication: the auth middlewares call
- * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
+ * Decrypt `ENC:v1|tk-<ticket>|…` fields. Each ticket seals its own key and is bound to the
+ * auth session (JWT `sid`), so this runs after authentication: the auth middlewares call it in
+ * place of `next()` once `req.user` is set, rather than it being mounted globally.
  */
 export async function decryptRequestBodyMiddleware(
   req: Request,
@@ -128,18 +129,18 @@ async function decryptRequestBody(req: Request, next: NextFunction): Promise<voi
       return next();
     }
 
-    const sessionId = req.user?.sid;
+    const subject = req.user?.sid;
 
-    if (!sessionId) {
+    if (!subject) {
       logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
         method: sanitizeForLog(method),
         path: sanitizeForLog(req.path),
-        hasSessionId: Boolean(sessionId),
+        hasSessionId: false,
       });
       getCryptoOperations().add(1, {
         operation: 'decrypt_request_body',
         status: 'error',
-        reason: !sessionId ? 'missing_session' : 'missing_user',
+        reason: 'missing_session',
         path: req.path,
       });
       return next(new AppError('Encrypted request body requires an active session', 400));
@@ -150,7 +151,7 @@ async function decryptRequestBody(req: Request, next: NextFunction): Promise<voi
       path: sanitizeForLog(req.path),
     });
 
-    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId);
+    req.body = await getEncryptionProvider().decryptRequest(req.body, subject);
 
     logger.info('[decryptionMiddleware] request body decrypted successfully', {
       method: sanitizeForLog(method),
@@ -173,10 +174,19 @@ async function decryptRequestBody(req: Request, next: NextFunction): Promise<voi
   next();
 }
 
+function transitTicket(req: Request): string | undefined {
+  const header = req.header(TRANSIT_TICKET_HEADER);
+  if (header) return header;
+  const cookie: unknown = req.cookies?.[TRANSIT_TICKET_COOKIE];
+  return typeof cookie === 'string' && cookie.length > 0 ? cookie : undefined;
+}
+
 /**
- * Transform session-encrypted fields by their manifest rule instead of decrypting them:
+ * Transform transit-encrypted fields by their manifest rule instead of decrypting them:
  * `MASTER_DEK` fields come back as workspace-DEK ciphertext the Prisma extension stores
- * as-is, `NONE` fields as plaintext. The controller never sees a MASTER_DEK plaintext.
+ * as-is, `NONE` fields as plaintext. The controller never sees a MASTER_DEK plaintext. The
+ * tickets the fields are under travel inside the ciphertext; the service opens them for the
+ * request's session.
  */
 async function transformRequestBody(
   req: Request,
@@ -190,8 +200,8 @@ async function transformRequestBody(
       return next();
     }
 
-    const sessionId = req.user?.sid;
-    if (!sessionId) {
+    const subject = req.user?.sid;
+    if (!subject) {
       logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
         method: sanitizeForLog(req.method),
         path: sanitizeForLog(req.path),
@@ -217,7 +227,7 @@ async function transformRequestBody(
 
     const { body, derived } = await getEncryptionProvider().transformRequest({
       body: req.body,
-      sessionId,
+      subject,
       rule: { type: rule.type, value: rule.value, revision: rule.revision },
       ...owner,
     });
@@ -291,8 +301,8 @@ export type ManifestRequestBodyOptions = {
  * multipart, so `req.body` is still undefined when the auth middleware runs and is only
  * filled in by multer. Rejects bodies that violate the manifest rule (400
  * ENC_MANIFEST_VIOLATION), then, when the route has a rule and DB encryption is on,
- * transforms session-key fields by that rule (MASTER_DEK fields stay ciphertext, now under
- * the workspace DEK). Without a rule, or with DB encryption off (no DEK to re-encrypt
+ * transforms transit-encrypted fields by that rule (MASTER_DEK fields stay ciphertext, now
+ * under the workspace DEK). Without a rule, or with DB encryption off (no DEK to re-encrypt
  * under), it decrypts to plaintext as before. The manifest version check already ran in
  * the auth middleware.
  */
@@ -361,8 +371,8 @@ export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOption
 }
 
 /**
- * Encrypt JSON responses for the caller's session key. Mounted globally: `res.json` runs
- * after the route's auth middleware, so `req.user.sid` is already resolved by then.
+ * Encrypt JSON responses under the caller's current transit ticket. Mounted globally:
+ * `res.json` runs after the route's auth middleware, so `req.user.sid` is already resolved.
  */
 export function encryptResponseBodyMiddleware(
   req: Request,
@@ -372,20 +382,21 @@ export function encryptResponseBodyMiddleware(
   const originalJson = res.json.bind(res);
 
   res.json = ((body?: unknown): Response => {
-    const sessionId = req.user?.sid;
-    if (!sessionId || !body || typeof body !== 'object') {
+    const subject = req.user?.sid;
+    if (!subject || !body || typeof body !== 'object') {
       return originalJson(body);
     }
 
     // Under DEK passthrough the body still holds storage ciphertext; the encryption
-    // service turns it into session ciphertext without the backend seeing plaintext.
+    // service turns it into transit ciphertext without the backend seeing plaintext.
     const provider = getEncryptionProvider();
+    const ticket = transitTicket(req);
     const encrypted = isDekPassthrough()
-      ? provider.transformResponse(body, sessionId)
-      : provider.encryptResponse(body, sessionId);
+      ? provider.transformResponse(body, subject, ticket)
+      : provider.encryptResponse(body, subject, ticket);
 
     void encrypted
-      .then((encryptedBody) => originalJson(encryptedBody))
+      .then((result) => originalJson(result.body))
       .catch((error) => {
         logger.error('[decryptionMiddleware] failed to encrypt response body', {
           method: sanitizeForLog(req.method),

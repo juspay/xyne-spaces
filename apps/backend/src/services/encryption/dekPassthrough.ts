@@ -15,7 +15,8 @@ export function isDekPassthrough(): boolean {
 /**
  * Within this request the Prisma extension leaves storage ciphertext (`ENC:v1|<dekId>|…`)
  * in results instead of decrypting it, and the response middleware hands the body to the
- * encryption service for DEK→CEK, so plaintext never exists in the backend. `next()` runs
+ * encryption service to re-encrypt from the DEK to the caller's transit ticket, so plaintext
+ * never exists in the backend. `next()` runs
  * the rest of the chain inside the store, so the route's async continuations (multer
  * keeps its caller's async scope) all see it, as with `loggerContext.run` in auth.
  */

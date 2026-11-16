@@ -15,7 +15,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { activityTrackingService, ActivityEventPayload } from './activityTrackingService';
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
-import { containsServerCiphertext, transformPayloadForSession } from '@/services/encryption';
+import { containsServerCiphertext, transformPayloadForSession, TRANSIT_TICKET_COOKIE } from '@/services/encryption';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -25,6 +25,8 @@ interface AuthenticatedSocket extends Socket {
   orgMemberId?: string;
   workspaceId?: string;
   workspaceName?: string;
+  /** Transit ticket pushes to this socket are encrypted under; replaced when the encryption service mints a newer one. */
+  transitTicket?: string;
 }
 
 // interface JoinSessionData {
@@ -181,6 +183,7 @@ class WebSocketService {
             (socket as any).userEmail = req.user.email;
             (socket as any).userName = req.user.displayName || req.user.name;
             (socket as any).user = req.user;
+            (socket as any).transitTicket = cookies[TRANSIT_TICKET_COOKIE];
 
             logger.info(`WebSocket authenticated: ${req.user.email} (${req.user.id})`);
             logger.info(`Socket ${socket.id} assigned user: ${req.user.name} (${req.user.email})`);
@@ -1440,7 +1443,7 @@ class WebSocketService {
   /**
    * A payload carrying storage ciphertext (`ENC:v1|<dekId>|…`, left in place by DEK
    * passthrough) must be re-encrypted per recipient before it reaches a socket: each
-   * client only holds its own session key. Payloads without it (every broadcast except
+   * client only holds its own ticket keys. Payloads without it (every broadcast except
    * passthrough routes) skip this and never call the encryption service.
    */
   private requiresRecipientTransform(data: unknown): boolean {
@@ -1452,10 +1455,12 @@ class WebSocketService {
   }
 
   /**
-   * DEK→CEK per recipient socket, using the `sid` its handshake authenticated with. One
-   * encryption-service call per recipient, run concurrently, so a busy room costs N calls
-   * per message. A socket with no `sid`, or whose transform fails, gets nothing: sending
-   * the payload as-is would leak storage ciphertext it cannot (and must not) decrypt.
+   * Storage ciphertext to transit ciphertext per recipient socket, under the ticket the
+   * socket connected with (its `xt` cookie) or one the encryption service mints for its
+   * `sid` once that ticket has expired. One encryption-service call per recipient, run
+   * concurrently, so a busy room costs N calls per message. A socket with no `sid`, or whose
+   * transform fails, gets nothing: sending the payload as-is would leak storage ciphertext
+   * it cannot (and must not) decrypt.
    */
   private async emitPerRecipient<T>(
     socketIds: string[],
@@ -1466,7 +1471,7 @@ class WebSocketService {
     await Promise.all(
       socketIds.map(async (socketId) => {
         const socket = this.io?.sockets.sockets.get(socketId) as
-          | (Socket & { user?: { sid?: string } })
+          | (Socket & { user?: { sid?: string }; transitTicket?: string })
           | undefined;
         // Not connected to this pod any more; a plain emit would be a no-op too.
         if (!socket) return;
@@ -1478,10 +1483,11 @@ class WebSocketService {
         }
 
         try {
-          const transformed = await transformPayloadForSession(data, sid);
-          socket.emit(event, wrap(transformed));
+          const { body, ticket } = await transformPayloadForSession(data, sid, socket.transitTicket);
+          if (ticket) socket.transitTicket = ticket;
+          socket.emit(event, wrap(body));
         } catch (error) {
-          logger.warn(`[WS-ENC] DEK→CEK transform failed for socket ${socketId}; not sending ${event}`, {
+          logger.warn(`[WS-ENC] DEK to ticket transform failed for socket ${socketId}; not sending ${event}`, {
             error: error instanceof Error ? error.message : String(error),
           });
         }
