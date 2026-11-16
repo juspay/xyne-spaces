@@ -392,7 +392,7 @@ export class AuthV2Controller {
           launchParams.set('invitationId', stateData.invitationId);
         }
         const launchUrl = `${frontendUrl}/launch?${launchParams.toString()}`;
-        logger.info(`${tag()} Google OAuth login handed off to Electron (outcome=electron_handoff) — redirecting to launch page: ${launchUrl}`);
+        logger.info(`${tag()} Google OAuth login handed off to Electron (outcome=electron_handoff) — redirecting to launch page: ${frontendUrl}/launch`);
         res.redirect(launchUrl);
         return;
       }
@@ -572,7 +572,7 @@ export class AuthV2Controller {
       // subsequent re-login (e.g. after workspace switch) from re-triggering this flow with
       // an already-accepted invitation.
       if (pendingInvitationId) {
-        logger.info(`${tag()} Google OAuth login succeeded (platform=web, outcome=pending_invitation, invitationId=${pendingInvitationId})`);
+        logger.info(`${tag()} Google OAuth login succeeded (platform=web, outcome=pending_invitation)`);
         res.clearCookie('pending_invitation_id', { path: '/' });
         const inviteParams = new URLSearchParams({
           loginComplete: 'true',
@@ -908,7 +908,7 @@ export class AuthV2Controller {
       // will navigate to /invite?loginComplete=true inside the app — no browser involvement.
       const effectiveInvitationId = stateData.invitationId || invitationId;
       if (effectiveInvitationId) {
-        logger.info(`${tag()} Google OAuth login succeeded (platform=electron, outcome=pending_invitation, invitationId=${effectiveInvitationId})`);
+        logger.info(`${tag()} Google OAuth login succeeded (platform=electron, outcome=pending_invitation)`);
         const tokenKey = await this.storePendingOAuthTokens(
           refresh_token,
           access_token,

@@ -90,6 +90,23 @@ function redactString(s: string): string {
   return out;
 }
 
+/** Replaces every query parameter value (and drops any fragment / userinfo) in a URL or path. */
+export function redactUrlQuery(url: string): string {
+  const withoutFragment = url.split("#")[0] ?? "";
+  const withoutUserinfo = withoutFragment.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?@]*@/i, `$1[REDACTED]@`);
+  const q = withoutUserinfo.indexOf("?");
+  if (q === -1) return withoutUserinfo;
+  const query = withoutUserinfo
+    .slice(q + 1)
+    .split("&")
+    .map((pair) => {
+      const eq = pair.indexOf("=");
+      return eq === -1 ? pair : `${pair.slice(0, eq)}=[REDACTED]`;
+    })
+    .join("&");
+  return `${withoutUserinfo.slice(0, q)}?${query}`;
+}
+
 function redactValue(v: unknown): unknown {
   if (typeof v === "string") return redactString(v);
   if (Array.isArray(v)) return v.map(redactValue);

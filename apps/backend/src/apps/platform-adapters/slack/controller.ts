@@ -73,6 +73,14 @@ import type { SlackAuthTestResponse, SlackFileObject } from "./types";
 
 // ========== Zod Schemas ==========
 
+// Slack Web API clients may send their token in the body or query.
+function withoutToken(value: unknown): unknown {
+	if (!value || typeof value !== "object") return value;
+	const rest = { ...(value as Record<string, unknown>) };
+	delete rest.token;
+	return rest;
+}
+
 function parseJsonString(value: unknown): unknown {
 	if (typeof value !== "string") return value;
 	try {
@@ -349,7 +357,7 @@ export class SlackController {
 	});
 
 	chatPostMessage = wrapSlackHandler(async (req: Request, res: Response) => {
-		logger.info("[SLACK-POST-MESSAGE] Received request", { body: req.body, query: req.query, headers: req.headers });
+		logger.info("[SLACK-POST-MESSAGE] Received request", { body: withoutToken(req.body), query: withoutToken(req.query) });
 		const parsed = PostMessageSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });
@@ -875,7 +883,7 @@ export class SlackController {
 	});
 
 	filesUpload = wrapSlackHandler(async (req: Request, res: Response) => {
-		logger.info("[SLACK-FILES-UPLOAD] Received request", { body: req.body, query: req.query, headers: req.headers });
+		logger.info("[SLACK-FILES-UPLOAD] Received request", { body: withoutToken(req.body), query: withoutToken(req.query) });
 		const parsed = FilesUploadSchema.safeParse(req.body);
 		if (!parsed.success) {
 			res.status(200).json({ ok: false, error: "invalid_arguments" });

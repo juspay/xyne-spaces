@@ -181,8 +181,12 @@ export class KataClient {
         name: claimName,
       });
     } catch (err) {
-      if ((err as { code?: number }).code === 404) return;
-      console.error(`Failed to delete orphaned SandboxClaim ${claimName} in ${namespace} after provisioning error:`, err);
+      const code = (err as { code?: number }).code;
+      if (code === 404) return;
+      console.error(
+        `Failed to delete orphaned SandboxClaim ${claimName} in ${namespace} after provisioning error:`,
+        { message: err instanceof Error ? err.message : String(err), statusCode: code },
+      );
     }
   }
 
