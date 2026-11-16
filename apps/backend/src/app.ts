@@ -242,6 +242,7 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
+import { EXTRACTORS, runExtractors, type ExtractorName } from '@xyne/shared';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 
 
@@ -567,6 +568,23 @@ export class App {
     });
     this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
       void new ReactionController().reactAsUser(req, res);
+    });
+    // TEMPORARY: content extraction for the encryption service's transform-request, until the
+    // extractor runs as a sidecar container in the encryption-api pod (apps/encryption-extractor
+    // in the private repo; switch back by pointing EXTRACTOR_URL at it and deleting this
+    // route). The body carries message plaintext: never log it.
+    this.app.post('/api/internal/content/extract', validateS2SKey, (req: Request, res: Response) => {
+      const { text, extractors } = (req.body ?? {}) as { text?: unknown; extractors?: unknown };
+      const known = new Set<string>(EXTRACTORS);
+      if (
+        typeof text !== 'string' ||
+        !Array.isArray(extractors) ||
+        !extractors.every((name): name is ExtractorName => typeof name === 'string' && known.has(name))
+      ) {
+        res.status(400).json({ error: 'Bad request', message: 'text must be a string and extractors known extractor names' });
+        return;
+      }
+      res.json(runExtractors(text, extractors));
     });
     this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
       try {
