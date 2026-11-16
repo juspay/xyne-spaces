@@ -14,7 +14,7 @@ window.__APP_VERSION__ = __APP_VERSION__;
 
 installErrorReporting();
 
-// Manifest signing keys URL, accepted environments, refetch on prod <-> pre-prod moves.
+// Accepted manifest environments, and refetch on prod <-> pre-prod moves.
 setupEncryptionManifestEnvironment();
 
 // Register Service Worker for docs preview and push notifications

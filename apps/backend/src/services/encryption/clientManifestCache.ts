@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import type { ClientManifestVersionEvent, SignedClientManifest } from '@xyne/shared';
+import type { ClientManifestVersionEvent } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { defaultManifestEnvironment, type ClientManifestEnvironment } from './manifestEnvironment';
@@ -16,8 +16,6 @@ const MAX_WATCHED_ENTRIES = 8;
 
 type CacheEntry = {
   manifest: ClientEncryptionManifest | null;
-  /** Relayed to clients byte-for-byte; `null` while signing is not configured. */
-  signed: SignedClientManifest | null;
   expiresAt: number;
 };
 
@@ -54,12 +52,7 @@ function remember(key: ManifestKey, entry: CacheEntry): void {
   }
 }
 
-/**
- * The unsigned manifest (for this backend's own checks) and the signed envelope (for
- * clients), fetched together once per (environment, tag) however many requests are
- * waiting. Signing failures do not fail the load: clients then fall back to their stored
- * copy.
- */
+/** The manifest for (environment, tag), fetched once however many requests are waiting. */
 function load(key: ManifestKey): Promise<CacheEntry> {
   const k = keyOf(key);
   const cached = cache.get(k);
@@ -68,19 +61,10 @@ function load(key: ManifestKey): Promise<CacheEntry> {
   const pending = inFlight.get(k);
   if (pending) return pending;
 
-  const provider = getEncryptionProvider();
-  const request = Promise.all([
-    provider.getClientManifest(key),
-    provider.getSignedClientManifest(key).catch((error) => {
-      logger.warn('[encManifest] signed client manifest unavailable', {
-        ...key,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }),
-  ])
-    .then(([manifest, signed]) => {
-      const entry = { manifest, signed, expiresAt: Date.now() + CACHE_TTL_MS };
+  const request = getEncryptionProvider()
+    .getClientManifest(key)
+    .then((manifest) => {
+      const entry = { manifest, expiresAt: Date.now() + CACHE_TTL_MS };
       remember(key, entry);
       return entry;
     })
@@ -103,15 +87,6 @@ export async function getLatestClientManifest(
   environment: ClientManifestEnvironment = defaultManifestEnvironment()
 ): Promise<ClientEncryptionManifest | null> {
   return (await load({ environment, tag })).manifest;
-}
-
-/** Both halves of the cache entry, for the manifest route. */
-export async function getLatestClientManifests(
-  tag: string,
-  environment: ClientManifestEnvironment
-): Promise<{ manifest: ClientEncryptionManifest | null; signed: SignedClientManifest | null }> {
-  const { manifest, signed } = await load({ environment, tag });
-  return { manifest, signed };
 }
 
 /** Last version this pod knows for (environment, tag), for the socket hello; no I/O. */

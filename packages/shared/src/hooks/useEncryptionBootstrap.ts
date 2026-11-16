@@ -3,7 +3,7 @@ import { fetchEncryptionConfig, handshake } from '../crypto/handshake.js';
 import type { EncryptionConfig } from '../crypto/handshake.js';
 import { TransitKeyring } from '../crypto/keyring.js';
 import { decryptionCache } from '../crypto/decryption-cache.js';
-import { refreshClientManifest, clearClientManifest } from '../crypto/client-manifest.js';
+import { refreshClientManifest, clearClientManifest, setClientManifestKeyring } from '../crypto/client-manifest.js';
 import { consoleLogger, Event } from '../logger/index.js';
 
 export type { EncryptionConfig };
@@ -66,13 +66,13 @@ async function performBootstrap(): Promise<EncryptionBootstrapState> {
     return { config, keyring: null, isReady: true, error: null };
   }
 
-  // With API client encryption on, the manifest loads alongside the first ticket, so
-  // bootstrap is not ready until both are in place. The manifest lives in its own module store.
+  // With API client encryption on, the manifest loads after the first ticket: it arrives
+  // encrypted with the transit key. Bootstrap is not ready until both are in place.
   const keyring = new TransitKeyring(handshake);
+  await keyring.init();
   if (config.apiClientEncryptionEnabled) {
-    await Promise.all([keyring.init(), refreshClientManifest()]);
-  } else {
-    await keyring.init();
+    setClientManifestKeyring(keyring);
+    await refreshClientManifest();
   }
 
   consoleLogger.info(Event.ENCRYPTION_KEY_REGISTRATION_SUCCESS, {

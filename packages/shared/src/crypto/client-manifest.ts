@@ -1,18 +1,9 @@
 import { API_BASE_URL } from '../config.js';
 import { Event } from '../logger/events.js';
-import type {
-  ClientEncryptionManifest,
-  ClientManifestVersionEvent,
-  SignedClientManifest,
-  SignedClientManifestPayload,
-} from '../enc-contracts/manifest.js';
+import type { ClientEncryptionManifest, ClientManifestVersionEvent } from '../enc-contracts/manifest.js';
 import { getCryptoLogger } from './crypto-logger.js';
-import { isEncSigningRequired } from './enc-signing-keys.js';
-import {
-  ManifestVerificationError,
-  getAllowedManifestEnvironments,
-  verifySignedClientManifest,
-} from './manifest-verify.js';
+import { decryptField, isEncryptedField } from './field-decrypt.js';
+import { TRANSIT_TICKET_HEADER, type TransitKeyring } from './keyring.js';
 
 // The manifest types are defined once, next to the contracts they are generated from.
 export type {
@@ -32,67 +23,15 @@ export const CLIENT_MANIFEST_ENVIRONMENT_HEADER = 'x-enc-manifest-environment';
 
 /** Upper bound of the random delay before refetching after a version announcement. */
 const REFRESH_JITTER_MS = 30_000;
-/**
- * Upper bound after a move between prod and pre-prod. Short, because until the refetch the
- * client holds the other lane's rules; it fits inside the switch overlay (central-service's
- * loadingSeconds, 3s by default). Moves already arrive in timed batches; the jitter only
- * spreads an abort, which reverts every moved user at once.
- */
+/** Upper bound after a prod <-> pre-prod move: short, it fits inside the switch overlay. */
 const LANE_CHANGE_JITTER_MS = 3_000;
-
-/**
- * Where the signed envelope and the highest version seen are kept between app starts.
- * Only the signed envelope is stored, never the parsed manifest, so a copy edited on the
- * device fails verification on the next load. Defaults to localStorage (web, Electron)
- * and to memory where there is none (React Native, Node).
- */
-export interface ClientManifestStorage {
-  getItem(key: string): string | null | Promise<string | null>;
-  setItem(key: string, value: string): void | Promise<void>;
-}
-
-function defaultStorage(): ClientManifestStorage {
-  try {
-    const ls = (globalThis as { localStorage?: Storage }).localStorage;
-    if (ls) {
-      const probe = '__xyne_enc_manifest_probe__';
-      ls.setItem(probe, '1');
-      ls.removeItem(probe);
-      return ls;
-    }
-  } catch {
-    // Storage disabled (private mode, sandboxed iframe): fall through to memory.
-  }
-  const memory = new Map<string, string>();
-  return {
-    getItem: key => memory.get(key) ?? null,
-    setItem: (key, value) => void memory.set(key, value),
-  };
-}
-
-let storage: ClientManifestStorage | null = null;
-
-function getStorage(): ClientManifestStorage {
-  storage ??= defaultStorage();
-  return storage;
-}
-
-export function setClientManifestStorage(next: ClientManifestStorage): void {
-  storage = next;
-}
-
-// Kept per environment: a user moved from prod to pre-prod and back keeps both copies and
-// both counters, so moving back is not mistaken for a rollback.
-const envelopeKey = (environment: string, tag: string) => `xyne.enc.manifest.envelope:${environment}:${tag}`;
-/** Environment of the copy accepted last, which an offline start restores. */
-const laneKey = (tag: string) => `xyne.enc.manifest.lane:${tag}`;
-const highestKey = (environment: string, tag: string) => `xyne.enc.manifest.highest:${environment}:${tag}`;
 
 // Module-level store: the manifest is independent of the transit keyring, so it
 // is kept here rather than in EncryptionConfig or key storage.
 let currentManifest: ClientEncryptionManifest | null = null;
 let inFlight: Promise<ClientEncryptionManifest | null> | null = null;
-let warnedUnsigned = false;
+/** Decrypts the manifest, which the backend sends encrypted with the transit key. */
+let keyring: TransitKeyring | null = null;
 
 /** Latest version the backend announced over the socket, if newer than ours. */
 let announced: ClientManifestVersionEvent | null = null;
@@ -100,127 +39,68 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 /** Set when the user was moved between lanes and the new lane's manifest is not loaded yet. */
 let laneChangePending = false;
 
+/**
+ * Environments this build accepts a manifest for: production builds 'production' and
+ * 'playground' (the server picks the lane per request), sandbox only 'sandbox', local only
+ * 'development'. `null` = any.
+ */
+let allowedEnvironments: readonly string[] | null = null;
+
+export function setAllowedManifestEnvironments(environments: readonly string[] | null): void {
+  allowedEnvironments = environments && environments.length > 0 ? [...environments] : null;
+}
+
+/** The keyring the manifest response is decrypted with; set at bootstrap. */
+export function setClientManifestKeyring(next: TransitKeyring | null): void {
+  keyring = next;
+}
+
 export function getClientManifest(): ClientEncryptionManifest | null {
   return currentManifest;
 }
 
-function logRejected(reason: string, extra: Record<string, unknown> = {}): void {
-  getCryptoLogger().warn(Event.ENCRYPTION_MANIFEST_REJECTED, {
-    message: `[encryptionlog] Client manifest rejected: ${reason}`,
-    reason,
-    ...extra,
-  });
+function isManifest(value: unknown): value is ClientEncryptionManifest {
+  if (!value || typeof value !== 'object') return false;
+  const m = value as Record<string, unknown>;
+  return (
+    typeof m.version === 'number' &&
+    typeof m.tag === 'string' &&
+    typeof m.environment === 'string' &&
+    Array.isArray(m.rules)
+  );
 }
 
-async function readHighest(environment: string, tag: string): Promise<number> {
-  const raw = await getStorage().getItem(highestKey(environment, tag));
-  const n = raw === null ? NaN : Number(raw);
-  return Number.isInteger(n) ? n : 0;
-}
-
-/**
- * Verifies `envelope` and checks it is not older than a version this device already
- * accepted (an old but validly signed manifest is the replay a compromised relay would
- * try). On success the envelope and the new high-water mark are stored.
- */
-async function acceptEnvelope(
-  envelope: SignedClientManifest,
-  tag: string,
-): Promise<SignedClientManifestPayload> {
-  const payload = await verifySignedClientManifest(envelope, tag);
-  const highest = await readHighest(payload.environment, tag);
-  if (payload.version < highest) {
-    throw new ManifestVerificationError(
-      'rolled_back',
-      `Manifest version ${payload.version} is older than version ${highest} already seen`,
-    );
+/** `clientManifest` arrives as a JSON string, transit-encrypted when encryption is on. */
+async function parseManifest(raw: unknown): Promise<ClientEncryptionManifest | null> {
+  if (typeof raw !== 'string') return null;
+  let json = raw;
+  if (isEncryptedField(raw)) {
+    if (!keyring) throw new Error('Client manifest is encrypted but no transit keyring is set');
+    json = await decryptField(raw, keyring);
   }
-  const store = getStorage();
-  await store.setItem(envelopeKey(payload.environment, tag), JSON.stringify(envelope));
-  await store.setItem(laneKey(tag), payload.environment);
-  if (payload.version > highest) {
-    await store.setItem(highestKey(payload.environment, tag), String(payload.version));
-  }
-  getCryptoLogger().info(Event.ENCRYPTION_MANIFEST_ACCEPTED, {
-    message: '[encryptionlog] Client manifest verified',
-    kid: envelope.kid,
-    version: payload.version,
-    tag,
-    environment: payload.environment,
-  });
-  return payload;
-}
-
-/** The stored envelope, re-verified (signature, expiry, rollback), or null. */
-async function restoreStoredManifest(tag: string): Promise<SignedClientManifestPayload | null> {
-  try {
-    const environment = await getStorage().getItem(laneKey(tag));
-    if (!environment) return null;
-    const raw = await getStorage().getItem(envelopeKey(environment, tag));
-    if (!raw) return null;
-    return await acceptEnvelope(JSON.parse(raw) as SignedClientManifest, tag);
-  } catch (error) {
-    logRejected(error instanceof ManifestVerificationError ? error.reason : 'stored_unreadable', {
-      source: 'storage',
+  const manifest: unknown = JSON.parse(json);
+  if (!isManifest(manifest)) throw new Error('Client manifest response is malformed');
+  if (allowedEnvironments && !allowedEnvironments.includes(manifest.environment)) {
+    getCryptoLogger().warn(Event.ENCRYPTION_MANIFEST_REJECTED, {
+      message: `[encryptionlog] Client manifest for "${manifest.environment}" not accepted by this build`,
+      reason: 'wrong_environment',
     });
     return null;
   }
-}
-
-/**
- * Unsigned manifest only while no manifest key is published; otherwise only a verified
- * envelope, else the last verified copy, else none (encrypt-all).
- */
-async function resolveManifest(
-  data: { clientManifest?: ClientEncryptionManifest | null; signedManifest?: SignedClientManifest | null },
-  tag: string,
-): Promise<ClientEncryptionManifest | null> {
-  if ((await isEncSigningRequired('manifest')) === false) {
-    if (!warnedUnsigned) {
-      warnedUnsigned = true;
-      getCryptoLogger().warn(Event.ENCRYPTION_MANIFEST_REJECTED, {
-        message: '[encryptionlog] No manifest signing key published; using the unsigned manifest',
-        reason: 'unsigned_rollout',
-      });
-    }
-    return data.clientManifest ?? null;
-  }
-
-  if (!data.signedManifest) {
-    logRejected('missing_signature', { source: 'server' });
-    return restoreStoredManifest(tag);
-  }
-
-  try {
-    return await acceptEnvelope(data.signedManifest, tag);
-  } catch (error) {
-    logRejected(error instanceof ManifestVerificationError ? error.reason : 'verify_failed', {
-      source: 'server',
-      kid: data.signedManifest.kid,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return restoreStoredManifest(tag);
-  }
+  return manifest;
 }
 
 export function refreshClientManifest(tag = 'default'): Promise<ClientEncryptionManifest | null> {
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE_URL}/encryption-manifest?tag=${encodeURIComponent(tag)}`, {
-        credentials: 'include',
-      });
-    } catch (error) {
-      // Offline: keep working from the last verified copy, if it has not expired.
-      const restored = (await isEncSigningRequired('manifest')) !== false ? await restoreStoredManifest(tag) : null;
-      if (restored) {
-        currentManifest = restored;
-        return currentManifest;
-      }
-      throw error;
-    }
+    const headers: Record<string, string> = {};
+    // Ask for the response to be encrypted under our current ticket.
+    if (keyring) headers[TRANSIT_TICKET_HEADER] = (await keyring.current()).ticket;
+    const response = await fetch(`${API_BASE_URL}/encryption-manifest?tag=${encodeURIComponent(tag)}`, {
+      credentials: 'include',
+      headers,
+    });
 
     if (response.status === 404) {
       currentManifest = null;
@@ -231,11 +111,8 @@ export function refreshClientManifest(tag = 'default'): Promise<ClientEncryption
       throw new Error(`Client encryption manifest request failed with status ${response.status}`);
     }
 
-    const data = (await response.json()) as {
-      clientManifest?: ClientEncryptionManifest | null;
-      signedManifest?: SignedClientManifest | null;
-    };
-    currentManifest = await resolveManifest(data, tag);
+    const data = (await response.json()) as { clientManifest?: unknown };
+    currentManifest = await parseManifest(data.clientManifest);
     return currentManifest;
   })().finally(() => {
     inFlight = null;
@@ -264,14 +141,12 @@ function scheduleRefresh(tag: string, maxDelayMs: number): void {
 }
 
 /**
- * Socket handler for `enc_manifest_version`. Sent on every connect and whenever a new
- * version is published. If it is newer than ours, refetch after a random 0–30 s delay so
- * that thousands of clients do not all refetch in the same instant.
+ * Socket handler for `enc_manifest_version` (sent on connect and when a new version is
+ * published): refetch after a random 0–30 s delay if it is newer than ours.
  */
 export function noteClientManifestVersion(event: ClientManifestVersionEvent): void {
   if (!event || typeof event.tag !== 'string' || typeof event.version !== 'number') return;
-  const allowed = getAllowedManifestEnvironments();
-  if (allowed && event.environment && !allowed.includes(event.environment)) return;
+  if (allowedEnvironments && event.environment && !allowedEnvironments.includes(event.environment)) return;
   if (!isBehind(event)) return;
   announced = event;
   // A different lane means the user was moved: use the short window, not the long one.
@@ -280,21 +155,13 @@ export function noteClientManifestVersion(event: ClientManifestVersionEvent): vo
   scheduleRefresh(event.tag, laneChanged ? LANE_CHANGE_JITTER_MS : REFRESH_JITTER_MS);
 }
 
-/**
- * The user was moved between prod and pre-prod (central-service pushed a new x-route-env;
- * the dashboard fires `xyne:dynamic-headers-changed`). The backend now answers with the
- * other lane's manifest, so refetch within 0–3s. Until then the old lane's copy stays in
- * place, and any write in between refetches first (refreshClientManifestIfStale).
- */
+/** The user was moved between prod and pre-prod: refetch the new lane's manifest within 0–3 s. */
 export function noteClientManifestLaneChanged(tag = currentManifest?.tag ?? 'default'): void {
   laneChangePending = true;
   scheduleRefresh(tag, LANE_CHANGE_JITTER_MS);
 }
 
-/**
- * Before a write: if a newer version was announced, or the user changed lanes, and the
- * delayed refetch has not run yet, refetch now so the write uses the current lane's rules.
- */
+/** Before a write: if a refetch is pending (new version or lane change), run it now. */
 export async function refreshClientManifestIfStale(): Promise<void> {
   const pending = announced && isBehind(announced) ? announced : null;
   if (!pending && !laneChangePending) return;
@@ -307,12 +174,11 @@ export async function refreshClientManifestIfStale(): Promise<void> {
 
 export function clearClientManifest(): void {
   currentManifest = null;
+  keyring = null;
   announced = null;
   laneChangePending = false;
   if (refreshTimer) {
     clearTimeout(refreshTimer);
     refreshTimer = null;
   }
-  // The stored envelope and the highest-version counter are kept on purpose: they are
-  // not secret, and the counter is what stops an older manifest being replayed later.
 }
