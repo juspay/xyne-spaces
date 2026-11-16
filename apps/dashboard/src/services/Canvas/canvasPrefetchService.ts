@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import { createYjsProvider, EVENT_CONNECTION_STATUS } from '@y-sweet/client';
 import type { YSweetProvider } from '@y-sweet/client';
 import type { QueryClient } from '@tanstack/react-query';
-import { canvasService } from './canvasService';
+import { canvasService, fetchTicketPerAttempt } from './canvasService';
 import type { YSweetAuthToken } from './canvasService';
 import { logger, Event } from '../../utils/logger';
 import { stopYjsProviderPermanently } from './yjsProviderTeardown';
@@ -86,17 +86,11 @@ class CanvasPrefetchService {
         syncResolve = resolve;
       });
 
-      const getAuthToken = (): Promise<YSweetAuthToken> => {
-        const data = queryClient.getQueryData<YSweetAuthToken>([
-          'ysweet-auth',
-          canvasId,
-          options?.channelId,
-        ]);
-        if (!data) {
-          return Promise.reject(new Error('Auth token not found in cache'));
-        }
-        return Promise.resolve(data);
-      };
+      const getAuthToken = (): Promise<YSweetAuthToken> =>
+        canvasService.getYSweetTicket({
+          docId: canvasId,
+          ...(options?.channelId ? { channelId: options.channelId } : {}),
+        });
 
       const provider = createYjsProvider(doc, actualDocId, getAuthToken, {
         offlineSupport: true,
@@ -104,6 +98,7 @@ class CanvasPrefetchService {
         showDebuggerLink: false,
         connect: true,
       });
+      fetchTicketPerAttempt(provider);
 
       const prefetchedCanvas: PrefetchedCanvas = {
         doc,

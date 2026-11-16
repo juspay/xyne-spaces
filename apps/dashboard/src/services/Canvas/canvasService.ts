@@ -36,13 +36,51 @@ export interface CanvasFileUploadResponse {
   thumbnailUrl?: string;
 }
 
+/**
+ * Tickets are single use, but @y-sweet/client retries the same token 3 times before it fetches
+ * a new one. Fetch a new ticket for any attempt that would reuse a spent one.
+ */
+export function fetchTicketPerAttempt(provider: object): void {
+  const p = provider as unknown as {
+    clientToken: YSweetAuthToken | null;
+    ensureClientToken(): Promise<YSweetAuthToken>;
+    attemptToConnect(token: YSweetAuthToken): Promise<boolean>;
+  };
+  const attempt = p.attemptToConnect.bind(p);
+  const spent = new Set<string | undefined>();
+  p.attemptToConnect = async (token): Promise<boolean> => {
+    let next: YSweetAuthToken | null = token;
+    if (spent.has(token.token)) {
+      p.clientToken = null;
+      // A throw here would end the provider's connect loop. A failed attempt keeps its backoff.
+      next = await p.ensureClientToken().catch(() => null);
+      if (!next) return false;
+    }
+    spent.add(next.token);
+    return attempt(next);
+  };
+}
+
 // Cache for prefetched canvas data
 const prefetchedCanvases = new Map<string, { token: YSweetAuthToken; timestamp: number }>();
 const PREFETCH_CACHE_TTL = 1000 * 60 * 50; // 50 minutes (same as staleTime)
 
 export class CanvasService {
+  /** Canvas metadata (docId, authorization) without a token. */
   async getYSweetAuthToken(request: YSweetAuthRequest): Promise<YSweetAuthToken> {
-    const response = await apiInstance.post<YSweetAuthToken>('/ysweet/auth', request);
+    const response = await apiInstance.post<YSweetAuthToken>('/ysweet/auth', {
+      ...request,
+      tokenType: 'none',
+    });
+    return response.data;
+  }
+
+  /** A single-use WebSocket ticket. Only the provider's connect should ask for one. */
+  async getYSweetTicket(request: YSweetAuthRequest): Promise<YSweetAuthToken> {
+    const response = await apiInstance.post<YSweetAuthToken>('/ysweet/auth', {
+      ...request,
+      tokenType: 'ticket',
+    });
     return response.data;
   }
 
@@ -55,6 +93,7 @@ export class CanvasService {
       projectId: request.projectId,
       folderId: request.folderId,
       title: request.title || 'Untitled Canvas',
+      tokenType: 'none',
     });
     return response.data;
   }

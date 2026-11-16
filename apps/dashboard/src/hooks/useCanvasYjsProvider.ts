@@ -6,7 +6,8 @@ import { DYNAMIC_HEADERS_CHANGED_EVENT } from '../services/clients/dynamicHeader
 import type { YSweetProvider } from '@y-sweet/client';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
-import { canvasService } from '../services/Canvas/canvasService';
+import { isAxiosError } from 'axios';
+import { canvasService, fetchTicketPerAttempt } from '../services/Canvas/canvasService';
 import type { YSweetAuthToken } from '../services/Canvas/canvasService';
 import { canvasPrefetchService } from '../services/Canvas/canvasPrefetchService';
 import { stopYjsProviderPermanently } from '../services/Canvas/yjsProviderTeardown';
@@ -236,7 +237,8 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     if (authTokenData) {
       const readOnly = authTokenData.authorization === 'read-only';
       permissionReadOnlyRef.current = readOnly;
-      if (providerRef.current) {
+      // While reconnecting, stay read-only. The `connected` handler applies the ref.
+      if (providerRef.current?.status === 'connected') {
         setIsReadOnly(readOnly);
       }
     }
@@ -263,12 +265,19 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     if (errorCountRef.current >= 5) {
       throw new Error('Authentication retry limit reached');
     }
-    const { data, isError, error } = await refetch();
-    if (isError || !data) {
-      throw error || new Error('Failed to refetch auth token');
+    try {
+      const ticket = await canvasService.getYSweetTicket({
+        docId: canvasId,
+        ...(channelId ? { channelId } : {}),
+      });
+      permissionReadOnlyRef.current = ticket.authorization === 'read-only';
+      return ticket;
+    } catch (error) {
+      // Access is gone: the metadata refetch fails too, and the authError effect stops the canvas.
+      if (isAxiosError(error) && error.response?.status === 403) void refetch();
+      throw error;
     }
-    return data;
-  }, [refetch]);
+  }, [canvasId, channelId, refetch]);
 
   useEffect(() => {
     if (prefetchedCanvas?.provider && !prefetchedProviderDestroyedRef.current) {
@@ -380,6 +389,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
       showDebuggerLink: false,
       connect: true,
     });
+    fetchTicketPerAttempt(provider);
 
     providerRef.current = provider;
     setAwareness(provider.awareness);
