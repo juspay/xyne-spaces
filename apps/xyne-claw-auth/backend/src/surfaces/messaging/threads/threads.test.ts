@@ -18,7 +18,8 @@ const planInbound = vi.fn();
 vi.mock("./planner.js", () => ({ planInbound }));
 type Task = { conversationId: string; agentSlug: string; label: string; originMessageId: string; createdAt: number };
 const openTasks = vi.fn(async (..._args: unknown[]): Promise<Task[]> => []);
-vi.mock("./registry.js", () => ({ openTasks, createTask: vi.fn(async () => undefined), taskForReply: vi.fn(async () => null) }));
+const taskForReply = vi.fn(async (..._args: unknown[]): Promise<Task | null> => null);
+vi.mock("./registry.js", () => ({ openTasks, createTask: vi.fn(async () => undefined), taskForReply }));
 
 const { threadsEnabled } = await import("./config.js");
 const { taskConversationId, channelConversationId } = await import("../ids.js");
@@ -124,6 +125,7 @@ describe("handleThreaded", () => {
 
   beforeEach(() => {
     dispatchOrQueueChannelRun.mockClear();
+    planInbound.mockClear();
     isSlotBusy.mockResolvedValue(false);
     openTasks.mockResolvedValue([]);
   });
@@ -167,5 +169,29 @@ describe("handleThreaded", () => {
     expect(first!.task).toContain("only this part of that message: flights to Goa");
     expect(second!.conversationId.startsWith(`${home}-t-`)).toBe(true);
     expect(second!.task).toContain("hotels in Goa");
+  });
+
+  it("routes a quote-reply to the quoted task, carrying the quoted message as context", async () => {
+    taskForReply.mockResolvedValueOnce({
+      conversationId: `${home}-t-abc`,
+      agentSlug: "concierge",
+      label: "flights",
+      originMessageId: "m0",
+      createdAt: 1,
+    });
+    const base = args("summarise this") as unknown as Record<string, unknown>;
+    await handleThreaded({
+      ...base,
+      msg: { ...(base["msg"] as object), replyToSelf: true, replyToMessageId: "wamid.OLD" },
+      contextBlock: "[Message being replied to — context only]\n…\n[End of quoted message]\n",
+    } as never);
+    expect(taskForReply).toHaveBeenCalledWith("acc-1", "chat-1", "wamid.OLD");
+    expect(planInbound).not.toHaveBeenCalled();
+    expect(dispatched()).toEqual([
+      expect.objectContaining({
+        conversationId: `${home}-t-abc`,
+        task: "[Message being replied to — context only]\n…\n[End of quoted message]\nsummarise this",
+      }),
+    ]);
   });
 });

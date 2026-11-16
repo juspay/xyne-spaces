@@ -31,6 +31,7 @@ import type { AnyChannelPlugin, ChannelAccount, ChannelDeliveryTarget, InboundMe
 import { chatIsAnswerable, evaluatePolicy } from "./policy.js";
 import { formatAgentList, namesAnAgent, parseAgentRoute } from "./routing.js";
 import { policyOf } from "./schema.js";
+import { FORWARDED_TASK, renderQuotedContext } from "./quoted-context.js";
 import {
   activeRun,
   handleControlCommand,
@@ -213,6 +214,11 @@ function asAgentRequest(outcome: Extract<AnswerOutcome, { kind: "done" }>): stri
 async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void> {
   const { plugin } = ctx;
   let text = msg.text.trim();
+  // A forwarded message is someone else's words, not this person's request:
+  // it reaches the agent as quoted context, and never as a command, a menu
+  // choice, an answer or an agent's name.
+  let forwardedText = msg.forwarded ? text : "";
+  if (forwardedText) text = "";
 
   // Who sent this, properly. Inside the queue so two quick messages cannot
   // swap places while one of them looks the sender up, and behind the
@@ -329,13 +335,13 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
   if (decision.action === "ignore") {
     // Nobody addressed us, but this is still a room we belong in — keep the
     // line so the next reply knows what was being discussed.
-    if (decision.remember && text) {
+    if (decision.remember && (text || forwardedText)) {
       await rememberGroupMessage({
         accountId: account.id,
         chatId: msg.chatId,
         senderId: msg.senderId,
         ...(msg.senderName ? { senderName: msg.senderName } : {}),
-        text,
+        text: text || `(forwarded) ${forwardedText}`,
         limit: policy.groupHistoryLimit,
       });
     }
@@ -496,7 +502,7 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
 
   // Nothing to do yet — a bare tag or a bare "/slug". Asked before typing
   // starts, since this reply ends nothing that would switch it off again.
-  if (!route.task && !msg.attachments?.length && !msg.loadAttachments) {
+  if (!route.task && !forwardedText && !msg.attachments?.length && !msg.loadAttachments) {
     await reply(`What would you like /${agent.slug} to do?`);
     return;
   }
@@ -539,16 +545,18 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       log.info(`[inbound] transcribed voice note account=${account.id} chars=${spoken.length}`);
     }
   }
+  // A forwarded voice note is someone else speaking: context, like any forward.
+  if (msg.forwarded && spoken) forwardedText = [forwardedText, spoken].filter(Boolean).join("\n");
 
   // Give a captionless attachment something to be a request about, so it does
   // not fall through the "what would you like me to do?" branch below.
   const task =
     route.task ||
-    spoken ||
+    (msg.forwarded && spoken ? FORWARDED_TASK : spoken) ||
     (audio && !spoken ? "(sent a voice note that could not be transcribed)" : "") ||
     (msg.attachments?.length
       ? `(sent ${msg.attachments.map((file) => file.fileName).join(", ")})`
-      : mediaNote || route.task);
+      : mediaNote || (forwardedText ? FORWARDED_TASK : route.task));
   if (!task) {
     await reply(`What would you like /${agent.slug} to do?`);
     return;
@@ -582,7 +590,13 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
   // the conversation for good when the dispatch fails. The run still belongs
   // to this sender.
   const overheard = msg.isGroup && policy.groupHistoryLimit > 0 ? await readGroupContext(account.id, msg.chatId) : [];
-  const contextBlock = renderGroupContext(overheard);
+  // What they replied to or forwarded, so "summarise this" has a "this".
+  const contextBlock =
+    renderGroupContext(overheard) +
+    renderQuotedContext({
+      ...(msg.quotedMessage ? { quoted: msg.quotedMessage } : {}),
+      ...(forwardedText ? { forwardedText } : {}),
+    });
 
   // The threaded path (WhatsApp with the flag on) runs linked tasks in this
   // chat concurrently instead of one at a time. Every other surface, and

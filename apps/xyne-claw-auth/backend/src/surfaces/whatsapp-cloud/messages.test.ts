@@ -78,3 +78,43 @@ describe("parseCloudWebhook forms", () => {
     expect(parseCloudWebhook(flowReply(JSON.stringify({ q0_one: "1" })))).toEqual([]);
   });
 });
+
+describe("parseCloudWebhook replies and forwards", () => {
+  it("keeps reply routing and marks the quote, whose text Meta does not send", () => {
+    const [msg] = parseCloudWebhook(
+      wrap({ ...base, type: "text", text: { body: "summarise this" }, context: { from: "15550002222", id: "wamid.OLD" } }),
+    );
+    expect(msg).toMatchObject({ text: "summarise this", replyToSelf: true, replyToMessageId: "wamid.OLD" });
+    expect(msg?.quotedMessage).toEqual({ text: "" });
+    expect(msg?.forwarded).toBeUndefined();
+  });
+
+  it("flags a forwarded message, which carries no quoted id", () => {
+    const [msg] = parseCloudWebhook(wrap({ ...base, type: "text", text: { body: "fwd text" }, context: { forwarded: true } }));
+    expect(msg).toMatchObject({ forwarded: true, replyToSelf: false });
+    expect(msg?.quotedMessage).toBeUndefined();
+    const [often] = parseCloudWebhook(
+      wrap({ ...base, type: "text", text: { body: "fwd text" }, context: { frequently_forwarded: true } }),
+    );
+    expect(often?.forwarded).toBe(true);
+  });
+
+  it("does not treat a button tap on our card as a reply about something", () => {
+    const [msg] = parseCloudWebhook(
+      wrap({
+        ...base,
+        type: "interactive",
+        interactive: { type: "button_reply", button_reply: { id: "opt-1", title: "Approve" } },
+        context: { from: "15550002222", id: "wamid.CARD" },
+      }),
+    );
+    expect(msg).toMatchObject({ cardReplyId: "opt-1", replyToMessageId: "wamid.CARD" });
+    expect(msg?.quotedMessage).toBeUndefined();
+  });
+
+  it("carries nothing extra for a plain message", () => {
+    const [msg] = parseCloudWebhook(wrap({ ...base, type: "text", text: { body: "hi" } }));
+    expect(msg?.quotedMessage).toBeUndefined();
+    expect(msg?.forwarded).toBeUndefined();
+  });
+});

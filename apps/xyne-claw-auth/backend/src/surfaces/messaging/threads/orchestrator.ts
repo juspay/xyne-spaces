@@ -39,7 +39,8 @@ export interface ThreadedInboundArgs {
   msg: InboundMessage;
   /** The resolved request text (transcript / caption / typed), no context. */
   rawTask: string;
-  /** Group overheard lines, prepended to each dispatch as today. */
+  /** Group overheard lines and the quoted/forwarded message, prepended to
+   *  each dispatch. */
   contextBlock: string;
   /** The base delivery target built by inbound.ts (chat, quoted = this msg). */
   target: ChannelDeliveryTarget;
@@ -82,7 +83,9 @@ export async function handleThreaded(args: ThreadedInboundArgs): Promise<{ accep
   if (msg.replyToSelf) {
     const existing = await taskForReply(accountId, chatId, msg.replyToMessageId);
     if (existing) {
-      const accepted = await dispatchTask(args, existing.conversationId, existing.label, rawTask);
+      // With its context: the quoted message is the point of a quote-reply,
+      // and the overheard lines are consumed once this is accepted.
+      const accepted = await dispatchTask(args, existing.conversationId, existing.label, `${contextBlock}${rawTask}`);
       return { accepted };
     }
   }

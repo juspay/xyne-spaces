@@ -43,8 +43,9 @@ interface CloudMessage {
      *  the flow_token we sent plus the form's `complete` payload. */
     nfm_reply?: { name?: string; body?: string; response_json?: string };
   };
-  /** Present when the user replied to one of our messages. */
-  context?: { id?: string; from?: string };
+  /** A reply carries the quoted message's `id` (never its text); a forward
+   *  carries `forwarded` / `frequently_forwarded` and no id. */
+  context?: { id?: string; from?: string; forwarded?: boolean; frequently_forwarded?: boolean };
 }
 
 /** What the plugin needs to go and fetch a message's file. Mirrors the
@@ -169,6 +170,8 @@ export function parseCloudWebhook(payload: unknown): CloudInbound[] {
         if (!text && !cardReplyId && !formReply && !media) continue;
         const name = names.get(from);
         const timestamp = Number(messageRaw.timestamp);
+        const quotedId = messageRaw.context?.id;
+        const forwarded = messageRaw.context?.forwarded === true || messageRaw.context?.frequently_forwarded === true;
 
         out.push({
           ...(media ? { media } : {}),
@@ -181,8 +184,15 @@ export function parseCloudWebhook(payload: unknown): CloudInbound[] {
           text,
           mentionedSelf: false,
           // Any quoted message in a business chat is one we sent.
-          replyToSelf: Boolean(messageRaw.context?.id),
-          ...(messageRaw.context?.id ? { replyToMessageId: messageRaw.context.id } : {}),
+          replyToSelf: Boolean(quotedId),
+          ...(quotedId ? { replyToMessageId: quotedId } : {}),
+          // Meta sends only the quoted message's id, and nothing here stores
+          // message text by id, so the agent is told it is a reply without
+          // being told to what. Its own earlier replies are in its history. A
+          // tap or a form submission also carries the card's id; that is an
+          // answer, not a reply about something.
+          ...(quotedId && !cardReplyId && !formReply ? { quotedMessage: { text: "" } } : {}),
+          ...(forwarded ? { forwarded: true } : {}),
           fromSelf: false,
           ref: { chatId: from, messageId: id },
           ...(cardReplyId ? { cardReplyId } : {}),

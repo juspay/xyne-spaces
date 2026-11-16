@@ -482,6 +482,11 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
           }
           labelMentions(inbound, labels);
         }
+        // Name whoever wrote the quoted message, the way mentions are named.
+        if (inbound.quotedMessage && inbound.quotedAuthorJid) {
+          const author = await mentionLabel(handle, inbound.isGroup ? inbound.chatId : null, inbound.quotedAuthorJid);
+          if (author) inbound.quotedMessage.author = author;
+        }
         await ctx.onInbound(inbound);
       })().catch((err) => ctx.logger.warn(`[whatsapp] inbound handling failed: ${errMsg(err)}`));
     }
