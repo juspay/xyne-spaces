@@ -47,11 +47,16 @@ vi.mock("../repositories/index.js", () => ({
     }),
     update: vi.fn(async (id: string, orgId: string, input: Record<string, any>) => {
       const row = state.systems.find((s) => s["id"] === id && s["orgId"] === orgId);
-      if (!row) return null;
+      if (!row) return { status: "not-found" };
+      // Mirrors the real optimistic-concurrency guard, so an ACL test cannot
+      // pass by accident on a path the repository would have refused.
+      if (input["expectedVersion"] !== undefined && input["expectedVersion"] !== row["version"]) {
+        return { status: "conflict", currentVersion: row["version"] };
+      }
       for (const [key, value] of Object.entries(input)) {
         if (value !== undefined) row[key] = value;
       }
-      return row;
+      return { status: "updated", row };
     }),
     remove: vi.fn(async (id: string, orgId: string) => {
       const index = state.systems.findIndex((s) => s["id"] === id && s["orgId"] === orgId);

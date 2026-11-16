@@ -70,7 +70,36 @@ export interface SkillDiff {
   removed: number;
   /** True when the two contents differ after normalization. */
   hasChanges: boolean;
+  /**
+   * Set when the inputs were too large to diff line-by-line, in which case
+   * `unified`, `hunks`, `added` and `removed` carry no detail — only
+   * `hasChanges` and the line counts below are meaningful. A caller that shows
+   * a diff must say so rather than render an empty one.
+   */
+  tooLarge?: boolean;
+  /** Line count on each side. Always present; the only figures that survive
+   *  `tooLarge`. */
+  oldLineCount: number;
+  newLineCount: number;
 }
+
+/**
+ * Cells in the LCS table, past which the full diff is refused.
+ *
+ * `lcsEditScript` fills an (n+1)×(m+1) table of numbers, so time and memory
+ * grow with the PRODUCT of the two line counts. Measured on this
+ * implementation, diffing two files of N lines each:
+ *
+ *   1,000 lines →  10 ms,  89 MB      4,000 lines → 130 ms, 234 MB
+ *   2,000 lines →  36 ms, 127 MB      8,000 lines → 518 ms, 614 MB
+ *
+ * This runs synchronously in a request, so an unbounded table is a way for one
+ * save to stall a pod and exhaust its memory — and the design-system routes
+ * accept 64k characters of token CSS, which is tens of thousands of short
+ * lines. 4M cells is 2000×2000: about 36 ms and well inside any real DESIGN.md,
+ * tokens.css or skill file, while refusing the pathological ones.
+ */
+export const MAX_DIFF_CELLS = 4_000_000;
 
 type EditOp = { kind: "eq" | "add" | "del"; line: string };
 
@@ -124,11 +153,26 @@ export function computeSkillDiff(
   const context = Math.max(0, opts?.context ?? 3);
   const oldNorm = normalizeSkillContent(oldContent);
   const newNorm = normalizeSkillContent(newContent);
-  if (oldNorm === newNorm) {
-    return { unified: "", hunks: [], added: 0, removed: 0, hasChanges: false };
-  }
   const oldLines = oldNorm.length ? oldNorm.split("\n") : [];
   const newLines = newNorm.length ? newNorm.split("\n") : [];
+  const counts = { oldLineCount: oldLines.length, newLineCount: newLines.length };
+  if (oldNorm === newNorm) {
+    return { unified: "", hunks: [], added: 0, removed: 0, hasChanges: false, ...counts };
+  }
+  // Refused BEFORE the table is allocated. See MAX_DIFF_CELLS: the cost is the
+  // product of the two line counts, so this is the only place it can be
+  // stopped cheaply.
+  if ((oldLines.length + 1) * (newLines.length + 1) > MAX_DIFF_CELLS) {
+    return {
+      unified: `@@ diff skipped @@ ${oldLines.length} → ${newLines.length} lines, too large to compare line by line`,
+      hunks: [],
+      added: 0,
+      removed: 0,
+      hasChanges: true,
+      tooLarge: true,
+      ...counts,
+    };
+  }
   const ops = lcsEditScript(oldLines, newLines);
 
   let added = 0;
@@ -213,7 +257,7 @@ export function computeSkillDiff(
       })),
     });
   }
-  return { unified: out.join("\n"), hunks: structured, added, removed, hasChanges: true };
+  return { unified: out.join("\n"), hunks: structured, added, removed, hasChanges: true, ...counts };
 }
 
 /**

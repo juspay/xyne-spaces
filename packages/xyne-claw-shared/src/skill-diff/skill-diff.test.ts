@@ -4,6 +4,7 @@ import {
   hashSkillContent,
   skillHashEquals,
   computeSkillDiff,
+  MAX_DIFF_CELLS,
   formatSkillDiffForCard,
   resolveSkillUpdateApprover,
   authorizeSkillUpdateApproval,
@@ -181,5 +182,55 @@ describe("authorizeSkillFileUpdate", () => {
   });
   it("allows an admin even when the skill has no owner", () => {
     expect(authorizeSkillFileUpdate({ ownerUserId: null, callerUserId: "admin", callerIsAdmin: true })).toEqual({ ok: true });
+  });
+});
+
+describe("computeSkillDiff size guard", () => {
+  const file = (lines: number, token: string): string =>
+    Array.from({ length: lines }, (_, i) => `line ${i} ${token}`).join("\n");
+
+  it("refuses a table larger than MAX_DIFF_CELLS and says so", () => {
+    // The LCS table is (n+1)×(m+1) numbers, so cost grows with the PRODUCT of
+    // the line counts. Unguarded, 8k lines a side measured 518ms and 614MB in
+    // a request — one save could stall a pod.
+    const lines = 2_500;
+    expect((lines + 1) * (lines + 1)).toBeGreaterThan(MAX_DIFF_CELLS);
+
+    const started = Date.now();
+    const diff = computeSkillDiff(file(lines, "a"), file(lines, "b"));
+
+    expect(diff.tooLarge).toBe(true);
+    expect(diff.hasChanges).toBe(true);
+    expect(diff.oldLineCount).toBe(lines);
+    expect(diff.newLineCount).toBe(lines);
+    // No per-line detail is claimed, because none was computed.
+    expect(diff.hunks).toEqual([]);
+    expect(diff.added).toBe(0);
+    expect(diff.removed).toBe(0);
+    expect(diff.unified).toContain("too large to compare line by line");
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("still diffs a file comfortably under the limit", () => {
+    // The guard must not degrade a real skill or DESIGN.md.
+    const diff = computeSkillDiff(file(1_500, "a"), file(1_500, "b"));
+    expect(diff.tooLarge).toBeUndefined();
+    expect(diff.added).toBe(1_500);
+    expect(diff.removed).toBe(1_500);
+    expect(diff.hunks.length).toBeGreaterThan(0);
+  });
+
+  it("reports line counts on an ordinary diff too", () => {
+    const diff = computeSkillDiff("a\nb", "a\nb\nc");
+    expect(diff.oldLineCount).toBe(2);
+    expect(diff.newLineCount).toBe(3);
+    expect(diff.tooLarge).toBeUndefined();
+  });
+
+  it("reports line counts when the two sides are identical", () => {
+    const diff = computeSkillDiff("a\nb", "a\nb");
+    expect(diff.hasChanges).toBe(false);
+    expect(diff.oldLineCount).toBe(2);
+    expect(diff.newLineCount).toBe(2);
   });
 });
