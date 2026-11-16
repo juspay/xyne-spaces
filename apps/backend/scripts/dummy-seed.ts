@@ -99,7 +99,7 @@ async function main() {
       const org2 = await tx.organization.create({
         data: {
           orgId: generateId(),
-          name: 'Xyne Innovations',
+          name: 'Acme Innovations',
           description: 'Payment solutions company',
           createdBy: 'system',
           metadata: { industry: 'FinTech', website: 'https://example.com' }

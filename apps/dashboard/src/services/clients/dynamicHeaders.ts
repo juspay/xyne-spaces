@@ -72,7 +72,7 @@ function commonCookieDomain(): string | null {
     common.push(first[i]);
   }
   if (common.length === 1 && common[0] === 'localhost') return 'localhost';
-  // Never a bare registrable domain (e.g. juspay.net): the cookie would reach every sibling app.
+  // Never a bare registrable domain (e.g. example.net): the cookie would reach every sibling app.
   if (common.length < 3) return null;
   return common.reverse().join('.');
 }

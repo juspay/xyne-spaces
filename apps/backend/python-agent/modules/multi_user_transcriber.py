@@ -560,13 +560,13 @@ class MultiUserTranscriber:
 
         # Define domain-specific hot words to bias the STT engine
         hot_words = [
-            "Xyne Calls", "Namma Cloud", "Xyne Chats",
+            "Xyne Calls", "Xyne Chats",
             "Xyne Tickets", "Xyne Support",
-            "Namma Yatri", "Xyne Spaces", "Xyne Code",
-            "Xyne Training", "Namma Bengaluru", "Xyne Automatic",
+            "Xyne Spaces", "Xyne Code",
+            "Xyne Training", "Xyne Automatic",
             "Xyne AI",
-            "Xyne Assistant", "Namma Shuttle", "Xyne Agent",
-            "Xyne Bot", "Namma Switch",
+            "Xyne Assistant", "Xyne Agent",
+            "Xyne Bot",
         ]
 
         multi_language = len(language_codes) > 1
@@ -652,13 +652,13 @@ class MultiUserTranscriber:
             elif selected_model == "deepgram" and self._deepgram_api_key:
                 # Domain-specific hot words shared with Google STT adaptation
                 hot_words = [
-                    "Xyne Calls", "Namma Cloud", "Xyne Chats",
+                    "Xyne Calls", "Xyne Chats",
                     "Xyne Tickets", "Xyne Support",
-                    "Namma Yatri", "Xyne Spaces", "Xyne Code",
-                    "Xyne Training", "Namma Bengaluru", "Xyne Automatic",
+                    "Xyne Spaces", "Xyne Code",
+                    "Xyne Training", "Xyne Automatic",
                     "Xyne AI",
-                    "Xyne Assistant", "Namma Shuttle", "Xyne Agent",
-                    "Xyne Bot", "Namma Switch",
+                    "Xyne Assistant", "Xyne Agent",
+                    "Xyne Bot",
                 ]
                 # Nova-3 uses keyterms (plain strings); older models use keywords (word, boost) tuples.
                 # detect_language=True is incompatible with streaming mode and with keyterms —
@@ -696,7 +696,7 @@ class MultiUserTranscriber:
                     self._shared_stt = resilient_stt
             else:
                 logger.info("[STT] Using Azure OpenAI Whisper")
-                stt_prompt = "Technical terms: Xyne Calls, Namma Cloud, Xyne Chats, Xyne Tickets, Xyne Support, Namma Yatri, Xyne Spaces, Xyne Code, Xyne Training, Namma Bengaluru, Xyne Automatic, Xyne AI, Xyne Assistant, Namma Shuttle, Xyne Agent, Xyne Bot, Namma Switch."
+                stt_prompt = "Technical terms: Xyne Calls, Xyne Chats, Xyne Tickets, Xyne Support, Xyne Spaces, Xyne Code, Xyne Training, Xyne Automatic, Xyne AI, Xyne Assistant, Xyne Agent, Xyne Bot."
                 inner_stt = openai.STT.with_azure(
                     azure_endpoint=self._azure_endpoint,
                     azure_deployment=self._azure_deployment,
