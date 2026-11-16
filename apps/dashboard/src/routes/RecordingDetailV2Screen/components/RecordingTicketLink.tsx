@@ -7,6 +7,7 @@ import type { SelectorOption } from '../../../components/ui/EntitySelector/Entit
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useTicketSearchIds } from '../../../hooks/useTicketSearchIds';
 import { queries } from '../../../zero/queries';
 
 export interface RecordingTicketLinkProps {
@@ -36,9 +37,9 @@ const CHIP_CLASS_NAME =
  * Links a recording to exactly one ticket. `EntitySelector`'s `selectedValue` is a
  * single id, so "only one" is a contract rather than a convention.
  *
- * Candidates come from `ticketsSearch`, not Vespa: it is live, matches xyneId and
- * title, and is already scoped by `TicketsACL`, so the picker cannot surface a
- * ticket the viewer has no access to.
+ * Vespa matches the search term; the rows come from `ticketsSearch`, which is
+ * scoped by `TicketsACL`, so the picker cannot surface a ticket the viewer has no
+ * access to.
  */
 export function RecordingTicketLink({
   linkedTicketId,
@@ -52,13 +53,14 @@ export function RecordingTicketLink({
 
   // Only while the picker is open — an unopened dropdown shouldn't hold a live
   // query over the workspace's tickets.
-  const [searchResults] = useCachedQuery(
-    queries.ticketsSearch({
-      search: debouncedSearch.trim() || undefined,
-      limit: TICKET_SEARCH_LIMIT,
-    }),
-    { enabled: canEdit && isOpen },
+  const { ticketIds, isSearching } = useTicketSearchIds(debouncedSearch, {
+    enabled: canEdit && isOpen,
+  });
+  const [searchRows] = useCachedQuery(
+    queries.ticketsSearch({ ticketIds, limit: TICKET_SEARCH_LIMIT }),
+    { enabled: canEdit && isOpen && !isSearching },
   );
+  const searchResults = isSearching ? undefined : searchRows;
 
   const [linkedRows, linkedRowsDetails] = useCachedQuery(
     queries.ticketsByIds({ ticketIds: linkedTicketId ? [linkedTicketId] : [] }),
@@ -195,7 +197,7 @@ export function RecordingTicketLink({
       onSearchChange={setSearch}
       // The query starts with the popover, so the first frame has no rows yet.
       isLoading={isOpen && !searchResults}
-      // `ticketsSearch` already filtered server-side; doing it again would hide
+      // Vespa already matched the term server-side; doing it again would hide
       // rows the server deliberately returned.
       disableClientFiltering
       showIndicator={false}

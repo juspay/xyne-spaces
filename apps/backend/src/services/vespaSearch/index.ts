@@ -1098,6 +1098,23 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+/** Ids of the tickets the user can see whose indexed text matches `query`, best match first. */
+export const searchTicketIds = async (
+  query: string,
+  user: { id: string; workspaceId: string },
+  limit: number,
+): Promise<string[]> => {
+  const results = await vespaService.searchService.searchVespa(query, user.id, ['ticket'], {
+    limit,
+    groupBy: '',
+    workspaceId: user.workspaceId,
+  });
+  const { hits = [] } = parseVespaResults(results.root.children || []);
+  return hits
+    .map((hit: VespaSearchHit) => hit.fields?.docId)
+    .filter((id): id is string => typeof id === 'string');
+};
+
 // Export vespa service and client for other uses
 export { vespaService };
 export const vespaClient = vespaService.vespaClient;

@@ -293,14 +293,14 @@ const ticketsList: ToolDef = {
 const ticketsSearch: ToolDef = {
 	name: "spaces_tickets_search",
 	description:
-		"Find Xyne Spaces tickets by ticket key or title. Matches a substring of the human key (e.g. 'PLAT-12') or of " +
+		"Find Xyne Spaces tickets by ticket key or title. Matches the human key (e.g. 'PLAT-12') or words in " +
 		"the title, across every project you can see. This is the quickest way to turn 'the refund timeout ticket' or " +
 		"'PLAT-1234' into a ticket id. It matches titles and keys only — to search ticket bodies and comments use " +
 		"spaces_search with type ['tickets'], and to list a board or a person's queue use spaces_tickets_list.",
 	inputSchema: {
 		type: "object",
 		properties: {
-			query: { type: "string", description: "Substring of the ticket key or title. Omit to get the most recent tickets." },
+			query: { type: "string", description: "Ticket key or words from the title. Omit to get the most recent tickets." },
 			limit: { type: "number", minimum: 1, maximum: 100, default: 20, description: "Max tickets (default 20, max 100)." },
 		},
 		additionalProperties: false,
