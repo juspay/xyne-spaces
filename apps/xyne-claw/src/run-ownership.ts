@@ -140,7 +140,7 @@ function getClient(): Redis | null {
       host,
       port: Number(process.env["REDIS_PORT"] ?? 6379),
       ...(process.env["REDIS_PASSWORD"] ? { password: process.env["REDIS_PASSWORD"] } : {}),
-      ...(process.env["REDIS_TLS"] ? { tls: { rejectUnauthorized: false } } : {}),
+      ...(/^(1|true|yes)$/i.test(process.env["REDIS_TLS"] ?? "") ? { tls: { rejectUnauthorized: false } } : {}),
       connectTimeout: 3_000,
       maxRetriesPerRequest: 1,
     });

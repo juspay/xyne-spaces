@@ -182,6 +182,28 @@ export function ReviewPanel({ userId, refreshKey, onApproved, onBackfill, onUplo
             No proposals pending. Run a backfill or upload a&nbsp;.md file to generate new ones.
           </p>
         </div>
+        {(onBackfill || onUpload) && (
+          <div className="mt-[4px] flex items-center gap-[6px]">
+            {onBackfill && (
+              <button
+                onClick={onBackfill}
+                className="flex items-center gap-[5px] rounded-full border border-xyne-border bg-xyne-surface px-[10px] py-[4px] text-[11px] text-xyne-fg-tertiary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+              >
+                <ArrowsClockwiseIcon size={12} weight="duotone" />
+                Backfill history
+              </button>
+            )}
+            {onUpload && (
+              <button
+                onClick={onUpload}
+                className="flex items-center gap-[5px] rounded-full border border-xyne-border bg-xyne-surface px-[10px] py-[4px] text-[11px] text-xyne-fg-tertiary shadow-sm transition hover:bg-xyne-surface-sunken hover:text-xyne-fg-primary"
+              >
+                <UploadSimpleIcon size={12} weight="duotone" />
+                Upload .md
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   }

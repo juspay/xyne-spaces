@@ -57,6 +57,27 @@ fails with `Connection error.` in the claw log and `getaddrinfo ENOTFOUND litell
 claw-auth signs in with the same Google client as the backend. Long-term memory across sessions
 is a separate feature: [memory.md](memory.md).
 
+### Spaces database access
+
+claw-auth reads the user's live Spaces session from the Spaces database to act as that user:
+downloading message attachments, answering Digital Twin mentions, and Spaces tools. Without it,
+attachments arrive as "could not be downloaded" and Twin mentions are skipped with
+`no resolvable workspaceId`. Give it a read-only role on the Spaces database:
+
+```sql
+CREATE ROLE claw_readonly WITH LOGIN PASSWORD '…';
+GRANT CONNECT ON DATABASE <spaces db> TO claw_readonly;
+GRANT USAGE ON SCHEMA public, workflow TO claw_readonly;
+GRANT SELECT ON public.users, workflow.user_sessions, public.installed_apps, public.apps,
+  public.channels, public.channel_participants, public.user_groups TO claw_readonly;
+```
+
+and its URL in `02-platform.secrets.tfvars`, inside `app_secrets`:
+
+```hcl
+spaces_db_url = "postgresql://claw_readonly:…@<host>:5432/<spaces db>?sslmode=require"
+```
+
 ## Turn on sandboxes
 
 Sandboxes need nodes that can run virtual machines:

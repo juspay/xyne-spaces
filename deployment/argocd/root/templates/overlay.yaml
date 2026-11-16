@@ -4,8 +4,15 @@
 {{- $source = include "xyne-root.helmSource" (dict "root" $ "repoURL" $s.repoURL "chart" $s.chart "targetRevision" ($s.chartVersion | default $s.targetRevision) "releaseName" $s.name "values" ($s.helmValues | default "" | fromYaml)) | fromYaml }}
 {{- else }}
 {{- $source = dict "repoURL" $s.repoURL "targetRevision" ($s.targetRevision | default "main") "path" $s.path }}
-{{- if $s.helmValues }}
-{{- $_ := set $source "helm" (dict "releaseName" $s.name "values" $s.helmValues) }}
+{{- if or $s.helmValues $s.valueFiles }}
+{{- $helm := dict "releaseName" $s.name }}
+{{- with $s.valueFiles }}
+{{- $_ := set $helm "valueFiles" . }}
+{{- end }}
+{{- with $s.helmValues }}
+{{- $_ := set $helm "values" . }}
+{{- end }}
+{{- $_ := set $source "helm" $helm }}
 {{- end }}
 {{- end }}
 {{- include "xyne-root.application" (dict "root" $ "name" $s.name "namespace" ($s.namespace | default $.Values.global.namespace) "wave" 2 "source" $source) }}
