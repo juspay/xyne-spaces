@@ -1,8 +1,9 @@
 import { logger } from '@/utils/logger';
 import { AgentsConfig } from '@/agents/config';
 import { askDecision } from '@/services/decision/ask';
+import { answerConfidence } from '@/services/decision/engines';
 import { isDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
-import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
+import type { ChoiceQuestion, AskFailure, DecisionAnswer } from '@/services/decision/types';
 import type { CategoryConfig, GeneratedTag } from '../types';
 import { validateGeneratedTags } from './validate';
 
@@ -52,9 +53,15 @@ export async function generateJevTags(
   const answers = await askDecision('desk_tags', context, questions, SHADOW_TIMEOUT_MS, undefined, { partial: true });
   if (!answers) return null;
   const raw = Object.entries(answers).flatMap(([category, a]) =>
-    a.type === 'choice' ? [{ category, tag: a.choice, reason: 'Chosen by Jev' }] : [],
+    a.type === 'choice' ? [{ category, tag: a.choice, reason: jevReason(a) }] : [],
   );
   return validateGeneratedTags(raw, categories);
+}
+
+/** Jev returns no text, so the reason is how sure it was. */
+function jevReason(a: DecisionAnswer): string {
+  const sure = answerConfidence(a);
+  return sure === undefined ? 'Chosen by Jev' : `Jev · ${Math.round(sure * 100)}% confident`;
 }
 
 export async function runShadowTagGeneration(

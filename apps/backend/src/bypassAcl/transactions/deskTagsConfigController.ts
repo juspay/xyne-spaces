@@ -6,7 +6,7 @@ import { TagMethod } from '@xyne/shared';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 
-export function addDeskEmailTagTx(emailId: string, category: string, tag: any, catConfig: any, workspaceId: string, configKey: string, userId: string) {
+export function addDeskEmailTagTx(emailId: string, category: string, tag: any, catConfig: any, workspaceId: string, configKey: string, userId: string, reason: string | null) {
   return transaction(['Tag'], 'addDeskEmailTag: advisory lock plus duplicate check and tag insert must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     await advisoryXactLock(tx, ['Tag'],
       'desk tags: serialize concurrent manual tag adds for the same entity+category',
@@ -43,6 +43,7 @@ export function addDeskEmailTagTx(emailId: string, category: string, tag: any, c
         tagCategory: category,
         tag,
         method: TagMethod.MANUAL,
+        reason,
         createdBy: userId,
         updatedBy: userId,
         createdAt: new Date(),

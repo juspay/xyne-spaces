@@ -297,9 +297,11 @@ export const TagEditorContent = ({
 export const EntityTagsBadge = ({
   sourceType,
   sourceId,
+  onClose,
 }: {
   sourceType: string;
   sourceId: string;
+  onClose?: (() => void) | undefined;
 }): JSX.Element => {
   const [open, setOpen] = useState(false);
 
@@ -328,7 +330,10 @@ export const EntityTagsBadge = ({
     <Popover
       trigger={trigger}
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={next => {
+        setOpen(next);
+        if (!next) onClose?.();
+      }}
       side='bottom'
       align='end'
       sideOffset={6}
