@@ -82,11 +82,6 @@ ENV VITE_POSTHOG_KEY=${VITE_POSTHOG_KEY}
 ARG VITE_POSTHOG_HOST=""
 ENV VITE_POSTHOG_HOST=${VITE_POSTHOG_HOST}
 
-# Client-manifest signing public keys (JSON array), injected at build time from a CI
-# secret. Public keys, so being in the bundle is fine; they are never in git.
-ARG VITE_ENC_MANIFEST_TRUSTED_KEYS=""
-ENV VITE_ENC_MANIFEST_TRUSTED_KEYS=${VITE_ENC_MANIFEST_TRUSTED_KEYS}
-
 # Default workspace ID
 ENV VITE_DEFAULT_WORKSPACE_ID=6642623f-cca7-43ad-9a6b-5e49c33226b4
 

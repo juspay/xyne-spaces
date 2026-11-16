@@ -7,7 +7,7 @@ import type {
   SignedClientManifestPayload,
 } from '../enc-contracts/manifest.js';
 import { getCryptoLogger } from './crypto-logger.js';
-import { getTrustedManifestKeys } from './manifest-keys.js';
+import { isEncSigningRequired } from './enc-signing-keys.js';
 import {
   ManifestVerificationError,
   getAllowedManifestEnvironments,
@@ -168,20 +168,18 @@ async function restoreStoredManifest(tag: string): Promise<SignedClientManifestP
 }
 
 /**
- * Which manifest to use from a server response. Until trusted keys are built into the
- * app (rollout), the unsigned manifest is used as before. Once any key is trusted, only
- * a verified envelope counts; otherwise the last verified stored copy, or none, in which
- * case requests fall back to encrypting every field (over-encryption is the safe side).
+ * Unsigned manifest only while no manifest key is published; otherwise only a verified
+ * envelope, else the last verified copy, else none (encrypt-all).
  */
 async function resolveManifest(
   data: { clientManifest?: ClientEncryptionManifest | null; signedManifest?: SignedClientManifest | null },
   tag: string,
 ): Promise<ClientEncryptionManifest | null> {
-  if (getTrustedManifestKeys().length === 0) {
+  if ((await isEncSigningRequired('manifest')) === false) {
     if (!warnedUnsigned) {
       warnedUnsigned = true;
       getCryptoLogger().warn(Event.ENCRYPTION_MANIFEST_REJECTED, {
-        message: '[encryptionlog] No trusted manifest keys configured; using the unsigned manifest',
+        message: '[encryptionlog] No manifest signing key published; using the unsigned manifest',
         reason: 'unsigned_rollout',
       });
     }
@@ -216,7 +214,7 @@ export function refreshClientManifest(tag = 'default'): Promise<ClientEncryption
       });
     } catch (error) {
       // Offline: keep working from the last verified copy, if it has not expired.
-      const restored = getTrustedManifestKeys().length > 0 ? await restoreStoredManifest(tag) : null;
+      const restored = (await isEncSigningRequired('manifest')) !== false ? await restoreStoredManifest(tag) : null;
       if (restored) {
         currentManifest = restored;
         return currentManifest;

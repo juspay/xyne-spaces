@@ -1,5 +1,9 @@
-import { noteClientManifestLaneChanged, setAllowedManifestEnvironments } from '@xyne/shared';
-import { isLocalhost, isSandBox, isSandboxLocal, isTestEnv } from '../config';
+import {
+  noteClientManifestLaneChanged,
+  setAllowedManifestEnvironments,
+  setEncSigningKeysUrl,
+} from '@xyne/shared';
+import { isLocalhost, isSandBox, isSandboxLocal, isTestEnv, VITE_ZERO_SERVER } from '../config';
 import { DYNAMIC_HEADERS_CHANGED_EVENT } from './clients/dynamicHeaders';
 
 /**
@@ -26,6 +30,8 @@ function acceptedManifestEnvironments(): string[] {
  * comes first).
  */
 export function setupEncryptionManifestEnvironment(): void {
+  // Signing keys are served by the encryption service on the Zero origin.
+  setEncSigningKeysUrl(`${VITE_ZERO_SERVER}/.well-known/enc-signing-keys.json`);
   setAllowedManifestEnvironments(acceptedManifestEnvironments());
   window.addEventListener(DYNAMIC_HEADERS_CHANGED_EVENT, () => noteClientManifestLaneChanged());
 }

@@ -35,16 +35,22 @@ export {
 export type { FieldEncryptor, RuleViolation } from './manifest-encrypt.js';
 export type { ClientManifestStorage } from './client-manifest.js';
 export {
-  registerTrustedManifestKeys,
-  getTrustedManifestKeys,
-  parseTrustedManifestKeys,
-} from './manifest-keys.js';
-export type { TrustedManifestKey } from './manifest-keys.js';
+  loadEncSigningKeys,
+  isEncSigningRequired,
+  verifyEncSignature,
+  setEncSigningKeysUrl,
+  setEncSignatureVerifier,
+} from './enc-signing-keys.js';
+export type {
+  EncSigningPurpose,
+  EncSigningJwk,
+  EncSignatureVerifier,
+  EncSignatureResult,
+} from './enc-signing-keys.js';
 export {
   verifySignedClientManifest,
-  setManifestSignatureVerifier,
   setAllowedManifestEnvironments,
   getAllowedManifestEnvironments,
   ManifestVerificationError,
 } from './manifest-verify.js';
-export type { ManifestSignatureVerifier, ManifestRejectReason } from './manifest-verify.js';
+export type { ManifestRejectReason } from './manifest-verify.js';

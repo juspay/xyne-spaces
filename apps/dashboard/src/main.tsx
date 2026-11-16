@@ -7,7 +7,6 @@ import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReporting } from './bootstrap/errorReporting';
 import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';
 import { logger, Event } from './utils/logger';
-import { parseTrustedManifestKeys, registerTrustedManifestKeys } from '@xyne/shared';
 import { setupEncryptionManifestEnvironment } from './services/encryptionManifestEnvironment';
 
 // Expose app version to window for Electron access
@@ -15,13 +14,7 @@ window.__APP_VERSION__ = __APP_VERSION__;
 
 installErrorReporting();
 
-// Manifest signing keys trusted by this build: JSON array of { kid, environments?, spki }
-// from the build-time env (a CI secret; a local key in development). Never in source and
-// never fetched from the backend. None set = unsigned manifest (rollout).
-registerTrustedManifestKeys(
-  parseTrustedManifestKeys(import.meta.env.VITE_ENC_MANIFEST_TRUSTED_KEYS),
-);
-// Which manifest environments this build accepts, and refetch on a prod <-> pre-prod move.
+// Manifest signing keys URL, accepted environments, refetch on prod <-> pre-prod moves.
 setupEncryptionManifestEnvironment();
 
 // Register Service Worker for docs preview and push notifications
