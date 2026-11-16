@@ -13,8 +13,9 @@ window.__APP_VERSION__ = __APP_VERSION__;
 
 installErrorReporting();
 
-// Manifest signing keys for this build (e.g. a local development key), on top of the
-// ones built into @xyne/shared. Build-time only: never fetched from the backend.
+// Manifest signing keys trusted by this build: JSON array of { kid, environments?, spki }
+// from the build-time env (a CI secret; a local key in development). Never in source and
+// never fetched from the backend. None set = unsigned manifest (rollout).
 registerTrustedManifestKeys(
   parseTrustedManifestKeys(import.meta.env.VITE_ENC_MANIFEST_TRUSTED_KEYS),
 );

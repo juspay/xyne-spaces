@@ -1,10 +1,15 @@
 /**
  * Public keys this client trusts to sign the client encryption manifest.
  *
- * They are built into the app and never fetched: the backend relays the manifest, so a
- * key it served could just as well be its own. One encryption service signs for every
- * environment, so a key may list the environments it is valid for; which environments a
- * client accepts at all is set separately (setAllowedManifestEnvironments).
+ * No key is kept in source. The app registers them at boot from its build-time env
+ * (the dashboard: VITE_ENC_MANIFEST_TRUSTED_KEYS, set by the CI build from a secret), so
+ * they end up in the built bundle, which is fine for public keys. They are never fetched:
+ * the backend relays the manifest, so a key it served could just as well be its own.
+ * With no key registered the client stays in the unsigned rollout.
+ *
+ * One encryption service signs for every environment, so a key may list the environments
+ * it is valid for; which environments a client accepts at all is set separately
+ * (setAllowedManifestEnvironments).
  *
  * Get a key's value from its Cloud KMS key version:
  *   gcloud kms keys versions get-public-key <n> --key <key> --keyring <ring> --location <loc> \
@@ -21,17 +26,12 @@ export interface TrustedManifestKey {
   spki: string;
 }
 
-/**
- * Production / pre-production keys, added here once their KMS keys exist. Keep the
- * current and the next key listed while rotating, so clients on either keep working.
- */
-const BUILT_IN_KEYS: readonly TrustedManifestKey[] = [];
-
 const registeredKeys: TrustedManifestKey[] = [];
 
 /**
- * Adds keys at boot, e.g. a local development key from the app's build-time env. Call
- * before the first manifest fetch.
+ * Adds keys at boot, from the app's build-time env. Call before the first manifest fetch.
+ * While rotating, register both the current and the next key, so clients on either keep
+ * working.
  */
 export function registerTrustedManifestKeys(keys: readonly TrustedManifestKey[]): void {
   for (const key of keys) {
@@ -42,7 +42,7 @@ export function registerTrustedManifestKeys(keys: readonly TrustedManifestKey[])
 }
 
 export function getTrustedManifestKeys(): readonly TrustedManifestKey[] {
-  return [...BUILT_IN_KEYS, ...registeredKeys];
+  return registeredKeys;
 }
 
 export function findTrustedManifestKey(kid: string): TrustedManifestKey | undefined {
