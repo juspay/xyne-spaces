@@ -31,6 +31,7 @@ import { moveJiraProjectChannelTx } from '@/bypassAcl/transactions/jiraMigration
 import { runPurgeJobTx } from '@/bypassAcl/transactions/jiraMigrationController';
 import { createMigrationReportCanvasTx } from '@/bypassAcl/transactions/jiraMigrationController';
 import { postMigrationReportTx } from '@/bypassAcl/transactions/jiraMigrationController';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export const db = DatabaseClient.getInstance();
 
@@ -885,7 +886,7 @@ export class JiraMigrationController {
         const chunks = chunkArray(externalSourceIds, phase1ExternalSourceChunkSize);
         for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          const result = await db.externalMessage.deleteMany({ where: { externalSourceId: { in: chunk } } });
+          const result = await withWorkspaceScope(() => db.externalMessage.deleteMany({ where: { externalSourceId: { in: chunk } } }));
           deletedExternalMessages += result.count;
         }
       }

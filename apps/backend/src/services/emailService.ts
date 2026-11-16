@@ -846,12 +846,12 @@ export class EmailService {
     try {
       // The seed row has no owner, so it is resolved above the caller's scope.
       await withWorkspaceScope(async () => {
-        const seed = await this.prisma.emailDraft.findFirst({
+        const seed = await withWorkspaceScope(() => this.prisma.emailDraft.findFirst({
           where: { conversationId, userId: null },
           select: { channelId: true, autoDraftStatus: true },
-        });
+        }));
         if (seed?.autoDraftStatus === AutoDraftStatus.GENERATING) draftingChannelId = seed.channelId;
-        await this.prisma.emailDraft.deleteMany({ where: { conversationId, userId: null } });
+        await withWorkspaceScope(() => this.prisma.emailDraft.deleteMany({ where: { conversationId, userId: null } }));
       });
     } catch (error) {
       logger.warn('[AutoDraft] failed to discard the opening draft after send', {
@@ -990,18 +990,18 @@ export class EmailService {
     try {
       // The seed row has no owner, so it runs above the caller's own scope.
       await withWorkspaceScope(async () => {
-        const existingSeed = await this.prisma.emailDraft.findFirst({
+        const existingSeed = await withWorkspaceScope(() => this.prisma.emailDraft.findFirst({
           where: { conversationId, userId: null },
           select: { id: true },
-        });
+        }));
         if (existingSeed) {
-          await this.prisma.emailDraft.update({
+          await withWorkspaceScope(() => this.prisma.emailDraft.update({
             where: { id: existingSeed.id },
             data: { autoDraftStatus: AutoDraftStatus.GENERATING, updatedAt: new Date() },
-          });
+          }));
         } else {
           const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
-          await this.prisma.emailDraft.create({
+          await withWorkspaceScope(() => this.prisma.emailDraft.create({
             data: {
               conversationId,
               channelId,
@@ -1010,7 +1010,7 @@ export class EmailService {
               draftContent: '',
               autoDraftStatus: AutoDraftStatus.GENERATING,
             },
-          });
+          }));
         }
       });
     } catch (error) {
@@ -1026,18 +1026,18 @@ export class EmailService {
     try {
       // The seed row is ownerless, so it is resolved above the caller's own scope.
       await withWorkspaceScope(async () => {
-        const seed = await this.prisma.emailDraft.findFirst({
+        const seed = await withWorkspaceScope(() => this.prisma.emailDraft.findFirst({
           where: { conversationId, userId: null, autoDraftStatus: AutoDraftStatus.GENERATING },
           select: { id: true, draftContent: true },
-        });
+        }));
         if (!seed) return;
         if (!seed.draftContent || !seed.draftContent.trim()) {
-          await this.prisma.emailDraft.delete({ where: { id: seed.id } });
+          await withWorkspaceScope(() => this.prisma.emailDraft.delete({ where: { id: seed.id } }));
         } else {
-          await this.prisma.emailDraft.update({
+          await withWorkspaceScope(() => this.prisma.emailDraft.update({
             where: { id: seed.id },
             data: { autoDraftStatus: AutoDraftStatus.READY },
-          });
+          }));
         }
       });
     } catch (error) {
@@ -1080,10 +1080,10 @@ export class EmailService {
     const html = await marked.parse(cleanedSummary);
     const now = new Date();
     try {
-      const existingSeed = await this.prisma.emailDraft.findFirst({
+      const existingSeed = await withWorkspaceScope(() => this.prisma.emailDraft.findFirst({
         where: { conversationId, userId: null },
         select: { id: true },
-      });
+      }));
       if (!existingSeed) {
         const latest = await this.prisma.email.findFirst({
           where: { conversationId },
@@ -1104,13 +1104,13 @@ export class EmailService {
         }
       }
       if (existingSeed) {
-        await this.prisma.emailDraft.update({
+        await withWorkspaceScope(() => this.prisma.emailDraft.update({
           where: { id: existingSeed.id },
           data: { draftContent: html, channelId, autoDraftStatus: AutoDraftStatus.READY, updatedAt: now },
-        });
+        }));
       } else {
         const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
-        await this.prisma.emailDraft.create({
+        await withWorkspaceScope(() => this.prisma.emailDraft.create({
           data: {
             conversationId,
             channelId,
@@ -1119,7 +1119,7 @@ export class EmailService {
             draftContent: html,
             autoDraftStatus: AutoDraftStatus.READY,
           },
-        });
+        }));
       }
       logger.info('[AutoDraft] draft persisted', {
         mode: 'autodraft',

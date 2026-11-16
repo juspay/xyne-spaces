@@ -16,6 +16,7 @@ import { ExternalAttachmentService } from '@/services/externalAttachmentService'
 import { logger } from '@/utils/logger';
 import { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
 import { sendSlackReplyTx } from '@/bypassAcl/transactions/slackDeskService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const TAG = '[SlackDeskService]';
 
@@ -93,9 +94,9 @@ export class SlackDeskService {
     let authToken = creds.botOauthToken;
     let senderName = 'Xyne Bot';
 
-    const userExternalToken = await this.prisma.userExternalToken.findUnique({
+    const userExternalToken = await withWorkspaceScope(() => this.prisma.userExternalToken.findUnique({
       where: { userId_provider: { userId, provider: 'slack' } },
-    });
+    }));
     if (userExternalToken) {
       authToken = decrypt(userExternalToken.encryptedToken);
       const user = await this.prisma.user.findUnique({

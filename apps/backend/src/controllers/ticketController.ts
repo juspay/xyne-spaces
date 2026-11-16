@@ -106,6 +106,7 @@ import { createTicketTx, TicketCreateAccessError } from '@/bypassAcl/transaction
 import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 
 export const prisma = DatabaseClient.getInstance();
@@ -191,7 +192,7 @@ export class TicketController {
           const logWorkspaceId = workspaceId ?? currentWorkspaceId();
           if (!logWorkspaceId) throw new Error('workspaceId required: no tenant context');
           if (db.vespaInsertionLogs) {
-            await db.vespaInsertionLogs.create({
+            await withWorkspaceScope(() => db.vespaInsertionLogs.create({
               data: {
                 status: "FAILED",
                 type: "INSERT",
@@ -204,7 +205,7 @@ export class TicketController {
                 workspaceId: logWorkspaceId,
                 createdAt: new Date(),
               },
-            });
+            }));
           }
         } catch (dbError) {
           logger.error('Failed to log Vespa insertion error to database:', dbError);

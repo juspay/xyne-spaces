@@ -10,6 +10,7 @@ import { AuthProvider, UserStatus, UserType, OrgRole } from '@xyne/shared';
 import { db } from '@/database/client';
 import { botCatalog, type BotDefinition } from '../index.js';
 import {logger} from '@/utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 /**
  * Bot user info for API responses
@@ -91,7 +92,7 @@ class UnifiedBotUserService {
       throw new Error(`orgMember not found for bot email ${definition.email} after ensuring membership`);
     }
 
-    const user = await db.user.upsert({
+    const user = await withWorkspaceScope(() => db.user.upsert({
       where: { email_workspaceId: { email: definition.email, workspaceId } },
       // Identity/FK fields in `create` (authProvider, providerUserId, orgMemberId) are set
       // once and excluded from botUserNeedsUpdate; won't self-heal if a bot's id changes.
@@ -120,7 +121,7 @@ class UnifiedBotUserService {
           description: definition.description,
         },
       },
-    });
+    }));
 
     return user;
   }
@@ -168,13 +169,13 @@ class UnifiedBotUserService {
       });
 
       if (!existingMember) {
-        await db.orgMember.create({
+        await withWorkspaceScope(() => db.orgMember.create({
           data: {
             email: botEmail,
             orgId: orgId,
             role: OrgRole.MEMBER,
           }
-        });
+        }));
         logger.info(`[UnifiedBotUserService] Added bot '${botEmail}' to org_member for org ${orgId}`);
       } else if (existingMember.orgId !== orgId) {
         // Bot email exists but in a different org - this shouldn't happen with our design

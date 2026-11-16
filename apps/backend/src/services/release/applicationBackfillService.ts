@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import { XyneChangeType, XyneFormSchemaProvider } from './xyne/xyneReleaseForm';
 import { BaseTicketType } from '@xyne/shared';
 import { EntitySequenceService } from '@/services/entitySequenceService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface ApplicationData {
   name: string;
@@ -229,9 +230,9 @@ export class ApplicationBackfillService {
 
     if (newLookupData.length > 0) {
       // Use createMany for batch insert
-      await db.lookupValue.createMany({
+      await withWorkspaceScope(() => db.lookupValue.createMany({
         data: newLookupData,
-      });
+      }));
 
       logger.info(`Created ${newLookupData.length} new TICKET_TYPE lookup values`);
     }

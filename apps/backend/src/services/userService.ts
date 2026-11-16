@@ -26,6 +26,7 @@ import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/
 import { createId } from '@paralleldrive/cuid2';
 import { getEncryptionProvider } from '@/services/encryption';
 import { createOrganizationWithUserTx } from '@/bypassAcl/transactions/userService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -139,14 +140,14 @@ export class UserService {
       return 0;
     }
     try {
-      const result = await this.prisma.user.updateMany({
+      const result = await withWorkspaceScope(() => this.prisma.user.updateMany({
         where: {
           email: { equals: email, mode: 'insensitive' },
           authProvider,
           providerUserId: oldProviderUserId,
         },
         data: { providerUserId: newProviderUserId },
-      });
+      }));
       if (result.count > 0) {
         logger.info(
           `[migrateProviderUserId] Migrated ${result.count} ${authProvider} row(s) for ${email} to new providerUserId`,
@@ -196,7 +197,7 @@ export class UserService {
         throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
       }
 
-      const user = await this.prisma.user.create({
+      const user = await withWorkspaceScope(() => this.prisma.user.create({
         data: {
           authProvider: provider,
           providerUserId: providerUserId,
@@ -206,7 +207,7 @@ export class UserService {
           workspace: { connect: { id: workspaceId } },
           orgMember: { connect: { memberId: orgMember.memberId } },
         },
-      });
+      }));
 
       logger.info(
         `Created new user: ${user.email} (${user.id}) without assigning to a default group.`
@@ -293,14 +294,14 @@ export class UserService {
           where: { id: userId },
           select: { workspaceId: true },
         });
-        await this.prisma.userPreference.create({
+        await withWorkspaceScope(() => this.prisma.userPreference.create({
           data: {
             ...USER_PREFERENCE_NOTIFICATION_DEFAULTS,
             userId,
             workspaceId: user.workspaceId,
             askai_custom_instruction: null, // Initialize with null
           },
-        });
+        }));
         logger.info(`Successfully created user preference entry for user ${userId}`);
       } else {
         logger.debug(`User preference already exists for user ${userId}`);
@@ -740,7 +741,7 @@ export class UserService {
       });
 
       if (!orgMember && approvedJoinRequest) {
-        orgMember = await this.prisma.orgMember.create({
+        orgMember = await withWorkspaceScope(() => this.prisma.orgMember.create({
           data: {
             orgId: workspace.orgId,
             email: userData.email,
@@ -748,7 +749,7 @@ export class UserService {
             leftAt: null,
           },
           select: { memberId: true },
-        });
+        }));
       }
 
       if (!orgMember) {
@@ -838,13 +839,13 @@ export class UserService {
       const { organization, workspace } = await createOrganizationWithUserTx(this, orgId, orgName, userData, workspaceName);
 
       // Step 3: Link workspace to organization
-      await this.prisma.workspaceOrganization.create({
+      await withWorkspaceScope(() => this.prisma.workspaceOrganization.create({
         data: {
           orgId: organization.orgId,
           workspaceId: workspace.id,
           role: WorkspaceRole.ADMIN
         }
-      });
+      }));
 
       // Step 4: Add/upgrade user as OrgMember first so they can create additional workspaces later.
       // A COMMUNITY_MEMBER row is the only global OrgMember row public users have before
@@ -860,14 +861,14 @@ export class UserService {
       }
 
       const orgMember = existingOrgMember
-        ? await this.prisma.orgMember.update({
+        ? await withWorkspaceScope(() => this.prisma.orgMember.update({
             where: { memberId: existingOrgMember.memberId },
             data: {
               orgId: organization.orgId,
               role: OrgRole.OWNER,
               leftAt: null,
             },
-          })
+          }))
         : await this.prisma.orgMember.create({
             data: {
               orgId: organization.orgId,
@@ -876,10 +877,10 @@ export class UserService {
             },
           });
       // The password lives only in OrgMemberCredential; keep its orgId in step with the member's new org.
-      await this.prisma.orgMemberCredential.updateMany({
+      await withWorkspaceScope(() => this.prisma.orgMemberCredential.updateMany({
         where: { memberId: orgMember.memberId },
         data: { orgId: orgMember.orgId },
-      });
+      }));
 
       if (existingOrgMember?.role === (OrgRole.COMMUNITY_MEMBER as any)) {
         await aiProvisioningService.resyncUserBudget(orgMember.memberId);

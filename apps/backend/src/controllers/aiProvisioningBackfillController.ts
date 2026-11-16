@@ -96,7 +96,7 @@ export class AiProvisioningBackfillController {
     subjectType: AIProvisioningSubjectType,
     subjectId: string,
   ): Promise<boolean> {
-    const row = await this.prisma.aiProvisioningStatus.findUnique({
+    const row = await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.findUnique({
       where: {
         subjectType_subjectId_provider: {
           subjectType,
@@ -105,7 +105,7 @@ export class AiProvisioningBackfillController {
         },
       },
       select: { status: true },
-    });
+    }));
     return row?.status === AIProvisioningStatusValue.SUCCESS;
   }
 
@@ -116,7 +116,7 @@ export class AiProvisioningBackfillController {
     error?: string,
   ): Promise<void> {
     const now = new Date();
-    const existing = await this.prisma.aiProvisioningStatus.findUnique({
+    const existing = await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.findUnique({
       where: {
         subjectType_subjectId_provider: {
           subjectType,
@@ -124,10 +124,10 @@ export class AiProvisioningBackfillController {
           provider: AIProvisioningProvider.CLAW_LITELLM,
         },
       },
-    });
+    }));
 
     if (existing) {
-      await this.prisma.aiProvisioningStatus.update({
+      await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.update({
         where: { id: existing.id },
         data: {
           status,
@@ -135,9 +135,9 @@ export class AiProvisioningBackfillController {
           lastAttemptedAt: now,
           updatedAt: now,
         },
-      });
+      }));
     } else {
-      await this.prisma.aiProvisioningStatus.create({
+      await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.create({
         data: {
           subjectType,
           subjectId,
@@ -149,7 +149,7 @@ export class AiProvisioningBackfillController {
           createdAt: now,
           updatedAt: now,
         },
-      });
+      }));
     }
   }
 
@@ -660,15 +660,15 @@ export class AiProvisioningBackfillController {
       ]);
 
       const [orgsDone, workspacesDone, usersDone] = await Promise.all([
-        this.prisma.aiProvisioningStatus.count({
+        withWorkspaceScope(() => this.prisma.aiProvisioningStatus.count({
           where: { subjectType: AIProvisioningSubjectType.ORG, status: AIProvisioningStatusValue.SUCCESS },
-        }),
-        this.prisma.aiProvisioningStatus.count({
+        })),
+        withWorkspaceScope(() => this.prisma.aiProvisioningStatus.count({
           where: { subjectType: AIProvisioningSubjectType.WORKSPACE, status: AIProvisioningStatusValue.SUCCESS },
-        }),
-        this.prisma.aiProvisioningStatus.count({
+        })),
+        withWorkspaceScope(() => this.prisma.aiProvisioningStatus.count({
           where: { subjectType: AIProvisioningSubjectType.USER, status: AIProvisioningStatusValue.SUCCESS },
-        }),
+        })),
       ]);
 
       res.status(200).json({

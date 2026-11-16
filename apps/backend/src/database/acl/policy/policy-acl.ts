@@ -50,12 +50,17 @@ export abstract class PolicyACL<TWhere = Where, TData = Record<string, unknown>>
 
   // ── what a policy class defines ─────────────────────────────────────────────
 
-  protected abstract read(): Promise<Where> | Where
-  protected abstract write(op: MutateOp): Promise<Where> | Where
+  /** `queryWhere` is the caller's own where; most classes ignore it (Slack Connect canvas children use it). */
+  // `null` = no opinion: the extension falls back to plain workspace scope.
+  protected abstract read(queryWhere?: Record<string, unknown>): Promise<Where | null> | Where | null
+  protected abstract write(op: MutateOp, queryWhere?: Record<string, unknown>): Promise<Where | null> | Where | null
   protected abstract create(data: Record<string, unknown>): Promise<boolean> | boolean
 
   /** Column rules for an update payload. Default: any column the row filter allows. */
-  protected allowUpdate(_data: Record<string, unknown>): Promise<boolean> | boolean {
+  protected allowUpdate(
+    _data: Record<string, unknown>,
+    _queryWhere?: Record<string, unknown>,
+  ): Promise<boolean> | boolean {
     return true
   }
 
@@ -86,14 +91,14 @@ export abstract class PolicyACL<TWhere = Where, TData = Record<string, unknown>>
 
   // ── the hooks the extension calls ───────────────────────────────────────────
 
-  async getWhereClause(_queryWhere?: Record<string, unknown>): Promise<TWhere | null> {
+  async getWhereClause(queryWhere?: Record<string, unknown>): Promise<TWhere | null> {
     if (this.guestBlocked('read')) return DENY as unknown as TWhere
-    return (await this.read()) as unknown as TWhere
+    return (await this.read(queryWhere)) as unknown as TWhere
   }
 
-  async getMutateWhere(_queryWhere?: Record<string, unknown>, op: MutateOp = 'update'): Promise<TWhere | null> {
+  async getMutateWhere(queryWhere?: Record<string, unknown>, op: MutateOp = 'update'): Promise<TWhere | null> {
     if (this.guestBlocked('write')) return DENY as unknown as TWhere
-    return (await this.write(op)) as unknown as TWhere
+    return (await this.write(op, queryWhere)) as unknown as TWhere
   }
 
   async canCreate(data: TData): Promise<boolean> {
@@ -102,9 +107,9 @@ export abstract class PolicyACL<TWhere = Where, TData = Record<string, unknown>>
     return this.create((data ?? {}) as Record<string, unknown>)
   }
 
-  async canUpdate(data: Record<string, unknown>): Promise<boolean> {
+  async canUpdate(data: Record<string, unknown>, queryWhere?: Record<string, unknown>): Promise<boolean> {
     if (this.guestBlocked('write')) return false
-    return this.allowUpdate(data ?? {})
+    return this.allowUpdate(data ?? {}, queryWhere)
   }
 
   hiddenFields(): string[] {

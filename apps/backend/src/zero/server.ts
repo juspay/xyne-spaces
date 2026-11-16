@@ -41,6 +41,7 @@ import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
 import { runCompiledZqlSql } from '@/bypassAcl/zeroServices';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
@@ -398,7 +399,7 @@ export async function handleMutate(request: Request, enc?: MutationEncryptionCon
           });
         } catch (err) {
           try {
-            await db.vespaInsertionLogs.create({
+            await withWorkspaceScope(() => db.vespaInsertionLogs.create({
               data: {
                 status: "FAILED",
                 type: VespaOperationType[job.jobType],
@@ -411,7 +412,7 @@ export async function handleMutate(request: Request, enc?: MutationEncryptionCon
                 workspaceId: authData!.workspaceId,
                 createdAt: new Date(),
               },
-            });
+            }));
           } catch (dbError) {
             logger.error(`Failed to log insertion error to database:
               ${dbError instanceof Error ? dbError.message : String(dbError)}`);
@@ -904,7 +905,7 @@ export async function runCatalogMutation(
         });
       } catch (err) {
         try {
-          await db.vespaInsertionLogs.create({
+          await withWorkspaceScope(() => db.vespaInsertionLogs.create({
             data: {
               status: "FAILED",
               type: VespaOperationType[job.jobType],
@@ -917,7 +918,7 @@ export async function runCatalogMutation(
               workspaceId: authData.workspaceId,
               createdAt: new Date(),
             },
-          });
+          }));
         } catch (dbError) {
           logger.error('Failed to log insertion error to database', dbError);
         }

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { WorkflowMappingEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { encrypt, decrypt } from '@/services/encryptionService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const ENTITY_TYPE = WorkflowMappingEntityType.AUTOMATION_WEBHOOK;
 
@@ -18,9 +19,9 @@ export async function webhookSecretExists(seriesId: string): Promise<boolean> {
 export async function issueWebhookSecret(seriesId: string): Promise<string | null> {
   if (await webhookSecretExists(seriesId)) return null;
   const secret = crypto.randomBytes(18).toString('base64url');
-  await db.workflowMapping.create({
+  await withWorkspaceScope(() => db.workflowMapping.create({
     data: { entityType: ENTITY_TYPE, entityId: seriesId, entitySecret: encrypt(secret) },
-  });
+  }));
   return secret;
 }
 
@@ -40,10 +41,10 @@ export async function storedSecretMatches(seriesId: string, secret: string): Pro
 
 export async function rotateWebhookSecret(seriesId: string): Promise<string> {
   const secret = crypto.randomBytes(18).toString('base64url');
-  await db.workflowMapping.upsert({
+  await withWorkspaceScope(() => db.workflowMapping.upsert({
     where: mapKey(seriesId),
     create: { entityType: ENTITY_TYPE, entityId: seriesId, entitySecret: encrypt(secret) },
     update: { entitySecret: encrypt(secret) },
-  });
+  }));
   return secret;
 }

@@ -9,6 +9,7 @@ import {
   PaginatedResult,
   ACLAuditLogWithActor,
 } from '@/types/database';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class ACLAuditLogRepository extends BaseRepository<ACLAuditLog, CreateACLAuditLogInput, UpdateACLAuditLogInput> {
   constructor() {
@@ -19,12 +20,12 @@ export class ACLAuditLogRepository extends BaseRepository<ACLAuditLog, CreateACL
     await this.validateString(data.description, 'description', 1000);
     await this.validateString(data.targetId, 'targetId', 255);
 
-    return await this.db.aCLAuditLog.create({
+    return await withWorkspaceScope(() => this.db.aCLAuditLog.create({
       data: {
         ...data,
         timestamp: new Date(),
       },
-    });
+    }));
   }
 
   async findById(id: string): Promise<ACLAuditLog | null> {
@@ -52,16 +53,16 @@ export class ACLAuditLogRepository extends BaseRepository<ACLAuditLog, CreateACL
       await this.validateString(data.targetId, 'targetId', 255);
     }
 
-    return await this.db.aCLAuditLog.update({
+    return await withWorkspaceScope(() => this.db.aCLAuditLog.update({
       where: { id },
       data,
-    });
+    }));
   }
 
   async delete(id: string): Promise<ACLAuditLog> {
-    return await this.db.aCLAuditLog.delete({
+    return await withWorkspaceScope(() => this.db.aCLAuditLog.delete({
       where: { id },
-    });
+    }));
   }
 
   /**
@@ -234,13 +235,13 @@ export class ACLAuditLogRepository extends BaseRepository<ACLAuditLog, CreateACL
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
-    const result = await this.db.aCLAuditLog.deleteMany({
+    const result = await withWorkspaceScope(() => this.db.aCLAuditLog.deleteMany({
       where: {
         timestamp: {
           lt: cutoffDate,
         },
       },
-    });
+    }));
 
     return { deletedCount: result.count };
   }

@@ -1,6 +1,7 @@
 import { repositories } from '../database/repositories';
 import { logger } from '../utils/logger';
 import { config as appConfig } from '../config/env';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class ConfigSyncService {
   constructor() {
@@ -167,12 +168,12 @@ export class ConfigSyncService {
 
       if (!userGroupsResource) {
         logger.info('Creating USER-GROUPS resource');
-        await prisma.resource.create({
+        await withWorkspaceScope(() => prisma.resource.create({
           data: {
             name: 'USER-GROUPS',
             description: 'Manage user groups and group assignments'
           }
-        });
+        }));
         logger.info('Successfully created USER-GROUPS resource');
       } else {
         logger.info('USER-GROUPS resource already exists');
@@ -184,12 +185,12 @@ export class ConfigSyncService {
 
       if (!teamIntelligenceDashboardResource) {
         logger.info('Creating TEAM-INTELLIGENCE-DASHBOARD resource');
-        await prisma.resource.create({
+        await withWorkspaceScope(() => prisma.resource.create({
           data: {
             name: 'TEAM-INTELLIGENCE-DASHBOARD',
             description: 'Access Team Intelligence dashboard org/team/user endpoints'
           }
-        });
+        }));
         logger.info('Successfully created TEAM-INTELLIGENCE-DASHBOARD resource');
       } else {
         logger.info('TEAM-INTELLIGENCE-DASHBOARD resource already exists');
@@ -202,12 +203,12 @@ export class ConfigSyncService {
 
       if (!vespaResource) {
         logger.info('Creating VESPA resource');
-        await prisma.resource.create({
+        await withWorkspaceScope(() => prisma.resource.create({
           data: {
             name: 'VESPA',
             description: 'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*)'
           }
-        });
+        }));
         logger.info('Successfully created VESPA resource');
       } else {
         logger.info('VESPA resource already exists');
@@ -219,12 +220,12 @@ export class ConfigSyncService {
 
       if (!releaseManagerResource) {
         logger.info('Creating RELEASE-MANAGER resource');
-        await prisma.resource.create({
+        await withWorkspaceScope(() => prisma.resource.create({
           data: {
             name: 'RELEASE-MANAGER',
             description: 'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.'
           }
-        });
+        }));
         logger.info('Successfully created RELEASE-MANAGER resource');
       } else {
         logger.info('RELEASE-MANAGER resource already exists');

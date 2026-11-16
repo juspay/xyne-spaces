@@ -13,6 +13,7 @@ import type {
 } from './connectors/types';
 import { createTx } from '@/bypassAcl/transactions/DataSourceService';
 import { requestRefreshTx } from '@/bypassAcl/transactions/DataSourceService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export type { SourceType };
 
@@ -102,7 +103,7 @@ export class DataSourceConnectionError extends Error {
 
 export class DataSourceService {
   async findWorkspace(id: string, workspaceId: string): Promise<DataSource | null> {
-    const ds = await db.dataSource.findUnique({ where: { id } });
+    const ds = await withWorkspaceScope(() => db.dataSource.findUnique({ where: { id } }));
     if (!ds || ds.workspaceId !== workspaceId) return null;
     return ds;
   }

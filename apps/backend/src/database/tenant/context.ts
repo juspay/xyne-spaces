@@ -89,6 +89,24 @@ export function isRequestContext(): boolean {
   return !(source.req as unknown as Record<symbol, boolean>)[WORKSPACE_SCOPED];
 }
 
+/**
+ * Run `fn` inside `source`, and when it returns a promise, await it INSIDE the scope.
+ *
+ * Prisma model queries are lazy: `db.x.findMany()` only builds the query, which runs when the
+ * caller awaits it. A scope written as `withWorkspaceScope(() => db.x.findMany())` would otherwise
+ * close before the query runs, so the query would execute with the caller's context instead.
+ * Awaiting inside the scope makes `() => db.x.findMany()` and `async () => …` behave the same.
+ */
+function runScoped<T>(source: CtxSource, fn: () => T): T {
+  return storage.run(source, () => {
+    const result = fn();
+    if (result && typeof (result as { then?: unknown }).then === 'function') {
+      return (async () => await (result as unknown as PromiseLike<unknown>))() as unknown as T;
+    }
+    return result;
+  });
+}
+
 /** Read the current tenant context, or null when none is open / resolvable. */
 export function getContextOrNull(): TenantCtx | null {
   return resolve(storage.getStore());
@@ -121,12 +139,12 @@ export function withWorkspaceScope<T>(fn: () => T): T {
   if (!ctx) return fn();
   // Don't narrow a `system` bypass into a workspace filter.
   if (ctx.actor === 'system') return fn();
-  return storage.run({ kind: 'explicit', ctx: { ...ctx, actor: 'service' } }, fn);
+  return runScoped({ kind: 'explicit', ctx: { ...ctx, actor: 'service' } }, fn);
 }
 
 /** Open a tenant scope for a non-HTTP entry point (worker, cron, socket, webhook). */
 export function runWithContext<T>(ctx: PrincipalCtx, fn: () => T): T {
-  return storage.run({ kind: 'explicit', ctx: { ...ctx, actor: 'user' } }, fn);
+  return runScoped({ kind: 'explicit', ctx: { ...ctx, actor: 'user' } }, fn);
 }
 
 /**
@@ -137,7 +155,7 @@ export function runWithContext<T>(ctx: PrincipalCtx, fn: () => T): T {
  * resolved without the ACL that would have rejected them.
  */
 export function runAsServiceActor<T>(userId: string, workspaceId: string, fn: () => T): T {
-  return storage.run({ kind: 'explicit', ctx: { userId, workspaceId, actor: 'service' } }, fn);
+  return runScoped({ kind: 'explicit', ctx: { userId, workspaceId, actor: 'service' } }, fn);
 }
 
 /**
@@ -145,7 +163,7 @@ export function runAsServiceActor<T>(userId: string, workspaceId: string, fn: ()
  * enforcement but still visible to `getContextOrNull()` readers.
  */
 export function runAsSystem<T>(fn: () => T): T {
-  return storage.run(
+  return runScoped(
     { kind: 'explicit', ctx: { userId: SYSTEM_USER_ID, workspaceId: SYSTEM_WORKSPACE_ID, actor: 'system' } },
     fn,
   );

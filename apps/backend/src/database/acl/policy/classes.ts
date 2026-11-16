@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client'
-import type { ACLContext, MutateOp } from '../base-acl'
+import type { ACLContext, BaseQueryACL, MutateOp } from '../base-acl'
 import { DENY, PolicyACL, type PolicyOptions } from './policy-acl'
 import type { ParentRule } from './parents'
 import { callerOrgIds, hasResourceAdmin } from './roles'
@@ -52,7 +52,8 @@ export class SelfACL extends PolicyACL {
   }
 
   protected read(): Where {
-    return this.s.read === 'members' ? this.scope() : this.own()
+    // A directory row (profile, presence) is visible to members; a guest still sees only their own.
+    return this.s.read === 'members' && !this.isGuest() ? this.scope() : this.own()
   }
 
   protected write(op: MutateOp): Where {
@@ -229,6 +230,11 @@ export interface EntityOptions extends PolicyOptions {
   creator?: string
   /** Only the creator may update or delete (a message's sender). Default false. */
   creatorOnlyWrites?: boolean
+  /**
+   * Who may write rows under a parent: those who may write the parent (default), or everyone who
+   * may read it (call chat, recordings: any participant adds rows without editing the call).
+   */
+  writeVia?: 'write' | 'read'
 }
 
 /**
@@ -245,14 +251,17 @@ export class EntityACL extends PolicyACL {
   }
 
   protected async write(op: MutateOp): Promise<Where> {
-    const viaParent = await this.e.parent.write(this.ctx, this.prisma, op)
+    const viaParent =
+      this.e.writeVia === 'read'
+        ? await this.e.parent.read(this.ctx, this.prisma)
+        : await this.e.parent.write(this.ctx, this.prisma, op)
     if (this.e.creator && this.e.creatorOnlyWrites) return { AND: [viaParent, { [this.e.creator]: this.me }] }
     return viaParent
   }
 
   protected async create(data: Record<string, unknown>): Promise<boolean> {
     if (this.e.creator && data[this.e.creator] !== this.me) return false
-    return this.e.parent.canCreateUnder(this.ctx, this.prisma, data)
+    return this.e.parent.canCreateUnder(this.ctx, this.prisma, data, this.e.writeVia ?? 'write')
   }
 }
 
@@ -261,6 +270,11 @@ export class EntityACL extends PolicyACL {
 export interface SystemWriteOptions extends PolicyOptions {
   /** Who reads: through a parent, every member, workspace admins, or nobody. Default 'members'. */
   read?: ParentRule | 'members' | 'admins' | 'none'
+  /**
+   * The one insert a user request may make, when the row is part of the user's own action
+   * (an audit entry naming the caller as actor, a connect group for a new entity). Default: none.
+   */
+  allowCreate?: (ctx: ACLContext, data: Record<string, unknown>) => boolean
 }
 
 /**
@@ -284,8 +298,8 @@ export class SystemWriteACL extends PolicyACL {
     return DENY
   }
 
-  protected create(): boolean {
-    return false
+  protected create(data: Record<string, unknown>): boolean {
+    return this.y.allowCreate ? this.y.allowCreate(this.ctx, data) : false
   }
 }
 
@@ -307,5 +321,47 @@ export class PlatformACL extends PolicyACL {
 
   protected create(): boolean {
     return false
+  }
+}
+
+// ── Custom ─────────────────────────────────────────────────────────────────────
+
+/**
+ * A table whose rule is too specific for a generic class (Slack Connect reach, DM exclusion,
+ * guest channel grants): its existing hand-written ACL supplies read, write, create and column
+ * rules, and PolicyACL still applies the shared ones on top (guest deny unless opted in, the
+ * workspace check, column masking).
+ */
+export class CustomACL extends PolicyACL {
+  private readonly inner: BaseQueryACL
+
+  constructor(
+    ctx: ACLContext,
+    prisma: PrismaClient,
+    Inner: new (ctx: ACLContext, prisma: PrismaClient) => BaseQueryACL,
+    opts: PolicyOptions = {},
+  ) {
+    super(ctx, prisma, opts)
+    this.inner = new Inner(ctx, prisma)
+  }
+
+  protected async read(queryWhere?: Record<string, unknown>): Promise<Where | null> {
+    return (await this.inner.getWhereClause(queryWhere)) as Where | null
+  }
+
+  protected async write(op: MutateOp, queryWhere?: Record<string, unknown>): Promise<Where | null> {
+    return (await this.inner.getMutateWhere(queryWhere, op)) as Where | null
+  }
+
+  protected create(data: Record<string, unknown>): Promise<boolean> {
+    return this.inner.canCreate(data)
+  }
+
+  protected allowUpdate(data: Record<string, unknown>, queryWhere?: Record<string, unknown>): Promise<boolean> {
+    return this.inner.canUpdate(data, queryWhere)
+  }
+
+  hiddenFields(): string[] {
+    return [...new Set([...super.hiddenFields(), ...this.inner.hiddenFields()])]
   }
 }

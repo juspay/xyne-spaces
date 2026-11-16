@@ -5,6 +5,7 @@ import type {
   UpdateDataSourceInput,
   QueryOptions,
 } from '@/types/database';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class DataSourceRepository extends BaseRepository<
   DataSource,
@@ -52,17 +53,17 @@ export class DataSourceRepository extends BaseRepository<
     id: string,
     status: 'pending' | 'in_progress' | 'complete' | 'error',
   ): Promise<DataSource> {
-    return this.db.dataSource.update({
+    return withWorkspaceScope(() => this.db.dataSource.update({
       where: { id },
       data: { ingestionStatus: status },
-    });
+    }));
   }
 
   async tryClaimForIngestion(id: string): Promise<boolean> {
-    const res = await this.db.dataSource.updateMany({
+    const res = await withWorkspaceScope(() => this.db.dataSource.updateMany({
       where: { id, ingestionStatus: { in: ['pending', 'error'] } },
       data: { ingestionStatus: 'in_progress' },
-    });
+    }));
     return res.count === 1;
   }
 

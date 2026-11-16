@@ -16,15 +16,24 @@ export interface ParentRule {
   read(ctx: ACLContext, prisma: PrismaClient): Promise<Where>
   /** Child rows whose parent the caller may write. */
   write(ctx: ACLContext, prisma: PrismaClient, op: MutateOp): Promise<Where>
-  /** The new child row points at a parent the caller may write. */
-  canCreateUnder(ctx: ACLContext, prisma: PrismaClient, data: Record<string, unknown>): Promise<boolean>
+  /** The new child row points at a parent the caller may write (or, with `via: 'read'`, read). */
+  canCreateUnder(
+    ctx: ACLContext,
+    prisma: PrismaClient,
+    data: Record<string, unknown>,
+    via?: 'write' | 'read',
+  ): Promise<boolean>
 }
 
 export interface ParentSpec {
   /** Parent model, as the ACL factory names it ('channel', 'canvas', …). */
   model: Uncapitalize<Prisma.ModelName>
-  /** Relation path from the child to the parent, dot-separated, to-one hops only ('conversation.channel'). */
-  path: string
+  /**
+   * Relation path from the child to the parent, dot-separated, to-one hops only ('conversation.channel').
+   * Omit when the child has only a key column and no Prisma relation: the rule then filters
+   * `fk IN (ids of parents the caller may read/write)`.
+   */
+  path?: string
   /** Child column holding the parent's key ('channelId'). Used to authorize inserts. */
   fk: string
   /** Parent column that `fk` references. Default 'id'. */
@@ -50,23 +59,37 @@ export function parent(spec: ParentSpec): ParentRule {
   const parentWrite = async (ctx: ACLContext, prisma: PrismaClient, op: MutateOp): Promise<Where> =>
     ((await parentAcl(ctx, prisma).getMutateWhere(undefined, op)) as Where | null) ?? { workspaceId: ctx.workspaceId }
 
+  const pk = spec.pk ?? 'id'
+  const delegateOf = (prisma: PrismaClient) =>
+    (prisma as unknown as Record<string, { findMany: (a: unknown) => Promise<Record<string, unknown>[]>; findFirst: (a: unknown) => Promise<unknown> }>)[spec.model]
+
+  /** The child-side filter for a parent clause: nested under the relation, or by key list. */
+  const onChild = async (ctx: ACLContext, prisma: PrismaClient, parentWhere: Where): Promise<Where> => {
+    if (spec.path) return withChildWorkspace(spec, ctx, nest(spec.path, parentWhere))
+    const rows = await delegateOf(prisma).findMany({ where: parentWhere, select: { [pk]: true } })
+    return withChildWorkspace(spec, ctx, { [spec.fk]: { in: rows.map((r) => r[pk]) } })
+  }
+
   return {
     async read(ctx, prisma) {
       const w = ((await parentAcl(ctx, prisma).getWhereClause()) as Where | null) ?? { workspaceId: ctx.workspaceId }
-      return withChildWorkspace(spec, ctx, nest(spec.path, w))
+      return onChild(ctx, prisma, w)
     },
 
     async write(ctx, prisma, op) {
-      return withChildWorkspace(spec, ctx, nest(spec.path, await parentWrite(ctx, prisma, op)))
+      return onChild(ctx, prisma, await parentWrite(ctx, prisma, op))
     },
 
-    async canCreateUnder(ctx, prisma, data) {
+    async canCreateUnder(ctx, prisma, data, via = 'write') {
       const key = data[spec.fk]
       if (typeof key !== 'string' || key === '') return false
-      const delegate = (prisma as unknown as Record<string, { findFirst: (a: unknown) => Promise<unknown> }>)[spec.model]
-      const row = await delegate.findFirst({
-        where: { AND: [{ [spec.pk ?? 'id']: key }, await parentWrite(ctx, prisma, 'update')] },
-        select: { [spec.pk ?? 'id']: true },
+      const parentWhere =
+        via === 'read'
+          ? (((await parentAcl(ctx, prisma).getWhereClause()) as Where | null) ?? { workspaceId: ctx.workspaceId })
+          : await parentWrite(ctx, prisma, 'update')
+      const row = await delegateOf(prisma).findFirst({
+        where: { AND: [{ [pk]: key }, parentWhere] },
+        select: { [pk]: true },
       })
       return row !== null
     },

@@ -137,7 +137,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       await vespaQueue.addJob({ schema: channelSchema, jobType: 'feed', docId: channelId, workspaceId });
     } catch (error) {
       logger.error(`[ChannelRepository] Failed to queue Vespa feed for channel ${channelId}:`, error);
-      await this.db.vespaInsertionLogs.create({
+      await withWorkspaceScope(() => this.db.vespaInsertionLogs.create({
         data: {
           status: VespaInsertionStatus.FAILED,
           type: VespaOperationType.INSERT,
@@ -148,7 +148,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
           workspaceId,
           createdAt: new Date(),
         },
-      }).catch((dbError) => logger.error('[ChannelRepository] Failed to log the Vespa enqueue failure:', dbError));
+      })).catch((dbError) => logger.error('[ChannelRepository] Failed to log the Vespa enqueue failure:', dbError));
     }
   }
 

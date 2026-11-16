@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { MessageType, TicketStatusV2, FormFieldType, ActivityType } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export const OPEN_STATUSES = [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED];
 
@@ -256,7 +257,7 @@ export async function createEtaSystemMessage(params: {
     throw new Error(`Conversation not found for ETA system message: ${conversationId}`);
   }
 
-  await db.message.create({
+  await withWorkspaceScope(() => db.message.create({
     data: {
       messageId: uuidv4(),
       conversationId,
@@ -272,5 +273,5 @@ export async function createEtaSystemMessage(params: {
       createdAt,
       metadata,
     },
-  });
+  }));
 }

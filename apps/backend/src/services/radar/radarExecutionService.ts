@@ -19,6 +19,7 @@ import {
   type DedupCheck,
 } from '@/services/radar/radarDedupScorer';
 import type { RadarScope } from '@/services/radar/radarScope';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -534,7 +535,7 @@ class RadarExecutionService {
     at: { workspaceId: string; createdAt: Date; messageId: string },
     consecutiveFailures: number,
   ): Promise<void> {
-    await prisma.executionThreadState.upsert({
+    await withWorkspaceScope(() => prisma.executionThreadState.upsert({
       where: { conversationId: scopeKey },
       create: {
         conversationId: scopeKey,
@@ -548,7 +549,7 @@ class RadarExecutionService {
         watermarkMsgId: at.messageId,
         consecutiveFailures,
       },
-    });
+    }));
   }
 
   private async recordRun(run: RunLogDraft, startedAt: number): Promise<void> {

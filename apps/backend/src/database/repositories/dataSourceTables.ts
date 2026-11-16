@@ -5,6 +5,7 @@ import type {
   UpdateDataSourceTableInput,
   QueryOptions,
 } from '@/types/database';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class DataSourceTableRepository extends BaseRepository<
   DataSourceTable,
@@ -23,10 +24,10 @@ export class DataSourceTableRepository extends BaseRepository<
     dataSourceId: string,
     rows: Array<{ schemaName: string; tableName: string; rowCountEstimate: bigint | null }>
   ): Promise<DataSourceTable[]> {
-    const dataSource = await this.db.dataSource.findUnique({
+    const dataSource = await withWorkspaceScope(() => this.db.dataSource.findUnique({
       where: { id: dataSourceId },
       select: { workspaceId: true },
-    });
+    }));
     if (!dataSource) {
       throw new Error(`workspaceId required: dataSource ${dataSourceId} not found`);
     }

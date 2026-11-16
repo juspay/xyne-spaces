@@ -7,6 +7,7 @@ import vespaClient from '@/vespa/client';
 import { ticketSchema } from '@/vespa/src/types';
 import { descCleaner } from './index';
 import { claimFailedCleanupLogsTx } from '@/bypassAcl/transactions/ticketCleanupWorkerService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const MIN_INTERVAL_MS = 5000;
@@ -74,7 +75,7 @@ class TicketCleanupWorkerService {
   }
 
   private async resetProcessingOnStart(): Promise<void> {
-    const result = await db.vespaInsertionLogs.updateMany({
+    const result = await withWorkspaceScope(() => db.vespaInsertionLogs.updateMany({
       where: {
         type: VespaOperationType.POST_INGEST_CLEAN,
         status: VespaInsertionStatus.PENDING,
@@ -82,7 +83,7 @@ class TicketCleanupWorkerService {
       data: {
         status: VespaInsertionStatus.FAILED,
       },
-    });
+    }));
 
     if (result.count > 0) {
       logger.warn('[TicketCleanupWorker] Reset PENDING cleanup logs on startup', {
@@ -92,7 +93,7 @@ class TicketCleanupWorkerService {
   }
 
   private async markMaxRetryFailures(): Promise<void> {
-    await db.vespaInsertionLogs.updateMany({
+    await withWorkspaceScope(() => db.vespaInsertionLogs.updateMany({
       where: {
         type: VespaOperationType.POST_INGEST_CLEAN,
         status: VespaInsertionStatus.FAILED,
@@ -102,7 +103,7 @@ class TicketCleanupWorkerService {
         status: VespaInsertionStatus.FAILED_MAX_RETRIES,
         resolvedAt: new Date(),
       },
-    });
+    }));
   }
 
   private async claimFailedCleanupLogs(): Promise<VespaInsertionLogs[]> {
@@ -181,9 +182,9 @@ class TicketCleanupWorkerService {
 
   private async deleteProcessedLog(logId: string, ticketId: string, attempt: number): Promise<void> {
     try {
-      const result = await db.vespaInsertionLogs.deleteMany({
+      const result = await withWorkspaceScope(() => db.vespaInsertionLogs.deleteMany({
         where: { id: logId },
-      });
+      }));
       if (result.count !== 1) {
         throw new Error(`cleanup_log_delete_unexpected_count:${result.count}`);
       }
@@ -207,7 +208,7 @@ class TicketCleanupWorkerService {
     const nextRetryCount = log.retryCount + 1;
     const hitMax = markMax || nextRetryCount >= MAX_RETRIES;
 
-    await db.vespaInsertionLogs.update({
+    await withWorkspaceScope(() => db.vespaInsertionLogs.update({
       where: { id: log.id },
       data: {
         status: hitMax ? VespaInsertionStatus.FAILED_MAX_RETRIES : VespaInsertionStatus.FAILED,
@@ -220,7 +221,7 @@ class TicketCleanupWorkerService {
         },
         resolvedAt: hitMax ? new Date() : null,
       },
-    });
+    }));
   }
 
 }

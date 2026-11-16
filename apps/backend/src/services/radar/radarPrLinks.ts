@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import type { RadarScope } from '@/services/radar/radarScope';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const prisma = DatabaseClient.getInstance();
 const TAG = '[RADAR-PR-LINKS]';
@@ -118,7 +119,7 @@ export async function recordPrLinks(scope: RadarScope, window: WindowMessage[]):
       })),
     );
     if (rows.length === 0) return;
-    await prisma.radarPrLink.createMany({ data: rows, skipDuplicates: true });
+    await withWorkspaceScope(() => prisma.radarPrLink.createMany({ data: rows, skipDuplicates: true }));
   } catch (error) {
     logger.warn(`${TAG} recording PR links failed`, {
       scope: scope.key,

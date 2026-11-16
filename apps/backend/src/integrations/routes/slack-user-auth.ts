@@ -19,6 +19,7 @@ import { redisService } from '@/services/redisService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const TAG = '[SlackUserAuth]';
 const router = express.Router();
@@ -231,10 +232,10 @@ router.get(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;
-      const token = await db.userExternalToken.findUnique({
+      const token = await withWorkspaceScope(() => db.userExternalToken.findUnique({
         where: { userId_provider: { userId, provider: 'slack' } },
         select: { providerUserId: true, connectedAt: true },
-      });
+      }));
 
       if (!token) {
         res.json({ connected: false });

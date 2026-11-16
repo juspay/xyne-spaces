@@ -5,6 +5,7 @@ import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 type ReminderStatus = 'PENDING' | 'SENT' | 'DISMISSED';
 
@@ -245,13 +246,13 @@ class BookmarkReminderService {
 
     delete nextMetadata.snoozeUntil;
 
-    await db.bookmark.update({
+    await withWorkspaceScope(() => db.bookmark.update({
       where: { id: bookmarkId },
       data: {
         metadata: nextMetadata as Prisma.InputJsonValue,
         updatedAt: new Date(),
       },
-    });
+    }));
   }
 
   private buildNotificationPayload({

@@ -1,6 +1,7 @@
 import type { Prisma, EntityAccess } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { EntityUserAccess } from '@xyne/shared';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export interface EntityAccessKey {
   workspaceId: string;
@@ -95,9 +96,9 @@ export class EntityAccessRepository {
   }
 
   deleteForResource(shareableEntityType: string, entityId: string): Promise<Prisma.BatchPayload> {
-    return this.db.entityAccess.deleteMany({
+    return withWorkspaceScope(() => this.db.entityAccess.deleteMany({
       where: { shareableEntityType, entityId },
-    });
+    }));
   }
 
   /**

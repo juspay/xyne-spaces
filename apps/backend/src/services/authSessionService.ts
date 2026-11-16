@@ -12,6 +12,7 @@ import {
 } from '@/bypassAcl/transactions/authSessionStore';
 import { redisService } from '@/services/redisService';
 import { logger as baseLogger } from '../utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const logger = baseLogger.child({ module: 'AuthSessionService' });
 
@@ -258,14 +259,14 @@ export class AuthSessionService {
     const presented = getPresentedRefreshToken(req);
     if (!presented) return null;
 
-    const session = await db.authSession.findFirst({
+    const session = await withWorkspaceScope(() => db.authSession.findFirst({
       where: {
         refreshToken: hashToken(presented),
         status: AuthSessionStatus.ACTIVE,
         refreshTokenExpiry: { gt: new Date() },
       },
       select: { id: true, orgMemberId: true, orgId: true, deviceKey: true, platform: true, refreshTokenExpiry: true },
-    });
+    }));
     if (!session) return null;
 
     const orgMember = await db.orgMember.findUnique({
@@ -285,7 +286,7 @@ export class AuthSessionService {
 
   /** The auth session row by id, or null. */
   findById(id: string) {
-    return db.authSession.findUnique({ where: { id } });
+    return withWorkspaceScope(() => db.authSession.findUnique({ where: { id } }));
   }
 
   /**
@@ -293,10 +294,10 @@ export class AuthSessionService {
    * that already authenticated the caller and need the session's expiry (switch/create workspace).
    */
   findActiveById(id: string, orgMemberId: string) {
-    return db.authSession.findFirst({
+    return withWorkspaceScope(() => db.authSession.findFirst({
       where: { id, orgMemberId, status: AuthSessionStatus.ACTIVE, refreshTokenExpiry: { gt: new Date() } },
       select: { id: true, orgMemberId: true, refreshTokenExpiry: true },
-    });
+    }));
   }
 
   /** Workspace this session most recently entered (login landing or latest switch), or null. */
@@ -454,7 +455,7 @@ export class AuthSessionService {
     if (!deviceKey) return;
 
     try {
-      const active = await db.authSession.findFirst({
+      const active = await withWorkspaceScope(() => db.authSession.findFirst({
         where: {
           orgMemberId: identity.orgMemberId,
           deviceKey,
@@ -462,7 +463,7 @@ export class AuthSessionService {
           refreshTokenExpiry: { gt: new Date() },
         },
         select: { id: true },
-      });
+      }));
       if (!active) {
         logger.info('[AUTH-SESSION] No active auth session for device - skipping workspace access record', {
           orgMemberId: identity.orgMemberId,

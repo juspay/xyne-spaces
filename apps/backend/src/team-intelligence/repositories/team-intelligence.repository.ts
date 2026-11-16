@@ -9,6 +9,7 @@ import {
 import { db } from '@/database/client';
 import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
 import { createBatchWithUsersTx } from '@/bypassAcl/transactions/teamIntelligenceRepository';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export interface CreateTeamIntelligenceBatchData {
   orgId?: string | null;
@@ -145,10 +146,10 @@ export class TeamIntelligenceRepository {
       errorMessage: string | null;
     }>
   ): Promise<TeamIntelligenceIngestionBatchV2 | null> {
-    const result = await this.prisma.teamIntelligenceIngestionBatchV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceIngestionBatchV2.updateMany({
       where: { id: batchId },
       data,
-    });
+    }));
     if (result.count === 0) {
       return null;
     }
@@ -168,10 +169,10 @@ export class TeamIntelligenceRepository {
       errorMessage: string | null;
     }>
   ): Promise<TeamIntelligenceUserIngestionV2 | null> {
-    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: userIngestionId },
       data,
-    });
+    }));
     if (result.count === 0) {
       return null;
     }
@@ -195,10 +196,10 @@ export class TeamIntelligenceRepository {
       return 0;
     }
 
-    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: { in: userIngestionIds } },
       data,
-    });
+    }));
 
     return result.count;
   }
@@ -254,10 +255,10 @@ export class TeamIntelligenceRepository {
       errorMessage?: string | null;
     }
   ): Promise<TeamIntelligenceUserIngestionV2 | null> {
-    const result = await this.prisma.teamIntelligenceUserIngestionV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceUserIngestionV2.updateMany({
       where: { id: userIngestionId },
       data,
-    });
+    }));
     if (result.count === 0) {
       return null;
     }
@@ -320,9 +321,9 @@ export class TeamIntelligenceRepository {
   async createTeamSummary(
     data: CreateTeamIntelligenceTeamSummaryData
   ): Promise<TeamIntelligenceTeamSummaryV2> {
-    return await this.prisma.teamIntelligenceTeamSummaryV2.create({
+    return await withWorkspaceScope(() => this.prisma.teamIntelligenceTeamSummaryV2.create({
       data,
-    });
+    }));
   }
 
   async updateTeamSummaryStatus(
@@ -341,10 +342,10 @@ export class TeamIntelligenceRepository {
       errorMessage: string | null;
     }>
   ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
-    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: teamSummaryId },
       data,
-    });
+    }));
     if (result.count === 0) {
       return null;
     }
@@ -372,10 +373,10 @@ export class TeamIntelligenceRepository {
       return 0;
     }
 
-    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: { in: teamSummaryIds } },
       data,
-    });
+    }));
 
     return result.count;
   }
@@ -395,10 +396,10 @@ export class TeamIntelligenceRepository {
       errorMessage?: string | null;
     }
   ): Promise<TeamIntelligenceTeamSummaryV2 | null> {
-    const result = await this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceTeamSummaryV2.updateMany({
       where: { id: teamSummaryId },
       data,
-    });
+    }));
     if (result.count === 0) {
       return null;
     }
@@ -446,9 +447,9 @@ export class TeamIntelligenceRepository {
   }
 
   async createOrgSummary(data: CreateTeamIntelligenceOrgSummaryData): Promise<TeamIntelligenceOrgSummaryV2> {
-    return await this.prisma.teamIntelligenceOrgSummaryV2.create({
+    return await withWorkspaceScope(() => this.prisma.teamIntelligenceOrgSummaryV2.create({
       data,
-    });
+    }));
   }
 
   async updateOrgSummaryStatus(
@@ -466,10 +467,10 @@ export class TeamIntelligenceRepository {
       errorMessage: string | null;
     }>
   ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
-    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: orgSummaryId },
       data,
-    });
+    }));
     if (result.count === 0) {
       return null;
     }
@@ -497,10 +498,10 @@ export class TeamIntelligenceRepository {
       return 0;
     }
 
-    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: { in: orgSummaryIds } },
       data,
-    });
+    }));
 
     return result.count;
   }
@@ -520,10 +521,10 @@ export class TeamIntelligenceRepository {
       errorMessage?: string | null;
     }
   ): Promise<TeamIntelligenceOrgSummaryV2 | null> {
-    const result = await this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
+    const result = await withWorkspaceScope(() => this.prisma.teamIntelligenceOrgSummaryV2.updateMany({
       where: { id: orgSummaryId },
       data,
-    });
+    }));
     if (result.count === 0) {
       return null;
     }

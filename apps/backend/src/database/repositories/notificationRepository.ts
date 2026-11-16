@@ -2,6 +2,7 @@ import { BaseRepository } from './base';
 import { Notification, NotificationPreference, BrowserNotificationSubscription } from '@prisma/client';
 import { NotificationType, NotificationStatus, NotificationDeliveryMethod } from '@xyne/shared';
 import { currentWorkspaceId } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 // Define create/update input types
 type NotificationCreateInput = {
@@ -25,7 +26,7 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
   }
 
   async create(data: NotificationCreateInput): Promise<Notification> {
-    return this.db.notification.create({ data });
+    return withWorkspaceScope(() => this.db.notification.create({ data }));
   }
 
   async findById(id: string): Promise<Notification | null> {
@@ -113,13 +114,13 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
   }
 
   async deleteExpired(): Promise<number> {
-    const result = await this.db.notification.deleteMany({
+    const result = await withWorkspaceScope(() => this.db.notification.deleteMany({
       where: {
         expiresAt: {
           lt: new Date()
         }
       }
-    });
+    }));
 
     return result.count;
   }
@@ -128,14 +129,14 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
     id: string,
     status: NotificationStatus
   ): Promise<Notification> {
-    return this.db.notification.update({
+    return withWorkspaceScope(() => this.db.notification.update({
       where: {
         id
       },
       data: {
         status
       }
-    });
+    }));
   }
 }
 
@@ -312,17 +313,17 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
   }
 
   async deactivateByEndpoint(endpoint: string): Promise<void> {
-    await this.db.browserNotificationSubscription.updateMany({
+    await withWorkspaceScope(() => this.db.browserNotificationSubscription.updateMany({
       where: { endpoint },
       data: { isActive: false }
-    });
+    }));
   }
 
   async deactivateByUserId(userId: string): Promise<void> {
-    await this.db.browserNotificationSubscription.updateMany({
+    await withWorkspaceScope(() => this.db.browserNotificationSubscription.updateMany({
       where: { userId },
       data: { isActive: false }
-    });
+    }));
   }
 
   async updateLastUsed(id: string): Promise<void> {
@@ -336,7 +337,7 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);
 
-    const result = await this.db.browserNotificationSubscription.deleteMany({
+    const result = await withWorkspaceScope(() => this.db.browserNotificationSubscription.deleteMany({
       where: {
         OR: [
           {
@@ -348,7 +349,7 @@ export class BrowserNotificationSubscriptionRepository extends BaseRepository<Br
           }
         ]
       }
-    });
+    }));
 
     return result.count;
   }

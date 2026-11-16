@@ -93,7 +93,7 @@ export class BaseQueryACL<
    * not its `role`") live here. A `workspaceId` change is refused by the extension for every
    * table, so overrides don't need to check it.
    */
-  async canUpdate(_data: Record<string, unknown>): Promise<boolean> {
+  async canUpdate(_data: Record<string, unknown>, _queryWhere?: Record<string, unknown>): Promise<boolean> {
     return true
   }
 

@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client'
 import type { ACLContext, BaseQueryACL } from '../base-acl'
 import {
   AdminWriteACL,
+  CustomACL,
   EntityACL,
   MemberACL,
   OrgACL,
@@ -48,9 +49,9 @@ export const system = (o: SystemWriteOptions = {}): PolicyFactory => (c, p) => n
 export const platform = (o: PolicyOptions = {}): PolicyFactory => (c, p) => new PlatformACL(c, p, o)
 
 /**
- * A table still on its hand-written ACL. Every table starts here; moving one onto its access
- * class replaces its `legacy(...)` line.
+ * A table whose existing hand-written rule is kept (see CustomACL). It still runs inside
+ * PolicyACL, so guests are denied unless `guest` says otherwise.
  */
-export const legacy =
-  (Cls: new (ctx: ACLContext, prisma: PrismaClient) => BaseQueryACL): PolicyFactory =>
-  (c, p) => new Cls(c, p)
+export const custom =
+  (Cls: new (ctx: ACLContext, prisma: PrismaClient) => BaseQueryACL, o: PolicyOptions = {}): PolicyFactory =>
+  (c, p) => new CustomACL(c, p, Cls, o)

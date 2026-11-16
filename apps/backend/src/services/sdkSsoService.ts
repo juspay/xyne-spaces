@@ -35,6 +35,7 @@ import { userActivityTrackingService } from './userActivityTrackingService';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 /**
  * Marks an auth session minted by Xyne SSO for the Spaces SDK, MCP or CLI. Its
@@ -455,10 +456,10 @@ class SdkSsoService {
     const settled = await this.awaitRotation(rotatedKey);
     if (settled) return settled;
 
-    const session = await db.authSession.findUnique({
+    const session = await withWorkspaceScope(() => db.authSession.findUnique({
       where: { refreshToken: storedRefreshToken(hash) },
       select: { id: true, orgMemberId: true, status: true, refreshTokenExpiry: true },
-    });
+    }));
 
     if (!session) {
       // Checked again: a concurrent rotation may have claimed the token
@@ -574,10 +575,10 @@ class SdkSsoService {
    */
   async revokeRefreshToken(refreshToken: string): Promise<void> {
     const hash = hashRefreshToken(refreshToken);
-    const session = await db.authSession.findUnique({
+    const session = await withWorkspaceScope(() => db.authSession.findUnique({
       where: { refreshToken: storedRefreshToken(hash) },
       select: { id: true },
-    });
+    }));
     const sessionId = session?.id ?? (await redisService.get(`${SPENT_KEY_PREFIX}${hash}`));
     if (!sessionId) return;
     await authSessionService.revokeById(sessionId, AuthSessionRevokeReason.LOGOUT);

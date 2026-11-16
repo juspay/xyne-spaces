@@ -43,6 +43,7 @@ import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper'
 import { redisService } from '@/services/redisService';
 import { randomUUID } from 'crypto';
 import { setOnboardingCookie } from '@/utils/onboardingCookie';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
 
@@ -1961,7 +1962,7 @@ export class AuthV2Controller {
           return;
         }
 
-        await this.prisma.orgMember.upsert({
+        await withWorkspaceScope(() => this.prisma.orgMember.upsert({
           where: { email: userData.email.toLowerCase() },
           create: {
             orgId: existingOrgId,
@@ -1971,7 +1972,7 @@ export class AuthV2Controller {
           update: {
             leftAt: null,
           },
-        });
+        }));
 
         const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
           { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },

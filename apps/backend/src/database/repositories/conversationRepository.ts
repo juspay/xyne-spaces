@@ -4,6 +4,7 @@ import { QueryOptions } from '@/types/database';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export interface CreateConversationInput {
   conversationId?: string; // Optional - for custom IDs (e.g., showInChannel child conversations)
@@ -483,7 +484,9 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     sourceChannelId: string,
     targetChannelId: string
   ): Promise<number> {
-    const [movedConversations] = await this.db.$transaction([
+    // Moving a thread re-parents every participant's rows (drafts, unread state, artifacts): a
+    // backend maintenance step, run for the workspace rather than as the caller.
+    const [movedConversations] = await withWorkspaceScope(() => this.db.$transaction([
       this.db.conversation.updateMany({
         where: { conversationId: { in: conversationIds } },
         data: { channelId: targetChannelId }
@@ -546,7 +549,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         where: { channelId: sourceChannelId, lastViewedConversationId: { in: conversationIds } },
         data: { lastViewedConversationId: null }
       })
-    ]);
+    ]));
 
     // Note: the label-unread broadcast lives in the service layer (groupDmParticipantService), not here — a
     // repository must not depend on websocketService (that inverted dependency created a module-load cycle).

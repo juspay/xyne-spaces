@@ -508,7 +508,8 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
 
     // Column rules: may the caller write these columns (e.g. not their own `role`)?
     if (acl && updateData && typeof updateData === 'object') {
-      if (!(await acl.canUpdate(updateData as Record<string, unknown>))) throw denyUpdate(model, operation);
+      const updateWhere = (args as { where?: Record<string, unknown> } | undefined)?.where;
+      if (!(await acl.canUpdate(updateData as Record<string, unknown>, updateWhere))) throw denyUpdate(model, operation);
     }
 
     // Hand the caller's own `where` to the ACL so a single-entity write can scope by the
