@@ -15,7 +15,7 @@ export interface ParsedBotCommand {
   rawCommand: string;
 }
 
-// Command parsing lives in @xyne/shared (content-extractors/command) so the encryption
+// Command parsing lives in @xyne/shared (encryption-transformation/command) so the encryption
 // service's command extractor and this parser agree; this class keeps the logging and
 // the registry/validation step.
 export class BotCommandParser {

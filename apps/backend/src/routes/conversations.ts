@@ -2,28 +2,13 @@ import { Router } from 'express';
 import { replyToConversation } from '@xyne/shared';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
-import { manifestRequestBodyMiddleware } from '../middleware/decryptionMiddleware';
-import { AppError } from '../middleware/errorHandler';
-import { db } from '../database/client';
-import { dekPassthroughMiddleware } from '../services/encryption';
+import { encryptedRoute } from '../middleware/encryptedRoute';
 
 const router = Router();
 const conversationController = new ConversationController();
 
-// A reply is stored under its conversation's workspace (messageRepository.create resolves it
-// the same way), so that workspace's DEK is what the manifest's MASTER_DEK fields become.
-const transformReplyBody = manifestRequestBodyMiddleware({
-  contract: replyToConversation,
-  resolveWorkspaceId: async (req) => {
-    const conversation = await db.conversation.findUnique({
-      where: { conversationId: req.params.conversationId },
-      select: { workspaceId: true },
-    });
-    if (!conversation) {
-      throw new AppError('Conversation not found', 404);
-    }
-    return conversation.workspaceId;
-  },
+const encryptedReply = encryptedRoute(replyToConversation, {
+  resolveWorkspaceId: async (req) => req.user!.workspaceId,
 });
 
 // Static route must be registered before any /:conversationId routes.
@@ -35,13 +20,9 @@ router.post('/reply-drafts/:draftId/decline', conversationController.declineRepl
 router.get('/recent-visited', conversationController.getRecentVisitedConversations);
 
 // Keep replyToConversation for file upload handling
-// Multipart: the manifest rule check and ticket transform run here, after multer has
-// filled req.body (it is still empty when the auth middleware runs). With the manifest rule
-// active, `content` reaches the controller as workspace-DEK ciphertext, not plaintext.
-// dekPassthroughMiddleware goes first so the whole chain, including the response, runs in
-// passthrough: storage ciphertext stays encrypted on reads and the response is re-encrypted
-// from the DEK to the caller's ticket.
-router.post('/:conversationId/messages', dekPassthroughMiddleware, uploadMultiple, transformReplyBody, conversationController.replyToConversation);
+// encryptedRoute runs after multer (it fills req.body); see middleware/encryptedRoute.ts for
+// the request (CEK → DEK) and response (DEK → CEK) steps.
+router.post('/:conversationId/messages', uploadMultiple, ...encryptedReply, conversationController.replyToConversation);
 
 // Get a single conversation message by conversationId + messageId (for mobile background prefetch)
 router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);
