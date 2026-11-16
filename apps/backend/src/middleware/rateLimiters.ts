@@ -19,7 +19,7 @@ import rateLimit, { ipKeyGenerator, RateLimitRequestHandler } from 'express-rate
 //   legacyHeaders: false,
 // });
 
-/** Per-user limiter for office-document-to-PDF conversion: each request can spawn a LibreOffice process, so this caps request rate on top of the in-process concurrency cap in officeConversionService. */
+/** Per-user limiter for office-document-to-PDF conversion: each request can occupy a Ream conversion thread, so this caps request rate on top of the thread pool in reamConversionPool. */
 export const officeConversionLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10,

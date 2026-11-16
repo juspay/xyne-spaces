@@ -171,7 +171,7 @@ export class FileProcessor {
             )
         }
 
-        // PPTX/PPT: convert to PDF first (the same LibreOffice conversion
+        // PPTX/PPT: convert to PDF first (the same Ream conversion
         // officeConversionService already does for the viewer) and route
         // through the SAME dedicated PDF OCR ladder (LightOnOCR → Docling →
         // PdfJs) that PDFs get. The dedicated LightOnOCR model is only

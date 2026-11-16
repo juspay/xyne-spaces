@@ -7,11 +7,9 @@ from renderer import is_supported_upload, stream_rendered_pages
 
 
 class RendererTest(unittest.TestCase):
-    def test_supported_uploads_include_office_text_pdf_and_images(self):
+    def test_supported_uploads_include_text_pdf_and_images(self):
         accepted = [
             "file.pdf",
-            "file.docx",
-            "file.pptx",
             "file.txt",
             "file.png",
             "file.jpg",
@@ -25,6 +23,9 @@ class RendererTest(unittest.TestCase):
             with self.subTest(filename=filename):
                 assert is_supported_upload(filename)
 
+        # Office files are converted to PDF upstream; this service never runs LibreOffice.
+        assert not is_supported_upload("file.docx")
+        assert not is_supported_upload("file.pptx")
         assert not is_supported_upload("file.xlsx")
         assert not is_supported_upload("file.csv")
 
