@@ -7,6 +7,7 @@ import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapsh
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { logger } from '@/utils/logger';
 import { ticketSchema } from '@/vespa/src/types';
+import { vespaQueue } from '@/queues/vespaQueue';
 import { DatabaseClient } from '@/database/client';
 import {
   BaseTicketType,
@@ -905,12 +906,10 @@ export class TicketRepository {
 
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
     // Keep the Vespa ticket doc's isArchived in step with the row: this Prisma path bypasses the Zero ticket handler
-    // that re-feeds on update. Imported lazily to keep the repository free of a static dependency on the queue.
+    // that re-feeds on update.
     if (fields.isArchived !== undefined && prevSnapshot?.isArchived !== fields.isArchived) {
-      void import('@/queues/vespaQueue')
-        .then(({ vespaQueue }) => vespaQueue.addJob({
-          schema: ticketSchema, jobType: 'feed', docId: ticketId, workspaceId: updatedTicket.workspaceId ?? undefined,
-        }))
+      vespaQueue
+        .addJob({ schema: ticketSchema, jobType: 'feed', docId: ticketId, workspaceId: updatedTicket.workspaceId ?? undefined })
         .catch((error) => logger.error(`[TicketRepository] Failed to queue Vespa feed for ticket ${ticketId}:`, error));
     }
     if (fields.description !== undefined) {
