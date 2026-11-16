@@ -1,4 +1,5 @@
 import { decryptField } from './field-decrypt.js';
+import type { TransitKeyring } from './keyring.js';
 import { Event } from '../logger/events.js';
 import { getCryptoLogger } from './crypto-logger.js';
 
@@ -9,7 +10,7 @@ const MAX_ENTRIES = 10_000;
  *
  * - .get(ciphertext) -> plaintext | undefined (sync read)
  * - .set(ciphertext, plaintext) -> void (with LRU eviction)
- * - .prefetch(ciphertext, key) -> Promise<void> (async decrypt + cache)
+ * - .prefetch(ciphertext, keyring) -> Promise<void> (async decrypt + cache)
  * - .clear() -> void (on key change or disconnect)
  * - .subscribe(cb) -> unsubscribe fn (notified on new cache entries)
  * - .size -> number
@@ -77,7 +78,7 @@ class DecryptionCache {
   /**
    * Async decrypt + cache. Used to warm the cache for a ciphertext.
    */
-  async prefetch(ciphertext: string, key: CryptoKey): Promise<void> {
+  async prefetch(ciphertext: string, keyring: TransitKeyring): Promise<void> {
     const logger = getCryptoLogger();
     if (this.cache.has(ciphertext)) {
       return;
@@ -86,7 +87,7 @@ class DecryptionCache {
     const format = ciphertext.split('|')[0] || 'unknown';
 
     try {
-      const plaintext = await decryptField(ciphertext, key);
+      const plaintext = await decryptField(ciphertext, keyring);
       this.set(ciphertext, plaintext);
       logger.info(Event.ENCRYPTION_FIELD_DECRYPT, {
         message: '[encryptionlog] Decryption successful',

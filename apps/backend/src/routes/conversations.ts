@@ -1,9 +1,15 @@
 import { Router } from 'express';
+import { replyToConversationClient } from '@xyne/shared';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
+import { encryptedRoute } from '../middleware/encryptedRoute';
 
 const router = Router();
 const conversationController = new ConversationController();
+
+const encryptedReply = encryptedRoute(replyToConversationClient, {
+  resolveWorkspaceId: async (req) => req.user!.workspaceId,
+});
 
 // Static route must be registered before any /:conversationId routes.
 router.get('/threads', conversationController.getUserThreads);
@@ -14,7 +20,9 @@ router.post('/reply-drafts/:draftId/decline', conversationController.declineRepl
 router.get('/recent-visited', conversationController.getRecentVisitedConversations);
 
 // Keep replyToConversation for file upload handling
-router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
+// encryptedRoute runs after multer (it fills req.body); see middleware/encryptedRoute.ts for
+// the request (CEK → DEK) and response (DEK → CEK) steps.
+router.post('/:conversationId/messages', uploadMultiple, ...encryptedReply, conversationController.replyToConversation);
 
 // Get a single conversation message by conversationId + messageId (for mobile background prefetch)
 router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);

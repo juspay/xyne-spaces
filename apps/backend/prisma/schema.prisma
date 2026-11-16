@@ -929,6 +929,7 @@ model AuthSession {
   deviceInfo  String?   // JSON: { appVersion, userAgent, acceptLanguage }
   fcmToken    String?
   voipToken   String?
+  transitPublicKey String? // base64 P-256 point the client registered (POST /api/transit/register); transit keys for pushes derive from it
   revokedAt   DateTime?
   revokeReason String?  // superseded | logout | admin_removed
   createdAt   DateTime  @default(now())

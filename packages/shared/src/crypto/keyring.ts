@@ -1,0 +1,166 @@
+/** The client's P-256 key pair. The private key is a WebCrypto handle, never raw bytes. */
+export interface TransitKeyPair {
+  /** ECDH P-256, `deriveBits` only. */
+  privateKey: CryptoKey;
+  /** Base64 uncompressed point: what `x-transit-key` carries and the register route stores. */
+  publicKey: string;
+}
+
+export interface TransitServerKey {
+  version: number;
+  /** Base64 uncompressed P-256 point. */
+  publicKey: string;
+}
+
+/** The encryption service's public keys; new ciphertext goes under `current`. */
+export interface TransitServerKeys {
+  current: number;
+  keys: TransitServerKey[];
+}
+
+/** Where the client's key pair lives between page loads. */
+export interface TransitKeyStore {
+  getOrCreate(): Promise<TransitKeyPair>;
+}
+
+export const TRANSIT_KEY_HEADER = 'x-transit-key';
+const TRANSIT_KEY_ID_PREFIX = 'tk-';
+const DERIVE_INFO = 'transit/v1';
+const ECDH = { name: 'ECDH', namedCurve: 'P-256' } as const;
+
+export function transitKeyId(version: number): string {
+  return `${TRANSIT_KEY_ID_PREFIX}${version}`;
+}
+
+/** The server key version a transit key id names; `null` for anything else. */
+export function parseTransitKeyId(keyId: string): number | null {
+  if (!keyId.startsWith(TRANSIT_KEY_ID_PREFIX)) return null;
+  const rest = keyId.slice(TRANSIT_KEY_ID_PREFIX.length);
+  return /^\d+$/.test(rest) ? Number(rest) : null;
+}
+
+export function toBase64(bytes: ArrayBuffer | Uint8Array): string {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)));
+}
+
+export function fromBase64(value: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** A fresh non-extractable ECDH pair; the default store keeps it for the page's lifetime. */
+export async function generateTransitKeyPair(): Promise<TransitKeyPair> {
+  const pair = await crypto.subtle.generateKey(ECDH, false, ['deriveBits']);
+  return {
+    privateKey: pair.privateKey,
+    publicKey: toBase64(await crypto.subtle.exportKey('raw', pair.publicKey)),
+  };
+}
+
+/**
+ * Static ECDH with one server key version, then HKDF-SHA256 with salt = clientPoint ||
+ * serverPoint and info "transit/v1": the same AES-256-GCM key the encryption service
+ * derives from its private key and the client's public key.
+ */
+export async function deriveTransitKey(
+  pair: TransitKeyPair,
+  serverPublicKey: string,
+): Promise<CryptoKey> {
+  const clientPoint = fromBase64(pair.publicKey);
+  const serverPoint = fromBase64(serverPublicKey);
+  const serverKey = await crypto.subtle.importKey('raw', serverPoint, ECDH, false, []);
+  const shared = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: serverKey },
+    pair.privateKey,
+    256,
+  );
+  const hkdfKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  const salt = new Uint8Array(clientPoint.length + serverPoint.length);
+  salt.set(clientPoint, 0);
+  salt.set(serverPoint, clientPoint.length);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(DERIVE_INFO) },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/**
+ * Transit keys by server key version, derived from the client's key pair and the server's
+ * public keys. New ciphertext goes under the current version; any listed version decrypts.
+ * A key id naming a version not seen yet (a rotated server key) triggers one refetch of the
+ * server keys. Keys never leave memory.
+ */
+export class TransitKeyring {
+  private readonly derived = new Map<number, Promise<CryptoKey>>();
+  private serverKeys: TransitServerKeys;
+  private refetching: Promise<TransitServerKeys> | null = null;
+
+  constructor(
+    private readonly pair: TransitKeyPair,
+    serverKeys: TransitServerKeys,
+    private readonly fetchServerKeys: () => Promise<TransitServerKeys>,
+  ) {
+    this.serverKeys = serverKeys;
+  }
+
+  /** Base64 P-256 point every request names in `x-transit-key`. */
+  get clientPublicKey(): string {
+    return this.pair.publicKey;
+  }
+
+  async current(): Promise<{ key: CryptoKey; keyId: string }> {
+    const version = this.serverKeys.current;
+    return { key: await this.forVersion(version), keyId: transitKeyId(version) };
+  }
+
+  async forKeyId(keyId: string): Promise<CryptoKey> {
+    const version = parseTransitKeyId(keyId);
+    if (version === null) throw new Error(`Not a transit key id: ${keyId}`);
+    if (!this.has(version)) {
+      await this.refetch();
+      if (!this.has(version))
+        throw new Error(`Server transit key version ${version} is not available`);
+    }
+    return this.forVersion(version);
+  }
+
+  clear(): void {
+    this.derived.clear();
+  }
+
+  private has(version: number): boolean {
+    return this.serverKeys.keys.some(k => k.version === version);
+  }
+
+  private forVersion(version: number): Promise<CryptoKey> {
+    let pending = this.derived.get(version);
+    if (!pending) {
+      const server = this.serverKeys.keys.find(k => k.version === version);
+      if (!server)
+        return Promise.reject(new Error(`Server transit key version ${version} is not available`));
+      pending = deriveTransitKey(this.pair, server.publicKey);
+      pending.catch(() => this.derived.delete(version));
+      this.derived.set(version, pending);
+    }
+    return pending;
+  }
+
+  private refetch(): Promise<TransitServerKeys> {
+    if (!this.refetching) {
+      this.refetching = this.fetchServerKeys()
+        .then(keys => {
+          this.serverKeys = keys;
+          return keys;
+        })
+        .finally(() => {
+          this.refetching = null;
+        });
+    }
+    return this.refetching;
+  }
+}
