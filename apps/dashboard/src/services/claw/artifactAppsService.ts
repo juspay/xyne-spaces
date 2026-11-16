@@ -198,3 +198,77 @@ export function artifactAppPayloadUrl(appId: string, versionId?: string): string
   const q = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
   return `${BASE}/${encodeURIComponent(appId)}/payload${q}`;
 }
+
+/** Ranges the analytics endpoint accepts; anything else falls back to 30. */
+export type ArtifactAppsAnalyticsDays = 7 | 30 | 90;
+
+/** One UTC day of activity. Every day in the window is present, quiet ones as zeros. */
+export interface ArtifactAppsAnalyticsDay {
+  /** YYYY-MM-DD, UTC. */
+  date: string;
+  appsCreated: number;
+  versions: number;
+  runsCompleted: number;
+  runsFailed: number;
+  runsCancelled: number;
+}
+
+export interface ArtifactAppsAnalytics {
+  range: { days: ArtifactAppsAnalyticsDays; from: string; to: string };
+  /** All time, across every app in the workspace (counts only). */
+  totals: {
+    apps: number;
+    published: number;
+    builders: number;
+    versions: number;
+    storageRecords: number;
+  };
+  /** Within the range. */
+  period: {
+    appsCreated: number;
+    versions: number;
+    restores: number;
+    archived: number;
+    agentRuns: {
+      total: number;
+      completed: number;
+      failed: number;
+      cancelled: number;
+      inProgress: number;
+    };
+    /** Failed share of finished runs; null when none finished in the range. */
+    failureRate: number | null;
+  };
+  /** Every app in exactly one part: the parts add up to all apps. */
+  composition: { published: number; private: number; empty: number; archived: number };
+  daily: ArtifactAppsAnalyticsDay[];
+  /** Most active apps the caller can open (their own, or published). */
+  topApps: {
+    id: string;
+    title: string;
+    icon: string | null;
+    visibility: ArtifactAppVisibility;
+    isMine: boolean;
+    ownerName: string | null;
+    versions: number;
+    agentRuns: number;
+    failedRuns: number;
+    storageRecords: number;
+    updatedAt: string;
+  }[];
+  /** Latest failed builds on the caller's OWN apps; the first line of each error only. */
+  recentErrors: {
+    appId: string;
+    appTitle: string;
+    at: string;
+    source: 'dispatch' | 'run';
+    message: string;
+  }[];
+}
+
+/** Apps Marketplace analytics for the caller's workspace. */
+export async function getArtifactAppsAnalytics(
+  days: ArtifactAppsAnalyticsDays,
+): Promise<ArtifactAppsAnalytics> {
+  return clawRequest(`${BASE}/analytics?days=${days}`);
+}

@@ -1,0 +1,39 @@
+/*
+ * Chart colours for Apps Marketplace analytics, by role, so the chart code never
+ * names a hex. Light values are for the classic / summer_breeze themes, the
+ * second block for midnight. The four series slots were checked with the
+ * dataviz palette validator against #ffffff and #1a1a1f (the app backgrounds):
+ * every adjacent pair clears the colour-blind and normal-vision separation
+ * gates in both modes. Light aqua and yellow sit below 3:1 contrast, so every
+ * chart here also has a table view and the status bar prints its counts.
+ *
+ * Status colours mean a state (a run completed or failed) and are never used
+ * as series colours; they always appear with a text label.
+ */
+.apps-analytics {
+  --viz-series-1: #2a78d6; /* blue */
+  --viz-series-2: #eb6834; /* orange */
+  --viz-series-3: #1baf7a; /* aqua */
+  --viz-series-4: #eda100; /* yellow */
+  --viz-on-series-4: #0b0b0b; /* label ink inside the yellow fill */
+  --viz-status-good: #0ca30c;
+  --viz-status-critical: #d03b3b;
+  --viz-neutral: #898781; /* cancelled, and other "no outcome" states */
+  --viz-grid: #e1e0d9;
+  --viz-axis: #898781;
+  --viz-surface: #ffffff;
+}
+
+[data-theme="midnight"] .apps-analytics {
+  --viz-series-1: #3987e5;
+  --viz-series-2: #d95926;
+  --viz-series-3: #199e70;
+  --viz-series-4: #c98500;
+  --viz-on-series-4: #ffffff;
+  --viz-status-good: #0ca30c;
+  --viz-status-critical: #d03b3b;
+  --viz-neutral: #898781;
+  --viz-grid: #2c2c2a;
+  --viz-axis: #898781;
+  --viz-surface: #1a1a1f;
+}
