@@ -74,6 +74,9 @@ const REDISPATCH_JITTER_MAX_MS = 10 * 1000;
 const REDISPATCH_COOLDOWN_SECONDS = 15;
 const redispatchCooldownKey = (roomName: string) => `livekit:agent-redispatch:cooldown:${roomName}`;
 
+/** A dispatched agent claims its call session within seconds; the record only has to outlive that. */
+const AGENT_DISPATCH_RECORD_TTL_SECONDS = 60 * 60;
+
 /** How long after createDispatch we check whether any worker actually claimed the job. */
 const DISPATCH_CLAIM_CHECK_DELAY_MS = 9 * 1000;
 
@@ -360,6 +363,10 @@ export class LiveKitService {
     try {
       const dispatch = await this.agentDispatch.createDispatch(roomName, agentName);
       logger.info(`[${roomName}] transcription_agent_dispatched | dispatch_id=${dispatch.id}, agent=${agentName}`);
+      // The agent's /session call must name a dispatch recorded here; LiveKit can't invent one.
+      await redisService
+        .recordAgentDispatch(dispatch.id, roomName, AGENT_DISPATCH_RECORD_TTL_SECONDS)
+        .catch((error) => logger.error(`[${roomName}] agent_dispatch_record_failed | dispatch_id=${dispatch.id}, error=${error}`));
       return dispatch;
     } catch (error) {
       logger.error(`[${roomName}] transcription_agent_dispatch_failed | agent=${agentName}, error=${error}`);

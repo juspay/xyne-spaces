@@ -288,6 +288,18 @@ class RedisService {
     return this.redis.get(`ozonetel:call-ticket:${workspaceId}:${callId}`);
   }
 
+  /** Every transcription-agent dispatch the backend creates, so /session only answers for real ones. */
+  async recordAgentDispatch(dispatchId: string, roomName: string, ttlSeconds: number): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    await this.redis.set(`agent-dispatch:${dispatchId}`, roomName, 'EX', ttlSeconds);
+  }
+
+  /** Atomically takes a recorded dispatch: returns its room once, then null forever. */
+  async claimAgentDispatch(dispatchId: string): Promise<string | null> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    return this.redis.getdel(`agent-dispatch:${dispatchId}`);
+  }
+
   // Session subscription management
   async subscribeToSession(sessionId: string, socketId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');

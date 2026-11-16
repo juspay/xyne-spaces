@@ -29,8 +29,16 @@ const SESSION_CALL_STATUSES = new Set<CallStatus>([
 
 /** Raw 32-byte X25519 public key, base64. */
 const callSessionBodySchema = z.object({
-  publicKey: z.string().refine((value) => Buffer.from(value, 'base64').length === 32, 'publicKey must be 32 bytes'),
+  publicKey: z.string().refine((value) => callEncryptionService.isUsableAgentPublicKey(value), 'publicKey must be a 32-byte X25519 key'),
+  /** The LiveKit dispatch this job belongs to (`ctx.job.dispatch_id`). */
+  dispatchId: z.string().min(1).max(128),
 });
+
+/** A caller-supplied `limit` query param, parsed and bounded so one request can't pull a whole table. */
+const clampLimit = (value: unknown, fallback: number, max: number): number => {
+  const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+};
 
 class TranscriptionAgentController {
   private ticketController: TicketController;
@@ -132,6 +140,9 @@ class TranscriptionAgentController {
    * The agent calls this after LiveKit hands it a job and before it joins the room: it
    * joins an encrypted call only with the key from here, never anything LiveKit carried.
    * The key is sealed to the job's one-time X25519 public key (body `publicKey`).
+   * Only a dispatch this backend created (recorded in Redis at dispatch time) gets a
+   * session, and only once: a stolen agent API key can't fetch keys on its own, and
+   * LiveKit can't invent a dispatch.
    */
   callSession = async (req: Request, res: Response): Promise<void> => {
     const { callId } = req.params;
@@ -139,7 +150,7 @@ class TranscriptionAgentController {
 
     const parsed = callSessionBodySchema.safeParse(req.body);
     if (!callId || !parsed.success) {
-      res.status(400).json({ success: false, error: 'callId and publicKey are required' });
+      res.status(400).json({ success: false, error: 'callId, publicKey and dispatchId are required' });
       return;
     }
 
@@ -155,15 +166,24 @@ class TranscriptionAgentController {
         return;
       }
 
+      const { dispatchId } = parsed.data;
+      const dispatchedRoom = await redisService.claimAgentDispatch(dispatchId);
+      if (dispatchedRoom !== callId) {
+        // Unknown, expired, already claimed, or recorded for another room.
+        logger.warn(`[${callId}] agent_call_session_refused | reason=dispatch_not_claimable, dispatch_id=${dispatchId}`);
+        res.status(403).json({ success: false, error: 'Dispatch not recognised' });
+        return;
+      }
+
       const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion);
       if (!encryption) {
-        logger.info(`[${callId}] agent_call_session_issued | encrypted=false`);
+        logger.info(`[${callId}] agent_call_session_issued | encrypted=false, dispatch_id=${dispatchId}`);
         res.json({ success: true, encrypted: false });
         return;
       }
 
       const sealedKey = callEncryptionService.sealKeyForAgent(callId, encryption.key, parsed.data.publicKey);
-      logger.info(`[${callId}] agent_call_session_issued | encrypted=true`);
+      logger.info(`[${callId}] agent_call_session_issued | encrypted=true, dispatch_id=${dispatchId}`);
       res.json({ success: true, encrypted: true, sealedKey });
     } catch (error) {
       logger.error(`[${callId}] agent_call_session_failed`, error);
@@ -328,6 +348,14 @@ class TranscriptionAgentController {
         return;
       }
 
+      // The agent's key is shared, so only answer for someone who is actually in this call.
+      const isInCall = userId === call.createdByUserId || (await repositories.calls.findParticipant(call.id, userId)) !== null;
+      if (!isInCall) {
+        logger.warn(`[GetMyTickets] Refused: user ${userId} is not a participant of call ${callId}`);
+        res.status(403).json({ success: false, error: 'User is not a participant of this call' });
+        return;
+      }
+
       // Build query filters
       const whereClause: any = {
         assignedTo: userId,
@@ -342,7 +370,7 @@ class TranscriptionAgentController {
       const tickets = await db.ticket.findMany({
         where: whereClause,
         orderBy: { createdAt: 'desc' },
-        take: parseInt(limit as string, 10),
+        take: clampLimit(limit, 10, 50),
         select: {
           id: true,
           xyneId: true,
@@ -384,8 +412,8 @@ class TranscriptionAgentController {
         return;
       }
 
-      if (!q || typeof q !== 'string') {
-        res.status(400).json({ success: false, error: 'Search query (q) is required' });
+      if (!q || typeof q !== 'string' || q.trim().length < 2) {
+        res.status(400).json({ success: false, error: 'Search query (q) of at least 2 characters is required' });
         return;
       }
 
@@ -411,7 +439,7 @@ class TranscriptionAgentController {
       // Search users by name (case-insensitive)
       const users = await db.user.findMany({
         where: whereClause,
-        take: parseInt(limit as string, 10),
+        take: clampLimit(limit, 5, 20),
         select: {
           id: true,
           name: true,

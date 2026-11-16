@@ -1,4 +1,4 @@
-import { createCipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'crypto';
+import { createCipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes, type KeyObject } from 'crypto';
 import type { Call } from '@prisma/client';
 import { CallStatus, CallType, type CallEncryptionCredentials } from '@xyne/shared';
 import { config } from '@/config/env';
@@ -152,15 +152,31 @@ class CallEncryptionService {
    * never crosses the in-cluster hop in clear. X25519 -> HKDF-SHA256 -> AES-256-GCM,
    * with the room name as AAD so a sealed key can't be replayed for another call.
    */
-  sealKeyForAgent(roomName: string, key: string, agentPublicKeyB64: string): SealedCallKey {
+  /** A raw 32-byte X25519 key that isn't a small-order point (those force an all-zero secret). */
+  isUsableAgentPublicKey(agentPublicKeyB64: string): boolean {
+    try {
+      this.agreeWithAgent(agentPublicKeyB64, generateKeyPairSync('x25519').privateKey);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private agreeWithAgent(agentPublicKeyB64: string, privateKey: KeyObject): Buffer {
     const agentRaw = Buffer.from(agentPublicKeyB64, 'base64');
     if (agentRaw.length !== 32) throw new Error('agent public key must be 32 bytes (raw X25519)');
     const agentPublicKey = createPublicKey({
       key: { kty: 'OKP', crv: 'X25519', x: agentRaw.toString('base64url') },
       format: 'jwk',
     });
+    const shared = diffieHellman({ privateKey, publicKey: agentPublicKey });
+    if (shared.every((byte) => byte === 0)) throw new Error('agent public key is a small-order point');
+    return shared;
+  }
+
+  sealKeyForAgent(roomName: string, key: string, agentPublicKeyB64: string): SealedCallKey {
     const ephemeral = generateKeyPairSync('x25519');
-    const shared = diffieHellman({ privateKey: ephemeral.privateKey, publicKey: agentPublicKey });
+    const shared = this.agreeWithAgent(agentPublicKeyB64, ephemeral.privateKey);
     const wrapKey = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), Buffer.from(AGENT_SEAL_INFO, 'utf8'), 32));
     const nonce = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', wrapKey, nonce);

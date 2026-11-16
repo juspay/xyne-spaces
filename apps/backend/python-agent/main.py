@@ -147,7 +147,9 @@ async def entrypoint(ctx: JobContext):
     # The LiveKit job alone is not enough to join: the backend must also say yes, and it
     # is the only source of the call key. No answer means no join (never join unencrypted).
     try:
-        call_session = await fetch_call_session(config.backend_url, config.transcription_agent_api_key, call_id)
+        call_session = await fetch_call_session(
+            config.backend_url, config.transcription_agent_api_key, call_id, ctx.job.dispatch_id
+        )
     except CallSessionError as e:
         logger.error(f"call_session_unavailable | error={e}, action=not_joining")
         ctx.shutdown(reason="call_session_unavailable")

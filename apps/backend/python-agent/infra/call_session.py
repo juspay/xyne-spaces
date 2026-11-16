@@ -64,10 +64,12 @@ def _unseal(room_name: str, private_key: X25519PrivateKey, sealed: dict) -> str:
     return plaintext.decode("utf-8")
 
 
-async def fetch_call_session(backend_url: str, api_key: str, room_name: str) -> CallSession:
+async def fetch_call_session(backend_url: str, api_key: str, room_name: str, dispatch_id: str) -> CallSession:
     """Raises CallSessionError if the backend refuses or can't be reached."""
     if not backend_url or not api_key:
         raise CallSessionError("backend URL or API key not configured")
+    if not dispatch_id:
+        raise CallSessionError("job has no dispatch id")
 
     private_key = X25519PrivateKey.generate()
     public_key = private_key.public_key().public_bytes(
@@ -75,7 +77,8 @@ async def fetch_call_session(backend_url: str, api_key: str, room_name: str) -> 
     )
     url = f"{backend_url}/api/transcriptionAgent/{room_name}/session"
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
-    body = {"publicKey": base64.b64encode(public_key).decode("ascii")}
+    # The backend gives each dispatch it created exactly one session.
+    body = {"publicKey": base64.b64encode(public_key).decode("ascii"), "dispatchId": dispatch_id}
 
     last_error = "no attempt"
     for attempt in range(_MAX_ATTEMPTS):
@@ -90,7 +93,8 @@ async def fetch_call_session(backend_url: str, api_key: str, room_name: str) -> 
                             return CallSession(call_key=None)
                         return CallSession(call_key=_unseal(room_name, private_key, data["sealedKey"]))
                     last_error = f"status={response.status}"
-                    if 400 <= response.status < 500:
+                    # 403 can mean the backend hasn't finished recording the dispatch yet; retry it.
+                    if 400 <= response.status < 500 and response.status != 403:
                         break  # refused: retrying won't change the answer
         except (asyncio.TimeoutError, aiohttp.ClientError) as e:
             last_error = type(e).__name__

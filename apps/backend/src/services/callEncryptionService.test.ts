@@ -136,6 +136,16 @@ describe('callEncryptionService.sealKeyForAgent', () => {
     expect(a.nonce).not.toBe(b.nonce);
   });
 
+  it('rejects small-order public keys, which would force an all-zero shared secret', () => {
+    const zeroPoint = Buffer.alloc(32).toString('base64');
+    const onePoint = Buffer.concat([Buffer.from([1]), Buffer.alloc(31)]).toString('base64');
+    for (const weak of [zeroPoint, onePoint]) {
+      expect(callEncryptionService.isUsableAgentPublicKey(weak)).toBe(false);
+      expect(() => callEncryptionService.sealKeyForAgent('room-1', CALL_KEY, weak)).toThrow();
+    }
+    expect(callEncryptionService.isUsableAgentPublicKey(agentKeys().publicKeyB64)).toBe(true);
+  });
+
   it('rejects a public key that is not 32 raw bytes', () => {
     expect(() => callEncryptionService.sealKeyForAgent('room-1', CALL_KEY, Buffer.alloc(31).toString('base64'))).toThrow(/32 bytes/);
   });
