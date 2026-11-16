@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import type { ClientManifestVersionEvent, SignedClientManifest } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { defaultManifestEnvironment, type ClientManifestEnvironment } from './manifestEnvironment';
 import { getEncryptionProvider } from './provider';
 import type { ClientEncryptionManifest } from './types';
 
@@ -10,8 +11,8 @@ const CACHE_TTL_MS = 60_000;
 /** How often each backend pod asks the encryption service for the latest version. */
 const VERSION_POLL_INTERVAL_MS = 10_000;
 /** Tags are client-supplied, so bound what one pod caches and polls. */
-const MAX_CACHED_TAGS = 32;
-const MAX_WATCHED_TAGS = 8;
+const MAX_CACHED_ENTRIES = 32;
+const MAX_WATCHED_ENTRIES = 8;
 
 type CacheEntry = {
   manifest: ClientEncryptionManifest | null;
@@ -20,45 +21,59 @@ type CacheEntry = {
   expiresAt: number;
 };
 
+/** What is cached, polled and announced: one manifest per (environment, tag). */
+type ManifestKey = { environment: ClientManifestEnvironment; tag: string };
+
+const keyOf = ({ environment, tag }: ManifestKey): string => `${environment}\u0000${tag}`;
+
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<CacheEntry>>();
-/** Last version seen per tag, by the poll or by a load. */
+/** Last version seen per (environment, tag), by the poll or by a load. */
 const knownVersions = new Map<string, number>();
-const watchedTags = new Set<string>(['default']);
+/**
+ * What the poll checks. There is no list of environments to configure: an (environment,
+ * tag) is watched from the first time a request asks for it and the encryption service has
+ * a manifest for it, so the production cluster ends up polling 'production' and
+ * 'playground', a sandbox deployment 'sandbox', and so on.
+ */
+const initialKey: ManifestKey = { environment: defaultManifestEnvironment(), tag: 'default' };
+const watched = new Map<string, ManifestKey>([[keyOf(initialKey), initialKey]]);
 const versionEvents = new EventEmitter();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-function remember(tag: string, entry: CacheEntry): void {
-  if (!cache.has(tag) && cache.size >= MAX_CACHED_TAGS) {
+function remember(key: ManifestKey, entry: CacheEntry): void {
+  const k = keyOf(key);
+  if (!cache.has(k) && cache.size >= MAX_CACHED_ENTRIES) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) cache.delete(oldest);
   }
-  cache.set(tag, entry);
+  cache.set(k, entry);
   if (entry.manifest) {
-    if (!knownVersions.has(tag)) knownVersions.set(tag, entry.manifest.version);
-    if (watchedTags.size < MAX_WATCHED_TAGS) watchedTags.add(tag);
+    if (!knownVersions.has(k)) knownVersions.set(k, entry.manifest.version);
+    if (watched.size < MAX_WATCHED_ENTRIES) watched.set(k, key);
   }
 }
 
 /**
  * The unsigned manifest (for this backend's own checks) and the signed envelope (for
- * clients), fetched together once per tag however many requests are waiting. Signing
- * failures do not fail the load: clients then fall back to their stored copy.
+ * clients), fetched together once per (environment, tag) however many requests are
+ * waiting. Signing failures do not fail the load: clients then fall back to their stored
+ * copy.
  */
-function load(tag: string): Promise<CacheEntry> {
-  const cached = cache.get(tag);
+function load(key: ManifestKey): Promise<CacheEntry> {
+  const k = keyOf(key);
+  const cached = cache.get(k);
   if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached);
 
-  const pending = inFlight.get(tag);
+  const pending = inFlight.get(k);
   if (pending) return pending;
 
   const provider = getEncryptionProvider();
-  const params = { tag, environment: config.env };
   const request = Promise.all([
-    provider.getClientManifest(params),
-    provider.getSignedClientManifest(params).catch((error) => {
+    provider.getClientManifest(key),
+    provider.getSignedClientManifest(key).catch((error) => {
       logger.warn('[encManifest] signed client manifest unavailable', {
-        tag,
+        ...key,
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
@@ -66,42 +81,48 @@ function load(tag: string): Promise<CacheEntry> {
   ])
     .then(([manifest, signed]) => {
       const entry = { manifest, signed, expiresAt: Date.now() + CACHE_TTL_MS };
-      remember(tag, entry);
+      remember(key, entry);
       return entry;
     })
     .finally(() => {
-      inFlight.delete(tag);
+      inFlight.delete(k);
     });
 
-  inFlight.set(tag, request);
+  inFlight.set(k, request);
   return request;
 }
 
 /**
- * Latest client manifest for `tag` in this environment. Cached per tag, refreshed when
- * the version poll sees a new version (or after 60s), with in-flight dedupe. Used by the
- * per-request checks. Failures are not cached.
+ * Latest client manifest for `tag` in `environment` (default: from NODE_ENV). Cached, refreshed when the version poll sees a new
+ * version (or after 60s), with in-flight dedupe. Used by the per-request checks; pass the
+ * request's environment (`manifestEnvironmentForRequest`) so pre-prod requests are checked
+ * against the pre-prod manifest. Failures are not cached.
  */
 export async function getLatestClientManifest(
-  tag: string
+  tag: string,
+  environment: ClientManifestEnvironment = defaultManifestEnvironment()
 ): Promise<ClientEncryptionManifest | null> {
-  return (await load(tag)).manifest;
+  return (await load({ environment, tag })).manifest;
 }
 
 /** Both halves of the cache entry, for the manifest route. */
 export async function getLatestClientManifests(
-  tag: string
+  tag: string,
+  environment: ClientManifestEnvironment
 ): Promise<{ manifest: ClientEncryptionManifest | null; signed: SignedClientManifest | null }> {
-  const { manifest, signed } = await load(tag);
+  const { manifest, signed } = await load({ environment, tag });
   return { manifest, signed };
 }
 
-/** Last version this pod knows for `tag`, for the socket hello; no I/O. */
-export function getKnownClientManifestVersion(tag: string): number | undefined {
-  return knownVersions.get(tag);
+/** Last version this pod knows for (environment, tag), for the socket hello; no I/O. */
+export function getKnownClientManifestVersion(
+  tag: string,
+  environment: ClientManifestEnvironment
+): number | undefined {
+  return knownVersions.get(keyOf({ environment, tag }));
 }
 
-/** Called with `{ tag, version }` whenever the poll sees the latest version change. */
+/** Called with `{ tag, environment, version }` whenever a polled version changes. */
 export function onClientManifestVersionChange(
   listener: (event: ClientManifestVersionEvent) => void
 ): () => void {
@@ -109,33 +130,31 @@ export function onClientManifestVersionChange(
   return () => versionEvents.off('change', listener);
 }
 
-async function pollTag(tag: string): Promise<void> {
-  const version = await getEncryptionProvider().getClientManifestVersion({
-    tag,
-    environment: config.env,
-  });
+async function poll(key: ManifestKey): Promise<void> {
+  const version = await getEncryptionProvider().getClientManifestVersion(key);
   if (version === null) return;
-  const previous = knownVersions.get(tag);
+  const k = keyOf(key);
+  const previous = knownVersions.get(k);
   if (previous === version) return;
-  knownVersions.set(tag, version);
-  cache.delete(tag);
+  knownVersions.set(k, version);
+  cache.delete(k);
   if (previous === undefined) return;
   // Load before announcing, so the clients that refetch are served from memory.
-  await load(tag);
+  await load(key);
   logger.info('[encManifest] client manifest version changed', {
-    tag,
+    ...key,
     from: previous,
     to: version,
   });
-  versionEvents.emit('change', { tag, version } satisfies ClientManifestVersionEvent);
+  versionEvents.emit('change', { ...key, version } satisfies ClientManifestVersionEvent);
 }
 
 async function pollOnce(): Promise<void> {
   await Promise.all(
-    [...watchedTags].map((tag) =>
-      pollTag(tag).catch((error) => {
+    [...watched.values()].map((key) =>
+      poll(key).catch((error) => {
         logger.warn('[encManifest] client manifest version poll failed', {
-          tag,
+          ...key,
           error: error instanceof Error ? error.message : String(error),
         });
       })
@@ -144,9 +163,10 @@ async function pollOnce(): Promise<void> {
 }
 
 /**
- * Each pod polls the encryption service (one tiny request per tag every 10s) and tells
- * its own sockets when the version changes. No cross-pod messaging: every pod notices
- * the change by itself within one interval.
+ * Each pod polls the encryption service (one tiny request per environment and tag every
+ * 10s) and tells its own sockets when a version changes. No cross-pod messaging: every pod
+ * notices the change by itself within one interval. Either A/B side may serve either lane,
+ * so a production pod polls 'production' and 'playground' once both have been requested.
  */
 export function startClientManifestWatcher(): void {
   if (!config.enc.apiClientEncryptionEnabled || pollTimer) return;

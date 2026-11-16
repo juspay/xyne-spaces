@@ -60,5 +60,7 @@ export const CLIENT_MANIFEST_VERSION_EVENT = 'enc_manifest_version';
 
 export interface ClientManifestVersionEvent {
   tag: string;
+  /** The lane the socket is on: 'production' | 'playground' | 'sandbox' | 'development'. */
+  environment: string;
   version: number;
 }

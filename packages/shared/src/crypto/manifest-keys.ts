@@ -2,8 +2,9 @@
  * Public keys this client trusts to sign the client encryption manifest.
  *
  * They are built into the app and never fetched: the backend relays the manifest, so a
- * key it served could just as well be its own. Each key is bound to one environment, so
- * a manifest signed for pre-production can never be accepted by a production client.
+ * key it served could just as well be its own. One encryption service signs for every
+ * environment, so a key may list the environments it is valid for; which environments a
+ * client accepts at all is set separately (setAllowedManifestEnvironments).
  *
  * Get a key's value from its Cloud KMS key version:
  *   gcloud kms keys versions get-public-key <n> --key <key> --keyring <ring> --location <loc> \
@@ -14,8 +15,8 @@
 export interface TrustedManifestKey {
   /** Matches `MANIFEST_SIGNING_KEY_ID` on the encryption service. */
   kid: string;
-  /** The only `environment` a manifest signed by this key may carry. */
-  environment: string;
+  /** Environments a manifest signed by this key may carry; omitted = any. */
+  environments?: readonly string[];
   /** base64 of the DER SubjectPublicKeyInfo of an EC P-256 key. */
   spki: string;
 }
@@ -34,7 +35,7 @@ const registeredKeys: TrustedManifestKey[] = [];
  */
 export function registerTrustedManifestKeys(keys: readonly TrustedManifestKey[]): void {
   for (const key of keys) {
-    if (!key.kid || !key.environment || !key.spki) continue;
+    if (!key.kid || !key.spki) continue;
     if (registeredKeys.some(k => k.kid === key.kid)) continue;
     registeredKeys.push(key);
   }
@@ -57,14 +58,15 @@ export function parseTrustedManifestKeys(json: string | undefined): TrustedManif
   try {
     const parsed: unknown = JSON.parse(json);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (k): k is TrustedManifestKey =>
-        !!k &&
-        typeof k === 'object' &&
-        typeof (k as TrustedManifestKey).kid === 'string' &&
-        typeof (k as TrustedManifestKey).environment === 'string' &&
-        typeof (k as TrustedManifestKey).spki === 'string',
-    );
+    return parsed.flatMap((k): TrustedManifestKey[] => {
+      if (!k || typeof k !== 'object') return [];
+      const { kid, spki, environments } = k as Record<string, unknown>;
+      if (typeof kid !== 'string' || typeof spki !== 'string') return [];
+      const envs = Array.isArray(environments)
+        ? environments.filter((e): e is string => typeof e === 'string')
+        : undefined;
+      return [{ kid, spki, ...(envs ? { environments: envs } : {}) }];
+    });
   } catch {
     return [];
   }

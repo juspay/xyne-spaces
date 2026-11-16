@@ -8,9 +8,11 @@ export {
   refreshClientManifest,
   clearClientManifest,
   noteClientManifestVersion,
+  noteClientManifestLaneChanged,
   refreshClientManifestIfStale,
   setClientManifestStorage,
   CLIENT_MANIFEST_VERSION_HEADER,
+  CLIENT_MANIFEST_ENVIRONMENT_HEADER,
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_STALE_CODE,
 } from './client-manifest.js';
@@ -39,6 +41,8 @@ export type { TrustedManifestKey } from './manifest-keys.js';
 export {
   verifySignedClientManifest,
   setManifestSignatureVerifier,
+  setAllowedManifestEnvironments,
+  getAllowedManifestEnvironments,
   ManifestVerificationError,
 } from './manifest-verify.js';
 export type { ManifestSignatureVerifier, ManifestRejectReason } from './manifest-verify.js';
