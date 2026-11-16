@@ -10,21 +10,24 @@ export async function hasResourceAdminAccess(
   prisma: PrismaClient,
   userId: string,
   resourceName: string,
+  /** When given, grants and group memberships are only counted inside this workspace. */
+  workspaceId?: string,
 ): Promise<boolean> {
   const resource = await prisma.resource.findUnique({
     where: { name: resourceName },
     select: { id: true },
   })
   if (!resource) return false
+  const inWorkspace = workspaceId ? { workspaceId } : {}
 
   const direct = await prisma.resourceAccess.findFirst({
-    where: { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+    where: { userId, resourceId: resource.id, accessType: AccessType.ADMIN, ...inWorkspace },
     select: { id: true },
   })
   if (direct) return true
 
   const groups = await prisma.userGroupMapping.findMany({
-    where: { userId },
+    where: { userId, ...inWorkspace },
     select: { userGroupId: true },
   })
   if (groups.length === 0) return false
@@ -34,6 +37,7 @@ export async function hasResourceAdminAccess(
       resourceId: resource.id,
       accessType: AccessType.ADMIN,
       groupId: { in: groups.map(g => g.userGroupId) },
+      ...inWorkspace,
     },
     select: { id: true },
   })

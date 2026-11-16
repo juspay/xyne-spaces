@@ -8,6 +8,7 @@ import {
   OrgLLMServiceAccountPurpose,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { decrypt, encrypt } from '@/services/encryptionService';
@@ -204,7 +205,8 @@ export class AiProvisioningBackfillController {
   }
 
   private static async getOrgLiteLLMTeamId(orgId: string): Promise<string | null> {
-    const credential = await this.prisma.orgLLMServiceAccountCredential.findUnique({
+    // Backend read of a hidden column (credentials); see orgLLMCredentialService.
+    const credential = await withWorkspaceScope(() => this.prisma.orgLLMServiceAccountCredential.findUnique({
       where: {
         orgId_provider_purpose: {
           orgId,
@@ -213,7 +215,7 @@ export class AiProvisioningBackfillController {
         },
       },
       select: { credentials: true, status: true },
-    });
+    }));
 
     if (!credential || credential.status === OrgLLMServiceAccountCredentialStatus.REVOKED) {
       return null;

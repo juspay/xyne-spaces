@@ -23,4 +23,9 @@ export class UnscopedACL<
   async getMutateWhere(): Promise<TWhereInput | null> {
     return {} as TWhereInput
   }
+
+  /** Cross-workspace by nature, so a row may name any workspace. */
+  async canCreate(_data: TData): Promise<boolean> {
+    return true
+  }
 }
