@@ -262,7 +262,9 @@ apiConfig.interceptors.response.use(
         | undefined;
       const isRefreshCall = isRefreshSessionUrl(originalConfig?.url);
 
-      if (claimAxiosRetry(401, originalConfig) && originalConfig) {
+      // Only a missing/expired JWT is worth a refresh; TOKEN_INVALID, SESSION_REVOKED,
+      // USER_REMOVED and EMAIL_DOMAIN_NOT_ALLOWED fall straight through to logout.
+      if (claimAxiosRetry(401, originalConfig, axiosError.response?.data) && originalConfig) {
         const outcome = await refreshSessionOnce();
         if (outcome === 'ok') {
           logger.info(Logger.Event.AUTH_REFRESH_SUCCESS, {

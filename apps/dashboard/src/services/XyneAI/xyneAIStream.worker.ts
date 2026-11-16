@@ -150,6 +150,8 @@ export interface WorkerStreamUnauthorizedMessage {
   type: 'STREAM_UNAUTHORIZED';
   payload: {
     streamId: string;
+    /** The 401 body's `code` (backend AuthFailureCode), so the manager can skip a useless refresh. */
+    code?: string;
   };
 }
 
@@ -283,6 +285,13 @@ async function executeStream(
         type: 'STREAM_UNAUTHORIZED',
         payload: { streamId },
       };
+      try {
+        const body: unknown = await response.json();
+        const code = (body as { code?: unknown } | null)?.code;
+        if (typeof code === 'string') unauthorized.payload.code = code;
+      } catch {
+        // Non-JSON 401 body: no code, the manager treats it as refreshable.
+      }
       self.postMessage(unauthorized);
       return;
     }
