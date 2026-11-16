@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { addHHMMDuration } from '@/utils/dateUtils';
+import { seriesRuleAnchor } from '@/utils/recurringSeriesAnchor';
 import { DatabaseClient } from '@/database/client';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
@@ -48,11 +49,8 @@ export class RecurringCallService {
    * Returns null when: no more occurrences exist, or endsOn has passed.
    */
   getNextOccurrence(recurringSeries: RecurringSeriesShape, after: Date, inclusive = false): Date | null {
-    // series.startsOn is already the correct UTC epoch (frontend sent data.startsAt.getTime()).
-    // Using it directly as dtstart means RRule generates all occurrences at the same
-    // UTC offset, preserving the user's local time correctly.
     const options = RRule.parseString(recurringSeries.recurrenceRule);
-    options.dtstart = recurringSeries.startsOn;
+    options.dtstart = seriesRuleAnchor(recurringSeries);
     const rule = new RRule(options);
     const next = rule.after(after, inclusive);
     if (!next) return null;
@@ -229,7 +227,7 @@ export class RecurringCallService {
     toDate: Date,
   ): Date[] {
     const options = RRule.parseString(series.recurrenceRule);
-    options.dtstart = series.startsOn;
+    options.dtstart = seriesRuleAnchor(series);
     const rule = new RRule(options);
 
     // Cap at buffer period from now or series endsOn, whichever is earlier
