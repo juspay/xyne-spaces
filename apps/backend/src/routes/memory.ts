@@ -1,6 +1,5 @@
 import { Router} from 'express';
 import { AccessType } from '@xyne/shared';
-import multer from 'multer';
 import { memoryController } from '@/controllers/memoryController';
 import { documentController } from '@/controllers/documentController';
 import { authMiddleware } from '@/middleware/auth';
@@ -10,11 +9,6 @@ import { validateZod } from '@/middleware/validation';
 import { z } from 'zod';
 
 const router = Router();
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
-});
 
 /**
   * Validation schema for POST /memory/search
@@ -99,7 +93,8 @@ router.delete('/:docId', authMiddleware.authenticate, memoryController.deleteMem
   * @access Private (requires authentication)
   * @body SessionRecordingPayload
   */
-router.post('/turn', authMiddleware.authenticate, memoryController.bufferSessionTurn);
+// Disabled: session recording is not in use.
+// router.post('/turn', authMiddleware.authenticate, memoryController.bufferSessionTurn);
 
   /**
   * @route POST /api/memory/index
@@ -156,19 +151,6 @@ const deleteBySessionIdsSchema = z.object({
     .min(1, 'At least one sessionId is required')
     .max(100, 'Maximum 100 sessionIds per request'),
 });
-
-/**
- * @route POST /api/memory/upload
- * @desc Upload one or more .txt/.md files to be async-ingested into Vespa memory.
- *       Body fields: files (multipart), repoUrl (optional string)
- * @access Private (requires authentication)
- */
-router.post(
-  '/upload',
-  authMiddleware.authenticate,
-  upload.array('files', 20),
-  documentController.uploadDocuments,
-);
 
 /**
  * @route DELETE /api/memory/sessions

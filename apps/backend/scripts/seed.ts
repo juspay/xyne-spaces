@@ -13,7 +13,6 @@
 import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
 import {
-  WorkspaceJoinPolicy,
   WorkspaceType,
   OrgLLMServiceAccountProvider,
   OrgLLMServiceAccountPurpose,
@@ -35,7 +34,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'PROJECTS', description: 'Project management endpoints (/api/projects/*)' },
   { name: 'TICKETS', description: 'Ticket management endpoints (/api/tickets/*)' },
   { name: 'USERS', description: 'User management endpoints (/api/users/*)' },
-  { name: 'WORKFLOWS', description: 'Workflow management endpoints (/api/workflows/*)' },
+  { name: 'WORKFLOWS', description: 'Workflows surface (/api/workflows-v2/*)' },
   { name: 'AGENTS', description: 'Agent management endpoints (/api/agents/*)' },
   { name: 'TOOLS', description: 'Tool management endpoints (/api/tools/*)' },
   { name: 'MODELS', description: 'Model management endpoints (/api/models/*)' },
@@ -46,7 +45,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'VESPA', description: 'Vespa backfill / reindex admin endpoints (/api/admin/vespa-backfill/*, /api/migration/vespa-workspace-backfill/*)' },
   { name: 'RELEASE-MANAGER', description: 'Release-config edit access (/api/commits/analyze/*, save release config). Admins/owners have it by role; grant to other users to let them edit without admin privilege.' },
   { name: 'ROLES', description: 'Role creation and management UI' },
-  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
+  { name: 'SDLC', description: 'SDLC surface access (/sdlc, /api/sdlc/*)' },
 ];
 
 // Default user groups with their permissions
@@ -232,7 +231,6 @@ async function main() {
             orgId: defaultOrg.orgId,
             createdBy: 'system',
             workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');
@@ -402,7 +400,7 @@ async function main() {
     console.log('\n🔑 Seeding org LLM service account credentials...');
     try {
       const litellmApiKey = process.env.LITELLM_API_KEY;
-      const litellmBaseUrl = process.env.LITELLM_BASE_URL || 'https://grid.ai.example.com/';
+      const litellmBaseUrl = process.env.LITELLM_BASE_URL || 'https://llm.example.com/';
 
       if (!litellmApiKey) {
         console.log('  ⚠️  LITELLM_API_KEY not set in environment, skipping org LLM credential seeding');

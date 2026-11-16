@@ -6,24 +6,24 @@ import { resolveMetricsEndpoint } from '@/src/observability/metrics/config/resol
 describe('resolveMetricsEndpoint', () => {
   it('uses the fallback host when the override is missing or blank', () => {
     assert.equal(
-      resolveMetricsEndpoint(undefined, 'https://spaces.xyne.juspay.net'),
-      'https://spaces.xyne.juspay.net/godel/v1/metrics',
+      resolveMetricsEndpoint(undefined, 'https://example.org'),
+      'https://example.org/godel/v1/metrics',
     );
 
     assert.equal(
-      resolveMetricsEndpoint('', 'https://spaces.xyne.juspay.net'),
-      'https://spaces.xyne.juspay.net/godel/v1/metrics',
+      resolveMetricsEndpoint('', 'https://example.org'),
+      'https://example.org/godel/v1/metrics',
     );
 
     assert.equal(
-      resolveMetricsEndpoint('   ', 'https://spaces.xyne.juspay.net'),
-      'https://spaces.xyne.juspay.net/godel/v1/metrics',
+      resolveMetricsEndpoint('   ', 'https://example.org'),
+      'https://example.org/godel/v1/metrics',
     );
   });
 
   it('uses a non-empty override and strips a trailing slash', () => {
     assert.equal(
-      resolveMetricsEndpoint('http://localhost:4001/', 'https://spaces.xyne.juspay.net'),
+      resolveMetricsEndpoint('http://localhost:4001/', 'https://example.org'),
       'http://localhost:4001/godel/v1/metrics',
     );
   });

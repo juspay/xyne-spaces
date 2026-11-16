@@ -32,7 +32,6 @@ const ruleSchema = z
     version: z.union([z.string(), z.number()]).optional(),
     cache: z.enum(['versioned', 'never', 'ttl']).default('versioned'),
     ttl: z.union([z.string(), z.number()]).optional(),
-    strip_prefix: z.string().optional(),
   })
   .strict();
 
@@ -65,7 +64,6 @@ export interface Rule {
   bundle: string;
   cache: CacheMode;
   ttl?: number;
-  stripPrefix?: string;
   /** False when the bundle is missing and there was no previous target to keep. */
   enabled: boolean;
   healthy: boolean;
@@ -235,16 +233,6 @@ function normaliseRule(raw: RawRule): Rule | string {
       return `${where}: cache ttl needs ttl like 60, "60s" or "5m"`;
     }
     rule.ttl = ttl;
-  }
-
-  if (raw.strip_prefix !== undefined) {
-    if (!raw.strip_prefix.startsWith('/')) {
-      return `${where}: strip_prefix must start with /`;
-    }
-    const trimmed = raw.strip_prefix.replace(/\/+$/, '');
-    if (trimmed !== '') {
-      rule.stripPrefix = trimmed;
-    }
   }
 
   return rule;

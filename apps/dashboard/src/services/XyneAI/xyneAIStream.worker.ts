@@ -58,11 +58,6 @@ export interface WorkerStartStreamMessage {
       speed?: 'fast';
       researchContext?: { type: string; id?: string; name: string } | null;
       canvasId?: string;
-      workflowContext?: {
-        workflowId?: string | null;
-        executionId?: string | null;
-        stepId?: string | null;
-      };
       messageAttachmentIds?: string[];
       attachments?: Array<{
         data: string;
@@ -146,10 +141,23 @@ export interface WorkerLogErrorMessage {
   };
 }
 
+/**
+ * The backend answered 401: the workspace JWT cookie has expired. The worker cannot
+ * refresh it (window.fetch's refresh wrapper does not reach workers), so the manager
+ * calls /auth/refresh-session and re-sends START_STREAM.
+ */
+export interface WorkerStreamUnauthorizedMessage {
+  type: 'STREAM_UNAUTHORIZED';
+  payload: {
+    streamId: string;
+  };
+}
+
 export type WorkerOutgoingMessage =
   | WorkerStreamChunkMessage
   | WorkerStreamCompleteMessage
   | WorkerStreamErrorMessage
+  | WorkerStreamUnauthorizedMessage
   | WorkerLogErrorMessage;
 
 // Track active streams
@@ -224,7 +232,6 @@ async function executeStream(
         ...(requestBody.canvasId && {
           canvas_id: requestBody.canvasId,
         }),
-        ...(requestBody.workflowContext && { workflowContext: requestBody.workflowContext }),
         ...(requestBody.messageAttachmentIds &&
           requestBody.messageAttachmentIds.length > 0 && {
             message_attachment_ids: requestBody.messageAttachmentIds,
@@ -270,6 +277,15 @@ async function executeStream(
       }),
       signal: abortController.signal,
     });
+
+    if (response.status === 401) {
+      const unauthorized: WorkerStreamUnauthorizedMessage = {
+        type: 'STREAM_UNAUTHORIZED',
+        payload: { streamId },
+      };
+      self.postMessage(unauthorized);
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);

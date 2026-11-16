@@ -27,15 +27,7 @@ export { LoadError, type PageLoadError } from './LoadError';
 export { LoadingBar } from './LoadingBar';
 export { LinkPreview } from './LinkPreview';
 export { DownloadsButton } from './DownloadsButton';
-export {
-  actOnDownload,
-  clearFinishedDownloads,
-  currentDownloads,
-  keepDownloads,
-  subscribeToDownloads,
-  useBrowserDownloads,
-  type BrowserDownload,
-} from './downloads';
+export { keepDownloads, useBrowserDownloads, type BrowserDownload } from './downloads';
 export { PageContextMenu, type PageMenuAction, type PageMenuParams } from './PageContextMenu';
 export {
   KEY_RELAY,

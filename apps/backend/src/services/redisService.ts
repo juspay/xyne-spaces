@@ -33,19 +33,6 @@ export interface OrgMemberEvent {
   timestamp: Date;
 }
 
-export interface WorkflowEvent {
-  type: 'step_added' | 'step_updated' | 'execution_completed';
-  executionId: string;
-  data: {
-    stepId?: string;
-    stepName?: string | null;
-    type?: string | null;  // 'input' | 'output' for step_added events
-    stepExecutorType?: string;
-    [key: string]: unknown;
-  };
-  timestamp: Date;
-}
-
 export interface PresenceEvent {
   userId: string;
   status: 'ONLINE' | 'AWAY' | 'OFFLINE';
@@ -383,24 +370,6 @@ class RedisService {
     await this.publisher.publish(channel, JSON.stringify(event));
   }
 
-  // Workflow event broadcasting (cross-process communication for worker -> API server)
-  async broadcastWorkflowEvent(executionId: string, event: WorkflowEvent): Promise<void> {
-    if (!this.publisher) {
-      logger.info('❌ [REDIS-SERVICE] Redis publisher not initialized for workflow event');
-      return; // Fail silently for workflow events - don't block workflow execution
-    }
-
-    const channel = `workflow:${executionId}:events`;
-    
-    try {
-      await this.publisher.publish(channel, JSON.stringify(event));
-      logger.info(`📊 [REDIS-WORKFLOW] Published ${event.type} event to channel '${channel}'`);
-    } catch (error) {
-      // Log but don't throw - workflow execution should not be blocked by Redis issues
-      logger.error(`❌ [REDIS-WORKFLOW] Failed to publish workflow event:`, error);
-    }
-  }
-
   async broadcastZeroFallbackConfigUpdate(config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number }): Promise<void> {
     if (!this.publisher) {
       logger.info('❌ [REDIS-SERVICE] Redis publisher not initialized for Zero fallback config');
@@ -445,12 +414,7 @@ class RedisService {
         const parsed = JSON.parse(data);
         
         // Log based on channel type for debugging
-        if (receivedChannel.includes('workflow:')) {
-          logger.info(`📊 [REDIS-WORKFLOW] Received event on channel: ${receivedChannel}`, {
-            type: parsed.type,
-            executionId: parsed.executionId
-          });
-        } else if (receivedChannel.includes(':messages')) {
+        if (receivedChannel.includes(':messages')) {
           logger.info(`🔴 [REDIS-MESSAGE] Received on channel: ${receivedChannel}`);
         }
 
@@ -575,7 +539,6 @@ class RedisService {
     await this.unsubscribeFromChannel(channel);
   }
 
-  // Subscribe to workflow events (for real-time step updates)
   async subscribeToZeroFallbackConfigUpdates(
     callback: (config: { fallbackEnabled: boolean; allowMutations: boolean; pollIntervalMs: number; timestamp: Date }) => void
   ): Promise<void> {
@@ -1136,176 +1099,6 @@ class RedisService {
     }
     
     return await this.redis.hdel(key, field);
-  }
-
-  // ============== AGENT STEP CONTINUATION PUB/SUB ==============
-
-  /**
-   * Publish a continuation event for an agent step
-   * Used to signal a running agent to abort and continue with a new message
-   */
-  async publishAgentContinuation(
-    executionId: string,
-    stepName: string,
-    message: string
-  ): Promise<void> {
-    if (!this.publisher) {
-      logger.warn('[REDIS-AGENT-CONTINUATION] Redis publisher not initialized');
-      return;
-    }
-
-    const channel = `workflow:${executionId}:${stepName}:continue`;
-    const event = {
-      type: 'agent_continuation',
-      executionId,
-      stepName,
-      message,
-      timestamp: new Date().toISOString()
-    };
-
-    try {
-      await this.publisher.publish(channel, JSON.stringify(event));
-      logger.info(`[REDIS-AGENT-CONTINUATION] Published continuation event to ${channel}`);
-    } catch (error) {
-      logger.error('[REDIS-AGENT-CONTINUATION] Failed to publish continuation event:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Subscribe to agent continuation events
-   * Called by the agent executor to listen for continuation signals
-   */
-  async subscribeToAgentContinuation(
-    executionId: string,
-    stepName: string,
-    callback: (event: { message: string; type: string; executionId: string; stepName: string; timestamp: string }) => void
-  ): Promise<void> {
-    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
-
-    const channel = `workflow:${executionId}:${stepName}:continue`;
-
-    // Add callback to the list for this channel
-    if (!this.subscriptionCallbacks.has(channel)) {
-      this.subscriptionCallbacks.set(channel, []);
-    }
-    this.subscriptionCallbacks.get(channel)!.push(callback);
-
-    // Ensure global message handler is set up
-    this.setupGlobalMessageHandler();
-
-    // Only subscribe to Redis if we haven't already
-    if (!this.activeSubscriptions.has(channel)) {
-      logger.info(`[REDIS-AGENT-CONTINUATION] Subscribing to channel: ${channel}`);
-      await this.subscriber.subscribe(channel);
-      this.activeSubscriptions.add(channel);
-    }
-  }
-
-  /**
-   * Unsubscribe from agent continuation events
-   */
-  async unsubscribeFromAgentContinuation(
-    executionId: string,
-    stepName: string,
-    callback?: (event: { message: string; type: string; executionId: string; stepName: string; timestamp: string }) => void
-  ): Promise<void> {
-    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
-
-    const channel = `workflow:${executionId}:${stepName}:continue`;
-
-    if (callback) {
-      // Remove specific callback
-      const callbacks = this.subscriptionCallbacks.get(channel) || [];
-      const index = callbacks.indexOf(callback);
-      if (index > -1) {
-        callbacks.splice(index, 1);
-        logger.info(`[REDIS-AGENT-CONTINUATION] Removed callback from channel: ${channel}`);
-      }
-
-      // If no more callbacks, unsubscribe from Redis
-      if (callbacks.length === 0) {
-        await this.unsubscribeFromChannel(channel);
-      }
-    } else {
-      // Remove all callbacks and unsubscribe
-      await this.unsubscribeFromChannel(channel);
-      logger.info(`[REDIS-AGENT-CONTINUATION] Unsubscribed from channel: ${channel}`);
-    }
-  }
-
-  // Mode Change Pub/Sub for Agent Executor
-  async subscribeToModeChange(
-    executionId: string,
-    callback: (event: { mode: string; executionId: string; timestamp: string }) => void
-  ): Promise<void> {
-    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
-
-    const channel = `workflow:${executionId}:mode`;
-
-    const wrapperCallback = (message: string) => {
-      try {
-        const event = JSON.parse(message);
-        callback(event);
-      } catch (error) {
-        logger.error('[REDIS-MODE] Failed to parse mode change message:', error);
-      }
-    };
-
-    if (!this.subscriptionCallbacks.has(channel)) {
-      this.subscriptionCallbacks.set(channel, []);
-    }
-    this.subscriptionCallbacks.get(channel)!.push(wrapperCallback);
-
-    this.setupGlobalMessageHandler();
-
-    if (!this.activeSubscriptions.has(channel)) {
-      await this.subscriber.subscribe(channel);
-      this.activeSubscriptions.add(channel);
-    }
-  }
-
-  async unsubscribeFromModeChange(
-    executionId: string,
-    callback?: (event: { mode: string; executionId: string; timestamp: string }) => void
-  ): Promise<void> {
-    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
-
-    const channel = `workflow:${executionId}:mode`;
-
-    if (callback) {
-      const callbacks = this.subscriptionCallbacks.get(channel) || [];
-      const index = callbacks.indexOf(callback);
-      if (index > -1) {
-        callbacks.splice(index, 1);
-      }
-      if (callbacks.length === 0) {
-        await this.subscriber.unsubscribe(channel);
-        this.activeSubscriptions.delete(channel);
-        this.subscriptionCallbacks.delete(channel);
-      }
-    } else {
-      await this.subscriber.unsubscribe(channel);
-      this.activeSubscriptions.delete(channel);
-      this.subscriptionCallbacks.delete(channel);
-    }
-  }
-
-  async publishModeChange(
-    executionId: string,
-    mode: string
-  ): Promise<void> {
-    if (!this.redis) throw new Error('Redis not initialized');
-
-    const channel = `workflow:${executionId}:mode`;
-    const message = JSON.stringify({
-      executionId,
-      mode,
-      timestamp: new Date().toISOString()
-    });
-
-    await this.redis.publish(channel, message);
-    logger.info(`[REDIS-MODE] Published mode change for ${executionId}: ${mode}`);
   }
 
   // Zero Fallback Configuration

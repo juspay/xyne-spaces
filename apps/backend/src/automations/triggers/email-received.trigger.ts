@@ -91,9 +91,9 @@ export const EmailReceivedConfigFieldsSchema = z.object({
     ),
 });
 
-export function withEmailReceivedConfigValidation<T extends z.AnyZodObject>(
+export function withEmailReceivedConfigValidation<T extends z.ZodObject>(
   schema: T,
-): z.ZodEffects<T> {
+): T {
   return schema.refine(
     data => !(data.onlyNewThreads === true && data.onlyReplies === true),
     { message: 'onlyNewThreads and onlyReplies cannot both be true — they are mutually exclusive' },

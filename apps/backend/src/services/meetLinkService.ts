@@ -85,7 +85,7 @@ export function generateNotificationUrl(
   threadId: string,
   meetCode: string
 ): string | null {
-  const backendUrl = process.env.BACKEND_URL;
+  const backendUrl = config.backendUrl;
   if (!backendUrl) {
     logger.error('[MeetLinkService] Backend URL not configured - cannot generate notification URL');
     return null;

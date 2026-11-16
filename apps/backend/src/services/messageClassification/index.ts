@@ -27,9 +27,7 @@ const TAG = '[MessageClassification]';
  * and dedupes per thread, so a short thread costs one call for its whole life — the
  * threshold no longer buys anything, and a one-message thread still has a clear type.
  */
-export const MIN_THREAD_SIZE = Number(
-  process.env['MESSAGE_CLASSIFICATION_MIN_THREAD_SIZE'] ?? 1,
-);
+export const MIN_THREAD_SIZE = config.messageClassification.minThreadSize;
 
 /** Upper bound on messages sent to the model in one pass. */
 const MAX_THREAD_CONTEXT = 60;
@@ -44,7 +42,7 @@ const MAX_THREAD_CONTEXT = 60;
  * Channels do not get this. There a thread is a real thread and its own replies are the
  * context; pulling in unrelated channel chatter would add noise, not signal.
  */
-const DM_CONTEXT_MESSAGES = Number(process.env['MESSAGE_CLASSIFICATION_DM_CONTEXT'] ?? 5);
+const DM_CONTEXT_MESSAGES = config.messageClassification.dmContextMessages;
 
 /** scopeType values that mean "no one uses threads here". */
 const DM_SCOPES = new Set(['DM', 'GROUP_DM']);
@@ -100,9 +98,7 @@ const isCurated = (
  * `max(at)` across the thread's tags IS the last-classification time, so no extra column is
  * needed to remember it. The floor stops a one-word "thanks" buying a model call.
  */
-const MIN_NEW_MESSAGES_TO_RECLASSIFY = Number(
-  process.env['MESSAGE_CLASSIFICATION_MIN_NEW_MESSAGES'] ?? 3,
-);
+const MIN_NEW_MESSAGES_TO_RECLASSIFY = config.messageClassification.minNewMessages;
 
 const newMessagesSince = (tags: AppliedTag[], messages: { createdAt: Date }[]): number => {
   const lastPass = Math.max(0, ...tags.map(tag => tag.at));

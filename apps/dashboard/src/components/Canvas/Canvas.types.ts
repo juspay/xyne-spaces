@@ -60,23 +60,6 @@ export interface CollaborativeCanvasEditorRef {
   selectedTheme: string;
 }
 
-/**
- * Metadata for knowledge canvases (created from workflow learnings)
- */
-export interface KnowledgeCanvasMetadata {
-  source: 'workflow_knowledge';
-  workflowExecutionId: string;
-  learningCount: number;
-  projectId?: string;
-  conversationId?: string;
-  repositoryUrl?: string | null;
-  learningIds?: string[];
-  // Approval tracking
-  approvedAt?: string;
-  approvedBy?: string;
-  knowledgeDocumentId?: string;
-}
-
 export interface CanvasProject {
   id: string;
   name: string;
@@ -120,7 +103,7 @@ export interface Canvas {
   lastEditedAt?: number;
   createdAt: number;
   updatedAt: number;
-  metadata?: Record<string, unknown> | KnowledgeCanvasMetadata;
+  metadata?: Record<string, unknown>;
   sdlcArtifact?: { artifactType?: string; artifactStatus?: string } | null;
   accessLevel?: CanvasRole;
   docType?: DocType;

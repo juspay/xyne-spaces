@@ -11,7 +11,7 @@ import { config } from '@/config/env';
 import { logger, stream } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
 import { requestLogger } from '@/middleware/requestLogger';
-import { runWithContext, tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
+import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
 import { redactSensitiveUrl } from '@/utils/redact';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
@@ -26,28 +26,29 @@ import healthRoutes from '@/routes/health';
 import authRoutes from '@/routes/auth';
 import authV2Routes from '@/routes/authV2';
 import ticketRoutes from '@/routes/tickets';
-import toolRoutes from '@/routes/tools';
-import agentToolsMappingRoutes from '@/routes/agent-tools-mappings';
+// Disabled (LLM)
+// import toolRoutes from '@/routes/tools';
+// import agentToolsMappingRoutes from '@/routes/agent-tools-mappings';
 import analyticsRoutes from '@/routes/analytics';
-import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import userActivationRoutes from '@/routes/userActivation';
-import secretsVaultRoutes from '@/routes/secretsVault';
+// Disabled (Secrets vault) — re-enable together with the route mount below.
+// import secretsVaultRoutes from '@/routes/secretsVault';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
-import threadTypeVocabularyRoutes from '@/routes/threadTypeVocabulary';
+// Disabled (LLM)
+// import threadTypeVocabularyRoutes from '@/routes/threadTypeVocabulary';
 import conversationLabelRoutes from '@/routes/conversationLabels';
-import radarExecutionRoutes from '@/routes/radarExecution';
+// Disabled (LLM)
+// import radarExecutionRoutes from '@/routes/radarExecution';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
-import communityRoutes from '@/routes/community';
+import joinRequestRoutes, { legacyJoinRequestRouter } from '@/routes/joinRequests';
 import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
-import { registerAllWorkflows } from '@/workflows';
-import workflowRoutes from '@/routes/workflows';
-import { workflowsClawRouter, workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
+import { workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
 import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
@@ -64,9 +65,9 @@ import socialMediaRoutes from './integrations/routes/social-media.js';
 import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
-import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
+// Disabled (all workers)
+// import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
-import publicWorkspaceRoutes from '@/routes/publicWorkspaceRoutes';
 import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
@@ -95,7 +96,6 @@ import { notificationService } from '@/notification-service';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 import linkPreviewRoutes from '@/routes/linkPreview';
-import bundleRoutes from '@/routes/bundles';
 import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
@@ -107,22 +107,27 @@ import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfil
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes, {
-  discussionTitleRouter,
-  relatedContextRouter,
-} from '@/routes/vespaSearch';
-import assistantRouteRoutes from '@/routes/assistantRoute';
+// Disabled (LLM)
+// import vespaSearchRoutes, {
+//   discussionTitleRouter,
+//   relatedContextRouter,
+// } from '@/routes/vespaSearch';
+import vespaSearchRoutes from '@/routes/vespaSearch';
+// Disabled (LLM)
+// import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
-import summarizeRoutes from '@/routes/summarize';
+// Disabled (LLM)
+// import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
 import cacConfigRoutes from '@/routes/cacConfig';
 import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
-import aiRoutes from '@/routes/aiRoutes';
+// Disabled (LLM)
+// import aiRoutes from '@/routes/aiRoutes';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
-import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
+import ysweetRoutes, { ysweetStorageKeyRouter, ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
@@ -131,25 +136,30 @@ import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
 import emailRoutes from '@/routes/email';
 import emailDemergeRoutes from '@/routes/emailDemerge';
-import emailClassificationRoutes from '@/routes/emailClassification';
+// Disabled (LLM)
+// import emailClassificationRoutes from '@/routes/emailClassification';
 import deskTagsConfigRoutes from '@/routes/deskTagsConfig';
-import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
+// Disabled (LLM)
+// import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
 import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
 import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
-import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
-import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
+// Disabled (LLM)
+// import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
+// import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
 import deskAutoAssignRoutes from '@/routes/deskAutoAssignRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
 import userSkillsRoutes from '@/routes/userSkills';
 import scheduledMessageRoutes from '@/routes/scheduledMessages';
-import { tagRoutes, registerDeskEmailTags } from '@/tags';
-import { tagGenerationPipeline } from '@/tags/pipeline';
+// Disabled (LLM)
+// import { tagRoutes, registerDeskEmailTags } from '@/tags';
+import { tagRoutes } from '@/tags';
+// Disabled (LLM)
+// import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
-import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -165,40 +175,45 @@ import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
 import samRoutes from '@/routes/sam';
 import mettleUserSyncRoutes from '@/routes/mettleUserSync';
-import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
+// Disabled (LLM)
+// import mettleTeamMembersRoutes from '@/routes/mettleTeamMembersRoutes';
 import teamIntelligenceRoutes from '@/team-intelligence/routes';
-import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
-import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
-import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
+// Disabled (LLM)
+// import teamIntelligenceDashboardRoutes from '@/routes/teamIntelligenceDashboard';
+// import teamIntelligenceTeamDashboardRoutes from '@/routes/teamIntelligenceTeamDashboard';
+// import teamIntelligenceUserDashboardRoutes from '@/routes/teamIntelligenceUserDashboard';
 import mettleEmployeeDetailsRoutes from '@/routes/mettleEmployeeDetailsRoutes';
 import memoryRoutes from '@/routes/memory';
 import queueManagementRoutes from '@/routes/clearqueueManagement';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
-import { modelSyncQueue } from '@/queues/modelSyncQueue';
+// Disabled (LLM)
+// import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
-import { decisionEvaluationQueue } from '@/queues/decisionEvaluationQueue';
+// Disabled (LLM)
+// import { decisionEvaluationQueue } from '@/queues/decisionEvaluationQueue';
 import { warmUserRegistryQueue } from '@/queues/warmUserRegistryQueue';
 import { watchRenewalQueue } from '@/pubsub';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { boardConfigCopyQueue } from '@/queues/boardConfigCopyQueue';
-import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
+// Disabled (all workers)
+// import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
-import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
-import { documentIngestQueue } from '@/queues/documentIngestQueue';
-import { teamIntelligenceQueue } from '@/team-intelligence/queue';
+// Disabled (LLM)
+// import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
-import { autoDraftQueue } from '@/queues/autoDraftQueue';
-import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
+// Disabled (LLM)
+// import { autoDraftQueue } from '@/queues/autoDraftQueue';
+// import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
@@ -210,7 +225,7 @@ import { ReactionController } from '@/controllers/reactionController';
 import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
 import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
-import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
+import { encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
@@ -227,9 +242,10 @@ import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';
-import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
-import { publicChannels, roomAllows, type RoomRef } from '@/services/proactivity/roomScope';
-import { decodeDraftContext, type DraftResult } from '@/services/proactivity/dispatch';
+// Disabled (Claw)
+// import { proactiveEpisodeQueue } from '@/queues/proactiveEpisodeQueue';
+// import { publicChannels, roomAllows, type RoomRef } from '@/services/proactivity/roomScope';
+// import { decodeDraftContext, type DraftResult } from '@/services/proactivity/dispatch';
 
 
 export class App {
@@ -245,23 +261,6 @@ export class App {
   }
 
   private initializeMiddlewares(): void {
-
-    const apiPathPrefix = config.apiPathPrefix;
-    if (apiPathPrefix) {
-      this.app.use((req: Request, _res: Response, next: express.NextFunction): void => {
-        const url = req.url;
-        const isPrefixed =
-          url === apiPathPrefix ||
-          url.startsWith(`${apiPathPrefix}/`) ||
-          url.startsWith(`${apiPathPrefix}?`);
-        if (isPrefixed) {
-          req.url = `/api${url.slice(apiPathPrefix.length)}`;
-          req.originalUrl = req.url;
-        }
-        next();
-      });
-    }
-
     // Security middleware
     this.app.use(helmet());
 
@@ -338,10 +337,13 @@ export class App {
     this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
-    // Migration routes (body parsing handled in route file)
-    this.app.use('/api/migration', migrationRoutes);
-
-    this.app.use('/migrate/api/migration', migrationRoutes);
+    // Migration routes (body parsing handled in route file). Only mounted when
+    // MIGRATION_ROUTES_ENABLED=true; otherwise these paths fall through to 404.
+    if (config.migrationRoutes.enabled) {
+      this.app.use('/api/migration', migrationRoutes);
+      this.app.use('/migrate/api/migration', migrationRoutes);
+      logger.info('Migration routes mounted at /api/migration and /migrate/api/migration');
+    }
 
     // Webhook routes with webhook rate limiter (applied before general rate limiter)
     this.app.use('/api/webhooks',
@@ -360,7 +362,8 @@ export class App {
     // Body parsing for all other routes (10mb limit)
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-    this.app.use(decryptRequestBodyMiddleware);
+    // Request-body decryption needs the auth session (JWT sid), so the auth middlewares run
+    // it after authenticating instead of it being mounted here.
     this.app.use(encryptResponseBodyMiddleware);
 
     // Public SDK API. Uses the same cookie-based auth as the dashboard via
@@ -394,14 +397,17 @@ export class App {
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/email', emailRoutes);
     this.app.use('/api/email', emailDemergeRoutes);
-    this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
     this.app.use('/api/channels/:channelId/tags-config', authMiddleware.authenticate, deskTagsConfigRoutes);
-    this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
     this.app.use('/api/channels/:channelId/metrics', authMiddleware.authenticate, deskMetricsRoutes);
     this.app.use('/api/desk-metrics/claw', authenticateUserOrApp, deskMetricsClawRoutes);
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
-    this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
-    this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
+    // this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
     this.app.use('/api/channels/:channelId/desk', authMiddleware.authenticate, deskAutoAssignRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
@@ -414,21 +420,20 @@ export class App {
     this.app.use('/api/mettle', mettleUserSyncRoutes);
 
     // Mettle team members lookup route (authenticated wrapper around external Mettle API)
-    this.app.use('/api/mettle/team-members', authMiddleware.authenticate, mettleTeamMembersRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/mettle/team-members', authMiddleware.authenticate, mettleTeamMembersRoutes);
 
     // Team intelligence sync route (S2S auth - called by Mettle)
     this.app.use('/api/team-intelligence', teamIntelligenceRoutes);
 
     // Team intelligence dashboard routes (JWT auth - called by dashboard)
-    this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);
-    this.app.use('/api/team-intelligence-dashboard/team', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceTeamDashboardRoutes);
-    this.app.use('/api/team-intelligence-dashboard/user', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceUserDashboardRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/team-intelligence-dashboard/org', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceDashboardRoutes);
+    // this.app.use('/api/team-intelligence-dashboard/team', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceTeamDashboardRoutes);
+    // this.app.use('/api/team-intelligence-dashboard/user', authMiddleware.authenticate, aclMiddleware.checkAccess, teamIntelligenceUserDashboardRoutes);
 
     // Mettle employee details route (JWT auth - fetch employee information)
     this.app.use('/api/mettle/employee', authMiddleware.authenticate, mettleEmployeeDetailsRoutes);
-
-    // Bundle serving routes (public, no auth required - frontend static assets)
-    this.app.use('/api/bundles', bundleRoutes);
 
     // External call lobby — PUBLIC, no auth middleware
     this.app.use('/api/call-lobby', callLobbyRoutes);
@@ -466,7 +471,7 @@ export class App {
 
     // Test-only routes - only register when NODE_ENV=test
     // Test auth routes - used for CI automation testing and sandbox environments
-    const enableDevAuth = process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
+    const enableDevAuth = config.enableDevAuth && config.env === 'development';
     if (config.isTestEnv || enableDevAuth) {
       logger.info('Registering test routes (/api/test/*)');
       this.app.use('/api/test', testAuthRoutes);
@@ -475,9 +480,9 @@ export class App {
     // Apply general rate limiter to all API routes from this point onward
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api/v2/auth', authV2Routes);
-    this.app.use('/api/community', communityRoutes);
+    this.app.use('/api/join-requests', joinRequestRoutes);
+    this.app.use('/api/community', legacyJoinRequestRouter);
     this.app.use('/api/bots', unifiedBotRoutes); // Unified bot framework routes
-    this.app.use('/api/public', publicWorkspaceRoutes);
 
     // Protected routes (auth first, then ACL middleware)
     // Claw MCP route (user + app auth) — must be before /api/tickets
@@ -494,21 +499,15 @@ export class App {
       aclMiddleware.checkAccess,
       ticketReportRoutes
     );
-    this.app.use(
-      '/api/workflows',
-      authMiddleware.authenticate,
-      aclMiddleware.checkAccess,
-      workflowRoutes
-    );
-    this.app.use('/api/workflows-v2/claw', authenticateUserOrApp, workflowsClawRouter);
     this.app.use('/api/workflows-v2', authMiddleware.authenticate, workflowsRouter);
-    this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
-    this.app.use(
-      '/api/agent-tools-mappings',
-      authMiddleware.authenticate,
-      aclMiddleware.checkAccess,
-      agentToolsMappingRoutes
-    );
+    // Disabled (LLM)
+    // this.app.use('/api/tools', authMiddleware.authenticate, aclMiddleware.checkAccess, toolRoutes);
+    // this.app.use(
+    //   '/api/agent-tools-mappings',
+    //   authMiddleware.authenticate,
+    //   aclMiddleware.checkAccess,
+    //   agentToolsMappingRoutes
+    // );
     this.app.use('/api/analytics', authMiddleware.authenticate, analyticsRoutes);
     this.app.use('/api/queues', authMiddleware.authenticate, queueManagementRoutes);
 
@@ -521,13 +520,14 @@ export class App {
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
-    this.app.use('/api/radar', authMiddleware.authenticate, radarExecutionRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/radar', authMiddleware.authenticate, radarExecutionRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
-    this.app.use('/api/zero', zeroRoutes); // Zero sync routes (uses authenticateZero middleware in route file)
+    this.app.use('/api/zero', zeroRoutes);
     this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
     this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
 
@@ -552,7 +552,7 @@ export class App {
     // Internal S2S endpoints (trusted service-to-service calls)
     const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
       const supplied = req.headers['x-s2s-key'];
-      const accepted = [process.env['INTERNAL_S2S_KEY'], config.xyneClaw.s2sKey].filter(Boolean);
+      const accepted = [config.internalS2sKey, config.xyneClaw.s2sKey].filter(Boolean);
       if (accepted.length === 0 || !accepted.includes(String(supplied || ''))) {
         res.status(401).json({ error: 'Invalid or missing S2S key' });
         return;
@@ -668,89 +668,6 @@ export class App {
       validateS2SKey,
       handleAutoDraftCallback,
     );
-    // An agent's draft for an unprompted answer. Acked first: claw-auth must not wait
-    // on the check before posting.
-    // For claw-auth's proactive runs, answered as the agent's bot with its own channel
-    // access: where the run's reads land, and which channels a routing card may learn
-    // from. Any failure means no.
-    this.app.post('/api/internal/proactivity/room-allows', validateS2SKey, async (req: Request, res: Response) => {
-      const { userId, workspaceId, roomChannelId, refs } = (req.body ?? {}) as Record<string, unknown>;
-      const valid =
-        Array.isArray(refs) &&
-        refs.every(
-          (r) =>
-            r &&
-            ['channel', 'conversation', 'message', 'ticket'].includes((r as RoomRef).kind) &&
-            typeof (r as RoomRef).id === 'string',
-        );
-      if (typeof userId !== 'string' || typeof workspaceId !== 'string' || typeof roomChannelId !== 'string' || !valid) {
-        res.status(400).json({ allowed: false });
-        return;
-      }
-      try {
-        const allowed = await runWithContext({ userId, workspaceId }, () =>
-          roomAllows(roomChannelId, refs as RoomRef[]),
-        );
-        res.json({ allowed });
-      } catch (error) {
-        logger.error('[Proactivity] room check failed', { error });
-        res.status(500).json({ allowed: false });
-      }
-    });
-    this.app.post('/api/internal/proactivity/public-channels', validateS2SKey, async (req: Request, res: Response) => {
-      const { userId, workspaceId, channelIds } = (req.body ?? {}) as Record<string, unknown>;
-      if (
-        typeof userId !== 'string' ||
-        typeof workspaceId !== 'string' ||
-        !Array.isArray(channelIds) ||
-        !channelIds.every((id) => typeof id === 'string')
-      ) {
-        res.status(400).json({ channelIds: [] });
-        return;
-      }
-      try {
-        const ids = await runWithContext({ userId, workspaceId }, () =>
-          publicChannels((channelIds as string[]).slice(0, 500)),
-        );
-        res.json({ channelIds: ids });
-      } catch (error) {
-        logger.error('[Proactivity] public channels lookup failed', { error });
-        res.status(500).json({ channelIds: [] });
-      }
-    });
-    this.app.post(
-      '/api/internal/proactivity/draft/:episodeId/:agentSlug',
-      validateS2SKey,
-      (req: Request, res: Response) => {
-        // Into the worker's queue, so a restarting API pod can't lose the draft.
-        const context = decodeDraftContext(req.query.context);
-        if (!context) {
-          logger.warn('[Proactivity] draft without its context', { params: req.params });
-          res.json({ success: true });
-          return;
-        }
-        void proactiveEpisodeQueue
-          .schedule(
-            {
-              type: 'draft',
-              episodeId: String(req.params.episodeId),
-              agentSlug: String(req.params.agentSlug),
-              result: (req.body ?? {}) as DraftResult,
-              context,
-            },
-            Date.now(),
-          )
-          .finally(() => res.json({ success: true }));
-      },
-    );
-    // Claw's completion callback for a parked RUN_AGENT step. The session — not
-    // the node path — identifies which attempt reported back; the handler
-    // resolves the gate from it.
-    this.app.post(
-      '/api/internal/workflows-v2/claw-callback/:executionId',
-      validateS2SKey,
-      handleWorkflowClawCallback,
-    );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
@@ -789,14 +706,12 @@ export class App {
     // No user session here — the caller is the y-sweet server itself, gated
     // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
     this.app.use('/api/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
+    this.app.use('/internal/ysweet/storage-key', requireYSweetServerToken, ysweetStorageKeyRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
     this.app.use('/api/search-feedback', authMiddleware.authenticate, searchFeedbackRoutes); // Search feedback routes (POST /api/search-feedback)
-
-    // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
-    this.app.use('/api/admin/api-keys', apiKeyRoutes);
 
     // User management routes - admin operations with ACL protection
     this.app.use(
@@ -809,11 +724,16 @@ export class App {
     // user deactivation from dashboard 
     this.app.use('/api/user-activation', userActivationRoutes);
 
-    this.app.use('/api/secrets-vault', authMiddleware.authenticate, secretsVaultRoutes);
+    // Disabled (Secrets vault): access survives role downgrade and the vault is platform-wide;
+    // blocked until access control is fixed. Router logic in routes/secretsVault.ts is untouched.
+    // this.app.use('/api/secrets-vault', authMiddleware.authenticate, secretsVaultRoutes);
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
-    this.app.use('/api/sdlc/claw', authenticateUserOrApp, sdlcClawRoutes);
+    // The SDLC screen creates artifacts, artifact types and links through these routes.
+    // User auth only: 25c3a5cc3 took this router away from Claw app tokens
+    // (authenticateUserOrApp), and that stays so.
+    this.app.use('/api/sdlc/claw', authMiddleware.authenticate, sdlcClawRoutes);
     this.app.use('/api/sdlc', authMiddleware.authenticate, sdlcRoutes);
 
     // Board routes (auth and ACL required)
@@ -828,7 +748,8 @@ export class App {
 
     this.app.use('/api/ysweet', ysweetRoutes);
     // AI routes (auth required)
-    this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/ai', authMiddleware.authenticate, aiRoutes);
 
     // Generic query route (auth required)
     this.app.use('/api/analytics-query', authMiddleware.authenticate, queryRoutes);
@@ -844,7 +765,8 @@ export class App {
     this.app.use('/api/emojis', authMiddleware.authenticate, emojiRoutes);
 
     // Summarization routes (auth required, uses JAF agent)
-    this.app.use('/api/summarize', authMiddleware.authenticate, summarizeRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/summarize', authMiddleware.authenticate, summarizeRoutes);
 
     // Xyne AI routes (unified AI assistant with context awareness)
     this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
@@ -894,7 +816,8 @@ export class App {
     // New chat schema routes
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
-    this.app.use('/api/thread-type-vocabulary', authMiddleware.authenticate, threadTypeVocabularyRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/thread-type-vocabulary', authMiddleware.authenticate, threadTypeVocabularyRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
@@ -907,21 +830,18 @@ export class App {
 
     // Vespa search routes (auth required)
     // Ahead of the general mount, so a lookup is answered here and nothing else runs.
-    this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
-    this.app.use(
-      '/api/vespaSearch/discussion-title',
-      authMiddleware.authenticate,
-      discussionTitleRouter
-    );
+    // Disabled (LLM)
+    // this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
+    // this.app.use(
+    //   '/api/vespaSearch/discussion-title',
+    //   authMiddleware.authenticate,
+    //   discussionTitleRouter
+    // );
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
-    this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
+    // Disabled (LLM)
+    // this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
 
-    // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
-    this.app.use('/api/admin/api-keys', apiKeyRoutes);
-
-    // API Key test route
-    this.app.use('/api/test/api-key', apiKeyRoutes);
     // User management routes - /users endpoint without ACL, others with ACL
     const userManagementController = UserManagementController.getInstance();
     this.app.get(
@@ -975,7 +895,7 @@ export class App {
     initializeOpenTelemetry();
 
     // Phase 2 Optimization: Parallelize initialization in TEST environment only
-    const isTestEnv = config.isTestEnv || process.env.NODE_ENV === 'test';
+    const isTestEnv = config.isTestEnv;
 
     if (isTestEnv) {
       logger.info('[TEST MODE] Starting parallel initialization of core services...');
@@ -1019,7 +939,8 @@ export class App {
         (async () => {
           logger.info('Initializing board config copy queue...');
           await boardConfigCopyQueue.initialize();
-          boardConfigCopyWorker.start();
+          // Disabled (all workers)
+          // boardConfigCopyWorker.start();
         })(),
         (async () => {
           logger.info('Initializing assignment reactivation queue...');
@@ -1037,10 +958,11 @@ export class App {
           logger.info('Initializing scheduled message queue...');
           await scheduledMessageQueue.initialize();
         })(),
-        (async () => {
-          logger.info('Initializing team intelligence queue...');
-          await teamIntelligenceQueue.initialize();
-        })(),
+        // Disabled (LLM)
+        // (async () => {
+        //   logger.info('Initializing team intelligence queue...');
+        //   await teamIntelligenceQueue.initialize();
+        // })(),
         (async () => {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
@@ -1074,7 +996,8 @@ export class App {
 
       logger.info('Initializing board config copy queue...');
       await boardConfigCopyQueue.initialize();
-      boardConfigCopyWorker.start();
+      // Disabled (all workers)
+      // boardConfigCopyWorker.start();
 
       logger.info('Initializing assignment reactivation queue...');
       await assignmentReactivationQueue.initialize();
@@ -1088,8 +1011,9 @@ export class App {
       logger.info('Initializing scheduled message queue...');
       await scheduledMessageQueue.initialize();
 
-      logger.info('Initializing team intelligence queue...');
-      await teamIntelligenceQueue.initialize();
+      // Disabled (LLM)
+      // logger.info('Initializing team intelligence queue...');
+      // await teamIntelligenceQueue.initialize();
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
@@ -1102,11 +1026,13 @@ export class App {
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.
-      logger.info('Initializing entity extraction queue...');
-      await entityExtractionQueue.initialize();
+      // Disabled (LLM)
+      // logger.info('Initializing entity extraction queue...');
+      // await entityExtractionQueue.initialize();
 
-      logger.info('Initializing auto draft queue...');
-      await autoDraftQueue.initialize();
+      // Disabled (LLM)
+      // logger.info('Initializing auto draft queue...');
+      // await autoDraftQueue.initialize();
     }
 
     logger.info('Initializing automations module (registries + queue producers)...');
@@ -1129,25 +1055,22 @@ export class App {
     logger.info('Initializing bookmark reminder service...');
     await bookmarkReminderService.initialize();
 
-    // Ensure default model and tools exist before synchronizing config
+    // Ensure default model and tools exist
     await configSyncService.ensureDefaultModelAndTools();
-
-    // Synchronize config.json with database before starting other services
-    logger.info('Synchronizing configuration with database...');
-    await configSyncService.syncConfigWithDatabase();
 
     // Initialize and start model sync queue (Bull-based scheduling)
     // Only run when LiteLLM is configured; otherwise there is nothing to sync
     // and we must not fire requests to LiteLLM (e.g. local `pnpm run dev`).
-    if (config.litellm.apiKey && config.litellm.baseUrl) {
-      logger.info('Initializing model sync queue...');
-      await modelSyncQueue.initialize();
-      await modelSyncQueue.runInitialSync();
-    } else {
-      logger.info(
-        'Skipping model sync queue: LITELLM_API_KEY / LITELLM_BASE_URL not configured',
-      );
-    }
+    // Disabled (LLM)
+    // if (config.litellm.apiKey && config.litellm.baseUrl) {
+    //   logger.info('Initializing model sync queue...');
+    //   await modelSyncQueue.initialize();
+    //   await modelSyncQueue.runInitialSync();
+    // } else {
+    //   logger.info(
+    //     'Skipping model sync queue: LITELLM_API_KEY / LITELLM_BASE_URL not configured',
+    //   );
+    // }
 
     // Initialize calendar sync queues as PRODUCERS only. The calendar webhook
     // routes live here and must stay here (they are the publicly reachable
@@ -1181,11 +1104,12 @@ export class App {
       logger.warn('Continuing startup without Superposition client...');
     }
 
-    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate (requireYSweetServerToken
-    // fails closed with 401 if it's empty). A missing token here is silent at
-    // request time — every canvas connect and every 10s revalidation poll
-    // just 401s — so surface it loudly at boot instead. Warn, don't crash:
-    // an empty value is expected in local dev where nothing calls this route.
+    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate and /internal/ysweet/storage-key
+    // (requireYSweetServerToken fails closed with 401 if it's empty). A missing
+    // token here is silent at request time — every canvas connect, every 10s
+    // revalidation poll and every doc storage-key request just 401s — so surface
+    // it loudly at boot instead. Warn, don't crash: an empty value is expected in
+    // local dev where nothing calls these routes.
     if (!config.ysweet.serverToken) {
       logger.warn(
         'Y_SWEET_SERVER_TOKEN is not set.' +
@@ -1203,10 +1127,6 @@ export class App {
     } else {
       logger.info('Skipping external-source bot registration (ENABLE_EXTERNAL_SOURCE_REGISTRATION=false)');
     }
-
-    // Register workflow definitions
-    logger.info('Registering workflow definitions...');
-    registerAllWorkflows();
 
     // Initialize bot framework
     logger.info('Initializing bot framework...');
@@ -1245,14 +1165,9 @@ export class App {
     botCatalog.markInitialized();
     logger.info(`Unified bot framework initialized with ${botCatalog.count} bot(s)`);
 
-    logger.info('Initializing conversation ingest queue (producer)...');
-    await conversationIngestQueue.initialize();
-
-    logger.info('Initializing team intelligence queue (producer)...');
-    await teamIntelligenceQueue.initialize();
-
-    logger.info('Initializing document ingest queue (producer)...');
-    await documentIngestQueue.initialize();
+    // Disabled (LLM)
+    // logger.info('Initializing team intelligence queue (producer)...');
+    // await teamIntelligenceQueue.initialize();
 
     logger.info('Initializing data source ingest queue (producer)...');
     const { dataSourceIngestQueue } = await import('@/queues/dataSourceIngestQueue');
@@ -1262,36 +1177,41 @@ export class App {
     const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
     await delayedMessageQueue.initialize();
 
-    const { radarExecutionQueue, isRadarExecutionEnabled } = await import('@/queues/radarExecutionQueue');
-    if (isRadarExecutionEnabled()) {
-      logger.info('Initializing radar execution queue (producer)...');
-      await radarExecutionQueue.initialize();
-    }
+    // Disabled (LLM)
+    // const { radarExecutionQueue, isRadarExecutionEnabled } = await import('@/queues/radarExecutionQueue');
+    // if (isRadarExecutionEnabled()) {
+    //   logger.info('Initializing radar execution queue (producer)...');
+    //   await radarExecutionQueue.initialize();
+    // }
 
-    logger.info('Initializing message classification queue (producer)...');
-    const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
-    await messageClassificationQueue.initialize();
+    // Disabled (LLM)
+    // logger.info('Initializing message classification queue (producer)...');
+    // const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
+    // await messageClassificationQueue.initialize();
 
-    if (config.decisionEval.enabled) {
-      logger.info('Initializing decision evaluation queue (producer)...');
-      await decisionEvaluationQueue.initialize();
-    }
+    // Disabled (LLM)
+    // if (config.decisionEval.enabled) {
+    //   logger.info('Initializing decision evaluation queue (producer)...');
+    //   await decisionEvaluationQueue.initialize();
+    // }
 
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');
     await heicRenditionQueue.initialize();
 
-    if (config.enableTagGenerationPipeline) {
-      logger.info('Initializing tag generation pipeline queue (producer)...');
-      registerDeskEmailTags(tagGenerationPipeline);
-      await tagGenerationPipeline.connectQueue();
-    }
+    // Disabled (LLM)
+    // if (config.enableTagGenerationPipeline) {
+    //   logger.info('Initializing tag generation pipeline queue (producer)...');
+    //   registerDeskEmailTags(tagGenerationPipeline);
+    //   await tagGenerationPipeline.connectQueue();
+    // }
 
     // Nightly automated Slack migration cron (runs only on migration pod)
-    if (config.autoSyncSlackChannel.enabled) {
-      logger.info('[APP] Starting Slack migration nightly worker...');
-      await slackMigrationWorker.start();
-    }
+    // Disabled (all workers)
+    // if (config.autoSyncSlackChannel.enabled) {
+    //   logger.info('[APP] Starting Slack migration nightly worker...');
+    //   await slackMigrationWorker.start();
+    // }
 
     this.httpServer.listen(config.port, config.host, () => {
       logger.info(`Server is running on ${config.host}:${config.port} in ${config.env} mode`);
@@ -1347,17 +1267,20 @@ export class App {
       await emailClassificationQueue.close();
 
       // Close auto draft queue
-      await autoDraftQueue.close();
+      // Disabled (LLM)
+      // await autoDraftQueue.close();
 
       // Close call transcription queue
       await callTranscriptionQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
-      const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
-      await radarQueue.close();
+      // Disabled (LLM)
+      // const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
+      // await radarQueue.close();
 
       // Close tag generation pipeline queue
-      await tagGenerationPipeline.close();
+      // Disabled (LLM)
+      // await tagGenerationPipeline.close();
 
       const { shutdownWorkflows } = await import('@/workflowsV2/runtime');
       await shutdownWorkflows();
@@ -1375,8 +1298,9 @@ export class App {
       await CommonDatabaseClient.disconnect();
       await redisService.disconnect();
 
-      // Stop Slack migration nightly worker if running
-      await slackMigrationWorker.stop();
+      // Disabled (all workers)
+      // // Stop Slack migration nightly worker if running
+      // await slackMigrationWorker.stop();
 
       // Close HTTP server
       this.httpServer.close(() => {

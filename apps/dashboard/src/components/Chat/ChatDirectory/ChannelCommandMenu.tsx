@@ -136,6 +136,7 @@ import type { SlashSelectionType } from '../../../types/slashCommandEvents';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
+import { htmlToPlainText } from '../../../utils/sanitizer';
 import SearchResultItem from './SearchResultItem';
 import SearchSectionSkeleton, { type SkeletonVariant } from './SearchSectionSkeleton';
 import {
@@ -197,9 +198,7 @@ const dateOptionHint = (value: string): string | null => {
 type TabDefinition = { id: TabType; label: string; icon?: ReactElement };
 
 function stripHtmlTags(html: string): string {
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  return div.textContent || html;
+  return htmlToPlainText(html) || html;
 }
 /**
  * Bring a clicked tab to the middle of its own strip — and nothing else.
@@ -1027,7 +1026,9 @@ const ChannelCommandMenuContent = ({
     defaultIncludeBotMessages: initialToggles?.includeBotMessages ?? false,
     // Classifying costs a request per settled query, so only surfaces that can show the
     // overview ask for it (the backend gates the feature itself on cmdk_ai_intent_config.enabled).
-    classifyIntent: aiOverview && !isInTicketView,
+    // Disabled (LLM)
+    // classifyIntent: aiOverview && !isInTicketView,
+    classifyIntent: false && aiOverview && !isInTicketView,
     // cmd+k hides archived tickets on its Desk and Tickets tabs (the hook gates this by
     // active tab). There is no toggle here to opt back in.
     defaultExcludeArchived: true,
@@ -5183,7 +5184,9 @@ const ChannelCommandMenuContent = ({
                 {/* AI answer above the current tab's results when the query needs AI
                     (Google "AI Overview" style). Not a cmdk item, so the results below
                     keep arrow keys and the Enter target. */}
-                {aiOverview && !isInTicketView && (
+                {/* Disabled (LLM) */}
+                {/* {aiOverview && !isInTicketView && ( */}
+                {aiOverview && !isInTicketView && false && (
                   <AiAnswerCard
                     query={searchText}
                     tab={activeTab}

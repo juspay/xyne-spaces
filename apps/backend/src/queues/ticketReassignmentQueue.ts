@@ -3,6 +3,7 @@ import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { reassignTicketAwayFrom } from '@/utils/ticketReassignment';
 import { TicketStatusV2 } from '@xyne/shared';
+import { config } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -29,11 +30,11 @@ class TicketReassignmentQueue {
 
     try {
       const redisConfig = {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        host: config.redis.host,
+        port: config.redis.port,
         maxRetriesPerRequest: 3,
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && {
+        ...(config.redis.password && { password: config.redis.password }),
+        ...(config.redis.tls && {
           tls: {
             rejectUnauthorized: false
           }

@@ -1,11 +1,15 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { Prisma, type Call } from '@prisma/client';
+// Disabled (LLM)
+// import { Prisma, type Call } from '@prisma/client';
+import { type Call } from '@prisma/client';
 import { config } from '@/config/env';
-import { Agent } from '@framework';
+// import { Agent } from '@framework'; // framework removed
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
+// Disabled (LLM)
+// import { MessageType, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
+import { MessageType, AttachmentEntityType, TicketPriority, NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
@@ -23,20 +27,23 @@ import {
   executeStreamingLlmRequest,
   type SummaryModelType,
 } from './callLlmRetry';
-import { callRecordingService } from '@/services/callRecordingService';
+// Disabled (LLM)
+// import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { callSubject } from '@/utils/callTypeUtils';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
-import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
+// Disabled (LLM)
+// import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { mapWithConcurrency } from '@/utils/concurrency';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { processCallWithSummaryTx } from '@/bypassAcl/transactions/transcriptService';
-import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
+// import { orgLLMCredentialService } from '@/services/orgLLMCredentialService'; // framework removed
+// Disabled (LLM)
+// import { processCallWithSummaryTx } from '@/bypassAcl/transactions/transcriptService';
+// import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -316,99 +323,101 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private async createAgent(callId?: string, modelType?: SummaryModelType, workspaceId?: string): Promise<Agent | null> {
-    try {
-      const userId = await this.getCreatedByUserIdForCall(callId);
-      // `workspaceId` is for callers with no Xyne call to resolve the org from (desk call recordings).
-      const credential = workspaceId
-        ? await orgLLMCredentialService.getCredentialByWorkspaceId(
-            workspaceId,
-            OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
-          )
-        : await orgLLMCredentialService.getCredentialByUserId(
-            userId,
-            OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
-          );
-
-      // Prefer the org-provisioned credential; fall back to the env-configured
-      // CALL_LITELLM_API_KEY/LITELLM_BASE_URL (config.llm) when no org credential
-      // exists yet (e.g. local/dev where AI provisioning never ran).
-      const apiKey = credential?.apiKey || config.llm.callLitellmApiKey;
-      const baseUrl = credential?.baseUrl || config.llm.litellmBaseUrl;
-      // Model tier selection: when the fast/thinking env models are configured
-      // they drive which model runs (that's the whole point of the per-user
-      // preference); otherwise fall back to the org credential's model, then the
-      // generic call model. `callRecordingFastLitellmModel`/`callRecordingThinkingLitellmModel`
-      // themselves fall back to CALL_LITELLM_MODEL (see config/env.ts).
-      const tierModel =
-        modelType === 'thinking'
-          ? config.llm.callRecordingThinkingLitellmModel
-          : config.llm.callRecordingFastLitellmModel;
-      const defaultModel =
-        tierModel || credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
-
-      if (!apiKey || !baseUrl) {
-        logger.warn('Org LiteLLM credentials not configured and no CALL_LITELLM_API_KEY/LITELLM_BASE_URL env fallback set. AI features will be disabled.', {
-          userId,
-        });
-        return null;
+  private async createAgent(_callId?: string, _modelType?: SummaryModelType, _workspaceId?: string): Promise<null> {
+    // LLM framework removed; original kept below.
+    return null;
+    //     try {
+    //       const userId = await this.getCreatedByUserIdForCall(callId);
+    //       // `workspaceId` is for callers with no Xyne call to resolve the org from (desk call recordings).
+    //       const credential = workspaceId
+    //         ? await orgLLMCredentialService.getCredentialByWorkspaceId(
+    //             workspaceId,
+    //             OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+    //           )
+    //         : await orgLLMCredentialService.getCredentialByUserId(
+    //             userId,
+    //             OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+    //           );
+    //
+    //       // Prefer the org-provisioned credential; fall back to the env-configured
+    //       // CALL_LITELLM_API_KEY/LITELLM_BASE_URL (config.llm) when no org credential
+    //       // exists yet (e.g. local/dev where AI provisioning never ran).
+    //       const apiKey = credential?.apiKey || config.llm.callLitellmApiKey;
+    //       const baseUrl = credential?.baseUrl || config.llm.litellmBaseUrl;
+    //       // Model tier selection: when the fast/thinking env models are configured
+    //       // they drive which model runs (that's the whole point of the per-user
+    //       // preference); otherwise fall back to the org credential's model, then the
+    //       // generic call model. `callRecordingFastLitellmModel`/`callRecordingThinkingLitellmModel`
+    //       // themselves fall back to CALL_LITELLM_MODEL (see config/env.ts).
+    //       const tierModel =
+    //         modelType === 'thinking'
+    //           ? config.llm.callRecordingThinkingLitellmModel
+    //           : config.llm.callRecordingFastLitellmModel;
+    //       const defaultModel =
+    //         tierModel || credential?.defaultModel || config.llm.callLitellmModel || 'glm-private';
+    //
+    //       if (!apiKey || !baseUrl) {
+    //         logger.warn('Org LiteLLM credentials not configured and no CALL_LITELLM_API_KEY/LITELLM_BASE_URL env fallback set. AI features will be disabled.', {
+    //           userId,
+    //         });
+    //         return null;
+    //       }
+    //
+    //       if (!credential) {
+    //         logger.info('Using env-configured LiteLLM credentials (CALL_LITELLM_API_KEY/LITELLM_BASE_URL) — no org-provisioned credential found.', {
+    //           userId,
+    //         });
+    //       }
+    //
+    //       const agentConfig = {
+    //         model: {
+    //           provider: {
+    //             type: 'litellm' as const,
+    //             config: {
+    //               apiKey,
+    //               baseUrl,
+    //               timeout: 300000,
+    //             },
+    //           },
+    //           defaultModel,
+    //         },
+    //         tools: {
+    //           enabled: [],
+    //           config: {},
+    //           execution: { timeout: 300000 },
+    //         },
+    //         execution: {
+    //           maxTurns: 1,
+    //           mode: 'single' as const,
+    //           timeouts: { llm: 300000 },
+    //           limits: {},
+    //           errorHandling: {
+    //             maxRetries: 3,
+    //             retryDelay: 120000,
+    //             maxDelay: 960000,
+    //           },
+    //         },
+    //         events: {
+    //           logging: 'warn' as const,
+    //         },
+    //       };
+    //
+    //       return Agent.create(agentConfig);
+    //     } catch (error) {
+    //       logger.error('Failed to create AI agent:', error);
+    //       return null;
+    //     }
       }
 
-      if (!credential) {
-        logger.info('Using env-configured LiteLLM credentials (CALL_LITELLM_API_KEY/LITELLM_BASE_URL) — no org-provisioned credential found.', {
-          userId,
-        });
-      }
-
-      const agentConfig = {
-        model: {
-          provider: {
-            type: 'litellm' as const,
-            config: {
-              apiKey,
-              baseUrl,
-              timeout: 300000,
-            },
-          },
-          defaultModel,
-        },
-        tools: {
-          enabled: [],
-          config: {},
-          execution: { timeout: 300000 },
-        },
-        execution: {
-          maxTurns: 1,
-          mode: 'single' as const,
-          timeouts: { llm: 300000 },
-          limits: {},
-          errorHandling: {
-            maxRetries: 3,
-            retryDelay: 120000,
-            maxDelay: 960000,
-          },
-        },
-        events: {
-          logging: 'warn' as const,
-        },
-      };
-
-      return Agent.create(agentConfig);
-    } catch (error) {
-      logger.error('Failed to create AI agent:', error);
-      return null;
-    }
-  }
-
-  private async getCreatedByUserIdForCall(callId: string | null | undefined): Promise<string | null> {
-    if (!callId) {
-      return null;
-    }
-
-    const call = await repositories.calls.findByExternalId(callId);
-    return call?.createdByUserId ?? null;
-  }
-
+    // private async getCreatedByUserIdForCall(callId: string | null | undefined): Promise<string | null> {
+  //     if (!callId) {
+  //       return null;
+  //     }
+  //
+  //     const call = await repositories.calls.findByExternalId(callId);
+  //     return call?.createdByUserId ?? null;
+  //   }
+  
   /**
    * Main entry point - attach transcript to existing call message when call ends
    * @param callId - The external call ID
@@ -1835,9 +1844,10 @@ export class TranscriptService {
       return;
     }
 
-    let pendingDetailedSummary:
-      | ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>
-      | null = null;
+    // Disabled (LLM)
+    // let pendingDetailedSummary:
+    //   | ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>
+    //   | null = null;
 
     try {
       // Get call details for summary generation and notes posting.
@@ -1908,241 +1918,242 @@ export class TranscriptService {
         return;
       }
 
-      // Retrieve and format transcript for AI.
-      const transcriptContent = await this.retrieveTranscript(callId);
-      if (!transcriptContent) {
-        logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_content' });
-        return;
-      }
+      // Disabled (LLM)
+      // // Retrieve and format transcript for AI.
+      // const transcriptContent = await this.retrieveTranscript(callId);
+      // if (!transcriptContent) {
+      //   logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_content' });
+      //   return;
+      // }
 
-      const entries = this.parseTranscriptEntries(transcriptContent);
-      if (entries.length === 0) {
-        logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
-        return;
-      }
-      const formattedTranscript = this.formatTranscript(entries, callId);
+      // const entries = this.parseTranscriptEntries(transcriptContent);
+      // if (entries.length === 0) {
+      //   logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
+      //   return;
+      // }
+      // const formattedTranscript = this.formatTranscript(entries, callId);
 
-      // For CONVERSATION origin calls, combine conversation messages with transcript for title
-      let titleInput = formattedTranscript;
-      if (call.callOrigin === CallOrigin.CONVERSATION && callMessage.conversationId) {
-        const conversationMessages = await this.formatConversationMessagesForTitle(callMessage.conversationId).catch(() => null);
-        if (conversationMessages) {
-          titleInput = `CONVERSATION CONTEXT:\n${conversationMessages}\n\nCALL TRANSCRIPT:\n${formattedTranscript}`;
-        }
-      }
+      // // For CONVERSATION origin calls, combine conversation messages with transcript for title
+      // let titleInput = formattedTranscript;
+      // if (call.callOrigin === CallOrigin.CONVERSATION && callMessage.conversationId) {
+      //   const conversationMessages = await this.formatConversationMessagesForTitle(callMessage.conversationId).catch(() => null);
+      //   if (conversationMessages) {
+      //     titleInput = `CONVERSATION CONTEXT:\n${conversationMessages}\n\nCALL TRANSCRIPT:\n${formattedTranscript}`;
+      //   }
+      // }
 
-      const startTime = Date.now();
+      // const startTime = Date.now();
 
-      // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
-      const skipTitleGeneration = call.callType === CallType.HEADLESS;
-      if (skipTitleGeneration) {
-        logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
-      }
-      const summaryPromise = this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-        logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-        return null;
-      });
-      const callTitlePromise = skipTitleGeneration
-        ? Promise.resolve(null)
-        : this.generateCallTitle(titleInput, callId).catch((err) => {
-          logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-          return null;
-        });
-      const ticketSuggestionsPromise = this.generateTicketSuggestions(formattedTranscript, callId).catch((err) => {
-        logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-        return [];
-      });
-      // Recordings already label themselves on the note-taker path; running here
-      // too would spend a second LLM call on the same tags.
-      const labelsPromise =
-        call.callType === CallType.HEADLESS
-          ? Promise.resolve([] as string[])
-          : this.generateAndSaveLabels(call, formattedTranscript);
+      // // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
+      // const skipTitleGeneration = call.callType === CallType.HEADLESS;
+      // if (skipTitleGeneration) {
+      //   logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
+      // }
+      // const summaryPromise = this.generateCallSummary(formattedTranscript, callId).catch((err) => {
+      //   logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+      //   return null;
+      // });
+      // const callTitlePromise = skipTitleGeneration
+      //   ? Promise.resolve(null)
+      //   : this.generateCallTitle(titleInput, callId).catch((err) => {
+      //     logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+      //     return null;
+      //   });
+      // const ticketSuggestionsPromise = this.generateTicketSuggestions(formattedTranscript, callId).catch((err) => {
+      //   logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+      //   return [];
+      // });
+      // // Recordings already label themselves on the note-taker path; running here
+      // // too would spend a second LLM call on the same tags.
+      // const labelsPromise =
+      //   call.callType === CallType.HEADLESS
+      //     ? Promise.resolve([] as string[])
+      //     : this.generateAndSaveLabels(call, formattedTranscript);
 
-      // Start all five post-call LLM operations immediately. Detailed-summary
-      // streaming remains unchanged; title, summary, and tickets persist their
-      // own result as soon as it is ready rather than waiting on one another.
-      pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
-        callId,
-        formattedTranscript,
-        callMessage.conversationId,
-        undefined,
-        { callTitlePromise },
-      ).catch((error) => {
-        // generateAndPostDetailedSummary logs its own failure exits; reaching
-        // here means it threw outside them, so this is the only record.
-        logDetailedSummaryFailed(callId, 'unexpected_error', error);
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
-      });
+      // // Start all five post-call LLM operations immediately. Detailed-summary
+      // // streaming remains unchanged; title, summary, and tickets persist their
+      // // own result as soon as it is ready rather than waiting on one another.
+      // pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
+      //   callId,
+      //   formattedTranscript,
+      //   callMessage.conversationId,
+      //   undefined,
+      //   { callTitlePromise },
+      // ).catch((error) => {
+      //   // generateAndPostDetailedSummary logs its own failure exits; reaching
+      //   // here means it threw outside them, so this is the only record.
+      //   logDetailedSummaryFailed(callId, 'unexpected_error', error);
+      //   return { success: false, error: error instanceof Error ? error.message : String(error) };
+      // });
 
-      const summaryUiPromise = summaryPromise.then(async (summary) => {
-        if (!summary) return null;
-        try {
-          await repositories.calls.update(call.id, { aiSummary: summary });
-          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
-        } catch (updateError) {
-          if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
-            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
-            return null;
-          }
-          logger.error(`[${callId}] call_record_update_failed`, {
-            stage: 'call_record_update', error: updateError,
-            stack: updateError instanceof Error ? updateError.stack : undefined,
-          });
-        }
+      // const summaryUiPromise = summaryPromise.then(async (summary) => {
+      //   if (!summary) return null;
+      //   try {
+      //     await repositories.calls.update(call.id, { aiSummary: summary });
+      //     logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
+      //   } catch (updateError) {
+      //     if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
+      //       logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
+      //       return null;
+      //     }
+      //     logger.error(`[${callId}] call_record_update_failed`, {
+      //       stage: 'call_record_update', error: updateError,
+      //       stack: updateError instanceof Error ? updateError.stack : undefined,
+      //     });
+      //   }
 
-        try {
-          await this.postSummaryAsReply(callMessage.conversationId, callId, summary);
-        } catch (replyError) {
-          logger.error(`[${callId}] post_summary_reply_failed`, {
-            stage: 'post_summary_reply', error: replyError,
-            stack: replyError instanceof Error ? replyError.stack : undefined,
-          });
-        }
-        return summary;
-      });
+      //   try {
+      //     await this.postSummaryAsReply(callMessage.conversationId, callId, summary);
+      //   } catch (replyError) {
+      //     logger.error(`[${callId}] post_summary_reply_failed`, {
+      //       stage: 'post_summary_reply', error: replyError,
+      //       stack: replyError instanceof Error ? replyError.stack : undefined,
+      //     });
+      //   }
+      //   return summary;
+      // });
 
-      const titleUiPromise = callTitlePromise.then(async (title) => {
-        if (!title) return null;
-        try {
-          if (!call.title) {
-            await repositories.calls.update(call.id, { title });
-            void callRecordingService.updateRecordingFilename(callId, title);
-          }
+      // const titleUiPromise = callTitlePromise.then(async (title) => {
+      //   if (!title) return null;
+      //   try {
+      //     if (!call.title) {
+      //       await repositories.calls.update(call.id, { title });
+      //       void callRecordingService.updateRecordingFilename(callId, title);
+      //     }
 
-          // Serialize with first-chunk Canvas URL attachment: both merge the
-          // call-message metadata, so neither can discard the other's fields.
-          await processCallWithSummaryTx(messageId, title);
-          logger.info(`[${callId}] call_title_updated`);
-        } catch (error) {
-          logger.error(`[${callId}] call_title_update_failed`, { error });
-        }
-        return title;
-      });
+      //     // Serialize with first-chunk Canvas URL attachment: both merge the
+      //     // call-message metadata, so neither can discard the other's fields.
+      //     await processCallWithSummaryTx(messageId, title);
+      //     logger.info(`[${callId}] call_title_updated`);
+      //   } catch (error) {
+      //     logger.error(`[${callId}] call_title_update_failed`, { error });
+      //   }
+      //   return title;
+      // });
 
-      const ticketsUiPromise = ticketSuggestionsPromise.then(async (ticketSuggestions) => {
-        if (ticketSuggestions.length === 0) return ticketSuggestions;
-        try {
-          await this.postSummaryAsReply(
-            callMessage.conversationId, callId, null, ticketSuggestions,
-          );
-        } catch (ticketError) {
-          logger.error(`[${callId}] post_ticket_suggestions_failed`, {
-            error: ticketError,
-            stack: ticketError instanceof Error ? ticketError.stack : undefined,
-          });
-        }
-        return ticketSuggestions;
-      });
+      // const ticketsUiPromise = ticketSuggestionsPromise.then(async (ticketSuggestions) => {
+      //   if (ticketSuggestions.length === 0) return ticketSuggestions;
+      //   try {
+      //     await this.postSummaryAsReply(
+      //       callMessage.conversationId, callId, null, ticketSuggestions,
+      //     );
+      //   } catch (ticketError) {
+      //     logger.error(`[${callId}] post_ticket_suggestions_failed`, {
+      //       error: ticketError,
+      //       stack: ticketError instanceof Error ? ticketError.stack : undefined,
+      //     });
+      //   }
+      //   return ticketSuggestions;
+      // });
 
-      // appendLabels merges, so a label typed mid-processing survives this write.
-      const labelsUiPromise = labelsPromise.then(async (labelIds) => {
-        if (labelIds.length === 0) return labelIds;
-        try {
-          await repositories.calls.appendLabels(call.id, labelIds);
-          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
-        } catch (error) {
-          logger.error(`[${callId}] labels_save_failed`, { error });
-        }
-        return labelIds;
-      });
+      // // appendLabels merges, so a label typed mid-processing survives this write.
+      // const labelsUiPromise = labelsPromise.then(async (labelIds) => {
+      //   if (labelIds.length === 0) return labelIds;
+      //   try {
+      //     await repositories.calls.appendLabels(call.id, labelIds);
+      //     logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
+      //   } catch (error) {
+      //     logger.error(`[${callId}] labels_save_failed`, { error });
+      //   }
+      //   return labelIds;
+      // });
 
-      const [summary, title, ticketSuggestions] = await Promise.all([
-        summaryUiPromise,
-        titleUiPromise,
-        ticketsUiPromise,
-        labelsUiPromise,
-      ]);
+      // const [summary, title, ticketSuggestions] = await Promise.all([
+      //   summaryUiPromise,
+      //   titleUiPromise,
+      //   ticketsUiPromise,
+      //   labelsUiPromise,
+      // ]);
 
-      const duration = Date.now() - startTime;
-      logger.info(
-        `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
-      );
+      // const duration = Date.now() - startTime;
+      // logger.info(
+      //   `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
+      // );
 
-      // If ALL three AI calls failed, escalate from per-call warns to a single error so
-      // an LLM outage affecting every call is immediately visible rather than buried in warns.
-      const aiFullyFailed = !summary && !title && ticketSuggestions.length === 0;
-      if (aiFullyFailed) {
-        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, tickets: 0 });
-      }
+      // // If ALL three AI calls failed, escalate from per-call warns to a single error so
+      // // an LLM outage affecting every call is immediately visible rather than buried in warns.
+      // const aiFullyFailed = !summary && !title && ticketSuggestions.length === 0;
+      // if (aiFullyFailed) {
+      //   logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, tickets: 0 });
+      // }
 
-      if (summary) {
-        // Pulse block — completely separate from Xyne tickets.
-        // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
-        if (config.pulse.enabledChannels.length > 0) {
-          try {
-            // Check if this call's channel is in the Pulse allowlist (by channel ID)
-            const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId ?? '');
+      // if (summary) {
+      //   // Pulse block — completely separate from Xyne tickets.
+      //   // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
+      //   if (config.pulse.enabledChannels.length > 0) {
+      //     try {
+      //       // Check if this call's channel is in the Pulse allowlist (by channel ID)
+      //       const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId ?? '');
 
-            if (isPulseChannel) {
-              logger.info(`[Pulse] Channel ${call.channelId} is in allowlist — generating Pulse data for call ${callId}`);
-              const pulseGroups = await this.generatePulseData(formattedTranscript, callId);
-              const validatedGroups: Array<{
-                merchantName: string;
-                actionItems: PulseActionItem[];
-                orgContext: import('@/services/pulseService').PulseOrgContext;
-              }> = [];
+      //       if (isPulseChannel) {
+      //         logger.info(`[Pulse] Channel ${call.channelId} is in allowlist — generating Pulse data for call ${callId}`);
+      //         const pulseGroups = await this.generatePulseData(formattedTranscript, callId);
+      //         const validatedGroups: Array<{
+      //           merchantName: string;
+      //           actionItems: PulseActionItem[];
+      //           orgContext: import('@/services/pulseService').PulseOrgContext;
+      //         }> = [];
 
-              for (const group of pulseGroups) {
-                if (group.actionItems.length > 0) {
-                  // Validate the merchant exists in Pulse BEFORE showing the UI card.
-                  const { pulseService } = await import('@/services/pulseService');
-                  const orgContext = group.merchantName
-                    ? await pulseService.resolveOrgForMerchant(group.merchantName)
-                    : null;
+      //         for (const group of pulseGroups) {
+      //           if (group.actionItems.length > 0) {
+      //             // Validate the merchant exists in Pulse BEFORE showing the UI card.
+      //             const { pulseService } = await import('@/services/pulseService');
+      //             const orgContext = group.merchantName
+      //               ? await pulseService.resolveOrgForMerchant(group.merchantName)
+      //               : null;
 
-                  if (orgContext) {
-                    validatedGroups.push({
-                      merchantName: group.merchantName,
-                      actionItems: group.actionItems,
-                      orgContext,
-                    });
-                  } else {
-                    logger.warn(`[Pulse] Merchant "${group.merchantName}" not found in Pulse — skipping its action items`);
-                  }
-                }
-              }
+      //             if (orgContext) {
+      //               validatedGroups.push({
+      //                 merchantName: group.merchantName,
+      //                 actionItems: group.actionItems,
+      //                 orgContext,
+      //               });
+      //             } else {
+      //               logger.warn(`[Pulse] Merchant "${group.merchantName}" not found in Pulse — skipping its action items`);
+      //             }
+      //           }
+      //         }
 
-              if (validatedGroups.length > 0) {
-                await this.postPulseTicketsAsMessage(
-                  callMessage.conversationId,
-                  callId,
-                  validatedGroups,
-                );
-              } else {
-                logger.info(`[Pulse] No valid merchant actionables for call ${callId}`);
-              }
-            } else {
-              logger.info(`[Pulse] Channel ${call.channelId} not in allowlist — skipping Pulse for call ${callId}`);
-            }
-          } catch (err) {
-            logger.error(`[Pulse] Failed to post Pulse tickets message for call ${callId}:`, err);
-          }
-        }
+      //         if (validatedGroups.length > 0) {
+      //           await this.postPulseTicketsAsMessage(
+      //             callMessage.conversationId,
+      //             callId,
+      //             validatedGroups,
+      //           );
+      //         } else {
+      //           logger.info(`[Pulse] No valid merchant actionables for call ${callId}`);
+      //         }
+      //       } else {
+      //         logger.info(`[Pulse] Channel ${call.channelId} not in allowlist — skipping Pulse for call ${callId}`);
+      //       }
+      //     } catch (err) {
+      //       logger.error(`[Pulse] Failed to post Pulse tickets message for call ${callId}:`, err);
+      //     }
+      //   }
 
-        if (pendingDetailedSummary) {
-          // Clear the fallback reference before awaiting normally. The finally
-          // block only drains a task when an earlier return/error bypasses here.
-          const detailedSummaryPromise = pendingDetailedSummary;
-          pendingDetailedSummary = null;
-          try {
-            const detailedSummaryResult = await detailedSummaryPromise;
-            if (detailedSummaryResult.success) {
-              logger.info(`Auto-generated detailed summary for call: ${callId}`);
-              // App-scheduled calls get the finished summary pushed to their
-              // app's webhook. No-ops for calls no app owns, and never throws.
-              await emitCallSummaryReadyToApp(callId, detailedSummaryResult.rawSummary);
-            }
-            // A failure here was already logged by whichever exit gave up, so
-            // there is no second line and the alert counts one per recording.
-          } catch (error) {
-            logDetailedSummaryFailed(callId, 'unexpected_error', error);
-          }
-        }
-      } else {
-        // Use error (not warn) so LLM-down conditions generate alertable signal.
-        logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
-      }
+      //   if (pendingDetailedSummary) {
+      //     // Clear the fallback reference before awaiting normally. The finally
+      //     // block only drains a task when an earlier return/error bypasses here.
+      //     const detailedSummaryPromise = pendingDetailedSummary;
+      //     pendingDetailedSummary = null;
+      //     try {
+      //       const detailedSummaryResult = await detailedSummaryPromise;
+      //       if (detailedSummaryResult.success) {
+      //         logger.info(`Auto-generated detailed summary for call: ${callId}`);
+      //         // App-scheduled calls get the finished summary pushed to their
+      //         // app's webhook. No-ops for calls no app owns, and never throws.
+      //         await emitCallSummaryReadyToApp(callId, detailedSummaryResult.rawSummary);
+      //       }
+      //       // A failure here was already logged by whichever exit gave up, so
+      //       // there is no second line and the alert counts one per recording.
+      //     } catch (error) {
+      //       logDetailedSummaryFailed(callId, 'unexpected_error', error);
+      //     }
+      //   }
+      // } else {
+      //   // Use error (not warn) so LLM-down conditions generate alertable signal.
+      //   logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
+      // }
       // Queue Vespa indexing for the transcript (using call.id as the identifier)
       await this.queueTranscriptIndexing(call);
 
@@ -2150,113 +2161,115 @@ export class TranscriptService {
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
     } finally {
-      // Once started, keep the per-call lock until detailed generation settles.
-      // This covers early returns (for example, a concurrently deleted call)
-      // without leaving an unobserved stream racing the next reconciliation.
-      if (pendingDetailedSummary) {
-        try {
-          await pendingDetailedSummary;
-        } catch (error) {
-          logger.error(`[${callId}] detailed_summary_background_drain_failed`, {
-            error,
-            stack: error instanceof Error ? error.stack : undefined,
-          });
-        }
-      }
+      // Disabled (LLM)
+      // // Once started, keep the per-call lock until detailed generation settles.
+      // // This covers early returns (for example, a concurrently deleted call)
+      // // without leaving an unobserved stream racing the next reconciliation.
+      // if (pendingDetailedSummary) {
+      //   try {
+      //     await pendingDetailedSummary;
+      //   } catch (error) {
+      //     logger.error(`[${callId}] detailed_summary_background_drain_failed`, {
+      //       error,
+      //       stack: error instanceof Error ? error.stack : undefined,
+      //     });
+      //   }
+      // }
       await releaseLock(lockHandle);
     }
   }
 
-  /**
-   * Posts a dedicated bot message for Pulse actionables.
-   * Uses the same YAML frontmatter pattern as Xyne ticket suggestions so the
-   * frontend can parse + track which items have been sent to Pulse.
-   *
-   * Frontmatter shape:
-   *   pulseItems:
-   *     - itemId: <uuid>
-   *       content: <action item text>
-   *       assignee: <email>
-   *   pulseSent:    # moved here after user creates the actionable
-   *     - ...
-   */
-  private async postPulseTicketsAsMessage(
-    conversationId: string,
-    callId: string,
-    validatedGroups: Array<{
-      merchantName: string;
-      actionItems: PulseActionItem[];
-      orgContext: import('@/services/pulseService').PulseOrgContext;
-    }>,
-  ): Promise<void> {
-    // Get conversation to retrieve workspaceId
-    const conversation = await repositories.conversations.findById(conversationId);
-    if (!conversation) {
-      logger.error('[Pulse] Conversation not found — cannot post Pulse tickets message');
-      return;
-    }
+  // Disabled (LLM)
+  // /**
+  //  * Posts a dedicated bot message for Pulse actionables.
+  //  * Uses the same YAML frontmatter pattern as Xyne ticket suggestions so the
+  //  * frontend can parse + track which items have been sent to Pulse.
+  //  *
+  //  * Frontmatter shape:
+  //  *   pulseItems:
+  //  *     - itemId: <uuid>
+  //  *       content: <action item text>
+  //  *       assignee: <email>
+  //  *   pulseSent:    # moved here after user creates the actionable
+  //  *     - ...
+  //  */
+  // private async postPulseTicketsAsMessage(
+  //   conversationId: string,
+  //   callId: string,
+  //   validatedGroups: Array<{
+  //     merchantName: string;
+  //     actionItems: PulseActionItem[];
+  //     orgContext: import('@/services/pulseService').PulseOrgContext;
+  //   }>,
+  // ): Promise<void> {
+  //   // Get conversation to retrieve workspaceId
+  //   const conversation = await repositories.conversations.findById(conversationId);
+  //   if (!conversation) {
+  //     logger.error('[Pulse] Conversation not found — cannot post Pulse tickets message');
+  //     return;
+  //   }
 
-    // Get channel to retrieve workspaceId
-    const channel = await db.channel.findUnique({
-      where: { id: conversation.channelId },
-      select: { workspaceId: true }
-    });
-    if (!channel?.workspaceId) {
-      logger.error('[Pulse] Channel workspace not found — cannot post Pulse tickets message');
-      return;
-    }
+  //   // Get channel to retrieve workspaceId
+  //   const channel = await db.channel.findUnique({
+  //     where: { id: conversation.channelId },
+  //     select: { workspaceId: true }
+  //   });
+  //   if (!channel?.workspaceId) {
+  //     logger.error('[Pulse] Channel workspace not found — cannot post Pulse tickets message');
+  //     return;
+  //   }
 
-    const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
-    if (!xyneAutomaticBot) {
-      logger.error('[Pulse] xyne-automatic bot not found — cannot post Pulse tickets message');
-      return;
-    }
+  //   const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
+  //   if (!xyneAutomaticBot) {
+  //     logger.error('[Pulse] xyne-automatic bot not found — cannot post Pulse tickets message');
+  //     return;
+  //   }
 
-    const merchants = validatedGroups.map((g, idx) => ({
-      id: `m${idx + 1}`,
-      name: g.merchantName,
-      orgId: g.orgContext.orgId,
-      merchantId: g.orgContext.merchantId,
-      productId: g.orgContext.productId,
-    }));
+  //   const merchants = validatedGroups.map((g, idx) => ({
+  //     id: `m${idx + 1}`,
+  //     name: g.merchantName,
+  //     orgId: g.orgContext.orgId,
+  //     merchantId: g.orgContext.merchantId,
+  //     productId: g.orgContext.productId,
+  //   }));
 
-    const pulseItems = validatedGroups.flatMap((g, gIdx) =>
-      g.actionItems.map((item) => ({
-        itemId: randomUUID(),
-        merchantId: `m${gIdx + 1}`,
-        content: item.content,
-        assignee: item.assignee,
-      }))
-    );
+  //   const pulseItems = validatedGroups.flatMap((g, gIdx) =>
+  //     g.actionItems.map((item) => ({
+  //       itemId: randomUUID(),
+  //       merchantId: `m${gIdx + 1}`,
+  //       content: item.content,
+  //       assignee: item.assignee,
+  //     }))
+  //   );
 
-    const frontmatterData = {
-      merchants,
-      pulseItems,
-    };
+  //   const frontmatterData = {
+  //     merchants,
+  //     pulseItems,
+  //   };
 
-    const content = '---\n' + yaml.dump(frontmatterData) + '---\n\n## Suggested Pulse Actionables';
+  //   const content = '---\n' + yaml.dump(frontmatterData) + '---\n\n## Suggested Pulse Actionables';
 
-    await repositories.messages.create({
-      conversationId,
-      senderId: xyneAutomaticBot.id,
-      content,
-      msgType: MessageType.BOT,
-      showInChannel: false,
-      metadata: {
-        messageSubtype: 'pulse_actionables',
-        callId,
-        isAiGenerated: true,
-        contentFormat: 'markdown',
-        hasPulseItems: true,
-        pulseItemCount: pulseItems.length,
-      },
-    });
+  //   await repositories.messages.create({
+  //     conversationId,
+  //     senderId: xyneAutomaticBot.id,
+  //     content,
+  //     msgType: MessageType.BOT,
+  //     showInChannel: false,
+  //     metadata: {
+  //       messageSubtype: 'pulse_actionables',
+  //       callId,
+  //       isAiGenerated: true,
+  //       contentFormat: 'markdown',
+  //       hasPulseItems: true,
+  //       pulseItemCount: pulseItems.length,
+  //     },
+  //   });
 
-    await repositories.conversations.incrementReplyCount(conversationId);
-    logger.info(
-      `[Pulse] Posted consolidated Pulse actionables message for call ${callId} (${merchants.length} merchants)`
-    );
-  }
+  //   await repositories.conversations.incrementReplyCount(conversationId);
+  //   logger.info(
+  //     `[Pulse] Posted consolidated Pulse actionables message for call ${callId} (${merchants.length} merchants)`
+  //   );
+  // }
 }
 
 export const transcriptService = new TranscriptService();

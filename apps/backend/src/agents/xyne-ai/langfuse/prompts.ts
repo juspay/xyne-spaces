@@ -8,8 +8,9 @@ import { LangfuseClient } from '@langfuse/client';
 import { logger } from '../../../utils/logger.js';
 import { getLangfuseConfig } from './config.js';
 import { compileFallbackPrompt } from './fallback-prompts.js';
+import { config as appConfig } from '@/config/env';
 
-const DEFAULT_PROMPT_CACHE_TTL = parseInt(process.env.LANGFUSE_PROMPT_CACHE_TTL || '300', 10) * 1000;
+const DEFAULT_PROMPT_CACHE_TTL = appConfig.langfuse.promptCacheTtlSeconds * 1000;
 
 let langfuseClient: LangfuseClient | null = null;
 
@@ -22,7 +23,11 @@ export function getLangfuseClient(): LangfuseClient | null {
   }
   
   if (!langfuseClient) {
-    langfuseClient = new LangfuseClient();
+    langfuseClient = new LangfuseClient({
+      publicKey: config.publicKey,
+      secretKey: config.secretKey,
+      baseUrl: config.baseUrl,
+    });
   }
   
   return langfuseClient;

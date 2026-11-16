@@ -1,3 +1,4 @@
+import { assertGroupInWorkspace } from '../util/author-access';
 import { z } from 'zod';
 import { ActivityType } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
@@ -49,6 +50,7 @@ export class AssignTicketToGroupStep extends BaseActionStep<
       select: { userGroupId: true, assignedTo: true },
     });
     const updatedBy = context.automation.createdById;
+    await assertGroupInWorkspace(config.groupId as string, context.automation.workspaceId, 'ASSIGN_TICKET_TO_GROUP');
     const assignedUserId = await ticketAssignmentService.assignTicketToGroup({
       ticketId,
       groupId,

@@ -5,10 +5,11 @@ import {
   X,
   Sparkles,
   ArrowRight,
-  AlignLeft,
-  CheckCheck,
-  Maximize2,
-  Minimize2,
+  // Disabled (LLM)
+  // AlignLeft,
+  // CheckCheck,
+  // Maximize2,
+  // Minimize2,
   RefreshCw,
   ExternalLink,
 } from 'lucide-react';
@@ -22,12 +23,13 @@ export interface AIQuickRewriteAction {
   icon: React.ReactNode;
 }
 
-const QUICK_REWRITE_ACTIONS: ReadonlyArray<AIQuickRewriteAction> = [
-  { id: 'polish', label: 'Polish', icon: <AlignLeft size={14} /> },
-  { id: 'formalise', label: 'Formalize', icon: <CheckCheck size={14} /> },
-  { id: 'elaborate', label: 'Elaborate', icon: <Maximize2 size={14} /> },
-  { id: 'shorten', label: 'Shorten', icon: <Minimize2 size={14} /> },
-];
+// Disabled (LLM)
+// const QUICK_REWRITE_ACTIONS: ReadonlyArray<AIQuickRewriteAction> = [
+//   { id: 'polish', label: 'Polish', icon: <AlignLeft size={14} /> },
+//   { id: 'formalise', label: 'Formalize', icon: <CheckCheck size={14} /> },
+//   { id: 'elaborate', label: 'Elaborate', icon: <Maximize2 size={14} /> },
+//   { id: 'shorten', label: 'Shorten', icon: <Minimize2 size={14} /> },
+// ];
 
 interface AIComposerPanelProps {
   onAskAISubmit: (instruction: string) => void;
@@ -184,14 +186,16 @@ interface AIRefineDropdownProps {
 }
 
 export const AIRefineDropdown = ({
-  onQuickRewrite,
+  // Disabled (LLM)
+  // onQuickRewrite,
   onAskAI,
   onRerunDraft,
   onSeeSources,
   showSeeSources = false,
   agentName,
   disabled = false,
-  showQuickRewrite = true,
+  // Disabled (LLM)
+  // showQuickRewrite = true,
 }: AIRefineDropdownProps): ReactElement => {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -240,6 +244,8 @@ export const AIRefineDropdown = ({
             exit={{ opacity: 0, scale: 0.96, y: 4 }}
             transition={{ duration: 0.12 }}
           >
+            {/* Disabled (LLM) */}
+            {/*
             {showQuickRewrite && (
               <>
                 <div className='px-3 pt-2.5 pb-1'>
@@ -271,6 +277,7 @@ export const AIRefineDropdown = ({
                 <div className='border-t border-border my-1' />
               </>
             )}
+            */}
 
             <div className='px-3 pt-1 pb-1'>
               <p className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'>

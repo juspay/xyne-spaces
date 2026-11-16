@@ -17,6 +17,7 @@ import {
   userSchema,
   type VespaSchema,
 } from '@/vespa/src/types';
+import { config as appConfig } from '@/config/env';
 
 const router = Router();
 
@@ -24,7 +25,7 @@ const router = Router();
 
 // 8083, not 8080: y-sweet owns 8080 and MESSAGE_CLASSIFIER_URL uses 8082, so docker-compose.dev.yml publishes
 // Vespa's feed port on 8083 (container-internal port is still 8080).
-const FEED_ENDPOINT = process.env.VESPA_FEED_URL || 'http://127.0.0.1:8083';
+const FEED_ENDPOINT = appConfig.vespa.feedUrl;
 const VESPA_NAMESPACE = NAMESPACE;
 const VESPA_CLUSTER = CLUSTER;
 

@@ -5,7 +5,7 @@ const router = Router();
 const organizationController = new OrganizationController();
 
 // Organization Management Routes
-router.post('/', organizationController.createOrganization);
+// router.post('/', organizationController.createOrganization);
 router.get('/', organizationController.getUserOrganizations);
 router.get('/:orgId', organizationController.getOrganizationDetails);
 

@@ -176,6 +176,7 @@ export const CanvasObjectToolbar: FC<{
   const view = editor?._tiptapEditor?.view;
   // Nothing to offer: no commenting, and Ask AI left out by the host screen.
   if (!selected || !view || (props.canComment === false && !askAIAvailable)) return null;
+  if (!selected || !view || props.canComment === false) return null;
 
   const rect = posToDOMRect(view, selected.from, selected.to);
   return createPortal(

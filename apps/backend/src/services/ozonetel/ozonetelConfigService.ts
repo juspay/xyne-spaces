@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { DatabaseClient } from '@/database/client';
 import { encrypt, decrypt } from '@/services/encryptionService';
+import { logger } from '@/utils/logger';
 import { ChannelType } from '@xyne/shared';
 
 export interface OzonetelAgent {
@@ -35,6 +36,15 @@ export interface OzonetelConfig {
 }
 
 const SOURCE_TYPE = 'ozonetel';
+
+export function isAllowedOzonetelBaseUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' && /(^|\.)ozonetel\.com$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 type SaveConfigInput = Omit<OzonetelConfig, 'webhookSecret'> & { webhookSecret?: string };
 
@@ -146,6 +156,13 @@ export const ozonetelConfigService = {
     });
     if (!source || !source.isActive) return null;
     const config = JSON.parse(decrypt(source.credentials)) as OzonetelConfig;
+    if (!isAllowedOzonetelBaseUrl(config.baseUrl)) {
+      logger.error('[Ozonetel] Ignoring config whose baseUrl is not an https ozonetel.com host', {
+        workspaceId,
+        baseUrl: config.baseUrl,
+      });
+      return null;
+    }
     const normalizedTicketRules = normalizeTicketRules(config.ticketRules);
     if (normalizedTicketRules) {
       config.ticketRules = normalizedTicketRules;

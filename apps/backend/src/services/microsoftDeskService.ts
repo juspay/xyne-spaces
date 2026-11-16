@@ -141,9 +141,9 @@ export class MicrosoftDeskService {
   private oauthClient: AuthorizationCode | undefined;
 
   constructor() {
-    const clientId = process.env.MICROSOFT_CLIENT_ID;
-    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+    const clientId = config.microsoft.clientId;
+    const clientSecret = config.microsoft.clientSecret;
+    const tenantId = config.microsoft.tenantId || 'common';
 
     if (clientId && clientSecret) {
       this.oauthClient = new AuthorizationCode({
@@ -465,9 +465,9 @@ export class MicrosoftDeskService {
 
     logger.info('Microsoft access token expired, refreshing...');
 
-    const clientId = process.env.MICROSOFT_CLIENT_ID;
-    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+    const clientId = config.microsoft.clientId;
+    const clientSecret = config.microsoft.clientSecret;
+    const tenantId = config.microsoft.tenantId || 'common';
 
     if (!clientId || !clientSecret) {
       throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET required for token refresh');
@@ -871,7 +871,7 @@ export class MicrosoftDeskService {
 
         // 1. Primary: lookup by internetMessageId.
         const searchResponse = await fetch(
-          `${config.microsoftGraph.baseUrl}/me/messages?$filter=internetMessageId eq '${encodeURIComponent(latestExternalMessageId)}'&$select=id`,
+          `${config.microsoftGraph.baseUrl}/me/messages?$filter=internetMessageId eq '${encodeURIComponent(latestExternalMessageId.replace(/'/g, "''"))}'&$select=id`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         if (searchResponse.ok) {
@@ -882,7 +882,7 @@ export class MicrosoftDeskService {
         // 2. Fallback: look up any message in the conversation.
         if (!graphMessageId && threadId) {
           const conversationResponse = await fetch(
-            `${config.microsoftGraph.baseUrl}/me/messages?$filter=conversationId eq '${encodeURIComponent(threadId)}'&$orderby=receivedDateTime desc&$top=1&$select=id`,
+            `${config.microsoftGraph.baseUrl}/me/messages?$filter=conversationId eq '${encodeURIComponent(threadId.replace(/'/g, "''"))}'&$orderby=receivedDateTime desc&$top=1&$select=id`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           );
           if (conversationResponse.ok) {

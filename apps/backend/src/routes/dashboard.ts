@@ -43,6 +43,7 @@ export const dashboardRouter = Router()
   .use('/datasource',  datasource)
   .use('/query',       query)
   .use('/ai',          ai);
+  ;
 
 // Mounted at /api/dashboards. Specific paths (components/:queryId,
 // with-components) are registered before the '/:id' catch-alls.

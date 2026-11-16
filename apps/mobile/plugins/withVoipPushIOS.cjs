@@ -7,12 +7,10 @@ const {
 const fs = require('fs');
 const { readFileIfExists } = require('./utils/fs.cjs');
 const path = require('path');
-const { resolveIosApsEnvironment } = require('../config/variants.cjs');
+const { getPrebuildVariant, resolveIosApsEnvironment } = require('../config/variants.cjs');
 
 const PLUGIN_NAME = 'with-voip-push-ios';
 const PLUGIN_VERSION = '1.5.0';
-// What src/config.ts falls back to when no API base URL is configured.
-const DEFAULT_API_BASE_URL = 'https://app.spaces.xyne.juspay.net/api';
 
 /**
  * Native owner of every CallKit report. Generated into AppDelegate.swift so an
@@ -1358,12 +1356,21 @@ function withVoipPushIOS(config) {
     }
     // LotusCallApi (native ring-status / decline) needs the API base URL JS gets from
     // extra.lotusApiBaseUrl; same source, so the two can never point at different servers.
-    infoPlist.LotusApiBaseUrl = (
+    const variant = getPrebuildVariant();
+    const apiBaseUrl = (
       config.extra?.lotusApiBaseUrl ||
       process.env.EXPO_PUBLIC_API_BASE_URL ||
       process.env.API_BASE_URL ||
-      DEFAULT_API_BASE_URL
+      variant.defaultApiBaseUrl ||
+      ''
     ).trim();
+    if (!apiBaseUrl) {
+      throw new Error(
+        `[${PLUGIN_NAME}] API_BASE_URL is not set for APP_VARIANT=${variant.key}; ` +
+          'the native call API needs the backend URL (see .env.example).',
+      );
+    }
+    infoPlist.LotusApiBaseUrl = apiBaseUrl;
     // Disable Firebase method swizzling; APNs token is forwarded manually in AppDelegate.
     // Foreground chat UI is handled by Notifee via FCM onMessage (NotificationV3).
     if (!infoPlist.FirebaseAppDelegateProxyEnabled) {

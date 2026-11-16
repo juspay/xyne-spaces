@@ -6,7 +6,8 @@ import UIKit
 final class AirborneManager: NSObject {
   static let shared = AirborneManager()
 
-  private static let airborneReleaseURL = "https://airborne.juspay.in/release/xyne/xyne-mobile-ios"
+  // Placeholder replaced at prebuild from LOTUS_AIRBORNE_RELEASE_URL_IOS (plugins/withAirborneOTAIOS.cjs).
+  private static let airborneReleaseURL = "__LOTUS_AIRBORNE_RELEASE_URL__"
   private static let airborneNamespace = "xyne-mobile-ios"
   private static let importantPackageDownloadResultKey = "important_package_download_result"
   private static let backgroundTaskIdentifier = "net.juspay.xynespaces.airborne-ota"

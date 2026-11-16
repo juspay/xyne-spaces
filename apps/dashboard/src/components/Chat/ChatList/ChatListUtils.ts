@@ -1,7 +1,6 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { MessageType, parseAppliedTags, visibleTags } from '@xyne/shared';
-import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 // Type definitions for utility functions
@@ -83,24 +82,15 @@ export const shouldShowAvatar = (
     return metadata?.['isCallMessage'] === true;
   };
 
-  const isPreviousItemAWorkflowOrActivity = (): boolean => {
+  const isPreviousItemAnActivity = (): boolean => {
     if (prevItem.type !== 'conversation') return false;
 
     const previousMessage = getInitialMessageFromConversation(prevItem.data);
-    const previousMessageMetadata = previousMessage?.metadata as MessageMetadata | null;
-    const isPreviousMessageAWorkflowMessage =
-      (previousMessage?.msgType === MessageType.SYSTEM &&
-        previousMessageMetadata?.workflowId &&
-        previousMessageMetadata?.ticketId) ||
-      (previousMessage?.msgType === MessageType.BOT &&
-        previousMessageMetadata?.xyneId &&
-        previousMessageMetadata?.ticketId);
     const prevMsgMetadataasRecord = previousMessage?.metadata as Record<string, unknown> | null;
-    const isPreviousMessageAnActivity =
+    return (
       previousMessage?.msgType === MessageType.SYSTEM &&
-      prevMsgMetadataasRecord?.['isTicketActivity'] === true;
-
-    return !!isPreviousMessageAWorkflowMessage || isPreviousMessageAnActivity;
+      prevMsgMetadataasRecord?.['isTicketActivity'] === true
+    );
   };
 
   // A tagged thread shows its chip beside the name and timestamp, so it needs its own
@@ -118,7 +108,7 @@ export const shouldShowAvatar = (
   if (isCurrentItemCallMessage()) return true;
   if (!isSameDayMessege()) return true;
 
-  if (isPreviousItemAWorkflowOrActivity()) return true;
+  if (isPreviousItemAnActivity()) return true;
 
   const getCurrentSenderId = (item: CombinedMessageItem): string => {
     if (item.type === 'conversation') {

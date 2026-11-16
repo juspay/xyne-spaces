@@ -390,7 +390,6 @@ const ActivityListView = (): ReactElement => {
           'ticket_reference_added',
           'ticket_reference_removed',
           'ticket_multi_updated',
-          'workflow_question',
           'stage_approval_requested',
           'stage_approval_approved',
           'stage_approval_rejected',

@@ -135,6 +135,18 @@ export class DelayStep extends BaseActionStep<typeof DelayConfigSchema, DelayOut
     if (!output?.delayedUntil) {
       throw new Error('[DELAY] onResume called with no delayedUntil on the step row');
     }
+    const remainingMs = Date.parse(output.delayedUntil) - Date.now();
+    if (remainingMs > 5_000) {
+      const runId = automationContextStorage.getStore()?.runId;
+      if (runId) {
+        await automationScheduleQueue
+          .getQueue()
+          .add({ executionId: runId }, { delay: remainingMs, jobId: `${runId}:delay-recheck:${output.delayedUntil}` });
+      }
+      throw new PauseStep('delay not yet elapsed', {
+        statePatch: { output: { delayedUntil: output.delayedUntil } },
+      });
+    }
 
     const triggerType = context.trigger.type;
     if (triggerRegistry.has(triggerType)) {

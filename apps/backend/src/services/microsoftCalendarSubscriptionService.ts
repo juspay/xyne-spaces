@@ -27,7 +27,7 @@ function getNotificationUrl(): string {
 }
 
 function getSubscriptionTtlMs(): number {
-  const raw = process.env.MICROSOFT_CALENDAR_SUBSCRIPTION_TTL_MINUTES;
+  const raw = config.microsoft.calendarSubscriptionTtlMinutes;
   const minutes = raw ? Number(raw) : DEFAULT_SUBSCRIPTION_TTL_MINUTES;
 
   if (!Number.isFinite(minutes) || minutes <= 0) {

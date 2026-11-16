@@ -8,7 +8,11 @@ const {
 const fs = require('fs');
 const path = require('path');
 
-const { getDefaultAndroidApplicationId, getPrebuildVariant } = require('../../config/variants.cjs');
+const {
+  getDefaultAndroidApplicationId,
+  getPrebuildVariant,
+  getVariant,
+} = require('../../config/variants.cjs');
 
 /** @param {import('@expo/config-plugins').ExportedConfig} config */
 function getAndroidApplicationPackage(config) {
@@ -250,22 +254,19 @@ const withCertificatePackageRegistration = config => {
 const withMtlsBuildConfig = config => {
   const mtlsEnabled = isMtlsEnabled(config);
   const variantKey = config.extra?.appVariant || getPrebuildVariant().key;
-  const fallbackApiBaseUrls = {
-    dev: 'http://localhost:3001/api',
-    sandbox: 'https://app.spaces.sandbox.xyne.juspay.net/api',
-    prod: 'https://app.spaces.xyne.juspay.net/api',
-  };
-  const fallbackDashboardOrigins = {
-    dev: 'http://localhost:5173',
-    sandbox: 'https://app.spaces.sandbox.xyne.juspay.net',
-    prod: 'https://app.spaces.xyne.juspay.net',
-  };
+  // Only `dev` has a built-in (local) fallback; every other variant must set API_BASE_URL in
+  // .env.<variant> (see .env.example) because the native mTLS allowlist pins this origin.
   const rawApiBaseUrl = String(
-    config.extra?.lotusApiBaseUrl || fallbackApiBaseUrls[variantKey] || '',
+    config.extra?.lotusApiBaseUrl ||
+      getVariant(variantKey)?.defaultApiBaseUrl ||
+      (variantKey === 'dev' ? 'http://localhost:3001/api' : ''),
   ).trim();
-  const rawDashboardOrigin = String(
-    config.extra?.lotusDashboardOrigin || fallbackDashboardOrigins[variantKey] || '',
-  ).trim();
+  if (!rawApiBaseUrl) {
+    throw new Error(
+      `[with-certificate-module-android] API_BASE_URL is not set for APP_VARIANT=${variantKey}; ` +
+        'the native mTLS transport allowlist needs the backend origin (see .env.example).',
+    );
+  }
   let apiOrigin = '';
   let dashboardOrigin = '';
   try {
@@ -276,6 +277,11 @@ const withMtlsBuildConfig = config => {
   } catch {
     // Native transport will fail closed when no valid configured origin exists.
   }
+  // The dashboard is served from the API origin unless DASHBOARD_URL says otherwise.
+  const rawDashboardOrigin = String(
+    config.extra?.lotusDashboardOrigin ||
+      (variantKey === 'dev' ? 'http://localhost:5173' : apiOrigin),
+  ).trim();
   try {
     const parsed = new URL(rawDashboardOrigin);
     if (!parsed.username && !parsed.password && !parsed.search && !parsed.hash) {

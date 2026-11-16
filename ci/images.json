@@ -82,5 +82,19 @@
     "dockerfile": "claw-deployments/kata-infra/agent-workspace/Dockerfile",
     "context": "claw-deployments/kata-infra/agent-workspace",
     "charts": []
+  },
+  {
+    "name": "livekit-server",
+    "image": "xyne-spaces-livekit-server",
+    "dockerfile": "livekit-server/Dockerfile",
+    "context": "livekit-server",
+    "charts": []
+  },
+  {
+    "name": "livekit-egress",
+    "image": "xyne-spaces-livekit-egress",
+    "dockerfile": "livekit-egress/Dockerfile",
+    "context": "livekit-egress",
+    "charts": []
   }
 ]

@@ -137,22 +137,20 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
                 <XyneAIStar size={15} />
                 Ask AI
               </Button>
-              {isScribeAdmin && (
-                <Button
-                  type='button'
-                  variant='outline'
-                  onClick={() => void navigate('/calls/admin')}
-                  className={cn(
-                    'h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold',
-                    !isMobile && 'hover:bg-muted/70',
-                  )}
-                  data-track-category='CALLS'
-                  data-track-name='open-calls-admin'
-                >
-                  <Settings2 size={15} />
-                  Manage calls
-                </Button>
-              )}
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => void navigate('/calls/admin')}
+                className={cn(
+                  'h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold',
+                  !isMobile && 'hover:bg-muted/70',
+                )}
+                data-track-category='CALLS'
+                data-track-name='open-calls-admin'
+              >
+                <Settings2 size={15} />
+                Manage calls
+              </Button>
               <Button
                 type='button'
                 variant='outline'

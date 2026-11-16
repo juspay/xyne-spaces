@@ -219,7 +219,7 @@ export class CommandController {
   getCommands = async (req: Request, res: Response): Promise<void> => {
     const params = AppIdParamsSchema.safeParse(req.params);
     if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.errors });
+      res.status(400).json({ error: 'Validation error', details: params.error.issues });
       return;
     }
 
@@ -366,12 +366,12 @@ export class CommandController {
   ): { appId: string; body: z.infer<typeof UpsertCommandBodySchema> } | null {
     const params = AppIdParamsSchema.safeParse(req.params);
     if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.errors });
+      res.status(400).json({ error: 'Validation error', details: params.error.issues });
       return null;
     }
     const body = UpsertCommandBodySchema.safeParse(req.body);
     if (!body.success) {
-      res.status(400).json({ error: 'Validation error', details: body.error.errors });
+      res.status(400).json({ error: 'Validation error', details: body.error.issues });
       return null;
     }
     return { appId: params.data.appId, body: body.data };
@@ -385,7 +385,7 @@ export class CommandController {
   deleteCommand = async (req: Request, res: Response): Promise<void> => {
     const params = CommandNameParamsSchema.safeParse(req.params);
     if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.errors });
+      res.status(400).json({ error: 'Validation error', details: params.error.issues });
       return;
     }
 
@@ -432,7 +432,7 @@ export class CommandController {
   getChannelCommands = async (req: Request, res: Response): Promise<void> => {
     const params = ChannelIdParamsSchema.safeParse(req.params);
     if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.errors });
+      res.status(400).json({ error: 'Validation error', details: params.error.issues });
       return;
     }
 
@@ -492,12 +492,12 @@ export class CommandController {
   dispatchCommand = async (req: Request, res: Response): Promise<void> => {
     const params = ChannelIdParamsSchema.safeParse(req.params);
     if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.errors });
+      res.status(400).json({ error: 'Validation error', details: params.error.issues });
       return;
     }
     const body = DispatchCommandBodySchema.safeParse(req.body);
     if (!body.success) {
-      res.status(400).json({ error: 'Validation error', details: body.error.errors });
+      res.status(400).json({ error: 'Validation error', details: body.error.issues });
       return;
     }
 

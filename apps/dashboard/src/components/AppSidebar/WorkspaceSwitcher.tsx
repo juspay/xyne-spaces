@@ -288,10 +288,10 @@ export const WorkspaceSwitcher: React.FC = () => {
   const totalUnread = workspaceId ? currentWorkspaceUnread : 0;
   const getWorkspaceCount = (id: string): number =>
     id === workspaceId ? currentWorkspaceUnread : (activityCounts.get(id) ?? 0);
-  const createLabel = 'Create enterprise workspace';
+  const createLabel = 'Create workspace';
 
-  // Always rendered so community members in community workspaces see the action
-  // exists; they just can't use it — the disabled state carries an upsell tooltip.
+  // Always rendered so members without create permission see the action exists;
+  // the disabled state carries an explanatory tooltip.
   // disabled:pointer-events-none lifts hit-testing to the wrapper span below, so
   // Radix's pointermove-based tooltip trigger actually fires over a disabled button.
   const createWorkspaceButton = (
@@ -541,7 +541,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                   /* A disabled <button> emits no pointer events, so the tooltip
                      trigger is a wrapping <span>. */
                   <Tooltip
-                    content='Create Enterprise workspace to enable this option'
+                    content='Only workspace admins can create workspaces'
                     side='bottom'
                     delayDuration={0}
                   >

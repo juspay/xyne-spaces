@@ -7,7 +7,8 @@ import {
   Download,
   Plus,
   RefreshCw,
-  Sparkles,
+  // Disabled (LLM)
+  // Sparkles,
   SquareArrowOutUpRight,
   Ticket as TicketIcon,
 } from 'lucide-react';
@@ -58,7 +59,8 @@ type TabValue = 'testing' | 'envs' | 'migrations' | 'timeline' | 'releasenotes';
 import {
   ReleaseInsightsPanel,
   readReleaseInsights,
-  readIsGeneratingInsights,
+  // Disabled (LLM)
+  // readIsGeneratingInsights,
 } from '../../components/Release/ReleaseInsightsPanel';
 
 // Shape returned by GET /commits/analyze/repos/:releaseId. Mirrors the
@@ -394,34 +396,36 @@ const ReleaseDetailScreen = (): ReactElement => {
     () => readReleaseInsights(releaseTicket?.metadata),
     [releaseTicket?.metadata],
   );
-  const isGeneratingInsights = useMemo(
-    () => readIsGeneratingInsights(releaseTicket?.metadata),
-    [releaseTicket?.metadata],
-  );
+  // Disabled (LLM)
+  // const isGeneratingInsights = useMemo(
+  //   () => readIsGeneratingInsights(releaseTicket?.metadata),
+  //   [releaseTicket?.metadata],
+  // );
 
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  // Re-analyzing overwrites existing insights, so gate it behind a confirm.
-  // First-time analysis (no insights yet) runs straight away — nothing to lose.
-  const [confirmReanalyze, setConfirmReanalyze] = useState(false);
-  const handleAnalyzeRelease = async (): Promise<void> => {
-    if (!releaseTicket?.id) return;
-    setIsAnalyzing(true);
-    try {
-      const response = await apiInstance.post<{ success: boolean; error?: string }>(
-        `/tickets/${releaseTicket.id}/release-insights`,
-        {},
-      );
-      if (response.data?.success) {
-        toast.success('Release insights generated.');
-      } else {
-        toast.error(response.data?.error ?? 'Analysis failed');
-      }
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Analysis failed'));
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
+  // Disabled (LLM)
+  // const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // // Re-analyzing overwrites existing insights, so gate it behind a confirm.
+  // // First-time analysis (no insights yet) runs straight away — nothing to lose.
+  // const [confirmReanalyze, setConfirmReanalyze] = useState(false);
+  // const handleAnalyzeRelease = async (): Promise<void> => {
+  //   if (!releaseTicket?.id) return;
+  //   setIsAnalyzing(true);
+  //   try {
+  //     const response = await apiInstance.post<{ success: boolean; error?: string }>(
+  //       `/tickets/${releaseTicket.id}/release-insights`,
+  //       {},
+  //     );
+  //     if (response.data?.success) {
+  //       toast.success('Release insights generated.');
+  //     } else {
+  //       toast.error(response.data?.error ?? 'Analysis failed');
+  //     }
+  //   } catch (err) {
+  //     toast.error(getApiErrorMessage(err, 'Analysis failed'));
+  //   } finally {
+  //     setIsAnalyzing(false);
+  //   }
+  // };
 
   // ─── Add-column picker: dev tickets' board fields (core + custom) ────────────
   // Custom columns are sourced from the boards the dev tickets live on (not the
@@ -891,7 +895,8 @@ const ReleaseDetailScreen = (): ReactElement => {
                         ` Updated ${new Date(releaseInsights.generatedAt).toLocaleString()}.`}
                     </p>
                   </div>
-                  <button
+                  {/* Disabled (LLM) */}
+                  {/* <button
                     type='button'
                     onClick={() => {
                       if (releaseInsights) setConfirmReanalyze(true);
@@ -911,7 +916,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                       : releaseInsights
                         ? 'Re-analyze'
                         : 'Analyze release'}
-                  </button>
+                  </button> */}
                 </div>
 
                 {releaseInsights && <ReleaseInsightsPanel insights={releaseInsights} />}
@@ -933,7 +938,8 @@ const ReleaseDetailScreen = (): ReactElement => {
       </div>
 
       {/* Re-analyze confirmation — guards overwriting existing insights */}
-      <Dialog
+      {/* Disabled (LLM) */}
+      {/* <Dialog
         open={confirmReanalyze}
         onOpenChange={setConfirmReanalyze}
         title='Re-analyze this release?'
@@ -962,7 +968,7 @@ const ReleaseDetailScreen = (): ReactElement => {
             Re-analyze
           </button>
         </div>
-      </Dialog>
+      </Dialog> */}
 
       {/* Failure Reason Dialog */}
       <Dialog

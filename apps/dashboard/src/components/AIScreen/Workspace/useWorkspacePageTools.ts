@@ -26,7 +26,7 @@ export function useWorkspacePageTools(): void {
   useEffect(() => startPagePanelCalls(), []);
 
   useEffect(() => {
-    if (!isElectronApp() || window.parent !== window) return undefined;
+    if (!isElectronApp()) return undefined;
     const harness = window.electronAPI?.localHarness;
     if (!harness?.onPageToolRequest || !harness.sendPageToolResult) return undefined;
 

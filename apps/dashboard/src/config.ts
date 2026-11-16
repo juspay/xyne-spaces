@@ -20,48 +20,43 @@ export const isLocalHarnessAvailable = (): boolean =>
 
 const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
-const ELECTRON_BACKEND_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
-  : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:3001';
-const ELECTRON_BACKEND_ZERO_URL = isProd
-  ? 'https://app.spaces.xyne.juspay.net'
-  : isSandBox
-    ? 'https://app.spaces.sandbox.xyne.juspay.net'
-    : 'http://localhost:4848';
+// The bundled Electron UI has no serving host to derive its backend from, so the
+// hosted origins are deployment config: set VITE_ELECTRON_BACKEND_URL and
+// VITE_ELECTRON_ZERO_BACKEND_URL in each flavour's build. Unset, the bundle talks
+// to the local dev stack.
+const ELECTRON_BACKEND_URL =
+  import.meta.env['VITE_ELECTRON_BACKEND_URL'] || 'http://localhost:3001';
+const ELECTRON_BACKEND_ZERO_URL =
+  import.meta.env['VITE_ELECTRON_ZERO_BACKEND_URL'] || 'http://localhost:4848';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 
-// Replaces API_BASE_URL wholesale; the SDLC lane builds with '/sdlc-api'.
-// NOT named VITE_API_BASE_URL — that already means the backend origin with no
-// '/api' suffix, used as a vite proxy target.
-const apiBaseOverride = (import.meta.env['VITE_API_BASE_OVERRIDE'] as string | undefined) || '';
 const useDevProxy = import.meta.env.DEV && import.meta.env['VITE_DEV_PROXY'] === 'true';
 
-export const API_BASE_URL =
-  apiBaseOverride ||
-  (useDevProxy
-    ? '/api'
-    : isElectronBundled
-      ? `${ELECTRON_BACKEND_URL}/api`
-      : `${protocol}://${hostname}${backendPort}/api`);
+export const API_BASE_URL = useDevProxy
+  ? '/api'
+  : isElectronBundled
+    ? `${ELECTRON_BACKEND_URL}/api`
+    : `${protocol}://${hostname}${backendPort}/api`;
 
 const zeroServerPort = isLocalhost ? ':4848' : isTestEnv ? ':4848' : '';
-export const APPS_PUBLIC_BASE_URL = isLocalhost
-  ? 'http://localhost:3001/api/apps'
-  : isSandBox
-    ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
-    : 'https://spaces.xyne.juspay.net/api/apps';
+// Public base of app links. The public host is not always the serving host, so it is
+// deployment config: set VITE_APPS_PUBLIC_BASE_URL. Unset, links use the serving host.
+export const APPS_PUBLIC_BASE_URL =
+  import.meta.env['VITE_APPS_PUBLIC_BASE_URL'] ||
+  (isLocalhost
+    ? 'http://localhost:3001/api/apps'
+    : `${protocol}://${hostname}${backendPort}/api/apps`);
 
-// SDLC lane: same-origin path to its own zero-cache. Everything else derives from
-// the serving host. VITE_ZERO_SERVER is deliberately not read here — it is used
-// server-side (vite preview's /zero proxy, sandbox's traefik rule), and reading it
-// client-side let a baked absolute URL pin every host to one origin.
-const laneZeroPath = (import.meta.env['VITE_ZERO_PATH'] as string | undefined) || '';
+// A same-origin path to the zero-cache, for a host that proxies it (the test stack's
+// /zero). Everything else derives from the serving host. VITE_ZERO_SERVER is
+// deliberately not read here — it is used server-side (vite preview's /zero proxy,
+// sandbox's traefik rule), and reading it client-side let a baked absolute URL pin
+// every host to one origin.
+const zeroPath = (import.meta.env['VITE_ZERO_PATH'] as string | undefined) || '';
 
-export const VITE_ZERO_SERVER = laneZeroPath
-  ? `${window.location.origin}${laneZeroPath}`
+export const VITE_ZERO_SERVER = zeroPath
+  ? `${window.location.origin}${zeroPath}`
   : useDevProxy
     ? `${window.location.origin}/zero`
     : isElectronBundled
@@ -120,27 +115,10 @@ export const DEFAULT_WORKSPACE_ID: string =
 // set VITE_SLACK_APP_INSTALL_URL in .env.local — the UI hides the link when unset.
 export const SLACK_APP_INSTALL_URL: string =
   (import.meta.env['VITE_SLACK_APP_INSTALL_URL'] as string) || '';
-// Deployment lane. The same source builds a second 'sdlc' bundle served at
-// '/sdlc-app/' with its own backend and zero-cache. Inert when VITE_XYNE_SURFACE
-// is unset. See docs/sdlc-fast-lane.md.
 
-export type XyneSurface = 'main' | 'sdlc';
-
-export const XYNE_SURFACE: XyneSurface =
-  (import.meta.env['VITE_XYNE_SURFACE'] as string) === 'sdlc' ? 'sdlc' : 'main';
-
-export const isSdlcSurface = XYNE_SURFACE === 'sdlc';
-
-// Router basename; vite.config.ts reads the same var for `base`. No trailing
-// slash, which is what react-router expects.
-export const APP_BASE_PATH: string = (
-  (import.meta.env['VITE_APP_BASE_PATH'] as string) || '/'
-).replace(/\/+$/, '');
-
-// Where the main bundle points its iframe.
-export const SDLC_APP_BASE_PATH: string =
-  (import.meta.env['VITE_SDLC_APP_BASE_PATH'] as string) || '/sdlc-app';
-
-// Gives this bundle its own Zero IndexedDB so two clients on one origin do not
-// share a store. Empty = single lane, unchanged behaviour.
-export const ZERO_STORAGE_KEY: string = (import.meta.env['VITE_ZERO_STORAGE_KEY'] as string) || '';
+// Contact addresses shown on the legal pages (Privacy Policy, Terms of Service).
+// Deployment-specific, so env-only; the pages leave the contact line out when unset.
+export const LEGAL_CONTACT_EMAIL: string =
+  (import.meta.env['VITE_LEGAL_CONTACT_EMAIL'] as string) || '';
+export const PRIVACY_CONTACT_EMAIL: string =
+  (import.meta.env['VITE_PRIVACY_CONTACT_EMAIL'] as string) || '';

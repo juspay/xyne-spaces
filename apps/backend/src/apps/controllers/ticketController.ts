@@ -8,7 +8,9 @@ import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+// Disabled (LLM)
+// import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+import { type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import {
@@ -87,7 +89,7 @@ const CreateTicketBodySchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
   ticketType: z.string().trim().optional(),
-  dynamicFields: z.record(z.unknown()).optional(),
+  dynamicFields: z.record(z.string(), z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName,
   { message: 'Either channelId or channelName is required', path: ['channelId'] }
@@ -115,7 +117,7 @@ const UpdateTicketBodySchema = z.object({
   boardId: z.string().min(1, 'Board ID cannot be empty').trim().optional(),
   isArchived: z.boolean().optional(),
   tags: z.array(z.string().trim().min(1, 'Tags cannot be empty')).optional(),
-  dynamicFields: z.record(z.unknown()).optional(),
+  dynamicFields: z.record(z.string(), z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
@@ -159,7 +161,7 @@ const AppDeskInboundBodySchema = z.object({
   body: z.string().trim().optional(),
   senderName: z.string().trim().optional(),
   senderEmail: z.string().email('senderEmail must be a valid email when provided').trim().optional(),
-  additionalFormFields: z.record(z.unknown()).optional(),
+  additionalFormFields: z.record(z.string(), z.unknown()).optional(),
   timestamp: z.string().datetime({ offset: true, message: 'timestamp must be an ISO 8601 timestamp' }).optional(),
 });
 
@@ -216,7 +218,7 @@ const SearchTicketsBodySchema = z.object({
   senderEmail: z.string().email('senderEmail must be a valid email').trim().optional(),
   senderName: z.string().trim().min(1, 'senderName must not be empty').optional(),
   filters: TicketFiltersSchema.optional(),
-  customFields: z.record(z.unknown()).optional(),
+  customFields: z.record(z.string(), z.unknown()).optional(),
   includeCustomFields: z.boolean().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
@@ -559,7 +561,7 @@ export class TicketController {
         res.status(400).json({ 
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }
@@ -634,10 +636,11 @@ export class TicketController {
         return;
       }
 
-      const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
-        customFieldValues && customFieldValues.fieldValues.length > 0
-          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
-          : undefined;
+      // Disabled (LLM)
+      // const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
+      //   customFieldValues && customFieldValues.fieldValues.length > 0
+      //     ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+      //     : undefined;
 
       // Resolve channelId from channelName if not provided
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
@@ -719,24 +722,25 @@ export class TicketController {
         customFieldValues,
       });
 
-      // Check for duplicate tickets and persist references
-      if (result.ticketId) {
-        ticketDuplicateService.persistDuplicateReferences({
-          ticketId: result.ticketId,
-          ticketCreatedBy: userId,
-          title,
-          description,
-          projectId,
-          userId,
-          channelId: resolvedChannelId,
-          scopeFieldValues: duplicateScopeValues,
-        }).catch(error => {
-          logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
-            ticketId: result.ticketId,
-            error,
-          });
-        });
-      }
+      // Disabled (LLM)
+      // // Check for duplicate tickets and persist references
+      // if (result.ticketId) {
+      //   ticketDuplicateService.persistDuplicateReferences({
+      //     ticketId: result.ticketId,
+      //     ticketCreatedBy: userId,
+      //     title,
+      //     description,
+      //     projectId,
+      //     userId,
+      //     channelId: resolvedChannelId,
+      //     scopeFieldValues: duplicateScopeValues,
+      //   }).catch(error => {
+      //     logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
+      //       ticketId: result.ticketId,
+      //       error,
+      //     });
+      //   });
+      // }
 
       if (pendingFullRoleAssignment && userGroupId && result.ticketId) {
         try {
@@ -804,14 +808,14 @@ export class TicketController {
       logger.info(`[TicketController] Received update ticket request`, {
         body: req.body,
         validationSuccess: bodyResult.success,
-        validationErrors: bodyResult.success ? null : bodyResult.error.errors,
+        validationErrors: bodyResult.success ? null : bodyResult.error.issues,
       });
       
       if (!bodyResult.success) {
         res.status(400).json({ 
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }
@@ -1125,7 +1129,7 @@ export class TicketController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: queryResult.error.errors,
+          details: queryResult.error.issues,
         });
         return;
       }
@@ -1208,7 +1212,7 @@ export class TicketController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors,
+          details: bodyResult.error.issues,
         });
         return;
       }
@@ -1486,7 +1490,7 @@ export class TicketController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: queryResult.error.errors,
+          details: queryResult.error.issues,
         });
         return;
       }
@@ -1540,7 +1544,7 @@ export class TicketController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors,
+          details: paramsResult.error.issues,
         });
         return;
       }
@@ -1704,7 +1708,7 @@ export class TicketController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: queryResult.error.errors,
+          details: queryResult.error.issues,
         });
         return;
       }
@@ -2206,7 +2210,7 @@ export class TicketController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors,
+          details: bodyResult.error.issues,
         });
         return;
       }
@@ -2612,9 +2616,9 @@ export class TicketController {
       if (!bodyResult.success) {
         logger.warn('[AppDeskInbound] returning 400: payload validation failed', {
           ...receivedPayload,
-          schemaIssues: bodyResult.error.errors,
+          schemaIssues: bodyResult.error.issues,
         });
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
         return;
       }
       logger.info('[AppDeskInbound] payload received', receivedPayload);

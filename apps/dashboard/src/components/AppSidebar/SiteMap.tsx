@@ -110,6 +110,9 @@ export const SiteMap = (): ReactElement => {
             <PageLinks key={item.path} pages={[item, ...childrenOf(item)]} />
           ),
         )}
+        {items.map(item => (
+          <PageLinks key={item.path} pages={[item, ...childrenOf(item)]} />
+        ))}
       </ul>
     </nav>
   );

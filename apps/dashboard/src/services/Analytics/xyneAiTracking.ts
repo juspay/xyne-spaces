@@ -67,7 +67,6 @@ export interface AiRunTrackingArgs {
   callCount?: number | undefined;
   hasSelectionContext?: boolean | undefined;
   hasResearchContext?: boolean | undefined;
-  hasWorkflowContext?: boolean | undefined;
   queryLength?: number | undefined;
   isRegenerate?: boolean | undefined;
   isEdit?: boolean | undefined;
@@ -105,7 +104,6 @@ export function aiRunTrackingMetadata(args: AiRunTrackingArgs): Record<string, u
     callCount: args.callCount ?? 0,
     hasSelectionContext: !!args.hasSelectionContext,
     hasResearchContext: !!args.hasResearchContext,
-    hasWorkflowContext: !!args.hasWorkflowContext,
     ...(typeof args.queryLength === 'number' && {
       queryLengthBucket: lengthBucket(args.queryLength),
     }),

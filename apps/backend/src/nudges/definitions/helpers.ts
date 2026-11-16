@@ -7,7 +7,7 @@ import {
   type Agent,
   type RunConfig,
   type RunState,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { OrgLLMServiceAccountPurpose, MessageType, SurfaceAreaType, ChannelScopeType } from '@xyne/shared';
@@ -257,9 +257,9 @@ export async function runNudgeAgent<T>(opts: RunNudgeAgentOptions): Promise<T> {
         try {
           const output = result.outcome.output;
           if (typeof output === 'string') {
-            return parseAgentOutput(output, schema);
+            return parseAgentOutput(output, schema) as T;
           }
-          return schema.parse(output);
+          return schema.parse(output) as T;
         } catch (parseError) {
           lastError = parseError instanceof Error ? parseError : new Error(String(parseError));
 

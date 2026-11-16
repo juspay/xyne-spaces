@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { queryClient } from '../../services/clients/queryClient';
 import { websocketService } from '../../services/clients/socketClient';
-import { postToSdlcFrame } from '../../components/AIScreen/Workspace/sdlcBrowserTarget';
-import {
-  SDLC_FRAME_MESSAGE,
-  SDLC_RESOURCE_KINDS,
-  type SdlcResourceKind,
-} from './sdlcFrameMessages';
+
+export const SDLC_RESOURCE_KINDS = ['agents', 'knowledge', 'environments'] as const;
+export type SdlcResourceKind = (typeof SDLC_RESOURCE_KINDS)[number];
+
+export function isSdlcResourceKind(kind: unknown): kind is SdlcResourceKind {
+  return SDLC_RESOURCE_KINDS.includes(kind as SdlcResourceKind);
+}
 
 // Query key prefixes each kind's views read; only mounted queries refetch.
 const QUERY_KEYS: Record<SdlcResourceKind, string[]> = {
@@ -20,15 +21,13 @@ export function invalidateSdlcResource(kind: SdlcResourceKind): void {
   for (const key of QUERY_KEYS[kind]) void queryClient.invalidateQueries({ queryKey: [key] });
 }
 
-/** Refetches here and in the SDLC frame, which only the parent can tell. */
 export function refreshSdlcResource(kind: SdlcResourceKind): void {
   invalidateSdlcResource(kind);
-  postToSdlcFrame({ type: SDLC_FRAME_MESSAGE.resourceChanged, kind });
 }
 
 /**
  * Joins the workspace's SDLC resource room while `onPage`, so only open pages get the push.
- * Each join refetches too: the SDLC frame stays mounted off-page and missed pushes meanwhile.
+ * Each join refetches too, since pushes sent while off the page were missed.
  */
 export function useSdlcResourceRoom(onPage: boolean): void {
   useEffect(() => {

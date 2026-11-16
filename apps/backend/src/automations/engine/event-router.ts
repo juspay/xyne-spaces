@@ -2,6 +2,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { createAutomationExecutionForEvent, ticketScopeForAutomationEvent } from '@/bypassAcl/automationServices';
 import { currentUpstreamChain } from './automation-context-storage';
+import { MAX_AUTOMATION_CHAIN } from '../util/automation-chain';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   DESK_AUTOMATION_WORKFLOW_TYPE,
@@ -92,6 +93,12 @@ class EventRouter {
   async emitToAutomations(event: AutomationEvent, workspaceId: string): Promise<void> {
     const { type: eventType, payload } = event;
     const chain = currentUpstreamChain();
+    if (chain.length >= MAX_AUTOMATION_CHAIN) {
+      logger.warn(
+        `[EVENT-ROUTER] event=${eventType} workspaceId=${workspaceId} dropped: automation chain length ${chain.length} reached the cap`,
+      );
+      return;
+    }
 
     const candidates = await this.findCandidates(event, workspaceId);
 

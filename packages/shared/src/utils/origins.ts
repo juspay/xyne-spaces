@@ -3,15 +3,20 @@
  *
  * Used by:
  *  - Frontend (dashboard/src/App.tsx) – anchor click origin checks
- *  - Backend  (backend/src/utils/urlUtils.ts) – internal link detection
  *
- * Keep this as the single source of truth; do not copy-paste into other files.
+ * Deployment hosts come from the build-time env (`VITE_TRUSTED_ORIGINS`, a
+ * comma-separated list of origins such as "https://example.org"); no
+ * deployment hostname is hardcoded here. Keep this as the single source of
+ * truth; do not copy-paste into other files.
  */
-export const TRUSTED_ORIGINS: string[] = [
-  'https://spaces.xyne.juspay.net',
-  'https://app.spaces.xyne.juspay.net',
-  'https://app.spaces.sandbox.xyne.juspay.net',
-  'https://xyne-spaces.web.app',
-  'https://xyne-spaces.web',
-  'https://spaces.sandbox.xyne.juspay.net',
-];
+// This package also runs in Node, where import.meta.env is absent.
+const env = (import.meta as ImportMeta & {
+  env?: { VITE_TRUSTED_ORIGINS?: string };
+}).env;
+
+const configuredOrigins = (env?.VITE_TRUSTED_ORIGINS ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+export const TRUSTED_ORIGINS: string[] = [...configuredOrigins];

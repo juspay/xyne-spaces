@@ -1,8 +1,8 @@
 import { db } from '@/database/client';
 import { invitationService } from '@/services/invitationService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { WorkspaceJoinPolicy, WorkspaceType, OrgRole, ProjectType, WorkspaceRole, Status } from '@xyne/shared';
-import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
+import { WorkspaceType, OrgRole, ProjectType, WorkspaceRole, Status } from '@xyne/shared';
+import { createWorkspaceDefaults } from '@/utils/workspaceDefaults';
 import { getEncryptionProvider } from '@/services/encryption';
 import { asSystem } from './base';
 
@@ -44,7 +44,6 @@ export function createOrganizationWithWorkspace(
               createdBy: userId,
               status: Status.ACTIVE,
               workspaceType: WorkspaceType.ENTERPRISE,
-              joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
             },
           });
 
@@ -52,6 +51,11 @@ export function createOrganizationWithWorkspace(
             entityId: workspace.id,
             orgId: workspace.orgId,
             entityType: 'WORKSPACE',
+          });
+          await getEncryptionProvider().provisionEntity({
+            entityId: workspace.id,
+            orgId: workspace.orgId,
+            entityType: 'WORKSPACE_STORAGE',
           });
 
           // 3. Create DM project for the workspace (required by the system)
@@ -76,7 +80,7 @@ export function createOrganizationWithWorkspace(
           });
 
           // 4b. Seed general channel + default project + board/stages
-          await createCommunityWorkspaceDefaults({
+          await createWorkspaceDefaults({
             db: tx,
             workspaceId: workspace.id,
             workspaceName: workspace.name,

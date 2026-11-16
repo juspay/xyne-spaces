@@ -8,7 +8,7 @@ import {
   type RunConfig,
   type RunState,
   type Tool,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { OrgLLMServiceAccountPurpose, TicketStatus, TicketStatusV2, NudgeKind, SurfaceAreaType, SurfaceLinkKind } from '@xyne/shared';

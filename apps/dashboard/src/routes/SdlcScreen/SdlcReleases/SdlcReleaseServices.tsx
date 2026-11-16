@@ -1,14 +1,16 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { AlertCircle, ChevronRight, Sparkles, Users, X } from 'lucide-react';
-import { toast } from 'sonner';
+// Disabled (LLM)
+// import { toast } from 'sonner';
 import { Button } from '../../../components/ui/Button';
 import { EntitySelector } from '../../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../../components/ui/EntitySelector/EntitySelector.types';
 import { Field } from '../../../components/ui/Field/Field';
 import { Input } from '../../../components/ui/Input';
 import { useUserGroups } from '../../../hooks/useUserGroup';
-import { apiInstance } from '../../../services/clients/apiClient';
-import { getApiErrorMessage } from '../../../utils/apiError';
+// Disabled (LLM)
+// import { apiInstance } from '../../../services/clients/apiClient';
+// import { getApiErrorMessage } from '../../../utils/apiError';
 import { cn } from '../../../utils/classNames';
 import type { ReleaseServiceDraft, SdlcReleaseServicesProps } from './SdlcReleases.types';
 import {
@@ -20,24 +22,27 @@ import {
   regexState,
 } from './SdlcReleases.utils';
 
-interface SuggestedService {
-  name: string;
-  regex: string;
-  envPaths: string[];
-  migrationPaths: string[];
-}
+// Disabled (LLM)
+// interface SuggestedService {
+//   name: string;
+//   regex: string;
+//   envPaths: string[];
+//   migrationPaths: string[];
+// }
 
 const GRID_CLASS = 'grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,0.8fr)_16px] gap-3';
 
 export function SdlcReleaseServices({
   repoName,
-  repoId,
-  projectId,
+  // Disabled (LLM)
+  // repoId,
+  // projectId,
   services,
   onChange,
 }: SdlcReleaseServicesProps): ReactElement {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [suggesting, setSuggesting] = useState(false);
+  // Disabled (LLM)
+  // const [suggesting, setSuggesting] = useState(false);
 
   const addService = (): void => {
     const service = newService();
@@ -45,59 +50,60 @@ export function SdlcReleaseServices({
     setOpenId(service.id);
   };
 
-  const suggest = async (): Promise<void> => {
-    if (suggesting) return;
-    setSuggesting(true);
-    try {
-      const response = await apiInstance.post<{ services?: SuggestedService[]; message?: string }>(
-        '/commits/analyze/suggest-services',
-        { repoId, projectId },
-      );
-      const have = new Set(services.map(service => service.name.trim().toLowerCase()));
-      const added = (response.data.services ?? [])
-        .filter(service => !have.has(service.name.trim().toLowerCase()))
-        .map(service =>
-          newService({
-            name: service.name,
-            regex: service.regex,
-            envPaths: service.envPaths,
-            migrationPaths: service.migrationPaths,
-            showPaths: service.envPaths.length + service.migrationPaths.length > 0,
-          }),
-        );
-      if (added.length === 0) {
-        toast.info(
-          response.data.message ?? 'No new services could be suggested for this repository.',
-        );
-        return;
-      }
-      onChange([
-        ...services.filter(service => service.name.trim() || service.regex.trim()),
-        ...added,
-      ]);
-      setOpenId(null);
-      toast.success(`Added ${plural(added.length, 'service')}`);
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Failed to suggest services'));
-    } finally {
-      setSuggesting(false);
-    }
-  };
-
-  const detectButton = (variant: 'default' | 'ghost'): ReactElement => (
-    <Button
-      variant={variant}
-      size='sm'
-      onClick={() => void suggest()}
-      disabled={suggesting}
-      data-track-category={TRACK_CATEGORY}
-      data-track-name='DetectServicesWithAi'
-    >
-      <Sparkles />
-      {suggesting ? 'Scanning…' : 'Detect with AI'}
-    </Button>
-  );
-
+  // Disabled (LLM)
+  // const suggest = async (): Promise<void> => {
+  //   if (suggesting) return;
+  //   setSuggesting(true);
+  //   try {
+  //     const response = await apiInstance.post<{ services?: SuggestedService[]; message?: string }>(
+  //       '/commits/analyze/suggest-services',
+  //       { repoId, projectId },
+  //     );
+  //     const have = new Set(services.map(service => service.name.trim().toLowerCase()));
+  //     const added = (response.data.services ?? [])
+  //       .filter(service => !have.has(service.name.trim().toLowerCase()))
+  //       .map(service =>
+  //         newService({
+  //           name: service.name,
+  //           regex: service.regex,
+  //           envPaths: service.envPaths,
+  //           migrationPaths: service.migrationPaths,
+  //           showPaths: service.envPaths.length + service.migrationPaths.length > 0,
+  //         }),
+  //       );
+  //     if (added.length === 0) {
+  //       toast.info(
+  //         response.data.message ?? 'No new services could be suggested for this repository.',
+  //       );
+  //       return;
+  //     }
+  //     onChange([
+  //       ...services.filter(service => service.name.trim() || service.regex.trim()),
+  //       ...added,
+  //     ]);
+  //     setOpenId(null);
+  //     toast.success(`Added ${plural(added.length, 'service')}`);
+  //   } catch (error) {
+  //     toast.error(getApiErrorMessage(error, 'Failed to suggest services'));
+  //   } finally {
+  //     setSuggesting(false);
+  //   }
+  // };
+  //
+  // const detectButton = (variant: 'default' | 'ghost'): ReactElement => (
+  //   <Button
+  //     variant={variant}
+  //     size='sm'
+  //     onClick={() => void suggest()}
+  //     disabled={suggesting}
+  //     data-track-category={TRACK_CATEGORY}
+  //     data-track-name='DetectServicesWithAi'
+  //   >
+  //     <Sparkles />
+  //     {suggesting ? 'Scanning…' : 'Detect with AI'}
+  //   </Button>
+  // );
+  //
   if (services.length === 0) {
     return (
       <div className='flex flex-col gap-2.5'>
@@ -116,7 +122,8 @@ export function SdlcReleaseServices({
             </span>
           </div>
           <div className='flex flex-wrap justify-center gap-2'>
-            {detectButton('default')}
+            {/* Disabled (LLM) */}
+            {/* {detectButton('default')} */}
             <Button
               variant='outline'
               size='sm'
@@ -138,7 +145,8 @@ export function SdlcReleaseServices({
         <span className='flex-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground'>
           Services · {services.length}
         </span>
-        {detectButton('ghost')}
+        {/* Disabled (LLM) */}
+        {/* {detectButton('ghost')} */}
         <Button
           variant='outline'
           size='sm'

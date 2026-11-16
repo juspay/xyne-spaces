@@ -20,7 +20,7 @@ import {
   type Message,
   type TraceEvent,
   type Attachment,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 
 // Import langfuse for prompt management
 import { getPromptFromLangfuse, PROMPT_NAMES } from '../xyne-ai/langfuse/index.js';

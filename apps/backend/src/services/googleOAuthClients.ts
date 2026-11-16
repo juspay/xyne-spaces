@@ -8,6 +8,7 @@
  */
 
 import { logger } from '../utils/logger';
+import { config } from '@/config/env';
 
 export type GoogleClientKey = 'web' | 'new' | 'mobile';
 
@@ -20,9 +21,9 @@ export interface GoogleClientCreds {
 // key → the env credentials that mint and refresh that client's tokens.
 // Read lazily so tests / env reloads see current values.
 export const GOOGLE_CLIENTS: Record<GoogleClientKey, () => GoogleClientCreds> = {
-  web: () => ({ id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET, label: 'web' }),
-  new: () => ({ id: process.env.GOOGLE_CLIENT_ID_NEW, secret: process.env.GOOGLE_CLIENT_SECRET_NEW, label: 'new/electron' }),
-  mobile: () => ({ id: process.env.GOOGLE_MOBILE_CLIENT_ID, secret: process.env.GOOGLE_MOBILE_CLIENT_SECRET, label: 'mobile' }),
+  web: () => ({ id: config.email.clientId, secret: config.email.clientSecret, label: 'web' }),
+  new: () => ({ id: config.email.clientIdNew, secret: config.email.clientSecretNew, label: 'new/electron' }),
+  mobile: () => ({ id: config.email.mobileClientId, secret: config.email.mobileClientSecret, label: 'mobile' }),
 };
 
 const ALL_KEYS: GoogleClientKey[] = ['web', 'new', 'mobile'];

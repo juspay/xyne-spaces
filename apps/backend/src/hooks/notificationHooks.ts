@@ -54,18 +54,6 @@ export class NotificationHooks {
       logger.error('[NotificationHooks] Failed to send ticket assignment notification:', error);
     }
   }
-
-  static async onWorkflowCompletion(
-    workflowId: string,
-    status: string,
-    executionId: string
-  ): Promise<void> {
-    try {
-      await notificationService.sendWorkflowCompletionNotification(workflowId, status, executionId);
-    } catch (error) {
-      logger.error('Failed to send workflow completion notification:', error);
-    }
-  }
 }
 
 export const notificationHooks = NotificationHooks;

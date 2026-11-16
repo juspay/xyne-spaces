@@ -1,3 +1,4 @@
+import { assertAssignableUser, assertGroupInWorkspace, automationRequestUser } from '../util/author-access';
 import { z } from 'zod';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import type { Request, Response } from 'express';
@@ -7,7 +8,7 @@ import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { TicketController } from '@/controllers/ticketController';
 import { logger } from '@/utils/logger';
-import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 import { generateTitle } from '@/services/agents/title-generator';
 
 const MAX_TITLE_LENGTH = 100;
@@ -26,7 +27,6 @@ const CreateTicketConfigSchema = z.object({
   userGroupId: variableRef(z.string()).optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
   status: z.nativeEnum(TicketStatusV2).optional(),
-  createdById: variableRef(z.string()).optional(),
 });
 
 const CreateTicketOutputSchema = z.object({
@@ -94,7 +94,7 @@ export class CreateTicketStep extends BaseActionStep<
     config: z.infer<typeof CreateTicketConfigSchema>,
     context: AutomationContext
   ): Promise<CreateTicketOutput> {
-    const createdBy = (config.createdById as string | undefined) ?? context.automation.createdById;
+    const createdBy = context.automation.createdById;
 
     const rawTitle = config.title as string | undefined;
     const rawDescription = config.description as string;
@@ -102,7 +102,7 @@ export class CreateTicketStep extends BaseActionStep<
       throw new Error('[CREATE_TICKET] Description must be provided');
     }
 
-    const description = rawDescription;
+    const description = sanitizeMessageContent(rawDescription);
     const plainDescription = extractPlainTextFromHtml(description).trim();
 
     let title = rawTitle?.trim() ? extractPlainTextFromHtml(rawTitle).trim() : '';
@@ -111,8 +111,12 @@ export class CreateTicketStep extends BaseActionStep<
       if (!plainDescription) {
         throw new Error('[CREATE_TICKET] Description must contain text to generate a title');
       }
+      // Disabled (LLM)
+      // title =
+      //   (await generateTitleWithRetry(plainDescription, createdBy)) ??
+      //   truncateForTitle(plainDescription);
       title =
-        (await generateTitleWithRetry(plainDescription, createdBy)) ??
+        ((false as boolean) ? await generateTitleWithRetry(plainDescription, createdBy) : null) ??
         truncateForTitle(plainDescription);
     }
 
@@ -125,6 +129,12 @@ export class CreateTicketStep extends BaseActionStep<
       projectId: config.projectId as string,
       boardId: config.boardId as string,
     };
+    if (config.assigneeId !== undefined) {
+      await assertAssignableUser(config.assigneeId as string, context.automation.workspaceId, 'CREATE_TICKET');
+    }
+    if (config.userGroupId !== undefined) {
+      await assertGroupInWorkspace(config.userGroupId as string, context.automation.workspaceId, 'CREATE_TICKET');
+    }
     if (config.assigneeId !== undefined) reqBody.assignedTo = config.assigneeId;
     if (config.userGroupId !== undefined) reqBody.userGroupId = config.userGroupId;
     if (config.priority !== undefined) reqBody.priority = config.priority;
@@ -133,7 +143,7 @@ export class CreateTicketStep extends BaseActionStep<
     const fakeReq = {
       body: reqBody,
       headers: {},
-      user: { id: createdBy, workspaceId: context.automation.workspaceId },
+      user: await automationRequestUser(createdBy, context.automation.workspaceId),
       files: {},
     } as unknown as Request;
 

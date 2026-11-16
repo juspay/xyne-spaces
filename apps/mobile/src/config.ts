@@ -28,6 +28,8 @@ interface ExpoConfigExtra {
   lotusMicrosoftClientId?: string;
   lotusMicrosoftTenantId?: string;
   lotusZeroServerUrl?: string;
+  lotusEnrollmentOrigins?: string;
+  lotusLegacyPublicDeepLinkOrigins?: string;
 }
 
 interface ExpoConfigWithExtra {
@@ -53,6 +55,8 @@ type LotusExtras = {
   lotusMicrosoftClientId?: string;
   lotusMicrosoftTenantId?: string;
   lotusZeroServerUrl?: string;
+  lotusEnrollmentOrigins?: string;
+  lotusLegacyPublicDeepLinkOrigins?: string;
 };
 
 function lotusExtras(): LotusExtras {
@@ -73,6 +77,8 @@ function lotusExtras(): LotusExtras {
     lotusMicrosoftClientId: s('lotusMicrosoftClientId'),
     lotusMicrosoftTenantId: s('lotusMicrosoftTenantId'),
     lotusZeroServerUrl: s('lotusZeroServerUrl'),
+    lotusEnrollmentOrigins: s('lotusEnrollmentOrigins'),
+    lotusLegacyPublicDeepLinkOrigins: s('lotusLegacyPublicDeepLinkOrigins'),
   };
 }
 
@@ -81,22 +87,23 @@ function lotusExtras(): LotusExtras {
  * Firebase project and signed-out landing screen; everything else is shared with the main app.
  */
 export const IS_COMMUNITY_APP = TypedConstants.expoConfig?.extra?.appVariant === 'community';
-const DEFAULT_APP_ORIGIN = IS_COMMUNITY_APP
-  ? 'https://spaces.xyne.ai'
-  : 'https://app.spaces.xyne.juspay.net';
-const PUBLIC_WEB_ORIGIN = IS_COMMUNITY_APP
-  ? 'https://spaces.xyne.ai'
-  : 'https://spaces.xyne.juspay.net';
-
-const DEFAULT_DEV_API_URL = `${DEFAULT_APP_ORIGIN}/api`;
-const DEFAULT_PROD_API_URL = `${DEFAULT_APP_ORIGIN}/api`;
+/** The community app ships against its own public backend; the main app has no built-in backend. */
+const COMMUNITY_APP_ORIGIN = 'https://spaces.xyne.ai';
+/** Local backend (`apps/backend`) for development builds that configure nothing. */
+const LOCAL_DEV_API_URL = 'http://localhost:3001/api';
 
 const xs = lotusExtras();
 const ENV_API_BASE_URL = xs.lotusApiBaseUrl;
 const ENV_DASHBOARD_ORIGIN = xs.lotusDashboardOrigin;
-const DEFAULT_PUBLIC_DEEP_LINK_ORIGIN = PUBLIC_WEB_ORIGIN;
 
-const rawApiBaseUrl = ENV_API_BASE_URL || (__DEV__ ? DEFAULT_DEV_API_URL : DEFAULT_PROD_API_URL);
+const rawApiBaseUrl =
+  ENV_API_BASE_URL ||
+  (IS_COMMUNITY_APP ? `${COMMUNITY_APP_ORIGIN}/api` : __DEV__ ? LOCAL_DEV_API_URL : '');
+if (!rawApiBaseUrl) {
+  // Native builds are validated at prebuild (the config plugins throw); this only trips on a
+  // release bundle exported without `API_BASE_URL` in `.env.<variant>` (see .env.example).
+  throw new Error('[config] API_BASE_URL is not configured for this build.');
+}
 
 export const API_BASE_URL = rawApiBaseUrl.replace(/\/$/, '');
 export const API_ORIGIN = API_BASE_URL.replace(/\/api$/, '').replace(/\/$/, '');
@@ -108,9 +115,16 @@ export const DASHBOARD_ORIGIN =
 export const DASHBOARD_URL = `${DASHBOARD_ORIGIN}/`;
 export const PROTECTED_HOSTS = [new URL(API_BASE_URL).host];
 
+/**
+ * Used when PUBLIC_DEEP_LINK_ORIGIN is unset or invalid: the community backend, otherwise the
+ * dashboard origin. Store builds always configure it (prebuild fails otherwise).
+ */
+const FALLBACK_PUBLIC_DEEP_LINK_ORIGIN = IS_COMMUNITY_APP ? COMMUNITY_APP_ORIGIN : DASHBOARD_ORIGIN;
+
 const normalizePublicDeepLinkOrigin = (raw: string | undefined): string => {
+  if (!raw) return FALLBACK_PUBLIC_DEEP_LINK_ORIGIN;
   try {
-    const parsed = new URL(raw || DEFAULT_PUBLIC_DEEP_LINK_ORIGIN);
+    const parsed = new URL(raw);
     if (
       parsed.protocol !== 'https:' ||
       parsed.username ||
@@ -119,16 +133,54 @@ const normalizePublicDeepLinkOrigin = (raw: string | undefined): string => {
       parsed.search ||
       parsed.hash
     ) {
-      return DEFAULT_PUBLIC_DEEP_LINK_ORIGIN;
+      return FALLBACK_PUBLIC_DEEP_LINK_ORIGIN;
     }
     return parsed.origin;
   } catch {
-    return DEFAULT_PUBLIC_DEEP_LINK_ORIGIN;
+    return FALLBACK_PUBLIC_DEEP_LINK_ORIGIN;
   }
 };
 
 /** Public origin for copied links and OS App/Universal Link verification. */
 export const PUBLIC_DEEP_LINK_ORIGIN = normalizePublicDeepLinkOrigin(xs.lotusPublicDeepLinkOrigin);
+
+/** Comma-separated HTTPS origins from `extra` → normalized origins (invalid entries dropped). */
+const parseHttpsOrigins = (raw: string | undefined): string[] =>
+  (raw ?? '')
+    .split(',')
+    .map(entry => {
+      try {
+        const parsed = new URL(entry.trim());
+        return parsed.protocol === 'https:' ? parsed.origin : '';
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean);
+
+/**
+ * Other origins deep links may arrive on: the dashboard / API host plus any retired public
+ * origins (`LEGACY_PUBLIC_DEEP_LINK_ORIGINS`). `canonicalizePublicDeepLink` rewrites these
+ * to PUBLIC_DEEP_LINK_ORIGIN.
+ */
+export const ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS: readonly string[] = Array.from(
+  new Set([
+    DASHBOARD_ORIGIN,
+    API_ORIGIN,
+    ...parseHttpsOrigins(xs.lotusLegacyPublicDeepLinkOrigins),
+  ]),
+).filter(origin => origin !== PUBLIC_DEEP_LINK_ORIGIN);
+
+/**
+ * HTTPS origins allowed to issue device-enrollment QR codes (`ENROLLMENT_ORIGINS`,
+ * comma-separated). Empty when unset, so enrollment fails closed.
+ */
+export const ENROLLMENT_ORIGINS: ReadonlySet<string> = new Set(
+  parseHttpsOrigins(xs.lotusEnrollmentOrigins),
+);
+
+/** The enrollment portal shown in the enrollment instructions (first configured origin). */
+export const ENROLLMENT_PORTAL_URL: string | undefined = Array.from(ENROLLMENT_ORIGINS)[0];
 
 export const MICROSOFT_CLIENT_ID = xs.lotusMicrosoftClientId ?? '';
 export const MICROSOFT_TENANT_ID = xs.lotusMicrosoftTenantId ?? '';
@@ -169,7 +221,7 @@ export const ZERO_SERVER_URL = (() => {
   } catch {
     /* fall through */
   }
-  return `${DEFAULT_APP_ORIGIN}/zero`;
+  return `${API_ORIGIN}/zero`;
 })();
 
 /**
@@ -180,13 +232,12 @@ export const ZERO_SERVER_URL = (() => {
 export const APP_VARIANT = TypedConstants.expoConfig?.extra?.appVariant as
   'dev' | 'sandbox' | 'prod' | 'community' | undefined;
 const IS_DEV = __DEV__ || APP_VARIANT === 'dev';
-const IS_SANDBOX = APP_VARIANT === 'sandbox';
 
-const getLoggerBaseUrl = (): string => {
-  // if (IS_DEV) return 'http://0.0.0.0:4001';
-  if (IS_SANDBOX) return 'https://spaces.sandbox.xyne.juspay.net';
-  return PUBLIC_WEB_ORIGIN;
-};
+/**
+ * First-party Godel base: the public web origin of this build. A build that reports
+ * elsewhere (e.g. sandbox) sets LOTUS_GRAFANA_LOGS_ENDPOINT / LOTUS_TELEMETRY_ENDPOINT.
+ */
+const getLoggerBaseUrl = (): string => PUBLIC_DEEP_LINK_ORIGIN;
 
 // Logger endpoint override (for local testing)
 const LOGGER_ENDPOINT_OVERRIDE = TypedConstants.expoConfig?.extra?.lotusGrafanaLogsEndpoint as
@@ -232,11 +283,7 @@ export const LOGGER_CONFIG = {
  * Telemetry (Metrics) Configuration
  */
 
-const getMetricsBaseUrl = (): string => {
-  // if (IS_DEV) return 'http://0.0.0.0:4001';
-  if (IS_SANDBOX) return 'https://spaces.sandbox.xyne.juspay.net';
-  return PUBLIC_WEB_ORIGIN;
-};
+const getMetricsBaseUrl = (): string => PUBLIC_DEEP_LINK_ORIGIN;
 
 export function isMetricsEnabled(): boolean {
   const extra = TypedConstants.expoConfig?.extra;

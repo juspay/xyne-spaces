@@ -40,7 +40,7 @@ const variableRefStringSchema = z
 export function variableRef<T extends z.ZodTypeAny>(inner: T): z.ZodUnion<[T, z.ZodString]> {
   return z
     .union([inner, variableRefStringSchema])
-    .describe(`${VARIABLE_REF_DESCRIPTION_PREFIX}${inner.description ?? inner._def.typeName}`) as z.ZodUnion<[T, z.ZodString]>;
+    .describe(`${VARIABLE_REF_DESCRIPTION_PREFIX}${inner.description ?? inner.def.type}`) as z.ZodUnion<[T, z.ZodString]>;
 }
 
 export function getVariableRefInnerSchema(schema: z.ZodTypeAny): z.ZodTypeAny | null {
@@ -49,8 +49,7 @@ export function getVariableRefInnerSchema(schema: z.ZodTypeAny): z.ZodTypeAny | 
     typeof schema.description === 'string' &&
     schema.description.startsWith(VARIABLE_REF_DESCRIPTION_PREFIX)
   ) {
-    const options = (schema as z.ZodUnion<[z.ZodTypeAny, z.ZodTypeAny]>)._def.options;
-    return options[0] ?? null;
+    return (schema.options[0] as z.ZodTypeAny | undefined) ?? null;
   }
   return null;
 }

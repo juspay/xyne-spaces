@@ -26,6 +26,9 @@ const DENIED: readonly Action[] = [];
 
 const APPROVE: Action = 'workflow:approve';
 
+/** Answering one parked gate. Cancel and rerun stay with the run itself. */
+const GATE_ANSWER: readonly Action[] = ['execution:approve'];
+
 const WORKFLOW_MAKER: readonly Action[] = WORKFLOW_ACTIONS.filter((a) => a !== APPROVE);
 
 const AUTOMATIONS_RESOURCE_NAME = 'AUTOMATIONS';
@@ -40,7 +43,11 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
     ctx: XyneCtx,
     refs: readonly ResourceRef[],
   ): Promise<ReadonlyArray<readonly Action[]>> {
-    const executionIds = refs.flatMap((ref) => (ref.type === 'execution' ? [ref.id] : []));
+    const executionIds = refs.flatMap((ref) => {
+      if (ref.type === 'execution') return [ref.id];
+      if (ref.type === 'approvalStep') return [ref.record.executionId];
+      return [];
+    });
     const [workspaceOf, mayApprove] = await Promise.all([
       this.executionWorkspaces(executionIds),
       this.mayApprove(ctx),
@@ -98,7 +105,7 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
         return workspaceOf.get(ref.id) === ctx.workspaceId ? EXECUTION_ACTIONS : DENIED;
 
       case 'approvalStep':
-        return DENIED;
+        return workspaceOf.get(ref.record.executionId) === ctx.workspaceId ? GATE_ANSWER : DENIED;
     }
   }
 

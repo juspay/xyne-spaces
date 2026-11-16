@@ -10,7 +10,9 @@ const isValidIsoDate = (value: string): boolean => {
 
 const isoDateQuery = (field: 'from' | 'to') =>
   z
-    .string({ required_error: `"${field}" query parameter is required` })
+    .string({
+      error: (issue) => (issue.input === undefined ? `"${field}" query parameter is required` : undefined),
+    })
     .refine(isValidIsoDate, `"${field}" must be a valid date in YYYY-MM-DD format`);
 
 const positiveIntegerQuery = (field: string, defaultValue: number, maxValue: number) =>
@@ -21,7 +23,7 @@ const positiveIntegerQuery = (field: string, defaultValue: number, maxValue: num
       return value;
     },
     z
-      .number({ invalid_type_error: `"${field}" must be a positive integer` })
+      .number({ error: `"${field}" must be a positive integer` })
       .int(`"${field}" must be a positive integer`)
       .min(1, `"${field}" must be at least 1`)
       .max(maxValue, `"${field}" must be at most ${maxValue}`)
@@ -34,13 +36,21 @@ const dateRangeSchema = <T extends z.ZodRawShape>(shape: T) =>
       to: isoDateQuery('to'),
       ...shape,
     })
-    .refine(({ from, to }) => !from || !to || from <= to, {
-      path: ['from'],
-      message: '"from" must be before or equal to "to"',
-    });
+    .refine(
+      (value) => {
+        const { from, to } = value as { from: string; to: string };
+        return !from || !to || from <= to;
+      },
+      {
+        path: ['from'],
+        message: '"from" must be before or equal to "to"',
+      },
+    );
 
 const teamIdQuery = z
-  .string({ required_error: '"teamId" query parameter is required' })
+  .string({
+    error: (issue) => (issue.input === undefined ? '"teamId" query parameter is required' : undefined),
+  })
   .trim()
   .min(1, '"teamId" query parameter is required');
 
@@ -72,7 +82,7 @@ export const TeamPrQuerySchema = dateRangeSchema({
 });
 
 export const formatTeamIntelligenceQueryErrors = (error: z.ZodError) =>
-  error.errors.map((issue) => ({
+  error.issues.map((issue) => ({
     path: issue.path.join('.'),
     message: issue.message,
   }));

@@ -15,7 +15,7 @@ import {
   isCallWindowSupported,
   waitForCallWindowPhase,
 } from '../../../utils/callWindow';
-import { isStandaloneWindow } from '../../../utils/electronApp';
+import { isSdlcWindow, isStandaloneWindow } from '../../../utils/electronApp';
 
 const CALL_WINDOW_ATTACH_TIMEOUT_MS = 60_000;
 
@@ -53,6 +53,7 @@ export function GlobalCallOverlay({
   const isCallWindowMode = useSelector(roomActor, state => state.context.isCallWindowMode);
   const token = useSelector(roomActor, state => state.context.token);
   const serverUrl = useSelector(roomActor, state => state.context.serverUrl);
+  const encryption = useSelector(roomActor, state => state.context.encryption);
   const callType = useSelector(roomActor, state => state.context.callType);
   const externalId = useSelector(roomActor, state => state.context.externalId);
   const room = useSelector(roomActor, state => state.context.room);
@@ -85,7 +86,7 @@ export function GlobalCallOverlay({
   // The main window (re)loaded while a call runs in the call window: pick it
   // back up, so the rest of the app knows there is a call.
   useEffect(() => {
-    if (!isCallWindowSupported() || isStandaloneWindow()) return undefined;
+    if (!isCallWindowSupported() || isStandaloneWindow() || isSdlcWindow()) return undefined;
     let cancelled = false;
     void (async (): Promise<void> => {
       let status = await getCallWindowStatus();
@@ -133,6 +134,7 @@ export function GlobalCallOverlay({
         <CustomLiveKitRoom
           token={token}
           serverUrl={serverUrl}
+          encryption={encryption}
           callId={externalId}
           callType={callType}
           externalId={externalId}

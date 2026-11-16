@@ -22,7 +22,6 @@ export * from './utils/mentionRanking';
 export * from './utils/channelSectionSuggestions';
 export * from './tags';
 export * from './board-types';
-export * from './types/workflowApproval';
 export * from './types/userActivity';
 export * from './types/call';
 export * from './types/callChat';

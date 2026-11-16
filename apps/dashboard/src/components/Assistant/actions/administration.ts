@@ -67,33 +67,6 @@ export const ADMINISTRATION_ACTIONS: readonly ActionDefinition[] = [
     page: 'admin_invitations',
   },
   {
-    id: 'create_workspace',
-    title: 'Create a workspace',
-    hint: 'Add a community workspace',
-    guide: [
-      'Under Create Community Workspace, type a Workspace Name.',
-      'Choose a Joining Policy: Open, Request to join or Invite only.',
-      'Click Create Community Workspace.',
-    ],
-    intent: {
-      description: 'Create a new workspace.',
-      examples: [
-        'I want to create a workspace',
-        'Make a new workspace',
-        'Add a workspace',
-        'Create a workspace for my team',
-      ],
-      notFor: [
-        {
-          when: 'setting up, renaming or changing the workspace the user is already in',
-          instead: 'that is workspace_settings',
-        },
-      ],
-    },
-    summarize: 'Open Organisations',
-    page: 'admin_organisations',
-  },
-  {
     id: 'create_organisation',
     title: 'Create an organisation',
     hint: 'Set up a new organisation',

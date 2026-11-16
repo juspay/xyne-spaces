@@ -4,7 +4,7 @@
  * Electron's main process denies every popup a webview asks for and forwards the
  * url to the app as `open-in-browser-panel`, which is right for the browser
  * panel's own tabs. It is wrong for a page embedded somewhere else — following a
- * link inside the SDLC lane's browser should stay in that browser, not fling the
+ * link inside an SDLC folder's browser should stay in that browser, not fling the
  * reader into a panel on the other side of the window.
  *
  * Main sends the originating webview's id alongside the url; anything listed

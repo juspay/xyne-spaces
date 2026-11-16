@@ -21,7 +21,7 @@ const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
   markdownText: z.string().optional(), // raw markdown (with optional frontmatter) — stored as-is
   attachments: z.array(z.any()).optional(),
-  metadata: z.record(z.unknown()).optional(), // message metadata (e.g. hasAppActions, appId)
+  metadata: z.record(z.string(), z.unknown()).optional(), // message metadata (e.g. hasAppActions, appId)
   // Only the internal S2S /api/internal/postAsUser route (no app auth) supplies this;
   // app-token callers are identified via req.user set by authenticateApp.
   userId: z.string().min(1, 'User ID is required').trim().optional(),
@@ -45,12 +45,12 @@ const PostMessageBodySchema = ChatActionBodySchema.extend({
     version: z.literal('2.0'),
     screenId: z.string().optional(),
     title: z.string().optional(),
-    components: z.array(z.record(z.any())).optional(),
-    data: z.record(z.unknown()).optional(),
+    components: z.array(z.record(z.string(), z.any())).optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
     state: z.object({
-      values: z.record(z.unknown()),
-      touched: z.record(z.boolean()),
-      errors: z.record(z.string()),
+      values: z.record(z.string(), z.unknown()),
+      touched: z.record(z.string(), z.boolean()),
+      errors: z.record(z.string(), z.string()),
       submitting: z.boolean(),
       submitted: z.boolean(),
       history: z.array(z.string()),
@@ -78,12 +78,12 @@ const EphemeralFlowInputSchema = z.object({
   version: z.literal('2.0'),
   screenId: z.string().optional(),
   title: z.string().optional(),
-  components: z.array(z.record(z.any())).optional(),
-  data: z.record(z.unknown()).optional(),
+  components: z.array(z.record(z.string(), z.any())).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
   state: z.object({
-    values: z.record(z.unknown()),
-    touched: z.record(z.boolean()),
-    errors: z.record(z.string()),
+    values: z.record(z.string(), z.unknown()),
+    touched: z.record(z.string(), z.boolean()),
+    errors: z.record(z.string(), z.string()),
     submitting: z.boolean(),
     submitted: z.boolean(),
     history: z.array(z.string()),
@@ -116,7 +116,7 @@ const UpdateMessageBodySchema = ChatActionBodySchema.extend({
   messageId: z.string().min(1, 'Message ID is required').trim(),
   channelId: z.string().optional(),
   channelName: z.string().trim().optional(),
-  flowJSON: z.record(z.unknown()).optional(),
+  flowJSON: z.record(z.string(), z.unknown()).optional(),
 }).refine(
   data => !!data.text || !!data.markdownText || !!data.flowJSON || (data.attachments && data.attachments.length > 0),
   { message: 'Either text, markdownText, flowJSON, or attachments is required', path: ['text'] }
@@ -179,7 +179,7 @@ export class ChatController {
     try {
       const queryResult = ConversationAttachmentsQuerySchema.safeParse(req.query);
       if (!queryResult.success) {
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.errors });
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: queryResult.error.issues });
         return;
       }
 
@@ -257,7 +257,7 @@ export class ChatController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }
@@ -414,7 +414,7 @@ export class ChatController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors,
+          details: bodyResult.error.issues,
         });
         return;
       }
@@ -535,7 +535,7 @@ export class ChatController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }
@@ -606,7 +606,7 @@ export class ChatController {
     try {
       const bodyResult = DeleteMessageBodySchema.safeParse(req.body);
       if (!bodyResult.success) {
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
         return;
       }
 
@@ -660,7 +660,7 @@ export class ChatController {
     try {
       const parsed = AgentProgressBodySchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.errors });
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.issues });
         return;
       }
       const { conversationId, channelId, agentSlug, agentName, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;

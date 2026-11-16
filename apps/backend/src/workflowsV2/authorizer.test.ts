@@ -43,6 +43,16 @@ describe('XyneWorkflowAuthorizer', () => {
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 
+  it('lets a caller answer a gate on a run in their workspace, and nothing else', async () => {
+    const gate = (executionId: string): ResourceRef => ({
+      type: 'approvalStep',
+      id: 'start/ask_start',
+      record: { stepId: 'ask_start', executionId, workflowId: 'wf', folderId: 'default' },
+    });
+    await expect(authorizer.permissions(inA, gate('ex_a1'))).resolves.toEqual(['execution:approve']);
+    await expect(authorizer.permissions(inA, gate('ex_b1'))).resolves.toEqual([]);
+  });
+
   it('decides workflows from their own attributes, without a query', async () => {
     const workflow = { id: 'wf', attributes: { workspaceId: 'ws_a' } } as unknown as WorkflowRecord;
     await expect(authorizer.permissions(inA, { type: 'workflow', id: 'wf', record: workflow })).resolves.toEqual(WORKFLOW_ACTIONS);

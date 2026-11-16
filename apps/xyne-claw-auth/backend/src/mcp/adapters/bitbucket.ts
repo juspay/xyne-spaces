@@ -3,6 +3,12 @@ import type { Citation } from "xyne-claw-shared";
 import { prefixChunk } from "./grafana.js";
 import { pathSegment, repoFilePath } from "../../lib/url-path.js";
 
+/**
+ * Base URL used when a connection leaves its own `baseUrl` credential blank.
+ * No in-repo default — set BITBUCKET_BASE_URL per environment.
+ */
+export const DEFAULT_BITBUCKET_BASE_URL = (process.env["BITBUCKET_BASE_URL"] ?? "").replace(/\/+$/, "");
+
 export const bitbucketAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "bitbucket",
@@ -11,12 +17,12 @@ export const bitbucketAdapter: StdioMcpAdapter = {
   credentialFields: [
     { name: "username", label: "Bitbucket Username", type: "text", placeholder: "your-username" },
     { name: "token", label: "Bitbucket Token", type: "password", placeholder: "Enter your Bitbucket access token" },
-    { name: "baseUrl", label: "Bitbucket Base URL", type: "text", placeholder: "https://bitbucket.juspay.net", optional: true },
+    { name: "baseUrl", label: "Bitbucket Base URL", type: "text", placeholder: "https://bitbucket.example.net", optional: true },
   ],
   buildCommand(credentials) {
     const username = credentials["username"] as string;
     const token = credentials["token"] as string;
-    const baseUrl = (credentials["baseUrl"] as string) || "https://bitbucket.juspay.net";
+    const baseUrl = (credentials["baseUrl"] as string) || DEFAULT_BITBUCKET_BASE_URL;
     return {
       cmd: "npx",
       args: ["-y", "@nexus2520/bitbucket-mcp-server@2.2.0"],
@@ -225,7 +231,7 @@ export async function handleUploadPrScreenshot(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
+  const baseUrl = ((credentials["baseUrl"] as string) || DEFAULT_BITBUCKET_BASE_URL).replace(/\/+$/, "");
 
   const projectKey = params["projectKey"] as string;
   const repoSlug = params["repoSlug"] as string;
@@ -447,7 +453,7 @@ export async function handleGetPrComments(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
+  const baseUrl = ((credentials["baseUrl"] as string) || DEFAULT_BITBUCKET_BASE_URL).replace(/\/+$/, "");
 
   const projectKey = params["projectKey"] as string;
   const repoSlug = params["repoSlug"] as string;
@@ -546,7 +552,7 @@ export async function handleGetPrTemplate(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
+  const baseUrl = ((credentials["baseUrl"] as string) || DEFAULT_BITBUCKET_BASE_URL).replace(/\/+$/, "");
 
   const projectKey = params["projectKey"] as string;
   const repoSlug = params["repoSlug"] as string;
@@ -664,7 +670,7 @@ export async function handleListPullRequests(
 ): Promise<{ content: string; citations?: Citation[] }> {
   const username = credentials["username"] as string;
   const token = credentials["token"] as string;
-  const baseUrl = ((credentials["baseUrl"] as string) || "https://bitbucket.juspay.net").replace(/\/+$/, "");
+  const baseUrl = ((credentials["baseUrl"] as string) || DEFAULT_BITBUCKET_BASE_URL).replace(/\/+$/, "");
 
   const projectKey = params["projectKey"] as string;
   const repoSlug = params["repoSlug"] as string;

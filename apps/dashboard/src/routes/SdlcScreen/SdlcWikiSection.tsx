@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -450,8 +450,6 @@ export function SdlcWikiHome(props: {
   repoUrls: ReadonlyMap<string, string>;
   /** Hub admins only; hides the add card when false. */
   canManage: boolean;
-  /** Status and button of the run that writes the Wiki. */
-  runControl: ReactNode;
   onSelectScope: (folderId: string) => void;
   onAddRepository: () => void;
   onOpenPage: (page: SdlcWikiHubPage) => void;
@@ -508,7 +506,6 @@ export function SdlcWikiHome(props: {
         <h4 className='text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'>
           Repositories and Relationships
         </h4>
-        {props.runControl}
       </div>
       <div className='mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
         {props.canManage && (
@@ -603,58 +600,34 @@ export function SdlcWikiEmpty(props: {
   canManage: boolean;
   /** Null on the Hub Wiki, which is written from every repository. */
   repositoryName: string | null;
-  /** A Wiki run is under way: say so, instead of offering to start one. */
-  running: boolean;
-  runStatus: ReactNode;
-  runButton: ReactNode;
   onCreatePage: () => void;
 }): ReactElement {
   const source = props.repositoryName ?? "this hub's repositories";
   return (
     <div className='grid h-full min-h-72 place-items-center px-6 text-center'>
       <div className='max-w-md'>
-        <BookOpen
-          className={cn('mx-auto', props.running ? 'text-primary' : 'text-muted-foreground')}
-          size={28}
-        />
-        <p className='mt-3 text-lg font-semibold' aria-live='polite'>
-          {props.running ? 'Running deep research' : 'No research pages yet'}
-        </p>
+        <BookOpen className='mx-auto text-muted-foreground' size={28} />
+        <p className='mt-3 text-lg font-semibold'>No research pages yet</p>
         <p className='mt-1.5 text-sm text-muted-foreground'>
-          {props.running
-            ? `The run reads the code of ${source} and writes its pages. They show up here as they are written, and a large repository takes a while.`
-            : props.canManage
-              ? `Generate it from the code of ${source}, or write the first page yourself.`
-              : 'Pages appear here once an admin runs deep research.'}
+          {props.canManage
+            ? `Write the first page about ${source}.`
+            : 'Pages appear here once an admin writes them.'}
         </p>
-        {/* While it runs, what is happening comes before the way to stop it. */}
-        <div
-          className={cn(
-            'mt-5 flex items-center gap-3',
-            props.running ? 'flex-col-reverse' : 'flex-col',
-          )}
-        >
-          <div className='flex flex-wrap items-center justify-center gap-2'>
-            {props.runButton}
-            {/* Not while a run writes the same Wiki. The sidebar keeps New page for whoever needs it. */}
-            {props.canManage && !props.running && (
-              <Button
-                type='button'
-                size='sm'
-                variant='outline'
-                onClick={props.onCreatePage}
-                data-track-category='SdlcHub'
-                data-track-name='WikiPageCreateOpened'
-              >
-                <Plus size={15} />
-                New page
-              </Button>
-            )}
+        {props.canManage && (
+          <div className='mt-5 flex justify-center'>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={props.onCreatePage}
+              data-track-category='SdlcHub'
+              data-track-name='WikiPageCreateOpened'
+            >
+              <Plus size={15} />
+              New page
+            </Button>
           </div>
-          <div className='flex flex-wrap items-center justify-center gap-x-2 gap-y-1'>
-            {props.runStatus}
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

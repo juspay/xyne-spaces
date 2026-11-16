@@ -21,10 +21,12 @@ export type WebhookEncoding = 'JSON' | 'FORM' | 'RAW';
 export function buildWebhookHeaders(
   headers: Record<string, string> | undefined,
   encoding: WebhookEncoding,
+  options: { decryptStored?: boolean } = {},
 ): Record<string, string> {
+  const decryptStored = options.decryptStored ?? true;
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(headers ?? {})) {
-    out[k] = decryptHeaderValue(v);
+    out[k] = decryptStored ? decryptHeaderValue(v) : v;
   }
   const hasContentType = Object.keys(out).some(k => k.toLowerCase() === 'content-type');
   if (!hasContentType) {

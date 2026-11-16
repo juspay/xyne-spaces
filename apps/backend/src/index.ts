@@ -1,10 +1,9 @@
 import './profiling.js';
 import { App } from './app.js';
 import { describeRejection, logger } from '@/utils/logger';
-import { configureJAF } from '@juspay-jaf/jaf';
 import { warnIfNoGoogleClientsConfigured } from '@/services/googleOAuthClients';
+import { assertJwtSecretConfigured } from '@/services/jwtService';
 
-configureJAF({ verbose: false });
 
 process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
   logger.error('UNHANDLED REJECTION', {
@@ -37,6 +36,7 @@ let app: App;
 
 async function startServer() {
   try {
+    assertJwtSecretConfigured();
     warnIfNoGoogleClientsConfigured();
     app = new App();
     await app.listen();

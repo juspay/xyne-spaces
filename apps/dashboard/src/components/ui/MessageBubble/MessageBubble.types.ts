@@ -76,7 +76,6 @@ export interface MessageBubbleProps {
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
   allThreadAttachments?: AttachmentRef[];
-  workflowNumber?: number | undefined;
   showLinkPreview?: boolean;
   /**
    * With showLinkPreview=false the parent renders the preview card; this tells the bubble

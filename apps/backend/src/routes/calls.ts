@@ -6,9 +6,11 @@ import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 import { uploadSingle } from '@/middleware/upload';
 import { workspaceScopedRoute } from '@/database/tenant/context';
-import { summaryTemplateController } from '@/controllers/summaryTemplateController';
+// Disabled (LLM)
+// import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
-import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
+// Disabled (LLM)
+// import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
 import { callBackgroundController } from '@/controllers/callBackgroundController';
 
 const router = Router();
@@ -27,47 +29,52 @@ router.post('/schedule', scheduleCallController.scheduleCall);
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);
 router.post('/recordings/bulk-delete', callController.bulkDeleteRecordings);
-router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
-router.post('/recordings/:callId/generate-labels', callController.regenerateRecordingLabels);
+// Disabled (LLM)
+// router.post('/recordings/:callId/generate-summary', callController.regenerateRecordingSummary);
+// router.post('/recordings/:callId/generate-labels', callController.regenerateRecordingLabels);
 router.get(
   '/recordings/:callId/email-compose-context',
   recordingEmailController.getComposeContext,
 );
 router.post('/recordings/:callId/send-email', recordingEmailController.sendRecordingEmail);
-router.post('/recordings/:callId/export-google-doc', recordingGoogleDocController.export);
-router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
+// Disabled (LLM)
+// router.post('/recordings/:callId/export-google-doc', recordingGoogleDocController.export);
+// router.get('/recordings/:callId/google-doc-compose-context', recordingGoogleDocController.context);
 router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.post('/recordings/:callId/participants', callController.manageRecordingParticipants);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
-router.get('/summary-templates', summaryTemplateController.list);
-router.post('/summary-templates', summaryTemplateController.create);
-router.post('/summary-templates/bulk', summaryTemplateController.bulkCreate);
-router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
-router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
-router.post('/summary-templates/ai/test-selection', summaryTemplateController.testSelection);
-router.post('/summary-templates/ai/test-output', summaryTemplateController.testOutput);
-router.post(
-  '/summary-templates/ai/generate-system-prompt',
-  summaryTemplateController.generateSystemPrompt
-);
-router.get('/summary-templates/publication/context', summaryTemplateController.publicationContext);
-router.get('/summary-templates/:templateId/shares', summaryTemplateController.listShares);
-router.post('/summary-templates/:templateId/sharing', summaryTemplateController.manageSharing);
-router.post(
-  '/summary-templates/:templateId/publication',
-  summaryTemplateController.managePublication
-);
-router.patch('/summary-templates/:templateId', summaryTemplateController.update);
-router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
+// Disabled (LLM)
+// router.get('/summary-templates', summaryTemplateController.list);
+// router.post('/summary-templates', summaryTemplateController.create);
+// router.post('/summary-templates/bulk', summaryTemplateController.bulkCreate);
+// router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
+// router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
+// router.post('/summary-templates/ai/test-selection', summaryTemplateController.testSelection);
+// router.post('/summary-templates/ai/test-output', summaryTemplateController.testOutput);
+// router.post(
+//   '/summary-templates/ai/generate-system-prompt',
+//   summaryTemplateController.generateSystemPrompt
+// );
+// router.get('/summary-templates/publication/context', summaryTemplateController.publicationContext);
+// router.get('/summary-templates/:templateId/shares', summaryTemplateController.listShares);
+// router.post('/summary-templates/:templateId/sharing', summaryTemplateController.manageSharing);
+// router.post(
+//   '/summary-templates/:templateId/publication',
+//   summaryTemplateController.managePublication
+// );
+// router.patch('/summary-templates/:templateId', summaryTemplateController.update);
+// router.delete('/summary-templates/:templateId', summaryTemplateController.delete);
 // Pulse org list proxy (must be before /:callId wildcard); requires ?channelId of a Pulse-enabled channel the user belongs to
-router.get('/pulse-orgs', callController.getPulseOrgs);
+// Disabled (LLM)
+// router.get('/pulse-orgs', callController.getPulseOrgs);
 // Preset backgrounds for the call background picker (Superposition-driven).
 router.get('/backgrounds', callBackgroundController.list);
 router.get('/backgrounds/:id/image', callBackgroundController.image);
 
-router.post('/summary-prompt/edit', callController.editSummaryPrompt);
+// Disabled (LLM)
+// router.post('/summary-prompt/edit', callController.editSummaryPrompt);
 
 router.post('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.sendMessage);
 router.get('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.getMessages);
@@ -107,16 +114,19 @@ router.post(
 );
 
 // PRD Generation endpoint (generates PRD canvas from call transcript)
-router.post('/:callId/generate-prd', callController.generatePRD);
+// Disabled (LLM)
+// router.post('/:callId/generate-prd', callController.generatePRD);
 
 // Get or create the collaborative notes canvas (shared across a recurring series)
 router.post('/:callId/notes-canvas', callController.getOrCreateNotesCanvas);
 
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
-router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
+// Disabled (LLM)
+// router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
 
 // Rewrite a call's detailed summary with a chosen summary template
-router.post('/:callId/generate-summary', callController.regenerateRecordingSummary);
+// Disabled (LLM)
+// router.post('/:callId/generate-summary', callController.regenerateRecordingSummary);
 
 // Invite users to call (creates call_participants for notifications)
 router.post('/:callId/invite', callController.inviteUsers);
@@ -148,8 +158,9 @@ router.post('/:callId/sharing', recordingSharingController.manage);
 // Draft a follow-up email and export to Google Docs.
 router.get('/:callId/email-compose-context', recordingEmailController.getComposeContext);
 router.post('/:callId/send-email', recordingEmailController.sendRecordingEmail);
-router.get('/:callId/google-doc-compose-context', recordingGoogleDocController.context);
-router.post('/:callId/export-google-doc', recordingGoogleDocController.export);
+// Disabled (LLM)
+// router.get('/:callId/google-doc-compose-context', recordingGoogleDocController.context);
+// router.post('/:callId/export-google-doc', recordingGoogleDocController.export);
 
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
@@ -158,7 +169,8 @@ router.post('/:callId/leave', callController.leaveCall);
 router.post('/:callId/end-for-all', callController.endCallForAll);
 
 // Pulse actionable proxy (keeps Pulse credentials server-side)
-router.post('/:callId/pulse-actionable', callController.createPulseActionable);
+// Disabled (LLM)
+// router.post('/:callId/pulse-actionable', callController.createPulseActionable);
 // Mute all participants endpoint
 router.post('/:callId/mute-all', callController.muteAllParticipants);
 

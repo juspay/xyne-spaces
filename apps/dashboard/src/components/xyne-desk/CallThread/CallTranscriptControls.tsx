@@ -6,15 +6,18 @@ import {
   Download,
   FileText,
   Loader2,
-  Sparkles,
+  // Disabled (LLM)
+  // Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
-import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
+// Disabled (LLM)
+// import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { downloadFile, fetchFile } from '../../../services/clients/fileFetchService';
 import { cn } from '../../../utils/classNames';
-import { createMarkdownComponents } from '../../../utils/markdownComponents';
+// Disabled (LLM)
+// import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
 export type CallTranscriptionStatus = 'queued' | 'processing' | 'done' | 'failed';
 
@@ -247,56 +250,58 @@ export function CallTranscriptControls({
   );
 }
 
-function CallSummaryPanel({
-  summary,
-  attachmentId,
-  buttonClass,
-}: {
-  summary: string;
-  attachmentId: string;
-  buttonClass: string;
-}): ReactElement {
-  const [open, setOpen] = useState(true);
-  const markdownComponents = useMemo(
-    () => createMarkdownComponents(`call-summary-${attachmentId}`),
-    [attachmentId],
-  );
+// Disabled (LLM)
+// function CallSummaryPanel({
+//   summary,
+//   attachmentId,
+//   buttonClass,
+// }: {
+//   summary: string;
+//   attachmentId: string;
+//   buttonClass: string;
+// }): ReactElement {
+//   const [open, setOpen] = useState(true);
+//   const markdownComponents = useMemo(
+//     () => createMarkdownComponents(`call-summary-${attachmentId}`),
+//     [attachmentId],
+//   );
 
-  return (
-    <div className='mt-2'>
-      <div className='flex items-center gap-2'>
-        <span className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
-          <Sparkles className='size-3.5 shrink-0' />
-          AI summary
-        </span>
-        <Button
-          type='button'
-          variant='ghost'
-          size='inline'
-          className={cn(buttonClass, 'ml-auto')}
-          onClick={() => setOpen(prev => !prev)}
-          aria-expanded={open}
-          data-track-category='Support'
-          data-track-name={open ? 'HideCallSummary' : 'ShowCallSummary'}
-        >
-          {open ? <ChevronUp className='size-3.5' /> : <ChevronDown className='size-3.5' />}
-          {open ? 'Hide summary' : 'View summary'}
-        </Button>
-      </div>
-      {open ? (
-        <div className='mt-2 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-xs [&_h2]:font-semibold [&_h2:first-child]:mt-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:list-disc [&_ul]:pl-4 [&_p]:my-1'>
-          <MarkdownMessageRenderer content={summary} markdownComponents={markdownComponents} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
+//   return (
+//     <div className='mt-2'>
+//       <div className='flex items-center gap-2'>
+//         <span className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+//           <Sparkles className='size-3.5 shrink-0' />
+//           AI summary
+//         </span>
+//         <Button
+//           type='button'
+//           variant='ghost'
+//           size='inline'
+//           className={cn(buttonClass, 'ml-auto')}
+//           onClick={() => setOpen(prev => !prev)}
+//           aria-expanded={open}
+//           data-track-category='Support'
+//           data-track-name={open ? 'HideCallSummary' : 'ShowCallSummary'}
+//         >
+//           {open ? <ChevronUp className='size-3.5' /> : <ChevronDown className='size-3.5' />}
+//           {open ? 'Hide summary' : 'View summary'}
+//         </Button>
+//       </div>
+//       {open ? (
+//         <div className='mt-2 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-xs [&_h2]:font-semibold [&_h2:first-child]:mt-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:list-disc [&_ul]:pl-4 [&_p]:my-1'>
+//           <MarkdownMessageRenderer content={summary} markdownComponents={markdownComponents} />
+//         </div>
+//       ) : null}
+//     </div>
+//   );
+// }
 
 function CallTranscriptViewer({
   attachment,
-  summary,
-  emailId,
-  ticketId,
+  // Disabled (LLM)
+  // summary,
+  // emailId,
+  // ticketId,
   rowClass,
   buttonClass,
   isCompact,
@@ -313,25 +318,27 @@ function CallTranscriptViewer({
   const [text, setText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Summary returned by the manual request, shown until Zero delivers the stored one.
-  const [requestedSummary, setRequestedSummary] = useState<string | null>(null);
-  const [summarizing, setSummarizing] = useState(false);
-  const effectiveSummary = summary ?? requestedSummary ?? undefined;
+  // Disabled (LLM)
+  // // Summary returned by the manual request, shown until Zero delivers the stored one.
+  // const [requestedSummary, setRequestedSummary] = useState<string | null>(null);
+  // const [summarizing, setSummarizing] = useState(false);
+  // const effectiveSummary = summary ?? requestedSummary ?? undefined;
   const filename = attachment.originalFilename?.trim() || DEFAULT_TRANSCRIPT_FILENAME;
 
-  const requestSummary = useCallback(async (): Promise<void> => {
-    setSummarizing(true);
-    try {
-      const { data } = await apiInstance.post<{ summary: string }>(
-        `/tickets/${encodeURIComponent(ticketId)}/emails/${encodeURIComponent(emailId)}/summarize`,
-      );
-      if (data?.summary) setRequestedSummary(data.summary);
-    } catch (error) {
-      toast.error(serverErrorMessage(error) ?? 'Failed to generate summary');
-    } finally {
-      setSummarizing(false);
-    }
-  }, [emailId, ticketId]);
+  // Disabled (LLM)
+  // const requestSummary = useCallback(async (): Promise<void> => {
+  //   setSummarizing(true);
+  //   try {
+  //     const { data } = await apiInstance.post<{ summary: string }>(
+  //       `/tickets/${encodeURIComponent(ticketId)}/emails/${encodeURIComponent(emailId)}/summarize`,
+  //     );
+  //     if (data?.summary) setRequestedSummary(data.summary);
+  //   } catch (error) {
+  //     toast.error(serverErrorMessage(error) ?? 'Failed to generate summary');
+  //   } finally {
+  //     setSummarizing(false);
+  //   }
+  // }, [emailId, ticketId]);
 
   const loadTranscript = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -396,6 +403,8 @@ function CallTranscriptViewer({
             {open ? <ChevronUp className='size-3.5' /> : <ChevronDown className='size-3.5' />}
             {open ? 'Hide transcript' : 'View transcript'}
           </Button>
+          {/* Disabled (LLM) */}
+          {/*
           {!effectiveSummary ? (
             <Button
               type='button'
@@ -415,6 +424,7 @@ function CallTranscriptViewer({
               {summarizing ? 'Summarizing…' : 'Summarize'}
             </Button>
           ) : null}
+          */}
         </div>
       </div>
       {open ? (
@@ -449,6 +459,8 @@ function CallTranscriptViewer({
           )}
         </div>
       ) : null}
+      {/* Disabled (LLM) */}
+      {/*
       {effectiveSummary ? (
         <CallSummaryPanel
           summary={effectiveSummary}
@@ -456,6 +468,7 @@ function CallTranscriptViewer({
           buttonClass={buttonClass}
         />
       ) : null}
+      */}
     </div>
   );
 }

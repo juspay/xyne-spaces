@@ -4,7 +4,7 @@ import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { getOtelTraceId } from '@juspay-jaf/jaf';
+import { getOtelTraceId } from '@/agents/llmClient';
 import {
   getAskAIQueriesTotal,
   getAskAIQueryDuration,
@@ -126,8 +126,8 @@ const AttachedContextItemSchema = z.object({
   eventName: z.string().optional(),
   eventCategory: z.string().optional(),
   timestamp: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
-  relatedData: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  relatedData: z.record(z.string(), z.unknown()).optional(),
 });
 
 // Attached context schema
@@ -144,13 +144,6 @@ const XyneAIRequestSchemaV2 = z.object({
   conversation_id: z.preprocess(emptyToUndefined, z.string().optional()),
   canvasId: z.string().optional(),
   canvas_id: z.string().optional(),
-  workflowContext: z
-    .object({
-      workflowId: z.string().min(1).nullish(),
-      executionId: z.string().min(1).nullish(),
-      stepId: z.string().min(1).nullish(),
-    })
-    .optional(),
   // Legacy aliases for canvasId (pre-XYNE-17290). Merged into canvasId below.
   canvasViewAccessId: z.string().optional(),
   canvas_view_access_id: z.string().optional(),
@@ -269,7 +262,9 @@ const ConversationNotesSchema = z.object({
 
 const FeedbackRequestSchema = z.object({
   traceId: z.string().min(1, 'traceId is required'),
-  value: z.enum(['LIKE', 'DISLIKE'], { required_error: 'value must be LIKE or DISLIKE' }),
+  value: z.enum(['LIKE', 'DISLIKE'], {
+    error: (issue) => (issue.input === undefined ? 'value must be LIKE or DISLIKE' : undefined),
+  }),
 });
 
 /**
@@ -323,7 +318,7 @@ export class XyneAIControllerV2 {
     if (!parseResult.success) {
       res.status(400).json({
         error: 'Invalid input',
-        details: parseResult.error.errors.map((e) => ({
+        details: parseResult.error.issues.map((e) => ({
           field: e.path.join('.'),
           message: e.message,
         })),
@@ -343,7 +338,6 @@ export class XyneAIControllerV2 {
       canvas_id,
       canvasViewAccessId,
       canvas_view_access_id,
-      workflowContext,
       createCanvasEnabled: createCanvasEnabledCC,
       create_canvas_enabled: createCanvasEnabledSC,
       webSearchEnabled: webSearchEnabledCC,
@@ -606,7 +600,6 @@ export class XyneAIControllerV2 {
           ticketIds: effectiveTicketIds,
           callIds: effectiveCallIds,
           ...(effectiveCanvasId && { canvasId: effectiveCanvasId }),
-          ...(workflowContext && { workflowContext }),
           attachedContext: effectiveAttachedContext ?? [],
           attachments,
           messageAttachmentIds,
@@ -782,7 +775,7 @@ export class XyneAIControllerV2 {
     if (!parseResult.success) {
       res.status(400).json({
         error: 'Invalid input',
-        details: parseResult.error.errors.map((e) => ({
+        details: parseResult.error.issues.map((e) => ({
           field: e.path.join('.'),
           message: e.message,
         })),

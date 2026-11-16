@@ -3,10 +3,13 @@ import type { DeviceInfo } from '../modules/certificate';
 
 const REQUEST_TIMEOUT = 30_000;
 
-const TRUSTED_ENROLLMENT_ORIGINS = new Set([
-  'https://auth.spaces.xyne.juspay.net',
-  'https://auth.spaces.sandbox.xyne.juspay.net',
-]);
+/**
+ * Origins allowed to issue enrollment QR codes. Callers pass the configured set
+ * (`ENROLLMENT_ORIGINS` in `src/config.ts`); an empty set fails closed.
+ */
+export interface EnrollmentRequestOptions {
+  trustedOrigins: ReadonlySet<string>;
+}
 
 export type EnrollmentFailureReason =
   | 'invalid_qr'
@@ -53,7 +56,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function buildRequestUrl(rawUrl: string): string {
+function buildRequestUrl(rawUrl: string, trustedOrigins: ReadonlySet<string>): string {
   let requestUrl: URL;
 
   try {
@@ -69,7 +72,7 @@ function buildRequestUrl(rawUrl: string): string {
     throw new EnrollmentFlowError('Invalid enrollment URL: HTTPS is required.', 'invalid_url');
   }
 
-  if (!TRUSTED_ENROLLMENT_ORIGINS.has(requestUrl.origin)) {
+  if (!trustedOrigins.has(requestUrl.origin)) {
     throw new EnrollmentFlowError(
       'Unsupported enrollment URL. Please scan a QR code from Xyne Spaces.',
       'unsupported_origin',
@@ -80,7 +83,10 @@ function buildRequestUrl(rawUrl: string): string {
 }
 
 /** Parse and validate the `{ url, token }` payload displayed by the laptop. */
-export function validateEnrollmentQrPayload(rawData: string): EnrollmentQrPayload {
+export function validateEnrollmentQrPayload(
+  rawData: string,
+  options: EnrollmentRequestOptions,
+): EnrollmentQrPayload {
   let parsedData: unknown;
 
   try {
@@ -109,7 +115,7 @@ export function validateEnrollmentQrPayload(rawData: string): EnrollmentQrPayloa
     );
   }
 
-  const resolvedUrl = buildRequestUrl(url);
+  const resolvedUrl = buildRequestUrl(url, options.trustedOrigins);
 
   return { url: resolvedUrl, token };
 }
@@ -123,8 +129,9 @@ export async function submitCSRWithToken(
   token: string,
   csrPem: string,
   deviceInfo: DeviceInfo,
+  options: EnrollmentRequestOptions,
 ): Promise<EnrollmentCertificateResponse> {
-  const requestUrl = buildRequestUrl(url);
+  const requestUrl = buildRequestUrl(url, options.trustedOrigins);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 

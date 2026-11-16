@@ -1,10 +1,8 @@
 import { KeyboardEvent, ReactElement, useMemo, useState } from 'react';
 import { ArrowRight } from '@xyne/icons';
 import { Check, Loader2, Search } from 'lucide-react';
-import { WorkspaceRole, WorkspaceType } from '@xyne/shared';
+import { WorkspaceRole } from '@xyne/shared';
 import { toast } from 'sonner';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
 import { apiInstance } from '../../services/clients/apiClient';
 import type { UserContact, UserContactsProvider } from '../../services/clients/userContactsApi';
 import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
@@ -68,13 +66,7 @@ export const InviteContactsStepPanel = ({
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [isSending, setIsSending] = useState(false);
 
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
-    enabled: Boolean(workspaceId),
-  }) as unknown as [{ workspaceType?: string } | undefined];
-  const inviteRole =
-    workspace?.workspaceType === WorkspaceType.COMMUNITY
-      ? WorkspaceRole.COMMUNITY_MEMBER
-      : WorkspaceRole.MEMBER;
+  const inviteRole = WorkspaceRole.MEMBER;
 
   /** Contacts left to invite, filtered by the search box. */
   const visibleContacts = useMemo(() => {

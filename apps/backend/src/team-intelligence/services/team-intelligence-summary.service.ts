@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
-import { LLMClient, createUserMessage } from '@framework';
+// import { createUserMessage } from '@framework'; // framework removed
+import type { LLMClient } from './team-intelligence-llm-client';
 import { config as appConfig } from '../../config/env.js';
 import { logger } from '@/utils/logger';
 import type {
@@ -14,7 +15,7 @@ import {
   mapWithConcurrency,
   parseLlmJson,
   runSectionWithFallback,
-  withTeamIntelligenceLlmSlot,
+  // withTeamIntelligenceLlmSlot, // framework removed
 } from '../llm-utils';
 import { pruneInvalidArrayItemsForRetry } from '../validation-utils';
 import {
@@ -190,104 +191,106 @@ const EVIDENCE_CHUNK_CHAR_LIMIT = 70_000;
 const LARGE_TEXT_SEGMENT_CHARS = 45_000;
 
 async function llmGenerate(
-  llmClient: LLMClient,
-  prompt: string,
-  options: LlmGenerateOptions
+  _llmClient: LLMClient,
+  _prompt: string,
+  _options: LlmGenerateOptions
 ): Promise<string> {
-  const startedAt = Date.now();
-  logger.info('[TEAM-INTEL-SUMMARY] LLM call started', {
-    purpose: options.purpose,
-    promptChars: prompt.length,
-  });
-
-  try {
-    return await withTeamIntelligenceLlmSlot(
-      { scope: 'user', purpose: options.purpose, promptChars: prompt.length },
-      async () => {
-        const response = await llmClient.generateStream({
-          model: appConfig.teamIntelligence.model,
-          messages: [createUserMessage(prompt)],
-        });
-        const finalMessagePromise = response.finalMessage.catch((error) => {
-          logger.warn('[TEAM-INTEL-SUMMARY] Streaming final message accumulation failed', {
-            purpose: options.purpose,
-            error,
-          });
-          return null;
-        });
-        let chunkCount = 0;
-        let contentChunkCount = 0;
-        let thinkingChunkCount = 0;
-        let streamedThinkingChars = 0;
-        let finalFinishReason: string | undefined;
-        let streamedContent = '';
-        let streamError: unknown = null;
-        try {
-          for await (const chunk of response.stream) {
-            chunkCount += 1;
-            if (chunk.type === 'content' && chunk.content) {
-              contentChunkCount += 1;
-              streamedContent += chunk.content;
-            }
-            if (chunk.type === 'thinking' && chunk.thinking) {
-              thinkingChunkCount += 1;
-              streamedThinkingChars += chunk.thinking.length;
-            }
-            if (chunk.metadata?.finishReason) {
-              finalFinishReason = chunk.metadata.finishReason;
-            }
-            if (chunk.type === 'error' && chunk.error) {
-              throw new Error(chunk.error);
-            }
-          }
-        } catch (error) {
-          streamError = error;
-        }
-        const finalMessage = await finalMessagePromise;
-        const content = (finalMessage?.content || streamedContent).trim();
-        if (streamError && content) {
-          logger.warn('[TEAM-INTEL-SUMMARY] Using streamed content after stream error', {
-            purpose: options.purpose,
-            durationMs: Date.now() - startedAt,
-            responseChars: content.length,
-            error: streamError,
-          });
-        }
-        if (streamError && !content) {
-          throw streamError;
-        }
-        if (!content) {
-          throw new Error(
-            `LLM returned an empty response (chunks=${chunkCount}, contentChunks=${contentChunkCount}, thinkingChunks=${thinkingChunkCount}, thinkingChars=${streamedThinkingChars}, finishReason=${finalFinishReason ?? 'unknown'})`
-          );
-        }
-        logger.info('[TEAM-INTEL-SUMMARY] LLM call completed', {
-          purpose: options.purpose,
-          durationMs: Date.now() - startedAt,
-          chunkCount,
-          contentChunkCount,
-          thinkingChunkCount,
-          finishReason: finalFinishReason,
-          responseChars: content.length,
-        });
-        return content;
-      }
-    );
-  } catch (error) {
-    logger.error(
-      '[TEAM-INTEL-SUMMARY] LLM call failed; section fallback will decide whether to retry, use text, or blank the section',
-      {
-        purpose: options.purpose,
-        durationMs: Date.now() - startedAt,
-        promptChars: prompt.length,
-        error,
-      }
-    );
-    throw new TeamIntelligenceLLMUnavailableError(
-      `LLM summary generation failed: ${error instanceof Error ? error.message : 'unknown error'}`
-    );
+  // LLM framework removed; original kept below.
+  throw new TeamIntelligenceLLMUnavailableError('LLM client is not configured');
+  //   const startedAt = Date.now();
+  //   logger.info('[TEAM-INTEL-SUMMARY] LLM call started', {
+  //     purpose: options.purpose,
+  //     promptChars: prompt.length,
+  //   });
+  //
+  //   try {
+  //     return await withTeamIntelligenceLlmSlot(
+  //       { scope: 'user', purpose: options.purpose, promptChars: prompt.length },
+  //       async () => {
+  //         const response = await llmClient.generateStream({
+  //           model: appConfig.teamIntelligence.model,
+  //           messages: [createUserMessage(prompt)],
+  //         });
+  //         const finalMessagePromise = response.finalMessage.catch((error) => {
+  //           logger.warn('[TEAM-INTEL-SUMMARY] Streaming final message accumulation failed', {
+  //             purpose: options.purpose,
+  //             error,
+  //           });
+  //           return null;
+  //         });
+  //         let chunkCount = 0;
+  //         let contentChunkCount = 0;
+  //         let thinkingChunkCount = 0;
+  //         let streamedThinkingChars = 0;
+  //         let finalFinishReason: string | undefined;
+  //         let streamedContent = '';
+  //         let streamError: unknown = null;
+  //         try {
+  //           for await (const chunk of response.stream) {
+  //             chunkCount += 1;
+  //             if (chunk.type === 'content' && chunk.content) {
+  //               contentChunkCount += 1;
+  //               streamedContent += chunk.content;
+  //             }
+  //             if (chunk.type === 'thinking' && chunk.thinking) {
+  //               thinkingChunkCount += 1;
+  //               streamedThinkingChars += chunk.thinking.length;
+  //             }
+  //             if (chunk.metadata?.finishReason) {
+  //               finalFinishReason = chunk.metadata.finishReason;
+  //             }
+  //             if (chunk.type === 'error' && chunk.error) {
+  //               throw new Error(chunk.error);
+  //             }
+  //           }
+  //         } catch (error) {
+  //           streamError = error;
+  //         }
+  //         const finalMessage = await finalMessagePromise;
+  //         const content = (finalMessage?.content || streamedContent).trim();
+  //         if (streamError && content) {
+  //           logger.warn('[TEAM-INTEL-SUMMARY] Using streamed content after stream error', {
+  //             purpose: options.purpose,
+  //             durationMs: Date.now() - startedAt,
+  //             responseChars: content.length,
+  //             error: streamError,
+  //           });
+  //         }
+  //         if (streamError && !content) {
+  //           throw streamError;
+  //         }
+  //         if (!content) {
+  //           throw new Error(
+  //             `LLM returned an empty response (chunks=${chunkCount}, contentChunks=${contentChunkCount}, thinkingChunks=${thinkingChunkCount}, thinkingChars=${streamedThinkingChars}, finishReason=${finalFinishReason ?? 'unknown'})`
+  //           );
+  //         }
+  //         logger.info('[TEAM-INTEL-SUMMARY] LLM call completed', {
+  //           purpose: options.purpose,
+  //           durationMs: Date.now() - startedAt,
+  //           chunkCount,
+  //           contentChunkCount,
+  //           thinkingChunkCount,
+  //           finishReason: finalFinishReason,
+  //           responseChars: content.length,
+  //         });
+  //         return content;
+  //       }
+  //     );
+  //   } catch (error) {
+  //     logger.error(
+  //       '[TEAM-INTEL-SUMMARY] LLM call failed; section fallback will decide whether to retry, use text, or blank the section',
+  //       {
+  //         purpose: options.purpose,
+  //         durationMs: Date.now() - startedAt,
+  //         promptChars: prompt.length,
+  //         error,
+  //       }
+  //     );
+  //     throw new TeamIntelligenceLLMUnavailableError(
+  //       `LLM summary generation failed: ${error instanceof Error ? error.message : 'unknown error'}`
+  //     );
+  //   }
   }
-}
 
 function normalizeCodeEvidence(
   pullRequestsInput: unknown,

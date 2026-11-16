@@ -63,7 +63,7 @@ export class ChannelController {
         res.status(400).json({ 
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }
@@ -119,7 +119,7 @@ export class ChannelController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors,
+          details: bodyResult.error.issues,
         });
         return;
       }
@@ -164,7 +164,7 @@ export class ChannelController {
         res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
-          details: queryResult.error.errors,
+          details: queryResult.error.issues,
         });
         return;
       }

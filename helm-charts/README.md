@@ -128,7 +128,6 @@ bucket per purpose; the variable names are historical and apply to all three pro
 | documents | `GCS_DOCS_BUCKET_NAME` | `xyne-docs` |
 | canvases | `GCS_CANVAS_BUCKET_NAME` | `xyne-canvas` |
 | session recordings | `GCS_SESSION_RECORDING_BUCKET_NAME` | `xyne-recordings` |
-| workflow steps | `GCS_WORKFLOW_STEPS_BUCKET_NAME` | `xyne-workflows` |
 | transcriptions | `TRANSCRIPTION_BUCKET_NAME` | `xyne-transcription` |
 | dashboard bundles (served by `xyne-dashboard-edge`) | `GCS_BUNDLE_BUCKET_NAME` | `xyne-bundles` |
 | agent chat attachments (`xyne-claw-auth`) | `S3_BUCKET_NAME` / `GCS_BUCKET_NAME` / `AZURE_STORAGE_CONTAINER` on that chart | `xyne-claw` |
@@ -326,7 +325,6 @@ xyne-backend:
     GCS_DOCS_BUCKET_NAME: xyne-docs
     GCS_CANVAS_BUCKET_NAME: xyne-canvas
     GCS_SESSION_RECORDING_BUCKET_NAME: xyne-recordings
-    GCS_WORKFLOW_STEPS_BUCKET_NAME: xyne-workflows
     TRANSCRIPTION_BUCKET_NAME: xyne-transcription
     GCS_BUNDLE_BUCKET_NAME: xyne-bundles
   secretEnv:
@@ -379,11 +377,9 @@ xyne-worker:
     GCS_DOCS_BUCKET_NAME: xyne-docs
     GCS_CANVAS_BUCKET_NAME: xyne-canvas
     GCS_SESSION_RECORDING_BUCKET_NAME: xyne-recordings
-    GCS_WORKFLOW_STEPS_BUCKET_NAME: xyne-workflows
     TRANSCRIPTION_BUCKET_NAME: xyne-transcription
     GCS_BUNDLE_BUCKET_NAME: xyne-bundles
     ENABLE_NOTIFICATION_WORKER: "true"
-    ENABLE_WORKFLOW_RECOVERY: "true"
   secretEnv:
     REDIS_PASSWORD:
       name: xyne-backend-secrets
@@ -482,7 +478,7 @@ What the file does, key by key:
   Blob with `AZURE_STORAGE_ACCOUNT`/`AZURE_STORAGE_CONTAINER`, and drop the `AWS_*` entries from
   `secretEnv`.
 - `xyne-worker`: one install runs one set of roles. `fullnameOverride` gives it its own name;
-  `ENABLE_NOTIFICATION_WORKER` and `ENABLE_WORKFLOW_RECOVERY` are the roles. The worker shares
+  `ENABLE_NOTIFICATION_WORKER` is the role. The worker shares
   `xyne-backend-secrets` and needs the same storage and Redis settings as the backend. Search
   indexing needs a second install with `ENABLE_VESPA_WORKER: "true"` once the Vespa tier exists
   (see [CHARTS.md](CHARTS.md#xyne-worker)).

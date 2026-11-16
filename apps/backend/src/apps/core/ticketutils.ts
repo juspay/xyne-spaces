@@ -110,7 +110,7 @@ export async function createTicketWithConversation(
     // Validate parameters with Zod
     const paramsResult = CreateTicketParamsSchema.safeParse(params);
     if (!paramsResult.success) {
-      const errorMessages = paramsResult.error.errors
+      const errorMessages = paramsResult.error.issues
         .map((err) => `${err.path.join('.')}: ${err.message}`)
         .join(', ');
       throw new Error(`Validation error: ${errorMessages}`);

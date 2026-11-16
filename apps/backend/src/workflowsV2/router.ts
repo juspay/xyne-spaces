@@ -1,13 +1,9 @@
 import { pipeline } from 'node:stream/promises';
 import express, { type Request, type Response, type Router } from 'express';
 import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne/workflow-sdk';
-import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { workflowAttachmentUpload } from '@/middleware/upload';
-import { ShareableEntityType } from '@xyne/shared';
-import { appResourceAccessService } from '@/services/appResourceAccessService';
-import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/sdlc-dispatch';
 import { persistence, workflowRuntime } from './runtime';
 import { attrsOf } from './utils';
 import type { XyneCtx } from './types';
@@ -22,46 +18,11 @@ import type { XyneCtx } from './types';
  */
 const NAME_PATTERN = /^[A-Za-z0-9 _()+-]+$/;
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-/**
- * Route key → how to find the workflow it acts on. Mounted behind app auth rather than
- * the session, and absent from {@link PUBLIC_ALLOWED_ROUTES} so nothing else exposes it.
- * Re-check on an SDK bump.
- *
- * A trigger names its workflow in the path. A conversation names it only when it starts —
- * after that it is identified by the run it created — so the workflow behind a running one
- * is looked up. Either way the same check follows: in this workspace, attached to this
- * install.
- */
-type WorkflowUnderTest = (req: Request) => Promise<string | undefined>;
-
+/** The workflow a run belongs to, for the upload scope check. */
 const workflowOfExecution = async (id: unknown): Promise<string | undefined> => {
   if (typeof id !== 'string' || id === '') return undefined;
   return (await persistence.getExecution(id))?.workflowId ?? undefined;
 };
-
-const APP_AUTH_ROUTES = new Map<string, WorkflowUnderTest>([
-  ['POST /v2/workflows/:workflowId/trigger/v2', (req) => Promise.resolve(req.params['workflowId'])],
-
-  // Conversations: the whole surface, which is three calls.
-  [
-    'POST /conversations',
-    async (req) => {
-      const body = isPlainObject(req.body) ? req.body : {};
-      // Starting names the workflow; answering and reading name the conversation.
-      if (typeof body['workflowId'] === 'string') return body['workflowId'];
-      return workflowOfExecution(body['conversationId']);
-    },
-  ],
-  ['GET /conversations/:id', (req) => workflowOfExecution(req.params['id'])],
-  ['POST /conversations/:id/end', (req) => workflowOfExecution(req.params['id'])],
-  [
-    'POST /executions/:execId/waits/:stepId',
-    (req) => workflowOfExecution(req.params['execId']),
-  ],
-]);
 
 /**
  * The SDK is generic over the caller's ctx and never inspects it. Ours comes from the
@@ -84,81 +45,6 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  * create to stamp ownership and is not persisted.
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
-
-/** SDLC steps act as this author, so only the server sets it: whoever last changed the steps. */
-const guardSdlcAuthor = async (key: string, request: RouteRequest, ctx: XyneCtx): Promise<void> => {
-  const body = request.body;
-  if (!isPlainObject(body)) return;
-
-  if (key === 'POST /workflows' || key === 'PUT /workflows/:id') {
-    const sent = body['metadata'];
-    const metadata = isPlainObject(sent) ? { ...sent } : {};
-    delete metadata[SDLC_AUTHOR_METADATA_KEY];
-    if (body['config']) metadata[SDLC_AUTHOR_METADATA_KEY] = ctx.userId;
-    if (sent !== undefined || body['config']) body['metadata'] = metadata;
-    return;
-  }
-
-  if (key === 'POST /executions/:execId/rerun' && body['configOverrides']) {
-    const execution = await db.workflowExecution.findFirst({
-      where: { id: request.params['execId'] ?? '', workspaceId: ctx.workspaceId },
-      select: { workflow: { select: { metadata: true } } },
-    });
-    const author = sdlcAuthorOf(execution?.workflow.metadata);
-    if (author && author !== ctx.userId) {
-      throw Object.assign(new Error('Only the workflow author can rerun it with changed steps'), {
-        statusCode: 403,
-      });
-    }
-  }
-};
-
-/**
- * The authorization the SDK skips: the handler discards its `auth` and calls
- * `triggerWebhookV2Public`, which by its own documentation "intentionally bypasses caller
- * authorization". The workflow must be in the caller's workspace AND attached to this app.
- *
- * Both lookups always run, so "no such workflow", "not yours" and "not attached" give the
- * same 404 at the same cost and cannot be told apart.
- */
-const installedAppIdOf = (req: Request): string | null => {
-  const auth = (req as { auth?: { installedAppId?: unknown } }).auth;
-  return typeof auth?.installedAppId === 'string' ? auth.installedAppId : null;
-};
-
-const assertAppMayUseWorkflow = async (
-  req: Request,
-  ctx: XyneCtx,
-  find: WorkflowUnderTest,
-): Promise<void> => {
-  const workflowId = await find(req);
-  const installedAppId = installedAppIdOf(req);
-  const [workflow, attached] = await Promise.all([
-    workflowId ? persistence.getWorkflow(workflowId) : Promise.resolve(null),
-    workflowId && installedAppId
-      ? appResourceAccessService.isAttached({
-          workspaceId: ctx.workspaceId,
-          installedAppId,
-          entityType: ShareableEntityType.WORKFLOW,
-          entityId: workflowId,
-        })
-      : Promise.resolve(false),
-  ]);
-
-  const ownedByCaller =
-    workflow !== null && attrsOf(workflow.attributes)?.workspaceId === ctx.workspaceId;
-
-  if (ownedByCaller && !attached) {
-    // A bare 404 and the wrapper only logs at 5xx, so this is the only trace an admin gets.
-    logger.warn(
-      `[workflows] install ${String(installedAppId)} is not attached to workflow ${String(workflowId)}`,
-    );
-  }
-
-  if (!ownedByCaller || !attached) {
-    throw Object.assign(new Error('Workflow not found'), { statusCode: 404 });
-  }
-};
 
 const resolveWorkflowUploadScope: express.RequestHandler = (req, res, next) => {
   void (async () => {
@@ -297,36 +183,6 @@ const PUBLIC_ALLOWED_ROUTES = new Set([
   'GET /webhooks/:workflowId',
 ]);
 
-const CLAW_ALLOWED_ROUTES = new Set([
-  'GET /schema/steps',
-  'GET /schema/steps/:type',
-  'GET /schema/triggers',
-  'GET /schema/triggers/:type',
-  'GET /schema/operators',
-  'POST /schema/available-context',
-  'GET /capabilities',
-  // Authoring.
-  'GET /workflows',
-  'GET /workflows/counts',
-  'GET /workflows/:id',
-  'POST /workflows',
-  'PUT /workflows/:id',
-  'POST /workflows/validate',
-  'POST /workflows/:id/deactivate',
-  'GET /folders',
-  'GET /folders/:id',
-  'POST /folders',
-  'POST /workflows/:id/trigger',
-  'GET /executions',
-  'GET /executions/pending-approvals',
-  'GET /executions/:execId',
-  'GET /executions/:execId/steps/:stepName/events',
-  'POST /executions/:execId/rerun',
-  'POST /executions/:execId/cancel',
-  'GET /analytics/summary',
-  'GET /analytics/top-errors',
-]);
-
 const needsSession = (access: RouteAccess): boolean => {
   switch (access) {
     case 'session':
@@ -341,7 +197,6 @@ const mount = (
   authenticated: boolean,
   allow?: ReadonlySet<string>,
   guards: readonly express.RequestHandler[] = [],
-  appAuth?: ReadonlyMap<string, WorkflowUnderTest>,
 ): void => {
   const routes = createWorkflowRouter<XyneCtx>(workflowRuntime, {
     authenticate: () => {
@@ -352,9 +207,8 @@ const mount = (
   for (const route of routes) {
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
-    const findWorkflow = appAuth?.get(key);
 
-    if (!findWorkflow && needsSession(route.access) !== authenticated) continue;
+    if (needsSession(route.access) !== authenticated) continue;
     if (allow && !allow.has(key)) continue;
 
     const middleware: express.RequestHandler[] = route.multipart
@@ -370,8 +224,7 @@ const mount = (
     router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
       void (async () => {
         try {
-          const ctx = authenticated || findWorkflow ? ctxFromRequest(req) : null;
-          if (ctx && findWorkflow) await assertAppMayUseWorkflow(req, ctx, findWorkflow);
+          const ctx = authenticated ? ctxFromRequest(req) : null;
 
           const routeRequest = buildRouteRequest(req, route.rawBody === true);
 
@@ -380,14 +233,13 @@ const mount = (
             body['attributes'] = { workspaceId: ctx.workspaceId, createdByUserId: ctx.userId };
             (routeRequest as { body: unknown }).body = body;
           }
-          if (ctx) await guardSdlcAuthor(key, routeRequest, ctx);
 
           const response = await route.handler(routeRequest, ctx);
           const name = typeof req.query['name'] === 'string' ? req.query['name'] : 'download';
           await sendRouteResponse(res, response, route.path, name);
         } catch (err) {
           const status = (err as { statusCode?: number }).statusCode ?? 500;
-          const message = err instanceof Error ? err.message : 'Internal error';
+          const message = status < 500 && err instanceof Error ? err.message : 'Internal error';
           if (status >= 500) {
             logger.error(`[workflows] ${key} failed`, err);
           }
@@ -403,9 +255,3 @@ mount(workflowsRouter, true);
 
 export const workflowsPublicRouter: Router = express.Router();
 mount(workflowsPublicRouter, false, PUBLIC_ALLOWED_ROUTES, [webhookLimiter]);
-export const workflowsClawRouter: Router = express.Router();
-mount(workflowsClawRouter, true, CLAW_ALLOWED_ROUTES);
-
-/** Registers only {@link APP_AUTH_ROUTES}; mounted under `/api/apps/workflows` behind `authenticateApp`. */
-export const workflowsAppRouter: Router = express.Router();
-mount(workflowsAppRouter, false, new Set(APP_AUTH_ROUTES.keys()), [], APP_AUTH_ROUTES);

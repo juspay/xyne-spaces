@@ -19,20 +19,22 @@ import {
   QuestionMarkCircle,
   BuildingApartmentTwo,
   LightningThunderElectricOn,
-  Atom,
   GitBranch,
+  Atom,
   LayoutGridTwoVertical,
   type PikaIconProps,
-  Tag,
+  // Disabled (LLM)
+  // Tag,
   ChatPlus,
   Subtask,
   ChatTyping,
   BookmarkDefault,
   SendPlaneSlant,
-  ListAiGenerated,
+  // Disabled (LLM)
+  // ListAiGenerated,
   KeySlant,
 } from '@xyne/icons';
-import { AudioLines, Radar, Store } from 'lucide-react';
+import { AudioLines, Store } from 'lucide-react';
 
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { isElectronApp } from '../../utils/electronApp';
@@ -49,8 +51,9 @@ export type PikaIcon = ComponentType<PikaIconProps>;
 const AudioWaveIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
   createElement(AudioLines, props);
 
-const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
-  createElement(Radar, props);
+// Disabled (LLM)
+// const RadarNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
+// createElement(Radar, props);
 
 const StoreNavIcon = ({ variant: _variant, ...props }: PikaIconProps): ReactElement =>
   createElement(Store, props);
@@ -132,23 +135,25 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     description: 'Messages set to send later',
     toolbarPath: '/scheduled-messages',
   },
-  {
-    key: 'recap',
-    label: 'Recap',
-    to: '/chat/dir/recap',
-    icon: ListAiGenerated,
-    trackName: 'OPEN_RECAP',
-    description: 'AI summary of what you missed',
-  },
-  {
-    key: 'radar',
-    label: 'Radar',
-    to: '/chat/dir/radar',
-    icon: RadarNavIcon,
-    trackName: 'OPEN_RADAR',
-    description: 'Items that need your attention',
-    requiresRadar: true,
-  },
+  // Disabled (LLM)
+  // {
+  // key: 'recap',
+  // label: 'Recap',
+  // to: '/chat/dir/recap',
+  // icon: ListAiGenerated,
+  // trackName: 'OPEN_RECAP',
+  // description: 'AI summary of what you missed',
+  // },
+  // Disabled (LLM)
+  // {
+  // key: 'radar',
+  // label: 'Radar',
+  // to: '/chat/dir/radar',
+  // icon: RadarNavIcon,
+  // trackName: 'OPEN_RADAR',
+  // description: 'Items that need your attention',
+  // requiresRadar: true,
+  // },
 ];
 
 // The full built-in set, radar-gated. The Inbox itself renders the user's
@@ -304,14 +309,15 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: BuildingApartmentTwo,
     popout: true,
   },
-  {
-    path: '/tag-review',
-    label: 'Tag Review',
-    description: 'Proposed thread tags awaiting review',
-    icon: Tag,
-    iconSize: 18,
-    popout: true,
-  },
+  // Disabled (LLM)
+  // {
+  // path: '/tag-review',
+  // label: 'Tag Review',
+  // description: 'Proposed thread tags awaiting review',
+  // icon: Tag,
+  // iconSize: 18,
+  // popout: true,
+  // },
   {
     path: '/analytics',
     label: 'Analytics',
@@ -384,13 +390,14 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     iconSize: 18,
     popout: true,
   },
-  {
-    path: '/team-intelligence',
-    label: 'Team Intelligence',
-    description: 'Also called Founder Brief: team goals and blockers',
-    icon: Atom,
-    popout: true,
-  },
+  // Disabled (LLM)
+  // {
+  // path: '/team-intelligence',
+  // label: 'Team Intelligence',
+  // description: 'Also called Founder Brief: team goals and blockers',
+  // icon: Atom,
+  // popout: true,
+  // },
   {
     path: '/secrets',
     label: 'Secrets',
@@ -461,7 +468,6 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [
 // the RESOURCES registry backing the Roles access grid (seed-acl.ts), so an
 // admin sees what they're hiding, not just a bare label.
 export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
-  '/ai': 'AI chat assistant panel',
   '/chat/dir': 'Channel-based team chat',
   '/chat/dm': 'Direct messages between users',
   '/chat/activity': 'Mentions and notification activity feed',

@@ -30,8 +30,8 @@ const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(re
 
 /**
  * The file's bytes for a previewer that reads them whole, fetched by the attachment's
- * id so the api base the app runs under applies (the SDLC lane's included). Cached
- * across tabs by the fetch service. A previewer that streams gets no bytes, at once.
+ * id so the api base the app runs under applies. Cached across tabs by the fetch
+ * service. A previewer that streams gets no bytes, at once.
  */
 export function usePreviewContent(
   file: PreviewFile,

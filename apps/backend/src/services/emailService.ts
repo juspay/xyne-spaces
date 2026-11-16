@@ -68,7 +68,8 @@ import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
 import { notificationService } from '@/services/notificationService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { generateDescription } from './agents/description-generator';
+// Disabled (LLM)
+// import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { normalizeRfcMessageId } from '@/utils/emailRfcMessageId';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
@@ -77,7 +78,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
-import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+// Disabled (LLM)
+// import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+import { type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask, buildOpeningDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -560,58 +563,59 @@ export class EmailService {
    * stays with the raw body if the AI call fails or times out, so webhook
    * ingestion is never blocked by AI availability.
    */
-  private async enrichTicketDescription(params: {
-    ticketId: string;
-    emailBody: string;
-    emailSubject: string;
-    userId: string;
-    channelId: string;
-  }): Promise<void> {
-    const { ticketId, emailBody, emailSubject, userId, channelId } = params;
-    let updatedTicket;
-    try {
-      const result = await generateDescription(
-        { rawContext: emailBody, title: emailSubject },
-        { userId, channelId },
-      );
+  // Disabled (LLM)
+  // private async enrichTicketDescription(params: {
+  //   ticketId: string;
+  //   emailBody: string;
+  //   emailSubject: string;
+  //   userId: string;
+  //   channelId: string;
+  // }): Promise<void> {
+  //   const { ticketId, emailBody, emailSubject, userId, channelId } = params;
+  //   let updatedTicket;
+  //   try {
+  //     const result = await generateDescription(
+  //       { rawContext: emailBody, title: emailSubject },
+  //       { userId, channelId },
+  //     );
 
-      if (!result.description || result.description.trim().length === 0) return;
+  //     if (!result.description || result.description.trim().length === 0) return;
 
-      updatedTicket = await this.prisma.ticket.update({
-        where: { id: ticketId },
-        data: { description: result.description, updatedBy: userId },
-      });
+  //     updatedTicket = await this.prisma.ticket.update({
+  //       where: { id: ticketId },
+  //       data: { description: result.description, updatedBy: userId },
+  //     });
 
-      // Re-index so search reflects the cleaned description.
-      this.pushVespaJobForTicket(ticketId, userId).catch((error) => {
-        // Swallowing this leaves search permanently stale for the ticket.
-        logger.error('ticket_vespa_reindex_failed', { ticketId, userId, error });
-      });
-      logger.info(`[EmailService] Ticket description enriched`, { ticketId });
-    } catch (error) {
-      logger.warn('[EmailService] Ticket description enrichment failed — keeping raw body', {
-        ticketId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-      return;
-    }
+  //     // Re-index so search reflects the cleaned description.
+  //     this.pushVespaJobForTicket(ticketId, userId).catch((error) => {
+  //       // Swallowing this leaves search permanently stale for the ticket.
+  //       logger.error('ticket_vespa_reindex_failed', { ticketId, userId, error });
+  //     });
+  //     logger.info(`[EmailService] Ticket description enriched`, { ticketId });
+  //   } catch (error) {
+  //     logger.warn('[EmailService] Ticket description enrichment failed — keeping raw body', {
+  //       ticketId,
+  //       error: error instanceof Error ? error.message : 'Unknown error',
+  //     });
+  //     return;
+  //   }
 
-    // Description is now persisted. Refresh the denormalised markdown
-    // projections so the UI / AI consumers see the enriched version instead of
-    // the raw email body. Failures here don't roll back the description — they
-    // just leave the md stale, which will self-heal on the next ticket update.
-    try {
-      await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
-      if (updatedTicket.conversationId) {
-        await messageMetadataService.syncInitialMessageMd(updatedTicket.conversationId);
-      }
-    } catch (error) {
-      logger.warn('[EmailService] Ticket description enriched but md sync failed', {
-        ticketId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  }
+  //   // Description is now persisted. Refresh the denormalised markdown
+  //   // projections so the UI / AI consumers see the enriched version instead of
+  //   // the raw email body. Failures here don't roll back the description — they
+  //   // just leave the md stale, which will self-heal on the next ticket update.
+  //   try {
+  //     await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
+  //     if (updatedTicket.conversationId) {
+  //       await messageMetadataService.syncInitialMessageMd(updatedTicket.conversationId);
+  //     }
+  //   } catch (error) {
+  //     logger.warn('[EmailService] Ticket description enriched but md sync failed', {
+  //       ticketId,
+  //       error: error instanceof Error ? error.message : 'Unknown error',
+  //     });
+  //   }
+  // }
 
   private async notifyAssigneeOfReply(params: {
     ticketId: string;
@@ -856,6 +860,7 @@ export class EmailService {
       });
     }
     if (draftingChannelId) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
+    if (draftingChannelId && (false as boolean)) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
   }
 
   /**
@@ -1229,7 +1234,8 @@ export class EmailService {
       rating,
       clientVersionName,
       clientVersionCode,
-      scopeFieldValues,
+      // Disabled (LLM)
+      // scopeFieldValues,
       deferChannelSideEffects = false,
       onThreadCommitted,
     } = params;
@@ -1371,23 +1377,24 @@ export class EmailService {
 
     // Ticket-creating mail only: DEFAULT (inbound) and COMPOSE (outbound-new).
     // Fire-and-forget — a failure leaves the ticket with no related tickets, no retry.
-    if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
-      ticketDuplicateService.persistDuplicateReferences({
-        ticketId: ticket.id,
-        ticketCreatedBy: ticket.createdBy,
-        title: ticket.title,
-        description: ticket.description,
-        projectId: ticket.projectId,
-        userId,
-        channelId,
-        scopeFieldValues,
-      }).catch((error: unknown) => {
-        logger.error('[EmailService] Failed to persist duplicate references for ticket', {
-          ticketId: ticket.id,
-          error,
-        });
-      });
-    }
+    // Disabled (LLM)
+    // if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
+    //   ticketDuplicateService.persistDuplicateReferences({
+    //     ticketId: ticket.id,
+    //     ticketCreatedBy: ticket.createdBy,
+    //     title: ticket.title,
+    //     description: ticket.description,
+    //     projectId: ticket.projectId,
+    //     userId,
+    //     channelId,
+    //     scopeFieldValues,
+    //   }).catch((error: unknown) => {
+    //     logger.error('[EmailService] Failed to persist duplicate references for ticket', {
+    //       ticketId: ticket.id,
+    //       error,
+    //     });
+    //   });
+    // }
 
     // Enqueue AI classification as a Redis worker job
     await emailClassificationQueue.getQueue().add('classify', {
@@ -1415,15 +1422,16 @@ export class EmailService {
       });
     }
 
-    // Fire-and-forget: enrich the ticket description via the AI agent. Never
-    // blocks ingestion; ticket keeps the raw email body if this fails or times out.
-    void this.enrichTicketDescription({
-      ticketId: ticket.id,
-      emailBody,
-      emailSubject,
-      userId,
-      channelId,
-    });
+    // Disabled (LLM)
+    // // Fire-and-forget: enrich the ticket description via the AI agent. Never
+    // // blocks ingestion; ticket keeps the raw email body if this fails or times out.
+    // void this.enrichTicketDescription({
+    //   ticketId: ticket.id,
+    //   emailBody,
+    //   emailSubject,
+    //   userId,
+    //   channelId,
+    // });
 
     void this.triggerAutoDraft({
       ticketId: ticket.id,
@@ -1810,14 +1818,15 @@ export class EmailService {
       });
     }
 
-    // Fire-and-forget enrichment — same pattern as createConversationWithEmail.
-    void this.enrichTicketDescription({
-      ticketId: ticket.id,
-      emailBody,
-      emailSubject,
-      userId,
-      channelId,
-    });
+    // Disabled (LLM)
+    // // Fire-and-forget enrichment — same pattern as createConversationWithEmail.
+    // void this.enrichTicketDescription({
+    //   ticketId: ticket.id,
+    //   emailBody,
+    //   emailSubject,
+    //   userId,
+    //   channelId,
+    // });
 
     // Auto-assign ticket if userGroupId is provided
     if (userGroupId && boardId) {
@@ -2353,22 +2362,23 @@ export class EmailService {
 
       // isNew implies !existingFirstEmail, where projectId is resolved — so this is always
       // truthy here; the guard is what narrows string | undefined for TS.
-      if (projectId) {
-        ticketDuplicateService.persistDuplicateReferences({
-          ticketId: txResult.ticketId,
-          ticketCreatedBy: userId,
-          title: firstEmail.subject,
-          description: firstEmail.body,
-          projectId,
-          userId,
-          channelId,
-        }).catch((error: unknown) => {
-          logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
-            ticketId: txResult.ticketId,
-            error,
-          });
-        });
-      }
+      // Disabled (LLM)
+      // if (projectId) {
+      //   ticketDuplicateService.persistDuplicateReferences({
+      //     ticketId: txResult.ticketId,
+      //     ticketCreatedBy: userId,
+      //     title: firstEmail.subject,
+      //     description: firstEmail.body,
+      //     projectId,
+      //     userId,
+      //     channelId,
+      //   }).catch((error: unknown) => {
+      //     logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
+      //       ticketId: txResult.ticketId,
+      //       error,
+      //     });
+      //   });
+      // }
 
       // Enqueue AI classification as a Redis worker job
       await emailClassificationQueue.getQueue().add('classify', {

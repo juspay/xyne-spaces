@@ -98,7 +98,7 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
 
   /**
    * Find every user in a workspace whose email local part matches `localPart`
-   * (the segment before `@`), e.g. 'harimohan.sharma' → harimohan.sharma@juspay.in.
+   * (the segment before `@`), e.g. 'harimohan.sharma' → harimohan.sharma@example.com.
    *
    * This is the Xyne equivalent of Slack's per-workspace `user.name` handle, which
    * Slack auto-derives from the email local part at signup — it is what lets Slack

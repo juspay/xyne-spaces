@@ -16,7 +16,7 @@ function base(overrides: Partial<TwinApprovalFlowParams> = {}): TwinApprovalFlow
     task: "can you review the PR?",
     agentSlug: "digital-twin",
     dmChannelId: "dm1",
-    spacesBaseUrl: "https://spaces.example.com",
+    spacesBaseUrl: "https://example.org",
     ...overrides,
   };
 }

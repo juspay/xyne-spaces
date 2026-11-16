@@ -9,6 +9,12 @@ export interface JwtPayload {
   picture?: string;
   workspaceId: string;
   memberId: string;
+  /**
+   * auth_sessions.id the token was minted under; encryption, push tokens and activity key on it.
+   * Absent only on the JWT handed to an SDK at device-flow approval (routes/sdk-sso.ts), which
+   * has no auth session of its own until the SDK's first refresh.
+   */
+  sid?: string;
   providerUserId?: string;
   provider?: string;
   iat?: number;
@@ -18,16 +24,18 @@ export interface JwtPayload {
 }
 
 export class JwtService {
-  private readonly secret: string;
   private readonly issuer = 'xyne';
   private readonly audience = 'xyne-user';
+  private resolvedSecret: string | null = null;
 
-  constructor() {
-    const secret = process.env.JWT_SECRET;
+  private get secret(): string {
+    if (this.resolvedSecret) return this.resolvedSecret;
+    const secret = config.jwt.secret;
     if (!secret || secret.length < 32) {
       throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
     }
-    this.secret = secret;
+    this.resolvedSecret = secret;
+    return secret;
   }
 
   /**
@@ -59,6 +67,7 @@ export class JwtService {
           picture: payload.picture,
           workspaceId: payload.workspaceId,
           memberId: payload.memberId,
+          sid: payload.sid,
           providerUserId: payload.providerUserId,
           provider: payload.provider,
         },
@@ -84,6 +93,7 @@ export class JwtService {
   verifyToken(token: string): JwtPayload {
     try {
       const decoded = jwt.verify(token, this.secret, {
+        algorithms: ['HS256'],
         issuer: this.issuer,
         audience: this.audience,
       }) as JwtPayload;
@@ -137,3 +147,11 @@ export class JwtService {
 }
 
 export const jwtService = new JwtService();
+
+/** Boot-time check for processes that sign or verify session tokens (the API). */
+export function assertJwtSecretConfigured(): void {
+  const secret = config.jwt.secret;
+  if (!secret || secret.length < 32) {
+    throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
+  }
+}

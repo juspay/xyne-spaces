@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 export interface ExternalCallTokenPayload {
   participantId: string;
@@ -16,14 +17,16 @@ const AUDIENCE = 'xyne-external-participant';
 const MAX_AGE_SECONDS = 24 * 60 * 60; // 24 hours
 
 class ExternalCallTokenService {
-  private readonly secret: string;
+  private resolvedSecret: string | null = null;
 
-  constructor() {
-    const secret = process.env.JWT_SECRET;
+  private get secret(): string {
+    if (this.resolvedSecret) return this.resolvedSecret;
+    const secret = config.jwt.secret;
     if (!secret || secret.length < 32) {
       throw new Error('JWT_SECRET environment variable is required and must be at least 32 characters');
     }
-    this.secret = secret;
+    this.resolvedSecret = secret;
+    return secret;
   }
 
   sign(payload: { participantId: string; callId: string; externalId: string }): string {
@@ -45,6 +48,7 @@ class ExternalCallTokenService {
   verify(token: string): ExternalCallTokenPayload | null {
     try {
       return jwt.verify(token, this.secret, {
+        algorithms: ['HS256'],
         issuer: ISSUER,
         audience: AUDIENCE,
       }) as ExternalCallTokenPayload;

@@ -154,7 +154,7 @@ export const DashboardAiEventSchema = z.discriminatedUnion('type', [
     type: z.literal('tool_activity'),
     toolCallId: z.string().min(1),
     toolName: z.string().min(1),
-    args: z.record(z.unknown()).optional(),
+    args: z.record(z.string(), z.unknown()).optional(),
     result: z.string().optional(),
     status: z.enum(['running', 'completed', 'error']),
     durationMs: z.number().optional(),

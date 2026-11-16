@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Pencil, CircleHelp, Sparkles, Loader2 } from 'lucide-react';
+// Disabled (LLM)
+// import { Pencil, CircleHelp, Sparkles, Loader2 } from 'lucide-react';
+import { CircleHelp, Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Switch } from '../../../ui/Switch';
 import Tooltip from '../../../ui/Tooltip';
@@ -49,17 +51,21 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
     setDeskReportAgentSlug,
     deskReportRangeDays,
     setDeskReportRangeDays,
-    classificationEnabledDraft,
+    // Disabled (LLM)
+    // classificationEnabledDraft,
     classificationEnabledSaved,
-    setClassificationEnabled,
-    priorityEnabledDraft,
+    // Disabled (LLM)
+    // setClassificationEnabled,
+    // priorityEnabledDraft,
     priorityEnabledSaved,
-    setPriorityEnabled,
+    // Disabled (LLM)
+    // setPriorityEnabled,
     clawAgents,
     aiFeatureConfig,
     setAiFeatureConfig,
-    openClassificationConfig,
-    openPriorityConfig,
+    // Disabled (LLM)
+    // openClassificationConfig,
+    // openPriorityConfig,
     // classification config (controlled)
     classificationPromptDraft,
     setClassificationPromptDraft,
@@ -340,6 +346,8 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
         title='Attribution'
         description='Automatically prioritize, classify, and tag incoming tickets with AI.'
       >
+        {/* Disabled (LLM) */}
+        {/*
         <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6'>
           <div className='min-w-0 flex-1'>
             <div className='flex items-center gap-[16px]'>
@@ -405,6 +413,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
             </button>
           </span>
         </div>
+        */}
 
         <TagGenerationConfig
           canManage={canManage}

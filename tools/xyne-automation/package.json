@@ -30,7 +30,6 @@
     "validate:literals": "ts-node --project tsconfig.json scripts/validation/validate-literals.ts"
   },
   "keywords": [],
-  "author": "Ameer Noufil <ameer.noufil@juspay.com>",
   "license": "Apache-2.0",
   "type": "commonjs",
   "devDependencies": {

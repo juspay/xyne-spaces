@@ -1,3 +1,7 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
+import { authorCanSeeChannel } from '../util/author-access';
+import { db } from '@/database/client';
+import type { AutomationContext } from '../types/context';
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
@@ -37,11 +41,32 @@ export class CreateEmailDraftStep extends BaseActionStep<
 
   async execute(
     config: z.infer<typeof CreateEmailDraftConfigSchema>,
+    context: AutomationContext,
   ): Promise<CreateEmailDraftOutput> {
+    const conversation = await db.conversation.findFirst({
+      where: {
+        conversationId: config.conversationId as string,
+        channelId: config.channelId as string,
+        workspaceId: context.automation.workspaceId,
+      },
+      select: { channelId: true },
+    });
+    if (!conversation) {
+      throw new Error('[CREATE_EMAIL_DRAFT] conversation is not in that channel in this workspace');
+    }
+    if (
+      !(await authorCanSeeChannel(
+        conversation.channelId,
+        context.automation.createdById,
+        context.automation.workspaceId,
+      ))
+    ) {
+      throw new Error('[CREATE_EMAIL_DRAFT] channel is private and the automation author is not a participant');
+    }
     const draft = await repositories.emailDrafts.upsertForChannelConversation({
       channelId: config.channelId as string,
       conversationId: config.conversationId as string,
-      draftContent: config.draftContent as string,
+      draftContent: sanitizeMessageContent(config.draftContent as string),
     });
 
     return {

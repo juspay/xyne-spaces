@@ -2,7 +2,19 @@
  * Application configuration constants
  */
 
-const { APP_ENV } = require('../../package.json');
+const packageJson = require('../../package.json');
+const { APP_ENV } = packageJson;
+
+// Hosted deployment URLs are not hard-coded. Each value is read from the environment
+// (dev, CI) and otherwise from package.json, where electron-builder's
+// `extraMetadata` (build.*.json, or `-c.extraMetadata.<NAME>=<url>` on the
+// command line) bakes it into a packaged build. Unset, the value is empty.
+const deploymentValue = (name: string): string => {
+  const fromEnv = process.env[name];
+  if (fromEnv) return fromEnv;
+  const fromPackage: unknown = packageJson[name];
+  return typeof fromPackage === 'string' ? fromPackage : '';
+};
 
 export interface AppConfig {
   BACKEND_URL: string;
@@ -62,13 +74,13 @@ const devConfig: AppConfig = {
 };
 
 const prodConfig: AppConfig = {
-  BACKEND_URL: 'https://app.spaces.xyne.juspay.net',
-  MTLS_BACKEND_URL: 'https://auth.spaces.xyne.juspay.net',
-  MTLS_FRONTEND_URL: 'https://auth.spaces.xyne.juspay.net',
+  BACKEND_URL: deploymentValue('XYNE_BACKEND_URL'),
+  MTLS_BACKEND_URL: deploymentValue('XYNE_MTLS_BACKEND_URL'),
+  MTLS_FRONTEND_URL: deploymentValue('XYNE_MTLS_FRONTEND_URL'),
   MTLS_IDENTITY_NAME: 'Web Simulation Client',
-  UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
-  FRONTEND_URL: 'https://app.spaces.xyne.juspay.net',
-  CLAW_AUTH_URL: 'https://app.spaces.xyne.juspay.net',
+  UNPROTECTED_URL: deploymentValue('XYNE_UNPROTECTED_URL'), // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
+  FRONTEND_URL: deploymentValue('XYNE_FRONTEND_URL'),
+  CLAW_AUTH_URL: deploymentValue('XYNE_CLAW_AUTH_URL'),
   DEEP_LINK_PROTOCOL: 'xyne-spaces',
   USER_DATA_SUFFIX: '',             // Empty — prod keeps original path, no migration needed
   APP_NAME: 'Xyne Spaces',
@@ -84,20 +96,20 @@ const prodConfig: AppConfig = {
   sendLogs: true,
   enableOtelMetrics: true,
   loginTempHeader: true,
-  RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
-  UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
+  RELEASE_CONFIG_URL: deploymentValue('RELEASE_CONFIG_URL'),
+  UI_ZIP_URL: deploymentValue('UI_ZIP_URL'),
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
   preProdKey: 'preProdFeaturesEnabled',
 };
 
 const sandboxConfig: AppConfig = {
-  BACKEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
-  MTLS_BACKEND_URL: 'https://auth.spaces.sandbox.xyne.juspay.net',
-  MTLS_FRONTEND_URL: 'https://auth.spaces.sandbox.xyne.juspay.net',
+  BACKEND_URL: deploymentValue('XYNE_BACKEND_URL'),
+  MTLS_BACKEND_URL: deploymentValue('XYNE_MTLS_BACKEND_URL'),
+  MTLS_FRONTEND_URL: deploymentValue('XYNE_MTLS_FRONTEND_URL'),
   MTLS_IDENTITY_NAME: 'Web Simulation Client Sandbox',
-  UNPROTECTED_URL: 'https://spaces.xyne.juspay.net', // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
-  FRONTEND_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
-  CLAW_AUTH_URL: 'https://app.spaces.sandbox.xyne.juspay.net',
+  UNPROTECTED_URL: deploymentValue('XYNE_UNPROTECTED_URL'), // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
+  FRONTEND_URL: deploymentValue('XYNE_FRONTEND_URL'),
+  CLAW_AUTH_URL: deploymentValue('XYNE_CLAW_AUTH_URL'),
   DEEP_LINK_PROTOCOL: 'xyne-spaces-sandbox',
   USER_DATA_SUFFIX: '-sandbox',
   APP_NAME: 'Xyne Spaces Sandbox',
@@ -112,8 +124,8 @@ const sandboxConfig: AppConfig = {
   useBundledUI: false,
   sendLogs: true,
   enableOtelMetrics: true,
-  RELEASE_CONFIG_URL: 'https://airborne.juspay.in/release/xyne/xyne-mobile',
-  UI_ZIP_URL: 'https://app.spaces.xyne.juspay.net/releases/dashboard.zip',
+  RELEASE_CONFIG_URL: deploymentValue('RELEASE_CONFIG_URL'),
+  UI_ZIP_URL: deploymentValue('UI_ZIP_URL'),
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod
   preProdKey: 'preProdFeaturesEnabled'
 };
@@ -134,3 +146,49 @@ export const config: AppConfig = {
   RELEASE_CONFIG_URL: process.env.RELEASE_CONFIG_URL || baseConfig.RELEASE_CONFIG_URL,
   UI_ZIP_URL: process.env.UI_ZIP_URL || baseConfig.UI_ZIP_URL,
 };
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Hostnames treated as first party by the privileged renderer bridge (preload.ts),
+ * the cookie sync and the frontend CSP. XYNE_FIRST_PARTY_HOSTS (comma-separated;
+ * an entry starting with "." or "*." matches the domain and every subdomain, e.g.
+ * ".example.org") overrides the default, which is the hosts of the configured
+ * URLs above. localhost is handled by each caller separately.
+ */
+const configuredFirstPartyHosts = deploymentValue('XYNE_FIRST_PARTY_HOSTS')
+  .split(',')
+  .map((host) => host.trim().toLowerCase().replace(/^\*\./, '.'))
+  .filter(Boolean);
+
+export const FIRST_PARTY_HOSTS: string[] =
+  configuredFirstPartyHosts.length > 0
+    ? configuredFirstPartyHosts
+    : Array.from(
+        new Set(
+          [
+            config.BACKEND_URL,
+            config.MTLS_BACKEND_URL,
+            config.MTLS_FRONTEND_URL,
+            config.UNPROTECTED_URL,
+            config.FRONTEND_URL,
+            config.CLAW_AUTH_URL,
+          ]
+            .map(hostOf)
+            .filter((host) => host && host !== 'localhost' && host !== '127.0.0.1'),
+        ),
+      );
+
+// Mirrored in preload.ts, which cannot require this module.
+export function isFirstPartyHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return FIRST_PARTY_HOSTS.some((entry) =>
+    entry.startsWith('.') ? host === entry.slice(1) || host.endsWith(entry) : host === entry,
+  );
+}

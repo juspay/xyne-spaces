@@ -2,7 +2,6 @@ import { asService, asSystem } from './base';
 import { externalSourceCore } from '@/integrations/core/core';
 import type { BitbucketWebhookService } from '@/services/bitbucketWebhookService';
 import type { BitbucketWebhookEnvelope } from '@/routes/webhooks';
-import type { GcsPollingService } from '@/services/gcsPollingService';
 import type { GitHubWebhookService } from '@/services/githubWebhookService';
 
 /**
@@ -49,9 +48,8 @@ export function runBitbucketWebhook(
  * Relocated from services/githubWebhookService.ts's handleWebhookEvent. Unauthenticated webhook
  * (no req.user). The new /webhooks/github/:workspaceId route carries a workspaceId — used to
  * open scope before the PR-metrics/ticket-sync writes pull_request events trigger. The legacy
- * /webhooks/github route (no workspaceId) only acknowledges pull_request events and processes
- * issue_comment ones, which resolve their own workspace deeper inside xyneCommentService — no
- * tenant is knowable at this entry point, so that branch runs as system instead.
+ * /webhooks/github route (no workspaceId) only acknowledges events — no tenant is knowable at
+ * this entry point, so that branch runs as system instead.
  */
 export function runGitHubWebhook(
   service: GitHubWebhookService,
@@ -70,27 +68,7 @@ export function runGitHubWebhook(
   }
   return asSystem(
     ['Ticket', 'Message', 'Conversation'],
-    'github webhook: legacy route carries no workspaceId, only acknowledges pull_request and processes issue_comment, which resolves its own workspace downstream',
+    'github webhook: legacy route carries no workspaceId, only acknowledges events',
     () => service.processWebhookEvent(eventType, payload, workspaceId),
-  );
-}
-
-/**
- * Relocated from services/gcsPollingService.ts's poll loop. Background poller → no request
- * context; the systemUserId actor is a dedicated bot account, not a participant of the channels
- * or tickets this touches, so relational predicates on a real caller would return nothing.
- */
-export function processGcsFile(
-  systemUserId: string,
-  workspaceId: string,
-  poller: GcsPollingService,
-  file: Parameters<GcsPollingService['processFile']>[0],
-): Promise<void> {
-  return asService(
-    ['Ticket', 'Conversation', 'Message'],
-    'gcs polling: background poller has no request context, actor is a dedicated bot account not a participant',
-    systemUserId,
-    workspaceId,
-    () => poller.processFile(file),
   );
 }

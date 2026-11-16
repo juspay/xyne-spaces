@@ -2,7 +2,7 @@
 
 This folder (`apps/public-web`) hosts the **Public Link Domain** for Xyne Spaces. 
 
-It is hosted on **Firebase Hosting** (e.g., `https://xyne-spaces.web.app`) to serve standard "App Link" verification files that must be public (bypassing the VPN/mTLS of the main backend).
+It is hosted on **Firebase Hosting** (e.g., `https://public.example.org`) to serve standard "App Link" verification files that must be public (bypassing the VPN/mTLS of the main backend).
 
 ## Purpose
 1.  **Deep Linking**: Hosts `.well-known/assetlinks.json` (Android) and `apple-app-site-association` (iOS) to enable direct app launching.

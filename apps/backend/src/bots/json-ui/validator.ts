@@ -12,7 +12,7 @@ export function validateFlowJson(data: unknown): { success: true; data: FlowJson
       return { success: true, data: result.data };
     }
     
-    const errors = result.error.errors.map((err: any) => 
+    const errors = result.error.issues.map((err: any) => 
       `${err.path.join('.')}: ${err.message}`
     );
     

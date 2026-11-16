@@ -1,12 +1,12 @@
-import { LLMClient, createUserMessage } from '@framework';
-import { config as appConfig } from '@/config/env';
+// import { LLMClient, createUserMessage } from '@framework'; // framework removed
+// import { config as appConfig } from '@/config/env';
 import {
   TeamChannelRecapChannelCandidate,
   teamIntelligenceTeamRepository,
 } from '@/database/repositories/teamIntelligenceTeamRepository';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { createTeamIntelligenceLlmClient } from '@/team-intelligence/services/team-intelligence-llm-client';
+// import { createTeamIntelligenceLlmClient } from '@/team-intelligence/services/team-intelligence-llm-client';
 
 export interface TeamBulletsDateRangeInput {
   from: Date;
@@ -18,9 +18,9 @@ export interface TeamBulletsDateRangeInput {
 }
 
 class TeamIntelligenceTeamDashboardService {
-  private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
-    return createTeamIntelligenceLlmClient();
-  }
+//   private async getDefaultWorkspaceLlmClient(): Promise<LLMClient | null> {
+//     return createTeamIntelligenceLlmClient();
+//   }
 
   async getTeamBullets(input: TeamBulletsDateRangeInput) {
     try {
@@ -114,64 +114,66 @@ class TeamIntelligenceTeamDashboardService {
     return scored.length > 0 ? scored : candidates.slice(0, 5).map((candidate) => candidate.channelId);
   }
 
-  private async llmMatchChannelIds(teamNames: string[], candidates: TeamChannelRecapChannelCandidate[]): Promise<string[]> {
-    if (candidates.length === 0) {
-      return [];
-    }
-
-    try {
-      const llmClient = await this.getDefaultWorkspaceLlmClient();
-      if (!llmClient) {
-        return [];
+  private async llmMatchChannelIds(_teamNames: string[], _candidates: TeamChannelRecapChannelCandidate[]): Promise<string[]> {
+    // LLM framework removed; original kept below.
+    return [];
+    //     if (candidates.length === 0) {
+    //       return [];
+    //     }
+    //
+    //     try {
+    //       const llmClient = await this.getDefaultWorkspaceLlmClient();
+    //       if (!llmClient) {
+    //         return [];
+    //       }
+    //
+    //       const candidateJson = JSON.stringify(
+    //         candidates.map((candidate) => ({
+    //           channelId: candidate.channelId,
+    //           channelName: candidate.channelName,
+    //           recapCount: candidate.recapCount,
+    //         }))
+    //       );
+    //
+    //       const teamNamesLine = teamNames.length === 1
+    //         ? `Team name: ${teamNames[0]}`
+    //         : `Team names (all known names for this team, including past names): ${teamNames.join(', ')}`;
+    //
+    //       const prompt = [
+    //         'You are matching a team to related channel names.',
+    //         teamNamesLine,
+    //         'Candidate channels (JSON array):',
+    //         candidateJson,
+    //         'Return ONLY valid JSON in this shape: {"matchedChannelIds": ["id1", "id2"]}.',
+    //         'Include all likely matches, ordered from most likely to least likely.',
+    //         'Do not include channel IDs that are not present in the candidate list.',
+    //       ].join('\n');
+    //
+    //       const response = await llmClient.generate({
+    //         model: appConfig.workflow.defaultModelName,
+    //         messages: [createUserMessage(prompt)],
+    //         parameters: { maxTokens: 1024 },
+    //       });
+    //
+    //       const raw = response.content?.trim();
+    //       if (!raw) {
+    //         return [];
+    //       }
+    //
+    //       const parsed = JSON.parse(raw) as { matchedChannelIds?: unknown };
+    //       const allowedIds = new Set(candidates.map((candidate) => candidate.channelId));
+    //       const matchedIds = Array.isArray(parsed.matchedChannelIds)
+    //         ? parsed.matchedChannelIds
+    //             .filter((value): value is string => typeof value === 'string')
+    //             .filter((id) => allowedIds.has(id))
+    //         : [];
+    //
+    //       return [...new Set(matchedIds)];
+    //     } catch (error) {
+    //       logger.warn('[TEAM-INTEL-TEAM] LLM team-channel matching failed', { error, teamNames });
+    //       return [];
+    //     }
       }
-
-      const candidateJson = JSON.stringify(
-        candidates.map((candidate) => ({
-          channelId: candidate.channelId,
-          channelName: candidate.channelName,
-          recapCount: candidate.recapCount,
-        }))
-      );
-
-      const teamNamesLine = teamNames.length === 1
-        ? `Team name: ${teamNames[0]}`
-        : `Team names (all known names for this team, including past names): ${teamNames.join(', ')}`;
-
-      const prompt = [
-        'You are matching a team to related channel names.',
-        teamNamesLine,
-        'Candidate channels (JSON array):',
-        candidateJson,
-        'Return ONLY valid JSON in this shape: {"matchedChannelIds": ["id1", "id2"]}.',
-        'Include all likely matches, ordered from most likely to least likely.',
-        'Do not include channel IDs that are not present in the candidate list.',
-      ].join('\n');
-
-      const response = await llmClient.generate({
-        model: appConfig.workflow.defaultModelName,
-        messages: [createUserMessage(prompt)],
-        parameters: { maxTokens: 1024 },
-      });
-
-      const raw = response.content?.trim();
-      if (!raw) {
-        return [];
-      }
-
-      const parsed = JSON.parse(raw) as { matchedChannelIds?: unknown };
-      const allowedIds = new Set(candidates.map((candidate) => candidate.channelId));
-      const matchedIds = Array.isArray(parsed.matchedChannelIds)
-        ? parsed.matchedChannelIds
-            .filter((value): value is string => typeof value === 'string')
-            .filter((id) => allowedIds.has(id))
-        : [];
-
-      return [...new Set(matchedIds)];
-    } catch (error) {
-      logger.warn('[TEAM-INTEL-TEAM] LLM team-channel matching failed', { error, teamNames });
-      return [];
-    }
-  }
 
   async getTeamChannelRecaps(input: { from: Date; to: Date; teamId: string; page: number; limit: number; workspaceId: string }) {
     try {

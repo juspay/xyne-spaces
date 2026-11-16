@@ -16,7 +16,6 @@ import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { useChannel } from '../../../hooks/useChannels';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { roomActor } from '../../../machines/roomMachine';
-import { isSdlcSurface } from '../../../config';
 import { useUsersById } from '../../../hooks/useUsers';
 import { queries } from '../../../zero/queries';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
@@ -166,15 +165,11 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
   }, [starting, resetStart]);
 
   const placeCall = useCallback((): void => {
-    if (isSdlcSurface) {
-      dismissIntentCallSuggestion(detection.messageId);
-    } else {
-      sawIdleSinceStart.current = !isInCall;
-      sawAttempt.current = false;
-      setStarting(true);
-    }
+    sawIdleSinceStart.current = !isInCall;
+    sawAttempt.current = false;
+    setStarting(true);
     handleCallClick();
-  }, [handleCallClick, isInCall, detection.messageId]);
+  }, [handleCallClick, isInCall]);
 
   const confirmStart = useCallback(
     (): void => handleConfirmCall(placeCall),

@@ -23,8 +23,10 @@ import {
   ClipboardCheck,
   Hash,
   Lock,
-  Tag as TagIcon,
-  ChevronRight,
+  // Disabled (LLM)
+  // Tag as TagIcon,
+  // Disabled (LLM)
+  // ChevronRight,
 } from 'lucide-react';
 import {
   ArrowLeft,
@@ -47,9 +49,10 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
+  // Disabled (LLM)
+  // DropdownMenuSub,
+  // DropdownMenuSubContent,
+  // DropdownMenuSubTrigger,
 } from '../ui/dropdown-menu';
 import { AddToStreamMenuItem } from '../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { ChatInput } from './ChatInput';
@@ -66,9 +69,12 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../utils/classNames';
 import JoinChannel from './JoinChannel/JoinChannel';
 import { BotBubble } from './BotBubble';
-import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
-import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
-import { useShowThreadTags } from '../../hooks/useShowThreadTags';
+// Disabled (LLM)
+// import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
+// Disabled (LLM)
+// import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
+// Disabled (LLM)
+// import { useShowThreadTags } from '../../hooks/useShowThreadTags';
 import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
@@ -770,8 +776,9 @@ export const ThreadMessages = ({
     [initialMessageContent],
   );
   const initialMessageSender = useUser(initialMessage?.senderId || '');
-  const setThreadTypes = useSetThreadTypes(derivedConversationId);
-  const { showThreadTags } = useShowThreadTags();
+  // Disabled (LLM)
+  // const setThreadTypes = useSetThreadTypes(derivedConversationId);
+  // const { showThreadTags } = useShowThreadTags();
   const askAIAvailable = useAskAIAvailable();
   // Which tag's evidence is on screen. Owned here because this component renders both the
   // chips and the message list; cleared on thread change so it never leaks across threads.
@@ -1441,7 +1448,8 @@ export const ThreadMessages = ({
                   />
                 </DropdownMenuItem>
               )}
-              {showThreadTags && !channel?.isArchived && (
+              {/* Disabled (LLM) */}
+              {/* {showThreadTags && !channel?.isArchived && (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger
                     className='gap-2'
@@ -1466,7 +1474,7 @@ export const ThreadMessages = ({
                     />
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-              )}
+              )} */}
               {!isMobile && !channel?.isArchived && (
                 <DropdownMenuItem
                   className='gap-2'
@@ -1710,7 +1718,8 @@ export const ThreadMessages = ({
                       }}
                     />
                   )}
-                  {showThreadTags && !channel?.isArchived && (
+                  {/* Disabled (LLM) */}
+                  {/* {showThreadTags && !channel?.isArchived && (
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger
                         className='gap-2'
@@ -1735,7 +1744,7 @@ export const ThreadMessages = ({
                         />
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
-                  )}
+                  )} */}
                   {!isMobile && !channel?.isArchived && (
                     <DropdownMenuItem
                       className='gap-2'
@@ -2060,17 +2069,20 @@ export const ThreadMessages = ({
                         ? ticket.title
                         : discussionTitle || 'Thread message'}
                   </h3>
-                  {/* Classifies the whole thread, so it belongs beside the title rather
-                      than against any one message. */}
-                  {!simpleView && (
-                    <ThreadTags
-                      conversationId={derivedConversationId}
-                      threadType={conversation?.threadType}
-                      canEdit
-                      inspectedTag={inspectedTag}
-                      onInspect={setInspectedTag}
-                    />
-                  )}
+                  {/* Disabled (LLM) */}
+                  {
+                    // {/* Classifies the whole thread, so it belongs beside the title rather
+                    //     than against any one message. */}
+                    // {!simpleView && (
+                    //   <ThreadTags
+                    //     conversationId={derivedConversationId}
+                    //     threadType={conversation?.threadType}
+                    //     canEdit
+                    //     inspectedTag={inspectedTag}
+                    //     onInspect={setInspectedTag}
+                    //   />
+                    // )}
+                  }
                   {!simpleView && focusedChannelBreadcrumb}
                 </div>
 

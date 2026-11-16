@@ -4,6 +4,8 @@ import { logger } from '@/utils/logger';
 import { OAuth2Client } from 'google-auth-library';
 import { GoogleCredentials } from './types';
 import { SHARED_GOOGLE_WEBHOOK_PATH } from '@/services/googleService';
+import { config } from '@/config/env';
+import { checkNotificationMailbox } from './pubsubNotification';
 
 const TAG = '[GoogleAuthenticator]';
 const FAIL: AuthResult = { authenticated: false };
@@ -29,11 +31,11 @@ export class GoogleAuthenticator extends BaseAuthenticator {
       }
 
       // 1. Verify OIDC JWT from Authorization header
-      const jwtError = await this.verifyJWT(headers);
+      const jwtError = await this.verifyJWT(headers, payload.subscription);
       if (jwtError) return this.fail(jwtError, { sourceName });
 
       // 2. Verify email matches credentials
-      const emailError = this.verifyEmail(payload.message.data, credentials.email);
+      const emailError = checkNotificationMailbox(payload.message.data, credentials.email);
       if (emailError) return this.fail(emailError, { sourceName });
 
       logger.info(`${TAG} Authentication successful`, { sourceName });
@@ -49,7 +51,14 @@ export class GoogleAuthenticator extends BaseAuthenticator {
 
   private async verifyJWT(
     headers: Record<string, string | string[]>,
+    subscription: unknown,
   ): Promise<string | null> {
+    const { pubsubPushServiceAccountEmail, pubsubPushSubscription } = config.google;
+    if (!pubsubPushServiceAccountEmail || !pubsubPushSubscription) {
+      return 'Pub/Sub push service account / subscription not configured';
+    }
+    if (subscription !== pubsubPushSubscription) return 'Pub/Sub subscription mismatch';
+
     const authHeader = headers['authorization'];
     if (!authHeader) return 'Missing Authorization header';
 
@@ -61,29 +70,18 @@ export class GoogleAuthenticator extends BaseAuthenticator {
     // now arrives at the same URL, regardless of which source it's for. The
     // sourceName arg is the body-resolved DB name (e.g. "google-nikunj-gupta")
     // and must NOT be interpolated here, or the audience will mismatch the JWT.
-    const expectedAudience = `${process.env.BACKEND_URL || 'http://localhost:3000'}${SHARED_GOOGLE_WEBHOOK_PATH}`;
+    const expectedAudience = `${config.backendUrl || 'http://localhost:3000'}${SHARED_GOOGLE_WEBHOOK_PATH}`;
 
     try {
       const ticket = await this.oauth2Client.verifyIdToken({ idToken: bearer, audience: expectedAudience });
-      const email = ticket.getPayload()?.email;
-      if (!email || (!email.endsWith('@google.com') && !email.endsWith('.gserviceaccount.com'))) {
-        return `JWT not from Google service account: ${email}`;
+      const claims = ticket.getPayload();
+      if (claims?.email_verified !== true || claims.email !== pubsubPushServiceAccountEmail) {
+        return `JWT not from the configured push service account: ${claims?.email}`;
       }
     } catch (error) {
       return `JWT verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
 
-    return null;
-  }
-
-  private verifyEmail(base64Data: string, expectedEmail: string): string | null {
-    try {
-      const data = JSON.parse(Buffer.from(base64Data, 'base64').toString('utf-8'));
-      if (!data.emailAddress || !data.historyId) return 'Missing emailAddress or historyId in Pub/Sub data';
-      if (data.emailAddress !== expectedEmail) return `Email mismatch: expected ${expectedEmail}, got ${data.emailAddress}`;
-    } catch {
-      return 'Failed to decode Pub/Sub message data';
-    }
     return null;
   }
 

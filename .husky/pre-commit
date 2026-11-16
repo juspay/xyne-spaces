@@ -60,9 +60,6 @@ DASHBOARD_CHANGED=$(echo "$CHANGED_FILES" | grep '^apps/dashboard/' || true)
 # Check if xyne-automation files are changed
 AUTOMATION_CHANGED=$(echo "$CHANGED_FILES" | grep '^tools/xyne-automation/' || true)
 
-# Check if framework files are changed
-FRAMEWORK_CHANGED=$(echo "$CHANGED_FILES" | grep '^packages/framework/' || true)
-
 # Backend checks (only if backend files changed)
 if [ -n "$BACKEND_CHANGED" ]; then
   echo "🔧 Checking backend (backend files changed)..."
@@ -89,17 +86,6 @@ if [ -n "$DASHBOARD_CHANGED" ]; then
   XYNE_DOCTOR_NO_INTERACTIVE=1 pnpm run validate < /dev/null || exit 1
 else
   echo "⏭️  Skipping dashboard checks (no dashboard files changed)"
-fi
-
-# Framework checks (only if framework files changed)
-if [ -n "$FRAMEWORK_CHANGED" ]; then
-  echo "🧩 Checking framework (framework files changed)..."
-  cd "$REPO_ROOT/packages/framework"
-
-  echo "Running framework lint..."
-  pnpm run lint || exit 1
-else
-  echo "⏭️  Skipping framework checks (no framework files changed)"
 fi
 
 # Automation checks (only if xyne-automation files changed)

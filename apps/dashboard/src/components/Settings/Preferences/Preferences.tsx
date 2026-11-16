@@ -71,7 +71,8 @@ import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords'
 import { Badge } from '../../ui/Badge/Badge';
 
 import { usePreferencesState, type PreferencesState } from '../../../hooks/usePreferencesState';
-import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
+// Disabled (LLM)
+// import { useSummaryTemplates } from '../../../hooks/useSummaryTemplates';
 import {
   CALL_MEDIA_QUALITY_OPTIONS,
   type CallMediaQuality,
@@ -760,6 +761,8 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       />
     </div>
 
+    {/* Disabled (LLM) */}
+    {/*
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>
         <p className='text-sm font-medium text-foreground'>LLM summary generation model</p>
@@ -792,9 +795,12 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onChange={state.setDefaultSummaryTemplateId}
       />
     </div>
+    */}
   </div>
 );
 
+// Disabled (LLM)
+/*
 const AUTO_SUMMARY_TEMPLATE_OPTION = { id: null, label: 'Pick automatically' } as const;
 const DEFAULT_SUMMARY_TEMPLATE_OPTION = { id: 'default', label: 'Default summary' } as const;
 
@@ -857,6 +863,7 @@ const DefaultSummaryTemplateSelect: FC<{
     </div>
   );
 };
+*/
 
 // ─── Messaging ──────────────────────────────────────────────────────────────
 // Section is desktop-only (see NAV_ITEMS), so no isMobile branching needed.
@@ -906,7 +913,8 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         onCheckedChange={state.setAllowThreadBroadcastMentions}
       />
     </div>
-    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+    {/* Disabled (LLM) */}
+    {/* <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
       <div>
         <p className='text-sm font-medium text-foreground'>Show thread tags</p>
         <p className='text-xs text-muted-foreground mt-0.5'>
@@ -919,7 +927,7 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         checked={state.showThreadTags}
         onCheckedChange={state.setShowThreadTags}
       />
-    </div>
+    </div> */}
     {linkOpenPrefIsRelevant() && (
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>

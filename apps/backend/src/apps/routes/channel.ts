@@ -22,7 +22,7 @@ const OpenDmBodySchema = z.object({
 router.post('/openDm', requirePermission('im:write'), async (req: Request, res: Response) => {
   const result = OpenDmBodySchema.safeParse(req.body);
   if (!result.success) {
-    res.status(400).json({ error: 'Validation error', details: result.error.errors });
+    res.status(400).json({ error: 'Validation error', details: result.error.issues });
     return;
   }
   const { targetUserId } = result.data;
@@ -59,8 +59,7 @@ router.post('/deskChannelConfig', requirePermission('desk:read'), validateChanne
 
 router.get('/list', requirePermission('channels:read'), channelController.listChannels);
 
-router.post('/create', requirePermission('channels:write', { strict: true }), appChannelController.create);
-router.post('/update', requirePermission('channels:write', { strict: true }), appChannelController.update);
-router.get('/participants', requirePermission('channels:read', { strict: true }), appChannelController.listParticipants);
+router.post('/create', requirePermission('channels:write'), appChannelController.create);
+router.post('/update', requirePermission('channels:write'), appChannelController.update);
 
 export default router;

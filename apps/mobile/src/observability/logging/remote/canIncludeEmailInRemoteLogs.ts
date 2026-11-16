@@ -2,21 +2,24 @@ export type LogAppVariant = 'dev' | 'sandbox' | 'prod' | 'community' | undefined
 
 /**
  * Raw email may be included only in release logs sent directly to the first-party
- * Godel event endpoint for the selected application environment.
+ * Godel event endpoint for the selected application environment: `firstPartyOrigin`
+ * is that environment's public web origin (`PUBLIC_DEEP_LINK_ORIGIN` in `src/config.ts`).
  */
 export function canIncludeEmailInRemoteLogs(
   endpoint: string,
   appVariant: LogAppVariant,
   isDevelopmentBuild: boolean,
+  firstPartyOrigin: string,
 ): boolean {
-  const expectedHost =
-    appVariant === 'prod'
-      ? 'spaces.xyne.juspay.net'
-      : appVariant === 'sandbox'
-        ? 'spaces.sandbox.xyne.juspay.net'
-        : appVariant === 'community'
-          ? 'spaces.xyne.ai'
-          : null;
+  if (appVariant !== 'prod' && appVariant !== 'sandbox' && appVariant !== 'community') {
+    return false;
+  }
+  let expectedHost: string;
+  try {
+    expectedHost = new URL(firstPartyOrigin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
   if (!expectedHost) return false;
 
   try {

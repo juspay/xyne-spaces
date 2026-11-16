@@ -249,7 +249,7 @@ export function parseGenericQuery(data: unknown): { success: boolean; query?: Ge
   if (!result.success) {
     return {
       success: false,
-      error: result.error.errors.map(e => e.message).join(', '),
+      error: result.error.issues.map(e => e.message).join(', '),
     };
   }
   return { success: true, query: result.data };

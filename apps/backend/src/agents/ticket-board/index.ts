@@ -2,19 +2,19 @@
  * Ticket board suggestion agent — Framework LLM Client
  */
 
-import { z } from 'zod';
-import { LLMClient, createUserMessage } from '@framework';
+// import { z } from 'zod'; // framework removed
+// import { LLMClient, createUserMessage } from '@framework';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { AgentsConfig } from '../config.js';
-import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
+// import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
+// import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+// import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
 const MAX_BOARD_DESCRIPTION_LENGTH = 1000;
 
-const AGENT_NAME = 'TicketBoard';
+// const AGENT_NAME = 'TicketBoard';
 
 // ============================================================================
 // Types
@@ -48,28 +48,28 @@ export interface TicketBoardOutput {
 // Schema & Constants
 // ============================================================================
 
-const TicketBoardOutputSchema = z.object({
-  suggestedBoardId: z.string().nullable(),
-  suggestedBoardName: z.string().nullable(),
-});
-
+// const TicketBoardOutputSchema = z.object({
+//   suggestedBoardId: z.string().nullable(),
+//   suggestedBoardName: z.string().nullable(),
+// });
+//
 export const BOARD_TASK_INSTRUCTION =
   'You are a support triage assistant. Analyze the new ticket and suggest the most suitable board from the available candidates.';
 
-const SYSTEM_INSTRUCTIONS = `${BOARD_TASK_INSTRUCTION}
-
-Return ONLY valid JSON with this exact schema:
-{
-  "suggestedBoardId": string | null,
-  "suggestedBoardName": string | null
-}
-
-Rules:
-- Use suggestedBoardId and suggestedBoardName only from the candidate list.
-- If no suitable board is found, return null for both suggestedBoardId and suggestedBoardName.
-- Output JSON only, no extra text.
-- Do not include reasoning, analysis, or thinking tags.`;
-
+// const SYSTEM_INSTRUCTIONS = `${BOARD_TASK_INSTRUCTION}
+//
+// Return ONLY valid JSON with this exact schema:
+// {
+//   "suggestedBoardId": string | null,
+//   "suggestedBoardName": string | null
+// }
+//
+// Rules:
+// - Use suggestedBoardId and suggestedBoardName only from the candidate list.
+// - If no suitable board is found, return null for both suggestedBoardId and suggestedBoardName.
+// - Output JSON only, no extra text.
+// - Do not include reasoning, analysis, or thinking tags.`;
+//
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -122,44 +122,44 @@ ${candidateList}
 </available_boards>`;
 };
 
-const extractJson = (content: string): string | null => {
-  const sanitized = content.replace(/<thinking>[\s\S]*?<\/think>/gi, '').trim();
-  const match = sanitized.match(/\{[\s\S]*\}/);
-  return match ? match[0] : null;
-};
-
-function parseAgentOutput(content: string): TicketBoardOutput {
-  const jsonContent = extractJson(content);
-  if (!jsonContent) {
-    throw new Error('No JSON payload found in board analysis response.');
-  }
-
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(jsonContent);
-  } catch (error) {
-    throw new Error('Failed to parse JSON from agent response.');
-  }
-
-  const parsed = TicketBoardOutputSchema.safeParse(parsedJson);
-  if (!parsed.success) {
-    throw new Error(
-      `Board analysis response failed validation: ${parsed.error.message}`,
-    );
-  }
-
-  return parsed.data;
-}
-
+// const extractJson = (content: string): string | null => {
+//   const sanitized = content.replace(/<thinking>[\s\S]*?<\/think>/gi, '').trim();
+//   const match = sanitized.match(/\{[\s\S]*\}/);
+//   return match ? match[0] : null;
+// };
+//
+// function parseAgentOutput(content: string): TicketBoardOutput {
+//   const jsonContent = extractJson(content);
+//   if (!jsonContent) {
+//     throw new Error('No JSON payload found in board analysis response.');
+//   }
+//
+//   let parsedJson: unknown;
+//   try {
+//     parsedJson = JSON.parse(jsonContent);
+//   } catch (error) {
+//     throw new Error('Failed to parse JSON from agent response.');
+//   }
+//
+//   const parsed = TicketBoardOutputSchema.safeParse(parsedJson);
+//   if (!parsed.success) {
+//     throw new Error(
+//       `Board analysis response failed validation: ${parsed.error.message}`,
+//     );
+//   }
+//
+//   return parsed.data;
+// }
+//
 // ============================================================================
 // Execution Function
 // ============================================================================
 
 export async function analyzeTicketBoard(
   input: TicketBoardInput,
-  context: TicketBoardContext,
+  _context: TicketBoardContext,
   _onEvent?: unknown, // Kept for API compatibility, not used with direct calls
-  agentsConfig?: AgentsConfig,
+  _agentsConfig?: AgentsConfig,
 ): Promise<TicketBoardOutput> {
   if (!input.candidates || input.candidates.length === 0) {
     return {
@@ -168,65 +168,67 @@ export async function analyzeTicketBoard(
     };
   }
 
-  // Use model name from CAC config if provided, otherwise fetch or use default
-  const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
-  const modelName = cacConfig.ticketBoardModelName;
-  const credential =
-    await orgLLMCredentialService.getCredentialByProjectId(
-      context.projectId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    ) ??
-    await orgLLMCredentialService.getCredentialByUserId(
-      context.userId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-
-  if (!credential) {
-    throw new Error('LiteLLM credentials are not configured for this organization');
+  // LLM framework removed; original kept below.
+  throw new Error('LLM client is not configured');
+  //   // Use model name from CAC config if provided, otherwise fetch or use default
+  //   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
+  //   const modelName = cacConfig.ticketBoardModelName;
+  //   const credential =
+  //     await orgLLMCredentialService.getCredentialByProjectId(
+  //       context.projectId,
+  //       OrgLLMServiceAccountPurpose.DEFAULT,
+  //     ) ??
+  //     await orgLLMCredentialService.getCredentialByUserId(
+  //       context.userId,
+  //       OrgLLMServiceAccountPurpose.DEFAULT,
+  //     );
+  //
+  //   if (!credential) {
+  //     throw new Error('LiteLLM credentials are not configured for this organization');
+  //   }
+  //
+  //   // Initialize LLM client
+  //   const llmClient = new LLMClient({
+  //     provider: {
+  //       type: 'litellm',
+  //       config: {
+  //         apiKey: credential.apiKey,
+  //         baseUrl: credential.baseUrl,
+  //       },
+  //     },
+  //     defaultModel: modelName,
+  //   });
+  //
+  //   const prompt = buildPrompt(input);
+  //
+  //   // Log LLM call start
+  //   logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
+  //
+  //   try {
+  //     // Generate response using framework LLM client
+  //     const response = await llmClient.generate({
+  //       messages: [
+  //         createUserMessage(prompt)
+  //       ],
+  //       systemPrompt: SYSTEM_INSTRUCTIONS,
+  //       parameters: {
+  //         temperature: 0.2
+  //       },
+  //       extraBody: {
+  //         chat_template_kwargs: {
+  //           enable_thinking: false
+  //         }
+  //       }
+  //     });
+  //
+  //     // Log success
+  //     logLLMSuccess(AGENT_NAME, response.content);
+  //
+  //     const result = parseAgentOutput(response.content);
+  //     return result;
+  //   } catch (error) {
+  //     // Log error
+  //     logLLMError(AGENT_NAME, error);
+  //     throw error;
+  //   }
   }
-
-  // Initialize LLM client
-  const llmClient = new LLMClient({
-    provider: {
-      type: 'litellm',
-      config: {
-        apiKey: credential.apiKey,
-        baseUrl: credential.baseUrl,
-      },
-    },
-    defaultModel: modelName,
-  });
-
-  const prompt = buildPrompt(input);
-
-  // Log LLM call start
-  logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
-
-  try {
-    // Generate response using framework LLM client
-    const response = await llmClient.generate({
-      messages: [
-        createUserMessage(prompt)
-      ],
-      systemPrompt: SYSTEM_INSTRUCTIONS,
-      parameters: {
-        temperature: 0.2
-      },
-      extraBody: {
-        chat_template_kwargs: {
-          enable_thinking: false
-        }
-      }
-    });
-
-    // Log success
-    logLLMSuccess(AGENT_NAME, response.content);
-
-    const result = parseAgentOutput(response.content);
-    return result;
-  } catch (error) {
-    // Log error
-    logLLMError(AGENT_NAME, error);
-    throw error;
-  }
-}

@@ -1,6 +1,6 @@
 import type { useRouter } from 'expo-router';
 
-import { PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
+import { ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS, PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
 import { TICKET_ROUTE } from '@/src/features/chat/navigation/chatRoutePolicy';
 import { getActiveWorkspaceId } from './activeWorkspace';
 import { requiresWorkspaceSwitch } from './deepLinkWorkspace';
@@ -22,7 +22,7 @@ const TRUSTED_ORIGIN_SET = new Set(
 
 export function parseTicketDeepLink(url: string): TicketDeepLinkPayload | null {
   return parseTicketDeepLinkCore(
-    canonicalizePublicDeepLink(url, PUBLIC_DEEP_LINK_ORIGIN),
+    canonicalizePublicDeepLink(url, PUBLIC_DEEP_LINK_ORIGIN, ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS),
     TRUSTED_ORIGIN_SET,
   );
 }

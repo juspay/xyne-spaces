@@ -12,20 +12,24 @@ import { TAG_FORMAT_REGEX, TAG_FORMAT_MESSAGE, findDuplicateTags } from '@xyne/s
 import { TagChipInput } from '../../ui/TagChipInput/TagChipInput';
 import { useCategoryCatalog } from '../../../hooks/useCategoryCatalog';
 import { tagsApi } from '../../../api/tagsApi';
-import { tagsConfigApi } from '../../../api/tagsConfigApi';
+// Disabled (LLM)
+// import { tagsConfigApi } from '../../../api/tagsConfigApi';
 import type {
   CategoryCatalogEntry,
   TagCategories,
   TagCategoryConfig,
-  GeneratedTagPreviewItem,
+  // Disabled (LLM)
+  // GeneratedTagPreviewItem,
 } from '../../../api/tagsConfigApi';
-import { TestClassificationForm } from './TestClassificationForm';
-import { TagChip, CategoryLabel } from '../../tags/TagsBadge';
+// Disabled (LLM)
+// import { TestClassificationForm } from './TestClassificationForm';
+// import { TagChip, CategoryLabel } from '../../tags/TagsBadge';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TAG_METHODS: { value: TagCategoryConfig['method']; label: string }[] = [
-  { value: 'llm', label: 'LLM' },
+  // Disabled (LLM)
+  // { value: 'llm', label: 'LLM' },
   { value: 'manual', label: 'Manual' },
 ];
 
@@ -49,7 +53,9 @@ const normalizeColor = (color?: string): string =>
 
 const EMPTY_FORM: CategoryFormState = {
   name: '',
-  method: 'llm',
+  // Disabled (LLM)
+  // method: 'llm',
+  method: 'manual',
   color: DEFAULT_COLOR,
   tags: [],
   blacklist: [],
@@ -109,7 +115,8 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
   error,
   saveCategories,
   sourceType = 'desk-email',
-  channelId,
+  // Disabled (LLM)
+  // channelId,
 }) => {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [form, setForm] = useState<CategoryFormState | null>(null);
@@ -117,12 +124,13 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
   const [nameFormatError, setNameFormatError] = useState<string | null>(null);
   const [showNameSuggestions, setShowNameSuggestions] = useState(false);
 
-  // ── Preview state ──────────────────────────────────────────────────────────
-  const [testSubject, setTestSubject] = useState('');
-  const [testBody, setTestBody] = useState('');
-  const [previewResult, setPreviewResult] = useState<GeneratedTagPreviewItem[] | null>(null);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  // Disabled (LLM)
+  // // ── Preview state ──────────────────────────────────────────────────────────
+  // const [testSubject, setTestSubject] = useState('');
+  // const [testBody, setTestBody] = useState('');
+  // const [previewResult, setPreviewResult] = useState<GeneratedTagPreviewItem[] | null>(null);
+  // const [isPreviewing, setIsPreviewing] = useState(false);
+  // const [previewError, setPreviewError] = useState<string | null>(null);
 
   // ── Category-name autocomplete ─────────────────────────────────────────────
   const isAdding = editingName === '__new__';
@@ -272,32 +280,34 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
     }
   };
 
-  // ── Preview handler ────────────────────────────────────────────────────────
-  const handleRunPreview = async () => {
-    if (!channelId) return;
-    setPreviewResult(null);
-    setPreviewError(null);
-    if (!hasLlmCategories) {
-      setPreviewError('At least one LLM category is required to test tag generation.');
-      return;
-    }
-    setIsPreviewing(true);
-    try {
-      const tags = await tagsConfigApi.previewTagGeneration(channelId, testSubject, testBody);
-      setPreviewResult(tags);
-    } catch {
-      setPreviewError('Tag generation preview failed. Please try again.');
-    } finally {
-      setIsPreviewing(false);
-    }
-  };
+  // Disabled (LLM)
+  // // ── Preview handler ────────────────────────────────────────────────────────
+  // const handleRunPreview = async () => {
+  //   if (!channelId) return;
+  //   setPreviewResult(null);
+  //   setPreviewError(null);
+  //   if (!hasLlmCategories) {
+  //     setPreviewError('At least one LLM category is required to test tag generation.');
+  //     return;
+  //   }
+  //   setIsPreviewing(true);
+  //   try {
+  //     const tags = await tagsConfigApi.previewTagGeneration(channelId, testSubject, testBody);
+  //     setPreviewResult(tags);
+  //   } catch {
+  //     setPreviewError('Tag generation preview failed. Please try again.');
+  //   } finally {
+  //     setIsPreviewing(false);
+  //   }
+  // };
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const fieldDisabled = !canManage || isSaving;
   const categoryEntries = Object.entries(categories);
   const showBlacklistAndCount = form?.method !== 'manual';
-  const hasLlmCategories = Object.values(categories).some(c => c.method === 'llm');
+  // Disabled (LLM)
+  // const hasLlmCategories = Object.values(categories).some(c => c.method === 'llm');
 
   return (
     <div className='flex flex-col gap-[16px]'>
@@ -644,6 +654,8 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
         )}
       </div>
 
+      {/* Disabled (LLM) */}
+      {/*
       {channelId && (
         <TestClassificationForm
           title='Test tag generation'
@@ -682,6 +694,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
           )}
         </TestClassificationForm>
       )}
+      */}
     </div>
   );
 };

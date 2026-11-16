@@ -9,7 +9,6 @@ import {
   wikiScopePages,
   wikiScopes,
 } from './sdlcWikiTree';
-import { type HubWorkflow, useHubWorkflow } from './hubWorkflowRunPolicy';
 
 export interface SdlcWikiData<Repo> {
   scopes: WikiScope[];
@@ -28,7 +27,6 @@ export interface SdlcWikiData<Repo> {
   setShowArchived: (show: boolean) => void;
   /** The open page, when the open artifact is one of the scope's pages. */
   selectedPage: SdlcWikiPage | undefined;
-  workflow: HubWorkflow;
 }
 
 /**
@@ -54,14 +52,6 @@ export function useSdlcWikiData<Repo extends { id: string }>(input: {
   const [folderRows] = useCachedQuery(queries.getSdlcHubFolders({ channelId: channelId ?? '' }), {
     enabled: active,
   });
-  const [workflowLink] = useCachedQuery(
-    queries.getSdlcWikiWorkflow({ channelId: channelId ?? '' }),
-    {
-      enabled: active,
-    },
-  );
-  const workflow = useHubWorkflow(active ? (workflowLink?.workflow?.id ?? null) : null);
-
   const edges = useMemo(
     () => (active && Array.isArray(itemRows) ? itemRows : []),
     [active, itemRows],
@@ -171,6 +161,5 @@ export function useSdlcWikiData<Repo extends { id: string }>(input: {
     showArchived,
     setShowArchived,
     selectedPage,
-    workflow,
   };
 }

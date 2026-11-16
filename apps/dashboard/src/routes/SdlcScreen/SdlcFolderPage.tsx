@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactElement,
+} from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { createPortal } from 'react-dom';
 import {
@@ -47,22 +55,22 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { FilePreview } from '../../components/FilePreview';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { openLink } from '../../utils/openLink';
+import { isElectronApp } from '../../utils/electronApp';
 import { homePageFor, hostOf } from '../../utils/browserAddress';
-import { useBridgeTransport } from './useBridgeTransport';
 import {
-  canHostEmbedPages,
+  getSdlcWebview,
+  subscribeToSdlcWebview,
+} from '../../components/AIScreen/Workspace/sdlcBrowserTarget';
+import {
   controlEmbeddedPage,
   discardEmbeddedPage,
   embedPageOverElement,
-  historyFromHost,
-  openLinkFromSdlcFrame,
   reclaimHostFocus,
   subscribeToEmbeddedCommand,
   subscribeToEmbeddedOpen,
-  subscribeToEmbeddedPage,
   useEmbeddedPages,
-} from './useSdlcFrameBridge';
-import type { SdlcEmbedPageState, SdlcEmbedTab } from './sdlcFrameMessages';
+  type SdlcEmbedPageState,
+} from './sdlcEmbeddedPages';
 import { fileKind, type FileKind } from './fileKind';
 import {
   BrowserToolbar,
@@ -75,9 +83,9 @@ import {
   TabStrip,
   TabSwitcher,
   ToolbarButton,
+  desktopHistory,
   siteLetter,
   useFindInPage,
-  type HistorySource,
   type TabSwitcherEntry,
 } from '../../components/InAppBrowser';
 import { FileTypeIcon } from './FileTypeIcon';
@@ -93,6 +101,7 @@ import {
   revealAnchor,
   useAnnotate,
   useDomTransport,
+  useWebviewTransport,
   type PickedBlock,
   type WorkspaceItem,
 } from '../../components/workspaceItems';
@@ -740,7 +749,7 @@ function AddMenu(props: {
 const TOOLTIP_DELAY_MS = 600;
 
 /**
- * A tab's name. A page shows what it is on now — its title, as the host reports it —
+ * A tab's name. A page shows what it is on now — its title, as its webview reports it —
  * a saved link its own name until then, and a browsing tab the title it last had, or
  * its site, or that it is new. Anything else is its item's name, or what it is while
  * the item is on its way.
@@ -1376,19 +1385,20 @@ export function SdlcFolderPage(props: {
     setFocusCommentId(commentId);
   };
 
-  // A browsed page is held by the host over a hole in this frame, so it is
-  // reached through the bridge; everything else renders here and is reached
-  // directly. The annotator above does not know which it got.
+  // A browsed page is a webview held over a hole in this page, so it is reached
+  // through that webview; everything else renders here and is reached directly.
+  // The annotator above does not know which it got.
   const browsing = active?.kind === 'BROWSER' || active?.kind === 'LINK';
   const domTransport = useDomTransport(browsing ? null : viewerRoot, {
     onPick: setPicked,
     onMarkClick: openThread,
   });
-  // A browsed page is drawn by the host ON TOP of this frame, so a box rendered
-  // here would sit behind it. The picked passage goes to the comments panel
-  // beside the page instead, which is the one place we can draw next to it.
+  // A browsed page is drawn ON TOP of this page, so a box rendered here would sit
+  // behind it. The picked passage goes to the comments panel beside the page
+  // instead, which is the one place we can draw next to it.
   const notePickedRef = useRef<() => void>(() => undefined);
-  const bridgeTransport = useBridgeTransport(browsing && canHostEmbedPages(), {
+  const shownPage = useSyncExternalStore(subscribeToSdlcWebview, getSdlcWebview);
+  const webviewTransport = useWebviewTransport(browsing ? shownPage : null, {
     onPick: block => {
       setDraftAnchor({
         quote: block.text,
@@ -1403,7 +1413,7 @@ export function SdlcFolderPage(props: {
   const annotate = useAnnotate({
     item: activeItem ?? EMPTY_ITEM,
     url: activeItem?.url ?? '',
-    transport: browsing ? bridgeTransport : domTransport,
+    transport: browsing ? webviewTransport : domTransport,
     picked: browsing ? null : picked,
     onPicked: setPicked,
   });
@@ -1493,7 +1503,7 @@ export function SdlcFolderPage(props: {
    * conversation panel never carries it off to the other side.
    */
   const renderTabStrip = (strip: ReactElement): ReactElement => {
-    const canBrowse = canHostEmbedPages();
+    const canBrowse = isElectronApp();
     const bar = (
       <>
         {strip}
@@ -2207,9 +2217,9 @@ function LinkCard({ link }: { link: SdlcLinkItem }): ReactElement {
 
 /**
  * One open tab, rendered by the shared workspace viewer. The folder keeps the
- * things only it can draw — its own embedded browser, which the host window holds
- * over this frame, a browsing tab's start page, and the download card for a file
- * no viewer previews.
+ * things only it can draw — its own embedded browser, held over this tab by
+ * SdlcEmbeddedWebview, a browsing tab's start page, and the download card for a
+ * file no viewer previews.
  */
 function TabContent(props: {
   tab: FolderTab;
@@ -2247,7 +2257,7 @@ function TabContent(props: {
       />
     );
   }
-  if (props.tab.kind === 'BROWSER' && !props.browseUrl && canHostEmbedPages()) {
+  if (props.tab.kind === 'BROWSER' && !props.browseUrl && isElectronApp()) {
     return (
       <BrowserStartPage
         key={props.tab.id}
@@ -2278,7 +2288,7 @@ function TabContent(props: {
       slots={{
         canvas: canvasItem => props.renderCanvas(canvasItem.refId),
         browser: browsable => {
-          if (!canHostEmbedPages()) {
+          if (!isElectronApp()) {
             return found?.kind === 'LINK' && found.id === browsable.refId ? (
               <LinkCard link={found} />
             ) : null;
@@ -2466,7 +2476,7 @@ function BrowserStartPage(props: {
         </>
       }
       onGo={props.onGo}
-      history={LANE_HISTORY}
+      history={desktopHistory}
       footer={
         <HomePageSetting
           homePage={props.homePage}
@@ -2551,23 +2561,17 @@ function BrowserStartPage(props: {
   );
 }
 
-/** The browsing history, asked of the host: the lane can't reach the desktop app itself. */
-const LANE_HISTORY: HistorySource = {
-  suggest: (typed, limit) => historyFromHost('suggest', typed, limit),
-  top: limit => historyFromHost('top', '', limit).then(found => found.pages),
-};
-
 /**
  * The page itself, inside the tab. A <webview> is the same mechanism the browser
  * panel uses, so it inherits the app's partitions: a Xyne URL loads signed in,
  * everything else stays in the external jar where Xyne cookies never go.
  *
- * The host keeps it for as long as its tab is open: switching tabs puts it aside
+ * It is kept for as long as its tab is open: switching tabs puts it aside
  * and back as it was. Its bar says what it is doing — loading, where it is and
  * whether that is secure — and, on a saved link, which link it came from.
  */
 function EmbeddedPage(props: {
-  /** The tab it belongs to, which the host holds it under. */
+  /** The tab it belongs to, which SdlcEmbeddedWebview holds it under. */
   pageKey: string;
   /** Where it starts; afterwards it goes where its reader takes it. */
   url: string;
@@ -2578,28 +2582,18 @@ function EmbeddedPage(props: {
   const holeRef = useRef<HTMLDivElement | null>(null);
   const addressRef = useRef<HTMLInputElement | null>(null);
   const page = useEmbeddedPages().get(props.pageKey);
-  // An older host reports its one page in the fields it always has, and keeps
-  // pages a link opened as tabs of its own, inside this one.
-  const [legacy, setLegacy] = useState<{
-    url: string;
-    canGoBack: boolean;
-    canGoForward: boolean;
-    tabs: SdlcEmbedTab[];
-    activeTabId: string;
-  } | null>(null);
 
   useEffect(() => {
     const element = holeRef.current;
     if (!element) return undefined;
     return embedPageOverElement(props.url, element, props.pageKey);
   }, [props.url, props.pageKey]);
-  useEffect(() => subscribeToEmbeddedPage(setLegacy), []);
 
   const find = useFindInPage(
     {
       find: (key, text, forward, step) =>
-        controlEmbeddedPage('find', { key, text, forward, findNext: step }),
-      stop: key => controlEmbeddedPage('stopFind', { key }),
+        controlEmbeddedPage(key, 'find', { text, forward, findNext: step }),
+      stop: key => controlEmbeddedPage(key, 'stopFind'),
     },
     props.pageKey,
   );
@@ -2627,12 +2621,11 @@ function EmbeddedPage(props: {
     [props.pageKey, openFind, focusAddress],
   );
 
-  const fromLegacy = !page && legacy?.url ? legacy : null;
-  const url = page?.url || fromLegacy?.url || props.url;
+  const url = page?.url || props.url;
   const title = page?.title || '';
   const loading = page?.loading ?? false;
-  const canGoBack = page?.canGoBack ?? fromLegacy?.canGoBack ?? false;
-  const canGoForward = page?.canGoForward ?? fromLegacy?.canGoForward ?? false;
+  const canGoBack = page?.canGoBack ?? false;
+  const canGoForward = page?.canGoForward ?? false;
   const error = page?.error ?? null;
   // A saved link often lands somewhere else — stripe.com/docs redirects to
   // docs.stripe.com — so where it landed, before any history, is the saved page too.
@@ -2657,7 +2650,7 @@ function EmbeddedPage(props: {
     action: 'back' | 'forward' | 'reload' | 'stop' | 'goto',
     target?: string,
   ): void => {
-    controlEmbeddedPage(action, { key: props.pageKey, ...(target ? { url: target } : {}) });
+    controlEmbeddedPage(props.pageKey, action, target ? { url: target } : {});
   };
 
   return (
@@ -2673,7 +2666,7 @@ function EmbeddedPage(props: {
         onStop={() => control('stop')}
         onGo={target => control('goto', target)}
         addressRef={addressRef}
-        history={LANE_HISTORY}
+        history={desktopHistory}
         addressLeading={
           props.saved ? (
             <button
@@ -2739,38 +2732,6 @@ function EmbeddedPage(props: {
         onPointerEnter={reclaimHostFocus}
         trackCategory='SdlcHub'
       />
-      {fromLegacy && fromLegacy.tabs.length > 1 && (
-        // An older host keeps a page's new windows inside it: they can at least be
-        // switched between, until the host is updated and they become tabs.
-        <div
-          onPointerEnter={reclaimHostFocus}
-          className='scrollbar-none flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1'
-        >
-          {fromLegacy.tabs.map(tab => (
-            <button
-              key={tab.id}
-              type='button'
-              onClick={() => controlEmbeddedPage('select', { tabId: tab.id })}
-              title={tab.url}
-              className={cn(
-                'flex h-6 max-w-[180px] shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] outline-none transition-colors',
-                tab.id === fromLegacy.activeTabId
-                  ? 'bg-muted font-medium text-foreground'
-                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:bg-muted/60',
-              )}
-              data-track-category='SdlcHub'
-              data-track-name='EmbeddedTabSelected'
-            >
-              {tab.favicon ? (
-                <img src={tab.favicon} alt='' className='size-3.5 shrink-0 rounded-[2px]' />
-              ) : (
-                <Globe className='size-3.5 shrink-0' />
-              )}
-              <span className='truncate'>{tab.title || tab.url}</span>
-            </button>
-          ))}
-        </div>
-      )}
       <div ref={holeRef} className='relative min-h-0 flex-1'>
         {error && (
           <LoadError
@@ -2784,9 +2745,12 @@ function EmbeddedPage(props: {
   );
 }
 
-/** Same rule as the track's file list: the host opens it unless a modifier says otherwise. */
+/** Same rule as the track's file list: the app opens it unless a modifier says otherwise. */
 function openFromTab(url: string, event: { metaKey: boolean; ctrlKey: boolean }): void {
-  if (!event.metaKey && !event.ctrlKey && openLinkFromSdlcFrame(url)) return;
+  if (!event.metaKey && !event.ctrlKey && isElectronApp()) {
+    openLink(url, null, { force: 'in-app' });
+    return;
+  }
   openLink(url, event);
 }
 

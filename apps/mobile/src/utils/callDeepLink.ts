@@ -1,6 +1,6 @@
 import type { ImperativeRouter as Router } from 'expo-router';
 
-import { PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
+import { ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS, PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
 import { canonicalizePublicDeepLink } from '@/src/utils/publicDeepLink';
 
 const TRUSTED_ORIGIN_SET = new Set(
@@ -22,7 +22,11 @@ export type CallDeepLinkPayload = {
 /** Shared by other deep-link parsers (e.g. recordingDeepLink.ts) — normalizes the
  *  app scheme / public origin and rejects untrusted origins. */
 export function parseLinkUrl(url: string): URL | null {
-  const trimmed = canonicalizePublicDeepLink(url, PUBLIC_DEEP_LINK_ORIGIN).trim();
+  const trimmed = canonicalizePublicDeepLink(
+    url,
+    PUBLIC_DEEP_LINK_ORIGIN,
+    ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS,
+  ).trim();
   if (!trimmed) return null;
 
   try {

@@ -13,7 +13,18 @@ import { getContextOrNull, currentWorkspaceId, isRequestContext } from './contex
 import { ACLFactory } from '@/database/acl';
 import { logger } from '@/utils/logger';
 
-const txStorage = new AsyncLocalStorage<boolean>();
+type TransactionFrame = { tx: Prisma.TransactionClient; open: boolean };
+const txStorage = new AsyncLocalStorage<TransactionFrame>();
+
+/**
+ * The client of the interactive transaction the caller is running in, or undefined outside
+ * one. Work scheduled inside a transaction keeps its frame, so the frame is closed once the
+ * transaction callback settles.
+ */
+export function currentTransactionClient(): Prisma.TransactionClient | undefined {
+  const frame = txStorage.getStore();
+  return frame?.open ? frame.tx : undefined;
+}
 
 /** Model names (lowercased) with a scalar workspaceId column. */
 const WORKSPACE_MODELS = new Set(
@@ -186,7 +197,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
     query: {
       $allModels: {
         async $allOperations({ model, operation, args, query }) {
-          if (txStorage.getStore() === true) {
+          if (txStorage.getStore()?.open) {
             // Interactive transactions run on the base client; record what goes through.
             notePattern('[acl] ran inside a transaction', model, operation);
             return query(args);
@@ -408,8 +419,15 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
     client: {
       $transaction(...args: unknown[]) {
         if (typeof args[0] === 'function') {
-          const fn = args[0] as (tx: unknown) => unknown;
-          return runTransaction((tx: unknown) => txStorage.run(true, () => fn(tx)), ...args.slice(1));
+          const fn = args[0] as (tx: Prisma.TransactionClient) => unknown;
+          return runTransaction(async (tx: Prisma.TransactionClient) => {
+            const frame: TransactionFrame = { tx, open: true };
+            try {
+              return await txStorage.run(frame, () => fn(tx));
+            } finally {
+              frame.open = false;
+            }
+          }, ...args.slice(1));
         }
         return runTransaction(...args);
       },

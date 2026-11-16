@@ -267,11 +267,12 @@ async def entrypoint(ctx: JobContext):
         ai_voice_enabled_default=config.ai_voice_enabled_default,
     )
     
-    # Initialize Azure services (TTS/LLM)
-    logger.info(f"azure_services_initializing | stt={config.azure_stt_endpoint}, tts={config.azure_tts_endpoint}, llm={config.azure_openai_endpoint}")
-    azure_initialized = await ai_manager.initialize_azure_services()
-    if not azure_initialized:
-        logger.warning(f"azure_services_failed | error=initialization_failed, fallback=ai_disabled")
+    # Disabled (LLM)
+    # # Initialize Azure services (TTS/LLM)
+    # logger.info(f"azure_services_initializing | stt={config.azure_stt_endpoint}, tts={config.azure_tts_endpoint}, llm={config.azure_openai_endpoint}")
+    # azure_initialized = await ai_manager.initialize_azure_services()
+    # if not azure_initialized:
+    #     logger.warning(f"azure_services_failed | error=initialization_failed, fallback=ai_disabled")
     
     # Set OpenAI client in conversation store for LLM-based compaction
     if conversation_store and ai_manager.llm:

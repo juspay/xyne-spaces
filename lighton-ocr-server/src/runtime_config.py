@@ -112,8 +112,7 @@ async def refresh_runtime_config() -> RuntimeConfig:
         except Exception as exc:
             logger.warning(
                 "Failed to refresh OCR runtime config from Redis; keeping previous values"
-                " | redis_url=%s key=%s error=%s",
-                settings.redis_url,
+                " | key=%s error=%s",
                 settings.runtime_config_key,
                 exc,
             )

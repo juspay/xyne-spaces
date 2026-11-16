@@ -1,4 +1,5 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
+import { toSafeAppUrl } from '../../utils/safeNavUrl';
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import axios from 'axios';
 import { websocketService } from '../../services/clients/socketClient';
@@ -32,8 +33,10 @@ import { globalClickTracker } from '../../services/Analytics/globalClickTracker'
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 import { prefixWorkspacePath } from '../../lib/workspacePath';
-import { isSdlcResourceKind } from '../../routes/SdlcScreen/sdlcFrameMessages';
-import { refreshSdlcResource } from '../../routes/SdlcScreen/sdlcResourceChanged';
+import {
+  isSdlcResourceKind,
+  refreshSdlcResource,
+} from '../../routes/SdlcScreen/sdlcResourceChanged';
 
 // Singleton: a fresh Audio element PER NOTIFICATION leaked native listener
 // registrations and media elements — heap analysis showed "JS event
@@ -152,7 +155,10 @@ export const NotificationHandler: React.FC = () => {
   // Same-workspace clicks stay in the SPA.
   const handleNotificationClick = useCallback(
     async (actionUrl: string | undefined, targetWorkspaceId: string | undefined): Promise<void> => {
-      const resolvedUrl = actionUrl || (targetWorkspaceId ? `/${targetWorkspaceId}/chat` : '/chat');
+      const resolvedUrl = toSafeAppUrl(
+        actionUrl,
+        targetWorkspaceId ? `/${targetWorkspaceId}/chat` : '/chat',
+      );
       const currentWorkspaceId = activeWorkspaceIdRef.current;
 
       if (targetWorkspaceId && targetWorkspaceId !== currentWorkspaceId) {

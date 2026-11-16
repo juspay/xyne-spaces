@@ -12,7 +12,11 @@
  */
 
 import { useState, type ReactElement } from 'react';
-import { ChevronBigDown, Spinner } from '@xyne/icons';
+import {
+  // Disabled (LLM)
+  // ChevronBigDown,
+  Spinner,
+} from '@xyne/icons';
 import { Popover } from '../../components/ui/Popover';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
@@ -78,7 +82,11 @@ export function CallSummaryTemplatePicker({
 }: CallSummaryTemplatePickerProps): ReactElement {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [templatesModalMode, setTemplatesModalMode] = useState<'browse' | 'new' | null>(null);
-  const [shouldLoadTemplates, setShouldLoadTemplates] = useState(false);
+  const [
+    shouldLoadTemplates,
+    // Disabled (LLM)
+    // setShouldLoadTemplates,
+  ] = useState(false);
   const currentUser = useSelf();
 
   const { templates, isLoading: templatesLoading } = useSummaryTemplates(
@@ -167,9 +175,12 @@ export function CallSummaryTemplatePicker({
           </span>
         </Tooltip>
       )}
+      {/* Disabled (LLM) */}
+      {/*
       {isActive && (
         <ChevronBigDown strokeWidth={2} className='size-3.5 shrink-0' aria-hidden='true' />
       )}
+      */}
     </button>
   );
 
@@ -178,11 +189,12 @@ export function CallSummaryTemplatePicker({
       <Popover
         trigger={trigger}
         open={isActive && isMenuOpen}
-        onOpenChange={open => {
-          if (!isActive) return;
-          if (open) setShouldLoadTemplates(true);
-          setIsMenuOpen(open);
-        }}
+        // Disabled (LLM)
+        // onOpenChange={open => {
+        //   if (!isActive) return;
+        //   if (open) setShouldLoadTemplates(true);
+        //   setIsMenuOpen(open);
+        // }}
         side='bottom'
         align='start'
         sideOffset={8}

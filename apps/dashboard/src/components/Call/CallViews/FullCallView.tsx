@@ -1,6 +1,6 @@
 import type { Room } from 'livekit-client';
 import { ConnectionQuality, ConnectionState } from 'livekit-client';
-import { Minimize2, MonitorUp, WifiLow } from 'lucide-react';
+import { Lock, Minimize2, MonitorUp, WifiLow } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -508,6 +508,8 @@ export function FullCallView({
             : null;
 
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  // End-to-end encrypted call: the recording workers cannot decrypt it, so recording is off.
+  const isEncryptedCall = useSelector(roomActor, state => state.context.encryption !== null);
   const currentCall = useMemo(
     () =>
       (
@@ -813,8 +815,8 @@ export function FullCallView({
             isHost={isHost}
             isRecording={isRecordingActive}
             canStopRecording={canStopRecording}
-            onStartRecording={handleStartRecording}
-            onStopRecording={handleStopRecording}
+            onStartRecording={isEncryptedCall ? undefined : handleStartRecording}
+            onStopRecording={isEncryptedCall ? undefined : handleStopRecording}
             onTogglePresentationMode={
               isTelepresenceEnabled ? () => setIsPresentationMode(prev => !prev) : undefined
             }
@@ -824,6 +826,13 @@ export function FullCallView({
             onToggleHandRaise={onToggleHandRaise}
             infoSlot={
               <div className='flex min-w-0 items-center gap-3 text-base font-medium text-[#e3e3e3]'>
+                {isEncryptedCall && (
+                  <Lock
+                    size={14}
+                    className='shrink-0 text-[#e3e3e3]/80'
+                    aria-label='End-to-end encrypted'
+                  />
+                )}
                 <span className='shrink-0 tabular-nums'>{clockLabel}</span>
                 {callTitle && (
                   <>

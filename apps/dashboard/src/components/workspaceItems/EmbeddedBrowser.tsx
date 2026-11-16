@@ -20,11 +20,6 @@ import {
 } from '../InAppBrowser/PageContextMenu';
 import { runPageMenuAction } from '../InAppBrowser/pageMenuActions';
 import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
-import {
-  canHostEmbedPages,
-  embedPageOverElement,
-  reclaimHostFocus,
-} from '../../routes/SdlcScreen/useSdlcFrameBridge';
 
 export interface EmbeddedBrowserProps {
   url: string;
@@ -44,21 +39,6 @@ export interface EmbeddedBrowserProps {
   shown?: boolean;
   /** Told when the page starts or stops playing a video or a sound. */
   onPlaying?: (playing: boolean) => void;
-}
-
-/**
- * A page held by the host window, over a hole this element leaves. Used when the
- * surface is inside a frame, where a webview of its own cannot live.
- */
-function HostedPage({ url }: { url: string }): ReactElement {
-  const [element, setElement] = useState<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!element) return undefined;
-    return embedPageOverElement(url, element);
-  }, [url, element]);
-
-  return <div ref={setElement} className='h-full w-full bg-background' />;
 }
 
 /** A right-click in the page: the menu, where the click was, and the page's own point. */
@@ -107,7 +87,6 @@ function EmbeddedBrowserView({
   onPlayingRef.current = onPlaying;
 
   const releaseFocus = useCallback((): void => {
-    reclaimHostFocus();
     void window.electronAPI?.focusHostWebContents?.();
   }, []);
 
@@ -154,18 +133,6 @@ function EmbeddedBrowserView({
     window.addEventListener('pointermove', onMove, true);
     return () => window.removeEventListener('pointermove', onMove, true);
   }, [host, releaseFocus]);
-
-  if (canHostEmbedPages()) {
-    return (
-      <div className='flex h-full min-h-0 flex-col'>
-        {banner?.(null)}
-        <div ref={setHost} className='relative min-h-0 flex-1' onPointerLeave={releaseFocus}>
-          <HostedPage url={url} />
-          {overlay?.(null)}
-        </div>
-      </div>
-    );
-  }
 
   if (!isElectronApp()) {
     return <SandboxedFrame url={url} title={title} />;

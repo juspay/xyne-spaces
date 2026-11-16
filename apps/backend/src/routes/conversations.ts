@@ -25,20 +25,25 @@ router.get('/by-message/:messageId', conversationController.getConversationByMes
 // Read current ephemeral agent-progress signals for a conversation (dashboard rehydrate on thread open)
 router.get('/:conversationId/agent-progress', conversationController.getAgentProgress);
 
-router.get('/:conversationId/summary', conversationController.getSummary);
+// Disabled (LLM)
+// router.get('/:conversationId/summary', conversationController.getSummary);
 
-router.get('/:conversationId/recommendation', conversationController.getRecommendation);
+// Disabled (LLM)
+// router.get('/:conversationId/recommendation', conversationController.getRecommendation);
 
 // Cancel an in-flight agent run for the given conversation
 router.post('/:conversationId/agent-cancel', conversationController.cancelAgentRun);
 
 // Update message content (for ticket suggestion → ticket created flow)
-router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversationController.updateTicketSuggestion);
+// Disabled (LLM)
+// router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversationController.updateTicketSuggestion);
 
 // Mark a Pulse actionable item as sent (moves pulseItem → pulseSent in frontmatter)
-router.put('/:conversationId/messages/:messageId/pulse-item', conversationController.markPulseItemAsSent);
+// Disabled (LLM)
+// router.put('/:conversationId/messages/:messageId/pulse-item', conversationController.markPulseItemAsSent);
 
 // Update a Pulse merchant entry in the message frontmatter (user corrects auto-detected merchant)
-router.put('/:conversationId/messages/:messageId/pulse-merchant', conversationController.updatePulseMerchant);
+// Disabled (LLM)
+// router.put('/:conversationId/messages/:messageId/pulse-merchant', conversationController.updatePulseMerchant);
 
 export default router;

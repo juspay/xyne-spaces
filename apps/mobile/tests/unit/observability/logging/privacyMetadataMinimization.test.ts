@@ -121,7 +121,7 @@ describe('privacy metadata minimization', () => {
   it('limits email correlation to approved remote logs and keeps it out of metrics', () => {
     assert.match(
       legacyLoggerSource,
-      /canIncludeEmailInRemoteLogs\(LOGGER_CONFIG\.eventsEndpoint, APP_VARIANT, __DEV__\)/,
+      /canIncludeEmailInRemoteLogs\(\s*LOGGER_CONFIG\.eventsEndpoint,\s*APP_VARIANT,\s*__DEV__,\s*PUBLIC_DEEP_LINK_ORIGIN,?\s*\)/,
     );
     assert.match(legacyLoggerSource, /email: this\.emailId/);
     assert.match(legacyLoggerSource, /this\.isAuthenticatedSession = true/);

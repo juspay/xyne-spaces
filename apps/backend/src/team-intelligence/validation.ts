@@ -7,18 +7,18 @@ import { z } from 'zod';
 export interface TeamIntelligencePayloadValidationError {
   fieldName: string;
   fieldPath: string;
-  code: z.ZodIssueCode;
+  code: z.core.$ZodIssue['code'];
   message: string;
   expected?: string;
-  received?: string;
 }
 
-function formatValidationPath(path: (string | number)[]): string {
+function formatValidationPath(path: PropertyKey[]): string {
   if (path.length === 0) return '$';
 
   return path.reduce<string>((formatted, segment) => {
     if (typeof segment === 'number') return `${formatted}[${segment}]`;
-    return formatted ? `${formatted}.${segment}` : segment;
+    const key = String(segment);
+    return formatted ? `${formatted}.${key}` : key;
   }, '');
 }
 
@@ -40,9 +40,8 @@ export function formatTeamIntelligenceValidationErrors(
       message: issue.message,
     };
 
-    if (issue.code === z.ZodIssueCode.invalid_type) {
+    if (issue.code === 'invalid_type') {
       formatted.expected = issue.expected;
-      formatted.received = issue.received;
     }
 
     return formatted;

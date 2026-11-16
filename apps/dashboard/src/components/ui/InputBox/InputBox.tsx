@@ -2051,7 +2051,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           <Plus className='h-4 w-4' /> Upload Files
                           <ShortcutHint keys='mod+o' className='ml-auto pl-6' />
                         </DropdownMenuItem>
-                        <DropdownMenuItem
+                        {/* Disabled (LLM) */}
+                        {/* <DropdownMenuItem
                           onClick={() => {
                             setIsTranscriptSelectorOpen(true);
                             setIsPlusMenuOpen(false);
@@ -2060,7 +2061,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           data-track-name='ATTACH_TRANSCRIPT'
                         >
                           <FileText className='h-4 w-4' /> Add Call Summary
-                        </DropdownMenuItem>
+                        </DropdownMenuItem> */}
                         <DropdownMenuItem
                           onClick={() => {
                             setIsCanvasAttachmentModalOpen(true);

@@ -6,7 +6,6 @@ import {
   OrgLLMServiceAccountCredentialStatus,
   OrgLLMServiceAccountProvider,
   OrgLLMServiceAccountPurpose,
-  WorkspaceType,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -429,7 +428,6 @@ export class AiProvisioningBackfillController {
             id: true,
             orgId: true,
             name: true,
-            workspaceType: true,
             createdBy: true,
             organization: {
               select: {
@@ -450,8 +448,7 @@ export class AiProvisioningBackfillController {
       throw new Error(`Org ${orgId} has no LiteLLM team — provision orgs first`);
     }
 
-    const workspaceType = user.workspace.workspaceType ?? null;
-    const budget = this.getUserBudget(workspaceType);
+    const budget = config.aiProvisioning.enterpriseWorkspaceUserBudget ?? undefined;
 
     const clawUserPayload: ClawSyncUserPayload = {
       spacesUserId: user.id,
@@ -512,13 +509,6 @@ export class AiProvisioningBackfillController {
       keyAlias: key.keyAlias,
       expires: key.expires,
     });
-  }
-
-  private static getUserBudget(workspaceType: string | null | undefined): number | undefined {
-    const budget = workspaceType === WorkspaceType.COMMUNITY
-      ? config.aiProvisioning.communityWorkspaceUserBudget
-      : config.aiProvisioning.enterpriseWorkspaceUserBudget;
-    return budget ?? undefined;
   }
 
   // ── BATCH RUNNER ─────────────────────────────────────────────────────

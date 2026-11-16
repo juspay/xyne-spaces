@@ -6,7 +6,7 @@ class SlackService {
   private client: WebClient | undefined;
 
   constructor() {
-    const token = process.env.SLACK_BOT_TOKEN;
+    const token = config.slackBotToken;
 
     if (token) {
       this.client = new WebClient(token);

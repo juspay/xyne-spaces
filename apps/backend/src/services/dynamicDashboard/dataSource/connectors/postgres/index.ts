@@ -45,12 +45,11 @@ function verifyServerIdentity(host: string, cert: PeerCertificate): Error | unde
 function buildSslConfig(config: ConnectionConfig): PoolConfig['ssl'] {
   if (!config.ssl) return false;
 
-  const verify = appConfig.env === 'production';
-
   return {
     ...(config.ca ? { ca: config.ca } : {}),
     host: config.host,
-    rejectUnauthorized: verify,
+    ...(isIP(config.host) === 0 ? { servername: config.host } : {}),
+    rejectUnauthorized: true,
     checkServerIdentity: verifyServerIdentity,
   };
 }
@@ -61,7 +60,7 @@ export class PostgresConnector extends ConnectorBase {
   constructor(config: ConnectionConfig) {
     super(config);
     this.poolConfig = {
-      host: config.host,
+      host: config.pinned?.addresses[0] ?? config.host,
       port: config.port,
       user: config.user,
       password: config.password,

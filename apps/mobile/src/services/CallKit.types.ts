@@ -8,8 +8,6 @@ export interface CallKitPayload {
   callerName: string;
   callType: CallType;
   channelId?: string;
-  token?: string;
-  serverUrl?: string;
   /** iOS: CallKit saw another call in progress (SIM, other VoIP, ours) when this one arrived. */
   onAnotherCall?: boolean;
 }

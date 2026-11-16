@@ -35,7 +35,9 @@ import type { ExtensionFactory, ExtensionCommandContext } from "@earendil-works/
 
 // ── Config (self-contained; mirrors the CLI's ~/.xyne/agent convention) ─────
 
-const DEFAULT_CLAW_BASE_URL = "https://spaces.xyne.juspay.net";
+// No in-repo default: the Claw origin comes from /claw login <url>, XYNE_CLAW_BASE_URL,
+// or the stored ~/.xyne/agent/claw.json config.
+const DEFAULT_CLAW_BASE_URL = "";
 const API_PATH = "/claw/api/v1";
 
 interface ClawConfig {
@@ -100,6 +102,9 @@ function clearClawConfig(): boolean {
 /** override (flag/env) → stored config → default. */
 function resolveBaseUrl(override?: string): string {
 	const chosen = override || process.env.XYNE_CLAW_BASE_URL || loadClawConfig()?.baseUrl || DEFAULT_CLAW_BASE_URL;
+	if (!chosen) {
+		throw new Error("No Claw base URL configured — set XYNE_CLAW_BASE_URL or run `/claw login <url>`");
+	}
 	return trimTrailingSlash(chosen);
 }
 

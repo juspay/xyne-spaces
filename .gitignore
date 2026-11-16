@@ -252,3 +252,5 @@ security-reports/
 out/
 apps/xyne-claw-auth/backend/src/extensions/
 apps/xyne-claw-auth/frontend/src/v3/extensions/
+
+/pnpm-store

@@ -6,7 +6,8 @@ import { SearchableMultiSelect } from '../ui/SearchableMultiSelect/SearchableMul
 import type { SearchableMultiSelectOption } from '../ui/SearchableMultiSelect/SearchableMultiSelect.types';
 import { Button } from '../ui/Button/Button';
 import {
-  confirmRecordingLabelSuggestion,
+  // Disabled (LLM)
+  // confirmRecordingLabelSuggestion,
   useResolvedRecordingLabels,
 } from '../../hooks/useResolvedRecordingLabels';
 import { cn } from '../../utils/classNames';
@@ -135,11 +136,12 @@ export function LabelPicker({
     () => labels.filter(id => isResolved(id) && resolveMethod(id) === TagMethod.MANUAL),
     [labels, isResolved, resolveMethod],
   );
-  const suggestedLabels = useMemo(
-    () =>
-      canEdit ? labels.filter(id => isResolved(id) && resolveMethod(id) !== TagMethod.MANUAL) : [],
-    [labels, canEdit, isResolved, resolveMethod],
-  );
+  // Disabled (LLM)
+  // const suggestedLabels = useMemo(
+  //   () =>
+  //     canEdit ? labels.filter(id => isResolved(id) && resolveMethod(id) !== TagMethod.MANUAL) : [],
+  //   [labels, canEdit, isResolved, resolveMethod],
+  // );
   const loadingLabels = useMemo(() => labels.filter(id => !isResolved(id)), [labels, isResolved]);
 
   const options = useMemo<SearchableMultiSelectOption[]>(
@@ -186,33 +188,35 @@ export function LabelPicker({
     onChange(values);
   };
 
-  /** Tick: keep the AI-suggested tag — flips its Tag row to `manual` in place, no labels change needed. */
-  const handleConfirmSuggestion = async (labelId: string): Promise<void> => {
-    const revertMethod = resolveMethod(labelId);
-    try {
-      await confirmRecordingLabelSuggestion(labelId, revertMethod);
-    } catch {
-      toast.error('Failed to confirm label');
-    }
-  };
+  // Disabled (LLM)
+  // /** Tick: keep the AI-suggested tag — flips its Tag row to `manual` in place, no labels change needed. */
+  // const handleConfirmSuggestion = async (labelId: string): Promise<void> => {
+  //   const revertMethod = resolveMethod(labelId);
+  //   try {
+  //     await confirmRecordingLabelSuggestion(labelId, revertMethod);
+  //   } catch {
+  //     toast.error('Failed to confirm label');
+  //   }
+  // };
 
-  /** Cross: discard the AI-suggested tag — just drop its id from the call's labels. */
-  const handleRejectSuggestion = (labelId: string): void => {
-    onChange(labels.filter(id => id !== labelId));
-  };
+  // /** Cross: discard the AI-suggested tag — just drop its id from the call's labels. */
+  // const handleRejectSuggestion = (labelId: string): void => {
+  //   onChange(labels.filter(id => id !== labelId));
+  // };
 
-  const suggestionPills =
-    canEdit && suggestedLabels.length > 0
-      ? suggestedLabels.map(label => (
-          <SuggestedLabelChip
-            key={label}
-            label={resolveLabel(label)}
-            onConfirm={() => void handleConfirmSuggestion(label)}
-            onReject={() => handleRejectSuggestion(label)}
-            trackCategory={trackCategory}
-          />
-        ))
-      : null;
+  // Disabled (LLM)
+  // const suggestionPills =
+  //   canEdit && suggestedLabels.length > 0
+  //     ? suggestedLabels.map(label => (
+  //         <SuggestedLabelChip
+  //           key={label}
+  //           label={resolveLabel(label)}
+  //           onConfirm={() => void handleConfirmSuggestion(label)}
+  //           onReject={() => handleRejectSuggestion(label)}
+  //           trackCategory={trackCategory}
+  //         />
+  //       ))
+  //     : null;
 
   const loadingPills = loadingLabels.map(label => (
     <span key={label} className={LOADING_CHIP_CLASS_NAME} aria-hidden='true' />
@@ -274,7 +278,8 @@ export function LabelPicker({
           </Button>
         }
       />
-      {suggestionPills}
+      {/* Disabled (LLM) */}
+      {/* {suggestionPills} */}
     </>
   );
 }

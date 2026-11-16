@@ -1180,6 +1180,25 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       >
         <ArrowLeft className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
       </button>
+      {!isAtRoot && (
+        <button
+          type='button'
+          aria-label={isAtCollectionRoot ? 'Back to collections' : 'Up one level'}
+          onClick={() => {
+            if (collectionId && !spParentId) {
+              goToCollections();
+            } else {
+              goUp();
+            }
+          }}
+          className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+          title={isAtCollectionRoot ? 'Back to collections' : 'Up'}
+          data-track-category='knowledge-base'
+          data-track-name='navigate-up'
+        >
+          <ArrowLeft className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+        </button>
+      )}
 
       {isAtRoot ? (
         <span className='text-[13px] font-medium text-foreground'>Knowledge</span>

@@ -1,4 +1,9 @@
 import type { RepoSetupConfig } from "./tools.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("repo-configs");
+const BITBUCKET_SSH_HOST = (process.env["BITBUCKET_SSH_HOST"] ?? "").trim();
+const bitbucketSshUrl = (projectRepo: string): string => `ssh://git@${BITBUCKET_SSH_HOST}/${projectRepo}.git`;
 
 /**
  * Centralized repository setup configurations.
@@ -135,7 +140,9 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     ],
     ports: { backend: 3001, dashboard: 5173 },
   },
+};
 
+const BITBUCKET_REPO_CONFIGS: Record<string, RepoSetupConfig> = {
   lotus: {
     slug: "sandbox-lotus-setup",
     name: "LotusPay Doctor Sandbox Setup",
@@ -150,7 +157,7 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
       "No services auto-start; agent runs `rails s` (torana → :3000), " +
       "`npm run dev` (ashfall → :3001 / :5173 Vite), or `nix run ./#<x>` " +
       "(pluto) on demand.",
-    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/lp/torana.git",
+    repoUrl: bitbucketSshUrl("lp/torana"),
     defaultBranch: "master",
     cloneDepth: 1,
     workDir: "/workspace/torana",
@@ -159,8 +166,8 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     idleTimeoutMs: 60 * 60 * 1000,
     readyTimeoutMs: 10 * 60 * 1000,
     auxRepos: [
-      { name: "pluto",   url: "ssh://git@ssh.bitbucket.juspay.net/lp/pluto.git",   defaultBranch: "master",  workDir: "/workspace/pluto" },
-      { name: "ashfall", url: "ssh://git@ssh.bitbucket.juspay.net/lp/ashfall.git", defaultBranch: "develop", workDir: "/workspace/ashfall" },
+      { name: "pluto",   url: bitbucketSshUrl("lp/pluto"),   defaultBranch: "master",  workDir: "/workspace/pluto" },
+      { name: "ashfall", url: bitbucketSshUrl("lp/ashfall"), defaultBranch: "develop", workDir: "/workspace/ashfall" },
     ],
     steps: [],
     ports: {
@@ -187,7 +194,7 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
       "  - cd clms-retail    && yarn start:sandbox\n" +
       "(npm install / yarn install / yarn re:build are already baked; " +
       "re-run only if package.json or .res files change.)",
-    repoUrl: "ssh://git@ssh.bitbucket.juspay.net/ax/lamf-dashboard.git",
+    repoUrl: bitbucketSshUrl("ax/lamf-dashboard"),
     defaultBranch: "master",
     cloneDepth: 1,
     workDir: "/workspace/lamf-dashboard",
@@ -199,8 +206,8 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     // is master, clms-corp is main, clms-retail is master. Override per-claim
     // via auxBranches if needed.
     auxRepos: [
-      { name: "clms-corp",   url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-corp.git",   defaultBranch: "main",   workDir: "/workspace/clms-corp" },
-      { name: "clms-retail", url: "ssh://git@ssh.bitbucket.juspay.net/ax/clms-retail.git", defaultBranch: "master", workDir: "/workspace/clms-retail" },
+      { name: "clms-corp",   url: bitbucketSshUrl("ax/clms-corp"),   defaultBranch: "main",   workDir: "/workspace/clms-corp" },
+      { name: "clms-retail", url: bitbucketSshUrl("ax/clms-retail"), defaultBranch: "master", workDir: "/workspace/clms-retail" },
     ],
     steps: [],
     ports: {
@@ -211,6 +218,12 @@ export const REPO_CONFIGS: Record<string, RepoSetupConfig> = {
     },
   },
 };
+
+if (!BITBUCKET_SSH_HOST) {
+  log.warn(`BITBUCKET_SSH_HOST is not set — skipping Bitbucket-hosted sandbox repo configs: ${Object.keys(BITBUCKET_REPO_CONFIGS).join(", ")}`);
+} else {
+  Object.assign(REPO_CONFIGS, BITBUCKET_REPO_CONFIGS);
+}
  
 // ───────────────────────────────────────────────────────────────────────────
 // sbx-git — the SHARED, READ-ONLY, multi-repo sandbox.

@@ -3,23 +3,15 @@ import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
 import { InsertDocument, samTranscriptSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
-import { db } from '@/database/client';
-import { NAMESPACE } from '@/vespa/vespaConfig';
-import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
-import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
+import { validateVespaJob } from '@/zero/vespa-injection/core/jobValidation';
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
 	private isInitialized = false;
 	private isInitializing = false;
-	private namespace: string;
-
-	constructor(namespace: string = NAMESPACE) {
-		this.namespace = namespace;
-	}
-
 	async initialize(): Promise<void> {
 		// Prevent concurrent initialization attempts
 		if (this.isInitialized || this.isInitializing) {
@@ -31,11 +23,11 @@ export class VespaWorker {
 		try {
 			// Redis configuration from environment
 			const redisConfig = {
-				host: process.env.REDIS_HOST || 'localhost',
-				port: parseInt(process.env.REDIS_PORT || '6379', 10),
+				host: config.redis.host,
+				port: config.redis.port,
 				maxRetriesPerRequest: 3,
-				...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-				...(process.env.REDIS_TLS === 'true' && {
+				...(config.redis.password && { password: config.redis.password }),
+				...(config.redis.tls && {
 					tls: {
 						rejectUnauthorized: false
 					}
@@ -45,7 +37,7 @@ export class VespaWorker {
 			// Worker connects to the EXISTING queue created by the API server
 			// Multiple Bull instances with the same name share the same Redis queue
 			// The API server (vespaBullQueue) is the producer, worker is the consumer
-			const queueName = process.env.VESPA_WORKER_QUEUE_NAME || 'vespa-ingestion';
+			const queueName = config.vespa.workerQueueName;
 			this.queue = new Bull<VespaJob>(queueName, {
 				redis: redisConfig,
 				defaultJobOptions: {
@@ -55,6 +47,7 @@ export class VespaWorker {
 						delay: 2000,
 					},
 					removeOnComplete: 1000,
+					removeOnFail: 5000,
 				},
 				settings: {
 					stalledInterval: 30 * 1000,    // 30 seconds
@@ -84,6 +77,9 @@ export class VespaWorker {
 		if (!this.isInitialized) {
 			await this.initialize();
 		}
+		if (!this.isInitialized) {
+			throw new Error('[VESPA_WORKER] Failed to initialize queue consumer');
+		}
 
 		logger.info('[VESPA_WORKER] VespaWorker started successfully and ready to process jobs');
 	}
@@ -97,8 +93,12 @@ export class VespaWorker {
 			return;
 		}
 
-		// Process all jobs with a single queue processor to ensure only one job at a time across all schemas
-		this.queue.process('*', 1, async (job) => {
+		// One processor for all schemas. VESPA_WORKER_CONCURRENCY (default 1: one job at a time)
+		// lets a worker such as the backfill one run several jobs at once; each extra slot is
+		// another concurrent DB read and Vespa feed.
+		const concurrency = config.vespa.workerConcurrency;
+		logger.info(`[VESPA_WORKER] Processing up to ${concurrency} job(s) at a time`);
+		this.queue.process('*', concurrency, async (job) => {
 			return this.processJob(job);
 		});
 
@@ -112,11 +112,14 @@ export class VespaWorker {
 		// Event: Job failed
 		this.queue.on('failed', async (job, err) => {
 
-			// After max retries, record in database
+			if (validateVespaJob(job.data, { allowFileSchema: false })) {
+				return;
+			}
+
+			// After max retries the job stays in Bull's failed set (bounded by removeOnFail).
 			if (job.attemptsMade >= (job.opts.attempts || 3)) {
-				await this.recordFailedJob(job, err);
 				logger.warn(
-					`[VESPA_WORKER] Recorded failed job ${job.id} to database after ${job.attemptsMade} failed attempts`
+					`[VESPA_WORKER] Job ${job.id} (${job.data.schema}/${job.data.docId}) failed after ${job.attemptsMade} attempts: ${err.message}`
 				);
 			}
 		});
@@ -144,55 +147,16 @@ export class VespaWorker {
 	}
 
 	/**
-	 * Record a failed job in the database
-	 */
-	private async recordFailedJob(job: Bull.Job<VespaJob>, error: Error): Promise<void> {
-		try {
-			const entityId = job.data.docId;
-			const entityType = job.data.schema;
-			const userId = job.data.userId || null;
-			const workspaceId = job.data.workspaceId;
-			if (!workspaceId) {
-				logger.warn(
-					`[VESPA_WORKER] Skipping DB failure record for job ${job.id} (${entityType}/${entityId}): no workspaceId on job payload`,
-				);
-				return;
-			}
-			await db.vespaInsertionLogs.create({
-				data: {
-					entityId,
-					entityType,
-					workspaceId,
-					type: VespaOperationType[job.data.jobType],
-					status: VespaInsertionStatus.FAILED,
-					namespace: this.namespace,
-					errorMessage: `Job ${job.id} failed after ${job.attemptsMade} attempts: ${error.message}`,
-					errorDetails: JSON.stringify({
-						jobId: job.id,
-						jobName: job.name,
-						jobType: job.data.jobType,
-						attemptsMade: job.attemptsMade,
-						error: error.message,
-						stack: error.stack,
-						jobData: job.data,
-						timestamp: Date.now(),
-					}),
-					userId,
-					retryCount: job.attemptsMade || 0,
-					createdAt: new Date(),
-				},
-			});
-
-			logger.info(`[VESPA_WORKER] ✓ Recorded failed job ${job.id} in database`);
-		} catch (dbError) {
-			logger.error(`[VESPA_WORKER] Failed to record job ${job.id} failure in database:`, dbError);
-		}
-	}
-
-	/**
 	 * Process a single job from the queue
 	 */
 	private async processJob(job: Bull.Job<VespaJob>): Promise<any> {
+		const invalidReason = validateVespaJob(job.data, { allowFileSchema: false });
+		if (invalidReason) {
+			logger.warn(`[VESPA_WORKER] Rejected job ${job.id} (${job.name}): ${invalidReason}`);
+			await job.discard();
+			throw new Error(`Rejected invalid Vespa job: ${invalidReason}`);
+		}
+
 		const { schema, docId, jobType, app } = job.data;
 
 		logger.info(

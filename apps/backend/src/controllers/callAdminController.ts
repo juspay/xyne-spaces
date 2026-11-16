@@ -74,7 +74,7 @@ export class CallAdminController {
 
   private handleError(res: Response, error: unknown, failureMessage: string, targetId?: string): void {
     if (error instanceof ZodError) {
-      res.status(400).json({ success: false, error: error.errors[0]?.message ?? 'Invalid request' });
+      res.status(400).json({ success: false, error: error.issues[0]?.message ?? 'Invalid request' });
       return;
     }
     if (error instanceof CallAdminError) {

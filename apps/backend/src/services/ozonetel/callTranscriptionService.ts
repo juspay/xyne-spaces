@@ -147,11 +147,12 @@ export class CallTranscriptionService {
         ` | provider=${result.provider} | elapsed=${Date.now() - t0}ms`,
     );
 
-    const summary = await this.generateSummary(emailId, workspaceId, text);
-    if (summary) {
-      await this.safeSetState(data, { status: 'done', attachmentId: attachment.id, summary });
-      logger.info(`${TAG} summary stored | emailId=${emailId} | chars=${summary.length} | elapsed=${Date.now() - t0}ms`);
-    }
+    // Disabled (LLM)
+    // const summary = await this.generateSummary(emailId, workspaceId, text);
+    // if (summary) {
+    //   await this.safeSetState(data, { status: 'done', attachmentId: attachment.id, summary });
+    //   logger.info(`${TAG} summary stored | emailId=${emailId} | chars=${summary.length} | elapsed=${Date.now() - t0}ms`);
+    // }
 
     return { status: 'done', attachmentId: attachment.id };
   }

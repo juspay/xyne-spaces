@@ -8,7 +8,8 @@ import { DatabaseClient } from '@/database/client';
 import type { Call } from '@prisma/client';
 import { transaction } from '../base';
 import { setSlashCommandArtifactLifecycle } from '@/database/repositories/messageArtifactRepository';
-import { CallMetadata, CallRepository, CreateCallParticipantInput, parseRecordingParticipantIds, scheduledCallPillContent, scheduledCallPillMetadata } from '@/database/repositories/callRepository';
+import { CallMetadata, CallRepository, CreateCallParticipantInput, parseRecordingParticipantIds, scheduledCallPillContent, scheduledCallPillMetadata, type CallEncryptionState } from '@/database/repositories/callRepository';
+import { callEncryptionService } from '@/services/callEncryptionService';
 import { queueCallVespaFeed, CallVespaFeedSource } from '@/services/callVespaQueue';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { logger } from '@/utils/logger';
@@ -22,7 +23,7 @@ export function linkArtifactToActiveCallTx(callId: string, metadata: any, artifa
         metadata: {
           ...((metadata as CallMetadata | null) ?? {}),
           artifactMessageId,
-        } as Prisma.InputJsonValue,
+        } as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -190,6 +191,15 @@ export function handleRoomFinishedTx(callExternalId: string, endedAt: Date, self
       return { shouldEndCall: false, messageUpdated: false, call: null };
     }
 
+    // Nobody ever joined: no participants, conversation or message exist to close.
+    if (call.status === CallStatus.PENDING) {
+      await tx.call.update({
+        where: { id: call.id },
+        data: { status: CallStatus.CANCELLED, endedAt },
+      });
+      return { shouldEndCall: false, messageUpdated: false, call };
+    }
+
     let shouldEndCall = false;
     let messageUpdated = false;
 
@@ -296,7 +306,10 @@ export function activateScheduledCallTx(callParam: Call, workspaceId: string | u
     const callMetadata = call.metadata as {
       systemMessageId?: string;
       conversationId?: string;
+      e2ee?: CallEncryptionState;
     } | null;
+    // Activation pins the key version; a rejoin keeps the one its first session used.
+    const e2ee = callEncryptionService.stateAtActivation(callMetadata?.e2ee);
 
     if (!callMetadata?.conversationId) {
       // First join: create conversation + system message, then activate.
@@ -322,7 +335,7 @@ export function activateScheduledCallTx(callParam: Call, workspaceId: string | u
           // Merge (not replace) so calendar-derived fields already on the call
           // (organizer, attendees, provider, etc. — set by the calendar sync
           // upsert) survive activation instead of being wiped out.
-          metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
+          metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId, ...(e2ee && { e2ee }) },
         },
       });
     } else if (!callMetadata?.systemMessageId) {
@@ -364,7 +377,7 @@ export function activateScheduledCallTx(callParam: Call, workspaceId: string | u
           startedAt: now,
           lastActivityAt: now,
           updatedAt: now,
-          metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId },
+          metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), systemMessageId: messageId, conversationId, ...(e2ee && { e2ee }) },
         },
       });
     } else {
@@ -381,6 +394,9 @@ export function activateScheduledCallTx(callParam: Call, workspaceId: string | u
           startedAt: call.endedAt ? call.startedAt : now,
           lastActivityAt: now,
           updatedAt: now,
+          ...(e2ee && e2ee !== callMetadata.e2ee && {
+            metadata: { ...(call.metadata as Prisma.InputJsonObject ?? {}), e2ee },
+          }),
         },
       });
 
@@ -413,10 +429,39 @@ export function activateScheduledCallTx(callParam: Call, workspaceId: string | u
   });
 }
 
-export function createCallWithParticipantsAndMessageTx(callId: string, roomName: string, wsId: string, createdBy: string, channelId: string, workspaceId: string | undefined, callType: CallType, roomLink: string, isHeadless: boolean, now: Date, callOrigin: CallOrigin | undefined, messageId: string, conversationId: string, artifactMessageId: string | undefined, agentName: string | undefined, dispatchStatus: string | undefined, self: CallRepository, channelParticipants: { userId: string; }[], joiningUserId: string) {
+export function createCallWithParticipantsAndMessageTx(callId: string, roomName: string, wsId: string, createdBy: string, channelId: string, workspaceId: string | undefined, callType: CallType, roomLink: string, isHeadless: boolean, now: Date, callOrigin: CallOrigin | undefined, messageId: string, conversationId: string, artifactMessageId: string | undefined, agentName: string | undefined, dispatchStatus: string | undefined, self: CallRepository, channelParticipants: { userId: string; }[], joiningUserId: string, pendingCall?: Call, e2ee?: CallEncryptionState) {
   return transaction(['Call', 'CallParticipant', 'ChannelStats', 'Conversation', 'Message', 'MessageArtifact', 'User'], 'createCallWithParticipantsAndMessage: call, participants, conversation, system message and channel stats must commit atomically; tx is not ACL-wrapped', DatabaseClient.getInstance(), async (tx) => {
-    // Create the call record with ACTIVE status
-    const call = await tx.call.create({
+    const activationMetadata = {
+      systemMessageId: messageId,
+      conversationId,
+      ...(artifactMessageId && { artifactMessageId }),
+      ...(agentName && { agentName }),
+      ...(dispatchStatus && { dispatchStatus }),
+    };
+    // /initiate wrote the row as PENDING (encryption already on it); first join activates
+    // it in place. The create branch serves callers that never wrote a pending row.
+    // Either way the row becomes ACTIVE here, which pins the key version.
+    const pendingE2ee = callEncryptionService.stateAtActivation(
+      (pendingCall?.metadata as { e2ee?: CallEncryptionState } | null)?.e2ee,
+    );
+    const activeE2ee = callEncryptionService.stateAtActivation(e2ee);
+    const call = pendingCall
+      ? await tx.call.update({
+          where: { id: pendingCall.id, status: CallStatus.PENDING },
+          data: {
+            status: CallStatus.ACTIVE,
+            startedAt: now,
+            lastActivityAt: now,
+            recordingEnabled: isHeadless,
+            callOrigin: callOrigin || CallOrigin.CHANNEL,
+            metadata: {
+              ...(pendingCall.metadata as Prisma.InputJsonObject ?? {}),
+              ...activationMetadata,
+              ...(pendingE2ee && { e2ee: pendingE2ee }),
+            },
+          },
+        })
+      : await tx.call.create({
       data: {
         id: callId,
         externalId: roomName,
@@ -433,13 +478,7 @@ export function createCallWithParticipantsAndMessageTx(callId: string, roomName:
         startedAt: now,
         lastActivityAt: now,
         callOrigin: callOrigin || CallOrigin.CHANNEL,
-        metadata: {
-          systemMessageId: messageId,
-          conversationId,
-          ...(artifactMessageId && { artifactMessageId }),
-          ...(agentName && { agentName }),
-          ...(dispatchStatus && { dispatchStatus }),
-        },
+        metadata: { ...activationMetadata, ...(activeE2ee && { e2ee: activeE2ee }) },
       },
     });
 

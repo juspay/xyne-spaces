@@ -19,7 +19,7 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
   // gated by design — that one acts as the bot identity, autonomously.
   writeTools: ["spaces-create-ticket", "spaces-create-bulk-tickets", "spaces-update-ticket", "spaces-update-bulk-tickets", "spaces-send-ticket-email", "spaces-schedule-call", "spaces-start-call", "spaces-create-canvas", "spaces-edit-canvas", "user-send-message", "spaces-upload-to-kb", "spaces-automation-submit", "spaces-automation-webhook-issue"],
   credentialFields: [
-    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
+    { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.example.org" },
     { name: "token", label: "Google Auth Token", type: "password", placeholder: "Paste your google_access_token" },
   ],
   buildCommand(credentials) {

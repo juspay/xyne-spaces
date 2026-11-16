@@ -4,7 +4,6 @@ import { bitbucketAdapter } from "./adapters/bitbucket.js";
 import { kibanaAdapter } from "./adapters/kibana.js";
 import { xyneSpacesAdapter } from "./adapters/xyne-spaces.js";
 import { xyneDashboardAdapter } from "./adapters/xyne-dashboard.js";
-import { xyneWorkflowsAdapter } from "./adapters/xyne-workflows.js";
 import { figmaAdapter } from "./adapters/figma.js";
 import { ardraFinopsAdapter } from "./adapters/ardra-finops.js";
 import { sequencethinkingAdapter } from "./adapters/sequentialthinking.js";
@@ -70,7 +69,6 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   kibana: kibanaAdapter,
   "xyne-spaces": xyneSpacesAdapter,
   "xyne-dashboard": xyneDashboardAdapter,
-  "xyne-workflows": xyneWorkflowsAdapter,
   google: googleAdapter,
   microsoft: microsoftAdapter,
   figma: figmaAdapter,

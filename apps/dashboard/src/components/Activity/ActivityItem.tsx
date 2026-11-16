@@ -21,7 +21,8 @@ import { CanvasSharedActivity } from './CanvasSharedActivity';
 import { ViewSharedActivity } from './ViewSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
 import { RecordingSummaryActivity } from './RecordingSummaryActivity';
-import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
+// Disabled (LLM)
+// import { SummaryTemplateSharedActivity } from './SummaryTemplateSharedActivity';
 import { StageApprovalActivity } from './StageApprovalActivity';
 import { KbIngestionActivity } from './KbIngestionActivity';
 import { SlashCommandArtifactActivity } from './SlashCommandArtifactActivity';
@@ -151,9 +152,10 @@ export const ActivityItem = memo(function ActivityItem({
     case 'recording_summary_ready':
       return <RecordingSummaryActivity activity={activity} isExpanded={isExpanded} />;
 
-    case 'summary_template_shared':
-    case 'summary_template_access_revoked':
-      return <SummaryTemplateSharedActivity activity={activity} isExpanded={isExpanded} />;
+    // Disabled (LLM)
+    // case 'summary_template_shared':
+    // case 'summary_template_access_revoked':
+    //   return <SummaryTemplateSharedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'stage_approval_requested':
     case 'stage_approval_approved':

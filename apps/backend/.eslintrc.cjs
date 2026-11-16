@@ -64,7 +64,6 @@ module.exports = {
         },
       ],
     }],
-    'local-rules/no-duplicate-workflow-steps': 'error',
     'local-rules/no-rocicorp-define-query': 'error',
     'local-rules/require-is-deleted-filter': 'error',
   },
@@ -81,8 +80,6 @@ module.exports = {
         'src/services/gcsServiceFactory.ts',
         'src/services/storage/gcsAdapter.ts',
         'src/services/storage/storageServiceFactory.ts',
-        // GCS-specific: bundleController uses its own Storage client for static file serving
-        'src/controllers/bundleController.ts',
       ],
       rules: {
         'no-restricted-imports': 'off',

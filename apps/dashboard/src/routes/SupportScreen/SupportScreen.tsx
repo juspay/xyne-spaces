@@ -115,8 +115,9 @@ import * as Popover from '@radix-ui/react-popover';
 import {
   PrioritySubmenu,
   UserSubmenu,
-  AICategorySubmenu,
-  GeneratedTagsSubmenu,
+  // Disabled (LLM)
+  // AICategorySubmenu,
+  // GeneratedTagsSubmenu,
   UserGroupSubmenu,
   StagesSubmenu,
   DynamicFieldSubmenu,
@@ -144,10 +145,12 @@ import {
   TICKET_LIST_COLUMNS,
 } from '../../components/Tickets/TicketListView/ticketListColumns';
 import DuplicateTicketsBanner from './DuplicateTicketsBanner';
-import { useRecheckTicketDuplicates } from '../../hooks/useRecheckTicketDuplicates';
+// Disabled (LLM)
+// import { useRecheckTicketDuplicates } from '../../hooks/useRecheckTicketDuplicates';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
-import { classificationApi } from '../../api/classificationApi';
+// Disabled (LLM)
+// import { classificationApi } from '../../api/classificationApi';
 import {
   CalendarView,
   PRESETS,
@@ -249,7 +252,8 @@ import { ArtifactAppHost } from '../../components/ArtifactApp/ArtifactAppHost';
 import { useDeskApps } from '../../components/xyne-desk/DeskApps/useDeskApps';
 import { useChannelPublishedApps } from '../../hooks/useChannelPublishedApps';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
-import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
+// Disabled (LLM)
+// import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
 import {
@@ -1040,62 +1044,63 @@ const SupportScreen = (): ReactElement => {
     }
   }, [moreFiltersOpen]);
 
-  const [filterOptionsEnabled, setFilterOptionsEnabled] = useState(false);
-  useEffect(() => {
-    if (moreFiltersOpen) {
-      setFilterOptionsEnabled(true);
-    }
-  }, [moreFiltersOpen]);
+  // Disabled (LLM)
+  // const [filterOptionsEnabled, setFilterOptionsEnabled] = useState(false);
+  // useEffect(() => {
+  //   if (moreFiltersOpen) {
+  //     setFilterOptionsEnabled(true);
+  //   }
+  // }, [moreFiltersOpen]);
 
-  const [classificationMappings] = useCachedQuery(
-    queries.getClassificationMappings({ channelId: selectedChannelId ?? '' }),
-    {
-      enabled: filterOptionsEnabled && !!selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID,
-    },
-  );
-  // Categories the AI actually assigned to tickets. The AI emits free-form values, so the
-  // configured mappings only cover the subset that has an assignment rule — without this the
-  // filter hides every unmapped category that is visibly labelled on the list.
-  const [ticketAiCategories, setTicketAiCategories] = useState<string[]>([]);
-  const aiCategoriesChannelId =
-    filterOptionsEnabled && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
-      ? selectedChannelId
-      : null;
+  // const [classificationMappings] = useCachedQuery(
+  //   queries.getClassificationMappings({ channelId: selectedChannelId ?? '' }),
+  //   {
+  //     enabled: filterOptionsEnabled && !!selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID,
+  //   },
+  // );
+  // // Categories the AI actually assigned to tickets. The AI emits free-form values, so the
+  // // configured mappings only cover the subset that has an assignment rule — without this the
+  // // filter hides every unmapped category that is visibly labelled on the list.
+  // const [ticketAiCategories, setTicketAiCategories] = useState<string[]>([]);
+  // const aiCategoriesChannelId =
+  //   filterOptionsEnabled && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+  //     ? selectedChannelId
+  //     : null;
 
-  useEffect(() => {
-    if (!aiCategoriesChannelId) {
-      setTicketAiCategories([]);
-      return;
-    }
-    let cancelled = false;
-    classificationApi
-      .getAiCategories(aiCategoriesChannelId)
-      .then(categories => {
-        if (!cancelled) setTicketAiCategories(categories);
-      })
-      .catch(() => {
-        if (!cancelled) setTicketAiCategories([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [aiCategoriesChannelId]);
+  // useEffect(() => {
+  //   if (!aiCategoriesChannelId) {
+  //     setTicketAiCategories([]);
+  //     return;
+  //   }
+  //   let cancelled = false;
+  //   classificationApi
+  //     .getAiCategories(aiCategoriesChannelId)
+  //     .then(categories => {
+  //       if (!cancelled) setTicketAiCategories(categories);
+  //     })
+  //     .catch(() => {
+  //       if (!cancelled) setTicketAiCategories([]);
+  //     });
+  //   return () => {
+  //     cancelled = true;
+  //   };
+  // }, [aiCategoriesChannelId]);
 
-  const availableAiCategories = useMemo(() => {
-    const merged = [
-      ...new Set([
-        ...(classificationMappings ?? [])
-          .map(m => m.category)
-          .filter((c): c is string => Boolean(c)),
-        ...ticketAiCategories,
-      ]),
-    ];
-    if (merged.length === 0) return [];
-    if (!merged.includes('Other')) {
-      merged.push('Other');
-    }
-    return merged;
-  }, [classificationMappings, ticketAiCategories]);
+  // const availableAiCategories = useMemo(() => {
+  //   const merged = [
+  //     ...new Set([
+  //       ...(classificationMappings ?? [])
+  //         .map(m => m.category)
+  //         .filter((c): c is string => Boolean(c)),
+  //       ...ticketAiCategories,
+  //     ]),
+  //   ];
+  //   if (merged.length === 0) return [];
+  //   if (!merged.includes('Other')) {
+  //     merged.push('Other');
+  //   }
+  //   return merged;
+  // }, [classificationMappings, ticketAiCategories]);
 
   const availableStages = useMemo(
     () =>
@@ -1357,8 +1362,9 @@ const SupportScreen = (): ReactElement => {
         label: COLLAPSIBLE_FILTER_META[id].label,
         icon: COLLAPSIBLE_FILTER_META[id].icon,
       })),
-      { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
-      { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
+      // Disabled (LLM)
+      // { id: 'aiCategory', label: 'AI Category', icon: Sparkles },
+      // { id: 'generatedTags', label: 'AI Tags', icon: TagIcon },
       { id: 'userGroups', label: 'User Groups', icon: Users },
       { id: 'createdBy', label: 'Created by', icon: User },
       { id: 'date', label: 'Last updated', icon: CalendarDays },
@@ -1421,22 +1427,23 @@ const SupportScreen = (): ReactElement => {
             isLoading={!!deskBoardId && channelBoardDetailDetails.type !== 'complete'}
           />
         );
-      case 'aiCategory':
-        return (
-          <AICategorySubmenu
-            selectedCategories={filters.aiCategory || []}
-            onChange={(categories: string[]) => handleFilterChange('aiCategory', categories)}
-            availableCategories={availableAiCategories}
-          />
-        );
-      case 'generatedTags':
-        return (
-          <GeneratedTagsSubmenu
-            selectedTags={filters.generatedTags || []}
-            onChange={(tags: string[]) => handleFilterChange('generatedTags', tags)}
-            channelId={selectedChannelId}
-          />
-        );
+      // Disabled (LLM)
+      // case 'aiCategory':
+      //   return (
+      //     <AICategorySubmenu
+      //       selectedCategories={filters.aiCategory || []}
+      //       onChange={(categories: string[]) => handleFilterChange('aiCategory', categories)}
+      //       availableCategories={availableAiCategories}
+      //     />
+      //   );
+      // case 'generatedTags':
+      //   return (
+      //     <GeneratedTagsSubmenu
+      //       selectedTags={filters.generatedTags || []}
+      //       onChange={(tags: string[]) => handleFilterChange('generatedTags', tags)}
+      //       channelId={selectedChannelId}
+      //     />
+      //   );
       case 'userGroups':
         return (
           <UserGroupSubmenu
@@ -1583,7 +1590,8 @@ const SupportScreen = (): ReactElement => {
     handleDateRangeChange,
     handleCreatedDateRangeChange,
     handleDynamicFieldChange,
-    availableAiCategories,
+    // Disabled (LLM)
+    // availableAiCategories,
     availablePriorities,
     availableStages,
     deskBoardId,
@@ -2162,15 +2170,17 @@ const SupportScreen = (): ReactElement => {
   }, [listKey, loadedListKey]);
   // Topics Explorer rolls up one desk at a time; it doesn't read metrics data, so it
   // stays available when the metrics preference is off.
-  const canExploreTopics =
-    canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
+  // Disabled (LLM)
+  // const canExploreTopics =
+  //   canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
   // Metrics, Topics Explorer and Desk Report share one "Insights" entry point; each
   // section keeps its original visibility gate and its own `?<section>=open` param.
   const insightsSections: DeskInsightsSection[] = [
     ...(isSelectedChannelJoined && metricsEnabled && (canManageDeskInsights || isGuest)
       ? (['metrics'] as const)
       : []),
-    ...(canExploreTopics ? (['topics'] as const) : []),
+    // Disabled (LLM)
+    // ...(canExploreTopics ? (['topics'] as const) : []),
     ...(isSelectedChannelJoined &&
     selectedChannelId !== ALL_CHANNELS_ID &&
     channelPreference?.deskReportEnabled &&
@@ -4638,6 +4648,8 @@ const SupportScreen = (): ReactElement => {
                       }}
                     />
                   )}
+                  {/* Disabled (LLM) */}
+                  {/*
                   {activeInsightsSection === 'topics' && (
                     <TopicsExplorer
                       open
@@ -4650,6 +4662,7 @@ const SupportScreen = (): ReactElement => {
                       availableStages={availableStages}
                     />
                   )}
+                  */}
                   {activeInsightsSection === 'report' && (
                     <DeskReportPanel
                       open
@@ -5134,6 +5147,8 @@ const TicketMetaRow = ({
           showLabel={true}
         />
       </div>
+      {/* Disabled (LLM) */}
+      {/*
       {ticket.aiCategory && (
         <div className='flex items-center gap-1.5 pr-3 mr-1.5 border-r border-border'>
           <span
@@ -5144,6 +5159,7 @@ const TicketMetaRow = ({
           </span>
         </div>
       )}
+      */}
     </div>
   );
 };
@@ -6010,7 +6026,8 @@ export const SupportTicketDetail = ({
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
-  useRecheckTicketDuplicates(ticket && !ticket.isArchived ? ticket.id : null);
+  // Disabled (LLM)
+  // useRecheckTicketDuplicates(ticket && !ticket.isArchived ? ticket.id : null);
   const [showAddToCanvasDialog, setShowAddToCanvasDialog] = useState(false);
   if (!ticketIdParam) {
     return (
@@ -6687,40 +6704,43 @@ export const SupportTicketDetail = ({
                     </div>
                   </div>
                 )}
-              {emails.length > 0 && (
-                <Tooltip content='Summarize thread' side='left'>
-                  <button
-                    type='button'
-                    aria-label='Summarize thread'
-                    onClick={() => {
-                      if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
-                        setShowEmailSummary(true);
-                        void fetchEmailSummary();
-                      } else {
-                        setShowEmailSummary(prev => !prev);
-                      }
-                    }}
-                    className='absolute right-6 z-10 flex size-11 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105 active:scale-95'
-                    style={{
-                      bottom: composerOverlayHeight + 12,
-                      background: 'linear-gradient(135deg, #F87171, #FFB3B3)',
-                    }}
-                    data-track-category='Support'
-                    data-track-name='SummarizeEmailThread'
-                  >
-                    {emailSummaryState === 'loading' && (
-                      <span className='absolute inset-0 rounded-full bg-[#F87171] opacity-40 animate-ping' />
-                    )}
-                    <Sparkles
-                      size={20}
-                      className={cn(
-                        'relative',
-                        emailSummaryState !== 'loading' && 'animate-pulse [animation-duration:3s]',
-                      )}
-                    />
-                  </button>
-                </Tooltip>
-              )}
+              {/* Disabled (LLM) */}
+              {
+                // {emails.length > 0 && (
+                //   <Tooltip content='Summarize thread' side='left'>
+                //     <button
+                //       type='button'
+                //       aria-label='Summarize thread'
+                //       onClick={() => {
+                //         if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                //           setShowEmailSummary(true);
+                //           void fetchEmailSummary();
+                //         } else {
+                //           setShowEmailSummary(prev => !prev);
+                //         }
+                //       }}
+                //       className='absolute right-6 z-10 flex size-11 items-center justify-center rounded-full text-white shadow-lg transition-transform hover:scale-105 active:scale-95'
+                //       style={{
+                //         bottom: composerOverlayHeight + 12,
+                //         background: 'linear-gradient(135deg, #F87171, #FFB3B3)',
+                //       }}
+                //       data-track-category='Support'
+                //       data-track-name='SummarizeEmailThread'
+                //     >
+                //       {emailSummaryState === 'loading' && (
+                //         <span className='absolute inset-0 rounded-full bg-[#F87171] opacity-40 animate-ping' />
+                //       )}
+                //       <Sparkles
+                //         size={20}
+                //         className={cn(
+                //           'relative',
+                //           emailSummaryState !== 'loading' && 'animate-pulse [animation-duration:3s]',
+                //         )}
+                //       />
+                //     </button>
+                //   </Tooltip>
+                // )}
+              }
               {(emails.length > 0 || !!conversationId) && (
                 <Tooltip content='Add to canvas' side='left'>
                   <button

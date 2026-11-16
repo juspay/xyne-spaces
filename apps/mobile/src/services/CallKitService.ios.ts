@@ -117,10 +117,6 @@ function parsePayloadFields(raw: Record<string, unknown>): CallKitPayload | unde
         : ('AUDIO' as CallKitCallType),
     channelId: (raw['channelId'] as string) ?? callId,
   };
-  const token = raw['token'] as string | undefined;
-  const serverUrl = (raw['serverUrl'] ?? raw['liveKitUrl']) as string | undefined;
-  if (token) result.token = token;
-  if (serverUrl) result.serverUrl = serverUrl;
   return result;
 }
 
@@ -403,8 +399,6 @@ class CallKitService {
     console.log('[XCALL][KIT] cacheIncomingCallPayload', {
       callId: payload.callId,
       callUUID,
-      hasToken: !!payload.token,
-      hasServerUrl: !!payload.serverUrl,
     });
     this.payloadByCallId.set(payload.callId, resolved);
     if (callUUID !== payload.callId) {
@@ -588,7 +582,6 @@ class CallKitService {
       console.log('[XCALL][KIT] didDisplayIncomingCall — payload cached', {
         callUUID,
         callId: parsed.callId,
-        hasToken: !!parsed.token,
       });
       this.rememberDisplayedCall(callUUID, parsed);
       this.startRingTimeout(callUUID);
@@ -631,7 +624,6 @@ class CallKitService {
                 console.log('[XCALL][KIT] cold-start pass1 — payload cached', {
                   uuid,
                   callId: parsed.callId,
-                  hasToken: !!parsed.token,
                 });
                 this.rememberDisplayedCall(uuid, parsed);
               } else {

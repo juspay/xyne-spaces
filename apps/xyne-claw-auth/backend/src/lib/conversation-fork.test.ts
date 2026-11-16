@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../config.js", () => ({ CONFIG: { spacesAppUrl: "https://spaces.example.com/" } }));
+vi.mock("../config.js", () => ({ CONFIG: { spacesAppUrl: "https://example.org/" } }));
 vi.mock("../routes/lib/branching.js", () => ({ cloneBranchSession: vi.fn() }));
 
 const { applyConversationFork, forkMessage, parseForkRequest, FORK_SUMMARY_MAX_CHARS } = await import("./conversation-fork.js");
@@ -40,7 +40,7 @@ describe("applyConversationFork", () => {
     const result = await applyConversationFork({ channelId: "ch-dst", summary: "what I know" }, source, d);
     expect(d.post).toHaveBeenCalledWith({
       channelId: "ch-dst",
-      markdownText: expect.stringContaining("https://spaces.example.com/chat/dir/ch-src/conv-src"),
+      markdownText: expect.stringContaining("https://example.org/chat/dir/ch-src/conv-src"),
     });
     expect(d.clone).toHaveBeenCalledWith({
       sourceConversationId: "conv-src_architect",
@@ -50,7 +50,7 @@ describe("applyConversationFork", () => {
     expect(result).toMatchObject({
       ok: true,
       conversationId: "conv-new",
-      link: "https://spaces.example.com/chat/dir/ch-dst/conv-new",
+      link: "https://example.org/chat/dir/ch-dst/conv-new",
       memoryCopied: true,
     });
   });

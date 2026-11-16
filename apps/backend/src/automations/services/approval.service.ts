@@ -32,7 +32,7 @@ export class ApprovalError extends Error {
   }
 }
 
-async function assertIsAutomationsAdmin(
+export async function assertIsAutomationsAdmin(
   userId: string,
   opts: { isEnvAdmin?: boolean } = {},
 ): Promise<void> {
@@ -85,7 +85,10 @@ class ApprovalService {
       );
     }
     const author = proposerOf(row);
-    if (author && author !== userId) {
+    if (!author) {
+      // No recorded author: only an automations admin may submit it.
+      await assertIsAutomationsAdmin(userId);
+    } else if (author !== userId) {
       throw new ApprovalError(
         `Only the proposal's author can submit it.`,
         'not-owner',
@@ -239,10 +242,16 @@ class ApprovalService {
         'invalid-arg',
       );
     }
-    if (nextStatus === AutomationStatus.DISABLED) {
+    const row = ensureAutomation(await repositories.workflows.findById(liveId), liveId);
+    // An author may disable their own automation; that is not an admin kill-switch.
+    const authorDisable =
+      nextStatus === AutomationStatus.DISABLED && proposerOf(row) === actorUserId;
+    if (nextStatus === AutomationStatus.DISABLED && !authorDisable) {
       await assertIsAutomationsAdmin(actorUserId, opts);
     }
-    const row = ensureAutomation(await repositories.workflows.findById(liveId), liveId);
+    if (nextStatus === AutomationStatus.ACTIVE && parseAutomationMetadata(row.metadata).adminDisabled) {
+      await assertIsAutomationsAdmin(actorUserId, opts);
+    }
 
     if (!isLiveStatus(row.status)) {
       throw new ApprovalError(
@@ -255,14 +264,18 @@ class ApprovalService {
     if (nextStatus === AutomationStatus.ACTIVE) {
       const { automation } = await automationService.activate(liveId);
       const rootId = row.automationSeriesId ?? row.id;
-      const archived = await repositories.workflows.archivePriorLiveInLineage(rootId, liveId);
+      const archived = await repositories.workflows.archivePriorLiveInLineage(rootId, liveId, row.workspaceId);
       const archivedCount = archived.length;
       logger.info(
         `[approval] toggleLive ACTIVE id=${liveId} actorUserId=${actorUserId} archivedPrior=${archivedCount}`,
       );
       return automation;
     }
-    const automation = await automationService.disable(liveId, opts.cancelQueued ?? true);
+    const automation = await automationService.disable(
+      liveId,
+      opts.cancelQueued ?? true,
+      !authorDisable,
+    );
     logger.info(
       `[approval] toggleLive DISABLED id=${liveId} actorUserId=${actorUserId} cancelQueued=${opts.cancelQueued ?? true}`,
     );
@@ -274,8 +287,8 @@ class ApprovalService {
     return rows.map(workflowToAutomation);
   }
 
-  async listLineageVersions(automationSeriesId: string): Promise<AutomationView[]> {
-    const rows = await repositories.workflows.findByautomationSeriesId(automationSeriesId);
+  async listLineageVersions(automationSeriesId: string, workspaceId: string): Promise<AutomationView[]> {
+    const rows = await repositories.workflows.findByautomationSeriesId(automationSeriesId, workspaceId);
     return rows.map(workflowToAutomation);
   }
 }

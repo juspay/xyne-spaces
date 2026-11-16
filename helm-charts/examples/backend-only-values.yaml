@@ -21,7 +21,6 @@ env:
   GCS_DOCS_BUCKET_NAME: xyne-docs
   GCS_CANVAS_BUCKET_NAME: xyne-canvas
   GCS_SESSION_RECORDING_BUCKET_NAME: xyne-recordings
-  GCS_WORKFLOW_STEPS_BUCKET_NAME: xyne-workflows
   TRANSCRIPTION_BUCKET_NAME: xyne-transcription
   GCS_BUNDLE_BUCKET_NAME: xyne-bundles
 

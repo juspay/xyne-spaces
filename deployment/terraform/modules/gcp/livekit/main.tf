@@ -16,6 +16,7 @@ locals {
       image          = var.server_image
       docker_flags   = "-v /etc/livekit:/etc/livekit:ro"
       container_args = "--config /etc/livekit/config.yaml"
+      container_uid  = 65532 # distroless :nonroot
       turn_cert      = var.turn_cert_secret
       machine_type   = var.machine_type
       external_ip    = true
@@ -25,6 +26,7 @@ locals {
       image          = var.egress_image
       docker_flags   = "--cap-add SYS_ADMIN -e EGRESS_CONFIG_FILE=/etc/livekit/config.yaml -v /etc/livekit:/etc/livekit:ro"
       container_args = ""
+      container_uid  = 1001 # upstream egress user
       turn_cert      = ""
       machine_type   = var.egress_machine_type
       external_ip    = false
@@ -163,6 +165,7 @@ resource "google_compute_instance_template" "this" {
       image            = each.value.image
       docker_flags     = each.value.docker_flags
       container_args   = each.value.container_args
+      container_uid    = each.value.container_uid
     })
   }
 

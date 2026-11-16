@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
+import { getDeviceKey } from '@/services/authSessionService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
 
@@ -57,8 +58,9 @@ const preferencesSchema = z.record(
 );
 
 export class NotificationController {
+  /** The auth session (JWT `sid`) a mobile push token is registered against. */
   private resolveSessionId(req: Request): string | undefined {
-    return req.authenticatedSessionId;
+    return req.user?.sid;
   }
 
   registerMobilePushToken = async (req: Request, res: Response): Promise<void> => {
@@ -82,6 +84,8 @@ export class NotificationController {
         ...validated,
         sessionId,
         appVersion: req.headers['x-app-version'] as string | undefined,
+        orgMemberId: req.user?.memberId,
+        deviceKey: getDeviceKey(req),
       });
 
       res.json({ success: true });
@@ -89,7 +93,7 @@ export class NotificationController {
       logger.error('Failed to register mobile push token:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid mobile token data', details: error.errors });
+        res.status(400).json({ error: 'Invalid mobile token data', details: error.issues });
         return;
       }
 
@@ -108,14 +112,17 @@ export class NotificationController {
       mobileUnregisterSchema.parse(req.body ?? {});
       const sessionId = this.resolveSessionId(req);
 
-      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined);
+      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined, {
+        orgMemberId: req.user?.memberId,
+        deviceKey: getDeviceKey(req),
+      });
 
       res.json({ success: true });
     } catch (error) {
       logger.error('Failed to unregister mobile push token:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid mobile token data', details: error.errors });
+        res.status(400).json({ error: 'Invalid mobile token data', details: error.issues });
         return;
       }
 
@@ -145,7 +152,7 @@ export class NotificationController {
       logger.error('Failed to save notification subscription:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid subscription data', details: error.errors });
+        res.status(400).json({ error: 'Invalid subscription data', details: error.issues });
         return;
       }
 
@@ -170,7 +177,7 @@ export class NotificationController {
       logger.error('Failed to remove notification subscription:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid unsubscribe data', details: error.errors });
+        res.status(400).json({ error: 'Invalid unsubscribe data', details: error.issues });
         return;
       }
 
@@ -310,7 +317,7 @@ export class NotificationController {
       logger.error('Failed to update notification preferences:', error);
 
       if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid preferences data', details: error.errors });
+        res.status(400).json({ error: 'Invalid preferences data', details: error.issues });
         return;
       }
 

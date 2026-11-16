@@ -780,7 +780,7 @@ export class SlackMigrationEngine {
     if (job.type !== MigrationType.CHANNEL || !job.channelInput?.announceInSlack) return;
     const wsConfig = getBotConfigByWorkspaceId(job.workspaceId);
     if (!wsConfig.notificationsEnabled) return;
-    const link = `<https://spaces.xyne.juspay.net/${job.workspaceId}/chat/dir/${job.channelInput.xyneChannelId}|Xyne Spaces>`;
+    const link = `<${config.frontendUrl}/${job.workspaceId}/chat/dir/${job.channelInput.xyneChannelId}|Xyne Spaces>`;
     // Prefer the full body authored in Superposition ({link} → the Xyne Spaces link). Fall back to the
     // hardcoded line + the MIGRATION_SLACK_BOT_CONFIGS suffix when no final_message is configured.
     const { final_message } = await getMigrationWorkspaceConfig(job.workspaceId);

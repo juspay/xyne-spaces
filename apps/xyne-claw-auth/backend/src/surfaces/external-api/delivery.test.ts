@@ -65,8 +65,8 @@ describe("isInternalCallbackOrigin", () => {
   });
 
   it("matches the configured Spaces backend origins", () => {
-    const withSpaces = { ...config, spacesInternalUrl: "http://xyne-backend-02.xyne-apps.svc.cluster.local:3001", spacesBackendUrl: "https://spaces.example.net" };
-    expect(isInternalCallbackOrigin("https://spaces.example.net/api/agent/result", withSpaces)).toBe(true);
+    const withSpaces = { ...config, spacesInternalUrl: "http://xyne-backend-02.xyne-apps.svc.cluster.local:3001", spacesBackendUrl: "https://example.org" };
+    expect(isInternalCallbackOrigin("https://example.org/api/agent/result", withSpaces)).toBe(true);
   });
 });
 

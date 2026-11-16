@@ -23,14 +23,17 @@ const ROOT = path.join(__dirname, '..');
  *   googleSignInWebClientId: string,
  *   googleServicesRelDir: string,
  *   usesCleartextTraffic: boolean,
- *   defaultPublicDeepLinkOrigin: string,
- *   defaultApiBaseUrl: string,
+ *   defaultPublicDeepLinkOrigin?: string,
+ *   defaultApiBaseUrl?: string,
  *   androidReleaseStoreFile: string,
  *   androidReleaseKeyAlias: string,
  *   version?: string,
  *   iosBuildNumber?: string,
  *   androidVersionCode?: number,
  * }>} */
+// Built-in backend defaults exist only for `community` (its own public backend). The main app
+// variants take `API_BASE_URL` and `PUBLIC_DEEP_LINK_ORIGIN` from `.env.<variant>` (see
+// `.env.example`); prebuild fails loudly when they are missing.
 const VARIANTS = {
   dev: {
     key: 'dev',
@@ -45,8 +48,6 @@ const VARIANTS = {
       '313729737871-2rmq2hms3c4r949c269fcb8dp199uht2.apps.googleusercontent.com',
     googleServicesRelDir: 'assets/configs/dev',
     usesCleartextTraffic: true,
-    defaultPublicDeepLinkOrigin: 'https://spaces.xyne.juspay.net',
-    defaultApiBaseUrl: 'https://app.spaces.xyne.juspay.net/api',
     androidReleaseStoreFile: '../../assets/secrets/xynespaces-release.keystore',
     androidReleaseKeyAlias: 'xynespacesrelease',
   },
@@ -63,8 +64,6 @@ const VARIANTS = {
       '244924431232-5og3nosfdr8bl2huvrqg9hfrvveva9ea.apps.googleusercontent.com',
     googleServicesRelDir: 'assets/configs/prod',
     usesCleartextTraffic: false,
-    defaultPublicDeepLinkOrigin: 'https://spaces.xyne.juspay.net',
-    defaultApiBaseUrl: 'https://app.spaces.xyne.juspay.net/api',
     androidReleaseStoreFile: '../../assets/secrets/xynespaces-release.keystore',
     androidReleaseKeyAlias: 'xynespacesrelease',
   },
@@ -81,8 +80,6 @@ const VARIANTS = {
       '244924431232-5og3nosfdr8bl2huvrqg9hfrvveva9ea.apps.googleusercontent.com',
     googleServicesRelDir: 'assets/configs/sandbox',
     usesCleartextTraffic: false,
-    defaultPublicDeepLinkOrigin: 'https://spaces.xyne.juspay.net',
-    defaultApiBaseUrl: 'https://app.spaces.xyne.juspay.net/api',
     androidReleaseStoreFile: '../../assets/secrets/xynespaces-release.keystore',
     androidReleaseKeyAlias: 'xynespacesrelease',
   },

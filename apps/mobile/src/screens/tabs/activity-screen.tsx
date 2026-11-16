@@ -74,7 +74,6 @@ const getActivityItemType = (item: ActivityWithRelated): ActivityListItemType =>
     case 'eta_warning':
     case 'eta_breach':
     case 'stage_eta_breach':
-    case 'workflow_question':
       return 'ticket-medium';
     case 'scheduled_call':
     case 'call_reminder':

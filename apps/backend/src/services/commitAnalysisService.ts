@@ -17,6 +17,7 @@ import {
   DiffParser,
   ReleaseEventContext,
 } from './release/core';
+import { config } from '@/config/env';
 export type AnalyzeCommitsRequest =
   | {
     commitIds: string[];
@@ -187,8 +188,8 @@ export class CommitAnalysisService {
       // TODO: remove this branch (or harden into an admin tool) before this
       // ships — local dev convenience only.
       if (
-        process.env.NODE_ENV !== 'production' &&
-        process.env.RELEASE_AUTOSTUB_MISSING_TICKETS === '1'
+        config.env !== 'production' &&
+        config.releaseAutostubMissingTickets === '1'
       ) {
         const stub = await this.autoStubMissingTicket(xyneId, ticketPrefix, workspaceId, prTitle, prAuthor);
         if (stub) {

@@ -22,6 +22,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LotusRemoteLoggingEnabled</key>
 	<string>$(LOTUS_REMOTE_LOGGING_ENABLED)</string>
+	<key>LotusApiBaseUrl</key>
+	<string>$(LOTUS_API_BASE_URL)</string>
+	<key>LotusTelemetryBaseUrl</key>
+	<string>$(LOTUS_TELEMETRY_BASE_URL)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>

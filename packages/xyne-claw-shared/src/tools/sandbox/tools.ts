@@ -1827,7 +1827,8 @@ export const sandboxDeliverFiles: ToolDefinition = {
  *
  *   - Author = context.meta.{userEmail,userName}, which claw populates
  *     from the /run request in routes/run.ts:504-506.
- *   - Committer = Xyne Spaces <noreply@spaces.xyne.juspay.net> (constant).
+ *   - Committer = Xyne Spaces <SANDBOX_GIT_COMMITTER_EMAIL> (constant per deployment;
+ *     defaults to noreply@example.org).
  *
  * Both are enforced per workdir via a `post-commit` hook (see the big
  * comment below for why `git config` alone can't do it).
@@ -1854,7 +1855,7 @@ async function configureGitIdentity(
   // the author. These come from the same identity previously used for the
   // (now-removed) Co-Authored-By trailer.
   const COMMITTER_NAME = "Xyne Spaces";
-  const COMMITTER_EMAIL = "noreply@spaces.xyne.juspay.net";
+  const COMMITTER_EMAIL = process.env["SANDBOX_GIT_COMMITTER_EMAIL"] || "noreply@example.org";
 
   // ── The git-env override problem ─────────────────────────────────────
   // The kata sandbox pod sets these container-level env vars (see

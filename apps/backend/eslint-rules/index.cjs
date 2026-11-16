@@ -3,7 +3,5 @@
  */
 
 module.exports = {
-  rules: {
-    'no-duplicate-workflow-steps': require('./no-duplicate-workflow-steps.cjs'),
-  },
+  rules: {},
 }

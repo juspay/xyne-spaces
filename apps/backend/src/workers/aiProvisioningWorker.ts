@@ -5,7 +5,6 @@ import {
   OrgLLMServiceAccountCredentialStatus,
   OrgLLMServiceAccountProvider,
   OrgLLMServiceAccountPurpose,
-  WorkspaceType,
 } from '@xyne/shared';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
@@ -54,10 +53,6 @@ const ORG_SERVICE_ACCOUNT_PURPOSES = [
   OrgLLMServiceAccountPurpose.ACTIVITY_CLASSIFICATION,
   OrgLLMServiceAccountPurpose.CLAW_ORG_KEY,
 ] as const;
-
-type AIProvisioningUserPayload = ClawSyncUserPayload & {
-  workspaceType: string | null;
-};
 
 class AIProvisioningWorker {
   private prisma = DatabaseClient.getInstance();
@@ -215,10 +210,10 @@ class AIProvisioningWorker {
     }
 
     const userPayload = await this.buildUserPayload(sourceUser.id);
-    const { workspaceType, ...clawUserPayload } = userPayload;
+    const clawUserPayload: ClawSyncUserPayload = { ...userPayload };
     const orgPayload = await this.buildOrgPayload(userPayload.spacesOrgId);
     const workspacePayload = await this.buildWorkspacePayload(userPayload.spacesWorkspaceId);
-    const userBudget = this.getUserLiteLLMBudget(workspaceType);
+    const userBudget = config.aiProvisioning.enterpriseWorkspaceUserBudget ?? undefined;
 
     const isFirstOrgMember = await this.isFirstOrgMember(
       userPayload.spacesOrgId,
@@ -474,13 +469,6 @@ class AIProvisioningWorker {
     };
   }
 
-  private getUserLiteLLMBudget(workspaceType: string | null | undefined): number | undefined {
-    const budget = workspaceType === WorkspaceType.COMMUNITY
-      ? config.aiProvisioning.communityWorkspaceUserBudget
-      : config.aiProvisioning.enterpriseWorkspaceUserBudget;
-    return budget ?? undefined;
-  }
-
   private async storeOrgLiteLLMServiceAccountCredential(params: {
     orgPayload: ClawSyncOrgPayload;
     litellmTeamId: string;
@@ -647,7 +635,7 @@ class AIProvisioningWorker {
     };
   }
 
-  private async buildUserPayload(userId: string): Promise<AIProvisioningUserPayload> {
+  private async buildUserPayload(userId: string): Promise<ClawSyncUserPayload> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -662,7 +650,6 @@ class AIProvisioningWorker {
             id: true,
             orgId: true,
             name: true,
-            workspaceType: true,
             createdBy: true,
             organization: {
               select: {
@@ -694,7 +681,6 @@ class AIProvisioningWorker {
       email: user.email,
       name: user.name,
       role: user.role,
-      workspaceType: user.workspace.workspaceType ?? null,
       workspaceName: user.workspace.name,
       orgName: user.workspace.organization.name,
       createdBySpacesUserId: user.workspace.createdBy,

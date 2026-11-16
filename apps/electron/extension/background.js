@@ -8,7 +8,9 @@
  */
 
 const CONFIG = {
-  HEALTH_CHECK_URL: 'https://app.spaces.xyne.juspay.net/api/health',
+  // Health endpoint of the deployment's Xyne Spaces app origin; set this (and the
+  // matching host_permissions entry in manifest.json) when packaging the extension.
+  HEALTH_CHECK_URL: 'https://app.example.org/api/health',
   DEEP_LINK_PROTOCOL: 'xyne-spaces',
   VPN_CHECK_INTERVAL_MS: 30000, // 30 seconds
   VPN_CHECK_TIMEOUT_MS: 5000, // 5 second timeout

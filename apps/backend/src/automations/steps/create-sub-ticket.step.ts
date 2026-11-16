@@ -1,9 +1,11 @@
+import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { createSubTicket } from '@/services/subTicketService';
+import { DatabaseClient } from '@/database/client';
 import { createTicketStep } from './create-ticket.step';
 import { logger } from '@/utils/logger';
 
@@ -46,6 +48,22 @@ export class CreateSubTicketStep extends BaseActionStep<
     config: z.infer<typeof CreateSubTicketConfigSchema>,
     context: AutomationContext,
   ): Promise<CreateSubTicketOutput> {
+    const assignedTo = (config.assignedTo as string | undefined) ?? null;
+    if (assignedTo) {
+      const assignee = await DatabaseClient.getInstance().user.findFirst({
+        where: { id: assignedTo, workspaceId: context.automation.workspaceId },
+        select: { id: true },
+      });
+      if (!assignee) {
+        throw new Error(`CREATE_SUB_TICKET: assignee ${assignedTo} is not a member of this workspace`);
+      }
+    }
+
+    const title = extractPlainTextFromHtml(config.title as string).trim();
+    if (!title) {
+      throw new Error('CREATE_SUB_TICKET: title must contain text');
+    }
+
     const { channelId, projectId, boardId } = config as Record<string, string | undefined>;
     if ((channelId || projectId || boardId) && !(channelId && projectId && boardId)) {
       throw new Error('[CREATE_SUB_TICKET] Channel, project and board must be set together');
@@ -68,9 +86,9 @@ export class CreateSubTicketStep extends BaseActionStep<
 
     const result = await createSubTicket({
       parentTicketId: config.parentTicketId as string,
-      title: config.title as string,
-      description: (config.description as string | undefined) ?? null,
-      assignedTo: (config.assignedTo as string | undefined) ?? null,
+      title,
+      description: config.description ? sanitizeMessageContent(config.description as string) : null,
+      assignedTo,
       createdBy: context.automation.createdById,
       mappedTicketId: ticket?.ticketId ?? null,
       subTicketXyneId: ticket?.xyneId ?? null,

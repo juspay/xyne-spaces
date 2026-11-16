@@ -1,5 +1,5 @@
 import { GCSService } from './gcsService.js';
-import type { StorageService, UploadOptions, UploadResult, UploadToPathOptions, DeleteResult, FileMetadata, ListedFile, ObjectInfo, ObjectRead } from './types.js';
+import type { StorageService, UploadOptions, UploadResult, UploadToPathOptions, UploadV2Options, DeleteResult, FileMetadata, ListedFile, ObjectInfo, ObjectKeyOptions, ObjectRead, ReadStreamOptions } from './types.js';
 
 export class GCSAdapter implements StorageService {
   constructor(private gcs: GCSService) {}
@@ -14,7 +14,7 @@ export class GCSAdapter implements StorageService {
     return { filename: r.filename, path: r.gcsPath, size: r.size };
   }
 
-  async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string>; ifNotExists?: boolean; timeoutMs?: number }): Promise<UploadResult> {
+  async uploadFileV2(buffer: Buffer, options: UploadV2Options): Promise<UploadResult> {
     const gcsOptions = {
       path: options.path,
       contentType: options.contentType,
@@ -24,6 +24,7 @@ export class GCSAdapter implements StorageService {
       },
       ...(options.ifNotExists ? { ifNotExists: true } : {}),
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.encryption ? { encryption: options.encryption } : {}),
     };
     const r = await this.gcs.uploadFileV2(buffer, gcsOptions);
     return { filename: r.filename, path: r.gcsPath, size: r.size };
@@ -50,15 +51,15 @@ export class GCSAdapter implements StorageService {
     return this.gcs.getFileMetadata(filename);
   }
 
-  async getFileBuffer(path: string, maxRetries?: number): Promise<Buffer> {
-    return this.gcs.getFileBuffer(path, maxRetries);
+  async getFileBuffer(path: string, maxRetries?: number, options?: ObjectKeyOptions): Promise<Buffer> {
+    return this.gcs.getFileBuffer(path, maxRetries, options);
   }
 
-  async downloadFile(remotePath: string, localPath: string): Promise<void> {
-    return this.gcs.downloadFile(remotePath, localPath);
+  async downloadFile(remotePath: string, localPath: string, options?: ObjectKeyOptions): Promise<void> {
+    return this.gcs.downloadFile(remotePath, localPath, options);
   }
 
-  async createReadStream(path: string, options?: { start?: number; end?: number }): Promise<NodeJS.ReadableStream> {
+  async createReadStream(path: string, options?: ReadStreamOptions): Promise<NodeJS.ReadableStream> {
     return this.gcs.createReadStream(path, options);
   }
 
@@ -66,8 +67,8 @@ export class GCSAdapter implements StorageService {
     return this.gcs.headObject(path);
   }
 
-  async getObject(path: string): Promise<ObjectRead | null> {
-    return this.gcs.getObject(path);
+  async getObject(path: string, options?: ObjectKeyOptions): Promise<ObjectRead | null> {
+    return this.gcs.getObject(path, options);
   }
 
   async listFiles(prefix: string): Promise<ListedFile[]> {
@@ -78,8 +79,8 @@ export class GCSAdapter implements StorageService {
     return this.gcs.listPrefixes(prefix);
   }
 
-  async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
-    return this.gcs.moveFile(sourcePath, destinationPath);
+  async moveFile(sourcePath: string, destinationPath: string, options?: ObjectKeyOptions): Promise<void> {
+    return this.gcs.moveFile(sourcePath, destinationPath, options);
   }
 
   async ensureBucketExists(): Promise<void> {

@@ -17,7 +17,7 @@ export const GENIUS_CONFIG_SCHEMA = {
     label: "Genius API URL",
     default: "",
     required: true as const,
-    placeholder: "https://genius.juspay.in",
+    placeholder: "https://genius.example.com",
   },
   QUERY_ROUTING_KEY: {
     label: "Query Routing Key",

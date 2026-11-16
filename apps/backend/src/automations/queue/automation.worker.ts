@@ -9,6 +9,7 @@ import { automationScheduleQueue } from './automation-schedule.queue';
 import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
 import { AutomationStatus, AutomationRunStatus } from '../types/status';
+import { MAX_AUTOMATION_CHAIN } from '../util/automation-chain';
 import {
   isExecutableAutomationWorkflowType,
   mayDrainInFlight,
@@ -16,7 +17,7 @@ import {
   readAutomationMeta,
 } from '../types/workflow-adapter';
 import { getAutomationPauseState } from '@/database/repositories/workflowExecutionStateUtils';
-import { computeScheduleRunAt } from '../types/automation-config';
+import { computeScheduleRunAt, MAX_SCHEDULE_OFFSET_MINUTES } from '../types/automation-config';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
 
@@ -135,7 +136,7 @@ export class AutomationWorker {
 
     const stateForChain = await getAutomationPauseState(executionId);
     const upstreamChain = readAutomationMeta(stateForChain?.context ?? null).chain;
-    if (upstreamChain.includes(workflow.id)) {
+    if (upstreamChain.includes(workflow.id) || upstreamChain.length >= MAX_AUTOMATION_CHAIN) {
       await db.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },
@@ -235,6 +236,16 @@ export class AutomationWorker {
         `[AUTOMATION-WORKER] schedule.runAt is in the past (delayMs=${delayMs}) — firing immediately for execution=${executionId}`,
       );
       return false;
+    }
+    if (delayMs > MAX_SCHEDULE_OFFSET_MINUTES * 60_000) {
+      logger.warn(
+        `[AUTOMATION-WORKER] schedule.runAt is more than 30 days out (delayMs=${delayMs}) — cancelling execution=${executionId}`,
+      );
+      await db.workflowExecution.update({
+        where: { id: executionId },
+        data: { status: AutomationRunStatus.CANCELLED },
+      });
+      return true;
     }
 
     await db.workflowExecution.update({

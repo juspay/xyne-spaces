@@ -279,7 +279,6 @@ export const ActivityItemCard = ({
   const showChannelChip =
     actorAction !== 'paused_from_assignment' &&
     actorAction !== 'resumed_from_assignment' &&
-    actorAction !== 'workflow_question' &&
     Boolean(channelId);
 
   const channelChipInner = (

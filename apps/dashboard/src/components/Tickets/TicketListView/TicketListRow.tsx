@@ -222,6 +222,8 @@ export const TicketListRow = ({
                 {ticket.title}
               </span>
             </TruncatedTooltip>
+            {/* Disabled (LLM) */}
+            {/*
             {ticket.aiCategory && (
               <span
                 className='inline-flex h-[18px] shrink-0 items-center justify-center whitespace-nowrap rounded-sm bg-blue-100 px-2 text-[10px] font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
@@ -230,6 +232,7 @@ export const TicketListRow = ({
                 {ticket.aiCategory}
               </span>
             )}
+            */}
           </div>
         );
       case 'emails':

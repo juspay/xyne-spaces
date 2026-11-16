@@ -194,7 +194,7 @@ function toOutput(
 export class AskJevStep extends BaseActionStep<typeof AskJevConfigSchema, AskJevOutput> {
   readonly type = 'ASK_JEV';
   readonly configSchema = AskJevConfigSchema;
-  readonly outputSchema = z.record(AnswerOutputSchema);
+  readonly outputSchema = z.record(z.string(), AnswerOutputSchema);
   readonly name = 'Ask Jev';
   readonly description =
     'Asks Jev yes/no, choice or score questions about a text, all in one call. Each answer is under its question key; a choice option can carry text such as a reply.';

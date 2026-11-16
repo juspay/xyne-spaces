@@ -45,8 +45,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.processor = None
     app.state.lighton_client = None
     logger.info(
-        "[startup] lighton_url=%s lighton_model=%s redis_url=%s",
-        settings.lighton_url or "(not set)", settings.lighton_model, settings.redis_url,
+        "[startup] lighton_url=%s lighton_model=%s",
+        settings.lighton_url or "(not set)", settings.lighton_model,
     )
     await start_runtime_config_poller()
     if settings.has_lighton_endpoint:

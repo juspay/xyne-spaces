@@ -1,4 +1,4 @@
-import { isElectronApp, isStandaloneWindow } from './electronApp';
+import { isElectronApp, isSdlcWindow, isStandaloneWindow } from './electronApp';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { isCallWindowRoute } from './callWindow';
@@ -25,7 +25,7 @@ export const getLinkOpenExternalDefault = (): boolean =>
 // sender), and it syncs on load. Detached windows (the call window, SDLC) share
 // its localStorage, so they have nothing to add.
 const syncLinkOpenPrefToMain = (value: boolean): void => {
-  if (!isElectronApp() || isStandaloneWindow()) return;
+  if (!isElectronApp() || isStandaloneWindow() || isSdlcWindow()) return;
   window.electronAPI
     ?.setBrowserSettings?.({ openLinksExternally: value })
     ?.catch?.((error: unknown) => {
@@ -96,14 +96,13 @@ const openExternal = (url: string): void => {
 };
 
 const openInApp = (url: string): void => {
-  // The browser panel is mounted by the top-level document only. A framed
-  // bundle — the SDLC lane — has its own copy of this actor with no panel
-  // behind it, so sending to it would drop the link on the floor. window.open
-  // reaches Electron's window-open handler on the host webContents, which
-  // routes to the real panel and applies the user's open-externally setting.
+  // The browser panel is mounted by the main window only. A window an SDLC item
+  // opened in has this actor with no panel behind it, so sending to it would
+  // drop the link on the floor. window.open reaches Electron's window-open
+  // handler instead, which applies the user's open-externally setting.
   // The call window has no panel either; Electron forwards its window.open to
   // the main window's.
-  if (isElectronApp() && window.parent === window && !isCallWindowRoute()) {
+  if (isElectronApp() && !isSdlcWindow() && !isCallWindowRoute()) {
     const { browserPanelState } = browserPanelActor.getSnapshot().context;
     if (browserPanelState === 'open') {
       browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });

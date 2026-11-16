@@ -4,7 +4,6 @@ export { EditMessageIcon } from './EditMessageIcon';
 export { EmojiIcon } from './EmojiIcon';
 export { TicketIcon } from './TicketIcon';
 export { PinIcon } from './PinIcon';
-export { getWorkflowIcon } from './WorkflowIcons';
 export { TicketPriorityIcon } from './TicketPriorityIcon';
 export { TicketStatusIcon } from './TicketStatusIcon';
 export { SubTicketCountIcon } from './SubTicketCountIcon';

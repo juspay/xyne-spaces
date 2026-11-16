@@ -34,7 +34,7 @@ export class TeamIntelligenceUserController {
     try {
       const parseResult = UserDashboardQuerySchema.safeParse(req.query);
       if (!parseResult.success) {
-        res.status(400).json({ error: 'Validation error', details: parseResult.error.errors });
+        res.status(400).json({ error: 'Validation error', details: parseResult.error.issues });
         return;
       }
       const section = req.params.section;
@@ -127,7 +127,7 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map((e) => ({
+          details: parseResult.error.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),
@@ -192,7 +192,7 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map((e) => ({
+          details: parseResult.error.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),
@@ -242,7 +242,7 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map((e) => ({
+          details: parseResult.error.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),
@@ -293,7 +293,7 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map((e) => ({
+          details: parseResult.error.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),
@@ -339,7 +339,7 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map((e) => ({
+          details: parseResult.error.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),
@@ -384,7 +384,7 @@ export class TeamIntelligenceUserController {
       if (!parseResult.success) {
         res.status(400).json({
           error: 'Validation error',
-          details: parseResult.error.errors.map((e) => ({
+          details: parseResult.error.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),

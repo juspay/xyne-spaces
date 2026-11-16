@@ -1,7 +1,8 @@
 import { Prisma, type Call } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
-import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
+// Disabled (LLM)
+// import { noteTakerCallRepository } from '@/database/repositories/noteTakerCallRepository';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -11,7 +12,8 @@ import type { SummaryModelType } from '@/services/callLlmRetry';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
-import { canvasAuthService } from '@/services/canvasAuthService';
+// Disabled (LLM)
+// import { canvasAuthService } from '@/services/canvasAuthService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { callLabelService } from '@/services/callLabelService';
@@ -148,51 +150,52 @@ class NoteTakerTranscriptService {
       const formattedTranscript = await this.getFormattedTranscript(callId, entries);
       if (!formattedTranscript) return;
 
-      // The recording creator's model preference (fast/thinking) drives which
-      // LLM tier generates the summary, title, and detailed-summary canvas.
-      const summaryModelType = await this.getSummaryModelPreference(call);
+      // Disabled (LLM)
+      // // The recording creator's model preference (fast/thinking) drives which
+      // // LLM tier generates the summary, title, and detailed-summary canvas.
+      // const summaryModelType = await this.getSummaryModelPreference(call);
 
-      // These workloads are independent once the transcript is available, so
-      // start them together. The detailed-summary result is also the sole source
-      // for generated decisions/actions and their transcript timestamps.
-      const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript, summaryModelType);
-      const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript, undefined, summaryModelType);
-      const labelsPromise = transcriptService.generateAndSaveLabels(
-        call,
-        formattedTranscript,
-        TagMethod.LLM,
-        'note_taker',
-      );
+      // // These workloads are independent once the transcript is available, so
+      // // start them together. The detailed-summary result is also the sole source
+      // // for generated decisions/actions and their transcript timestamps.
+      // const summaryPromise = this.generateAndSaveSummary(call, formattedTranscript, summaryModelType);
+      // const detailedSummaryPromise = this.generateDetailedSummaryCanvas(call, formattedTranscript, undefined, summaryModelType);
+      // const labelsPromise = transcriptService.generateAndSaveLabels(
+      //   call,
+      //   formattedTranscript,
+      //   TagMethod.LLM,
+      //   'note_taker',
+      // );
 
-      const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
-        if (labelIds.length === 0) return labelIds;
-        try {
-          await repositories.calls.appendLabels(call.id, labelIds);
-          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels', path: 'note_taker' });
-        } catch (error) {
-          logger.error(`[${callId}] labels_save_failed`, { error, path: 'note_taker' });
-        }
-        return labelIds;
-      });
-      const [, detailedSummary] = await Promise.all([
-        summaryPromise,
-        detailedSummaryPromise,
-        saveLabelsPromise,
-      ]);
-      await this.finalizeCallUpdates(call, {
-        metadata: {
-          transcriptEntryCount: entries.length,
-          detailedSummaryCanvasId: detailedSummary?.canvasId,
-          detailedSummaryReady: detailedSummary ? true : undefined,
-          detailedSummaryStatus: detailedSummary ? 'ready' : 'failed',
-          summaryModelUsed: summaryModelType,
-        },
-        summaryTemplateId: detailedSummary?.summaryTemplateId,
-        ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
-      });
-      if (detailedSummary) {
-        await this.notifySummaryReady(call, detailedSummary.rawSummary);
-      }
+      // const saveLabelsPromise = labelsPromise.then(async (labelIds) => {
+      //   if (labelIds.length === 0) return labelIds;
+      //   try {
+      //     await repositories.calls.appendLabels(call.id, labelIds);
+      //     logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels', path: 'note_taker' });
+      //   } catch (error) {
+      //     logger.error(`[${callId}] labels_save_failed`, { error, path: 'note_taker' });
+      //   }
+      //   return labelIds;
+      // });
+      // const [, detailedSummary] = await Promise.all([
+      //   summaryPromise,
+      //   detailedSummaryPromise,
+      //   saveLabelsPromise,
+      // ]);
+      // await this.finalizeCallUpdates(call, {
+      //   metadata: {
+      //     transcriptEntryCount: entries.length,
+      //     detailedSummaryCanvasId: detailedSummary?.canvasId,
+      //     detailedSummaryReady: detailedSummary ? true : undefined,
+      //     detailedSummaryStatus: detailedSummary ? 'ready' : 'failed',
+      //     summaryModelUsed: summaryModelType,
+      //   },
+      //   summaryTemplateId: detailedSummary?.summaryTemplateId,
+      //   ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
+      // });
+      // if (detailedSummary) {
+      //   await this.notifySummaryReady(call, detailedSummary.rawSummary);
+      // }
       await this.queueVespaIndexing(call);
 
       // Thread-linked recording: already auto-shared to the thread's channel
@@ -537,71 +540,72 @@ class NoteTakerTranscriptService {
    * moment the user flagged during it. Those are re-read below rather than taken
    * from `call`, which is the one field where the snapshot is not good enough.
    */
-  private async finalizeCallUpdates(
-    call: Call,
-    updates: {
-      metadata?: Record<string, unknown>;
-      labels?: string[];
-      markedItems?: RecordingSummaryMarkedItem[];
-      summaryTemplateId?: string | null;
-    },
-  ): Promise<void> {
-    const metadataChanges = updates.metadata
-      ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
-      : [];
+  // Disabled (LLM)
+  // private async finalizeCallUpdates(
+  //   call: Call,
+  //   updates: {
+  //     metadata?: Record<string, unknown>;
+  //     labels?: string[];
+  //     markedItems?: RecordingSummaryMarkedItem[];
+  //     summaryTemplateId?: string | null;
+  //   },
+  // ): Promise<void> {
+  //   const metadataChanges = updates.metadata
+  //     ? Object.entries(updates.metadata).filter(([, v]) => v !== null && v !== undefined)
+  //     : [];
 
-    // Fetch the current DB row once (rather than trusting `call`, which is the
-    // in-memory snapshot from the top of processTranscript) whenever we're about
-    // to merge onto either JSON column. Generation can take minutes, during
-    // which another write — e.g. ensureStreamingCanvas's early publish of
-    // detailedSummaryCanvasId, or a user's mid-call markMoment — can land in
-    // the DB. Merging onto the stale snapshot would silently erase that write.
-    const needsFreshRead = metadataChanges.length > 0 || updates.markedItems !== undefined;
-    const current = needsFreshRead
-      ? await repositories.calls.findByExternalId(call.externalId)
-      : undefined;
+  //   // Fetch the current DB row once (rather than trusting `call`, which is the
+  //   // in-memory snapshot from the top of processTranscript) whenever we're about
+  //   // to merge onto either JSON column. Generation can take minutes, during
+  //   // which another write — e.g. ensureStreamingCanvas's early publish of
+  //   // detailedSummaryCanvasId, or a user's mid-call markMoment — can land in
+  //   // the DB. Merging onto the stale snapshot would silently erase that write.
+  //   const needsFreshRead = metadataChanges.length > 0 || updates.markedItems !== undefined;
+  //   const current = needsFreshRead
+  //     ? await repositories.calls.findByExternalId(call.externalId)
+  //     : undefined;
 
-    const data: {
-      metadata?: Record<string, unknown>;
-      labels?: string[];
-      markedItems?: Prisma.InputJsonValue[];
-      summaryTemplateId?: string | null;
-    } = {};
-    if (metadataChanges.length > 0) {
-      const currentMetadataSource = current?.metadata ?? call.metadata;
-      const currentMetadata =
-        currentMetadataSource &&
-        typeof currentMetadataSource === 'object' &&
-        !Array.isArray(currentMetadataSource)
-          ? (currentMetadataSource as Record<string, unknown>)
-          : {};
-      data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
-    }
-    if (updates.labels && updates.labels.length > 0) {
-      data.labels = updates.labels;
-    }
-    if (updates.markedItems !== undefined) {
-      data.markedItems = mergeRecordingSummaryMarkedItems(
-        current?.markedItems ?? call.markedItems,
-        updates.markedItems,
-      ) as Prisma.InputJsonValue[];
-    }
-    if (updates.summaryTemplateId !== undefined) {
-      data.summaryTemplateId = updates.summaryTemplateId;
-    }
+  //   const data: {
+  //     metadata?: Record<string, unknown>;
+  //     labels?: string[];
+  //     markedItems?: Prisma.InputJsonValue[];
+  //     summaryTemplateId?: string | null;
+  //   } = {};
+  //   if (metadataChanges.length > 0) {
+  //     const currentMetadataSource = current?.metadata ?? call.metadata;
+  //     const currentMetadata =
+  //       currentMetadataSource &&
+  //       typeof currentMetadataSource === 'object' &&
+  //       !Array.isArray(currentMetadataSource)
+  //         ? (currentMetadataSource as Record<string, unknown>)
+  //         : {};
+  //     data.metadata = { ...currentMetadata, ...Object.fromEntries(metadataChanges) };
+  //   }
+  //   if (updates.labels && updates.labels.length > 0) {
+  //     data.labels = updates.labels;
+  //   }
+  //   if (updates.markedItems !== undefined) {
+  //     data.markedItems = mergeRecordingSummaryMarkedItems(
+  //       current?.markedItems ?? call.markedItems,
+  //       updates.markedItems,
+  //     ) as Prisma.InputJsonValue[];
+  //   }
+  //   if (updates.summaryTemplateId !== undefined) {
+  //     data.summaryTemplateId = updates.summaryTemplateId;
+  //   }
 
-    if (Object.keys(data).length === 0) return;
+  //   if (Object.keys(data).length === 0) return;
 
-    try {
-      await repositories.calls.update(call.id, data);
-      logger.info(`[${call.externalId}] call_record_updated`, {
-        fields_updated: Object.keys(data).join(','),
-        path: 'note_taker',
-      });
-    } catch (error) {
-      logger.error(`[${call.externalId}] metadata_update_failed`, { error, path: 'note_taker' });
-    }
-  }
+  //   try {
+  //     await repositories.calls.update(call.id, data);
+  //     logger.info(`[${call.externalId}] call_record_updated`, {
+  //       fields_updated: Object.keys(data).join(','),
+  //       path: 'note_taker',
+  //     });
+  //   } catch (error) {
+  //     logger.error(`[${call.externalId}] metadata_update_failed`, { error, path: 'note_taker' });
+  //   }
+  // }
 
   /**
    * Merge just the detailed-summary status onto Call.metadata. Used by
@@ -665,103 +669,104 @@ class NoteTakerTranscriptService {
     return transcriptService.formatTranscript(plainEntries, callId);
   }
 
-  private async generateAndSaveSummary(
-    call: Call,
-    formattedTranscript: string,
-    modelType?: SummaryModelType,
-  ): Promise<void> {
-    const callId = call.externalId;
+  // Disabled (LLM)
+  // private async generateAndSaveSummary(
+  //   call: Call,
+  //   formattedTranscript: string,
+  //   modelType?: SummaryModelType,
+  // ): Promise<void> {
+  //   const callId = call.externalId;
 
-    // Number the transcript so the LLM can cite segments with [clf-N] tokens.
-    // The tokens stay inline in the stored aiSummary and are parsed client-side.
-    const { numbered: numberedTranscript } = numberTranscriptSegments(formattedTranscript);
+  //   // Number the transcript so the LLM can cite segments with [clf-N] tokens.
+  //   // The tokens stay inline in the stored aiSummary and are parsed client-side.
+  //   const { numbered: numberedTranscript } = numberTranscriptSegments(formattedTranscript);
 
-    const summaryPromise = transcriptService.generateCallSummary(numberedTranscript, callId, modelType).catch((err) => {
-        logger.error(`[${callId}] generate_summary_threw`, {
-          path: 'note_taker',
-          error: err,
-          stack: err instanceof Error ? err.stack : undefined,
-        });
-        return null;
-      });
-    const titlePromise = call.title
-      ? Promise.resolve(null)
-      : transcriptService.generateRecordingTitle(formattedTranscript, callId, modelType).catch((err) => {
-            logger.error(`[${callId}] generate_title_threw`, {
-              path: 'note_taker',
-              error: err,
-              stack: err instanceof Error ? err.stack : undefined,
-            });
-            return null;
-          });
+  //   const summaryPromise = transcriptService.generateCallSummary(numberedTranscript, callId, modelType).catch((err) => {
+  //       logger.error(`[${callId}] generate_summary_threw`, {
+  //         path: 'note_taker',
+  //         error: err,
+  //         stack: err instanceof Error ? err.stack : undefined,
+  //       });
+  //       return null;
+  //     });
+  //   const titlePromise = call.title
+  //     ? Promise.resolve(null)
+  //     : transcriptService.generateRecordingTitle(formattedTranscript, callId, modelType).catch((err) => {
+  //           logger.error(`[${callId}] generate_title_threw`, {
+  //             path: 'note_taker',
+  //             error: err,
+  //             stack: err instanceof Error ? err.stack : undefined,
+  //           });
+  //           return null;
+  //         });
 
-    const saveSummaryPromise = summaryPromise.then(async (summary) => {
-      if (!summary) return false;
-      try {
-        await repositories.calls.update(call.id, { aiSummary: summary });
-        logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary', path: 'note_taker' });
-        return true;
-      } catch (error) {
-        logger.error(`[${callId}] call_record_update_failed`, {
-          stage: 'summary_save', path: 'note_taker', error,
-        });
-        return false;
-      }
-    });
+  //   const saveSummaryPromise = summaryPromise.then(async (summary) => {
+  //     if (!summary) return false;
+  //     try {
+  //       await repositories.calls.update(call.id, { aiSummary: summary });
+  //       logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary', path: 'note_taker' });
+  //       return true;
+  //     } catch (error) {
+  //       logger.error(`[${callId}] call_record_update_failed`, {
+  //         stage: 'summary_save', path: 'note_taker', error,
+  //       });
+  //       return false;
+  //     }
+  //   });
 
-    const saveTitlePromise = titlePromise.then(async (generatedTitle) => {
-      const title = generatedTitle
-        ?.split(/\r?\n/, 1)[0]
-        ?.trim()
-        .replace(/^['"]|['"]$/g, '')
-        .slice(0, 100);
-      if (!title) return false;
+  //   const saveTitlePromise = titlePromise.then(async (generatedTitle) => {
+  //     const title = generatedTitle
+  //       ?.split(/\r?\n/, 1)[0]
+  //       ?.trim()
+  //       .replace(/^['"]|['"]$/g, '')
+  //       .slice(0, 100);
+  //     if (!title) return false;
 
-      // Re-read the title so a user rename made while the LLM was working wins.
-      if ((await repositories.calls.findByExternalId(callId))?.title) {
-        logger.info(`[${callId}] ai_title_discarded`, { reason: 'renamed_during_processing', path: 'note_taker' });
-        return false;
-      }
-      try {
-        await repositories.calls.update(call.id, { title });
-        logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
-        try {
-          await canvasAuthService.syncNotesCanvasTitle(call.id, title);
-        } catch (syncError) {
-          logger.error(`[${callId}] notes_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
-        }
-        try {
-          await canvasAuthService.syncDetailedSummaryCanvasTitle(call.id, title);
-        } catch (syncError) {
-          logger.error(`[${callId}] detailed_summary_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
-        }
-        // Thread-linked recording: patch the anchor message's content with
-        // this title too (mirrors how a regular call's ended message shows its
-        // AI text as message.content) so RecordingBubble never needs its own
-        // live query on the Call row just to display the ended-state title.
-        // Best-effort — a failure here must not affect the saved Call.title.
-        try {
-          await noteTakerCallRepository.updateThreadMessageTitle(call.id, title);
-        } catch (messageError) {
-          logger.error(`[${callId}] thread_message_title_update_failed`, {
-            path: 'note_taker',
-            error: messageError,
-          });
-        }
-        return true;
-      } catch (error) {
-        logger.error(`[${callId}] call_record_update_failed`, {
-          stage: 'title_save', path: 'note_taker', error,
-        });
-        return false;
-      }
-    });
+  //     // Re-read the title so a user rename made while the LLM was working wins.
+  //     if ((await repositories.calls.findByExternalId(callId))?.title) {
+  //       logger.info(`[${callId}] ai_title_discarded`, { reason: 'renamed_during_processing', path: 'note_taker' });
+  //       return false;
+  //     }
+  //     try {
+  //       await repositories.calls.update(call.id, { title });
+  //       logger.info(`[${callId}] call_record_updated`, { fields_updated: 'title', path: 'note_taker' });
+  //       try {
+  //         await canvasAuthService.syncNotesCanvasTitle(call.id, title);
+  //       } catch (syncError) {
+  //         logger.error(`[${callId}] notes_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
+  //       }
+  //       try {
+  //         await canvasAuthService.syncDetailedSummaryCanvasTitle(call.id, title);
+  //       } catch (syncError) {
+  //         logger.error(`[${callId}] detailed_summary_canvas_title_sync_failed`, { path: 'note_taker', error: syncError });
+  //       }
+  //       // Thread-linked recording: patch the anchor message's content with
+  //       // this title too (mirrors how a regular call's ended message shows its
+  //       // AI text as message.content) so RecordingBubble never needs its own
+  //       // live query on the Call row just to display the ended-state title.
+  //       // Best-effort — a failure here must not affect the saved Call.title.
+  //       try {
+  //         await noteTakerCallRepository.updateThreadMessageTitle(call.id, title);
+  //       } catch (messageError) {
+  //         logger.error(`[${callId}] thread_message_title_update_failed`, {
+  //           path: 'note_taker',
+  //           error: messageError,
+  //         });
+  //       }
+  //       return true;
+  //     } catch (error) {
+  //       logger.error(`[${callId}] call_record_update_failed`, {
+  //         stage: 'title_save', path: 'note_taker', error,
+  //       });
+  //       return false;
+  //     }
+  //   });
 
-    const [savedSummary, savedTitle] = await Promise.all([saveSummaryPromise, saveTitlePromise]);
-    if (!savedSummary && !savedTitle) {
-      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
-    }
-  }
+  //   const [savedSummary, savedTitle] = await Promise.all([saveSummaryPromise, saveTitlePromise]);
+  //   if (!savedSummary && !savedTitle) {
+  //     logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
+  //   }
+  // }
 
   /**
    * Generate the detailed summary and create/update its canvas. A brand-new

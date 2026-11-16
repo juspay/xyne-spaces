@@ -1,16 +1,15 @@
-{
   "mcpServers": {
     "xyne-genius-rca": {
       "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/genius/mcp"
+      "url": "${XYNE_MCP_BASE_URL}/xyne-mcp/genius/mcp"
     },
     "xyne-grafana-logs": {
       "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/logs/mcp"
+      "url": "${XYNE_MCP_BASE_URL}/xyne-mcp/logs/mcp"
     },
     "xyne-victoria-metrics": {
       "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/metrics/mcp"
+      "url": "${XYNE_MCP_BASE_URL}/xyne-mcp/metrics/mcp"
     },
     "xyne-spaces": {
       "command": "node",

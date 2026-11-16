@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 import { isApprovedTransportDestination } from '../../../src/utils/mtlsDestinationPolicy';
 
-const API_ORIGIN = 'https://app.spaces.xyne.juspay.net';
+const API_ORIGIN = 'https://app.example.org';
 
 const MTLS_HTTP_CLIENT_SOURCE = readFileSync(
   resolve(process.cwd(), 'src/utils/mtlsHttpClient.ts'),
@@ -42,13 +42,10 @@ describe('mTLS transport destination policy', () => {
 
   it('rejects lookalike, alternate-port, and non-API origins', () => {
     assert.equal(
-      isApprovedTransportDestination('https://app.spaces.xyne.juspay.net.evil.test/', API_ORIGIN),
+      isApprovedTransportDestination('https://app.example.org.evil.test/', API_ORIGIN),
       false,
     );
-    assert.equal(
-      isApprovedTransportDestination('https://app.spaces.xyne.juspay.net:444/', API_ORIGIN),
-      false,
-    );
+    assert.equal(isApprovedTransportDestination('https://app.example.org:444/', API_ORIGIN), false);
     assert.equal(
       isApprovedTransportDestination('https://attacker.test/collect', API_ORIGIN),
       false,
@@ -56,10 +53,7 @@ describe('mTLS transport destination policy', () => {
   });
 
   it('rejects cleartext and credentials on non-loopback destinations', () => {
-    assert.equal(
-      isApprovedTransportDestination('http://app.spaces.xyne.juspay.net/api', API_ORIGIN),
-      false,
-    );
+    assert.equal(isApprovedTransportDestination('http://app.example.org/api', API_ORIGIN), false);
     assert.equal(
       isApprovedTransportDestination(
         `https://user:pass@${new URL(API_ORIGIN).host}/api`,

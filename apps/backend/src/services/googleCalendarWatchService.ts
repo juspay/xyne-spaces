@@ -172,7 +172,7 @@ export class GoogleCalendarWatchService {
 }
 
 function createOAuth2Client(accessToken: string, refreshToken: string): OAuth2Client {
-  const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+  const client = new OAuth2Client(config.email.clientId, config.email.clientSecret);
   client.setCredentials({
     access_token: accessToken,
     refresh_token: refreshToken,

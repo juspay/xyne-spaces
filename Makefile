@@ -7,7 +7,8 @@ RUNNER_IMAGE_NAME ?= xyne-spaces-runner
 DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard
 DASHBOARD_EDGE_IMAGE_NAME ?= xyne-spaces-dashboard-edge
 EXTERNAL_DASHBOARD_IMAGE_NAME ?= xyne-spaces-dashboard-external
-LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= lighton-ocr-server
+LIGHTON_OCR_WRAPPER_IMAGE_NAME ?= xyne-spaces-lighton-ocr-server
+TEI_BATCH_PROXY_IMAGE_NAME ?= xyne-spaces-tei-batch-proxy
 TRANSCRIPTION_AGENT_IMAGE_NAME ?= xyne-spaces-transcription-agent
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
@@ -19,6 +20,12 @@ SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short
 # of git). Empty default: local builds ship a bundle with analytics disabled.
 VITE_POSTHOG_KEY ?=
 VITE_POSTHOG_HOST ?=
+VITE_API_URL ?=
+VITE_INTERNAL_XYNE_HOSTS ?=
+VITE_TRUSTED_ORIGINS ?=
+VITE_APPS_PUBLIC_BASE_URL ?=
+VITE_LEGAL_CONTACT_EMAIL ?=
+VITE_PRIVACY_CONTACT_EMAIL ?=
 
 #temp2
 # Backend targets 3s
@@ -46,11 +53,11 @@ prisma-generate:
 build-runner:
 	$(info Building $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/backend/Docker.runner -t $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --build-arg "CACHIX_AUTH_TOKEN=$(CACHIX_AUTH_TOKEN)" --load .
+	docker buildx build -f apps/backend/Docker.runner -t $(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --load .
 
 push-runner:
 	$(info Pushing to registry: $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/backend/Docker.runner -t $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "GITHUB_PAT_TOKEN=$(GITHUB_PAT_TOKEN)" --build-arg "CACHIX_AUTH_TOKEN=$(CACHIX_AUTH_TOKEN)" --push .
+	docker buildx build -f apps/backend/Docker.runner -t $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --push .
 	$(info Successfully pushed: $(NS)/$(RUNNER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-runner:
@@ -61,29 +68,26 @@ clean-runner:
 build-dashboard:
 	$(info Building $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
 	$(info Local image: $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --load .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --build-arg "VITE_API_URL=$(VITE_API_URL)" --build-arg "VITE_INTERNAL_XYNE_HOSTS=$(VITE_INTERNAL_XYNE_HOSTS)" --build-arg "VITE_TRUSTED_ORIGINS=$(VITE_TRUSTED_ORIGINS)" --build-arg "VITE_APPS_PUBLIC_BASE_URL=$(VITE_APPS_PUBLIC_BASE_URL)" --build-arg "VITE_LEGAL_CONTACT_EMAIL=$(VITE_LEGAL_CONTACT_EMAIL)" --build-arg "VITE_PRIVACY_CONTACT_EMAIL=$(VITE_PRIVACY_CONTACT_EMAIL)" --load .
 
 push-dashboard:
 	$(info Pushing to registry: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
-	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --push .
+	docker buildx build -f apps/dashboard/Dockerfile -t $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --build-arg "VITE_API_URL=$(VITE_API_URL)" --build-arg "VITE_INTERNAL_XYNE_HOSTS=$(VITE_INTERNAL_XYNE_HOSTS)" --build-arg "VITE_TRUSTED_ORIGINS=$(VITE_TRUSTED_ORIGINS)" --build-arg "VITE_APPS_PUBLIC_BASE_URL=$(VITE_APPS_PUBLIC_BASE_URL)" --build-arg "VITE_LEGAL_CONTACT_EMAIL=$(VITE_LEGAL_CONTACT_EMAIL)" --build-arg "VITE_PRIVACY_CONTACT_EMAIL=$(VITE_PRIVACY_CONTACT_EMAIL)" --push .
 	$(info Successfully pushed: $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
 
 clean-dashboard:
 	docker rmi $(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(DASHBOARD_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
-# Export the built dashboard bundles (dist + releases/dashboard.zip) for
-# upload to the dashboard edge's bucket: the normal bundle to
-# $(DASHBOARD_BUNDLE_OUT) and the SDLC-mode bundle (build:sdlc, base
-# /sdlc-app/) to $(DASHBOARD_BUNDLE_OUT)-sdlc. Same build args as
-# push-dashboard so the builder stage is served from cache.
+# Export the built dashboard bundle (dist + releases/dashboard.zip) to
+# $(DASHBOARD_BUNDLE_OUT) for upload to the dashboard edge's bucket. Same build
+# args as push-dashboard so the builder stage is served from cache.
 DASHBOARD_BUNDLE_OUT ?= out/dashboard-bundle
 export-dashboard-bundle:
-	$(info Exporting dashboard bundles to $(DASHBOARD_BUNDLE_OUT) and $(DASHBOARD_BUNDLE_OUT)-sdlc / git-head: $(SOURCE_COMMIT))
-	rm -rf $(DASHBOARD_BUNDLE_OUT) $(DASHBOARD_BUNDLE_OUT)-sdlc
-	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" .
-	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT)-sdlc --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "BUILD_SCRIPT=build:sdlc" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" .
-	$(info Exported: $(DASHBOARD_BUNDLE_OUT) and $(DASHBOARD_BUNDLE_OUT)-sdlc)
+	$(info Exporting dashboard bundle to $(DASHBOARD_BUNDLE_OUT) / git-head: $(SOURCE_COMMIT))
+	rm -rf $(DASHBOARD_BUNDLE_OUT)
+	docker buildx build -f apps/dashboard/Dockerfile --target bundle --output type=local,dest=$(DASHBOARD_BUNDLE_OUT) --build-arg "SOURCE_COMMIT=$(SOURCE_COMMIT)" --build-arg "VITE_POSTHOG_KEY=$(VITE_POSTHOG_KEY)" --build-arg "VITE_POSTHOG_HOST=$(VITE_POSTHOG_HOST)" --build-arg "VITE_API_URL=$(VITE_API_URL)" --build-arg "VITE_INTERNAL_XYNE_HOSTS=$(VITE_INTERNAL_XYNE_HOSTS)" --build-arg "VITE_TRUSTED_ORIGINS=$(VITE_TRUSTED_ORIGINS)" --build-arg "VITE_APPS_PUBLIC_BASE_URL=$(VITE_APPS_PUBLIC_BASE_URL)" --build-arg "VITE_LEGAL_CONTACT_EMAIL=$(VITE_LEGAL_CONTACT_EMAIL)" --build-arg "VITE_PRIVACY_CONTACT_EMAIL=$(VITE_PRIVACY_CONTACT_EMAIL)" .
+	$(info Exported: $(DASHBOARD_BUNDLE_OUT))
 
 # Dashboard edge targets (nginx + Node app serving bundles from object storage; apps/dashboard-edge)
 build-dashboard-edge:
@@ -128,6 +132,21 @@ push-lighton-ocr-wrapper:
 clean-lighton-ocr-wrapper:
 	docker rmi $(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(LIGHTON_OCR_WRAPPER_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
+# TEI batch proxy targets (Node, no deps). Self-contained build context (tei-batch-proxy).
+build-tei-batch-proxy:
+	$(info Building $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd tei-batch-proxy && docker buildx build -f Dockerfile -t $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-tei-batch-proxy:
+	$(info Pushing to registry: $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	cd tei-batch-proxy && docker buildx build -f Dockerfile -t $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-tei-batch-proxy:
+	docker rmi $(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(TEI_BATCH_PROXY_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
 # Transcription agent targets (Python / LiveKit agent). Self-contained build context
 # (apps/backend/python-agent) because the Dockerfile COPYs only from its own directory.
@@ -245,11 +264,11 @@ push-claw-all: push-claw push-claw-auth-backend push-claw-auth-frontend
 clean-claw-all: clean-claw clean-claw-auth-backend clean-claw-auth-frontend
 
 # Combined targets
-build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-transcription-agent build-claw-all
+build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-tei-batch-proxy build-transcription-agent build-claw-all
 
-push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-transcription-agent push-claw-all
+push-all: push-backend push-runner push-dashboard push-external-dashboard push-lighton-ocr-wrapper push-tei-batch-proxy push-transcription-agent push-claw-all
 
-clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-transcription-agent clean-claw-all
+clean-all: clean-backend clean-runner clean-dashboard clean-external-dashboard clean-lighton-ocr-wrapper clean-tei-batch-proxy clean-transcription-agent clean-claw-all
 
 test:
 	$(info Running tests for all components)
@@ -264,4 +283,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-tei-batch-proxy push-tei-batch-proxy clean-tei-batch-proxy build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa

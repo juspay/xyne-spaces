@@ -7,7 +7,7 @@ import {
   type RunState,
   type RunConfig,
   type TraceEvent,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 import { getReleaseNotesSystemPrompt, buildReleaseNotesUserPrompt } from './prompts';
 import { AgentsConfig } from '@/agents/config';
 import { createAgentEventLogger, composeEventHandlers } from '@/agents/agentLogger';

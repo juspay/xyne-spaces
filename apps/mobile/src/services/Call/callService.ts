@@ -1,7 +1,7 @@
 import { getAuthToken } from '../../contexts/AuthContext';
-import { CallType, MeetingStatus } from '@xyne/shared';
+import { CallType, MeetingStatus, type CallEncryptionCredentials } from '@xyne/shared';
 import { apiGetText, apiPost, apiRequest } from '../apiClient';
-import { PUBLIC_DEEP_LINK_ORIGIN } from '../../config';
+import { ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS, PUBLIC_DEEP_LINK_ORIGIN } from '../../config';
 import { canonicalizePublicDeepLink } from '../../utils/publicDeepLink';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -25,6 +25,8 @@ export interface InitiateCallResponse {
   roomLink: string;
   channelId: string;
   scopeType?: string | null;
+  /** Present on end-to-end encrypted calls; the media key for this participant. */
+  encryption?: CallEncryptionCredentials;
 }
 
 export interface JoinCallRequest {
@@ -38,6 +40,8 @@ export interface JoinCallResponse {
   roomLink: string;
   channelId?: string;
   scopeType?: string | null;
+  /** Present on end-to-end encrypted calls; the media key for this participant. */
+  encryption?: CallEncryptionCredentials;
 }
 
 export interface ValidateRoomsRequest {
@@ -141,6 +145,7 @@ interface CallApiCredentialsResponse {
   roomLink?: string;
   channelId?: string;
   scopeType?: string | null;
+  encryption?: CallEncryptionCredentials;
   error?: string;
 }
 
@@ -154,6 +159,7 @@ function extractCredentials(
   roomLink?: string;
   channelId?: string;
   scopeType?: string | null;
+  encryption?: CallEncryptionCredentials;
 } {
   if (!response.success) {
     throw new ApiError(response.error || errorFallback, 400, 'API_ERROR');
@@ -161,12 +167,23 @@ function extractCredentials(
   if (!response.token || !response.livekitUrl || !response.externalId) {
     throw new ApiError(errorFallback, 500, 'INVALID_RESPONSE');
   }
+  const encryption =
+    response.encryption && typeof response.encryption.key === 'string'
+      ? response.encryption
+      : undefined;
   return {
     token: response.token,
     livekitUrl: response.livekitUrl,
     externalId: response.externalId,
+    ...(encryption ? { encryption } : {}),
     ...(response.roomLink !== undefined
-      ? { roomLink: canonicalizePublicDeepLink(response.roomLink, PUBLIC_DEEP_LINK_ORIGIN) }
+      ? {
+          roomLink: canonicalizePublicDeepLink(
+            response.roomLink,
+            PUBLIC_DEEP_LINK_ORIGIN,
+            ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS,
+          ),
+        }
       : {}),
     ...(response.channelId !== undefined ? { channelId: response.channelId } : {}),
     ...(response.scopeType !== undefined ? { scopeType: response.scopeType } : {}),
@@ -217,6 +234,7 @@ class CallServiceWrapper {
       roomLink: creds.roomLink ?? '',
       channelId: creds.channelId ?? '',
       ...(creds.scopeType !== undefined ? { scopeType: creds.scopeType } : {}),
+      ...(creds.encryption ? { encryption: creds.encryption } : {}),
     };
   }
 
@@ -243,6 +261,7 @@ class CallServiceWrapper {
       roomLink: creds.roomLink ?? '',
       ...(creds.channelId !== undefined ? { channelId: creds.channelId } : {}),
       ...(creds.scopeType !== undefined ? { scopeType: creds.scopeType } : {}),
+      ...(creds.encryption ? { encryption: creds.encryption } : {}),
     };
   }
 

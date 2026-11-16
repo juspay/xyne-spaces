@@ -1,3 +1,5 @@
+import { config } from '@/config/env';
+
 const normalizeNamePart = (value: string): string =>
   value
     .normalize('NFKD')
@@ -21,7 +23,9 @@ export const extractEmailFromDisplayName = (displayName?: string): string | null
 };
 
 export const inferEmailCandidatesFromDisplayName = (displayName?: string): string[] => {
-  if (!displayName) return [];
+  // Candidate emails are only meaningful on the org's own domain (ORG_EMAIL_DOMAIN).
+  const domain = config.orgEmailDomain;
+  if (!displayName || !domain) return [];
 
   const nameParts = displayName
     .split(/\s+/)
@@ -31,7 +35,7 @@ export const inferEmailCandidatesFromDisplayName = (displayName?: string): strin
   const candidates = new Set<string>();
   const rawLocalPart = normalizeEmailLocalPart(displayName);
   if (rawLocalPart) {
-    candidates.add(`${rawLocalPart}@juspay.in`);
+    candidates.add(`${rawLocalPart}@${domain}`);
   }
 
   if (nameParts.length === 0) {
@@ -44,27 +48,27 @@ export const inferEmailCandidatesFromDisplayName = (displayName?: string): strin
   const firstInitial = first?.[0];
   const lastInitial = last?.[0];
 
-  candidates.add(`${nameParts.join('.')}@juspay.in`);
-  candidates.add(`${nameParts.join('')}@juspay.in`);
+  candidates.add(`${nameParts.join('.')}@${domain}`);
+  candidates.add(`${nameParts.join('')}@${domain}`);
 
   if (nameParts.length >= 2) {
-    candidates.add(`${first}.${last}@juspay.in`);
-    candidates.add(`${first}${last}@juspay.in`);
-    candidates.add(`${first}.${lastInitial}@juspay.in`);
-    candidates.add(`${first}${lastInitial}@juspay.in`);
-    candidates.add(`${firstInitial}.${last}@juspay.in`);
-    candidates.add(`${last}.${first}@juspay.in`);
-    candidates.add(`${last}${first}@juspay.in`);
+    candidates.add(`${first}.${last}@${domain}`);
+    candidates.add(`${first}${last}@${domain}`);
+    candidates.add(`${first}.${lastInitial}@${domain}`);
+    candidates.add(`${first}${lastInitial}@${domain}`);
+    candidates.add(`${firstInitial}.${last}@${domain}`);
+    candidates.add(`${last}.${first}@${domain}`);
+    candidates.add(`${last}${first}@${domain}`);
     if (firstInitial) {
-      candidates.add(`${last}.${firstInitial}@juspay.in`);
-      candidates.add(`${last}${firstInitial}@juspay.in`);
+      candidates.add(`${last}.${firstInitial}@${domain}`);
+      candidates.add(`${last}${firstInitial}@${domain}`);
     }
 
     if (second) {
-      candidates.add(`${first}.${second}@juspay.in`);
-      candidates.add(`${first}${second}@juspay.in`);
-      candidates.add(`${second}.${last}@juspay.in`);
-      candidates.add(`${second}${last}@juspay.in`);
+      candidates.add(`${first}.${second}@${domain}`);
+      candidates.add(`${first}${second}@${domain}`);
+      candidates.add(`${second}.${last}@${domain}`);
+      candidates.add(`${second}${last}@${domain}`);
     }
   }
 
@@ -75,8 +79,8 @@ export const inferEmailCandidatesFromDisplayName = (displayName?: string): strin
         if (i === j) continue;
         const a = nameParts[i];
         const b = nameParts[j];
-        candidates.add(`${a}.${b}@juspay.in`);
-        candidates.add(`${a}${b}@juspay.in`);
+        candidates.add(`${a}.${b}@${domain}`);
+        candidates.add(`${a}${b}@${domain}`);
         if (candidates.size >= MAX_PERMUTATION_CANDIDATES) break;
       }
       if (candidates.size >= MAX_PERMUTATION_CANDIDATES) break;

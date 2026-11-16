@@ -8,7 +8,6 @@ import { PrismaClient, Invitation, User } from '@prisma/client';
 import {
   GuestEntity,
   WorkspaceRole,
-  WorkspaceType,
   AuthProvider,
   ChannelRole,
   CanvasRole,
@@ -21,7 +20,8 @@ import { emailService } from './email/factory';
 import { reconcileUserPermissions } from './permissionMatrix';
 import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
-import { organizationDomainService } from './organizationDomainService';
+import { EmailDomainNotAllowedError, organizationDomainService } from './organizationDomainService';
+import { isEmailDomainAllowed } from './emailDomainPolicy';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { aiProvisioningService } from './aiProvisioningService';
 import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
@@ -67,7 +67,6 @@ export class InvitationService {
   toEnterpriseOrgRole(role: WorkspaceRole): OrgRole {
     if (role === WorkspaceRole.OWNER) return OrgRole.OWNER;
     if (role === WorkspaceRole.ADMIN) return OrgRole.ADMIN;
-    if (role === WorkspaceRole.COMMUNITY_MEMBER) return OrgRole.COMMUNITY_MEMBER;
     return OrgRole.MEMBER;
   }
 
@@ -91,6 +90,9 @@ export class InvitationService {
   async createInvitation(params: CreateInvitationParams): Promise<InvitationWithDetails> {
     const { role, workspaceId, invitedBy, orgId: explicitOrgId } = params;
     const email = params.email.toLowerCase();
+    if (!isEmailDomainAllowed(email)) {
+      throw new EmailDomainNotAllowedError(organizationDomainService.extractEmailDomain(email));
+    }
 
     let orgId: string;
     // null = flow skips the in-org check (read as approved), false = pending admin approval
@@ -101,15 +103,6 @@ export class InvitationService {
       // orgId supplied directly — skip inviter-org derivation and invitee-in-org check
       // (caller is responsible for having already added the invitee as an org member)
       orgId = explicitOrgId;
-    } else if (role === WorkspaceRole.COMMUNITY_MEMBER) {
-      const communityWorkspace = await this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { orgId: true },
-      });
-      if (!communityWorkspace?.orgId) {
-        throw new Error('Community workspace not found');
-      }
-      orgId = communityWorkspace.orgId;
     } else {
       // Derive orgId from the inviting user's active org membership
       const inviter = await this.prisma.user.findUnique({
@@ -128,7 +121,6 @@ export class InvitationService {
       orgId = derivedOrgId;
 
       // Non-org invitees are no longer rejected — the invite waits for admin approval.
-      // GUEST and COMMUNITY_MEMBER are handled in the branches above.
       if (role !== WorkspaceRole.GUEST) {
         // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
         // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
@@ -176,20 +168,8 @@ export class InvitationService {
           WorkspaceRole.ADMIN,
           WorkspaceRole.MEMBER,
           WorkspaceRole.GUEST,
-          WorkspaceRole.COMMUNITY_MEMBER,
         ];
     const invitationRole = role && validRoles.includes(role) ? role : WorkspaceRole.MEMBER;
-
-    if (invitationRole === WorkspaceRole.COMMUNITY_MEMBER) {
-      const workspace = await this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { workspaceType: true },
-      });
-
-      if (workspace?.workspaceType !== WorkspaceType.COMMUNITY) {
-        throw new Error('Community member invitations are only supported for community workspaces');
-      }
-    }
 
     if (invitationRole === 'GUEST' && (!params.entityId || !params.entityType)) {
       throw new Error('Guest invitations must target a channel or canvas');
@@ -802,9 +782,9 @@ export class InvitationService {
 
     if (upgradeCommunityMemberId) {
       try {
-        await aiProvisioningService.upgradeCommunityToEnterpriseBudget(upgradeCommunityMemberId);
+        await aiProvisioningService.resyncUserBudget(upgradeCommunityMemberId);
       } catch (error) {
-        logger.error('[InvitationService] Failed to upgrade community budget', {
+        logger.error('[InvitationService] Failed to resync user budget', {
           memberId: upgradeCommunityMemberId,
           error,
         });

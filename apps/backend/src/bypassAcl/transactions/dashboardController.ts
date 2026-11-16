@@ -70,7 +70,7 @@ export function removeTx(id: string, ctx: { userId: string; workspaceId: string;
     await tx.dynamicDashboard.delete({ where: { id } });
   });
 }
-export function addParticipantsTx(dashboardId: string, ctx: { userId: string; workspaceId: string; }, parsed: z.SafeParseSuccess<{ participants: { userId: string; role: DashboardRole; }[]; }>) {
+export function addParticipantsTx(dashboardId: string, ctx: { userId: string; workspaceId: string; }, parsed: z.ZodSafeParseSuccess<{ participants: { userId: string; role: DashboardRole; }[]; }>) {
   return transaction(['DashboardParticipant', 'DynamicDashboard', 'User'], 'addParticipants: dashboard access check plus participant inserts must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     const dashboard = await tx.dynamicDashboard.findUnique({ where: { id: dashboardId } });
     if (!dashboard || dashboard.workspaceId !== ctx.workspaceId) {
@@ -148,7 +148,7 @@ export function updateParticipantRoleTx(dashboardId: string, ctx: { userId: stri
     });
   });
 }
-export function updatePositionsTx(dashboardId: string, ctx: { userId: string; workspaceId: string; }, parsed: z.SafeParseSuccess<{ updates: { id: string; position: string; }[]; }>) {
+export function updatePositionsTx(dashboardId: string, ctx: { userId: string; workspaceId: string; }, parsed: z.ZodSafeParseSuccess<{ updates: { id: string; position: string; }[]; }>) {
   return transaction(['DashboardParticipant', 'DynamicDashboard', 'DynamicDashboardQuery', 'DynamicDashboardQueryMapping'], 'updatePositions: tile membership check plus query position updates must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     await assertDashboardEditAccess(tx, dashboardId, ctx.userId, ctx.workspaceId);
     // All updated tiles must belong to this dashboard.

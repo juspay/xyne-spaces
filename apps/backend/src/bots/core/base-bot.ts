@@ -232,7 +232,7 @@ export abstract class BaseBot<TInput = unknown, TOutput = unknown>
         };
       } else {
         // Create FlowJson representation of validation errors
-        const errorFlowJson = this.createErrorFlowJson(result.error.errors);
+        const errorFlowJson = this.createErrorFlowJson(result.error.issues);
         return { success: false, flowJson: JSON.stringify(errorFlowJson) };
       }
     } catch (error) {
@@ -337,7 +337,7 @@ export abstract class BaseBot<TInput = unknown, TOutput = unknown>
         return { success: true, data: result.data };
       }
       
-      const errors = result.error.errors.map(err => 
+      const errors = result.error.issues.map(err => 
         `${err.path.join('.')}: ${err.message}`
       );
       

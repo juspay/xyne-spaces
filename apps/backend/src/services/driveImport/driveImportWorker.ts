@@ -14,6 +14,8 @@ import {
   clearCollectionImportActive,
   maybeNotifyCollectionIngestionCompleteByCollection,
 } from '@/services/collectionIngestionNotifier';
+import { config } from '@/config/env';
+import { runDriveImportJob } from '@/bypassAcl/collectionServices';
 
 /**
  * Background worker for Google Drive imports. The API request only lists the folder
@@ -84,11 +86,11 @@ function getQueue(): Bull.Queue<DriveImportJobData> {
   if (!queue) {
     queue = new Bull<DriveImportJobData>(QUEUE_NAME, {
       redis: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        host: config.redis.host,
+        port: config.redis.port,
         maxRetriesPerRequest: 3,
-        ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-        ...(process.env.REDIS_TLS === 'true' && { tls: { rejectUnauthorized: false } }),
+        ...(config.redis.password && { password: config.redis.password }),
+        ...(config.redis.tls && { tls: { rejectUnauthorized: false } }),
       },
     });
   }
@@ -102,7 +104,7 @@ export async function enqueueDriveImport(data: DriveImportJobData): Promise<void
 /** Register the processor. Call once at startup in the process that runs downloads. */
 export function startDriveImportWorker(): void {
   getQueue().process(1, async job => {
-    await processDriveImportJob(job.data);
+    await runDriveImportJob(job.data);
   });
   logger.info('[DRIVE_IMPORT] Worker started, ready to process jobs');
 }

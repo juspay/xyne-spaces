@@ -16,6 +16,7 @@ import {
   evaluatePlanningRisk,
 } from '@/services/etaManagement';
 import { markTicketsStageOverdue } from '@/bypassAcl/ticketServices';
+import { config as appConfig } from '@/config/env';
 
 interface TicketForReconciliation extends TicketWithStageInfo {
   boardId: string;
@@ -25,8 +26,8 @@ interface TicketForReconciliation extends TicketWithStageInfo {
 }
 
 // Batching for the bulk `isStageOverdue` flag sync.
-const BATCH_SIZE = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SIZE || '15', 10);
-const BATCH_SLEEP_MS = parseInt(process.env.STAGE_ETA_DEADLINE_BATCH_SLEEP_MS || '1000', 10);
+const BATCH_SIZE = appConfig.stageEtaDeadline.batchSize;
+const BATCH_SLEEP_MS = appConfig.stageEtaDeadline.batchSleepMs;
 
 // Batching for the planning-risk reconciliation pass, which does per-ticket writes
 // (metadata + timeline + notifications) rather than a bulk `updateMany`.

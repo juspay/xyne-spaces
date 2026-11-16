@@ -3,7 +3,8 @@
 //  Lotus
 //
 //  RCTURLRequestHandler that uses mTLS (client certificate) for HTTPS requests
-//  to the protected host (app.spaces.xyne.juspay.net).
+//  to the protected host: the configured API origin (Info.plist `LotusApiOrigin`,
+//  written at prebuild by plugins/with-certificate-module-ios from API_BASE_URL).
 //  Higher priority than RCTHTTPRequestHandler so it handles these requests first.
 //
 
@@ -11,7 +12,10 @@ import Foundation
 import React
 import Security
 
-private let kProtectedHost = "app.spaces.xyne.juspay.net"
+/// Host of the configured API origin; nil (handler disabled) when the build is misconfigured.
+private let kProtectedHost: String? =
+  (Bundle.main.object(forInfoDictionaryKey: "LotusApiOrigin") as? String)
+    .flatMap { URL(string: $0)?.host?.lowercased() }
 private let kIdentityTag = "ClientIdentity"
 
 private let kServerCaPemProd = """
@@ -49,7 +53,9 @@ class MtlsHTTPRequestHandler: NSObject, RCTURLRequestHandler, RCTInvalidating {
   func canHandle(_ request: URLRequest) -> Bool {
     guard let url = request.url else { return false }
     guard url.scheme?.lowercased() == "https" else { return false }
-    guard let host = url.host?.lowercased(), host == kProtectedHost else { return false }
+    guard let protectedHost = kProtectedHost, let host = url.host?.lowercased(), host == protectedHost else {
+      return false
+    }
     return Self.getCertificateIdentity() != nil
   }
 

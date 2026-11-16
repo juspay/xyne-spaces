@@ -2,12 +2,6 @@ import { Request, Response, NextFunction } from 'express'
 import { logger } from '@/utils/logger'
 
 /**
- * Apps installed before this date are exempt from permission enforcement.
- * TODO: remove once all legacy apps have been backfilled and reinstalled.
- */
-const PERMISSION_ENFORCEMENT_DATE = new Date('2026-06-12')
-
-/**
  * Extracts the scoped permissions array from the authenticated request.
  *
  * The permissions are expected to be attached to `req.auth` (populated by the
@@ -24,24 +18,8 @@ function isPermissionsStale(req: Request): boolean {
   return (req as any).auth?.permissionsStale === true
 }
 
-/**
- * Returns true when the app was installed before the permission enforcement date.
- * Legacy apps bypass permission checks until they are reinstalled / backfilled.
- */
-function isLegacyApp(req: Request): boolean {
-  const createdAt = (req as any).auth?.installedAppCreatedAt
-  if (!createdAt) return false
-  return new Date(createdAt) < PERMISSION_ENFORCEMENT_DATE
-}
-
-/**
- * `strict`: no legacy bypass. For routes added after enforcement began: no legacy app can rely on
- * them, so every app needs the scope granted.
- */
-export function requirePermission(permission: string, options: { strict?: boolean } = {}) {
+export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (!options.strict && isLegacyApp(req)) { next(); return }
-
     const permissions = getPermissionsFromRequest(req)
     const stale = isPermissionsStale(req)
 
@@ -68,8 +46,6 @@ export function requirePermission(permission: string, options: { strict?: boolea
 
 export function requireAllPermissions(permissions: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (isLegacyApp(req)) { next(); return }
-
     const granted = getPermissionsFromRequest(req)
     const stale = isPermissionsStale(req)
     const missing = permissions.filter((p) => !granted.includes(p))
@@ -97,8 +73,6 @@ export function requireAllPermissions(permissions: string[]) {
 
 export function requireAnyPermission(permissions: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    if (isLegacyApp(req)) { next(); return }
-
     const granted = getPermissionsFromRequest(req)
     const stale = isPermissionsStale(req)
     const hasAny = permissions.some((p) => granted.includes(p))

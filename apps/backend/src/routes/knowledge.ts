@@ -3,90 +3,11 @@ import { Router, Request, Response } from 'express';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import {
-  approveKnowledgeCanvas,
   convertBlockNoteToMarkdown,
-  getCanvasById,
 } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
-
-/**
- * POST /api/knowledge/approve
- * Approve a knowledge canvas and create KnowledgeDocument entries
- *
- * Request body:
- * - canvasId: string (required) - The canonical canvas id
- * - viewAccessId: string (optional, legacy) - Accepted for backward
- *   compatibility with pre-XYNE-17290 clients. If provided (and canvasId
- *   isn't), the canvas is looked up and the canonical id is used.
- */
-router.post('/approve', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { canvasId, viewAccessId } = req.body;
-    const userId = req.user?.id;
-
-    if (!userId) {
-      res.status(401).json({ error: 'Unauthorized - user not authenticated' });
-      return;
-    }
-
-    if (!canvasId && !viewAccessId) {
-      res.status(400).json({ error: 'canvasId is required' });
-      return;
-    }
-
-    // Backward-compat resolution: if only the legacy viewAccessId was sent,
-    // look up the canvas so downstream logic always sees the canonical id.
-    let resolvedCanvasId: string = canvasId;
-    if (!resolvedCanvasId && viewAccessId) {
-      const canvas = await getCanvasById(viewAccessId);
-      if (!canvas) {
-        res.status(404).json({ error: 'Canvas not found' });
-        return;
-      }
-      resolvedCanvasId = canvas.id;
-    }
-
-    const workspaceId = req.user?.workspaceId;
-    if (!workspaceId) {
-      res.status(400).json({ error: 'Missing workspaceId' });
-      return;
-    }
-
-    const result = await approveKnowledgeCanvas(resolvedCanvasId, userId, workspaceId);
-
-    if (!result.success) {
-      // Non-owner approval attempts are rejected with 403.
-      res.status(result.forbidden ? 403 : 400).json({ error: result.error });
-      return;
-    }
-
-    if (result.alreadyApproved) {
-      logger.info(`[Knowledge] Canvas ${resolvedCanvasId} was already approved`);
-      res.status(200).json({
-        success: true,
-        alreadyApproved: true,
-        message: 'Knowledge document was already approved',
-      });
-      return;
-    }
-
-    logger.info(`[Knowledge] User ${userId} approved canvas ${resolvedCanvasId}`);
-    res.status(200).json({
-      success: true,
-      alreadyApproved: false,
-      message: 'Knowledge document created successfully',
-      documentIds: result.documentIds,
-    });
-  } catch (error) {
-    logger.error('[Knowledge] Error approving canvas:', error);
-    res.status(500).json({
-      error: 'Failed to approve knowledge canvas',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
 
 /**
  * GET /api/knowledge/documents

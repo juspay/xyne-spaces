@@ -1,7 +1,7 @@
 // One LiteLLM /v1/chat/completions POST plus the response shape the twin/memory callers read.
 import { fetchLiteLLMWithRetry, type LiteLLMFetchOptions } from "@xyne/litellm-client";
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
+const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://llm.example.com").replace(/\/$/, "");
 
 export interface ChatCompletionResponse {
   choices?: Array<{

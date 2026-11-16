@@ -16,7 +16,8 @@ import {
   ChevronRight,
   LinkChainHorizontal as LinkIcon,
   MinimizeTwoArrow as Minimize2,
-  SparkleAi02 as Sparkles,
+  // Disabled (LLM)
+  // SparkleAi02 as Sparkles,
   CalendarDefault as Calendar,
   ClockDefault as Clock,
   EyeOn as Eye,
@@ -154,10 +155,13 @@ import Tooltip from '../../ui/Tooltip';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
 import { isReleaseTicket, isDeskChannelType } from '@xyne/shared';
-import { generateReleaseNotes } from '../../../services/ticketBoardService';
+// Disabled (LLM)
+// import { generateReleaseNotes } from '../../../services/ticketBoardService';
 import { searchService } from '../../../services/searchService';
-import { AIClassificationPanel } from './AIClassificationPanel';
-import type { TicketClassificationData } from '../../../types/classification';
+// Disabled (LLM)
+// import { AIClassificationPanel } from './AIClassificationPanel';
+// Disabled (LLM)
+// import type { TicketClassificationData } from '../../../types/classification';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   resolveBoardAdditionalFields,
@@ -494,95 +498,96 @@ interface TicketDetailsProps {
   trackSource?: string;
 }
 
-interface ReleaseNotesButtonProps {
-  metadata: { releaseNotesCanvasUrl?: string; isGeneratingReleaseNotes?: boolean } | null;
-
-  isGeneratingReleaseNotes: boolean;
-  onGenerate: () => Promise<unknown>;
-  onGeneratingChange: (isGenerating: boolean) => void;
-}
-
-const ReleaseNotesButton: React.FC<ReleaseNotesButtonProps> = ({
-  metadata,
-  isGeneratingReleaseNotes,
-  onGenerate,
-  onGeneratingChange,
-}) => {
-  const canvasUrl = metadata?.releaseNotesCanvasUrl;
-  const isGenerating = isGeneratingReleaseNotes || (metadata?.isGeneratingReleaseNotes ?? false);
-  const navigate = useNavigate();
-
-  const handleViewClick = (): void => {
-    void navigate(canvasUrl!);
-  };
-
-  const handleGenerateClick = (): void => {
-    onGeneratingChange(true);
-    void onGenerate()
-      .then(() => {
-        toast.success('Release notes generated successfully', {
-          description: 'The release notes canvas has been created and posted to the conversation.',
-          duration: 2000,
-        });
-      })
-      .catch(error => {
-        toast.error('Failed to generate release notes', {
-          description: error instanceof Error ? error.message : 'Please try again.',
-          duration: 2000,
-        });
-      })
-      .finally(() => {
-        onGeneratingChange(false);
-      });
-  };
-
-  const config = canvasUrl
-    ? {
-        onClick: handleViewClick,
-        trackName: 'ViewReleaseNotes',
-        testId: 'view-release-notes-button',
-        iconClass: 'bg-muted text-muted-foreground',
-        label: 'View Release Notes',
-        description: 'Open the generated release notes canvas',
-        disabled: false,
-      }
-    : {
-        onClick: handleGenerateClick,
-        trackName: 'GenerateReleaseNotes',
-        testId: 'generate-release-notes-button',
-        iconClass: 'bg-muted text-muted-foreground',
-        label: isGenerating ? 'Generating...' : 'Generate Release Notes',
-        description: 'Create release-notes for this release',
-        disabled: isGenerating,
-      };
-
-  return (
-    <button
-      type='button'
-      onClick={config.onClick}
-      disabled={config.disabled}
-      data-track-category='Tickets'
-      data-track-name={config.trackName}
-      data-testid={config.testId}
-      className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground shadow-sm hover:shadow-md hover:border-border transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-    >
-      <span className='inline-flex items-center gap-3'>
-        <span
-          className={`flex h-9 w-9 items-center justify-center rounded-full ${config.iconClass}`}
-        >
-          <FileText size={18} />
-        </span>
-        <span className='flex flex-col text-left'>
-          <span className='text-sm font-semibold text-foreground'>{config.label}</span>
-          <span className='text-xs text-muted-foreground'>{config.description}</span>
-        </span>
-      </span>
-      <ArrowRight
-        className={`h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 ${isGenerating ? 'animate-pulse' : ''}`}
-      />
-    </button>
-  );
-};
+// Disabled (LLM)
+// interface ReleaseNotesButtonProps {
+//   metadata: { releaseNotesCanvasUrl?: string; isGeneratingReleaseNotes?: boolean } | null;
+//
+//   isGeneratingReleaseNotes: boolean;
+//   onGenerate: () => Promise<unknown>;
+//   onGeneratingChange: (isGenerating: boolean) => void;
+// }
+//
+// const ReleaseNotesButton: React.FC<ReleaseNotesButtonProps> = ({
+//   metadata,
+//   isGeneratingReleaseNotes,
+//   onGenerate,
+//   onGeneratingChange,
+// }) => {
+//   const canvasUrl = metadata?.releaseNotesCanvasUrl;
+//   const isGenerating = isGeneratingReleaseNotes || (metadata?.isGeneratingReleaseNotes ?? false);
+//   const navigate = useNavigate();
+//
+//   const handleViewClick = (): void => {
+//     void navigate(canvasUrl!);
+//   };
+//
+//   const handleGenerateClick = (): void => {
+//     onGeneratingChange(true);
+//     void onGenerate()
+//       .then(() => {
+//         toast.success('Release notes generated successfully', {
+//           description: 'The release notes canvas has been created and posted to the conversation.',
+//           duration: 2000,
+//         });
+//       })
+//       .catch(error => {
+//         toast.error('Failed to generate release notes', {
+//           description: error instanceof Error ? error.message : 'Please try again.',
+//           duration: 2000,
+//         });
+//       })
+//       .finally(() => {
+//         onGeneratingChange(false);
+//       });
+//   };
+//
+//   const config = canvasUrl
+//     ? {
+//         onClick: handleViewClick,
+//         trackName: 'ViewReleaseNotes',
+//         testId: 'view-release-notes-button',
+//         iconClass: 'bg-muted text-muted-foreground',
+//         label: 'View Release Notes',
+//         description: 'Open the generated release notes canvas',
+//         disabled: false,
+//       }
+//     : {
+//         onClick: handleGenerateClick,
+//         trackName: 'GenerateReleaseNotes',
+//         testId: 'generate-release-notes-button',
+//         iconClass: 'bg-muted text-muted-foreground',
+//         label: isGenerating ? 'Generating...' : 'Generate Release Notes',
+//         description: 'Create release-notes for this release',
+//         disabled: isGenerating,
+//       };
+//
+//   return (
+//     <button
+//       type='button'
+//       onClick={config.onClick}
+//       disabled={config.disabled}
+//       data-track-category='Tickets'
+//       data-track-name={config.trackName}
+//       data-testid={config.testId}
+//       className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground shadow-sm hover:shadow-md hover:border-border transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+//     >
+//       <span className='inline-flex items-center gap-3'>
+//         <span
+//           className={`flex h-9 w-9 items-center justify-center rounded-full ${config.iconClass}`}
+//         >
+//           <FileText size={18} />
+//         </span>
+//         <span className='flex flex-col text-left'>
+//           <span className='text-sm font-semibold text-foreground'>{config.label}</span>
+//           <span className='text-xs text-muted-foreground'>{config.description}</span>
+//         </span>
+//       </span>
+//       <ArrowRight
+//         className={`h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 ${isGenerating ? 'animate-pulse' : ''}`}
+//       />
+//     </button>
+//   );
+// };
 export const TicketDetails: React.FC<TicketDetailsProps> = ({
   ticketId,
   onNavigateToTicket,
@@ -656,12 +661,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   } | null>(null);
   const [showBoardChangeConfirmDialog, setShowBoardChangeConfirmDialog] = useState(false);
   const [pendingBoardChange, setPendingBoardChange] = useState<string | null>(null);
-  const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState(false);
+  // Disabled (LLM)
+  // const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState(false);
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
   const [pendingTitleValue, setPendingTitleValue] = useState<string | null>(null);
   const [showTitleChangeConfirmDialog, setShowTitleChangeConfirmDialog] = useState(false);
-  const prevStatusV2Ref = useRef<TicketStatusV2 | null>(null);
-  const hasAutoTriggeredReleaseNotesRef = useRef(false);
+  // Disabled (LLM)
+  // const prevStatusV2Ref = useRef<TicketStatusV2 | null>(null);
+  // const hasAutoTriggeredReleaseNotesRef = useRef(false);
   const [boardDropdownOpen, setBoardDropdownOpen] = useState(false);
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
@@ -1900,16 +1907,17 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       trackMetadata: JSON.stringify(ticketTrackingMetadata(ticket)),
       onSelect: () => handleCopyTicketViewLink(),
     },
-    {
-      label: 'Summarize thread',
-      icon: <Sparkles size={18} />,
-      trackName: 'SUMMARIZE_THREAD',
-      trackMetadata: JSON.stringify({ ticketId: ticket?.id, channelId: ticket?.channelId }),
-      onSelect: () => {
-        if (!ticket) return;
-        void navigate(`${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`);
-      },
-    },
+    // Disabled (LLM)
+    // {
+    //   label: 'Summarize thread',
+    //   icon: <Sparkles size={18} />,
+    //   trackName: 'SUMMARIZE_THREAD',
+    //   trackMetadata: JSON.stringify({ ticketId: ticket?.id, channelId: ticket?.channelId }),
+    //   onSelect: () => {
+    //     if (!ticket) return;
+    //     void navigate(`${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`);
+    //   },
+    // },
   ];
 
   const archiveMenuItem: TicketMenuItem = {
@@ -2268,54 +2276,55 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, [editingETA]);
 
   // Auto-generate release notes when ticket status transitions to COMPLETED
-  useEffect(() => {
-    if (!ticket) return;
-
-    const currentStatus = ticket.statusV2;
-    const prevStatus = prevStatusV2Ref.current;
-    const metadata = ticket.metadata as {
-      releaseNotesCanvasUrl?: string;
-      isGeneratingReleaseNotes?: boolean;
-    } | null;
-
-    const isReleaseType = isReleaseTicket(ticket.ticketType as BaseTicketType);
-    const justTransitionedToCompleted =
-      prevStatus !== TicketStatusV2.COMPLETED && currentStatus === TicketStatusV2.COMPLETED;
-    const hasNoReleaseNotes = !metadata?.releaseNotesCanvasUrl;
-    const isNotGenerating = !metadata?.isGeneratingReleaseNotes && !isGeneratingReleaseNotes;
-    const hasNotAutoTriggered = !hasAutoTriggeredReleaseNotesRef.current;
-
-    if (
-      isReleaseType &&
-      justTransitionedToCompleted &&
-      hasNoReleaseNotes &&
-      isNotGenerating &&
-      hasNotAutoTriggered
-    ) {
-      hasAutoTriggeredReleaseNotesRef.current = true;
-      setIsGeneratingReleaseNotes(true);
-
-      generateReleaseNotes(ticket.id)
-        .then(() => {
-          toast.success('Release notes generated automatically', {
-            description: 'Release notes have been created for this completed release.',
-            duration: 3000,
-          });
-        })
-        .catch(error => {
-          hasAutoTriggeredReleaseNotesRef.current = false;
-          toast.error('Failed to generate release notes', {
-            description: error instanceof Error ? error.message : 'Please try again manually.',
-            duration: 4000,
-          });
-        })
-        .finally(() => {
-          setIsGeneratingReleaseNotes(false);
-        });
-    }
-
-    prevStatusV2Ref.current = currentStatus;
-  }, [ticket, isGeneratingReleaseNotes]);
+  // Disabled (LLM)
+  // useEffect(() => {
+  //   if (!ticket) return;
+  //
+  //   const currentStatus = ticket.statusV2;
+  //   const prevStatus = prevStatusV2Ref.current;
+  //   const metadata = ticket.metadata as {
+  //     releaseNotesCanvasUrl?: string;
+  //     isGeneratingReleaseNotes?: boolean;
+  //   } | null;
+  //
+  //   const isReleaseType = isReleaseTicket(ticket.ticketType as BaseTicketType);
+  //   const justTransitionedToCompleted =
+  //     prevStatus !== TicketStatusV2.COMPLETED && currentStatus === TicketStatusV2.COMPLETED;
+  //   const hasNoReleaseNotes = !metadata?.releaseNotesCanvasUrl;
+  //   const isNotGenerating = !metadata?.isGeneratingReleaseNotes && !isGeneratingReleaseNotes;
+  //   const hasNotAutoTriggered = !hasAutoTriggeredReleaseNotesRef.current;
+  //
+  //   if (
+  //     isReleaseType &&
+  //     justTransitionedToCompleted &&
+  //     hasNoReleaseNotes &&
+  //     isNotGenerating &&
+  //     hasNotAutoTriggered
+  //   ) {
+  //     hasAutoTriggeredReleaseNotesRef.current = true;
+  //     setIsGeneratingReleaseNotes(true);
+  //
+  //     generateReleaseNotes(ticket.id)
+  //       .then(() => {
+  //         toast.success('Release notes generated automatically', {
+  //           description: 'Release notes have been created for this completed release.',
+  //           duration: 3000,
+  //         });
+  //       })
+  //       .catch(error => {
+  //         hasAutoTriggeredReleaseNotesRef.current = false;
+  //         toast.error('Failed to generate release notes', {
+  //           description: error instanceof Error ? error.message : 'Please try again manually.',
+  //           duration: 4000,
+  //         });
+  //       })
+  //       .finally(() => {
+  //         setIsGeneratingReleaseNotes(false);
+  //       });
+  //   }
+  //
+  //   prevStatusV2Ref.current = currentStatus;
+  // }, [ticket, isGeneratingReleaseNotes]);
 
   // Click outside handlers
   useEffect(() => {
@@ -5014,6 +5023,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         </DetailSection>
 
+        {/* Disabled (LLM) */}
+        {/*
         {ticket?.classificationData && channelId && (
           <DetailSection title='AI Classification' defaultOpen={false}>
             <div className='pt-2 pl-[21px]'>
@@ -5029,6 +5040,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           </DetailSection>
         )}
+        */}
 
         <DetailSection
           title='Workflow'
@@ -5548,7 +5560,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         )}
 
         {/* Generate/View Release Notes Button - shown for completed Release/Hotfix tickets */}
-        {ticket &&
+        {/* Disabled (LLM) */}
+        {/* {ticket &&
           isReleaseTicket(ticket.ticketType as BaseTicketType) &&
           ticket.statusV2 === TicketStatusV2.COMPLETED && (
             <div className='mt-4'>
@@ -5564,7 +5577,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 onGeneratingChange={setIsGeneratingReleaseNotes}
               />
             </div>
-          )}
+          )} */}
 
         {/* Relationships — sub-tickets and linked tickets, the panel's own tab. */}
         {!hideRelationships && (

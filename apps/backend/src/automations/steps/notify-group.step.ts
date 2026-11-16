@@ -47,7 +47,7 @@ export class NotifyGroupStep extends BaseActionStep<
     context: AutomationContext,
   ): Promise<NotifyGroupOutput> {
     const groupId = config.groupId as string;
-    const title = config.title as string;
+    const title = extractPlainTextFromHtml(config.title as string);
     const message = extractPlainTextFromHtml(config.message as string);
     const actionUrl = await buildNotifyActionUrl(
       context.automation.workspaceId,
@@ -56,7 +56,7 @@ export class NotifyGroupStep extends BaseActionStep<
     );
 
     const group = await repositories.userGroups.findWithMappings(groupId);
-    if (!group) {
+    if (!group || group.workspaceId !== context.automation.workspaceId) {
       throw new Error(`[NOTIFY_GROUP] User group not found: ${groupId}`);
     }
     const memberIds = (group.userGroupMappings ?? [])

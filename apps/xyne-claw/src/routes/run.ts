@@ -124,7 +124,6 @@ import {
 import {
   buildSubagentTools,
   withoutBuiltinSubagents,
-  loadDeepwikiTools,
   loadContext7Tools,
   type SkillTrigger,
 } from "../subagent-tools.js";
@@ -2138,13 +2137,10 @@ export async function processTask(
       getPendingResponses,
     } = customToolsResult;
 
-    // Load deepwiki/context7/playwright MCP tool groups (stdio transport, cached).
+    // Load context7/playwright MCP tool groups (stdio transport, cached).
     // Playwright doesn't get its own subagent — its tools are spliced into the
     // sandbox subagent's palette via bonusToolsBySubagent below.
-    const [deepwikiGroup, context7Group] = await Promise.all([
-      loadDeepwikiTools(),
-      loadContext7Tools(),
-    ]);
+    const context7Group = await loadContext7Tools();
 
     // Extract skill triggers from agent config (needed by both subagent tools and runTask)
     const rawTriggers =
@@ -2281,7 +2277,6 @@ export async function processTask(
     // Combine all MCP groups and build subagent wrappers (also wraps matching custom tools like sandbox)
     const allGroups = [
       ...mcpGroupsWithoutKb,
-      ...(deepwikiGroup ? [deepwikiGroup] : []),
       ...(context7Group ? [context7Group] : []),
     ];
     // Parent agent's provider — used as default for subagents that don't have an override
@@ -2581,7 +2576,6 @@ export async function processTask(
         const calleeKbTools = calleeMcp.groups.find((g) => g.serverType === "knowledge-base")?.tools ?? [];
         const calleeGroups = [
           ...calleeGroupsWithoutKb,
-          ...(deepwikiGroup ? [deepwikiGroup] : []),
           ...(context7Group ? [context7Group] : []),
         ];
         const calleeProvider =

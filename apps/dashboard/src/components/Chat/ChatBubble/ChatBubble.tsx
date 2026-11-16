@@ -36,7 +36,8 @@ import {
   type ConversationAnchorType,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
-import { MessageTags } from '../../tags/MessageTags';
+// Disabled (LLM)
+// import { MessageTags } from '../../tags/MessageTags';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { convertHtmlToBlocks } from './ChatBubble.utils';
 import { sanitizeHtmlString } from '../../../utils/sanitizer';
@@ -46,8 +47,9 @@ import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUti
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
-import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../../tags/ThreadTags';
-import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
+// Disabled (LLM)
+// import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../../tags/ThreadTags';
+// import { useShowThreadTags } from '../../../hooks/useShowThreadTags';
 import { CallLayout } from '../CallLayout';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
@@ -131,7 +133,6 @@ interface ChatBubbleProps {
   isTicketThread?: boolean;
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
-  workflowNumber?: number | undefined;
   disableAskAI?: boolean;
   searchItemView?: boolean;
   onUserClick?: (userId: string) => void;
@@ -163,7 +164,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isTicketThread = false,
   onEmojiPickerOpenChange,
   allThreadAttachments,
-  workflowNumber,
   disableAskAI = false,
   searchItemView = false,
   onUserClick,
@@ -172,7 +172,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   isNextActivity = false,
   linkedConversationId,
   highlightMessageId,
-  inspectedTag = null,
+  // Disabled (LLM)
+  // inspectedTag = null,
   afterTextContent,
   showIntentSuggestion = false,
 }) => {
@@ -1008,19 +1009,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // not confirmed it (in flight, or failed and awaiting retry/discard).
   const hasPendingCopy = usePendingByMessageId(message?.messageId ?? '') !== null;
 
-  const appliedThreadTypes = useMemo(
-    () => parseThreadTypes(conversation?.threadType),
-    [conversation?.threadType],
-  );
-  const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
-  const { showThreadTags } = useShowThreadTags();
-  // The thread types this message was cited as evidence for. Composed onto afterTextContent
-  // rather than the header slot: the header only renders for the first message in a group,
-  // and the second and third messages of a burst are exactly the ones you need to see marked.
-  const messageTags =
-    showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
-      <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
-    ) : null;
+  // Disabled (LLM)
+  // const appliedThreadTypes = useMemo(
+  //   () => parseThreadTypes(conversation?.threadType),
+  //   [conversation?.threadType],
+  // );
+  // const setThreadTypes = useSetThreadTypes(conversation?.conversationId);
+  // const { showThreadTags } = useShowThreadTags();
+  // // The thread types this message was cited as evidence for. Composed onto afterTextContent
+  // // rather than the header slot: the header only renders for the first message in a group,
+  // // and the second and third messages of a burst are exactly the ones you need to see marked.
+  // const messageTags =
+  //   showThreadTags && context === 'thread' && !isSystemMessage && !isMessageDeleted ? (
+  //     <MessageTags messageActs={message.messageActs} inspectedTag={inspectedTag} />
+  //   ) : null;
   const intentCallSuggestion = useIntentCallSuggestion(message.messageId);
   const intentCallCard =
     showIntentSuggestion &&
@@ -1035,10 +1037,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       />
     ) : null;
   const textTrailer =
-    afterTextContent !== undefined || messageTags || intentCallCard ? (
+    // Disabled (LLM)
+    // afterTextContent !== undefined || messageTags || intentCallCard ? (
+    afterTextContent !== undefined || intentCallCard ? (
       <>
         {afterTextContent}
-        {messageTags}
+        {/* Disabled (LLM) */}
+        {/* {messageTags} */}
         {intentCallCard}
       </>
     ) : undefined;
@@ -1080,24 +1085,25 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }),
       reactionsMd: message.reactions_md,
       onCopyLink,
-      // Channel rows only: inside a thread the panel header already carries this, and the
-      // tag is the thread's — one entry point per thread, not one per reply.
-      ...(showThreadTags &&
-        context === 'channel' &&
-        !isSystemMessage &&
-        !isMessageDeleted &&
-        conversation?.conversationId && {
-          threadTags: {
-            applied: appliedThreadTypes,
-            onToggle: (name: string) => {
-              void setThreadTypes(
-                appliedThreadTypes.includes(name)
-                  ? appliedThreadTypes.filter(value => value !== name)
-                  : [...appliedThreadTypes, name],
-              );
-            },
-          },
-        }),
+      // Disabled (LLM)
+      // // Channel rows only: inside a thread the panel header already carries this, and the
+      // // tag is the thread's — one entry point per thread, not one per reply.
+      // ...(showThreadTags &&
+      //   context === 'channel' &&
+      //   !isSystemMessage &&
+      //   !isMessageDeleted &&
+      //   conversation?.conversationId && {
+      //     threadTags: {
+      //       applied: appliedThreadTypes,
+      //       onToggle: (name: string) => {
+      //         void setThreadTypes(
+      //           appliedThreadTypes.includes(name)
+      //             ? appliedThreadTypes.filter(value => value !== name)
+      //             : [...appliedThreadTypes, name],
+      //         );
+      //       },
+      //     },
+      //   }),
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
       isChannelArchived: channel?.isArchived ?? false,
@@ -1391,19 +1397,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             searchItemView={searchItemView}
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
-            workflowNumber={workflowNumber}
             {...(textTrailer !== undefined && { afterTextContent: textTrailer })}
-            {...(context === 'channel' &&
-              !isSystemMessage &&
-              !isMessageDeleted && {
-                headerContent: (
-                  <ThreadTags
-                    conversationId={conversation?.conversationId}
-                    threadType={conversation?.threadType}
-                    canEdit
-                  />
-                ),
-              })}
+            // Disabled (LLM)
+            // {...(context === 'channel' &&
+            //   !isSystemMessage &&
+            //   !isMessageDeleted && {
+            //     headerContent: (
+            //       <ThreadTags
+            //         conversationId={conversation?.conversationId}
+            //         threadType={conversation?.threadType}
+            //         canEdit
+            //       />
+            //     ),
+            //   })}
             {...(conversation && { conversation: conversation })}
             {...(shouldEnableMobileThreadOpen && {
               onClick: handleMobileBubbleThreadOpen,

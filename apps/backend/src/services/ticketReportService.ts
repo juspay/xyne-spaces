@@ -71,12 +71,12 @@ export const ticketExportFiltersSchema = z.object({
   includeLinkedTicketDetails: z.boolean().default(false),
   includeActivity: z.boolean().default(false),
   timezone: z.string().default('UTC'),
-  columnsByBoard: z.record(z.array(z.string().min(1)).min(1)).optional(),
+  columnsByBoard: z.record(z.string(), z.array(z.string().min(1)).min(1)).optional(),
 });
 
 export const createTicketExportRequestSchema = z.object({
   workspaceId: z.string().min(1),
-  filters: ticketExportFiltersSchema.default({}),
+  filters: ticketExportFiltersSchema.prefault({}),
 });
 
 export const downloadTicketExportRequestSchema = z.union([

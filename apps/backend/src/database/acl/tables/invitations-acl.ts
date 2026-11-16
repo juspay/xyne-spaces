@@ -51,6 +51,6 @@ export class InvitationsACL extends BaseQueryACL<
     if (isGuestContext(this.ctx)) return false
     if (data.workspaceId !== this.ctx.workspaceId) return false
     if (this.ctx.role === 'ADMIN' || this.ctx.role === 'OWNER') return true
-    return data.role === 'COMMUNITY_MEMBER' || data.role === 'MEMBER'
+    return this.ctx.role === 'MEMBER' && data.role === 'MEMBER'
   }
 }

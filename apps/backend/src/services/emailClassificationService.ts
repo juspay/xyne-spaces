@@ -8,9 +8,9 @@ import { logger } from '../utils/logger.js';
 import { resolveFormFieldDefinitionsForForm } from '../utils/fieldDefinition.js';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
 import { DatabaseClient } from '../database/client.js';
-import { LLMClient, createUserMessage } from 'agentic-framework';
+// import { LLMClient, createUserMessage } from 'agentic-framework'; // framework removed
 import { AgentsConfig } from '../agents/config.js';
-import { logLLMCallStart, logLLMError } from '../agents/agentLogger.js';
+// import { logLLMCallStart, logLLMError } from '../agents/agentLogger.js';
 import type {
   ClassificationRawOutput,
   ClassificationResult,
@@ -19,14 +19,14 @@ import type {
   TicketClassificationDataWithPriority,
   PriorityClassificationResult,
 } from '../types/classification.js';
-import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+// import { orgLLMCredentialService } from '@/services/orgLLMCredentialService'; // framework removed
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { decide } from '@/services/decision/decide';
 import type { DecisionEngine, DecisionTask, TaskFeature, TaskInput } from '@/services/decision/types';
-import { ActivityType, OrgLLMServiceAccountPurpose, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import { ActivityType, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 
-const AGENT_NAME = 'EmailClassification';
-const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
+// const AGENT_NAME = 'EmailClassification'; // framework removed
+// const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
 const AI_FORM_FIELD_SKIP_KEYS = new Set(['summary', 'parse_reason', 'priority', 'confidence', 'reasoning']);
 
 const OTHER_CATEGORY = 'other';
@@ -646,82 +646,84 @@ export class EmailClassificationService {
   }
 
   private async runClassificationAgent(
-    systemPrompt: string,
-    userMessage: string,
-    modelName: string,
-    ownerUserId?: string | null,
+    _systemPrompt: string,
+    _userMessage: string,
+    _modelName: string,
+    _ownerUserId?: string | null,
   ): Promise<LlmOutput> {
-    const credential = await orgLLMCredentialService.getCredentialByUserId(
-      ownerUserId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    if (!credential) {
-      throw new Error('LiteLLM credentials are not configured for this organization');
-    }
+    // LLM framework removed; original kept below.
+    throw new Error('LLM client is not configured');
+    //     const credential = await orgLLMCredentialService.getCredentialByUserId(
+    //       ownerUserId,
+    //       OrgLLMServiceAccountPurpose.DEFAULT,
+    //     );
+    //     if (!credential) {
+    //       throw new Error('LiteLLM credentials are not configured for this organization');
+    //     }
+    //
+    //     // Create fresh LLM client (following codebase pattern - no caching)
+    //     const llmClient = new LLMClient({
+    //       provider: {
+    //         type: 'litellm',
+    //         config: {
+    //           apiKey: credential.apiKey,
+    //           baseUrl: credential.baseUrl,
+    //           timeout: 120000,
+    //           retries: 1,
+    //         },
+    //       },
+    //       defaultModel: modelName,
+    //       temperature: 0.1,
+    //       retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
+    //     });
+    //
+    //     logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
+    //     try {
+    //       const response = await llmClient.generate({
+    //         messages: [createUserMessage(userMessage)],
+    //         systemPrompt,
+    //         parameters: {
+    //           temperature: 0.1,
+    //           maxTokens: 8192,
+    //         },
+    //         extraBody: {
+    //           chat_template_kwargs: {
+    //             enable_thinking: false,
+    //           },
+    //         },
+    //       });
+    //
+    //       logger.info(`[${AGENT_NAME}] Success`, { chars: response.content.length });
+    //       return { output: this.parseClassificationOutput(response.content), model: response.model, usage: response.usage };
+    //     } catch (error) {
+    //       logLLMError(AGENT_NAME, error);
+    //       throw error;
+    //     }
+      }
 
-    // Create fresh LLM client (following codebase pattern - no caching)
-    const llmClient = new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: 120000,
-          retries: 1,
-        },
-      },
-      defaultModel: modelName,
-      temperature: 0.1,
-      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
-    });
-
-    logLLMCallStart(AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
-    try {
-      const response = await llmClient.generate({
-        messages: [createUserMessage(userMessage)],
-        systemPrompt,
-        parameters: {
-          temperature: 0.1,
-          maxTokens: 8192,
-        },
-        extraBody: {
-          chat_template_kwargs: {
-            enable_thinking: false,
-          },
-        },
-      });
-
-      logger.info(`[${AGENT_NAME}] Success`, { chars: response.content.length });
-      return { output: this.parseClassificationOutput(response.content), model: response.model, usage: response.usage };
-    } catch (error) {
-      logLLMError(AGENT_NAME, error);
-      throw error;
-    }
-  }
-
-  private parseClassificationOutput(content: string): ClassificationRawOutput {
-    // Strip <think> blocks and markdown code fences if present
-    const cleaned = content
-      .replace(/<think>[\s\S]*?<\/think>/gi, '')
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
-    // Extract JSON object
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      logger.warn('[Classification] Could not find JSON in AI output', { chars: cleaned.length });
-      return {};
-    }
-
-    try {
-      return JSON.parse(jsonMatch[0]) as ClassificationRawOutput;
-    } catch (e) {
-      logger.warn('[Classification] Failed to parse classification JSON', { error: e });
-      return {};
-    }
-  }
-
+    // private parseClassificationOutput(content: string): ClassificationRawOutput {
+  //     // Strip <think> blocks and markdown code fences if present
+  //     const cleaned = content
+  //       .replace(/<think>[\s\S]*?<\/think>/gi, '')
+  //       .replace(/^```(?:json)?\s*/i, '')
+  //       .replace(/\s*```$/i, '')
+  //       .trim();
+  //
+  //     // Extract JSON object
+  //     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  //     if (!jsonMatch) {
+  //       logger.warn('[Classification] Could not find JSON in AI output', { chars: cleaned.length });
+  //       return {};
+  //     }
+  //
+  //     try {
+  //       return JSON.parse(jsonMatch[0]) as ClassificationRawOutput;
+  //     } catch (e) {
+  //       logger.warn('[Classification] Failed to parse classification JSON', { error: e });
+  //       return {};
+  //     }
+  //   }
+  
   private extractField(rawOutput: ClassificationRawOutput, fieldName: string): string | null {
     const value = rawOutput[fieldName.trim()];
     if (value === undefined || value === null || value === 'null') return null;
@@ -731,68 +733,70 @@ export class EmailClassificationService {
   // ─── Priority Classification Helpers ──────────────────────────────────────
 
   private async runPriorityClassificationAgent(
-    systemPrompt: string,
-    modelName: string,
-    ownerUserId?: string | null,
+    _systemPrompt: string,
+    _modelName: string,
+    _ownerUserId?: string | null,
   ): Promise<LlmOutput> {
-    const credential = await orgLLMCredentialService.getCredentialByUserId(
-      ownerUserId,
-      OrgLLMServiceAccountPurpose.DEFAULT,
-    );
-    if (!credential) {
-      logger.error('[PriorityClassification] Org LiteLLM credentials are not configured');
-      throw new Error('LiteLLM credentials not configured');
-    }
-
-    logger.info('[PriorityClassification] Starting LLM call', {
-      modelName,
-    });
-
-    // Create fresh LLM client (following codebase pattern - no caching)
-    const llmClient = new LLMClient({
-      provider: {
-        type: 'litellm',
-        config: {
-          apiKey: credential.apiKey,
-          baseUrl: credential.baseUrl,
-          timeout: 120000,
-          retries: 1,
-        },
-      },
-      defaultModel: modelName,
-      temperature: 0.1,
-      retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
-    });
-
-    logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
-    try {
-      const response = await llmClient.generate({
-        messages: [createUserMessage(PRIORITY_USER_MESSAGE)],
-        systemPrompt,
-        parameters: {
-          temperature: 0.1,
-          maxTokens: 4096,
-        },
-        extraBody: {
-          chat_template_kwargs: {
-            enable_thinking: false,
-          },
-        },
-      });
-
-      logger.info('[PriorityClassification] LLM call successful', {
-        hasContent: !!response.content,
-      });
-      return { output: this.parseClassificationOutput(response.content), model: response.model, usage: response.usage };
-    } catch (error) {
-      logLLMError(PRIORITY_AGENT_NAME, error);
-      logger.error('[PriorityClassification] LLM call failed', {
-        error: error instanceof Error ? error.message : error,
-        modelName,
-      });
-      throw error;
-    }
-  }
+    // LLM framework removed; original kept below.
+    throw new Error('LLM client is not configured');
+    //     const credential = await orgLLMCredentialService.getCredentialByUserId(
+    //       ownerUserId,
+    //       OrgLLMServiceAccountPurpose.DEFAULT,
+    //     );
+    //     if (!credential) {
+    //       logger.error('[PriorityClassification] Org LiteLLM credentials are not configured');
+    //       throw new Error('LiteLLM credentials not configured');
+    //     }
+    //
+    //     logger.info('[PriorityClassification] Starting LLM call', {
+    //       modelName,
+    //     });
+    //
+    //     // Create fresh LLM client (following codebase pattern - no caching)
+    //     const llmClient = new LLMClient({
+    //       provider: {
+    //         type: 'litellm',
+    //         config: {
+    //           apiKey: credential.apiKey,
+    //           baseUrl: credential.baseUrl,
+    //           timeout: 120000,
+    //           retries: 1,
+    //         },
+    //       },
+    //       defaultModel: modelName,
+    //       temperature: 0.1,
+    //       retry: { maxAttempts: 5, baseDelay: 2000, maxDelay: 16000, exponentialBackoff: true },
+    //     });
+    //
+    //     logLLMCallStart(PRIORITY_AGENT_NAME, modelName, 'ORG_LITELLM_SERVICE_ACCOUNT');
+    //     try {
+    //       const response = await llmClient.generate({
+    //         messages: [createUserMessage(PRIORITY_USER_MESSAGE)],
+    //         systemPrompt,
+    //         parameters: {
+    //           temperature: 0.1,
+    //           maxTokens: 4096,
+    //         },
+    //         extraBody: {
+    //           chat_template_kwargs: {
+    //             enable_thinking: false,
+    //           },
+    //         },
+    //       });
+    //
+    //       logger.info('[PriorityClassification] LLM call successful', {
+    //         hasContent: !!response.content,
+    //       });
+    //       return { output: this.parseClassificationOutput(response.content), model: response.model, usage: response.usage };
+    //     } catch (error) {
+    //       logLLMError(PRIORITY_AGENT_NAME, error);
+    //       logger.error('[PriorityClassification] LLM call failed', {
+    //         error: error instanceof Error ? error.message : error,
+    //         modelName,
+    //       });
+    //       throw error;
+    //     }
+      }
 
   private parsePriorityOutput(rawOutput: ClassificationRawOutput): PriorityClassificationResult | null {
     logger.info('[PriorityClassification] parsePriorityOutput STARTED', {

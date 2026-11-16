@@ -9,8 +9,7 @@ import {
 } from 'react';
 import axios from 'axios';
 import { useLocation } from 'react-router-dom';
-import { CheckTickSingle, CopyDefault } from '@xyne/icons';
-import { WorkspaceRole, WorkspaceType } from '@xyne/shared';
+import { WorkspaceRole } from '@xyne/shared';
 import { toast } from 'sonner';
 import Dialog from '../ui/Dialog';
 import { Checkbox } from '../ui/Checkbox/Checkbox';
@@ -25,7 +24,6 @@ import {
   type UserContact,
   type UserContactsProvider,
 } from '../../services/clients/userContactsApi';
-import { cn } from '../../utils/classNames';
 
 /** Dialog view: 'contacts' is used when returning from the contacts OAuth. */
 export type WorkspaceInviteDialogView = 'default' | 'contacts';
@@ -37,17 +35,12 @@ interface WorkspaceInviteDialogProps {
   onOpenChange: (open: boolean) => void;
   workspaceId: string | undefined;
   initialView?: WorkspaceInviteDialogView;
-  /** Drives the invite role: COMMUNITY workspaces invite COMMUNITY_MEMBERs, others MEMBERs. */
-  workspaceType?: WorkspaceType | undefined;
 }
 
 const EMAIL_SPLIT_PATTERN = /[\s,;]+/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** The picker renders (and select-all applies to) at most this many rows. */
 const VISIBLE_CONTACTS_LIMIT = 200;
-
-const getWorkspaceInviteUrl = (workspaceId: string): string =>
-  `${window.location.origin}/auth?workspaceId=${encodeURIComponent(workspaceId)}`;
 
 const parseEmails = (value: string): string[] =>
   Array.from(
@@ -98,12 +91,10 @@ export const WorkspaceInviteDialog = ({
   onOpenChange,
   workspaceId,
   initialView = 'default',
-  workspaceType,
 }: WorkspaceInviteDialogProps): ReactElement => {
   const location = useLocation();
   const [emailsInput, setEmailsInput] = useState('');
   const [isInviting, setIsInviting] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const [contactsStep, setContactsStep] = useState<ContactsStep>('default');
   const [contactsProvider, setContactsProvider] = useState<UserContactsProvider | null>(null);
@@ -116,15 +107,7 @@ export const WorkspaceInviteDialog = ({
   const [contactsError, setContactsError] = useState<string | null>(null);
 
   const providerLabel = contactsProvider === 'MICROSOFT' ? 'Microsoft' : 'Google';
-  const inviteRole =
-    workspaceType === WorkspaceType.COMMUNITY
-      ? WorkspaceRole.COMMUNITY_MEMBER
-      : WorkspaceRole.MEMBER;
-
-  const inviteUrl = useMemo(
-    () => (workspaceId ? getWorkspaceInviteUrl(workspaceId) : ''),
-    [workspaceId],
-  );
+  const inviteRole = WorkspaceRole.MEMBER;
 
   const loadContacts = useCallback(async (): Promise<void> => {
     setIsLoadingContacts(true);
@@ -216,22 +199,6 @@ export const WorkspaceInviteDialog = ({
     },
     [workspaceId, inviteRole],
   );
-
-  const handleCopyLink = async (): Promise<void> => {
-    if (!inviteUrl) {
-      toast.error('No workspace selected');
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-      setCopied(true);
-      toast.success('Workspace link copied to clipboard');
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      toast.error('Failed to copy workspace link');
-    }
-  };
 
   const handleInvite = async (event?: FormEvent<HTMLFormElement>): Promise<void> => {
     event?.preventDefault();
@@ -443,7 +410,6 @@ export const WorkspaceInviteDialog = ({
 
   const handleOpenChange = (nextOpen: boolean): void => {
     if (!nextOpen) {
-      setCopied(false);
       setIsInviting(false);
     }
     onOpenChange(nextOpen);
@@ -689,33 +655,6 @@ export const WorkspaceInviteDialog = ({
                 </div>
               </>
             )}
-
-            <div className='my-5 h-px bg-border' />
-
-            <div className='space-y-3'>
-              <p className='text-[15px] font-medium leading-none text-muted-foreground'>
-                Invite via Link
-              </p>
-              <div className='flex gap-1.5'>
-                <div className='flex h-10 min-w-0 flex-1 items-center rounded-[7px] bg-muted px-3.5 text-[15px] font-semibold text-foreground'>
-                  <span className='truncate'>{inviteUrl}</span>
-                </div>
-                <button
-                  type='button'
-                  aria-label={copied ? 'Workspace link copied' : 'Copy workspace link'}
-                  onClick={() => void handleCopyLink()}
-                  disabled={!inviteUrl}
-                  className={cn(
-                    'flex size-10 shrink-0 items-center justify-center rounded-[7px] bg-muted text-foreground transition-colors hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-60',
-                    copied && 'text-green-600',
-                  )}
-                  data-track-category='WorkspaceInviteDialog'
-                  data-track-name='CopyInviteLink'
-                >
-                  {copied ? <CheckTickSingle size={21} /> : <CopyDefault size={21} />}
-                </button>
-              </div>
-            </div>
           </>
         )}
       </div>

@@ -1,12 +1,12 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import { stepRegistry } from '../steps/step-registry';
 import { ConditionOperator } from '../types/operators';
 import { automationService } from '../services/automation.service';
 import {
   issueWebhookSecret,
+  rotateWebhookSecret,
   webhookSecretExists,
 } from '../services/webhook-secret.service';
 import { WEBHOOK_EVENT } from '../triggers/webhook.trigger';
@@ -22,6 +22,7 @@ import {
   workflowExecutionToRunSummary,
   AUTOMATION_WORKFLOW_TYPE,
   buildAutomationMetadata,
+  parseAutomationMetadata,
   triggerTypeToEventType,
   workflowToAutomation,
 } from '../types/workflow-adapter';
@@ -30,9 +31,10 @@ import {
   getExecutionState,
   stitchExecutionContextMany,
 } from '@/database/repositories/workflowExecutionStateUtils';
-import { approvalService, ApprovalError } from '../services/approval.service';
+import { approvalService, ApprovalError, assertIsAutomationsAdmin } from '../services/approval.service';
 import { notifyAdminsOfArchiveRequest } from '../services/approval-notifications';
-import { encryptWebhookStepHeaders } from '../engine/webhook-step-encryption';
+import { encryptWebhookStepHeaders, WebhookSecretHeaderError } from '../engine/webhook-step-encryption';
+import { createId } from '@paralleldrive/cuid2';
 import { uploadAutomationTemplates } from '@/middleware/upload';
 import { AppError } from '@/middleware/errorHandler';
 import {
@@ -71,6 +73,20 @@ const OPERATOR_METADATA: Record<
   [ConditionOperator.HAS_TAG]: { label: 'has tag', valueType: 'tag' },
 };
 
+// `io: 'input'` keeps defaulted fields optional; dates become `date-time` strings, which the
+// dashboard's date fields key off.
+const JSON_SCHEMA_OPTIONS = {
+  target: 'draft-7',
+  io: 'input',
+  unrepresentable: 'any',
+  override: (ctx) => {
+    if (ctx.zodSchema._zod.def.type === 'date') {
+      ctx.jsonSchema.type = 'string';
+      ctx.jsonSchema.format = 'date-time';
+    }
+  },
+} satisfies z.core.ToJSONSchemaParams;
+
 const AutomationPayloadSchema = z.object({
   name: z.string().trim().min(1).optional(),
   description: z.string().nullable().optional(),
@@ -96,6 +112,7 @@ function sendUnauthorized(res: Response): void {
 function prepareConfigForSave(
   config: AutomationConfig,
   res: Response,
+  seriesId: string,
 ): { config: AutomationConfig; context: string; eventType: ReturnType<typeof triggerTypeToEventType> } | null {
   const validation = automationService.validateConfig(config);
   if (!validation.valid) {
@@ -104,7 +121,15 @@ function prepareConfigForSave(
   }
 
   const configToSave = JSON.parse(JSON.stringify(config)) as AutomationConfig;
-  encryptWebhookStepHeaders(configToSave.steps);
+  try {
+    encryptWebhookStepHeaders(configToSave.steps, seriesId);
+  } catch (err) {
+    if (err instanceof WebhookSecretHeaderError) {
+      res.status(400).json({ success: false, error: err.message });
+      return null;
+    }
+    throw err;
+  }
   return {
     config: configToSave,
     context: JSON.stringify(configToSave),
@@ -209,10 +234,7 @@ router.get('/schema/triggers/:type', (req: Request, res: Response) => {
     return;
   }
   const impl = triggerRegistry.get(type);
-  const rawConfig = zodToJsonSchema(impl.configSchema as z.ZodSchema, { name: 'config' }) as Record<
-    string,
-    unknown
-  >;
+  const rawConfig = z.toJSONSchema(impl.configSchema, JSON_SCHEMA_OPTIONS);
   res.json({
     success: true,
     data: {
@@ -222,7 +244,7 @@ router.get('/schema/triggers/:type', (req: Request, res: Response) => {
       category: impl.category,
       icon: impl.icon,
       configSchema: impl.decorateConfigSchema(rawConfig),
-      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output' }),
+      outputSchema: z.toJSONSchema(impl.outputSchema, JSON_SCHEMA_OPTIONS),
       ...(impl.type === WEBHOOK_EVENT ? { webhookUrl: webhookEndpoint() } : {}),
     },
     timestamp: new Date().toISOString(),
@@ -253,8 +275,8 @@ router.get('/schema/steps/:type', (req: Request, res: Response) => {
       description: impl.description,
       category: impl.category,
       icon: impl.icon,
-      configSchema: zodToJsonSchema(impl.configSchema as z.ZodSchema, { name: 'config' }),
-      outputSchema: zodToJsonSchema(impl.outputSchema as z.ZodSchema, { name: 'output', $refStrategy: 'none' }),
+      configSchema: z.toJSONSchema(impl.configSchema, JSON_SCHEMA_OPTIONS),
+      outputSchema: z.toJSONSchema(impl.outputSchema, { ...JSON_SCHEMA_OPTIONS, reused: 'inline' }),
     },
     timestamp: new Date().toISOString(),
   });
@@ -493,10 +515,11 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    const prepared = prepareConfigForSave(parsed.data.config, res);
+    const newId = createId();
+    const prepared = prepareConfigForSave(parsed.data.config, res, newId);
     if (!prepared) return;
 
-    const workflow = await postTx(prepared, auth, parsed);
+    const workflow = await postTx(prepared, auth, parsed, newId);
     res.status(201).json({
       success: true,
       data: { automation: workflowToAutomation(workflow) },
@@ -609,7 +632,7 @@ router.get('/:id/versions', async (req: Request<{ id: string }>, res: Response) 
     }
 
     const seriesId = workflow.automationSeriesId ?? workflow.id;
-    const versions = (await approvalService.listLineageVersions(seriesId)).filter(
+    const versions = (await approvalService.listLineageVersions(seriesId, auth.workspaceId)).filter(
       v => v.workspaceId === auth.workspaceId,
     );
     res.json({ success: true, data: versions, timestamp: new Date().toISOString() });
@@ -649,7 +672,7 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
     const existingAutomation = workflowToAutomation(existing);
     const prepared = parsed.data.config !== undefined
-      ? prepareConfigForSave(parsed.data.config, res)
+      ? prepareConfigForSave(parsed.data.config, res, existing.automationSeriesId ?? existing.id)
       : null;
     if (parsed.data.config !== undefined && !prepared) return;
 
@@ -848,13 +871,16 @@ router.get(
     const nextCursor = hasMore ? (page[page.length - 1]?.id ?? null) : null;
 
     const stitched = await stitchExecutionContextMany(page);
+    const canSeeData = await canSeeRunData(auth.userId, workflow.metadata);
 
     res.json({
       success: true,
       data: {
-        runs: stitched.map(row =>
-          workflowExecutionToRunSummary(row, { context: row.context }),
-        ),
+        runs: stitched.map(row => ({
+          ...workflowExecutionToRunSummary(row, { context: row.context }),
+          // Step error strings can echo inbound content, so they follow the run-detail gate.
+          ...(canSeeData ? {} : { error: null }),
+        })),
         nextCursor,
       },
       timestamp: new Date().toISOString(),
@@ -885,6 +911,14 @@ router.get(
       return;
     }
 
+    // Trigger payloads and step data can hold inbound email bodies from desks/mailboxes the
+    // caller may not be able to open, so only the author and AUTOMATIONS admins see them.
+    const owner = await db.workflow.findFirst({
+      where: { id: execution.workflowId, workspaceId: auth.workspaceId },
+      select: { metadata: true },
+    });
+    const canSeeData = await canSeeRunData(auth.userId, owner?.metadata);
+
     const [state, pauseState, stepRows] = await Promise.all([
       getExecutionState(executionId),
       getAutomationPauseState(executionId),
@@ -897,13 +931,20 @@ router.get(
     res.json({
       success: true,
       data: {
-        run: workflowExecutionToRun(execution, state),
-        state: pauseState,
+        run: canSeeData
+          ? workflowExecutionToRun(execution, state)
+          : {
+              ...workflowExecutionToRun(execution, state),
+              error: null,
+              triggerData: {},
+              context: {},
+            },
+        state: canSeeData || !pauseState ? pauseState : { ...pauseState, context: null },
         steps: stepRows.map(r => ({
           id: r.id,
           stepName: r.stepName,
           status: r.status,
-          data: r.data ? safeParseJson(r.data) : null,
+          data: canSeeData && r.data ? safeParseJson(r.data) : null,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
         })),
@@ -912,6 +953,23 @@ router.get(
     });
   },
 );
+
+/** Run data (trigger payloads, step data, errors) is visible to the author and AUTOMATIONS admins. */
+async function canSeeRunData(
+  userId: string,
+  ownerMetadata: string | null | undefined,
+): Promise<boolean> {
+  if (
+    ownerMetadata !== undefined &&
+    parseAutomationMetadata(ownerMetadata).createdById === userId
+  ) {
+    return true;
+  }
+  return assertIsAutomationsAdmin(userId).then(
+    () => true,
+    () => false,
+  );
+}
 
 function safeParseJson(s: string): unknown {
   try {
@@ -928,7 +986,7 @@ function webhookEndpoint(): string {
 async function resolveWebhookAutomation(
   automationId: string,
   workspaceId: string,
-): Promise<{ seriesId: string } | { error: { status: number; message: string } }> {
+): Promise<{ seriesId: string ; createdById: string } | { error: { status: number; message: string } }> {
   // Scope by workspaceId so an authenticated user in one workspace cannot resolve
   // (and mint/read the webhook secret for) an automation owned by another workspace.
   const workflow = await db.workflow.findFirst({
@@ -941,7 +999,10 @@ async function resolveWebhookAutomation(
   if (!workflow) {
     return { error: { status: 404, message: 'Automation not found' } };
   }
-  return { seriesId: workflow.automationSeriesId ?? workflow.id };
+  return {
+    seriesId: workflow.automationSeriesId ?? workflow.id,
+    createdById: parseAutomationMetadata(workflow.metadata).createdById,
+  };
 }
 
 // Read-only: the token is shown only once at creation, so this returns just
@@ -983,7 +1044,22 @@ router.post(
       res.status(resolved.error.status).json({ success: false, error: resolved.error.message });
       return;
     }
-    const secret = await issueWebhookSecret(resolved.seriesId);
+    if (req.user?.role === 'GUEST') {
+      res.status(403).json({ success: false, error: 'Forbidden' });
+      return;
+    }
+    if (resolved.createdById !== auth.userId) {
+      try {
+        await assertIsAutomationsAdmin(auth.userId);
+      } catch {
+        res.status(403).json({ success: false, error: 'Only the author or an automations admin can issue this URL' });
+        return;
+      }
+    }
+    const rotate = (req.body as { rotate?: unknown } | undefined)?.rotate === true;
+    const secret = rotate
+      ? await rotateWebhookSecret(resolved.seriesId)
+      : await issueWebhookSecret(resolved.seriesId);
     res.json({
       success: true,
       data: {

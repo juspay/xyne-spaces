@@ -18,6 +18,12 @@ interface ImportMetaEnv {
   readonly VITE_ENABLE_SUMMARY_ACTION_BUTTONS: string;
   readonly VITE_APPS_PUBLIC_BASE_URL?: string;
   readonly VITE_CLAW_API_BASE_URL?: string;
+  readonly VITE_ELECTRON_BACKEND_URL?: string;
+  readonly VITE_ELECTRON_ZERO_BACKEND_URL?: string;
+  readonly VITE_INTERNAL_XYNE_HOSTS?: string;
+  readonly VITE_TRUSTED_ORIGINS?: string;
+  readonly VITE_LEGAL_CONTACT_EMAIL?: string;
+  readonly VITE_PRIVACY_CONTACT_EMAIL?: string;
 }
 
 interface ImportMeta {

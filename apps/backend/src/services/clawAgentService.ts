@@ -102,11 +102,6 @@ export interface ClawRunRequest {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
-  workflowContext?: {
-    workflowId?: string | null;
-    executionId?: string | null;
-    stepId?: string | null;
-  };
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;
@@ -673,15 +668,6 @@ export async function runClawAgentStream(
       ...(request.draftId && { SPACES_DASHBOARD_DRAFT_ID: request.draftId }),
       ...(request.focusedComponentId && {
         SPACES_FOCUSED_COMPONENT_ID: request.focusedComponentId,
-      }),
-      ...(request.workflowContext?.workflowId && {
-        SPACES_WORKFLOW_ID: request.workflowContext.workflowId,
-      }),
-      ...(request.workflowContext?.executionId && {
-        SPACES_WORKFLOW_EXECUTION_ID: request.workflowContext.executionId,
-      }),
-      ...(request.workflowContext?.stepId && {
-        SPACES_WORKFLOW_STEP_ID: request.workflowContext.stepId,
       }),
     },
     ...(additionalInstructions && { additionalInstructions }),
@@ -1901,7 +1887,7 @@ export async function revokeClawDesignShare(
  * the dashboard's spinner) forever, since the browser client sets no timeout.
  */
 const DEBUG_BUNDLE_TIMEOUT_MS = (() => {
-  const override = Number(process.env['CLAW_DEBUG_PROXY_TIMEOUT_MS']);
+  const override = Number(config.xyneClaw.debugProxyTimeoutMs);
   // A non-numeric override would make AbortSignal.timeout throw on every call,
   // so an unusable value falls back rather than breaking the endpoint.
   return Number.isFinite(override) && override > 0 ? override : 60_000;

@@ -308,3 +308,13 @@ export const LegalDocumentScreen = ({
     </ThemeProvider>
   );
 };
+
+/** A contact address in a legal document, as a mailto link. */
+export const LegalEmailLink = ({ email }: { email: string }): ReactElement => (
+  <a
+    href={`mailto:${email}`}
+    className='font-medium underline underline-offset-4 transition-colors hover:text-primary'
+  >
+    {email}
+  </a>
+);

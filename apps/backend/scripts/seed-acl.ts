@@ -13,7 +13,6 @@
 import { PrismaClient } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
 import {
-  WorkspaceJoinPolicy,
   WorkspaceType,
   AccessType,
   AuthProvider,
@@ -36,7 +35,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'USERS', description: 'User management endpoints (/api/users/*)' },
   { name: 'USER-MANAGEMENT', description: 'User and user-group administration endpoints (/api/user-management/*)' },
   { name: 'USER-GROUPS', description: 'User Groups dashboard access and group visibility management' },
-  { name: 'WORKFLOWS', description: 'Workflow management endpoints (/api/workflows/*)' },
+  { name: 'WORKFLOWS', description: 'Workflows surface (/api/workflows-v2/*)' },
   { name: 'AGENTS', description: 'Agent management endpoints (/api/agents/*)' },
   { name: 'TOOLS', description: 'Tool management endpoints (/api/tools/*)' },
   { name: 'MODELS', description: 'Model management endpoints (/api/models/*)' },
@@ -56,7 +55,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'TICKET-MIGRATION', description: 'Admin access to Jira and ticket migration workflows'},
   { name: 'XYNE-APPS', description: 'Admin access to Xyne Apps management (webhooks, bot configuration, signing secrets)'},
   { name: 'ROLES', description: 'Role creation and management UI' },
-  { name: 'SDLC', description: 'SDLC fast-lane surface access (/sdlc, /api/sdlc/*)' },
+  { name: 'SDLC', description: 'SDLC surface access (/sdlc, /api/sdlc/*)' },
   {
     name: 'AUTOMATIONS',
     description:
@@ -226,7 +225,6 @@ async function main() {
             orgId: defaultOrg.orgId,
             createdBy: DEFAULT_WORKSPACE.createdBy,
             workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');
@@ -371,7 +369,6 @@ async function main() {
             orgId: defaultOrg.orgId,
             createdBy: DEFAULT_WORKSPACE.createdBy,
             workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
           }
         });
         console.log('  ✅ Created default workspace');

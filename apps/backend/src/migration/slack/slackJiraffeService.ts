@@ -13,7 +13,8 @@ import { fetchSlackUserInfo } from '../../integrations/adapters/slack-webhook-ti
 import { UserRepository } from '../../database/repositories/users';
 import { conversationService } from '../../services/conversationService';
 import { findOrCreateUser, ingestConversationSlack } from '../scripts/ingestConversationSlack';
-import { generateTitle } from '../../services/agents/title-generator';
+// Disabled (LLM)
+// import { generateTitle } from '../../services/agents/title-generator';
 import {
   fetchThreadReplies,
   transformReply,
@@ -138,7 +139,10 @@ async function fetchTicketsFromBitbot(
   slackChannelId: string,
   syncDate?: string
 ): Promise<BitbotTicket[]> {
-  const baseUrl = 'https://bitbot.internal.svc.k8s.office.mum.juspay.net';
+  const baseUrl = config.bitbot_base_url;
+  if (!baseUrl) {
+    throw new Error('BITBOT_BASE_URL is not configured; cannot fetch tickets from Bitbot');
+  }
   const url = new URL(`${baseUrl}/api/internal/migration/tickets`);
   url.searchParams.set('slackChannelId', slackChannelId);
   if (syncDate) {
@@ -333,8 +337,8 @@ async function ingestTicket(
 
   // Find assigned user if assigned_username exists
   let assignedToUserId: string | undefined;
-  if (ticket.assigned_username) {
-    const assignedUserEmail = `${ticket.assigned_username}@juspay.in`;
+  if (ticket.assigned_username && config.orgEmailDomain) {
+    const assignedUserEmail = `${ticket.assigned_username}@${config.orgEmailDomain}`;
     const resolvedWsId = workspaceId || config.defaultWorkspaceId;
     if (resolvedWsId) {
       const assignedUser = await userRepo.findByEmail(assignedUserEmail, resolvedWsId);
@@ -397,28 +401,30 @@ async function ingestTicket(
 
   // Generate title: try AI first, fallback to task_type and JIRA ID
   const fallbackTitle = `${ticket.task_type}: ${ticket.jira_issue_id}`;
-  let titleText: string;
-
-  if (ticket.task_description?.trim()) {
-    try {
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Title generation timeout after 15 seconds')), 15000);
-      });
-      const titleResult = await Promise.race([
-        generateTitle({ description: ticket.task_description }, { userId, channelId }),
-        timeoutPromise,
-      ]);
-      titleText = titleResult.title;
-    } catch (error) {
-      logger.warn('[Migration] Failed to generate title, using fallback', {
-        ticketId: ticket.id,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-      titleText = fallbackTitle;
-    }
-  } else {
-    titleText = fallbackTitle;
-  }
+  // Disabled (LLM)
+  // let titleText: string;
+  //
+  // if (ticket.task_description?.trim()) {
+  //   try {
+  //     const timeoutPromise = new Promise<never>((_, reject) => {
+  //       setTimeout(() => reject(new Error('Title generation timeout after 15 seconds')), 15000);
+  //     });
+  //     const titleResult = await Promise.race([
+  //       generateTitle({ description: ticket.task_description }, { userId, channelId }),
+  //       timeoutPromise,
+  //     ]);
+  //     titleText = titleResult.title;
+  //   } catch (error) {
+  //     logger.warn('[Migration] Failed to generate title, using fallback', {
+  //       ticketId: ticket.id,
+  //       error: error instanceof Error ? error.message : 'Unknown error',
+  //     });
+  //     titleText = fallbackTitle;
+  //   }
+  // } else {
+  //   titleText = fallbackTitle;
+  // }
+  const titleText = fallbackTitle;
 
   // Create conversation
   const conversation = await conversationService.createConversationWithMessage({
@@ -495,7 +501,7 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
     const xyneChannel = await channelRepo.findById(input.xyneSpaceChannelId);
     if (xyneChannel) {
       const channelName = xyneChannel.name;
-      xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|${channelName}>`;
+      xyneSpaceChannelLink = `<${config.frontendUrl}/chat/${input.xyneSpaceChannelId}|${channelName}>`;
       jiraffeBotToken = getBotConfigByWorkspaceId(xyneChannel.workspaceId).slackBotToken;
     }
   }

@@ -72,7 +72,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       res.status(400).json({
         success: false,
         error: 'Validation error',
-        details: parsed.error.errors,
+        details: parsed.error.issues,
       });
       return;
     }

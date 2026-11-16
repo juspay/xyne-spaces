@@ -1,7 +1,5 @@
 // Types barrel export
-export * from './coreTypes'
 export * from './call'
-export * from './workflowApproval'
 export * from './userActivity'
 export * from './callChat'
 export * from './deskMetrics'

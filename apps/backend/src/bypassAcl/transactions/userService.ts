@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { getEncryptionProvider } from '@/services/encryption';
 import { UserService } from '@/services/userService';
-import { Status, WorkspaceType, WorkspaceJoinPolicy } from '@xyne/shared';
+import { Status, WorkspaceType } from '@xyne/shared';
 
 
 export function createOrganizationWithUserTx(self: UserService, orgId: string, orgName: string, userData: { providerUserId: string; email: string; name: string; picture?: string | null; }, workspaceName: string) {
@@ -24,13 +24,17 @@ export function createOrganizationWithUserTx(self: UserService, orgId: string, o
         createdBy: userData.providerUserId, // Temporary: will update after user creation
         status: Status.ACTIVE,
         workspaceType: WorkspaceType.ENTERPRISE,
-        joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
       }
     });
     await getEncryptionProvider().provisionEntity({
       entityId: workspace.id,
       orgId: workspace.orgId,
       entityType: 'WORKSPACE',
+    });
+    await getEncryptionProvider().provisionEntity({
+      entityId: workspace.id,
+      orgId: workspace.orgId,
+      entityType: 'WORKSPACE_STORAGE',
     });
     return { organization, workspace };
   });

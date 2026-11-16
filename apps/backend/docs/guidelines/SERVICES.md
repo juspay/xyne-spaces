@@ -14,7 +14,6 @@ Services contain the core business logic. Located in `src/services/`.
 | `userSessionService.ts` | Session management, session tracking |
 | `userStatusService.ts` | Online/offline/away status management |
 | `jwtService.ts` | JWT token generation and validation with configurable expiry |
-| `apiKeyService.ts` | API key generation, validation, and management |
 | `aclService.ts` | Access control lists, permission checking by resource/action |
 | `aclAuditService.ts` | ACL audit logging for compliance |
 | `userAssignmentStateService.ts` | Track user assignment states |
@@ -55,7 +54,6 @@ Services contain the core business logic. Located in `src/services/`.
 |---------|---------|
 | `gcsService.ts` | Google Cloud Storage operations, upload/download/delete |
 | `gcsServiceFactory.ts` | Factory for creating GCS service instances per bucket |
-| `gcsPollingService.ts` | Poll GCS for file changes (transcriptions) |
 | `fileUploadService.ts` | Handle file uploads with validation |
 | `fileValidationService.ts` | Validate file types, sizes, content |
 | `attachmentUploadService.ts` | Message attachment uploads |
@@ -111,7 +109,6 @@ Services contain the core business logic. Located in `src/services/`.
 | `activity/activityService.ts` | Core activity tracking |
 | `activity/activityClassificationService.ts` | ML-based activity classification |
 | `activity/activityClassificationWorkerService.ts` | Background classification |
-| `eventService.ts` | Store workflow events for step responses |
 | `workspaceEventService.ts` | Workspace-level event tracking |
 
 ### Personalization
@@ -132,7 +129,6 @@ Services contain the core business logic. Located in `src/services/`.
 | Service | Purpose |
 |---------|---------|
 | `redisService.ts` | Redis operations, pub/sub, caching, session events |
-| `lockService.ts` | Distributed locking for workflow executions |
 | `encryptionService.ts` | AES-256-CBC encryption/decryption for sensitive data |
 | `configSyncService.ts` | Configuration synchronization |
 | `zeroRateLimiter.ts` | Rate limiting for Zero sync |

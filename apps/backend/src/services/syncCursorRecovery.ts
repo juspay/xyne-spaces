@@ -2,6 +2,7 @@ import { logger } from '@/utils/logger';
 import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/notification-service';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { db } from '@/database/client';
 
 const TAG = '[SyncCursorRecovery]';
 const externalSourceRepo = new ExternalSourceRepository();
@@ -35,7 +36,10 @@ export interface SeedSyncCursorParams {
 export async function seedSyncCursor(params: SeedSyncCursorParams): Promise<void> {
   const { source, seedHistoryId, reason, requesterUserId } = params;
 
-  await externalSourceRepo.update(source.id, { lastSyncCursor: seedHistoryId });
+  await db.externalSource.updateMany({
+    where: { id: source.id, ...(source.workspaceId ? { workspaceId: source.workspaceId } : {}) },
+    data: { lastSyncCursor: seedHistoryId },
+  });
   const details = { sourceId: source.id, sourceName: source.name, seededTo: seedHistoryId };
 
   if (reason === 'no-cursor') {

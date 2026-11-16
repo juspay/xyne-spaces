@@ -1,9 +1,8 @@
-import type { PrismaClient } from '@prisma/client';
 import type { WorkflowRecord, FolderRecord, ExecutionRecord } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import { WORKFLOWS_SCOPE, WORKFLOWS_TYPE } from '@/workflowsV2/constants';
 import { toWorkflowRecord, toFolderRecord, toExecutionRecord } from '@/workflowsV2/utils';
-import { asSystem, rawQuery } from './base';
+import { asSystem } from './base';
 
 /**
  * Relocated from workflowsV2/authorizer.ts's executionWorkspaces. Execution records carry no
@@ -18,22 +17,6 @@ export function executionWorkspacesQuery(ids: readonly string[]): Promise<Array<
       db.workflowExecution.findMany({
         where: { id: { in: [...new Set(ids)] }, ...WORKFLOWS_SCOPE },
         select: { id: true, workspaceId: true },
-      }),
-  );
-}
-
-/**
- * Relocated from workflowsV2/agents/callback.ts. Resolve which tenant to become BEFORE opening
- * a scope — a callback arrives with nothing but an id, same ordering constraint as the worker.
- */
-export function findWorkflowExecutionForCallback(executionId: string) {
-  return asSystem(
-    ['WorkflowExecution'],
-    'callback arrives with only an execution id — workspace must be resolved before a scope can open',
-    () =>
-      db.workflowExecution.findFirst({
-        where: { id: executionId, workflowType: WORKFLOWS_TYPE },
-        select: { workspaceId: true, createdBy: true },
       }),
   );
 }
@@ -152,14 +135,7 @@ export function workspaceForWorkflow(workflowId: string): Promise<string | null>
   );
 }
 
-/**
- * Relocated from workflowsV2/agents/callback.ts's handleWorkflowClawCallback. The gate is
- * addressed by node path; the attempt number says whether it is still current — a repair
- * re-dispatch re-parks the same step at the same node path, so the path alone cannot
- * distinguish a live callback from a superseded one. The runtime authorizes the resume, so it
- * needs an actor: the execution's creator, falling back to '' for a cron- or webhook-triggered
- * run that has no creator (the interim authorizer does not read userId).
- */export function getExecutionQuery(executionId: string): Promise<ExecutionRecord | null> {
+export function getExecutionQuery(executionId: string): Promise<ExecutionRecord | null> {
   return asSystem(
     ['WorkflowExecution'],
     'worker must discover the execution\'s workspace before it can open a tenant context',
@@ -174,20 +150,5 @@ export function workspaceForWorkflow(workflowId: string): Promise<string | null>
       if (!row) return null;
       return toExecutionRecord(row, row.workflow?.metadata ?? null, row.workflowExecutionState);
     },
-  );
-}
-
-/**
- * Relocated from database/repositories/workflows' claimNextPendingExecution. The claim uses
- * `FOR UPDATE SKIP LOCKED` so that competing worker pods cannot claim the same execution;
- * the statement text is built by buildClaimQuery and passed through unchanged.
- */
-export async function claimNextPendingExecutionRow(client: PrismaClient, query: string): Promise<Array<{ id: string }>> {
-  return rawQuery(
-    ['WorkflowExecution'],
-    'workflow scheduler: FOR UPDATE SKIP LOCKED claim query, built by buildClaimQuery',
-    () => client.$queryRawUnsafe<Array<{ id: string }>>(
-      query
-    ),
   );
 }

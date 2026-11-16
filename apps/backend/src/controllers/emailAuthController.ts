@@ -1,33 +1,31 @@
 import crypto from 'crypto';
-import { AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
-import jwt from 'jsonwebtoken';
+import { AuthProvider } from '@xyne/shared';
+import { signPendingAuthToken } from '@/utils/pendingAuthToken';
 import { Request, Response } from 'express';
-import { UserSessionService } from '../services/userSessionService';
-import { authSessionService } from '../services/authSessionService';
+import { authSessionService, AuthSessionRevokeReason } from '../services/authSessionService';
+import { completeLogin, respondDeviceKeyRequired } from '../services/loginCompletionService';
 import { UserService } from '../services/userService';
-import { jwtService } from '../services/jwtService';
 import {
   hashPassword,
   validatePasswordComplexity,
   generateSixDigitCode,
-  isClientPasswordHash,
-  normalizeClientPasswordHash,
   verifyEmailPassword,
   DUMMY_PASSWORD_HASH,
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
+import {
+  EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+  EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+  isEmailDomainAllowed,
+} from '@/services/emailDomainPolicy';
 import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
 import { setPasswordHash, getPasswordHash } from '@/services/orgMemberCredentialService';
-import {
-  organizationDomainService,
-  OrganizationDomainConflictError,
-  PublicEmailDomainError,
-} from '@/services/organizationDomainService';
 import '../types/express';
 import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper';
 import { logger } from '@/utils/logger';
+import { PENDING_AUTH_COOKIE } from '@/services/accessTokenService';
 
 const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
 const workspaceOutcome = (count: number): string =>
@@ -37,39 +35,51 @@ interface ResetCodePayload {
   code: string;
 }
 
-interface RegistrationPendingPayload {
-  code: string;
-  email: string;
-  passwordHash: string;
-  name: string;
-  workspaceId?: string;
-  invitationId?: string;
+interface LoginLimit {
+  scope: 'email' | 'global';
+  lockKey: string;
+  attemptKey: string;
+  maxFailedAttempts: number;
+  windowSeconds: number;
+  lockoutSeconds: number;
 }
 
-const LOGIN_MAX_FAILED_ATTEMPTS = 5;
-const LOGIN_LOCKOUT_SECONDS = 5 * 60;
-const LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS = 5 * 60;
+// Per-email stops guessing one account; the global limit stops spraying a few passwords across every account.
+const loginLimits = (normalizedEmail: string): LoginLimit[] => [
+  {
+    scope: 'email',
+    lockKey: `emaillogin:lock:${normalizedEmail}`,
+    attemptKey: `emaillogin:attempts:${normalizedEmail}`,
+    maxFailedAttempts: 5,
+    windowSeconds: 5 * 60,
+    lockoutSeconds: 5 * 60,
+  },
+  {
+    scope: 'global',
+    lockKey: 'emaillogin:lock:global',
+    attemptKey: 'emaillogin:attempts:global',
+    maxFailedAttempts: 20,
+    windowSeconds: 60 * 60,
+    lockoutSeconds: 60 * 60,
+  },
+];
 const PASSWORD_RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
+const MAX_RESET_CODE_ATTEMPTS = 3;
+const MAX_RESET_CODES_PER_DAY = 5;
 
-const REGISTER_RATE_LIMIT_SECONDS = 60;
-const REGISTER_REQUEST_MESSAGE = 'If this email is not already registered, a verification code has been sent.';
-const REGISTER_CODE_TTL_SECONDS = 15 * 60;
-const REGISTER_MAX_VERIFY_ATTEMPTS = 3;
-const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-const NAME_REGEX = /^[a-zA-Z][a-zA-Z\s]*$/;
+const resetCodeMatches = (expected: string, presented: unknown): boolean => {
+  if (typeof presented !== 'string') return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(presented);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
 
 export class EmailAuthController {
-  private userSessionService: UserSessionService;
   private userService: UserService;
   private prisma = DatabaseClient.getInstance();
 
   constructor() {
-    this.userSessionService = new UserSessionService();
     this.userService = new UserService();
-  }
-
-  private getPreAcceptanceOrgRole(role: string): OrgRole {
-    return role === WorkspaceRole.GUEST ? OrgRole.GUEST : OrgRole.COMMUNITY_MEMBER;
   }
 
   /**
@@ -107,21 +117,59 @@ export class EmailAuthController {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
-      const loginLockKey = `emaillogin:lock:${normalizedEmail}`;
-      const loginAttemptKey = `emaillogin:attempts:${normalizedEmail}`;
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        logger.warn(`${tag()} Email login rejected (reason=email_domain_not_allowed)`);
+        res.status(403).json({
+          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
+          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
+        });
+        return;
+      }
 
-      const existingLock = await redisService.get(loginLockKey);
-      if (existingLock) {
-        const retryAfterSeconds = Math.max(await redisService.getClient().ttl(loginLockKey), 0);
+      const redis = redisService.getClient();
+      const limits = loginLimits(normalizedEmail);
+      const [emailLimit, globalLimit] = limits;
+
+      const rateLimited = (scope: LoginLimit['scope'], retryAfterSeconds: number): void => {
         if (retryAfterSeconds > 0) {
           res.setHeader('Retry-After', retryAfterSeconds.toString());
         }
-
-        logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
+        logger.warn(`${tag()} Email login rejected (reason=rate_limited, scope=${scope})`);
         res.status(429).json({
           error: 'Rate limited',
           message: 'Too many failed login attempts. Please try again later.',
         });
+      };
+
+      for (const limit of limits) {
+        if (await redisService.get(limit.lockKey)) {
+          rateLimited(limit.scope, Math.max(await redis.ttl(limit.lockKey), 0));
+          return;
+        }
+      }
+
+      // Locks every limit that has reached its max; returns false when none has.
+      const lockOutReached = async (atOrAbove: (attempts: number, max: number) => boolean): Promise<boolean> => {
+        const reached = limits.filter((limit, i) => atOrAbove(attempts[i], limit.maxFailedAttempts));
+        if (reached.length === 0) return false;
+        await Promise.all(reached.map(limit => redisService.set(limit.lockKey, '1', limit.lockoutSeconds)));
+        rateLimited(reached[0].scope, Math.max(...reached.map(limit => limit.lockoutSeconds)));
+        return true;
+      };
+
+      // Count the attempt before checking the password: INCR is atomic, so a burst of
+      // concurrent guesses can't all pass the lock check above before the counter moves.
+      // A successful login takes it back off below.
+      const attempts = await Promise.all(
+        limits.map(async limit => {
+          const count = await redis.incr(limit.attemptKey);
+          if (count === 1) {
+            await redis.expire(limit.attemptKey, limit.windowSeconds);
+          }
+          return count;
+        }),
+      );
+      if (await lockOutReached((count, max) => count > max)) {
         return;
       }
 
@@ -129,23 +177,7 @@ export class EmailAuthController {
       // ends here, so the attempt counter, the lockout and the response are identical
       // whichever it was, keeping registered and unregistered emails indistinguishable.
       const rejectLogin = async (): Promise<void> => {
-        const redis = redisService.getClient();
-        const failedAttempts = await redis.incr(loginAttemptKey);
-        if (failedAttempts === 1) {
-          await redis.expire(loginAttemptKey, LOGIN_FAILED_ATTEMPT_WINDOW_SECONDS);
-        }
-
-        if (failedAttempts >= LOGIN_MAX_FAILED_ATTEMPTS) {
-          await Promise.all([
-            redisService.set(loginLockKey, '1', LOGIN_LOCKOUT_SECONDS),
-            redisService.del(loginAttemptKey),
-          ]);
-          logger.warn(`${tag()} Email login rejected (reason=rate_limited)`);
-          res.setHeader('Retry-After', LOGIN_LOCKOUT_SECONDS.toString());
-          res.status(429).json({
-            error: 'Rate limited',
-            message: 'Too many failed login attempts. Please try again later.',
-          });
+        if (await lockOutReached((count, max) => count >= max)) {
           return;
         }
 
@@ -202,11 +234,13 @@ export class EmailAuthController {
 
       logger.info(`${tag()} Email auth success for: ${normalizedEmail}`);
 
-      // Password is correct — immediately clear rate-limit state so a
-      // subsequent network/DB failure doesn't leave the user locked out.
+      // Password is correct — clear this email's state so a later network/DB failure doesn't
+      // leave the user locked out. The global counter only drops this attempt: one
+      // user's success must not wipe failures others have racked up.
       await Promise.all([
-        redisService.del(loginAttemptKey),
-        redisService.del(loginLockKey),
+        redisService.del(emailLimit.attemptKey),
+        redisService.del(emailLimit.lockKey),
+        redis.decr(globalLimit.attemptKey),
       ]);
 
       // 3. Find user's active workspace(s)
@@ -235,125 +269,6 @@ export class EmailAuthController {
         : null;
 
       if (workspaceUsers.length === 0 && !pendingInvitation) {
-        // Check if user has approved community workspace join request(s).
-        const approvedJoinRequests = await this.prisma.workspaceJoinRequest.findMany({
-          where: { email: normalizedEmail, status: 'APPROVED' },
-          orderBy: { updatedAt: 'desc' },
-          select: { id: true, workspaceId: true },
-        });
-
-        if (approvedJoinRequests.length === 1) {
-          // Exactly one approved request — issue pending-auth cookie and
-          // signal the frontend to complete the join for this workspace.
-          const approvedJoinRequest = approvedJoinRequests[0];
-          const userName = normalizedEmail.split('@')[0];
-
-          const isProduction = process.env.NODE_ENV === 'production';
-          const cookieBase = {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: 'strict' as const,
-            path: '/',
-          };
-
-          res.cookie(
-            'google_access_token',
-            jwt.sign(
-              {
-                email: normalizedEmail,
-                name: userName,
-                providerUserId: `email-${normalizedEmail}`,
-                provider: 'EMAIL',
-                refreshToken: null,
-                accessToken: null,
-              },
-              process.env.JWT_SECRET!,
-              { expiresIn: '10m' },
-            ),
-            {
-              ...cookieBase,
-              maxAge: 10 * 60 * 1000,
-            },
-          );
-
-          logger.info(`${tag()} Email login succeeded (outcome=approved_join, count=0)`);
-          res.status(200).json({
-            success: true,
-            workspaces: [],
-            pendingUserData: { email: normalizedEmail, name: userName },
-            userExistsButRemoved: false,
-            autoLoginWorkspace: approvedJoinRequest.workspaceId,
-          });
-          return;
-        }
-
-        if (approvedJoinRequests.length > 1) {
-          // Multiple approved requests — let the user pick which workspace to join.
-          const workspaceIds = approvedJoinRequests.map(r => r.workspaceId);
-          const workspaces = await this.prisma.workspace.findMany({
-            where: { id: { in: workspaceIds } },
-            select: { id: true, name: true },
-          });
-          const workspaceMap = new Map(workspaces.map(w => [w.id, w.name]));
-          const userName = normalizedEmail.split('@')[0];
-
-          const isProduction = process.env.NODE_ENV === 'production';
-          const cookieBase = {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: 'strict' as const,
-            path: '/',
-          };
-
-          res.cookie(
-            'google_access_token',
-            jwt.sign(
-              {
-                email: normalizedEmail,
-                name: userName,
-                providerUserId: `email-${normalizedEmail}`,
-                provider: 'EMAIL',
-                refreshToken: null,
-                accessToken: null,
-              },
-              process.env.JWT_SECRET!,
-              { expiresIn: '10m' },
-            ),
-            {
-              ...cookieBase,
-              maxAge: 10 * 60 * 1000,
-            },
-          );
-
-          logger.info(`${tag()} Email login succeeded (outcome=approved_join_selection, count=${approvedJoinRequests.length})`);
-          res.status(200).json({
-            success: true,
-            workspaces: approvedJoinRequests.map(r => ({
-              id: r.workspaceId,
-              name: workspaceMap.get(r.workspaceId) || r.workspaceId,
-              role: 'COMMUNITY_MEMBER',
-            })),
-            pendingUserData: { email: normalizedEmail, name: userName },
-            userExistsButRemoved: false,
-          });
-          return;
-        }
-
-        // Check if user has a pending join request
-        const pendingJoinRequest = await this.prisma.workspaceJoinRequest.findFirst({
-          where: { email: normalizedEmail, status: 'PENDING' },
-          orderBy: { updatedAt: 'desc' },
-        });
-
-        if (pendingJoinRequest) {
-          logger.warn(`${tag()} Email login rejected (reason=join_request_pending)`);
-          res.status(403).json({
-            error: 'Join request pending',
-            message: 'Your request to join the community workspace is pending approval.',
-          });
-          return;
-        }
-
         logger.warn(`${tag()} Email login rejected (reason=no_workspace_access)`);
         res.status(403).json({
           error: 'No workspace access',
@@ -363,7 +278,7 @@ export class EmailAuthController {
       }
 
       // Cookie base (used below for both invitation-pending and normal flows)
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = config.env === 'production';
       const cookieBase = {
         httpOnly: true,
         secure: isProduction,
@@ -377,19 +292,15 @@ export class EmailAuthController {
         const userName = normalizedEmail.split('@')[0];
 
         res.cookie(
-          'google_access_token',
-          jwt.sign(
-            {
-              email: normalizedEmail,
-              name: userName,
-              providerUserId: `email-${normalizedEmail}`,
-              provider: 'EMAIL',
-              refreshToken: null,
-              accessToken: null,
-            },
-            process.env.JWT_SECRET!,
-            { expiresIn: '10m' },
-          ),
+          PENDING_AUTH_COOKIE,
+          signPendingAuthToken({
+            email: normalizedEmail,
+            name: userName,
+            providerUserId: `email-${normalizedEmail}`,
+            provider: 'EMAIL',
+            refreshToken: null,
+            accessToken: null,
+          }),
           {
             ...cookieBase,
             maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -412,19 +323,15 @@ export class EmailAuthController {
       const userName = workspaceUser.name || normalizedEmail.split('@')[0];
 
       res.cookie(
-        'google_access_token',
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-          },
-          process.env.JWT_SECRET!,
-          { expiresIn: '10m' },
-        ),
+        PENDING_AUTH_COOKIE,
+        signPendingAuthToken({
+          email: normalizedEmail,
+          name: userName,
+          providerUserId: `email-${normalizedEmail}`,
+          provider: 'EMAIL',
+          refreshToken: null,
+          accessToken: null,
+        }),
         {
           ...cookieBase,
           maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
@@ -439,50 +346,12 @@ export class EmailAuthController {
       }));
 
       if (workspaceUsers.length === 1) {
-        const refreshToken = crypto.randomUUID();
-        const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-        const session = await this.userSessionService.createSession({
-          userId: workspaceUser.id,
-          refreshToken,
-          refreshTokenExpiry,
-          deviceInfo: JSON.stringify({
-            userAgent: req.headers['user-agent'],
-            timestamp: new Date().toISOString(),
-          }),
-          ipAddress: req.ip || req.connection.remoteAddress || undefined,
-          // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password.
+        // Auth session (xs) + JWT cookies. The user row may still say GOOGLE/MICROSOFT for an
+        // SSO account that set a password, so the method is pinned to EMAIL.
+        await completeLogin(req, res, {
+          user: workspaceUser,
           loginMethod: AuthProvider.EMAIL,
-        });
-
-        const jwtToken = jwtService.generateToken({
-          sub: workspaceUser.id,
-          email: workspaceUser.email,
-          name: workspaceUser.name,
-          workspaceId: workspaceUser.workspaceId,
-          memberId: workspaceUser.orgMemberId,
-          providerUserId: `email-${workspaceUser.email}`,
-          provider: AuthProvider.EMAIL,
-        });
-
-        res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
-          ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
-        });
-        res.cookie('user_session_id', session.id, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
-        // Org-scoped device auth session (xs cookie); no-op without x-device-id.
-        await authSessionService.issueOnLogin(req, res, {
-          orgMemberId: workspaceUser.orgMemberId,
-          workspaceId: workspaceUser.workspaceId ?? undefined,
+          cookieOptions: { sameSite: cookieBase.sameSite, secure: cookieBase.secure },
         });
 
         logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);
@@ -504,6 +373,7 @@ export class EmailAuthController {
         userExistsButRemoved: false,
       });
     } catch (error) {
+      if (respondDeviceKeyRequired(res, error)) return;
       logger.error(`${tag()} Email login failed:`, error);
       res.status(500).json({
         error: 'Login failed',
@@ -580,8 +450,8 @@ export class EmailAuthController {
       const newHash = await hashPassword(newPassword);
       await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
-      // Revoke all active sessions for this user — forces re-auth everywhere
-      await this.userSessionService.revokeAllUserSessions(userId, 'PASSWORD_CHANGED');
+      // Revoke every device's auth session for this org member — forces re-auth everywhere
+      await authSessionService.revokeAllForOrgMember(orgMember.memberId, AuthSessionRevokeReason.PASSWORD_CHANGED);
 
       res.status(200).json({ success: true, message: 'Password changed successfully. Please log in again.' });
     } catch (error) {
@@ -604,6 +474,11 @@ export class EmailAuthController {
 
       const normalizedEmail = email.toLowerCase().trim();
 
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
+        return;
+      }
+
       // Rate-limit before account lookup so the public response stays uniform.
       const rateLimitKey = `pwdreset:ratelimit:${normalizedEmail}`;
       const rateLimited = await redisService.get(rateLimitKey);
@@ -618,6 +493,19 @@ export class EmailAuthController {
       });
 
       if (!orgMember || orgMember.leftAt) {
+        res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
+        return;
+      }
+
+      // Each new code resets the attempt counter, so cap how many codes an account gets per day.
+      const dailyKey = `pwdreset:daily:${normalizedEmail}`;
+      const redis = redisService.getClient();
+      const codesToday = await redis.incr(dailyKey);
+      if (codesToday === 1) {
+        await redis.expire(dailyKey, 24 * 60 * 60);
+      }
+      if (codesToday > MAX_RESET_CODES_PER_DAY) {
+        logger.warn('[AUTH] Password reset code request rejected (reason=daily_cap)');
         res.status(200).json({ success: true, message: PASSWORD_RESET_REQUEST_MESSAGE });
         return;
       }
@@ -691,10 +579,28 @@ export class EmailAuthController {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
+      if (!isEmailDomainAllowed(normalizedEmail)) {
+        res.status(400).json({ error: 'Invalid or expired code' });
+        return;
+      }
+
       const redisKey = `pwdreset:code:${normalizedEmail}`;
       const attemptsKey = `pwdreset:attempts:${normalizedEmail}`;
 
-      // Retrieve and verify code from Redis
+      // Count the attempt before reading the code: INCR is atomic, so concurrent guesses can't
+      // all compare before the cap applies. The counter is left to expire on exhaustion (not
+      // deleted), or in-flight requests would start a fresh count.
+      const redis = redisService.getClient();
+      const attempts = await redis.incr(attemptsKey);
+      if (attempts === 1) {
+        await redis.expire(attemptsKey, 15 * 60);
+      }
+      if (attempts > MAX_RESET_CODE_ATTEMPTS) {
+        await redisService.del(redisKey);
+        res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
+        return;
+      }
+
       const raw = await redisService.get(redisKey);
       if (!raw) {
         res.status(400).json({ error: 'Invalid or expired code' });
@@ -709,18 +615,9 @@ export class EmailAuthController {
         return;
       }
 
-      if (payload.code !== code) {
-        const redis = redisService.getClient();
-        const attempts = await redis.incr(attemptsKey);
-        if (attempts === 1) {
-          await redis.expire(attemptsKey, 15 * 60);
-        }
-
-        if (attempts >= 3) {
-          await Promise.all([
-            redisService.del(redisKey),
-            redisService.del(attemptsKey),
-          ]);
+      if (!resetCodeMatches(payload.code, code)) {
+        if (attempts >= MAX_RESET_CODE_ATTEMPTS) {
+          await redisService.del(redisKey);
           res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
           return;
         }
@@ -756,14 +653,8 @@ export class EmailAuthController {
       const newHash = await hashPassword(newPassword);
       await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: newHash });
 
-      // Find all workspace users tied to this orgMember and revoke their sessions
-      const affectedUsers = await this.prisma.user.findMany({
-        where: { orgMemberId: orgMember.memberId },
-        select: { id: true },
-      });
-      for (const u of affectedUsers) {
-        await this.userSessionService.revokeAllUserSessions(u.id, 'PASSWORD_RESET');
-      }
+      // Auth sessions are org-level: one revoke covers every workspace and device.
+      await authSessionService.revokeAllForOrgMember(orgMember.memberId, AuthSessionRevokeReason.PASSWORD_RESET);
 
       // Delete the code from Redis (it's been consumed)
       await Promise.all([
@@ -772,612 +663,6 @@ export class EmailAuthController {
       ]);
 
       res.status(200).json({ success: true, message: 'Password reset successful. You can now log in.' });
-    } catch (error) {
-      res.status(500).json({ error: 'An unexpected error occurred' });
-    }
-  };
-
-  /**
-   * Register a new account with email + password
-   * POST /v2/auth/email/register
-   *
-   * Validates email + client-hashed password, stores pending
-   * registration data in Redis, and sends a 6-digit verification code.
-   * The OrgMember is NOT created until the code is verified.
-   *
-   * If workspaceId is provided, the user is registering to join a specific
-   * workspace (community or enterprise). If not provided, the post-verification
-   * flow mirrors OAuth — domain checking determines if an org exists, and
-   * the user can join existing workspaces or create a new org.
-   */
-  register = async (req: Request, res: Response): Promise<void> => {
-    try {
-      logger.info(`[AUTH] Email registration received`);
-
-      const { email, hashedPassword, name } = req.body;
-      const workspaceId: string | undefined = req.body.workspaceId;
-      const invitationId: string | undefined = typeof req.body.invitationId === 'string'
-        ? req.body.invitationId.trim()
-        : undefined;
-
-      if (!email || !hashedPassword || !name) {
-        res.status(400).json({
-          error: 'Missing required fields',
-          message: 'email, hashedPassword, and name are required',
-        });
-        return;
-      }
-
-      const normalizedEmail = email.toLowerCase().trim();
-      const trimmedName = name.trim();
-
-      if (!EMAIL_REGEX.test(normalizedEmail)) {
-        res.status(400).json({ error: 'Invalid email address' });
-        return;
-      }
-
-      if (!NAME_REGEX.test(trimmedName)) {
-        res.status(400).json({ error: 'Name can only contain alphabets and spaces' });
-        return;
-      }
-
-      if (!isClientPasswordHash(hashedPassword)) {
-        res.status(400).json({ error: 'Invalid password' });
-        return;
-      }
-
-      // Rate-limit: 60s between registration attempts for the same email
-      const rateLimitKey = `emailreg:ratelimit:${normalizedEmail}`;
-      const rateLimited = await redisService.get(rateLimitKey);
-      if (rateLimited) {
-        res.status(429).json({
-          error: 'Rate limited',
-          message: 'Please wait before requesting another verification code.',
-        });
-        return;
-      }
-
-      // If invitationId is provided, this registration is only for accepting
-      // that existing workspace invitation. Do not let it fall through to the
-      // normal create-org onboarding path after verification.
-      let workspaceName: string | null = null;
-      let invitationWorkspaceId: string | null = null;
-      if (invitationId) {
-        const invitation = await this.prisma.invitation.findFirst({
-          where: {
-            invitationId,
-            email: normalizedEmail,
-            acceptedAt: null,
-            expiredAt: { gt: new Date() },
-          },
-          include: {
-            workspace: {
-              select: { id: true, name: true, status: true },
-            },
-          },
-        });
-
-        if (!invitation || !invitation.workspace || invitation.workspace.status !== 'ACTIVE') {
-          res.status(400).json({ error: 'Invalid or expired invitation' });
-          return;
-        }
-
-        workspaceName = invitation.workspace.name;
-        invitationWorkspaceId = invitation.workspace.id;
-      } else if (workspaceId) {
-        const workspace = await this.prisma.workspace.findUnique({
-          where: { id: workspaceId },
-          select: { id: true, name: true, status: true },
-        });
-
-        if (!workspace || workspace.status !== 'ACTIVE') {
-          res.status(404).json({ error: 'Workspace not found' });
-          return;
-        }
-        workspaceName = workspace.name;
-      }
-
-      // Check if OrgMember already exists with a password (already registered)
-      const existingOrgMember = await this.prisma.orgMember.findUnique({
-        where: { email: normalizedEmail },
-        select: { memberId: true, leftAt: true },
-      });
-
-      const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
-
-      const existingHash = existingOrgMember ? await getPasswordHash(existingOrgMember.memberId) : null;
-      const isAlreadyRegistered = existingOrgMember && existingHash && !existingOrgMember.leftAt;
-      const isProviderMismatch = existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL;
-
-      if (isAlreadyRegistered || isProviderMismatch) {
-        const reason = isAlreadyRegistered
-          ? 'already registered'
-          : `SSO provider mismatch (${existingIdentity?.authProvider})`;
-        logger.info(`[AUTH] Email registration blocked for ${normalizedEmail}: ${reason}`);
-        res.status(200).json({
-          success: true,
-          message: REGISTER_REQUEST_MESSAGE,
-          email: normalizedEmail,
-        });
-        return;
-      }
-
-      // No workspaceId/invitationId means this registration is on the
-      // create-org (enterprise) path — public email domains cannot create
-      // enterprise workspaces, so fail fast before sending a verification code.
-      // Community joins (workspaceId) and invitations keep allowing any email.
-      if (!workspaceId && !invitationId) {
-        try {
-          await organizationDomainService.assertNotPublicEmailDomain(normalizedEmail);
-        } catch (error) {
-          if (error instanceof PublicEmailDomainError) {
-            logger.warn(`[AUTH] Email registration blocked for ${normalizedEmail} (reason=public_email_domain)`);
-            res.status(403).json({
-              error: error.code,
-              message: error.message,
-            });
-            return;
-          }
-        }
-      }
-
-      // Dashboard already sends the register password as a SHA-256 hash.
-      // Store that credential directly so we do not hash it again.
-      const passwordHash = normalizeClientPasswordHash(hashedPassword);
-
-      // Generate 6-digit verification code
-      const code = generateSixDigitCode();
-      const redisKey = `emailreg:code:${normalizedEmail}`;
-      const attemptsKey = `emailreg:attempts:${normalizedEmail}`;
-
-      const payload: RegistrationPendingPayload = {
-        code,
-        email: normalizedEmail,
-        passwordHash,
-        name: trimmedName,
-        ...(invitationWorkspaceId
-          ? { workspaceId: invitationWorkspaceId }
-          : workspaceId
-            ? { workspaceId }
-            : {}),
-        ...(invitationId ? { invitationId } : {}),
-      };
-
-      await Promise.all([
-        redisService.set(redisKey, JSON.stringify(payload), REGISTER_CODE_TTL_SECONDS),
-        redisService.del(attemptsKey),
-        redisService.set(rateLimitKey, '1', REGISTER_RATE_LIMIT_SECONDS),
-      ]);
-
-      // Send verification email
-      const escapedRegWorkspaceName = workspaceName
-        ? workspaceName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
-        : null;
-
-      const emailResult = await emailService.sendEmail({
-        to: normalizedEmail,
-        subject: 'Xyne Spaces — Verify Your Email',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
-            <h2>Verify Your Email</h2>
-            ${escapedRegWorkspaceName
-              ? `<p>You're registering for <strong>${escapedRegWorkspaceName}</strong> on Xyne Spaces.</p>`
-              : '<p>Welcome to Xyne Spaces!</p>'
-            }
-            <p>Enter the following code to complete your registration:</p>
-            <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px; padding: 16px; background: #f5f5f5; border-radius: 8px; text-align: center;">${code}</p>
-            <p>This code expires in 15 minutes.</p>
-            <p>If you didn't request this, you can safely ignore this email.</p>
-          </div>
-        `,
-        text: `Your Xyne Spaces verification code is: ${code}\n\nThis code expires in 15 minutes.\n`,
-      });
-
-      if (!emailResult.success) {
-        await Promise.all([
-          redisService.del(redisKey),
-          redisService.del(attemptsKey),
-          redisService.del(rateLimitKey),
-        ]);
-        res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
-        return;
-      }
-
-      logger.info(`[AUTH] Email registration code sent`);
-      res.status(200).json({
-        success: true,
-        message: REGISTER_REQUEST_MESSAGE,
-        email: normalizedEmail,
-      });
-    } catch (error) {
-      logger.error(`[AUTH] Email registration failed:`, error);
-      res.status(500).json({
-        error: 'Registration failed',
-        message: `An unexpected error occurred. Error: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-  };
-
-  /**
-   * Verify email and complete registration
-   * POST /v2/auth/email/verify
-   *
-   * Verifies the 6-digit code, creates the OrgMember with passwordHash,
-   * and issues a pending-auth cookie (same as OAuth flow). The frontend
-   * auth machine then handles the workspace join — community OPEN joins
-   * immediately, REQUEST_TO_JOIN creates a join request, and enterprise
-   * goes through the domain-check + join-request flow. All identical to
-   * what happens after Google/Microsoft SSO authentication.
-   */
-  verifyEmail = async (req: Request, res: Response): Promise<void> => {
-    try {
-      logger.info(`[AUTH] Email verification received`);
-
-      const { email, code } = req.body;
-
-      if (!email || !code) {
-        res.status(400).json({ error: 'Email and verification code are required' });
-        return;
-      }
-
-      const normalizedEmail = email.toLowerCase().trim();
-      const redisKey = `emailreg:code:${normalizedEmail}`;
-      const attemptsKey = `emailreg:attempts:${normalizedEmail}`;
-
-      const raw = await redisService.get(redisKey);
-      if (!raw) {
-        res.status(400).json({ error: 'Invalid or expired code. Please register again.' });
-        return;
-      }
-
-      let payload: RegistrationPendingPayload;
-      try {
-        payload = JSON.parse(raw) as RegistrationPendingPayload;
-      } catch {
-        res.status(400).json({ error: 'Invalid or expired code. Please register again.' });
-        return;
-      }
-
-      if (payload.code !== code) {
-        const redis = redisService.getClient();
-        const attempts = await redis.incr(attemptsKey);
-        if (attempts === 1) {
-          await redis.expire(attemptsKey, REGISTER_CODE_TTL_SECONDS);
-        }
-
-        if (attempts >= REGISTER_MAX_VERIFY_ATTEMPTS) {
-          await Promise.all([
-            redisService.del(redisKey),
-            redisService.del(attemptsKey),
-          ]);
-          res.status(400).json({ error: 'Too many failed attempts. Please register again.' });
-          return;
-        }
-
-        res.status(400).json({ error: 'Invalid code' });
-        return;
-      }
-
-      // Code verified — retrieve pending data
-      const { passwordHash, name, workspaceId, invitationId } = payload;
-
-      const existingIdentity = await this.userService.findAuthIdentityByEmail(normalizedEmail);
-      if (existingIdentity && existingIdentity.authProvider !== AuthProvider.EMAIL) {
-        logger.warn(`[AUTH] Email verification rejected (reason=provider_mismatch, existingProvider=${existingIdentity.authProvider})`);
-        res.status(403).json({
-          error: 'provider_mismatch',
-          message: 'This account uses a different login method. Please continue with your original sign-in method.',
-          existingProvider: existingIdentity.authProvider,
-        });
-        return;
-      }
-
-      // Determine the orgId for the OrgMember:
-      // - If workspaceId is provided, use that workspace's org
-      // - If not, try to find an existing org by email domain
-      // - If neither, don't create OrgMember yet — defer to create-org flow
-      let orgId: string | null = null;
-
-      let invitationOrgRole: OrgRole | null = null;
-
-      if (invitationId) {
-        const invitation = await this.prisma.invitation.findFirst({
-          where: {
-            invitationId,
-            email: normalizedEmail,
-            acceptedAt: null,
-            expiredAt: { gt: new Date() },
-          },
-          include: {
-            workspace: {
-              select: { orgId: true, status: true },
-            },
-          },
-        });
-
-        if (!invitation || !invitation.workspace || invitation.workspace.status !== 'ACTIVE') {
-          res.status(400).json({ error: 'Invalid or expired invitation' });
-          return;
-        }
-
-        orgId = invitation.orgId ?? invitation.workspace.orgId;
-        invitationOrgRole = this.getPreAcceptanceOrgRole(invitation.role);
-      } else if (workspaceId) {
-        const workspace = await this.prisma.workspace.findUnique({
-          where: { id: workspaceId },
-          select: { orgId: true, status: true },
-        });
-        if (!workspace || workspace.status !== 'ACTIVE') {
-          res.status(404).json({ error: 'Workspace not found' });
-          return;
-        }
-        orgId = workspace.orgId;
-      } else {
-        // No workspaceId — check if the email domain maps to an existing org
-        const existingOrg = await organizationDomainService.findExistingOrgByEmailDomain(normalizedEmail);
-        if (existingOrg) {
-          orgId = existingOrg.orgId;
-        }
-      }
-
-      // Create or update OrgMember with passwordHash.
-      // If we have an orgId, create/update the OrgMember now.
-      // If not, store the passwordHash in Redis so the create-org flow can
-      // pick it up when creating the OrgMember.
-      const existingOrgMember = await this.prisma.orgMember.findUnique({
-        where: { email: normalizedEmail },
-        select: { memberId: true, orgId: true, role: true },
-      });
-
-      if (existingOrgMember) {
-        if (orgId && existingOrgMember.orgId !== orgId) {
-          if (existingOrgMember.role !== OrgRole.COMMUNITY_MEMBER) {
-            res.status(409).json({
-              error: 'Organization conflict',
-              message: 'This email is already associated with a different organization.',
-            });
-            return;
-          }
-        }
-        const memberOrgId = orgId && existingOrgMember.orgId !== orgId ? orgId : existingOrgMember.orgId;
-        await this.prisma.orgMember.update({
-          where: { email: normalizedEmail },
-          data: {
-            passwordHash,
-            leftAt: null,
-            ...(orgId && existingOrgMember.orgId !== orgId ? { orgId } : {}),
-            ...(invitationOrgRole ? { role: invitationOrgRole } : {}),
-          },
-        });
-        await this.prisma.orgMemberCredential.upsert({
-          where: { memberId: existingOrgMember.memberId },
-          create: { memberId: existingOrgMember.memberId, orgId: memberOrgId, passwordHash },
-          update: { passwordHash },
-        });
-      } else if (orgId) {
-        const created = await this.prisma.orgMember.create({
-          data: {
-            orgId,
-            email: normalizedEmail,
-            role: invitationOrgRole ?? OrgRole.COMMUNITY_MEMBER,
-            passwordHash,
-          },
-        });
-        await this.prisma.orgMemberCredential.create({
-          data: { memberId: created.memberId, orgId, passwordHash },
-        });
-      } else {
-        // No orgId and no existing OrgMember — store passwordHash in Redis
-        // so createOrganizationWithUser can set it on the OrgMember later.
-        await redisService.set(
-          `emailreg:verified:${normalizedEmail}`,
-          JSON.stringify({ passwordHash, name }),
-          10 * 60, // 10 minutes
-        );
-      }
-      
-      await Promise.all([
-        redisService.del(`emailreg:code:${normalizedEmail}`),
-        redisService.del(`emailreg:attempts:${normalizedEmail}`),
-      ]);
-
-      // Issue pending-auth cookie — same mechanism as OAuth callback.
-      const userName = name || normalizedEmail.split('@')[0];
-
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieBase = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
-      res.cookie(
-        'google_access_token',
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-          },
-          process.env.JWT_SECRET!,
-          { expiresIn: '10m' },
-        ),
-        {
-          ...cookieBase,
-          maxAge: 10 * 60 * 1000,
-        },
-      );
-
-      // Build response — mirrors OAuth callback structure.
-      // If workspaceId was provided, return empty workspaces so the frontend
-      // triggers the joinWorkspace actor (handles community/enterprise join).
-      // If not, return existing workspaces + domain conflict info (same as OAuth).
-      if (workspaceId) {
-        logger.info(`[AUTH] Email registration verified (outcome=${invitationId ? 'pending_invitation' : 'workspace_scoped'})`);
-        res.status(200).json({
-          success: true,
-          ...(invitationId ? { invitationPending: true, invitationId } : {}),
-          workspaces: [],
-          pendingUserData: { email: normalizedEmail, name: userName },
-          userExistsButRemoved: false,
-        });
-        return;
-      }
-
-      // No workspaceId — same domain-checking logic as OAuth callback
-      const workspaces = await this.userService.getWorkspacesByEmail(normalizedEmail);
-
-      let domainConflictError: string | null = null;
-      let publicEmailDomainError: string | null = null;
-      let enterpriseJoinOrgName: string | null = null;
-      let enterpriseJoinWorkspaces: string | null = null;
-
-      if (workspaces.length === 0) {
-        try {
-          await organizationDomainService.assertCanCreateOrgForEmail(normalizedEmail);
-        } catch (error) {
-          if (error instanceof PublicEmailDomainError) {
-            publicEmailDomainError = error.message;
-          } else if (error instanceof OrganizationDomainConflictError) {
-            domainConflictError = error.message;
-          }
-        }
-
-        if (!domainConflictError && !publicEmailDomainError) {
-          const domainConflict = await organizationDomainService.findEnterpriseWorkspaceByEmailDomain(normalizedEmail);
-          if (domainConflict) {
-            domainConflictError = new OrganizationDomainConflictError(domainConflict.domain, domainConflict).message;
-            enterpriseJoinOrgName = domainConflict.name;
-            enterpriseJoinWorkspaces = JSON.stringify(domainConflict.workspaces);
-          }
-        }
-      }
-
-      logger.info(`[AUTH] Email registration verified (outcome=${workspaceOutcome(workspaces.length)}, count=${workspaces.length})`);
-      res.status(200).json({
-        success: true,
-        workspaces: workspaces.map(w => ({ id: w.id, name: w.name, role: w.role })),
-        pendingUserData: { email: normalizedEmail, name: userName },
-        userExistsButRemoved: false,
-        ...(domainConflictError ? { domainConflictError } : {}),
-        ...(enterpriseJoinOrgName ? { enterpriseJoinOrgName } : {}),
-        ...(enterpriseJoinWorkspaces ? { enterpriseJoinWorkspaces } : {}),
-        ...(publicEmailDomainError ? { publicEmailDomainError } : {}),
-      });
-    } catch (error) {
-      logger.error(`[AUTH] Email verification failed:`, error);
-      res.status(500).json({
-        error: 'Verification failed',
-        message: `An unexpected error occurred. Error: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    }
-  };
-
-  /**
-   * Resend verification code
-   * POST /v2/auth/email/resend-code
-   *
-   * Resends a new 6-digit code using the pending registration data in Redis.
-   */
-  resendVerificationCode = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { email } = req.body;
-
-      if (!email) {
-        res.status(400).json({ error: 'Email is required' });
-        return;
-      }
-
-      const normalizedEmail = email.toLowerCase().trim();
-
-      const rateLimitKey = `emailreg:ratelimit:${normalizedEmail}`;
-      const rateLimited = await redisService.get(rateLimitKey);
-      if (rateLimited) {
-        res.status(429).json({
-          error: 'Rate limited',
-          message: 'Please wait before requesting another verification code.',
-        });
-        return;
-      }
-
-      const redisKey = `emailreg:code:${normalizedEmail}`;
-      const raw = await redisService.get(redisKey);
-      if (!raw) {
-        res.status(400).json({
-          error: 'No pending registration found',
-          message: 'Please register again.',
-        });
-        return;
-      }
-
-      let payload: RegistrationPendingPayload;
-      try {
-        payload = JSON.parse(raw) as RegistrationPendingPayload;
-      } catch {
-        res.status(400).json({
-          error: 'No pending registration found',
-          message: 'Please register again.',
-        });
-        return;
-      }
-
-      // Generate new code
-      const newCode = generateSixDigitCode();
-      payload.code = newCode;
-
-      const attemptsKey = `emailreg:attempts:${normalizedEmail}`;
-
-      await Promise.all([
-        redisService.set(redisKey, JSON.stringify(payload), REGISTER_CODE_TTL_SECONDS),
-        redisService.del(attemptsKey),
-        redisService.set(rateLimitKey, '1', REGISTER_RATE_LIMIT_SECONDS),
-      ]);
-
-      // Fetch workspace name for the email (only when workspaceId is present)
-      let workspaceName: string | null = null;
-      if (payload.workspaceId) {
-        const workspace = await this.prisma.workspace.findUnique({
-          where: { id: payload.workspaceId },
-          select: { name: true },
-        });
-        workspaceName = workspace?.name ?? null;
-      }
-      const escapedWorkspaceName = workspaceName
-        ? workspaceName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')
-        : null;
-
-      const emailResult = await emailService.sendEmail({
-        to: normalizedEmail,
-        subject: 'Xyne Spaces — Verify Your Email',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
-            <h2>Verify Your Email</h2>
-            ${escapedWorkspaceName
-              ? `<p>You're registering for <strong>${escapedWorkspaceName}</strong> on Xyne Spaces.</p>`
-              : '<p>Welcome to Xyne Spaces!</p>'
-            }
-            <p>Enter the following code to complete your registration:</p>
-            <p style="font-size: 28px; font-weight: bold; letter-spacing: 4px; padding: 16px; background: #f5f5f5; border-radius: 8px; text-align: center;">${newCode}</p>
-            <p>This code expires in 15 minutes.</p>
-            <p>If you didn't request this, you can safely ignore this email.</p>
-          </div>
-        `,
-        text: `Your Xyne Spaces verification code is: ${newCode}\n\nThis code expires in 15 minutes.\n`,
-      });
-
-      if (!emailResult.success) {
-        res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
-        return;
-      }
-
-      res.status(200).json({
-        success: true,
-        message: 'A new verification code has been sent to your email.',
-      });
     } catch (error) {
       res.status(500).json({ error: 'An unexpected error occurred' });
     }

@@ -888,10 +888,6 @@ export async function prepareRun(
     };
     const attachedThreadConversationId = readAgentConfigString("SPACES_CONVERSATION_ID");
     const attachedCanvasViewAccessId = readAgentConfigString("SPACES_CANVAS_VIEW_ACCESS_ID");
-    // Same treatment for the workflow screen's scalars: they steer the workflow tools via
-    // run-scalars, but the agent also needs to be told IN PROSE what it is looking at.
-    const attachedWorkflowId = readAgentConfigString("SPACES_WORKFLOW_ID");
-    const attachedWorkflowExecutionId = readAgentConfigString("SPACES_WORKFLOW_EXECUTION_ID");
     let resolvedAttachedContext:
       | { contextFiles: Array<{ path: string; content: string }>; promptPrefix?: string }
       | undefined;
@@ -904,9 +900,7 @@ export async function prepareRun(
     if (
       normalizedAttached.length > 0 ||
       attachedThreadConversationId ||
-      attachedCanvasViewAccessId ||
-      attachedWorkflowId ||
-      attachedWorkflowExecutionId
+      attachedCanvasViewAccessId
     ) {
       // Try to get Spaces auth from request cookies
       const spacesAuth = (await input.resolveSpacesAuth?.(resolved.userId)) ?? undefined;
@@ -916,13 +910,9 @@ export async function prepareRun(
             userId: resolved.userId,
             ...(attachedThreadConversationId ? { threadConversationId: attachedThreadConversationId } : {}),
             ...(attachedCanvasViewAccessId ? { canvasViewAccessId: attachedCanvasViewAccessId } : {}),
-            ...(attachedWorkflowId ? { workflowId: attachedWorkflowId } : {}),
-            ...(attachedWorkflowExecutionId
-              ? { workflowExecutionId: attachedWorkflowExecutionId }
-              : {}),
           });
           log.info(
-            `[run] Resolved ${normalizedAttached.length} attached item(s)${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""}${attachedWorkflowExecutionId ? " + workflow-run" : attachedWorkflowId ? " + workflow" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
+            `[run] Resolved ${normalizedAttached.length} attached item(s)${attachedThreadConversationId ? " + thread" : ""}${attachedCanvasViewAccessId ? " + canvas" : ""} to ${resolvedAttachedContext.contextFiles.length} context files`,
           );
         } catch (err) {
           log.warn(
@@ -1481,7 +1471,7 @@ export async function prepareRun(
     }
 
     // Run scalars: the Spaces proxy passes what the user has OPEN via agentConfig — the
-    // dashboard being edited, or the workflow/run the Ask AI panel was opened on. Stored
+    // dashboard being edited. Stored
     // per-session so the MCP /call boundary can force-inject them into that server's tool
     // calls, rather than trusting the model to carry an id across a compaction.
     // Fire-and-forget.
@@ -1495,9 +1485,6 @@ export async function prepareRun(
         ...pick("dataSourceId", scalar("SPACES_DATA_SOURCE_ID")),
         ...pick("draftId", scalar("SPACES_DASHBOARD_DRAFT_ID")),
         ...pick("focusedComponentId", scalar("SPACES_FOCUSED_COMPONENT_ID")),
-        ...pick("workflowId", scalar("SPACES_WORKFLOW_ID")),
-        ...pick("executionId", scalar("SPACES_WORKFLOW_EXECUTION_ID")),
-        ...pick("focusedStepId", scalar("SPACES_WORKFLOW_STEP_ID")),
       };
       if (Object.keys(scalars).length > 0) {
         storeRunScalars(sessionId, scalars).catch(() => {});

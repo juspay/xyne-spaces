@@ -1,3 +1,4 @@
+import { sanitizeMessageContent } from '@/utils/contentUtils';
 /**
  * Conversation Service
  * Extracted common logic for creating conversations and messages
@@ -191,7 +192,7 @@ export class ConversationService {
    * Threshold is VESPA_BACKFILL_AGE_DAYS (default 365 days).
    */
   private pickVespaQueue(createdAt?: Date) {
-    const ageDays = Number(process.env.VESPA_BACKFILL_AGE_DAYS ?? 365);
+    const ageDays = config.vespa.backfillAgeDays;
     const thresholdMs = ageDays * 24 * 60 * 60 * 1000;
     const isHistorical = !!createdAt && createdAt.getTime() < Date.now() - thresholdMs;
     return isHistorical ? vespaBackfillQueue : vespaQueue;
@@ -460,7 +461,9 @@ export class ConversationService {
         conversationId,
         workspaceId: channel.workspaceId,
         senderId: userId,
-        content: messageContent,
+        content: (resolvedMessageMetadata as { contentFormat?: string } | null | undefined)?.contentFormat === 'markdown'
+          ? sanitizeMessageContent(messageContent)
+          : messageContent,
         msgType: resolvedMsgType,
         hasAttachment: processedFiles.length > 0,
         createdAt: messageCreatedAt.getTime(),

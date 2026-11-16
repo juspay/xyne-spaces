@@ -7,6 +7,7 @@ import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 import * as fs from 'fs';
 import * as path from 'path';
+import { safeChildPath, safePathSegment } from '../utils/safePath';
 import { resolvePeerProcess, describePeer, PeerProcess } from './peer-process';
 import { showAgentConsentWindow } from './agent-consent-window';
 
@@ -390,8 +391,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const authCookie = await this.getUserAuthCookie();
+      if (!authCookie) {
         this.sendJson(res, 401, { 
           error: 'Unauthorized',
           message: 'No user access token found in session' 
@@ -409,7 +410,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          Cookie: authCookie,
           'Content-Type': 'application/json'
         }
       });
@@ -461,8 +462,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const authCookie = await this.getUserAuthCookie();
+      if (!authCookie) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -481,7 +482,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Cookie: authCookie,
           'Content-Type': 'application/json',
         },
         bodyBuffer,
@@ -531,8 +532,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const authCookie = await this.getUserAuthCookie();
+      if (!authCookie) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -551,7 +552,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Cookie: authCookie,
           'Content-Type': 'application/json',
         },
         bodyBuffer,
@@ -591,8 +592,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const authCookie = await this.getUserAuthCookie();
+      if (!authCookie) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -619,7 +620,7 @@ class AgentAuthService {
       );
 
       const headers: Record<string, string> = {
-        Authorization: `Bearer ${accessToken}`,
+        Cookie: authCookie,
         'Content-Type': contentType,
       };
 
@@ -917,8 +918,8 @@ class AgentAuthService {
 
     try {
       // 3. Retrieve the user's active access token from workspace-scoped cookies
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const authCookie = await this.getUserAuthCookie();
+      if (!authCookie) {
         this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
         return;
       }
@@ -931,7 +932,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          Cookie: authCookie,
           'Content-Type': 'application/json'
         },
         data: body
@@ -952,7 +953,7 @@ class AgentAuthService {
    */
   private async fetchMessageAttachments(
     id: string,
-    accessToken: string
+    authCookie: string
   ): Promise<{ messageId: string; conversationId: string; attachments: any[] } | null> {
     let actualMessageId = id;
     let conversationId: string | null = null;
@@ -964,7 +965,7 @@ class AgentAuthService {
       url: conversationByMessageUrl,
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Cookie: authCookie,
         'Content-Type': 'application/json'
       }
     });
@@ -982,7 +983,7 @@ class AgentAuthService {
         url: conversationUrl,
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          Cookie: authCookie,
           'Content-Type': 'application/json'
         }
       });
@@ -1004,7 +1005,7 @@ class AgentAuthService {
       url: messageUrl,
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        Cookie: authCookie,
         'Content-Type': 'application/json'
       }
     });
@@ -1042,14 +1043,14 @@ class AgentAuthService {
 
     try {
       // 2. Retrieve the user's active access token from workspace-scoped cookies
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const authCookie = await this.getUserAuthCookie();
+      if (!authCookie) {
         this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
         return;
       }
 
       // 3. Fetch attachments using common logic
-      const result = await this.fetchMessageAttachments(id, accessToken);
+      const result = await this.fetchMessageAttachments(id, authCookie);
 
       if (!result) {
         this.sendJson(res, 404, {
@@ -1072,7 +1073,11 @@ class AgentAuthService {
       }
 
       // 4. Create download directory on desktop
-      const downloadDir = path.join(app.getPath('desktop'), 'xyne-attachments', actualMessageId);
+      const downloadDir = path.join(
+        app.getPath('desktop'),
+        'xyne-attachments',
+        safePathSegment(actualMessageId, 'message'),
+      );
       await fs.promises.mkdir(downloadDir, { recursive: true });
       log.info(`[AgentAuth] Created download directory: ${downloadDir}`);
 
@@ -1080,14 +1085,20 @@ class AgentAuthService {
       const downloadedFiles: Array<{ filename: string; path: string; size: number }> = [];
       for (const attachment of attachments) {
         try {
-          const filename = attachment.originalFilename || `attachment_${attachment.id}`;
-          const filePath = path.join(downloadDir, filename);
+          // The stored filename comes from other users and external senders, so it is reduced
+          // to a single safe segment and must resolve inside downloadDir.
+          const filename = safePathSegment(attachment.originalFilename, `attachment_${attachment.id}`);
+          const filePath = safeChildPath(downloadDir, filename);
+          if (!filePath) {
+            log.warn(`[AgentAuth] Skipping attachment ${attachment.id}: name resolves outside the download folder`);
+            continue;
+          }
 
           // Download attachment using the attachment download endpoint
-          const downloadUrl = `${config.BACKEND_URL}/api/attachments/${attachment.id}/download`;
+          const downloadUrl = `${config.BACKEND_URL}/api/attachments/${encodeURIComponent(String(attachment.id))}/download`;
           log.info(`[AgentAuth] Downloading attachment: ${filename} from ${downloadUrl}`);
 
-          await this.downloadAttachmentToFile(downloadUrl, filePath, accessToken);
+          await this.downloadAttachmentToFile(downloadUrl, filePath, authCookie);
 
           const stats = await fs.promises.stat(filePath);
           downloadedFiles.push({
@@ -1137,14 +1148,14 @@ class AgentAuthService {
 
     try {
       // 2. Retrieve the user's active access token from workspace-scoped cookies
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const authCookie = await this.getUserAuthCookie();
+      if (!authCookie) {
         this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
         return;
       }
 
       // 3. Fetch attachments using common logic
-      const result = await this.fetchMessageAttachments(id, accessToken);
+      const result = await this.fetchMessageAttachments(id, authCookie);
 
       if (!result) {
         this.sendJson(res, 404, {
@@ -1187,7 +1198,7 @@ class AgentAuthService {
   private async downloadAttachmentToFile(
     url: string,
     filePath: string,
-    accessToken: string
+    authCookie: string
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const request = net.request({
@@ -1196,7 +1207,7 @@ class AgentAuthService {
         useSessionCookies: false
       });
 
-      request.setHeader('Authorization', `Bearer ${accessToken}`);
+      request.setHeader('Cookie', authCookie);
 
       request.on('response', (response) => {
         if (response.statusCode !== 200) {
@@ -1387,31 +1398,23 @@ class AgentAuthService {
     res.end(backendResponse.body);
   }
 
-  private async getUserAccessTokenFromSession(): Promise<string | null> {
+  /**
+   * Cookie header carrying the user's workspace JWT (`xyne_ws_<workspaceId>_token`) for backend
+   * calls; the backend accepts the JWT only as that cookie.
+   */
+  private async getUserAuthCookie(): Promise<string | null> {
     const cookies = await session.defaultSession.cookies.get({});
     const readCookie = (name: string): string | undefined =>
       cookies.find((cookie) => cookie.name === name)?.value;
 
-    // Prefer authV2 workspace cookies:
-    // 1) pointer cookie `xyne_last_workspace`
-    // 2) token cookie `xyne_ws_<workspaceId>_token`
     const lastWorkspace = readCookie('xyne_last_workspace');
-    if (lastWorkspace) {
-      const workspaceToken = readCookie(`xyne_ws_${lastWorkspace}_token`);
-      if (workspaceToken) {
-        return workspaceToken;
-      }
-    }
-
-    // Backward compatibility fallback: old `google_access_token` cookie.
-    // Accept only JWT-shaped values to avoid using pending-auth JSON blobs.
-    const legacy = readCookie('google_access_token');
-    if (legacy && legacy.split('.').length === 3) {
-      return legacy;
-    }
-
-    return null;
+    if (!lastWorkspace) return null;
+    const tokenCookie = `xyne_ws_${lastWorkspace}_token`;
+    const workspaceToken = readCookie(tokenCookie);
+    if (!workspaceToken) return null;
+    return `${tokenCookie}=${workspaceToken}; xyne_last_workspace=${lastWorkspace}`;
   }
+
 
   /**
    * Validate an access token (for use by other services)

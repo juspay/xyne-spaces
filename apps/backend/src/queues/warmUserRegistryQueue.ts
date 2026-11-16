@@ -16,9 +16,10 @@ import { UserStatus, UserType } from '@xyne/shared';
 import { redisService } from '@/services/redisService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const TAG = '[WarmUserRegistry]';
-const WARM_USER_REGISTRY_CRON = process.env.WARM_USER_REGISTRY_CRON || '0 3 * * *';
+const WARM_USER_REGISTRY_CRON = config.cron.warmUserRegistry;
 
 export const STT_HINT_NAMES_REDIS_KEY = 'voiceInput:sttHintNames';
 // Refresh window is 24h; expire the cache a bit past that so a stalled cron
@@ -45,7 +46,9 @@ export async function computeSttHintNames(): Promise<string[]> {
       where: {
         status: UserStatus.ACTIVE,
         userType: { not: UserType.BOT },
-        email: { endsWith: '@juspay.in', mode: 'insensitive' },
+        ...(config.orgEmailDomain
+          ? { email: { endsWith: `@${config.orgEmailDomain}`, mode: 'insensitive' as const } }
+          : {}),
       },
       select: { name: true },
       orderBy: { name: 'asc' },

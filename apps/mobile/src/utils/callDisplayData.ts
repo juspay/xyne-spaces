@@ -8,7 +8,7 @@ import {
   MeetingStatus,
 } from '@xyne/shared';
 import { canonicalizePublicDeepLink } from './publicDeepLink';
-import { PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
+import { ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS, PUBLIC_DEEP_LINK_ORIGIN } from '@/src/config';
 
 import {
   formatDuration,
@@ -214,7 +214,11 @@ export function toCallDisplayData(
     title: call.title ?? null,
     transcript: call.transcript ?? null,
     roomLink: call.roomLink
-      ? canonicalizePublicDeepLink(call.roomLink, PUBLIC_DEEP_LINK_ORIGIN)
+      ? canonicalizePublicDeepLink(
+          call.roomLink,
+          PUBLIC_DEEP_LINK_ORIGIN,
+          ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS,
+        )
       : null,
     recurringSeriesId,
     participants: call.participants as unknown as CallDisplayData['participants'],

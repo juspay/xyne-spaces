@@ -140,7 +140,7 @@ export class FilesController {
         res.status(400).json({ 
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }

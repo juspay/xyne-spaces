@@ -33,7 +33,6 @@ export type ResourceName =
   | 'ORGANIZATIONS'
   | 'TICKET-MIGRATION'
   | 'CONFLUENCE-MIGRATION'
-  | 'EXTERNAL-STEP-RESPONSE'
   | 'VESPA'
   | 'SDLC';
 
@@ -76,7 +75,6 @@ export const PERMISSION_MATRIX: Record<WorkspaceRole, readonly PermissionEntry[]
     { resourceName: 'MODELS', accessType: AccessType.WRITE },
     { resourceName: 'TOOLS', accessType: AccessType.WRITE },
     { resourceName: 'AGENT-TOOLS-MAPPINGS', accessType: AccessType.WRITE },
-    { resourceName: 'EXTERNAL-STEP-RESPONSE', accessType: AccessType.WRITE },
     { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
     { resourceName: 'XYNE-APPS', accessType: AccessType.WRITE },
     { resourceName: 'CHANNELS', accessType: AccessType.WRITE },

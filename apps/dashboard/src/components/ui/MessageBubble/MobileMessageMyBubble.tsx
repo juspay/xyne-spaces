@@ -19,7 +19,8 @@ import { ChannelScopeType } from '@xyne/shared';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { PostedInLink } from './PostedInLink';
 import { hasMessageContent } from '../../../utils/chatUtils';
-import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
+// Disabled (LLM)
+// import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
@@ -47,7 +48,6 @@ export interface MobileMessageMyBubbleProps {
     | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
-  workflowNumber?: number | undefined;
   recordingShare?: ResolvedRecordingShareMessage | null;
   onClick?: ((e: React.MouseEvent<HTMLDivElement>) => void) | undefined;
 }
@@ -71,7 +71,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   channelId,
   conversation,
   context,
-  contentOnly,
+  // Disabled (LLM)
+  // contentOnly,
   threadInfo,
   channelScopeType,
   isFirstInThread = false,
@@ -83,27 +84,22 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   const attachments = message.attachments || [];
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
-  const isBotMessage = message.msgType === MessageType.BOT;
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
-  const isWorkflowMessage =
-    (isSystemMessage && metadata?.workflowId && metadata?.ticketId) ||
-    (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isTicketCardMessage =
-    !!conversation?.ticket_md &&
-    conversation?.initialMessageId === message.messageId &&
-    !isWorkflowMessage;
+    !!conversation?.ticket_md && conversation?.initialMessageId === message.messageId;
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isActiveCall = useIsCallActive(metadata?.callId);
   const { isMobile } = usePlatform();
-  const actionableCount = useMemo(
-    () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
-    [message.nudgeCounts],
-  );
-  const countRowIds = useMemo(
-    () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
-    [message.nudgeCounts],
-  );
+  // Disabled (LLM)
+  // const actionableCount = useMemo(
+  //   () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
+  //   [message.nudgeCounts],
+  // );
+  // const countRowIds = useMemo(
+  //   () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
+  //   [message.nudgeCounts],
+  // );
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -329,7 +325,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                   style={isSystemMessage ? systemMessageStyles : undefined}
                 >
                   <ExpandableMessage
-                    message={isWorkflowMessage ? 'Workflow created' : message.content}
+                    message={message.content}
                     showEdited={message.edited}
                     maxHeight={500}
                     messageId={message.messageId}
@@ -370,7 +366,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
             </div>
           )}
 
-          {conversation && conversation.ticket_md && !isWorkflowMessage && (
+          {conversation && conversation.ticket_md && (
             <div className='w-full'>
               <BotBubble
                 context={context}
@@ -381,7 +377,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
             </div>
           )}
 
-          {!contentOnly && (
+          {/* Disabled (LLM) */}
+          {/* {!contentOnly && (
             <SurfaceNudgeList
               messageId={message.messageId}
               actionableCount={actionableCount}
@@ -393,7 +390,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               isDeleted={message.isDeleted}
               className='mt-2 w-full'
             />
-          )}
+          )} */}
 
           {/* Reaction View - Outside Bubble */}
           <div className='mt-1 self-end'>

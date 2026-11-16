@@ -223,7 +223,7 @@ async function microsoftTokenHasContactsScope(accessToken: string): Promise<bool
  * CENTRAL, idempotent entry point for turning a Google/Microsoft login into the
  * user's contacts grant. Called from a single place — session creation — so it
  * can never be forgotten in one of the many login/join/create-workspace paths
- * (web, electron, mobile, invitation, community join, workspace creation).
+ * (web, electron, mobile, invitation, workspace creation).
  *
  * - No-op for unsupported/email users and when no refresh token is available.
  * - Skips when a usable (active) contacts grant already exists for the user.

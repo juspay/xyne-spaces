@@ -242,12 +242,6 @@ export function estimateMessageHeight(
   }
 
   // ── Plain system message (channel join, etc.) ──
-  const isWorkflowMessage =
-    (msgType === MessageType.SYSTEM &&
-      metadata?.workflowId &&
-      metadata?.ticketId &&
-      !metadata?.messageSubtype) ||
-    (msgType === MessageType.BOT && metadata?.xyneId && metadata?.ticketId);
   const isTicketCreationMessage =
     msgType === MessageType.SYSTEM && metadata?.ticketId !== undefined && !isTicketActivity;
   // isCallMessage is excluded here so calls with recordings fall through to the
@@ -396,19 +390,6 @@ export function estimateMessageHeight(
     height = Math.ceil(height * 1.4);
   }
 
-  // ── Workflow bubble ──
-  if (isWorkflowMessage) {
-    // Default (collapsed) view shows at most 1 step from completedSteps and 1 from
-    // pendingSteps. Outer card p-3 + header + timing rows ≈ 100px; the steps section
-    // card adds ~140px base + ~28px per visible step row.
-    const completedSteps = (metadata?.completedSteps ?? []) as unknown[];
-    const pendingSteps = (metadata?.pendingSteps ?? []) as unknown[];
-    const totalSteps = completedSteps.length + pendingSteps.length;
-    const defaultVisibleSteps = Math.min(totalSteps, 2);
-    const hasReadMore = totalSteps > 3;
-    height += totalSteps > 0 ? 100 + 140 + defaultVisibleSteps * 28 + (hasReadMore ? 24 : 0) : 100;
-  }
-
   // ── Attachments ──
   // Use item.data.initialMessageAttachments (the Zero query relationship) rather than
   // message.attachments which comes from InitialMessageSummary and is always empty.
@@ -481,7 +462,7 @@ export function estimateMessageHeight(
 
   // ── Ticket / BotBubble ──
   const hasTicket = item.data.ticketId !== null && item.data.ticketId !== undefined;
-  if (hasTicket && !isWorkflowMessage) {
+  if (hasTicket) {
     height += TICKET_BUBBLE_HEIGHT;
     if (isTicketCreationMessage) height += 20;
   }

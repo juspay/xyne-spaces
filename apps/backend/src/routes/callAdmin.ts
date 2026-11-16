@@ -24,7 +24,8 @@ router.post('/calls/:callId/cancel', callAdminController.cancelCall);
 router.post('/calls/:callId/force-end', callAdminController.forceEnd);
 router.post('/calls/:callId/unlink-transcript', callAdminController.unlinkTranscript);
 router.post('/calls/:callId/reprocess-transcript', callAdminController.reprocessTranscript);
-router.post('/calls/:callId/regenerate-summary', callAdminController.regenerateSummary);
+// Disabled (LLM)
+// router.post('/calls/:callId/regenerate-summary', callAdminController.regenerateSummary);
 router.post('/calls/:callId/owner', callAdminController.changeOwner);
 
 // Call background images (preset list itself is edited in Superposition).

@@ -88,8 +88,7 @@ Set all three public URLs. Add the bucket variables for your provider (see
 [README.md](README.md#2-prepare-dependencies)); `S3_ENDPOINT` and `AWS_REGION` for S3,
 `GCS_PROJECT_ID` for GCS, `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER` for Azure Blob
 (`AZURE_STORAGE_ENDPOINT`, `AZURE_STORAGE_CONNECTION_STRING` and `AZURE_STORAGE_SAS_TOKEN` are
-the optional overrides). `SESSION_EXPIRY_DAYS` (180) and `API_PATH_PREFIX` (empty; an extra
-prefix the API also answers on) are the other switches you are likely to touch.
+the optional overrides). `SESSION_EXPIRY_DAYS` (180) is the other switch you are likely to touch.
 
 **Scaling and disruption.** 2 replicas, HPA 2-6 on 70 % CPU / 80 % memory (scale up by 4 pods or
 100 % every 15 s, scale down 5 % every 120 s), PDB `minAvailable: 1`, `RollingUpdate` with
@@ -123,34 +122,33 @@ timeout 50 s; ServiceMonitor port `http`, path `/metrics`.
 
 ## xyne-worker
 
-The backend codebase started with its worker entrypoint (`pnpm run start:worker`). One install
+The backend codebase started with its worker entrypoint (`dist/main-worker.js`). One install
 runs one set of roles; install the chart once per role.
 
 **Image.** `ghcr.io/juspay/xyne-spaces-backend`, release-stamped; there is no separate worker
-image. `command: [pnpm, run, start:worker]`.
+image. The image is distroless (entrypoint `node`, no shell or pnpm), so the chart leaves
+`command` empty and sets `args: [--import, tsx, dist/main-worker.js]`.
 
 **Ports.** Container `http` 3001 and a Service with `http` 80 and `http-app` 3001 exist for
 parity only; worker mode starts no HTTP server, nothing listens.
 
 **Health.** All probes are empty on purpose. Use an exec probe if you need one.
 
-**Secrets.** `xyne-backend-secrets`: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `ENCRYPTION_KEY`,
-`INTERNAL_S2S_KEY`. The last three are required because the backend's env validation is loaded
-even though the worker does not serve requests. Add `REDIS_PASSWORD` and the storage keys the
-same way as on the backend.
+**Secrets.** `xyne-backend-secrets`: `DATABASE_URL`, `REDIS_URL`, `ENCRYPTION_KEY`,
+`INTERNAL_S2S_KEY`. `JWT_SECRET` is optional: only the API and the automation CSAT step sign
+with it, so a worker that runs neither does not mount it. Add `REDIS_PASSWORD` and the storage
+keys the same way as on the backend.
 
 **Environment.** The same Redis, storage and Vespa settings as the backend (`REDIS_HOST=redis`,
 `STORAGE_PROVIDER=s3`, `VESPA_FEED_URL`, `VESPA_QUERY_URL`, `ENABLE_OTEL_METRICS="false"`), plus
 the role flags, all `"false"`:
 
 `ENABLE_VESPA_WORKER`, `VESPA_WORKER_QUEUE_NAME` (`vespa-ingestion`), `ENABLE_VESPA_FILE_WORKER`,
-`ENABLE_NOTIFICATION_WORKER`, `ENABLE_AUTOMATION_WORKER`, `ENABLE_WORKFLOWS_WORKER`,
-`ENABLE_CONVERSATION_INGESTION_WORKER`, `ENABLE_DOCUMENT_INGESTION_WORKER`,
+`ENABLE_NOTIFICATION_WORKER`, `ENABLE_AUTOMATION_WORKER`,
 `ENABLE_DATA_SOURCE_INGESTION_WORKER`, `ENABLE_SCHEDULED_MESSAGE_WORKER`,
 `ENABLE_DELAYED_MESSAGE_WORKER`, `ENABLE_EMAIL_FETCH_WORKER`, `ENABLE_EMAIL_CLASSIFICATION_WORKER`,
 `ENABLE_CALENDAR_SYNC_WORKER`, `ENABLE_ACTIVITY_CLASSIFICATION_WORKER`,
-`ENABLE_TICKET_CLEANUP_WORKER`, `ENABLE_CALL_VALIDATION_WORKER`, `ENABLE_WORKER_SCHEDULER`,
-`ENABLE_WORKFLOW_RECOVERY`.
+`ENABLE_TICKET_CLEANUP_WORKER`, `ENABLE_CALL_VALIDATION_WORKER`, `ENABLE_WORKER_SCHEDULER`.
 
 An install with every flag at `"false"` does nothing. Two installs with the same flags on the same
 Redis process every job twice.
@@ -158,11 +156,10 @@ Redis process every job twice.
 - `VESPA_WORKER_QUEUE_NAME`: `vespa-ingestion` | `vespa-backfill-normal` | `vespa-backfill-file`.
   The Vespa worker and the notification worker are mutually exclusive in one process (the Vespa
   worker wins).
-- `ENABLE_WORKER_SCHEDULER` and `ENABLE_WORKFLOW_RECOVERY` default to `true` in the app; the chart
-  pins them to `"false"`. Enable each on exactly one install. The scheduler only starts inside a
-  Vespa worker (`ENABLE_VESPA_WORKER: "true"`); recovery starts on any role.
-- More role flags exist in `apps/backend/src/worker.ts` (`ENABLE_GCS_POLLING_WORKER`,
-  `ENABLE_PROACTIVE_NUDGE_WORKER`, `ENABLE_STITCH_WORKER`, ETA deadline, team intelligence, AI
+- `ENABLE_WORKER_SCHEDULER` defaults to `true` in the app; the chart pins it to `"false"`. Enable it
+  on exactly one install. The scheduler only starts inside a Vespa worker
+  (`ENABLE_VESPA_WORKER: "true"`).
+- More role flags exist in `apps/backend/src/worker.ts` (`ENABLE_PROACTIVE_NUDGE_WORKER`, `ENABLE_STITCH_WORKER`, ETA deadline, team intelligence, AI
   provisioning, drive import, social media sync, Slack migration); add them under `env` when
   needed.
 
@@ -179,8 +176,7 @@ helm install xyne-vespa-ingestion oci://ghcr.io/juspay/charts/xyne-worker --vers
 helm install xyne-notification-worker oci://ghcr.io/juspay/charts/xyne-worker --version 0.1.0-app.${VERSION} -n xyne \
   -f worker-common-values.yaml \
   --set fullnameOverride=xyne-external-notification-worker \
-  --set env.ENABLE_NOTIFICATION_WORKER=true \
-  --set env.ENABLE_WORKFLOW_RECOVERY=true
+  --set env.ENABLE_NOTIFICATION_WORKER=true
 ```
 
 where `worker-common-values.yaml` holds the Redis, storage and `secretEnv` settings shared by every
@@ -230,10 +226,6 @@ the image CMD writes `/etc/nginx/nginx.conf`, and nginx writes `/tmp` and `/var/
 **Gotchas.**
 
 - Leave `command` empty: the image CMD renders `nginx.conf` from its template and starts nginx.
-- The image's nginx config proxies requests whose user agent matches `devqa-xyne-<branch>` to
-  `http://xyne-backend.xyne-apps.svc.cluster.local:3001` (`/api/bundles/<branch>/...`), so that
-  test-only path assumes namespace `xyne-apps`. Nothing else in the image depends on the
-  namespace.
 
 ## xyne-dashboard-external
 

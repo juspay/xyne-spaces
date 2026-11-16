@@ -1,19 +1,3 @@
-export const DEFAULT_PUBLIC_DEEP_LINK_ORIGIN = 'https://spaces.xyne.juspay.net';
-
-/**
- * Supported (retired / alternate) Xyne Spaces web origins whose deep links must be
- * rewritten to the canonical public origin. OS Universal / App Link verification and
- * the in-app router are registered only for the canonical host (see
- * `plugins/withDeepLinks.cjs`), so a link that arrives on one of these origins would
- * otherwise open in the browser instead of the app. Keep this the single source of
- * truth for alternate domains — call sites must never hardcode or scatter replacements.
- */
-const LEGACY_PUBLIC_DEEP_LINK_ORIGINS = new Set([
-  'https://app.spaces.xyne.juspay.net',
-  'https://xyne-spaces.web.app',
-  'https://xyne-spaces.web',
-]);
-
 /**
  * Path shapes the mobile app deep-links. Mirrors `APP_PATH_PREFIXES` in
  * `plugins/withDeepLinks.cjs` so the runtime normalizer and the native
@@ -49,15 +33,21 @@ function isPublicDeepLinkPath(pathname: string): boolean {
 }
 
 /**
- * Normalize a Xyne Spaces link at the app boundary: rewrite a supported alternate
- * origin (see LEGACY_PUBLIC_DEEP_LINK_ORIGINS) to the canonical public origin while
- * preserving the workspace segment, path, entity ids, query, and hash. Non-Xyne hosts,
- * non-deep-link paths (e.g. `/apps/downloads`), and the retired `lotus:` scheme are
- * returned untouched. New links must be emitted with PUBLIC_DEEP_LINK_ORIGIN directly.
+ * Normalize a Xyne Spaces link at the app boundary: rewrite one of `alternateOrigins`
+ * (the dashboard / API host and any retired public origins — see
+ * `ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS` in `src/config.ts`; call sites must never
+ * hardcode or scatter replacements) to the canonical public origin while preserving
+ * the workspace segment, path, entity ids, query, and hash. OS Universal / App Link
+ * verification and the in-app router are registered only for the canonical host (see
+ * `plugins/withDeepLinks.cjs`), so such a link would otherwise open in the browser.
+ * Non-Xyne hosts, non-deep-link paths (e.g. `/apps/downloads`), and the retired
+ * `lotus:` scheme are returned untouched. New links must be emitted with
+ * PUBLIC_DEEP_LINK_ORIGIN directly.
  */
 export function canonicalizePublicDeepLink(
   value: string,
-  publicDeepLinkOrigin: string = DEFAULT_PUBLIC_DEEP_LINK_ORIGIN,
+  publicDeepLinkOrigin: string,
+  alternateOrigins: Iterable<string> = [],
 ): string {
   const trimmed = value.trim();
   if (!trimmed) return value;
@@ -69,10 +59,10 @@ export function canonicalizePublicDeepLink(
     return value;
   }
 
-  if (
-    !LEGACY_PUBLIC_DEEP_LINK_ORIGINS.has(parsed.origin) ||
-    !isPublicDeepLinkPath(parsed.pathname)
-  ) {
+  const rewritableOrigins = new Set(
+    Array.from(alternateOrigins, origin => origin.replace(/\/$/, '')),
+  );
+  if (!rewritableOrigins.has(parsed.origin) || !isPublicDeepLinkPath(parsed.pathname)) {
     return value;
   }
 

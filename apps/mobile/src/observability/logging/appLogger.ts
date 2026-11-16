@@ -1,6 +1,6 @@
 import { v7 as uuidv7 } from 'uuid';
 
-import { APP_VARIANT, LOGGER_CONFIG } from '../../config';
+import { APP_VARIANT, LOGGER_CONFIG, PUBLIC_DEEP_LINK_ORIGIN } from '../../config';
 import { SystemClock } from './clock/SystemClock';
 import { InMemoryLogContextStore } from './context/InMemoryLogContextStore';
 import { ReactNativeDeviceInfo } from './device/ReactNativeDeviceInfo';
@@ -101,7 +101,12 @@ export const logger = new Logger<AppLogEventMap>({
   // stream. Console output and arbitrary email fields stay redacted.
   includeEmailInRemoteRecords:
     remoteLogTransport !== null &&
-    canIncludeEmailInRemoteLogs(LOGGER_CONFIG.eventsEndpoint, APP_VARIANT, __DEV__),
+    canIncludeEmailInRemoteLogs(
+      LOGGER_CONFIG.eventsEndpoint,
+      APP_VARIANT,
+      __DEV__,
+      PUBLIC_DEEP_LINK_ORIGIN,
+    ),
   context: toStaticDeviceLogContext({
     serviceName: LOGGER_CONFIG.serviceName,
     osName: LOGGER_CONFIG.platform,

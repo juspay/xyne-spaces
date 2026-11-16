@@ -1,3 +1,4 @@
+import { isInstallWebhookHostAllowed } from '../core/appUrlResolver';
 import { Request, Response } from 'express';
 import { AccessType } from '@xyne/shared';
 import { z } from 'zod';
@@ -52,7 +53,7 @@ export class AppController {
         res.status(400).json({ 
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: bodyResult.error.errors
+          details: bodyResult.error.issues
         });
         return;
       }
@@ -142,7 +143,7 @@ export class AppController {
         res.status(400).json({ 
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }
@@ -210,7 +211,7 @@ export class AppController {
     try {
       const paramsResult = AppIdParamsSchema.safeParse(req.params);
       if (!paramsResult.success) {
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: paramsResult.error.errors });
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: paramsResult.error.issues });
         return;
       }
       const { appId } = paramsResult.data;
@@ -342,6 +343,10 @@ export class AppController {
         res.status(404).json({ error: 'Installed app not found in this workspace', code: 'INSTALLED_APP_NOT_FOUND' });
         return;
       }
+      if (webhookUrl && !(await isInstallWebhookHostAllowed(webhookUrl.trim(), install.appId))) {
+        res.status(400).json({ error: 'This webhook host is reserved for the app it belongs to', code: 'RESERVED_WEBHOOK_HOST' });
+        return;
+      }
 
       const updated = await repositories.installedApps.update(install.id, {
         webhookUrl: webhookUrl === undefined ? install.webhookUrl : webhookUrl.trim() || null,
@@ -365,7 +370,7 @@ export class AppController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }
@@ -438,7 +443,7 @@ export class AppController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }
@@ -493,7 +498,7 @@ export class AppController {
         res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
-          details: paramsResult.error.errors
+          details: paramsResult.error.issues
         });
         return;
       }

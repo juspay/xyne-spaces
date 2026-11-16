@@ -48,7 +48,6 @@ export interface RuleStatus {
   fingerprint?: string;
   cache: Rule['cache'];
   ttl?: number;
-  strip_prefix?: string;
   healthy: boolean;
   enabled: boolean;
   error?: string;
@@ -153,9 +152,6 @@ export class RulesStore {
       if (r.ttl !== undefined) {
         rs.ttl = r.ttl;
       }
-      if (r.stripPrefix !== undefined) {
-        rs.strip_prefix = r.stripPrefix;
-      }
       if (r.error !== undefined) {
         rs.error = r.error;
       }
@@ -189,8 +185,7 @@ export class RulesStore {
   }
 
   async fallbackBundles(ruleId: string, bundle: string): Promise<string[]> {
-    const sdlc = bundle.endsWith('-sdlc');
-    const fits = (b: string): boolean => b !== bundle && b.endsWith('-sdlc') === sdlc;
+    const fits = (b: string): boolean => b !== bundle;
     const seen = new Set<string>();
     const out: string[] = [];
     const add = (b: string): void => {
@@ -379,9 +374,6 @@ export class RulesStore {
             if (prev.ttl !== undefined) {
               rule.ttl = prev.ttl;
             }
-            if (prev.stripPrefix !== undefined) {
-              rule.stripPrefix = prev.stripPrefix;
-            }
             if (prev.fingerprint !== undefined) {
               rule.fingerprint = prev.fingerprint;
             }
@@ -410,8 +402,7 @@ export class RulesStore {
           prev.healthy !== rule.healthy ||
           prev.enabled !== rule.enabled ||
           prev.cache !== rule.cache ||
-          prev.ttl !== rule.ttl ||
-          prev.stripPrefix !== rule.stripPrefix;
+          prev.ttl !== rule.ttl;
       }
     }
     return changed;

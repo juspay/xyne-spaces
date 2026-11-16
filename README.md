@@ -1,9 +1,25 @@
 <div align="center">
 
-# [Xyne Spaces](https://xyne.ai)
+[![Xyne Spaces logo](docs/assets/xyne-spaces-icon.svg)](https://xyne.ai)
 
-**The org OS — your organization's context layer, with collaborative apps built
-around it. Real-time, permission-aware and built for agents.**
+# Xyne Spaces
+
+**The org OS.**<br>
+Your organization's context layer, with collaborative apps built around it.<br>
+Real-time, permission-aware and built for agents.
+
+<a href="https://github.com/juspay/xyne-spaces/stargazers"><img src="https://img.shields.io/github/stars/juspay/xyne-spaces?style=flat&logo=github&label=stars&color=EEEEEE" alt="GitHub stars"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-EEEEEE" alt="License: Apache 2.0"></a>
+<a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-EEEEEE" alt="PRs welcome"></a>
+[![Xyne Spaces: spaces.xyne.ai](docs/assets/spaces-readme-badge.svg)](https://spaces.xyne.ai/community)
+
+<a href="https://trendshift.io/repositories/178755?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-178755" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/178755/daily?language=TypeScript" alt="juspay%2Fxyne-spaces | Trendshift" width="250" height="55"/></a>
+
+[Quickstart](#quickstart) · [Community](https://spaces.xyne.ai/community) · [Architecture](#architecture) · [Agents](#agents-and-the-sandbox) · [MCP tools](#mcp-tools) · [Documentation](#documentation) · [Contributing](#contributing)
+
+</div>
+
+---
 
 **At the center: your org's context.** Connectors bring in what your organization
 already knows — Slack, Google Workspace, Microsoft 365 and [more](#connectors) —
@@ -15,10 +31,6 @@ Around that core sit the [org apps](#org-apps) — Call · Claw · Agentic Searc
 Automations · Customer Support Desk · Chat · Canvas · Tickets — adopted as you
 choose, where your team can do the work directly. Work done in them lands straight in the same context store —
 with each read and write filtered through the same permission model.
-
-[Quickstart](#quickstart) · [Community](https://spaces.xyne.ai/community) ·  [Architecture](#architecture) · [Agents](#agents-and-the-sandbox) · [MCP tools](#mcp-tools) · [Documentation](#documentation) · [Contributing](#contributing) · [License](LICENSE) · [PRs welcome](CONTRIBUTING.md)
-
-</div>
 
 <details>
 <summary><b>📁 Table of Contents</b></summary>

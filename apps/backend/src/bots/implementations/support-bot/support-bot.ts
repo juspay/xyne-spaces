@@ -15,6 +15,7 @@ import * as yaml from 'js-yaml'
 import jwt from "jsonwebtoken";
 import { getStorageService, type FileMetadata } from '@/services/storage'
 import { escapeHtml } from '@/utils/htmlEscape'
+import { config as appConfig } from '@/config/env';
 
 const CAC_KEYS = {
   support_group_name: 'support_group_name',
@@ -91,15 +92,15 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
 
   constructor() {
     super();
-    const backendUrl = process.env.API_BASE_URL || process.env.BACKEND_URL;
+    const backendUrl = appConfig.apiBaseUrl || appConfig.backendUrl;
     if (!backendUrl) {
       logger.warn('API_BASE_URL or BACKEND_URL environment variable is not set');
     }
-    if (!process.env.APP_JWT_KEY) {
+    if (!appConfig.appJwtKey) {
       logger.warn('APP_JWT_KEY environment variable is not set.');
     }
     this.BACKEND_URL = backendUrl || 'http://localhost:3000';
-    this.APP_JWT_KEY = process.env.APP_JWT_KEY || '';
+    this.APP_JWT_KEY = appConfig.appJwtKey;
     const parsed = TokenPayloadSchema.safeParse(jwt.decode(this.APP_JWT_KEY));
     this.botUserId = parsed.data?.userId || '';
 

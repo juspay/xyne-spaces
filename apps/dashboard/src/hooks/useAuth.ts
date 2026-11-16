@@ -1,10 +1,9 @@
 import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import axios from 'axios';
-import { authActor, setEnterpriseLoginIntent } from '../machines/authMachine';
+import { authActor } from '../machines/authMachine';
 import type {
   AuthState,
-  CommunityJoinRequestContext,
   User,
   Workspace,
   OAuthCallbackOutput,
@@ -12,7 +11,6 @@ import type {
 } from '../machines/authMachine';
 import { Context } from '@xyne/shared/index';
 import { apiInstance } from '../services/clients/apiClient';
-import { hashPasswordForAuth } from '../utils/passwordHash';
 
 export interface UseAuthReturn {
   // State
@@ -30,31 +28,14 @@ export interface UseAuthReturn {
   userExistsButRemoved: boolean;
   selfDmChannelId: string | null;
   landingChannelId: string | null;
-  communityJoinRequest: CommunityJoinRequestContext | null;
   enterpriseJoinTarget: EnterpriseJoinTarget | null;
 
   signInWithGoogle: () => void;
   signInWithMicrosoft: () => void;
   signInWithEmail: (email: string, password: string, invitationId?: string) => Promise<void>;
-  registerWithEmail: (
-    email: string,
-    password: string,
-    name: string,
-    workspaceId?: string,
-    invitationId?: string,
-  ) => Promise<{ success: boolean; message?: string; error?: string }>;
-  verifyEmailCode: (
-    email: string,
-    code: string,
-  ) => Promise<{ success: boolean; status?: string; error?: string }>;
-  resendVerificationCode: (
-    email: string,
-  ) => Promise<{ success: boolean; message?: string; error?: string }>;
   logout: () => void;
   clearError: () => void;
-  startEnterpriseLogin: () => void;
   selectWorkspace: (workspaceId: string) => void;
-  joinCommunityWorkspace: (workspaceId: string) => void;
   createOrg: (orgName: string, workspaceName: string) => void;
 }
 
@@ -142,14 +123,6 @@ export const useAuth = (): UseAuthReturn => {
     send({ type: 'CLEAR_ERROR' });
   }, [send]);
 
-  const startEnterpriseLogin = useCallback(() => {
-    // Persist the enterprise intent so the OAuth initiate actors can pass
-    // enterpriseLogin=true to the backend — the machine event alone is only
-    // handled in the communityJoinRequested state.
-    setEnterpriseLoginIntent();
-    send({ type: 'START_ENTERPRISE_LOGIN' });
-  }, [send]);
-
   const selectWorkspace = useCallback(
     (workspaceId: string) => {
       send({ type: 'SELECT_WORKSPACE', workspaceId });
@@ -164,158 +137,6 @@ export const useAuth = (): UseAuthReturn => {
     [send],
   );
 
-  const joinCommunityWorkspace = useCallback(
-    (workspaceId: string) => {
-      send({ type: 'JOIN_COMMUNITY_WORKSPACE', workspaceId });
-    },
-    [send],
-  );
-
-  const registerWithEmail = useCallback(
-    async (
-      email: string,
-      password: string,
-      name: string,
-      workspaceId?: string,
-      invitationId?: string,
-    ): Promise<{ success: boolean; message?: string; error?: string }> => {
-      try {
-        const hashedPassword = await hashPasswordForAuth(password);
-        const response = await apiInstance.post(
-          '/v2/auth/email/register',
-          {
-            email,
-            hashedPassword,
-            name,
-            ...(workspaceId ? { workspaceId } : {}),
-            ...(invitationId ? { invitationId } : {}),
-          },
-          { timeout: 30000 },
-        );
-        const data = response.data as { success: boolean; message?: string };
-        return { success: true, message: data.message ?? 'Verification code sent.' };
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          const data = err.response?.data as { error?: string; message?: string } | undefined;
-          return { success: false, error: data?.message ?? data?.error ?? 'Registration failed' };
-        }
-        const errWithResponse = err as { responseData?: { message?: string; error?: string } };
-        const errMessage =
-          errWithResponse.responseData?.message ??
-          errWithResponse.responseData?.error ??
-          (err instanceof Error ? err.message : '');
-        return { success: false, error: errMessage || 'Registration failed. Please try again.' };
-      }
-    },
-    [],
-  );
-
-  const verifyEmailCode = useCallback(
-    async (
-      email: string,
-      code: string,
-    ): Promise<{ success: boolean; status?: string; error?: string }> => {
-      try {
-        const response = await apiInstance.post(
-          '/v2/auth/email/verify',
-          { email, code },
-          { timeout: 15000 },
-        );
-        const data = response.data as {
-          success: boolean;
-          status?: string;
-          user?: User;
-          workspaces?: Workspace[];
-          pendingUserData?: { email: string; name: string; picture?: string };
-          userExistsButRemoved?: boolean;
-          autoLoginWorkspace?: string;
-          invitationPending?: boolean;
-          invitationId?: string;
-          domainConflictError?: string;
-          publicEmailDomainError?: string;
-          enterpriseJoinOrgName?: string;
-          enterpriseJoinWorkspaces?: string;
-        };
-
-        if (!data.success) {
-          return { success: false, error: 'Verification failed' };
-        }
-
-        if (data.invitationPending && data.invitationId) {
-          const emailForRedirect = data.pendingUserData?.email ?? email;
-          window.location.replace(
-            `/invite?invitationId=${encodeURIComponent(data.invitationId)}` +
-              `&loginComplete=true` +
-              `&loggedInEmail=${encodeURIComponent(emailForRedirect)}`,
-          );
-          return { success: true, status: data.status ?? 'INVITATION_PENDING' };
-        }
-
-        // Dispatch to auth machine — same as OAuth callback.
-        // The auth machine will check hasPendingWorkspace (from localStorage)
-        // and trigger the joinWorkspace actor, which handles community OPEN,
-        // community REQUEST_TO_JOIN, and enterprise join flows identically
-        // to Google/Microsoft SSO. If no workspaceId is pending, the auth
-        // machine shows the create-org / workspace-selection / domain-conflict
-        // UI — exactly like the OAuth callback flow.
-        authActor.send({
-          type: 'OAUTH_CALLBACK_COMPLETE',
-          output: {
-            ...(data.user ? { user: data.user } : {}),
-            workspaces: data.workspaces ?? [],
-            pendingUserData: data.pendingUserData ?? { email, name: '' },
-            userExistsButRemoved: data.userExistsButRemoved ?? false,
-            autoLoginWorkspace: data.autoLoginWorkspace,
-            domainConflictError: data.domainConflictError,
-            publicEmailDomainError: data.publicEmailDomainError,
-            enterpriseJoinOrgName: data.enterpriseJoinOrgName,
-            enterpriseJoinWorkspaces: data.enterpriseJoinWorkspaces,
-          } as OAuthCallbackOutput,
-        });
-
-        return { success: true, status: data.status ?? 'JOINED' };
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          const data = err.response?.data as { error?: string; message?: string } | undefined;
-          return { success: false, error: data?.message ?? data?.error ?? 'Verification failed' };
-        }
-        const errWithResponse = err as { responseData?: { message?: string; error?: string } };
-        const errMessage =
-          errWithResponse.responseData?.message ??
-          errWithResponse.responseData?.error ??
-          (err instanceof Error ? err.message : '');
-        return { success: false, error: errMessage || 'Verification failed. Please try again.' };
-      }
-    },
-    [],
-  );
-
-  const resendVerificationCode = useCallback(
-    async (email: string): Promise<{ success: boolean; message?: string; error?: string }> => {
-      try {
-        const response = await apiInstance.post(
-          '/v2/auth/email/resend-code',
-          { email },
-          { timeout: 30000 },
-        );
-        const data = response.data as { success: boolean; message?: string };
-        return { success: true, message: data.message ?? 'A new verification code has been sent.' };
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          const data = err.response?.data as { error?: string; message?: string } | undefined;
-          return { success: false, error: data?.message ?? data?.error ?? 'Failed to resend code' };
-        }
-        const errWithResponse = err as { responseData?: { message?: string; error?: string } };
-        const errMessage =
-          errWithResponse.responseData?.message ??
-          errWithResponse.responseData?.error ??
-          (err instanceof Error ? err.message : '');
-        return { success: false, error: errMessage || 'Failed to resend code. Please try again.' };
-      }
-    },
-    [],
-  );
-
   return {
     // State
     user: state.context.user,
@@ -328,7 +149,6 @@ export const useAuth = (): UseAuthReturn => {
       state.matches('loggingOut') ||
       state.matches('authenticating') ||
       state.matches('loggingInToWorkspace') ||
-      state.matches('joiningCommunityWorkspace') ||
       state.matches('submittingCreateOrg'),
     state: state.value as AuthState,
     isNewUser: state.context.isNewUser,
@@ -336,25 +156,18 @@ export const useAuth = (): UseAuthReturn => {
     pendingUserData: state.context.pendingUserData,
     isSelectingWorkspace: state.matches('selectingWorkspace'),
     isCreatingOrg: state.matches('creatingOrg'),
-    isLoggingInToWorkspace:
-      state.matches('loggingInToWorkspace') || state.matches('joiningCommunityWorkspace'),
+    isLoggingInToWorkspace: state.matches('loggingInToWorkspace'),
     userExistsButRemoved: state.context.userExistsButRemoved,
     selfDmChannelId: state.context.selfDmChannelId,
     landingChannelId: state.context.landingChannelId,
-    communityJoinRequest: state.context.communityJoinRequest,
     enterpriseJoinTarget: state.context.enterpriseJoinTarget,
 
     signInWithGoogle,
     signInWithMicrosoft,
     signInWithEmail,
-    registerWithEmail,
-    verifyEmailCode,
-    resendVerificationCode,
     logout,
     clearError,
-    startEnterpriseLogin,
     selectWorkspace,
-    joinCommunityWorkspace,
     createOrg,
   };
 };

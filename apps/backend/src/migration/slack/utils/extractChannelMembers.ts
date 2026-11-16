@@ -5,12 +5,13 @@
 
 import { WebClient } from '@slack/web-api';
 import { logger } from '../../../utils/logger';
+import { config } from '@/config/env';
 
 /**
  * Get Slack Web API client
  */
 function getSlackClient(token?: string): WebClient {
-  const resolvedToken = token || process.env.SLACK_BOT_TOKEN;
+  const resolvedToken = token || config.slackBotToken;
   if (!resolvedToken) {
     throw new Error('No bot token available for extractChannelMembers');
   }

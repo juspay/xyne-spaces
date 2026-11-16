@@ -11,8 +11,6 @@ export interface ColdStartCallInfo {
   callUUID: string;
   callerName: string;
   callType: CallKitCallType;
-  token?: string | undefined;
-  serverUrl?: string | undefined;
   channelId?: string | undefined;
 }
 
@@ -88,8 +86,6 @@ async function checkIOSColdStartCall(): Promise<ColdStartCallInfo | null> {
       callUUID: payload.callUUID,
       callerName: payload.callerName,
       callType: payload.callType,
-      ...(payload.token ? { token: payload.token } : {}),
-      ...(payload.serverUrl ? { serverUrl: payload.serverUrl } : {}),
       ...(payload.channelId ? { channelId: payload.channelId } : {}),
     };
   } catch (error) {

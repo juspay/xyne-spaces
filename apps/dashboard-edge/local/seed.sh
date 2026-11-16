@@ -22,13 +22,11 @@ bundle() { # bundle <prefix> <label>
 # the second argument is only a label baked into the sample files.
 bundle main aaa111
 bundle release-20260101 bbb222
-bundle main-sdlc ccc333
 bundle devqa-xyne-feature-x featurex
 
 # Pinned per-version copies, exactly as the pipeline uploads them beside each
 # lane; a rule with pin_version stamps a cookie naming one of these.
 VERSION=1.0.0-local.1 bundle main/1.0.0-local.1 aaa111
-VERSION=1.0.0-local.1 bundle main-sdlc/1.0.0-local.1 ccc333
 
 # --- fake-gcs -------------------------------------------------------------
 until curl -sf "http://${HOST}/storage/v1/b" >/dev/null; do sleep 1; done

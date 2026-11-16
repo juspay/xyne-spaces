@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { WorkspaceRole } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { Router, Request, Response } from 'express';
-import { authV2Middleware } from '../../middleware/authV2Middleware';
+import { authMiddleware } from '../../middleware/auth';
 import {
   microsoftDeskService,
   isReconnectChannelData,
@@ -193,7 +193,7 @@ async function createMicrosoftChannelEmailWorkspaceAuthUrl(
  * POST /api/integrations/microsoft/connect/init
  * Returns the Microsoft OAuth URL without relying on the browser's Xyne session.
  */
-router.post('/connect/init', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.post('/connect/init', authMiddleware.authenticate, async (req: Request, res: Response) => {
   const requestId = `MS_DESK_CONNECT_INIT_${Date.now()}`;
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   try {
@@ -231,7 +231,7 @@ router.post('/connect/init', authV2Middleware.authenticate, async (req: Request,
  * GET /api/integrations/microsoft/connect
  * Initiates Microsoft OAuth flow for email channel creation
  */
-router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.get('/connect', authMiddleware.authenticate, async (req: Request, res: Response) => {
   const requestId = `MS_DESK_CONNECT_${Date.now()}`;
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
@@ -277,7 +277,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
  * POST /api/integrations/microsoft/connect/workspace/init
  * Returns the Microsoft OAuth URL for the workspace shared mailbox.
  */
-router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.post('/connect/workspace/init', authMiddleware.authenticate, async (req: Request, res: Response) => {
   const requestId = `MS_DESK_WS_CONNECT_INIT_${Date.now()}`;
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   try {
@@ -305,7 +305,7 @@ router.post('/connect/workspace/init', authV2Middleware.authenticate, async (req
  * Workspace-level OAuth: connects xyne.desk@<orgDomain> as the shared mailbox
  * that DL desks ride on. Admin/owner only. Creates no channel.
  */
-router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.get('/connect/workspace', authMiddleware.authenticate, async (req: Request, res: Response) => {
   const requestId = `MS_DESK_WS_CONNECT_${Date.now()}`;
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';
@@ -336,7 +336,7 @@ router.get('/connect/workspace', authV2Middleware.authenticate, async (req: Requ
   }
 });
 
-router.post('/connect/channel-email-workspace/init', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.post('/connect/channel-email-workspace/init', authMiddleware.authenticate, async (req: Request, res: Response) => {
   const requestId = `MS_CHANNEL_EMAIL_WS_CONNECT_INIT_${Date.now()}`;
   const platform: ProviderPlatform = req.body.platform === 'electron' ? 'electron' : 'web';
   const returnPath = sanitizeReturnPath(req.body.returnPath);
@@ -361,7 +361,7 @@ router.post('/connect/channel-email-workspace/init', authV2Middleware.authentica
   }
 });
 
-router.get('/connect/channel-email-workspace', authV2Middleware.authenticate, async (req: Request, res: Response) => {
+router.get('/connect/channel-email-workspace', authMiddleware.authenticate, async (req: Request, res: Response) => {
   const requestId = `MS_CHANNEL_EMAIL_WS_CONNECT_${Date.now()}`;
   const platform: ProviderPlatform =
     req.query.platform === 'electron' ? 'electron' : 'web';

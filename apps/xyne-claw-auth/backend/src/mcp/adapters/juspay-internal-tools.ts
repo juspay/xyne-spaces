@@ -1,9 +1,7 @@
 import type { HttpMcpAdapter } from "../types.js";
 
 const TOKEN = process.env["JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN"] ?? "";
-const BASE_URL =
-  process.env["JUSPAY_INTERNAL_TOOLS_BASE_URL"] ??
-  "http://juspay-internal-tools-ext.internal.svc.k8s.dozer.mum.juspay.net/";
+const BASE_URL = process.env["JUSPAY_INTERNAL_TOOLS_BASE_URL"] ?? "";
 
 /**
  * Connects directly to the juspay-internal-tools Python MCP server's /tools

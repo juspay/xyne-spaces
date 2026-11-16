@@ -206,7 +206,7 @@ export const CREATE_PPT_CONFIG_SCHEMA = {
     label: "LiteLLM Proxy URL",
     default: "",
     required: true as const,
-    placeholder: "https://grid.ai.example.com",
+    placeholder: "https://llm.example.com",
   },
   LITELLM_API_KEY: {
     label: "LiteLLM API Key",

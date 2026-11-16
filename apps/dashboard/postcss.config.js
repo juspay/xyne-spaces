@@ -2,7 +2,7 @@ import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
 import isPseudoClass from '@csstools/postcss-is-pseudo-class';
 
-// Our own stylesheet only: third-party CSS (workflow-ui, BlockNote, pdf.js) is
+// Our own stylesheet only: third-party CSS (BlockNote, pdf.js) is
 // shipped as-is and some of it nests `:is()` beyond what the plugin can parse.
 const onlyGlobalCss = plugin => ({
   postcssPlugin: `${plugin.postcssPlugin}-global-css-only`,

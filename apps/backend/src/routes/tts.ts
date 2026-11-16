@@ -50,6 +50,7 @@ router.post('/', async (req: Request, res: Response) => {
   } catch {
     res.status(502).json({ success: false, error: 'TTS synthesis failed' });
   }
+  res.status(502).json({ success: false, error: 'TTS synthesis failed' });
 });
 
 export default router;

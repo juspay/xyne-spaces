@@ -5,7 +5,6 @@
     "lib": ["ES2020"],
     "types": ["node"],
     "outDir": "./dist",
-    "rootDirs": ["./src", "../../packages/framework/src"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -33,7 +32,6 @@
       "@xyne/cache": ["../../../packages/cache/dist"],
       "@xyne/shared": ["../../../packages/shared/dist"],
       "@xyne/storage": ["../../../packages/storage/dist"],
-      "@framework": ["../../../packages/framework/dist"],
       "@/*": ["*"],
       "@/config/*": ["config/*"],
       "@/controllers/*": ["controllers/*"],
@@ -44,13 +42,7 @@
       "@/utils/*": ["utils/*"],
       "@/validators/*": ["validators/*"],
       "@/zero/*": ["zero/*"]
-    },
-    "plugins": [
-      {
-        "transform": "./src/workflows/transformer/external-step-transformer.cjs",
-        "type": "program"
-      }
-    ]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "src/test/**/*"]

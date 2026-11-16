@@ -5,21 +5,14 @@ import { Button } from '../../components/ui/Button/Button';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { API_BASE_URL } from '../../config';
-import {
-  authActor,
-  PENDING_WORKSPACE_ID_KEY,
-  PENDING_WORKSPACE_NAME_KEY,
-  setLastActiveWorkspaceId,
-} from '../../machines/authMachine';
+import { authActor, setLastActiveWorkspaceId } from '../../machines/authMachine';
 
 interface InvitationDetails {
-  id: string;
-  email: string;
+  /** Server-side comparison of the invited address with the pending-auth cookie. The address itself is never sent. */
+  emailMatchesSession?: boolean;
   role: string;
   workspaceName?: string;
-  organizationName?: string;
   entityType?: string;
-  entityId?: string;
   entityTitle?: string | null;
   pendingApproval?: boolean;
 }
@@ -58,7 +51,7 @@ interface ApiErrorResponse {
 type PageState =
   | { status: 'redirecting' }
   | { status: 'verifying' }
-  | { status: 'email_mismatch'; loggedInEmail: string; invitedEmail: string }
+  | { status: 'email_mismatch'; loggedInEmail: string }
   | { status: 'pending_approval' }
   | { status: 'ready'; invitation: InvitationDetails }
   | { status: 'accepting' }
@@ -95,8 +88,6 @@ export const AcceptInvitation = (): ReactElement => {
     document.cookie = `pending_invitation_id=${invitationId}; path=/; max-age=600; SameSite=Lax`;
     // ALSO store in localStorage so it survives navigation
     localStorage.setItem('pending_invitation_id', invitationId);
-    localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
-    localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
     authActor.send({ type: 'LOGOUT' });
     void navigate(`/auth?invitationId=${invitationId}`);
   }, [loginComplete, invitationId, navigate]);
@@ -114,6 +105,7 @@ export const AcceptInvitation = (): ReactElement => {
       try {
         const response = await axios.get<VerificationResponse>(
           `${API_BASE_URL}/invitations/${invitationId}/verify`,
+          { withCredentials: true },
         );
 
         if (response.data.valid && response.data.invitation) {
@@ -121,9 +113,9 @@ export const AcceptInvitation = (): ReactElement => {
 
           if (inv.pendingApproval) {
             setState({ status: 'pending_approval' });
-          } else if (loggedInEmail && inv.email.toLowerCase() !== loggedInEmail.toLowerCase()) {
-            // Frontend email-match guard (backend also validates this on accept)
-            setState({ status: 'email_mismatch', loggedInEmail, invitedEmail: inv.email });
+          } else if (loggedInEmail && inv.emailMatchesSession === false) {
+            // Email-match guard computed by the backend (it also enforces this on accept)
+            setState({ status: 'email_mismatch', loggedInEmail });
           } else {
             setState({ status: 'ready', invitation: inv });
           }
@@ -156,7 +148,7 @@ export const AcceptInvitation = (): ReactElement => {
     setState({ status: 'accepting' });
     try {
       // Step 1: Accept invitation — creates workspace user, marks invitation accepted
-      // Backend reads google_access_token cookie for identity (does NOT clear it)
+      // Backend reads xyne_pending_auth cookie for identity (does NOT clear it)
       const acceptResponse = await axios.post<AcceptResponse>(
         `${API_BASE_URL}/invitations/${invitationId}/accept`,
         {},
@@ -165,7 +157,7 @@ export const AcceptInvitation = (): ReactElement => {
 
       const { workspaceId, redirectPath } = acceptResponse.data;
 
-      // Step 2: Login to workspace — issues JWT cookie, clears google_access_token cookie
+      // Step 2: Login to workspace — issues JWT cookie, clears xyne_pending_auth cookie
       const loginResponse = await axios.post<LoginWorkspaceResponse>(
         `${API_BASE_URL}/auth/login-workspace`,
         { workspaceId },
@@ -423,9 +415,6 @@ export const AcceptInvitation = (): ReactElement => {
             <CheckCircle className='w-5 h-5 text-green-500' />
             <span className='text-sm text-foreground'>Invitation verified</span>
           </div>
-          <p className='text-sm text-muted-foreground'>
-            Email: <span className='text-foreground'>{invitation.email}</span>
-          </p>
           <p className='text-sm text-muted-foreground'>
             Role:{' '}
             <span className='text-foreground capitalize'>{invitation.role?.toLowerCase()}</span>

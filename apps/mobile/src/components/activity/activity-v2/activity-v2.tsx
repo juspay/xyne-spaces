@@ -12,7 +12,6 @@ import { ReactionAddedActivityV2 } from '../reaction-added-activity-v2';
 import { ScheduledCallActivity } from '../scheduled-call-activity';
 import { TicketAssignmentActivity } from '../ticket-assignment-activity';
 import { TicketUpdateActivity } from '../ticket-update-activity';
-import { WorkflowQuestionActivity } from '../workflow-question-activity';
 import type { ActivityV2Props } from './activity-v2.types';
 import { ActivityRemoteAvatarLoadProvider } from './activity-avatar-load-context';
 import { ActivityRenderProvider } from './activity-render-context';
@@ -49,7 +48,6 @@ const ACTIVITY_RENDERERS = new Map<
   ['ticket_pr_declined', TicketUpdateActivity],
   ['ticket_pr_reviewer_assigned', TicketUpdateActivity],
   ['ticket_qa_assigned', TicketUpdateActivity],
-  ['workflow_question', WorkflowQuestionActivity],
   ['scheduled_call', ScheduledCallActivity],
   ['call_reminder', ScheduledCallActivity],
   ['call_updated', ScheduledCallActivity],

@@ -6,8 +6,8 @@ import {
   resolveTrustedCanvasWebViewPath,
 } from '@/src/utils/dashboardWebViewNavigation';
 
-const DASHBOARD = 'https://app.spaces.xyne.juspay.net';
-const TRUSTED = ['https://spaces.xyne.juspay.net', DASHBOARD];
+const DASHBOARD = 'https://app.example.org';
+const TRUSTED = ['https://example.org', DASHBOARD];
 
 describe('dashboard WebView navigation', () => {
   it('allows only same-origin dashboard documents inside the WebView', () => {
@@ -61,7 +61,7 @@ describe('dashboard WebView navigation', () => {
   it('normalizes a trusted public canvas link into the current WebView workspace', () => {
     assert.deepEqual(
       classifyDashboardWebViewNavigation(
-        'https://spaces.xyne.juspay.net/chat/canvas/canvas-1?mode=view#block-2',
+        'https://example.org/chat/canvas/canvas-1?mode=view#block-2',
         DASHBOARD,
         TRUSTED,
         '/ws1/chat/canvas',
@@ -76,7 +76,7 @@ describe('dashboard WebView navigation', () => {
   it('keeps the native-selected workspace for a trusted canvas link', () => {
     assert.equal(
       resolveTrustedCanvasWebViewPath(
-        'https://spaces.xyne.juspay.net/ws2/chat/canvas/canvas-2',
+        'https://example.org/ws2/chat/canvas/canvas-2',
         DASHBOARD,
         TRUSTED,
         '/ws1/chat/canvas',
@@ -109,14 +109,14 @@ describe('dashboard WebView navigation', () => {
   it('does not treat a lookalike host as trusted', () => {
     assert.deepEqual(
       classifyDashboardWebViewNavigation(
-        'https://spaces.xyne.juspay.net.attacker.test/chat/canvas/canvas-1',
+        'https://example.org.attacker.test/chat/canvas/canvas-1',
         DASHBOARD,
         TRUSTED,
         '/ws1/chat/canvas',
       ),
       {
         action: 'external',
-        url: 'https://spaces.xyne.juspay.net.attacker.test/chat/canvas/canvas-1',
+        url: 'https://example.org.attacker.test/chat/canvas/canvas-1',
       },
     );
   });

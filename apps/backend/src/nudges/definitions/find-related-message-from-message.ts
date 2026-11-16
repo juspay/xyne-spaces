@@ -9,7 +9,7 @@ import {
   type RunConfig,
   type RunState,
   type Tool,
-} from '@juspay-jaf/jaf';
+} from '@/agents/llmClient';
 import { logger } from '@/utils/logger';
 import { OrgLLMServiceAccountPurpose, NudgeKind, SurfaceAreaType, ChannelScopeType } from '@xyne/shared';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';

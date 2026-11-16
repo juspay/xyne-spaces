@@ -31,6 +31,20 @@ const ADMIN_ONLY_STATUSES = new Set<string>(['DISABLED', 'REJECTED', 'ARCHIVED']
  */
 const AUTHOR_OR_ADMIN_STATUSES = new Set<string>(['PENDING_APPROVAL', 'REVOKED']);
 
+/**
+ * Statuses each target status may be reached from. Mirrors the approval service's state
+ * machine so the ACL, which runs before the write, enforces it rather than the post-commit
+ * service check. A target not listed here cannot be set through Zero.
+ */
+const ALLOWED_FROM: Readonly<Record<string, readonly string[]>> = {
+  PENDING_APPROVAL: ['DRAFT'],
+  REVOKED: ['PENDING_APPROVAL'],
+  REJECTED: ['PENDING_APPROVAL'],
+  DISABLED: ['PENDING_APPROVAL', 'ACTIVE'],
+  ACTIVE: ['DISABLED'],
+  ARCHIVED: ['ACTIVE', 'DISABLED'],
+};
+
 export class WOrkflowsAcl extends BaseACL<'workflows'> {
   /**
    * Check that the calling user holds `ADMIN` on the AUTOMATIONS resource —
@@ -152,7 +166,34 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     //  - PENDING_APPROVAL / REVOKED → the automation's author, or an admin.
     //  - all other transitions → workspace membership only.
     const nextStatus = (args as { status?: string }).status;
-    if (nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus)) {
+    if (nextStatus && nextStatus !== existing.status && !(ALLOWED_FROM[nextStatus] ?? []).includes(existing.status)) {
+      throw new MutationACLError(
+        `Automation update failed: cannot move from ${existing.status} to ${nextStatus}`,
+        'workflows',
+      );
+    }
+    if (
+      existing.status === 'DRAFT' &&
+      (!nextStatus || nextStatus === 'DRAFT') &&
+      parseAutomationMetadata(existing.metadata).createdById !== this.ctx.userID
+    ) {
+      throw new MutationACLError('Automation update failed: only the author can edit a draft', 'workflows');
+    }
+    // The author may turn off their own live automation; every other DISABLED move is admin-only.
+    const isAuthorDisable =
+      nextStatus === 'DISABLED' &&
+      existing.status === 'ACTIVE' &&
+      parseAutomationMetadata(existing.metadata).createdById === this.ctx.userID;
+    if (nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus) && !isAuthorDisable) {
+      await this.requireAutomationsAdmin(tx);
+      if (
+        nextStatus === 'DISABLED' &&
+        existing.status === 'PENDING_APPROVAL' &&
+        parseAutomationMetadata(existing.metadata).createdById === this.ctx.userID
+      ) {
+        throw new MutationACLError('Automation approval failed: authors cannot approve their own proposals', 'workflows');
+      }
+    } else if (nextStatus === 'ACTIVE' && parseAutomationMetadata(existing.metadata).adminDisabled) {
       await this.requireAutomationsAdmin(tx);
     } else if (nextStatus && AUTHOR_OR_ADMIN_STATUSES.has(nextStatus)) {
       // Metadata may be missing/malformed/lacking createdById; treat any parse failure as
@@ -198,6 +239,9 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
         'Automation delete failed: only draft automations can be deleted',
         'workflows',
       );
+    }
+    if (parseAutomationMetadata(existing.metadata).createdById !== this.ctx.userID) {
+      await this.requireAutomationsAdmin(tx);
     }
   }
 
