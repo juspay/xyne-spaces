@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/Button/index';
 import { IconPopoverPicker } from '@/components/AppIcon/IconPopoverPicker';
 import { createBlankArtifactApp } from '@/services/claw/artifactAppsService';
 import { copyTextToClipboard } from '@/utils/clipboardUtils';
-import { appInitCommand } from '@/components/ArtifactApp/appInitCommand';
+import { appInitCommand, appPushCommand } from '@/components/ArtifactApp/appInitCommand';
+import { CLI_NPM_PACKAGE } from '@/routes/AIScreen/library/developers/developerTools';
 
 const MAX_TITLE = 120;
 const MIN_DESCRIPTION = 5;
@@ -17,9 +18,9 @@ const MAX_DESCRIPTION = 500;
  * Create app: name it, then build it locally.
  *
  * The app is created with nothing built yet, so its id exists before any code
- * does. The second step hands out the one command that installs the Spaces CLI
- * and scaffolds a project already pointed at this app — its first
- * `spaces app push` becomes version 1.
+ * does. The second step hands out one command that runs the Spaces CLI from npm
+ * (`npx`, nothing installed globally) and scaffolds a project already pointed at
+ * this app and this Spaces; its first push becomes version 1.
  */
 export const CreateAppDialog = ({
   open,
@@ -83,7 +84,7 @@ export const CreateAppDialog = ({
       title={created ? `Start building ${created.title}` : 'Create app'}
       description={
         created
-          ? 'Paste this in your terminal to install the Spaces CLI and set up the project.'
+          ? 'Paste this in your terminal to set up the project with the Spaces CLI.'
           : "Build your own front end on your workspace's data."
       }
       className={
@@ -109,8 +110,8 @@ export const CreateAppDialog = ({
               </button>
             </div>
             <p className='text-sm leading-6 text-muted-foreground'>
-              Paste this in your terminal. It installs the Spaces CLI, sets up the project and signs
-              you in. Then build it with your favourite coding tool.
+              Paste this in your terminal. It runs the Spaces CLI from npm (Node 22 or newer), sets
+              up the project and signs you in. Then build it with your favourite coding tool.
             </p>
             <div className='flex justify-end'>
               <Button
@@ -137,6 +138,13 @@ export const CreateAppDialog = ({
             <pre className='whitespace-pre-wrap break-all rounded-xl bg-zinc-900 px-5 py-4 font-mono text-[13px] leading-6 text-zinc-100'>
               {command}
             </pre>
+            {/* npx installs nothing globally, so there is no `spaces` command afterwards. */}
+            <p className='text-xs leading-5 text-muted-foreground'>
+              Nothing is installed globally. To push your work later, run{' '}
+              <code className='font-mono'>{appPushCommand()}</code> in the project folder, or
+              install the <code className='font-mono'>spaces</code> command with{' '}
+              <code className='font-mono'>npm i -g {CLI_NPM_PACKAGE}</code>.
+            </p>
           </div>
         </div>
       ) : (

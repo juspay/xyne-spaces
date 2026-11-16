@@ -15,7 +15,7 @@ import {
 } from '../../services/claw/artifactAppsService';
 import { clawErrorText } from '../../services/claw/clawRequest';
 import { copyTextToClipboard } from '../../utils/clipboardUtils';
-import { appFolderName, appInitCommand } from './appInitCommand';
+import { appFolderName, appInitCommand, appPushCommand } from './appInitCommand';
 import type { XyneAppContext, XyneContextChannel } from '../AIScreen/ReactArtifact';
 
 /**
@@ -285,7 +285,7 @@ export const ArtifactAppHost = ({
                     2. Build it, then push from the project folder
                   </span>
                   <pre className='whitespace-pre-wrap rounded-xl bg-zinc-900 px-4 py-3 font-mono text-[12px] leading-5 text-zinc-100'>
-                    {`cd ${folder}\nnpm run dev           # build and preview locally\nspaces app push       # upload it here`}
+                    {`cd ${folder}\nnpm run dev    # build and preview locally\n${appPushCommand()}    # upload it here`}
                   </pre>
                 </div>
                 <Button

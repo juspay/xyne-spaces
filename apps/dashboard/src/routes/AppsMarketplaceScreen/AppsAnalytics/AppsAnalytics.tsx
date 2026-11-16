@@ -78,7 +78,7 @@ const AppsAnalytics = (): ReactElement => {
           trackCategory='Apps'
           trackPrefix='AppsAnalyticsRange'
         />
-        <span className='text-xs text-muted-foreground'>Days are in UTC.</span>
+        <span className='text-xs text-muted-foreground'>Days are in IST.</span>
       </div>
 
       {query.isLoading ? (
@@ -412,7 +412,7 @@ const DailyTable = ({
     <table className='w-full text-sm'>
       <thead>
         <tr className='text-left text-xs text-muted-foreground'>
-          <th className='pb-2 font-normal'>Day (UTC)</th>
+          <th className='pb-2 font-normal'>Day (IST)</th>
           {series.map(s => (
             <th key={s.key} className='pb-2 text-right font-normal'>
               {s.label}

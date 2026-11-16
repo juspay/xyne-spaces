@@ -12,7 +12,6 @@ export function formatPercent(ratio: number): string {
   return `${Math.round(ratio * 100)}%`;
 }
 
-/** "Nov 3" for a YYYY-MM-DD day. The buckets are UTC days, so format in UTC. */
 export function formatDay(day: string): string {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, {
     month: 'short',

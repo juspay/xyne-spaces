@@ -868,7 +868,6 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
 });
 
 const ANALYTICS_RANGES = new Set([7, 30, 90]);
-const DAY_MS = 24 * 60 * 60 * 1000;
 /** Upper bounds on rows read per request, so one busy workspace can't make it unbounded. */
 const ANALYTICS_ROW_CAP = 50_000;
 const ANALYTICS_TOP_APPS = 10;
@@ -876,8 +875,20 @@ const ANALYTICS_RECENT_ERRORS = 10;
 /** Postgres caps bind parameters near 32k; `in` lists are chunked well below that. */
 const IN_CHUNK = 5_000;
 
-/** UTC calendar day, the bucket every daily series uses. */
-const dayKey = (d: Date): string => d.toISOString().slice(0, 10);
+/**
+ * Analytics days are IST calendar days (UTC+5:30). IST has no daylight saving,
+ * so a fixed offset is exact: shift an instant by it and its UTC date is the IST date.
+ */
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const clock = {
+  /** The IST calendar day (YYYY-MM-DD) an instant falls on. */
+  dayOf: (d: Date): string => new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10),
+  addDays: (day: string, n: number): string =>
+    new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10),
+  /** IST midnight at the start of `day`. */
+  startOf: (day: string): Date => new Date(Date.parse(`${day}T00:00:00Z`) - IST_OFFSET_MS),
+};
 
 /** First line of an error, whitespace collapsed and capped: enough to recognise
  *  it, without dumping a stack trace or a long tool payload into the UI. */
@@ -896,8 +907,10 @@ const errorSummary = (raw: string): string =>
  *    viewers started, and the owner is the one who can act on them. Only the
  *    first line of the error is returned, never the run's prompt.
  *
+ * Days are IST calendar days.
+ *
  * Built with the query builder only (no raw SQL, per scripts/validate-no-raw-sql.sh):
- * bounded reads of the window, bucketed per UTC day here.
+ * bounded reads of the window, bucketed per day here.
  */
 artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promise<void> => {
   const requesterId = getRequesterId(req);
@@ -909,8 +922,9 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
   const requestedDays = Number(req.query["days"] ?? 30);
   const days = ANALYTICS_RANGES.has(requestedDays) ? requestedDays : 30;
   const now = new Date();
-  // Start of the first UTC day in the window, so every bucket is a whole day.
-  const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - (days - 1) * DAY_MS);
+  // IST midnight of the first day in the window, so every bucket is a whole day.
+  const firstDay = clock.addDays(clock.dayOf(now), -(days - 1));
+  const since = clock.startOf(firstDay);
 
   const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
   if (!workspaceId) {
@@ -992,7 +1006,7 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
 
   // Every day in the window, including quiet ones, so a chart's x-axis is honest.
   const daily = Array.from({ length: days }, (_, i) => ({
-    date: dayKey(new Date(since.getTime() + i * DAY_MS)),
+    date: clock.addDays(firstDay, i),
     appsCreated: 0,
     versions: 0,
     runsCompleted: 0,
@@ -1001,7 +1015,7 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
   }));
   const dayIndex = new Map(daily.map((d, i) => [d.date, i]));
   const bump = (at: Date, field: Exclude<keyof (typeof daily)[number], "date">): void => {
-    const i = dayIndex.get(dayKey(at));
+    const i = dayIndex.get(clock.dayOf(at));
     if (i !== undefined) daily[i]![field] += 1;
   };
   for (const a of apps) bump(a.createdAt, "appsCreated");

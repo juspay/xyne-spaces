@@ -202,9 +202,9 @@ export function artifactAppPayloadUrl(appId: string, versionId?: string): string
 /** Ranges the analytics endpoint accepts; anything else falls back to 30. */
 export type ArtifactAppsAnalyticsDays = 7 | 30 | 90;
 
-/** One UTC day of activity. Every day in the window is present, quiet ones as zeros. */
+/** One IST calendar day of activity. Every day in the window is present, quiet ones as zeros. */
 export interface ArtifactAppsAnalyticsDay {
-  /** YYYY-MM-DD, UTC. */
+  /** YYYY-MM-DD, an IST calendar day. */
   date: string;
   appsCreated: number;
   versions: number;
@@ -266,7 +266,7 @@ export interface ArtifactAppsAnalytics {
   }[];
 }
 
-/** Apps Marketplace analytics for the caller's workspace. */
+/** Apps Marketplace analytics for the caller's workspace, counted in IST calendar days. */
 export async function getArtifactAppsAnalytics(
   days: ArtifactAppsAnalyticsDays,
 ): Promise<ArtifactAppsAnalytics> {
