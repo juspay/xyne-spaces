@@ -36,7 +36,11 @@ async function getValidateDbInstance() {
   return DatabaseClient.getInstance();
 }
 
-const TOKEN_VALID_SECONDS = 3600;
+const TOKEN_VALID_SECONDS = 30;
+// Dashboard bundles from before tickets send no tokenType and reuse one token until reload.
+// TODO: remove once those bundles are gone.
+const LEGACY_TOKEN_VALID_SECONDS = 3600;
+const TOKEN_TYPES = ['ticket', 'none'];
 
 const isDevelopment = config.env === 'development' || config.isTestEnv;
 
@@ -143,12 +147,20 @@ export class YSweetController {
 
   async getClientToken(req: Request, res: Response): Promise<void> {
     try {
-      const { docId, channelId, projectId, folderId, title } = req.body;
+      const { docId, channelId, projectId, folderId, title, tokenType } = req.body;
 
       if (!docId || typeof docId !== 'string') {
         res.status(400).json({
           error: 'Invalid request',
           message: 'docId is required and must be a string'
+        });
+        return;
+      }
+
+      if (tokenType !== undefined && !TOKEN_TYPES.includes(tokenType)) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: "tokenType must be 'ticket' or 'none'"
         });
         return;
       }
@@ -236,8 +248,11 @@ export class YSweetController {
       const clientToken = await ysweetGetOrCreateDocAndToken(canonicalDocId, {
         authorization,
         userId,
-        validForSeconds: TOKEN_VALID_SECONDS,
+        validForSeconds: tokenType ? TOKEN_VALID_SECONDS : LEGACY_TOKEN_VALID_SECONDS,
+        ticket: tokenType === 'ticket',
       });
+      // Only the socket needs a token. Every other caller reads docId and authorization.
+      if (tokenType === 'none') delete clientToken.token;
 
       logger.debug('[YSweet] Received client token from y-sweet', {
         baseUrl: clientToken.baseUrl,

@@ -144,7 +144,7 @@
     "@xyne/shared": "workspace:*",
     "@xyne/workflow-sdk": "3.2.69",
     "@xyne/workflow-ui": "1.3.69",
-    "@y-sweet/client": "^0.9.1",
+    "@y-sweet/client": "0.9.1",
     "ag-grid-community": "^35.0.0",
     "ag-grid-react": "^35.0.0",
     "axios": "^1.18.1",
