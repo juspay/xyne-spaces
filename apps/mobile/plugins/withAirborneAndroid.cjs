@@ -277,9 +277,9 @@ const withWorkManagerDependency = (config) => {
 };
 
 /**
- * Add Juspay maven repository to project-level build.gradle
+ * Add the Airborne maven repository to project-level build.gradle
  */
-const withJuspayMavenRepo = (config) => {
+const withAirborneMavenRepo = (config) => {
   return withDangerousMod(config, [
     'android',
     async (config) => {
@@ -322,6 +322,6 @@ module.exports = (config) => {
     withAirborneMainActivity,
     withAirborneOtaInMessagingService,
     withWorkManagerDependency,
-    withJuspayMavenRepo,
+    withAirborneMavenRepo,
   ]);
 };

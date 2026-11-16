@@ -90,19 +90,19 @@ describe("matchesDirectPick — the five historical conventions", () => {
 });
 
 describe("matchesDirectPick — server-type picks", () => {
-  const alerts = tool("Juspay_Alerts_MCP_2_0__alert_data_juspay", {
-    mcpToolName: "alert_data_juspay",
-    serverToolKey: "Juspay Internal Alerts MCP 2.0__alert_data_juspay",
+  const alerts = tool("Xyne_Alerts_MCP_2_0__alert_data_xyne", {
+    mcpToolName: "alert_data_xyne",
+    serverToolKey: "Xyne Internal Alerts MCP 2.0__alert_data_xyne",
   });
 
   it("admits a pick saved under the server type when it differs from the display name", () => {
-    expect(matchesDirectPick(alerts, ["Juspay Internal Alerts MCP 2.0__alert_data_juspay"])).toBe(true);
-    expect(matchesDirectPick(alerts, ["alert_data_juspay"])).toBe(true);
+    expect(matchesDirectPick(alerts, ["Xyne Internal Alerts MCP 2.0__alert_data_xyne"])).toBe(true);
+    expect(matchesDirectPick(alerts, ["alert_data_xyne"])).toBe(true);
   });
 
   it("does not admit another server's tool of the same name", () => {
-    expect(matchesDirectPick(alerts, ["Other Alerts MCP__alert_data_juspay"])).toBe(false);
-    expect(matchesDirectPick(alerts, ["Juspay Internal Alerts MCP 2.0__update_alert_metadata"])).toBe(false);
+    expect(matchesDirectPick(alerts, ["Other Alerts MCP__alert_data_xyne"])).toBe(false);
+    expect(matchesDirectPick(alerts, ["Xyne Internal Alerts MCP 2.0__update_alert_metadata"])).toBe(false);
   });
 });
 

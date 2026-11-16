@@ -72,7 +72,7 @@ const VCS_TEMPLATE_CONFIG_FIELDS: Record<string, {
       },
       repoName: {
         type: "string",
-        description: "owner/repository, for example juspay/xyne-spaces",
+        description: "owner/repository, for example xyne/xyne-spaces",
       },
     },
     required: [],

@@ -147,7 +147,7 @@ export const agentRepository = {
 
   // Phase-2: optional org scoping. `isDefault` becomes per-org — a fresh org has
   // no default agent until provisioned, so callers must tolerate null. Omitting
-  // orgId keeps today's global behavior (one org → the Juspay default).
+  // orgId keeps today's global behavior (one org → the Xyne default).
   findDefault: (orgId?: string) =>
     prisma.agent.findFirst({ where: { isDefault: true, enabled: true, ...(orgId ? { orgId } : {}) } }),
 

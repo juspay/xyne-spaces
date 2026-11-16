@@ -324,7 +324,7 @@ function topCounts(values: Array<string | null | undefined>, limit: number): Arr
     .map((e) => ({ value: e.display, count: e.count }));
 }
 
-/** `@Juspay `, `Juspay Technologies` → a comparable company key. */
+/** `@Xyne `, `Xyne Technologies` → a comparable company key. */
 function normalizeCompany(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const cleaned = raw.replace(/^@+/, "").replace(/[.,]+$/, "").replace(/\s+/g, " ").trim();
@@ -1485,7 +1485,7 @@ export async function handleRepoActivity(
         // GitHub's `owner` series counts commits by the owner ACCOUNT. For an
         // org-owned repo that account never commits, so the series is all
         // zeros and the split reads "100% community" — true but meaningless.
-        // Verified against juspay/xyne-spaces: owner sums to 0 over 52 weeks.
+        // Verified against xyne/xyne-spaces: owner sums to 0 over 52 weeks.
         ...(ownerTotal === 0 && allTotal > 0
           ? {
               ownerSplitMeaningful: false,
@@ -1800,7 +1800,7 @@ export async function handleCompareRepos(
 
 // ── tool definitions ────────────────────────────────────────────────────────
 
-const OWNER_PROP = { type: "string", description: "Repository owner / org (e.g. juspay)" } as const;
+const OWNER_PROP = { type: "string", description: "Repository owner / org (e.g. xyne)" } as const;
 const REPO_PROP = { type: "string", description: "Repository name (e.g. xyne-spaces)" } as const;
 
 export const GITHUB_INSIGHTS_TOOLS: McpToolInfo[] = [

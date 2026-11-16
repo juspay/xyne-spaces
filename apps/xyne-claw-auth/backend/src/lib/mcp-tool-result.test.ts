@@ -24,7 +24,7 @@ describe("classifyToolResult", () => {
   });
 
   it("passes a real payload through", () => {
-    expect(classifyToolResult('{"workspaces":[{"gid":"1","name":"Juspay"}]}')).toBeNull();
+    expect(classifyToolResult('{"workspaces":[{"gid":"1","name":"Xyne"}]}')).toBeNull();
     expect(classifyToolResult("")).toBeNull();
   });
 

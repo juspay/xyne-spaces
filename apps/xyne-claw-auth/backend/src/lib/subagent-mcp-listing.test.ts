@@ -56,8 +56,8 @@ beforeEach(() => {
     { id: "sub-po", name: "payouts", enabled: true, orgId: "org-1" },
   ];
   state.conns = [
-    conn("sub-pl", "juspay-dashboard-stream"),
-    conn("sub-po", "juspay-dashboard-stream"),
+    conn("sub-pl", "xyne-dashboard-stream"),
+    conn("sub-po", "xyne-dashboard-stream"),
   ];
   state.defWhere = null;
   state.decryptImpl = () => JSON.stringify({ apiKey: "x" });
@@ -72,7 +72,7 @@ describe("loadSubagentMcpListingEntries", () => {
     });
 
     expect(out).toHaveLength(1);
-    expect(out[0]!.serverType).toBe("juspay-dashboard-stream");
+    expect(out[0]!.serverType).toBe("xyne-dashboard-stream");
     expect(out[0]!.subagentDefinitionId).toBe("sub-pl");
     expect(out[0]!.subagentName).toBe("paymentlinks");
     expect(out[0]!.credentials).toEqual({ apiKey: "x" });
@@ -84,7 +84,7 @@ describe("loadSubagentMcpListingEntries", () => {
     const out = await loadSubagentMcpListingEntries({
       orgId: "org-1",
       subagentNames: ["paymentlinks"],
-      existingServerTypes: new Set(["juspay-dashboard-stream"]),
+      existingServerTypes: new Set(["xyne-dashboard-stream"]),
     });
 
     expect(out).toEqual([]);
@@ -116,8 +116,8 @@ describe("loadSubagentMcpListingEntries", () => {
 
   it("ignores a disabled MCP server", async () => {
     state.conns = [
-      conn("sub-pl", "juspay-dashboard-stream", {
-        mcpServer: { type: "juspay-dashboard-stream", name: "x", enabled: false },
+      conn("sub-pl", "xyne-dashboard-stream", {
+        mcpServer: { type: "xyne-dashboard-stream", name: "x", enabled: false },
       }),
     ];
 
