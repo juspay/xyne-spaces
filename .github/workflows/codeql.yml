@@ -1,0 +1,57 @@
+name: CodeQL
+
+# Advanced setup, on the self-hosted pools. Replaces GitHub's "Default setup",
+# which can only run on GitHub-hosted runners — turn Default setup OFF
+# (Settings -> Code security -> Code scanning) once this is merged, the two
+# can't both report.
+#
+# Same coverage as Default setup had: `extended` query suite (security-extended).
+# C/C++ is left out: the repo has one .c and five .h files
+# (apps/electron/native/mic-monitor), nothing worth a build-mode job.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One scan per PR at a time — a new push cancels the older, now-useless run
+# (Default setup piled up ~26 queued scans because nothing cancelled them).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze
+    # All three languages in one pod on mini (8Gi limit). CodeQL analyzes the
+    # databases one after another, so peak memory is the JS/TS one (~7GB on a
+    # hosted runner) — see the `ram` cap below.
+    runs-on: ${{ vars.USE_SELF_HOSTED_CI == 'true' && 'ci-cluster-github-runners-mini' || 'ubuntu-latest' }}
+    permissions:
+      security-events: write # upload SARIF results
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: actions,python,javascript-typescript
+          build-mode: none
+          queries: security-extended
+
+      # No `category`: with several languages, analyze uploads one SARIF per
+      # language and tags each with /language:<lang> itself.
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          # CodeQL sizes itself from host RAM, not the pod's cgroup limit — cap it
+          # under the 8Gi mini limit (runner + checkout need the rest) so the JVM
+          # isn't OOM-killed.
+          ram: "6144"
