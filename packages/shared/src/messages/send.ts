@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Zero } from '@rocicorp/zero';
 import { MessageType } from '../zero/schema.js';
 import type { EntityLinkContextInput } from '../sdlc.js';
+import type { SlashCommandArtifactProjection } from '../utils/slashCommandArtifact.js';
 import { mutators } from '../zero/mutators.js';
 import type { ConversationRef } from './conversationRef.js';
 import { clearDraft } from './draft.js';
@@ -25,6 +26,12 @@ export type SendPayload = {
   timestamp?: number;
   attachments?: PendingAttachment[];
   entityLinkContext?: EntityLinkContextInput;
+  /**
+   * Slash-command artifact projection computed from the plaintext body. The
+   * sender writes the `message_artifacts` row through the send mutator so the
+   * server never has to read (possibly encrypted) content to build it.
+   */
+  artifact?: SlashCommandArtifactProjection;
 };
 
 export type SendResult = {
@@ -74,6 +81,7 @@ export function sendMessage(
     ...(childConversationId !== undefined && { childConversationId }),
     ...(attachments.length > 0 && { attachments }),
     ...(payload.entityLinkContext !== undefined && { entityLinkContext: payload.entityLinkContext }),
+    ...(payload.artifact !== undefined && { artifact: payload.artifact }),
     sessionId: getCurrentSessionId(),
     zeroStateAtSend,
     mutatorFired: false,
@@ -129,6 +137,10 @@ export function sendMessage(
             ...(payload.entityLinkContext !== undefined && {
               entityLinkContext: payload.entityLinkContext,
             }),
+            ...(payload.artifact !== undefined && {
+              artifactCommand: payload.artifact.command,
+              artifactPreview: payload.artifact.messagePreview,
+            }),
           }),
         )
       : zero.mutate(
@@ -143,6 +155,10 @@ export function sendMessage(
               showInChannel: payload.alsoSendToChannel,
             }),
             ...(childConversationId !== undefined && { childConversationId }),
+            ...(payload.artifact !== undefined && {
+              artifactCommand: payload.artifact.command,
+              artifactPreview: payload.artifact.messagePreview,
+            }),
           }),
         );
 

@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import {
   getSlashCommandArtifactDiagnosticKey,
   getSlashCommandArtifactProjection,
+  isEncryptedField,
   MessageArtifactStatus,
   withSlashCommandArtifactEndedCall,
   type SlashCommandArtifactEndedCall,
@@ -15,9 +16,9 @@ export type MessageArtifactLifecycleStatus =
 /**
  * Rebuild the `message_artifacts` row from its source message, or delete it if
  * the message no longer qualifies (deleted, no longer an artifact, or scoped to
- * a single viewer). This is the only writer of the projected columns, so the
- * insert, edit, delete, and call-creation paths all stay consistent by calling
- * it rather than assembling their own projection.
+ * a single viewer). Server-authored writers (REST, imports, call creation) rely
+ * on it; the Zero send/update/delete mutators write the projection themselves
+ * from the client-computed `artifactCommand` / `artifactPreview` args
  *
  * Lifecycle columns (`status`, `callExternalId`) are intentionally not touched
  * on update: they are owned by setSlashCommandArtifactLifecycle, and message
@@ -43,6 +44,13 @@ export const syncMessageArtifact = async (
       },
     },
   });
+
+  if (message && isEncryptedField(message.content)) {
+    if (message.isDeleted) {
+      await tx.messageArtifact.deleteMany({ where: { messageId } });
+    }
+    return;
+  }
 
   const projection = getSlashCommandArtifactProjection(message?.content);
 

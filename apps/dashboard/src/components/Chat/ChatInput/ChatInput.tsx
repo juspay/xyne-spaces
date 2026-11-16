@@ -56,7 +56,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useRelatedContextAvailable } from '../../../contexts/RelatedContextAvailabilityContext';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
-import { getSlashCommandArtifactDefinition } from '@xyne/shared';
+import { getSlashCommandArtifactDefinition, getSlashCommandArtifactProjection } from '@xyne/shared';
 import { sendMessage, type ConversationRef, type PendingAttachment } from '@xyne/shared/messages';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
@@ -956,6 +956,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         const processedHtml = withDiscussionTitle(composedHtml);
         // Thrown, like the checks above, so the composer keeps what was written.
         if (processedHtml === null) throw new Error('Discussion title required');
+        // Projected here, from the plaintext, so the server can write the
+        // message_artifacts row without reading the (possibly encrypted) body.
+        const artifactProjection = artifactDraft
+          ? getSlashCommandArtifactProjection(processedHtml)
+          : null;
         const hasFiles = files && files.length > 0;
 
         // Backstop for callers that reach the send handler with the button bypassed
@@ -1136,6 +1141,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               timestamp: messageCreatedAt,
               alsoSendToChannel,
               ...(replyAttachments.length > 0 && { attachments: replyAttachments }),
+              ...(artifactProjection && { artifact: artifactProjection }),
             });
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
@@ -1209,6 +1215,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               messageId: newMessageId,
               timestamp: messageCreatedAt,
               ...(pendingAttachments.length > 0 && { attachments: pendingAttachments }),
+              ...(artifactProjection && { artifact: artifactProjection }),
               ...(entityLinkScope && {
                 entityLinkContext: {
                   sourceType: entityLinkScope.sourceType,
