@@ -145,6 +145,7 @@ async function retryBrokenBridgeOnce(opts: {
         body: JSON.stringify(newBody),
       },
       "bridge-retry-detached",
+      (opts.forwardBody as { conversationId?: string }).conversationId,
     );
     const retryBody = (await retryRes.json().catch(() => null)) as {
       success?: boolean;
