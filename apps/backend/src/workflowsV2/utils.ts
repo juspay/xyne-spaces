@@ -247,9 +247,11 @@ export const credentialAttributes = (row: {
   ...(row.ownerId !== null ? { ownerId: row.ownerId } : {}),
 });
 
-/** Narrow a credential query to the caller's own rows. */
-export const credentialOwnerWhere = (filter: { ownerId?: string }): { ownerId?: string } =>
-  filter.ownerId === undefined ? {} : { ownerId: filter.ownerId };
+/** Narrow a credential query to the caller's own rows plus unowned legacy rows. */
+export const credentialOwnerWhere = (
+  filter: { ownerId?: string },
+): { OR?: Array<{ ownerId: string | null }> } =>
+  filter.ownerId === undefined ? {} : { OR: [{ ownerId: filter.ownerId }, { ownerId: null }] };
 
 // ─── Guards ──────────────────────────────────────────────────────────────────
 

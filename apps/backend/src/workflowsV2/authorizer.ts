@@ -102,9 +102,11 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
         return this.sameWorkspace(ctx, ref.record.attributes) ? FOLDER_FULL : DENIED;
 
       case 'credential': {
-        // Owner only. A row with no owner predates ownership and is nobody's.
+        // Owner only. A row with no owner predates ownership: any workspace member
+        // may manage it (to revoke and re-add it scoped).
         if (!this.sameWorkspace(ctx, ref.record.attributes)) return DENIED;
-        return attrsOf(ref.record.attributes)?.ownerId === ctx.userId ? CREDENTIAL_ACTIONS : DENIED;
+        const ownerId = attrsOf(ref.record.attributes)?.ownerId;
+        return ownerId === undefined || ownerId === ctx.userId ? CREDENTIAL_ACTIONS : DENIED;
       }
 
       case 'execution':

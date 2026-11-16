@@ -81,8 +81,13 @@ describe('XyneWorkflowAuthorizer', () => {
       await expect(authorizer.permissions(inA, ref)).resolves.toEqual([]);
     });
 
-    it('denies everyone an unowned credential', async () => {
+    it('lets any workspace member manage an unowned legacy credential', async () => {
       const ref = credential({ workspaceId: 'ws_a' });
+      await expect(authorizer.permissions(inA, ref)).resolves.toEqual(CREDENTIAL_ACTIONS);
+    });
+
+    it('denies an unowned credential from another workspace', async () => {
+      const ref = credential({ workspaceId: 'ws_b' });
       await expect(authorizer.permissions(inA, ref)).resolves.toEqual([]);
     });
   });

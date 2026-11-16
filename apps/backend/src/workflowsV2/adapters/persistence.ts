@@ -969,18 +969,21 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         status: true,
         data: true,
         allowedWorkflowIds: true,
+        ownerId: true,
       },
     });
     if (!row || row.status !== CREDENTIAL_ACTIVE) return null;
 
-    // A credential is usable only by the workflows its owner listed. A caller
-    // with no workflow identity (workspace attributes alone) is refused too:
-    // there is nothing to check the list against.
-    const workflowId =
-      workflowOrAttributes && typeof workflowOrAttributes === 'object' && 'attributes' in workflowOrAttributes
-        ? (workflowOrAttributes as WorkflowContext['workflow']).id
-        : attrsOf(attributes)?.workflowId;
-    if (!workflowId || !row.allowedWorkflowIds.includes(workflowId)) return null;
+    // An owned credential is usable only by the workflows its owner listed; a
+    // caller with no workflow identity is refused. A legacy credential (no owner)
+    // stays usable by every workflow until someone revokes and re-adds it scoped.
+    if (row.ownerId !== null) {
+      const workflowId =
+        workflowOrAttributes && typeof workflowOrAttributes === 'object' && 'attributes' in workflowOrAttributes
+          ? (workflowOrAttributes as WorkflowContext['workflow']).id
+          : attrsOf(attributes)?.workflowId;
+      if (!workflowId || !row.allowedWorkflowIds.includes(workflowId)) return null;
+    }
 
     const values = JSON.parse(decrypt(row.data)) as unknown;
     const auth = validateCredentialAuth(row.authType as CredentialAuthType, values);
