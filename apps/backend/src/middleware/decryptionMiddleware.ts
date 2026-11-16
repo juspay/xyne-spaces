@@ -3,6 +3,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import {
+  CLIENT_MANIFEST_ENVIRONMENT_HEADER,
   CLIENT_MANIFEST_STALE_CODE,
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_VERSION_HEADER,
@@ -12,8 +13,13 @@ import {
 } from '@xyne/shared';
 import type { RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
-import { getEncryptionProvider, getLatestClientManifest, isDekPassthrough } from '@/services/encryption';
-import type { ClientManifestRule } from '@/services/encryption';
+import {
+  getEncryptionProvider,
+  getLatestClientManifest,
+  isDekPassthrough,
+  manifestEnvironmentForRequest,
+} from '@/services/encryption';
+import type { ClientEncryptionManifest, ClientManifestEnvironment, ClientManifestRule } from '@/services/encryption';
 import { TRANSIT_TICKET_COOKIE, TRANSIT_TICKET_HEADER } from '@/services/encryption/types';
 
 /** Entity type of the keys the Prisma encryption extension writes rows under. */
@@ -44,10 +50,58 @@ function hasEncryptedFields(obj: unknown): boolean {
   return false;
 }
 
+/** Same environment and a version not older than the latest; no version = not current. */
+function isClientManifestCurrent(
+  req: Request,
+  latest: ClientEncryptionManifest,
+  environment: ClientManifestEnvironment,
+): boolean {
+  const clientEnvironment = req.get(CLIENT_MANIFEST_ENVIRONMENT_HEADER);
+  if (clientEnvironment && clientEnvironment !== environment) return false;
+  const versionHeader = req.get(CLIENT_MANIFEST_VERSION_HEADER);
+  const version = versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : NaN;
+  // Newer than ours: our cache is behind.
+  return !Number.isNaN(version) && version >= latest.version;
+}
+
+function sendStale(
+  res: Response,
+  latest: ClientEncryptionManifest,
+  environment: ClientManifestEnvironment,
+): void {
+  res.status(409).json({
+    error: 'Client encryption manifest is stale',
+    code: CLIENT_MANIFEST_STALE_CODE,
+    latestVersion: latest.version,
+    environment,
+  });
+}
+
+/** Body breaks the latest rule: 409 if the client's manifest is old (it retries), else 400. */
+function rejectIfRuleViolated(
+  req: Request,
+  res: Response,
+  rule: ClientManifestRule,
+  latest: ClientEncryptionManifest,
+  environment: ClientManifestEnvironment,
+): boolean {
+  const violations = findRuleViolations(req.body, rule);
+  if (violations.length === 0) return false;
+  if (!isClientManifestCurrent(req, latest, environment)) {
+    sendStale(res, latest, environment);
+    return true;
+  }
+  res.status(400).json({
+    error: 'Request violates the client encryption manifest',
+    code: 'ENC_MANIFEST_VIOLATION',
+    violations,
+  });
+  return true;
+}
+
 /**
- * Reject writes to manifest-listed routes whose `x-enc-manifest-version` is older than
- * the latest manifest (409 ENC_MANIFEST_STALE), so the client refreshes and retries.
- * Routes not in the manifest pass through.
+ * Manifest-listed writes: 409 if encrypted with another environment's manifest; otherwise
+ * the body is checked against the latest rule (multipart later, after multer).
  */
 export async function enforceClientManifestVersion(
   req: Request,
@@ -61,36 +115,38 @@ export async function enforceClientManifestVersion(
 
   const tagHeader = req.get(CLIENT_MANIFEST_TAG_HEADER);
   const tag = tagHeader ? tagHeader : 'default';
+  const environment = manifestEnvironmentForRequest(req);
 
   let latest: Awaited<ReturnType<typeof getLatestClientManifest>>;
   try {
-    latest = await getLatestClientManifest(tag);
+    latest = await getLatestClientManifest(tag, environment);
   } catch (error) {
     // Fail open: a manifest lookup failure must not take every write down with it.
     logger.error('[decryptionMiddleware] failed to load client manifest, skipping version check', {
       method: sanitizeForLog(method),
       path: sanitizeForLog(req.path),
       tag: sanitizeForLog(tag),
+      environment,
       error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
     });
     return next();
   }
   if (!latest) return next();
 
-  if (!findRequestRule(latest, method, req.originalUrl)) {
+  const rule = findRequestRule(latest, method, req.originalUrl);
+  if (!rule) {
     return next();
   }
 
-  const versionHeader = req.get(CLIENT_MANIFEST_VERSION_HEADER);
-  const version = versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : NaN;
-  // A version newer than ours means this backend's cache is behind; let it through.
-  if (Number.isNaN(version) || version < latest.version) {
-    res.status(409).json({
-      error: 'Client encryption manifest is stale',
-      code: CLIENT_MANIFEST_STALE_CODE,
-      latestVersion: latest.version,
-    });
+  const clientEnvironment = req.get(CLIENT_MANIFEST_ENVIRONMENT_HEADER);
+  if (clientEnvironment && clientEnvironment !== environment) {
+    sendStale(res, latest, environment);
     return;
+  }
+
+  // Multipart is not parsed yet here.
+  if (req.body && typeof req.body === 'object' && !req.is('multipart/form-data')) {
+    if (rejectIfRuleViolated(req, res, rule, latest, environment)) return;
   }
 
   next();
@@ -235,7 +291,7 @@ async function transformRequestBody(
       rule: { type: rule.type, value: rule.value, revision: rule.revision },
       manifest: {
         tag: req.get(CLIENT_MANIFEST_TAG_HEADER) || 'default',
-        environment: config.env,
+        environment: manifestEnvironmentForRequest(req),
         version: versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : null,
       },
       ...owner,
@@ -387,10 +443,11 @@ export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOption
 
     const tagHeader = req.get(CLIENT_MANIFEST_TAG_HEADER);
     const tag = tagHeader ? tagHeader : 'default';
+    const environment = manifestEnvironmentForRequest(req);
 
     let latest: Awaited<ReturnType<typeof getLatestClientManifest>> = null;
     try {
-      latest = await getLatestClientManifest(tag);
+      latest = await getLatestClientManifest(tag, environment);
     } catch (error) {
       // Fail open on the rule check, as enforceClientManifestVersion does; decryption below
       // still runs.
@@ -398,6 +455,7 @@ export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOption
         method: sanitizeForLog(req.method),
         path: sanitizeForLog(req.path),
         tag: sanitizeForLog(tag),
+        environment,
         error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
       });
     }
@@ -416,15 +474,7 @@ export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOption
       const mismatches = contractFieldMismatches(contract, rule);
       if (mismatches.length > 0 && reportContractDrift(req, res, mismatches.join('; '))) return;
 
-      const violations = findRuleViolations(req.body, rule);
-      if (violations.length > 0) {
-        res.status(400).json({
-          error: 'Request violates the client encryption manifest',
-          code: 'ENC_MANIFEST_VIOLATION',
-          violations,
-        });
-        return;
-      }
+      if (latest && rejectIfRuleViolated(req, res, rule, latest, environment)) return;
     }
 
     // Shape check against the route's contract. passthrough() on purpose: keys the
