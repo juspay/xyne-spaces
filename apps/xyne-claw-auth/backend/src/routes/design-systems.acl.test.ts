@@ -271,3 +271,137 @@ describe("design system route authorization", () => {
     expect(state.pins).toHaveLength(0);
   });
 });
+
+/**
+ * A saved system's contrast audit (XYNE-66828). It is derived from the stored
+ * token CSS on every response rather than persisted, so it cannot go stale
+ * against an edited palette, and it is computed here rather than in the card so
+ * the maths has one tested implementation.
+ */
+describe("design system contrast audit", () => {
+  const FAILING_CSS =
+    ":root { --brand-background: #FFFFFF; --brand-surface: #F7F7F7; --brand-text: #AAAAAA; }";
+  const PASSING_CSS =
+    ":root { --brand-background: #FFFFFF; --brand-surface: #F7F7F7; --brand-text: #1A1A1A; }";
+
+  beforeEach(() => {
+    state.systems = [
+      { id: "ds-1", orgId: "org-1", name: "Pale", designMd: "", tokensCss: FAILING_CSS, createdBy: "user-a", version: 1, source: "url" },
+      { id: "ds-3", orgId: "org-1", name: "Readable", designMd: "", tokensCss: PASSING_CSS, createdBy: "user-a", version: 1, source: "url" },
+    ];
+    state.pins = [];
+    state.messages = [];
+    state.clawAdmins = new Set();
+    state.orgAdmins = new Set();
+    vi.clearAllMocks();
+  });
+
+  it("flags a failing system in the list, with counts rather than every pair", async () => {
+    const got = await requestJson("GET", "/");
+    expect(got.status).toBe(200);
+    const [failing, passing] = got.body["data"] as Array<Record<string, any>>;
+    expect(failing?.["contrast"]).toEqual({ audited: 2, failing: 2, hasIssues: true });
+    expect(passing?.["contrast"]["hasIssues"]).toBe(false);
+    // The picker only needs the verdict; five pair results per row is payload
+    // the badge never reads.
+    expect(failing?.["contrast"]["pairs"]).toBeUndefined();
+  });
+
+  it("returns every pair, with a suggestion, when a single system is read", async () => {
+    const got = await requestJson("GET", "/ds-1");
+    expect(got.status).toBe(200);
+    const audit = got.body["data"]["contrast"];
+    expect(audit["hasIssues"]).toBe(true);
+    expect(audit["pairs"]).toHaveLength(5);
+
+    const body = (audit["pairs"] as Array<Record<string, any>>).find(
+      (pair) => pair["id"] === "body-on-background",
+    );
+    expect(body?.["status"]).toBe("fail");
+    expect(body?.["foregroundToken"]).toBe("brand-text");
+    expect(body?.["suggestion"]["hex"]).toMatch(/^#[0-9A-F]{6}$/);
+    expect(body?.["suggestion"]["ratio"]).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("audits a system as it is created, so a failing palette is flagged before it is used", async () => {
+    const got = await requestJson("POST", "/", {
+      body: { name: "Fresh", tokensCss: FAILING_CSS, source: "url" },
+    });
+    expect(got.status).toBe(201);
+    expect(got.body["data"]["contrast"]["hasIssues"]).toBe(true);
+  });
+
+  it("re-audits on edit rather than carrying the verdict from before", async () => {
+    const before = await requestJson("GET", "/ds-1");
+    expect(before.body["data"]["contrast"]["hasIssues"]).toBe(true);
+
+    const got = await requestJson("PATCH", "/ds-1", {
+      userId: "user-a",
+      body: { tokensCss: PASSING_CSS },
+    });
+    expect(got.status).toBe(200);
+    expect(got.body["data"]["contrast"]["hasIssues"]).toBe(false);
+  });
+
+  it("saving a failing system is allowed", async () => {
+    const got = await requestJson("POST", "/", {
+      body: { name: "Unreadable on purpose", tokensCss: FAILING_CSS },
+    });
+    expect(got.status).toBe(201);
+    expect(state.systems.map((s) => s["name"])).toContain("Unreadable on purpose");
+  });
+
+  describe("POST /contrast-audit", () => {
+    it("requires an authenticated user", async () => {
+      const got = await requestJson("POST", "/contrast-audit", {
+        userId: null,
+        body: { tokens: { body: "#AAAAAA", background: "#FFFFFF" } },
+      });
+      expect(got.status).toBe(401);
+    });
+
+    it("rejects a request with nothing to audit", async () => {
+      expect((await requestJson("POST", "/contrast-audit", { body: {} })).status).toBe(400);
+    });
+
+    it("audits a palette the caller is still editing", async () => {
+      const got = await requestJson("POST", "/contrast-audit", {
+        body: {
+          tokens: { body: "#AAAAAA", background: "#FFFFFF" },
+          names: { body: "brand-text", background: "brand-background" },
+        },
+      });
+      expect(got.status).toBe(200);
+      expect(got.body["data"]["hasIssues"]).toBe(true);
+      const body = (got.body["data"]["pairs"] as Array<Record<string, any>>).find(
+        (pair) => pair["id"] === "body-on-background",
+      );
+      expect(body?.["status"]).toBe("fail");
+      expect(body?.["foregroundToken"]).toBe("brand-text");
+    });
+
+    it("reports a fixed palette as clean, which is what a one-click apply checks", async () => {
+      const got = await requestJson("POST", "/contrast-audit", {
+        body: { tokens: { body: "#595959", background: "#FFFFFF" } },
+      });
+      expect(got.body["data"]["failing"]).toBe(0);
+      expect(got.body["data"]["hasIssues"]).toBe(false);
+    });
+
+    it("ignores a slot it does not know instead of rejecting the whole request", async () => {
+      const got = await requestJson("POST", "/contrast-audit", {
+        body: { tokens: { body: "#AAAAAA", background: "#FFFFFF", sparkle: "#123456" } },
+      });
+      expect(got.status).toBe(200);
+      expect(got.body["data"]["audited"]).toBe(1);
+    });
+
+    it("audits raw token CSS, for a system that is not saved yet", async () => {
+      const got = await requestJson("POST", "/contrast-audit", {
+        body: { tokensCss: FAILING_CSS },
+      });
+      expect(got.status).toBe(200);
+      expect(got.body["data"]["hasIssues"]).toBe(true);
+    });
+  });
+});

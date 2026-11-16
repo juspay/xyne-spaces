@@ -97,7 +97,16 @@ brandAttachmentsRouter.get("/attachments/:id/brand-summary", async (req: Request
     // component-only, so after a refresh the button returned and each click
     // created another org-visible DesignSystem. The id is recorded on the
     // attachment, which is the only thing that survives the reload.
-    res.json({ success: true, data: summary, savedDesignSystemId: savedDesignSystemIdOf(att.metadata) });
+    // No contrast audit here. It used to ride along, computed from brand.json
+    // colours, but a saved system is audited from its tokens.css — and the two
+    // read a palette differently, so a token named outside the known slot list
+    // was flagged on the card and then clean once saved. The card audits the
+    // token CSS it is about to store instead. XYNE-66828.
+    res.json({
+      success: true,
+      data: summary,
+      savedDesignSystemId: savedDesignSystemIdOf(att.metadata),
+    });
   } catch (err) {
     log.error("[agent-chat] brand summary error:", err);
     if (!res.headersSent) res.status(500).json({ success: false, error: "Internal server error" });

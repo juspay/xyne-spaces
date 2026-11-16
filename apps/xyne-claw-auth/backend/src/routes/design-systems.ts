@@ -22,7 +22,15 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+import { Prisma, type DesignSystem } from "@prisma/client";
+import {
+  CONTRAST_SLOTS,
+  auditContrast,
+  auditTokensCss,
+  type ContrastAudit,
+  type ContrastSlot,
+  type ContrastTokens,
+} from "xyne-claw-shared";
 import {
   designSystemRepository,
   DESIGN_SYSTEM_SOURCES,
@@ -95,9 +103,79 @@ async function assertCanWrite(createdBy: string, caller: Caller): Promise<void> 
 const toJsonInput = (assets: Record<string, unknown> | null | undefined) =>
   assets === undefined ? undefined : (assets as Prisma.InputJsonValue | null);
 
+/**
+ * A saved system carries its WCAG audit on every single-row response
+ * (XYNE-66828), derived from its token CSS rather than stored: an audit is a
+ * pure function of the palette, and a stored verdict would go stale the moment
+ * a token is edited.
+ *
+ * The list response carries the counts only — `hasIssues` is all the warning
+ * badge needs, and five pair results per row is a lot of payload for a picker.
+ * The detail shape is a superset, so a client reading `contrast.hasIssues`
+ * works against both.
+ */
+const withContrast = (row: DesignSystem): DesignSystem & { contrast: ContrastAudit } => ({
+  ...row,
+  contrast: auditTokensCss(row.tokensCss),
+});
+
+const withContrastCounts = (row: DesignSystem) => {
+  const audit = auditTokensCss(row.tokensCss);
+  return {
+    ...row,
+    contrast: { audited: audit.audited, failing: audit.failing, hasIssues: audit.hasIssues },
+  };
+};
+
 designSystemsRouter.get("/", asyncHandler(async (req: Request, res: Response) => {
   const { orgId } = requireCaller(req);
-  ok(res, await designSystemRepository.listByOrg(orgId));
+  const rows = await designSystemRepository.listByOrg(orgId);
+  ok(res, rows.map(withContrastCounts));
+}));
+
+/**
+ * Re-audit a palette the caller is still editing.
+ *
+ * The review card needs this after a one-click fix: applying a suggestion
+ * changes a token that other pairs also use, so the whole set has to be
+ * re-measured. Nothing is read or written — it exists so the audit has exactly
+ * one implementation, in xyne-claw-shared, rather than a second copy in a
+ * frontend that has no workspace dependencies.
+ *
+ * Takes either a slot map or raw token CSS. Unknown slots are ignored rather
+ * than rejected, so a client that learns about a new slot before this server
+ * does still gets an answer for the slots it shares.
+ */
+const contrastAuditSchema = z.object({
+  tokens: z.record(z.string().max(64), z.string().max(64)).optional(),
+  tokensCss: z.string().max(MAX_TOKENS_CSS_CHARS).optional(),
+  names: z.record(z.string().max(64), z.string().max(120)).optional(),
+});
+
+const isContrastSlot = (value: string): value is ContrastSlot =>
+  (CONTRAST_SLOTS as readonly string[]).includes(value);
+
+const bySlot = <T,>(entries: Record<string, T> | undefined): Partial<Record<ContrastSlot, T>> => {
+  const out: Partial<Record<ContrastSlot, T>> = {};
+  for (const [key, value] of Object.entries(entries ?? {})) {
+    if (isContrastSlot(key)) out[key] = value;
+  }
+  return out;
+};
+
+designSystemsRouter.post("/contrast-audit", asyncHandler(async (req: Request, res: Response) => {
+  requireCaller(req);
+  const input = parseBody(contrastAuditSchema, req.body);
+  if (!input.tokens && input.tokensCss === undefined) {
+    throw badRequest("Either tokens or tokensCss is required");
+  }
+
+  if (input.tokens) {
+    const tokens: ContrastTokens = bySlot(input.tokens);
+    ok(res, auditContrast(tokens, { names: bySlot(input.names) }));
+    return;
+  }
+  ok(res, auditTokensCss(input.tokensCss ?? ""));
 }));
 
 designSystemsRouter.post("/", asyncHandler(async (req: Request, res: Response) => {
@@ -118,14 +196,14 @@ designSystemsRouter.post("/", asyncHandler(async (req: Request, res: Response) =
   });
 
   res.status(201);
-  ok(res, created);
+  ok(res, withContrast(created));
 }));
 
 designSystemsRouter.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
   const { orgId } = requireCaller(req);
   const row = await designSystemRepository.findById(req.params.id, orgId);
   if (!row) throw notFound("Design system not found");
-  ok(res, row);
+  ok(res, withContrast(row));
 }));
 
 designSystemsRouter.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
@@ -150,7 +228,7 @@ designSystemsRouter.patch("/:id", asyncHandler(async (req: Request<{ id: string 
     metadata: { orgId: caller.orgId, changed: Object.keys(input), version: updated.version },
   });
 
-  ok(res, updated);
+  ok(res, withContrast(updated));
 }));
 
 designSystemsRouter.delete("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
