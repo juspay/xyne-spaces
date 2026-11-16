@@ -57,6 +57,9 @@ jobs:
       - name: Run release check
         run: |
           set -euo pipefail
+          # The checked-out branch's release-check.ts may predate its GITHUB_ACTOR fallback and
+          # crash on `git config user.name`, which the runner leaves unset. Local to this checkout.
+          git config user.name "$GITHUB_ACTOR"
           ARGS=()
           if [ -n "$MODULES" ]; then
             # release-check.ts rejects unknown module names; this only blocks odd characters.
