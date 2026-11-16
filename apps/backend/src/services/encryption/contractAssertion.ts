@@ -1,59 +1,17 @@
-import { REQUEST_CONTRACTS, contractToRule } from '@xyne/shared';
-import type { ClientManifestRule, PersistPolicy, ExtractionPolicy } from '@xyne/shared';
+import { REQUEST_CONTRACTS } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { getLatestClientManifest } from './clientManifestCache';
 
-// Order-insensitive.
-function sameList(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
-  const left = [...(a ?? [])].sort();
-  const right = [...(b ?? [])].sort();
-  return left.length === right.length && left.every((value, i) => value === right[i]);
-}
-
-function sameFields(a: ClientManifestRule['fields'], b: ClientManifestRule['fields']): boolean {
-  const keys = Object.keys(a);
-  if (!sameList(keys, Object.keys(b))) return false;
-  return keys.every(
-    (key) =>
-      a[key].client === b[key].client &&
-      a[key].transform === b[key].transform &&
-      a[key].storage === b[key].storage,
-  );
-}
-
-function samePersist(a: PersistPolicy, b: PersistPolicy): boolean {
-  if (typeof a === 'boolean' || typeof b === 'boolean') return a === b;
-  return sameList(a, b);
-}
-
-// A rule served without an extractionPolicy (not shipped yet) counts as {}.
-function sameExtractionPolicy(a: ExtractionPolicy | undefined, b: ExtractionPolicy | undefined): boolean {
-  const left = a ?? {};
-  const right = b ?? {};
-  const names = Object.keys(left) as Array<keyof ExtractionPolicy>;
-  if (!sameList(names, Object.keys(right))) return false;
-  return names.every((name) => {
-    const l = left[name];
-    const r = right[name];
-    return Boolean(l && r) && samePersist(l!.persist, r!.persist);
-  });
-}
-
-function describeMismatch(expected: ClientManifestRule, served: ClientManifestRule | undefined): string | null {
-  if (!served) return 'no manifest rule with this value and revision';
-  const diffs: string[] = [];
-  if (!sameFields(expected.fields, served.fields)) diffs.push('fields');
-  if (!sameExtractionPolicy(expected.extractionPolicy, served.extractionPolicy)) diffs.push('extractionPolicy');
-  return diffs.length > 0 ? `differs in ${diffs.join(', ')}` : null;
-}
-
 /**
- * Checks that every request contract in @xyne/shared matches the rule the encryption
- * service serves for it (same value + revision; fields and extractionPolicy equal). A
- * mismatch throws in development and is logged plus counted elsewhere. An encryption
- * service outage is logged and never blocks startup.
+ * Checks that the request contracts in @xyne/shared (route + body schema) and the rules
+ * the encryption service serves (the encryption policy) agree on field names, in both
+ * directions: a manifest field the schema doesn't have is a typo or a removed field, and a
+ * schema field the manifest doesn't list would go out without a policy. Every REQUEST rule
+ * must also have a contract. Policy values themselves are owned by the encryption service
+ * and not compared. A mismatch throws in development and is logged plus counted elsewhere.
+ * An encryption service outage is logged and never blocks startup.
  */
 export async function assertEncContractsMatchManifest(): Promise<void> {
   if (!config.enc.apiClientEncryptionEnabled) return;
@@ -69,18 +27,36 @@ export async function assertEncContractsMatchManifest(): Promise<void> {
     return;
   }
 
+  const rules = (manifest?.rules ?? []).filter((rule) => rule.type === 'REQUEST');
   const mismatches: string[] = [];
+
   for (const contract of REQUEST_CONTRACTS) {
-    const expected = contractToRule(contract);
-    const served = manifest?.rules.find(
-      (rule) => rule.type === expected.type && rule.value === expected.value && rule.revision === expected.revision,
-    );
-    const mismatch = describeMismatch(expected, served);
-    if (mismatch) mismatches.push(`${expected.value} (rev ${expected.revision}): ${mismatch}`);
+    const rule = rules.find((candidate) => candidate.value === contract.route);
+    if (!rule) {
+      mismatches.push(`${contract.route}: no manifest rule for this route`);
+      continue;
+    }
+
+    const schemaFields = new Set(Object.keys(contract.schema.shape));
+    const ruleFields = new Set(Object.keys(rule.fields));
+    const notInRule = [...schemaFields].filter((field) => !ruleFields.has(field));
+    const notInSchema = [...ruleFields].filter((field) => !schemaFields.has(field));
+    if (notInRule.length > 0) {
+      mismatches.push(`${contract.route}: schema fields missing from the manifest rule: ${notInRule.join(', ')}`);
+    }
+    if (notInSchema.length > 0) {
+      mismatches.push(`${contract.route}: manifest fields missing from the schema: ${notInSchema.join(', ')}`);
+    }
+  }
+
+  for (const rule of rules) {
+    if (!REQUEST_CONTRACTS.some((contract) => contract.route === rule.value)) {
+      mismatches.push(`${rule.value}: manifest rule has no request contract`);
+    }
   }
 
   if (mismatches.length === 0) {
-    logger.info('[encContracts] request contracts match the client manifest', {
+    logger.info('[encContracts] request contracts and the client manifest agree on fields', {
       contracts: REQUEST_CONTRACTS.length,
       manifestVersion: manifest?.version ?? null,
     });

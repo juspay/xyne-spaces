@@ -47,6 +47,3 @@ export const derivedContentFactsSchema: z.ZodType<DerivedContentFacts> = z.objec
     })
     .optional(),
 });
-
-/** A whole extractor's output, or one key of it (`links.pr`), to store alongside the row. */
-export type PersistPath = ExtractorName | `${ExtractorName}.${string}`;
