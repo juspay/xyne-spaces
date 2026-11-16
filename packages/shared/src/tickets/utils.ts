@@ -1,5 +1,5 @@
 import { v5 as uuidv5 } from 'uuid';
-import { BaseTicketType, BoardType } from "../zero/types.js";
+import { BaseTicketType, BoardType, TicketStatusV2 } from "../zero/types.js";
 
 export const ClassifiableTicketTypes = Object.values(BaseTicketType).filter(
     (type) =>
@@ -29,6 +29,16 @@ export const stringFromFormValue = (value: unknown): string | null =>
  */
 export const isManualSubTicketBoard = (boardType?: BoardType | null): boolean =>
   boardType === BoardType.DEFAULT || boardType === BoardType.NON_LINEAR;
+
+/**
+ * Whether a stage with this default status may leave its ETA hours unset without blocking the
+ * ticket ETA forecast. No work happens in Completed/Cancelled/Paused stages, so an unset
+ * estimate counts as 0 hours; hours that are set are still used.
+ */
+export const isStageEtaOptional = (defaultTicketStatusV2?: string | null): boolean =>
+  defaultTicketStatusV2 === TicketStatusV2.COMPLETED ||
+  defaultTicketStatusV2 === TicketStatusV2.CANCELLED ||
+  defaultTicketStatusV2 === TicketStatusV2.PAUSED;
 
 const LINKED_SUB_TICKET_NAMESPACE = 'edffd0e4-129b-4f8a-9f73-c1a077f74433';
 

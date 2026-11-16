@@ -1,6 +1,7 @@
 import { transaction } from '../base';
 import { db } from '@/database/client';
 import { calculateETADeadline, recomputeOverallTicketEta } from '@/utils/etaCalculation';
+import { isTerminalStatus } from '@/services/etaManagement';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 
@@ -16,7 +17,10 @@ export function applyStageRemapTx(ticketId: string, targetBoardId: string, oldSt
 
     const targetStageEta =
       target.newStageEta !== null && target.newStageEta > 0 ? calculateETADeadline(now, target.newStageEta) : now;
-    const recomputedEta = recomputeOverallTicketEta(targetStageEta, now, target.futureStagesEtaHours);
+    // A ticket remapped into a Completed/Cancelled stage keeps its due date.
+    const recomputedEta = isTerminalStatus(target.newStageStatusV2)
+      ? null
+      : recomputeOverallTicketEta(targetStageEta, now, target.futureStagesEtaHours);
     const statusChanged = ticket.statusV2 !== target.newStageStatusV2;
 
     // Compare-and-swap: re-assert `stageName: oldStageName` at write time instead of

@@ -108,7 +108,7 @@ export function transferTicketToBoardTx(targetBoardId: string, ticketId: string,
     const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
     const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
     const stepEstimate = resolveStepEstimate(
-      { id: firstStage.id, eta: firstStage.eta },
+      firstStage,
       null,
       { requireExplicitTransition: false },
     );

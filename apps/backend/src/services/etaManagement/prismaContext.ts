@@ -13,6 +13,6 @@ export function isTerminalStatus(statusV2: string): boolean {
 export interface LoadedBoardEtaContext {
   boardType: string;
   boardEtaManagement: BoardEtaManagement;
-  stages: Array<Pick<Stage, 'id' | 'sequenceNumber' | 'eta'>>;
+  stages: Array<Pick<Stage, 'id' | 'sequenceNumber' | 'eta' | 'defaultTicketStatusV2'>>;
   transitions: StageTransition[];
 }

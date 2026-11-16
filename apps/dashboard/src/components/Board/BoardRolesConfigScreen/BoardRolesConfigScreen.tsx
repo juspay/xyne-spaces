@@ -11,13 +11,14 @@ import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { toast } from 'sonner';
 import { cn } from '../../../utils/classNames';
-import { BoardType, parseBoardEtaManagement } from '@xyne/shared';
+import { BoardType, isStageEtaOptional, parseBoardEtaManagement } from '@xyne/shared';
 
 interface BoardStageInfo {
   id: string;
   name: string;
   eta: number | null;
   sequenceNumber: number;
+  defaultTicketStatusV2: string | null;
 }
 
 interface BoardRolesConfigScreenProps {
@@ -316,6 +317,7 @@ const BoardRolesConfigScreen = ({
       name: s['name'] as string,
       eta: (s['eta'] as number | null) ?? null,
       sequenceNumber: s['sequenceNumber'] as number,
+      defaultTicketStatusV2: (s['defaultTicketStatusV2'] as string | null) ?? null,
     }));
   }, [board]);
   const stagesById = useMemo(() => new Map(boardStages.map(s => [s.id, s])), [boardStages]);
@@ -341,10 +343,11 @@ const BoardRolesConfigScreen = ({
     const missingEstimateStages: string[] = [];
     for (const id of standardPathStageIds) {
       const stage = stagesById.get(id);
-      if (!stage || !stage.eta || stage.eta <= 0) {
-        missingEstimateStages.push(stage?.name ?? id);
-      } else {
+      if (stage?.eta && stage.eta > 0) {
         totalHours += stage.eta;
+      } else if (!stage || !isStageEtaOptional(stage.defaultTicketStatusV2)) {
+        // Completed/Cancelled/Paused stages count as 0h when unset, so they aren't missing.
+        missingEstimateStages.push(stage?.name ?? id);
       }
     }
     return { totalHours, missingEstimateStages };

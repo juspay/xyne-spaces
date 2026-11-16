@@ -84,7 +84,7 @@ export async function createTicketWithClient(client: PrismaTransaction | PrismaC
   }
 
   const stepEstimate = resolveStepEstimate(
-    { id: selectedStage.id, eta: selectedStage.eta },
+    selectedStage,
     null,
     { requireExplicitTransition: false },
   );
@@ -296,7 +296,7 @@ export function updateTicketStageTx(isForwardMovement: boolean, currentStage: an
       ? activeVisitRow.stageEta.getTime() !== activeVisitRow.stageEnteredAt.getTime()
       : false;
     const stepEstimate = resolveStepEstimate(
-      { id: targetStage.id, eta: targetStage.eta },
+      targetStage,
       null,
       { requireExplicitTransition: false },
     );

@@ -21,7 +21,7 @@ export async function loadBoardEtaContext(
   const [stages, transitions] = await Promise.all([
     tx.stage.findMany({
       where: { boardId },
-      select: { id: true, sequenceNumber: true, eta: true },
+      select: { id: true, sequenceNumber: true, eta: true, defaultTicketStatusV2: true },
     }),
     tx.stageTransition.findMany({ where: { boardId } }),
   ]);
