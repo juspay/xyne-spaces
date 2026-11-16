@@ -11,7 +11,7 @@ import {
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
 } from '../integrations/core/deskSources';
-import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
+import { ChannelRepository, CreateChannelInput, DuplicateChannelNameError } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { ConversationRepository, CreateConversationInput } from '../database/repositories/conversationRepository';
 import { MessageRepository, CreateMessageInput } from '../database/repositories/messageRepository';
@@ -1466,6 +1466,16 @@ export class ChannelController {
       });
     } catch (error) {
       logger.error('Error creating channel:', error);
+
+      // Duplicate name: either caught by the pre-check, or by the unique index when a concurrent
+      // request with the same name won the race (see ChannelRepository.create).
+      if (error instanceof DuplicateChannelNameError) {
+        res.status(409).json({
+          error: 'DUPLICATE_CHANNEL_NAME',
+          message: error.message
+        });
+        return;
+      }
 
       // Handle specific duplicate channel error
       if (error instanceof Error && error.message.includes('already exists in organization')) {

@@ -11,6 +11,9 @@ import { createChannelWithConnectGroupTx } from '@/bypassAcl/transactions/connec
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
+import { DuplicateChannelNameError, isChannelNameUniqueViolation } from './channelNameUniqueness';
+
+export { CHANNEL_NAME_UNIQUE_INDEX, DuplicateChannelNameError, isChannelNameUniqueViolation } from './channelNameUniqueness';
 
 export interface CreateChannelInput {
   scopeType: ChannelScopeType;
@@ -66,7 +69,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Check for duplicate channel name within the workspace
     const isDuplicate = await this.checkDuplicateName(data.name, data.workspaceId);
     if (isDuplicate) {
-      throw new Error(`Channel with name "${data.name}" already exists.`);
+      throw new DuplicateChannelNameError(data.name);
     }
 
     // Slack Connect: mint a connectId, stamp it on the channel, and create its private
@@ -74,23 +77,35 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     const connectId = newConnectId();
     // Atomic channel + connect_group (bypassAcl op): a channel with a connectId but no group row is
     // invisible to connectReach and unrepairable via the app, so both must commit together.
-    const result = await createChannelWithConnectGroupTx(
-      {
-        scopeType: data.scopeType,
-        name: data.name,
-        description: data.description,
-        visibility: isDMChannel ? 'PRIVATE' : (data.visibility || 'PUBLIC'),
-        createdBy: data.createdBy,
-        // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
-        projectId: data.projectId ?? '',
-        workspaceId: data.workspaceId,
+    // checkDuplicateName above is only a fast path: two concurrent requests can both pass it.
+    // The partial unique index is the real guard; translate its violation into the same domain
+    // error so the losing request gets a 409 instead of a 500.
+    let result: Channel;
+    try {
+      result = await createChannelWithConnectGroupTx(
+        {
+          scopeType: data.scopeType,
+          name: data.name,
+          description: data.description,
+          visibility: isDMChannel ? 'PRIVATE' : (data.visibility || 'PUBLIC'),
+          createdBy: data.createdBy,
+          // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
+          projectId: data.projectId ?? '',
+          workspaceId: data.workspaceId,
+          connectId,
+          ...(data.type && { type: data.type }),
+        },
+        data.workspaceId,
         connectId,
-        ...(data.type && { type: data.type }),
-      },
-      data.workspaceId,
-      connectId,
-      this.db,
-    );
+        this.db,
+      );
+    } catch (error) {
+      if (isChannelNameUniqueViolation(error)) {
+        logger.warn(`[ChannelRepository] Concurrent create lost the channel-name race in workspace ${data.workspaceId}`);
+        throw new DuplicateChannelNameError(data.name);
+      }
+      throw error;
+    }
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
     // downstream consumers never read channel.projectId. Skipped entirely when the
