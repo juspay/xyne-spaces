@@ -4,6 +4,7 @@ import { pathToFileURL } from 'url';
 import { getActiveUIPath } from './ui-updater';
 import log from 'electron-log/main';
 import { config } from '../app/config';
+import { stripUrlQuery } from '../utils/log-url';
 
 /**
  * Custom protocol scheme for serving bundled UI.
@@ -100,7 +101,7 @@ export function setupCustomProtocol(): void {
     const fullPath = path.join(basePath, filePath);
     const fileUrl = pathToFileURL(fullPath).href;
 
-    log.info(`[CustomProtocol] Serving: ${request.url} -> ${fullPath}`);
+    log.info(`[CustomProtocol] Serving: ${stripUrlQuery(request.url)} -> ${fullPath}`);
 
     try {
       const response = await net.fetch(fileUrl);

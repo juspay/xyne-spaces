@@ -35,7 +35,7 @@ import { isClawAdmin } from "../middleware/agent-acl.js";
 import { resolveAgentCapabilities, toConfigTools, unknownToolsNote } from "./agent-card.js";
 import { writeAuditLog } from "./audit.js";
 import { resolvePromptChange } from "./prompt-edits.js";
-import { createLogger } from "../logger.js";
+import { createLogger, redactUrlQuery } from "../logger.js";
 
 const log = createLogger("agent-tools-apply");
 
@@ -435,7 +435,7 @@ async function createMcp(params: Record<string, unknown>, userId: string): Promi
     description: `agent-proposed MCP server "${cfg.name}" (${type}) approved from a create-mcp card`,
     metadata: { url: cfg.url, headerNames: cfg.headerNames },
   }).catch(() => {});
-  log.info(`[create-mcp] registered ${type} url=${cfg.url} by=${userId} headers=${cfg.headerNames.length}`);
+  log.info(`[create-mcp] registered ${type} url=${redactUrlQuery(cfg.url)} by=${userId} headers=${cfg.headerNames.length}`);
 
   const note =
     cfg.headerNames.length > 0

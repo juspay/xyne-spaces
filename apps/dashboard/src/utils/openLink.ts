@@ -3,6 +3,7 @@ import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge
 import { browserPanelActor } from '../machines/browserPanelMachine';
 import { isCallWindowRoute } from './callWindow';
 import { logger, Event } from './logger';
+import { stripUrlQuery } from './browserAddress';
 
 const LINK_OPEN_EXTERNAL_KEY = 'xyne:link-open-external-default';
 
@@ -73,7 +74,7 @@ export const openLink = (url: string, event?: MouseLike | null, opts?: OpenLinkO
   const modifier = !!(event?.metaKey || event?.ctrlKey);
 
   logger.info(modifier ? Event.BROWSER_LINK_CMD_CLICK : Event.BROWSER_LINK_CLICK, {
-    url,
+    url: stripUrlQuery(url),
     openedIn: resolveLinkTarget(event, opts),
   });
 

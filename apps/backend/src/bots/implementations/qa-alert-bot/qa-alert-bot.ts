@@ -346,7 +346,7 @@ export const qaAlertBot = new QaAlertBot();
  */
 export async function handleJenkinsWebhook(req: Request, res: Response): Promise<void> {
   try {
-    logger.info('[JenkinsWebhook] Received webhook:', req.body);
+    logger.info('[JenkinsWebhook] Received webhook');
     let payload: JenkinsWebhookPayload;
 
 if (Buffer.isBuffer(req.body)) {

@@ -41,3 +41,9 @@ export function homePageFor(typed: string): string | null {
   }
   return addressFor(text);
 }
+
+/** An address without its query string and fragment. */
+export function stripUrlQuery(url: string): string {
+  const end = url.search(/[?#]/);
+  return end === -1 ? url : url.slice(0, end);
+}

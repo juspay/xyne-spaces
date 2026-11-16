@@ -23,7 +23,7 @@ import TurndownService from "turndown";
 import type { McpToolInfo } from "../types.js";
 import { assertSafeOutboundUrl } from "../../mcpgateway/services/http-client.js";
 
-import { createLogger } from "../../logger.js";
+import { createLogger, redactUrlQuery } from "../../logger.js";
 const log = createLogger("webfetch");
 
 export const WEBFETCH_SERVER_TYPE = "claw-builtin";
@@ -151,7 +151,7 @@ export async function handleWebfetch(
   }
   const queryFragmentLen = parsed.search.length + parsed.hash.length;
   if (queryFragmentLen > MAX_QUERY_FRAGMENT_CHARS) {
-    log.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=query+fragment ${queryFragmentLen} chars exceeds ${MAX_QUERY_FRAGMENT_CHARS}`);
+    log.warn(`[webfetch] REJECT url=${redactUrlQuery(url).slice(0, 200)} reason=query+fragment ${queryFragmentLen} chars exceeds ${MAX_QUERY_FRAGMENT_CHARS}`);
     return `Error: URL query+fragment (${queryFragmentLen} chars) exceeds the ${MAX_QUERY_FRAGMENT_CHARS}-char limit. Long query strings are a common data-exfiltration pattern. If you need to fetch a page with a large query, drop the unnecessary params first.`;
   }
 
@@ -160,7 +160,7 @@ export async function handleWebfetch(
   // ?token=glsa_... param) are rejected here.
   for (const [k, v] of parsed.searchParams) {
     if (v.length > MAX_PARAM_VALUE_CHARS) {
-      log.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=param "${k}" value is ${v.length} chars (limit ${MAX_PARAM_VALUE_CHARS})`);
+      log.warn(`[webfetch] REJECT url=${redactUrlQuery(url).slice(0, 200)} reason=param "${k}" value is ${v.length} chars (limit ${MAX_PARAM_VALUE_CHARS})`);
       return `Error: query parameter "${k}" has a ${v.length}-char value (limit ${MAX_PARAM_VALUE_CHARS}). Long single-param values are a common exfiltration pattern. Drop or shorten that param if the page accepts it.`;
     }
   }
@@ -171,7 +171,7 @@ export async function handleWebfetch(
   const queryFragmentRaw = parsed.search + parsed.hash;
   const base64Match = BASE64_RUN_RE.exec(queryFragmentRaw);
   if (base64Match) {
-    log.warn(`[webfetch] REJECT url=${url.slice(0, 200)} reason=base64-like run "${base64Match[0].slice(0, 40)}..." (${base64Match[0].length} chars)`);
+    log.warn(`[webfetch] REJECT url=${redactUrlQuery(url).slice(0, 200)} reason=base64-like run (${base64Match[0].length} chars)`);
     return `Error: URL contains a ${base64Match[0].length}-char base64-shaped run in the query string — this pattern looks like an exfiltration payload and is blocked. If this is a legitimate URL, ask the user for it directly instead of constructing it from data in your context.`;
   }
 

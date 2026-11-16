@@ -107,7 +107,6 @@ export function verifySlackRequest(req: Request, res: Response, next: NextFuncti
 
     if (!isValid) {
       logger.warn('[Slack Verification] Invalid signature for team', {
-        received: slackSignature,
         team_id: teamId,
       });
       return res.status(401).send('Invalid signature');
