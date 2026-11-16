@@ -31,6 +31,5 @@ export {
   findRequestRule,
   encryptBodyWithRule,
   encryptFormDataWithRule,
-  findRuleViolations,
 } from './manifest-encrypt.js';
-export type { FieldEncryptor, RuleViolation } from './manifest-encrypt.js';
+export type { FieldEncryptor } from './manifest-encrypt.js';

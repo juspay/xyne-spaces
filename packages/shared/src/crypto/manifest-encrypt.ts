@@ -1,13 +1,7 @@
-import { isEncryptedField } from './field-decrypt.js';
 import type { ClientEncryptionManifest, ClientManifestRule } from './client-manifest.js';
 import { matchesRoute, normalizeRequestPath } from '../enc-contracts/route-match.js';
 
 export type FieldEncryptor = (value: string, fieldName: string) => Promise<string>;
-
-export interface RuleViolation {
-  path: string;
-  expected: 'expected ciphertext' | 'expected plaintext';
-}
 
 /**
  * REQUEST rule for `method` + `path`. `path` may carry a query string and the `/api`
@@ -78,26 +72,4 @@ export async function encryptFormDataWithRule(
   }
 
   return { unknownKeys };
-}
-
-/**
- * Fields whose encryption state disagrees with the rule: `client: true` values must be
- * ciphertext, `client: false` values must not be. Empty strings and non-strings pass.
- */
-export function findRuleViolations(body: unknown, rule: ClientManifestRule): RuleViolation[] {
-  const violations: RuleViolation[] = [];
-  if (!body || typeof body !== 'object') return violations;
-  const record = body as Record<string, unknown>;
-
-  for (const [key, fieldRule] of Object.entries(rule.fields)) {
-    const value = record[key];
-    if (typeof value !== 'string' || value.length === 0) continue;
-    if (fieldRule.client && !isEncryptedField(value)) {
-      violations.push({ path: key, expected: 'expected ciphertext' });
-    } else if (!fieldRule.client && isEncryptedField(value)) {
-      violations.push({ path: key, expected: 'expected plaintext' });
-    }
-  }
-
-  return violations;
 }

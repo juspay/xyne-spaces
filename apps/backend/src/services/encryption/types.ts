@@ -1,6 +1,4 @@
 import type {
-  ClientEncryptionManifest,
-  ClientManifestRule,
   DerivedContentFacts,
   EncryptedTableConfig,
 } from '@xyne/shared';
@@ -74,24 +72,20 @@ export type {
   ClientEncryptionManifest,
 } from '@xyne/shared';
 
-/** Identity of a manifest rule; the encryption service re-reads the field spec by it. */
-export type ClientManifestRuleRef = Pick<ClientManifestRule, 'type' | 'value' | 'revision'>;
-
 export type TransformRequestInput<T> = {
   body: T;
   /** Session the tickets inside `body` must have been issued to. */
   subject: string;
-  rule: ClientManifestRuleRef;
-  /**
-   * The manifest the client encrypted with (its tag and version headers, and this
-   * backend's environment). The encryption service rejects a version older than its latest
-   * for that tag and environment, or a missing one (`version: null`), with 409.
-   */
-  manifest: { tag: string; environment: string; version: number | null };
-  /**
-   * Owner of the row the request writes (the workspace whose DEK the Prisma extension would
-   * pick for it). Required when any `client: true` field in the rule is `MASTER_DEK`.
-   */
+  /** The request as made; the encryption service picks the manifest rule from these. */
+  method: string;
+  path: string;
+  /** The request's manifest lane (manifestEnvironmentForRequest). */
+  environment: string;
+  /** The client's manifest headers as sent; the encryption service checks them. */
+  client: { tag?: string; version?: number; environment?: string };
+  /** The route's request contract field names, compared with the rule's. */
+  contractFields?: string[];
+  /** Owner of the row the request writes: the workspace whose DEK its fields go under. */
   entityId?: string;
   entityType?: string;
 };
@@ -128,8 +122,6 @@ export interface EncryptionProvider {
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;
   generateStorageKey(input: GenerateStorageKeyInput): Promise<StorageObjectKey>;
   unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]>;
-  /** Latest client manifest for (tag, environment); `null` when the encryption service has none (404). */
-  getClientManifest(params: { tag: string; environment: string }): Promise<ClientEncryptionManifest | null>;
   /** Latest client manifest version, cheap enough to poll; `null` when there is none (404). */
   getClientManifestVersion(params: { tag: string; environment: string }): Promise<number | null>;
   /**

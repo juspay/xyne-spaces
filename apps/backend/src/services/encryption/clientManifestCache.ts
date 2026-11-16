@@ -4,96 +4,44 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { defaultManifestEnvironment, type ClientManifestEnvironment } from './manifestEnvironment';
 import { getEncryptionProvider } from './provider';
-import type { ClientEncryptionManifest } from './types';
 
-/** Fallback lifetime of a cached manifest; the version poll normally invalidates first. */
-const CACHE_TTL_MS = 60_000;
 /** How often each backend pod asks the encryption service for the latest version. */
 const VERSION_POLL_INTERVAL_MS = 10_000;
-/** Tags are client-supplied, so bound what one pod caches and polls. */
-const MAX_CACHED_ENTRIES = 32;
+/** Tags are client-supplied, so bound what one pod polls. */
 const MAX_WATCHED_ENTRIES = 8;
 
-type CacheEntry = {
-  manifest: ClientEncryptionManifest | null;
-  expiresAt: number;
-};
-
-/** What is cached, polled and announced: one manifest per (environment, tag). */
+/** What is polled and announced: one manifest per (environment, tag). */
 type ManifestKey = { environment: ClientManifestEnvironment; tag: string };
 
 const keyOf = ({ environment, tag }: ManifestKey): string => `${environment}\u0000${tag}`;
 
-const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<CacheEntry>>();
-/** Last version seen per (environment, tag), by the poll or by a load. */
+/** Last version the poll saw per (environment, tag). */
 const knownVersions = new Map<string, number>();
 /**
  * What the poll checks. There is no list of environments to configure: an (environment,
- * tag) is watched from the first time a request asks for it and the encryption service has
- * a manifest for it, so the production cluster ends up polling 'production' and
- * 'playground', a sandbox deployment 'sandbox', and so on.
+ * tag) is watched from the first time a socket on that lane asks for its version, so the
+ * production cluster ends up polling 'production' and 'playground', a sandbox deployment
+ * 'sandbox', and so on.
  */
 const initialKey: ManifestKey = { environment: defaultManifestEnvironment(), tag: 'default' };
 const watched = new Map<string, ManifestKey>([[keyOf(initialKey), initialKey]]);
 const versionEvents = new EventEmitter();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-function remember(key: ManifestKey, entry: CacheEntry): void {
+function watch(key: ManifestKey): void {
   const k = keyOf(key);
-  if (!cache.has(k) && cache.size >= MAX_CACHED_ENTRIES) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
-  }
-  cache.set(k, entry);
-  if (entry.manifest) {
-    if (!knownVersions.has(k)) knownVersions.set(k, entry.manifest.version);
-    if (watched.size < MAX_WATCHED_ENTRIES) watched.set(k, key);
-  }
-}
-
-/** The manifest for (environment, tag), fetched once however many requests are waiting. */
-function load(key: ManifestKey): Promise<CacheEntry> {
-  const k = keyOf(key);
-  const cached = cache.get(k);
-  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached);
-
-  const pending = inFlight.get(k);
-  if (pending) return pending;
-
-  const request = getEncryptionProvider()
-    .getClientManifest(key)
-    .then((manifest) => {
-      const entry = { manifest, expiresAt: Date.now() + CACHE_TTL_MS };
-      remember(key, entry);
-      return entry;
-    })
-    .finally(() => {
-      inFlight.delete(k);
-    });
-
-  inFlight.set(k, request);
-  return request;
+  if (!watched.has(k) && watched.size < MAX_WATCHED_ENTRIES) watched.set(k, key);
 }
 
 /**
- * Latest client manifest for `tag` in `environment` (default: from NODE_ENV). Cached, refreshed when the version poll sees a new
- * version (or after 60s), with in-flight dedupe. Used by the per-request checks; pass the
- * request's environment (`manifestEnvironmentForRequest`) so pre-prod requests are checked
- * against the pre-prod manifest. Failures are not cached.
+ * Last version this pod knows for (environment, tag), for the socket hello; no I/O. Starts
+ * watching it, so later changes reach that lane's sockets.
  */
-export async function getLatestClientManifest(
-  tag: string,
-  environment: ClientManifestEnvironment = defaultManifestEnvironment()
-): Promise<ClientEncryptionManifest | null> {
-  return (await load({ environment, tag })).manifest;
-}
-
-/** Last version this pod knows for (environment, tag), for the socket hello; no I/O. */
 export function getKnownClientManifestVersion(
   tag: string,
   environment: ClientManifestEnvironment
 ): number | undefined {
+  watch({ environment, tag });
   return knownVersions.get(keyOf({ environment, tag }));
 }
 
@@ -112,10 +60,7 @@ async function poll(key: ManifestKey): Promise<void> {
   const previous = knownVersions.get(k);
   if (previous === version) return;
   knownVersions.set(k, version);
-  cache.delete(k);
   if (previous === undefined) return;
-  // Load before announcing, so the clients that refetch are served from memory.
-  await load(key);
   logger.info('[encManifest] client manifest version changed', {
     ...key,
     from: previous,

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { ClientManifestRule, DerivedContentFacts, RequestBody, RequestContract } from '@xyne/shared';
+import type { DerivedContentFacts, RequestBody, RequestContract } from '@xyne/shared';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -64,8 +64,6 @@ declare global {
       user?: AuthenticatedUser;
       /** Facts the encryption service extracted from this request's encrypted fields. */
       derived?: DerivedContentFacts;
-      /** Client manifest rule this request was transformed under. */
-      encRule?: ClientManifestRule;
     }
   }
 }
