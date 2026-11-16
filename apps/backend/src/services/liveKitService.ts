@@ -12,7 +12,7 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { repositories } from '@/database/repositories';
 import { superpositionClient } from '@/services/superpositionClient';
-import { DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
+import { CallStatus, DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
 
 /** Most participants a single LiveKit room can hold. Keep in sync with the LiveKit server config's room.max_participants. */
 export const LIVEKIT_ROOM_MAX_PARTICIPANTS = 500;
@@ -182,6 +182,7 @@ export class LiveKitService {
   private agentDispatch: AgentDispatchClient;
   /** Rooms being watched for a missing transcription agent — one retry chain per room. */
   private redispatchWatchers = new Map<string, NodeJS.Timeout>();
+  private joinCheckTimers = new Map<string, NodeJS.Timeout>();
   private apiKey: string;
   private apiSecret: string;
   private serverUrl: string;
@@ -419,9 +420,19 @@ export class LiveKitService {
     // A claimed job can still fail to join (no call session, crash before connecting). The
     // claim check can't see that, so look for the agent in the room itself; presence-gated.
     const joinTimer = setTimeout(() => {
+      this.joinCheckTimers.delete(dispatchId);
       void this.ensureTranscriptionAgent(roomName, agentName, { reason: 'dispatched_agent_not_in_room' });
     }, AGENT_JOIN_CHECK_DELAY_MS);
     joinTimer.unref?.();
+    this.joinCheckTimers.set(dispatchId, joinTimer);
+  }
+
+  /** The call switched to another agent: this dispatch's join check must not bring it back. */
+  private cancelJoinCheck(dispatchId: string): void {
+    const timer = this.joinCheckTimers.get(dispatchId);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.joinCheckTimers.delete(dispatchId);
   }
 
   /**
@@ -461,6 +472,12 @@ export class LiveKitService {
     const fallbackAgentName = allowFallback ? await this.resolveFallbackAgentName(agentName) : null;
     if (fallbackAgentName) {
       logger.error(`[${roomName}] transcription_agent_fallback_to_default | from=${agentName}, to=${fallbackAgentName}, reason=dispatch_unclaimed`);
+      // The fallback arms its own checks under its own name. Drop the replaced dispatch too:
+      // if its workers came back they would claim it and join next to the fallback.
+      this.cancelJoinCheck(dispatchId);
+      await this.agentDispatch
+        .deleteDispatch(dispatchId, roomName)
+        .catch((error) => logger.warn(`[${roomName}] replaced_dispatch_delete_failed | dispatch_id=${dispatchId}, error=${error}`));
       await this.dispatchFallbackAgent(roomName, fallbackAgentName);
       return;
     }
@@ -518,21 +535,30 @@ export class LiveKitService {
   }
 
   /**
-   * Identities in `roomName` running under `agentName`. Goes through the dispatch API
-   * because `listParticipants` has no agent_name field.
+   * The room's dispatches, read through the dispatch API because `listParticipants` has
+   * no agent_name field. `identities`: participants that are jobs of ANY dispatch here, so
+   * a transcription agent of another name (e.g. the default after a fallback) still counts
+   * as present. `unclaimed`: dispatches of `agentName` no worker has picked up yet.
    */
-  private async liveAgentIdentitiesForName(roomName: string, agentName: string): Promise<Set<string> | null> {
+  private async roomAgentDispatches(
+    roomName: string,
+    agentName: string,
+  ): Promise<{ identities: Set<string>; unclaimed: string[] } | null> {
     try {
       const dispatches = await this.agentDispatch.listDispatch(roomName);
       const identities = new Set<string>();
+      const unclaimed: string[] = [];
       for (const dispatch of dispatches) {
-        if (dispatch.agentName !== agentName) continue;
-        for (const job of dispatch.state?.jobs ?? []) {
+        const jobs = dispatch.state?.jobs ?? [];
+        for (const job of jobs) {
           const identity = job.state?.participantIdentity;
           if (identity) identities.add(identity);
         }
+        if (dispatch.agentName === agentName && !jobs.some((job) => job.state?.workerId)) {
+          unclaimed.push(dispatch.id);
+        }
       }
-      return identities;
+      return { identities, unclaimed };
     } catch (error) {
       logger.warn(`[${roomName}] agent_dispatch_list_failed | agent=${agentName}, error=${error}`);
       return null;
@@ -559,6 +585,13 @@ export class LiveKitService {
         return 'room_inactive';
       }
 
+      // The room can outlive its call (a rejoin before empty_timeout); the agent would get 409.
+      const call = await repositories.calls.findByExternalId(roomName);
+      if (!call || call.status === CallStatus.ENDED || call.status === CallStatus.CANCELLED) {
+        logger.info(`[${roomName}] agent_redispatch_stopped | reason=call_not_running, status=${call?.status}, trigger=${reason}`);
+        return 'room_inactive';
+      }
+
       const participants = await this.listParticipants(roomName);
       const remaining = participants.filter((p) => p.identity !== excludeIdentity);
 
@@ -567,14 +600,23 @@ export class LiveKitService {
         return 'no_humans';
       }
 
-      const liveAgentIdentities = await this.liveAgentIdentitiesForName(roomName, agentName);
-      const agentStillPresent = liveAgentIdentities
-        ? remaining.some((p) => liveAgentIdentities.has(p.identity))
+      const roomDispatches = await this.roomAgentDispatches(roomName, agentName);
+      const agentStillPresent = roomDispatches
+        ? remaining.some((p) => roomDispatches.identities.has(p.identity))
         : remaining.some(isAgentParticipant);
 
       if (agentStillPresent) {
         logger.info(`[${roomName}] agent_redispatch_stopped | reason=agent_already_present, trigger=${reason}`);
         return 'agent_present';
+      }
+
+      // Each round would otherwise leave its unclaimed dispatch behind; when workers come
+      // back they'd claim all of them and several agents would join. Keep at most one.
+      for (const staleId of roomDispatches?.unclaimed ?? []) {
+        await this.agentDispatch
+          .deleteDispatch(staleId, roomName)
+          .then(() => logger.info(`[${roomName}] agent_stale_dispatch_deleted | dispatch_id=${staleId}, agent=${agentName}`))
+          .catch((error) => logger.warn(`[${roomName}] agent_stale_dispatch_delete_failed | dispatch_id=${staleId}, error=${error}`));
       }
 
       logger.info(`[${roomName}] agent_redispatch_attempt | attempt=${attempt}, trigger=${reason}, agent=${agentName}, humans=${remaining.filter(isHumanParticipant).length}`);
