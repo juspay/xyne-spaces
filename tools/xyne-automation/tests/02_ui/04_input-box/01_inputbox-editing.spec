@@ -52,7 +52,6 @@ tags: quarantine
 * appending text "Second line" in "[data-testid='message-input']"
 * verifying inputbox contains multiple lines
 * pressing Cmd+Enter in inputbox
-* waiting for "2" seconds
 * verifying message was sent to conversation
 
 ## List depth is enforced at 5 levels
