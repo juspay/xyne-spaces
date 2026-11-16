@@ -27,6 +27,9 @@ const SESSION_CALL_STATUSES = new Set<CallStatus>([
   CallStatus.IN_PROGRESS,
 ]);
 
+/** How long a dispatch stays bound to the agent key that claimed it. */
+const AGENT_DISPATCH_CLAIM_TTL_SECONDS = 60 * 60;
+
 /** Raw 32-byte X25519 public key, base64. */
 const callSessionBodySchema = z.object({
   publicKey: z.string().refine((value) => callEncryptionService.isUsableAgentPublicKey(value), 'publicKey must be a 32-byte X25519 key'),
@@ -141,8 +144,9 @@ class TranscriptionAgentController {
    * joins an encrypted call only with the key from here, never anything LiveKit carried.
    * The key is sealed to the job's one-time X25519 public key (body `publicKey`).
    * Only a dispatch this backend created (recorded in Redis at dispatch time) gets a
-   * session, and only once: a stolen agent API key can't fetch keys on its own, and
-   * LiveKit can't invent a dispatch.
+   * session, bound to the first public key that claims it: a stolen agent API key can't
+   * fetch keys on its own, and LiveKit can't invent a dispatch. Retries with the same key
+   * get the same answer, which is useless to anyone without the job's private key.
    */
   callSession = async (req: Request, res: Response): Promise<void> => {
     const { callId } = req.params;
@@ -166,10 +170,10 @@ class TranscriptionAgentController {
         return;
       }
 
-      const { dispatchId } = parsed.data;
-      const dispatchedRoom = await redisService.claimAgentDispatch(dispatchId);
+      const { dispatchId, publicKey } = parsed.data;
+      const dispatchedRoom = await redisService.claimAgentDispatch(dispatchId, publicKey, AGENT_DISPATCH_CLAIM_TTL_SECONDS);
       if (dispatchedRoom !== callId) {
-        // Unknown, expired, already claimed, or recorded for another room.
+        // Unknown, expired, claimed by another key, or recorded for another room.
         logger.warn(`[${callId}] agent_call_session_refused | reason=dispatch_not_claimable, dispatch_id=${dispatchId}`);
         res.status(403).json({ success: false, error: 'Dispatch not recognised' });
         return;
@@ -182,7 +186,7 @@ class TranscriptionAgentController {
         return;
       }
 
-      const sealedKey = callEncryptionService.sealKeyForAgent(callId, encryption.key, parsed.data.publicKey);
+      const sealedKey = callEncryptionService.sealKeyForAgent(callId, encryption.key, publicKey);
       logger.info(`[${callId}] agent_call_session_issued | encrypted=true, dispatch_id=${dispatchId}`);
       res.json({ success: true, encrypted: true, sealedKey });
     } catch (error) {
