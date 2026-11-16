@@ -383,6 +383,105 @@ describe("/brand task command", () => {
   });
 });
 
+describe("design-voice-check reads the rules the model was given", () => {
+  const BRAND = [
+    "# Acme",
+    "",
+    "## Voice",
+    "- Banned phrases: synergy",
+    "",
+    "## Colour",
+    "- Primary: #123456",
+  ].join("\n");
+
+  const voiceCheck = async (
+    agentConfig: Record<string, unknown>,
+    meta: Record<string, string>,
+  ): Promise<string> => {
+    const loaded = loadCustomTools(
+      agentConfig,
+      meta,
+      undefined,
+      undefined,
+      undefined,
+      "session-1",
+      "s2s-key",
+      "session-token",
+      undefined,
+      undefined,
+      undefined,
+      ["design-voice-check"],
+    );
+    const tool = loaded.tools.find((t) => t.name === "design-voice-check");
+    if (!tool) throw new Error("design-voice-check was not loaded");
+    const result = await tool.execute("call-1", {
+      content: "<h1>Unlock synergy today</h1>",
+    });
+    const first = result.content[0];
+    return first && "text" in first ? first.text : "";
+  };
+
+  it("checks against the system a /design run was given", async () => {
+    const report = await voiceCheck(
+      { designSystem: BRAND },
+      { userId: "u1", agentSlug: "a", taskCommand: "/design" },
+    );
+    expect(report).toContain("synergy");
+  });
+
+  it("checks nothing when the system was too large to inject", async () => {
+    // The injection drops a system over the cap, so the model designs without
+    // it. Reading agentConfig directly held the artifact to rules it was never
+    // shown, and the run log was the only place that disagreement appeared.
+    const report = await voiceCheck(
+      { designSystem: `${BRAND}\n${"<!-- pad -->".repeat(DESIGN_SYSTEM_MAX_CHARS)}` },
+      { userId: "u1", agentSlug: "a", taskCommand: "/design" },
+    );
+    expect(report).toContain("no voice rules");
+    expect(report).not.toContain("synergy");
+  });
+
+  it("checks nothing on a /brand run, which is never given a system", async () => {
+    // /brand EXTRACTS a system; injecting the agent's current one would let the
+    // old brand describe the new one. The voice pin has to honour that gate too.
+    const report = await voiceCheck(
+      { designSystem: BRAND },
+      { userId: "u1", agentSlug: "a", taskCommand: "/brand" },
+    );
+    expect(report).toContain("no voice rules");
+  });
+
+  it("checks nothing on an ordinary run with no command", async () => {
+    const report = await voiceCheck({ designSystem: BRAND }, { userId: "u1", agentSlug: "a" });
+    expect(report).toContain("no voice rules");
+  });
+
+  it("still honours an explicit designMd, which is how a run checks another system", async () => {
+    const loaded = loadCustomTools(
+      {},
+      { userId: "u1", agentSlug: "a" },
+      undefined,
+      undefined,
+      undefined,
+      "session-1",
+      "s2s-key",
+      "session-token",
+      undefined,
+      undefined,
+      undefined,
+      ["design-voice-check"],
+    );
+    const tool = loaded.tools.find((t) => t.name === "design-voice-check");
+    if (!tool) throw new Error("design-voice-check was not loaded");
+    const result = await tool.execute("call-1", {
+      content: "<h1>Unlock synergy today</h1>",
+      designMd: BRAND,
+    });
+    const first = result.content[0];
+    expect(first && "text" in first ? first.text : "").toContain("synergy");
+  });
+});
+
 describe("skill isolation between /brand and /design", () => {
   it("keeps the brand skills out of /design and /dashboard", () => {
     // Both load design-skills wholesale, so a brand skill living there told a

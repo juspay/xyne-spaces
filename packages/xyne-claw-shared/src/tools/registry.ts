@@ -41,6 +41,7 @@ import * as appControl from "./app-control/tools.js";
 import * as workspacePlan from "./workspace-plan/index.js";
 import * as localSandbox from "./local-sandbox/index.js";
 import * as localContainer from "./local-container/index.js";
+import * as voiceCheck from "./voice-check/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -64,6 +65,7 @@ register(workspacePlan.updatePlan);
 for (const t of localSandbox.LOCAL_SANDBOX_TOOLS) register(t);
 for (const t of localContainer.LOCAL_CONTAINER_TOOLS) register(t);
 register(addCitations.addCitationsTool);
+register(voiceCheck.designVoiceCheck);
 
 // Register google tools
 register(google.googleGmailSearch);

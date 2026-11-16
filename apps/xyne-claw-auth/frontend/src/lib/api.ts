@@ -3204,6 +3204,54 @@ export const BRAND_SUMMARY_FILENAME = "brand.json";
 export const BRAND_DESIGN_MD_FILENAME = "DESIGN.md";
 export const BRAND_TOKENS_CSS_FILENAME = "tokens.css";
 
+// --- Voice and tone (XYNE-66830) -------------------------------------------
+//
+// Render-only mirrors of packages/xyne-claw-shared/src/voice-tone.ts. The
+// PARSER is not mirrored and must not be: it bounds what this card and the QA
+// check act on for a DESIGN.md drafted from an untrusted page, so it stays
+// server-side with one implementation under test. It is not the fence on what
+// reaches a /design prompt — that is XYNE-66821's.
+
+export type VoiceCasing = "sentence-case" | "title-case" | "uppercase" | "preserve";
+
+export interface VoicePreferredWording {
+  avoid: string;
+  prefer: string;
+}
+
+export interface VoiceRules {
+  toneWords: string[];
+  preferredWording: VoicePreferredWording[];
+  bannedPhrases: string[];
+  casing: { headings?: VoiceCasing; buttons?: VoiceCasing };
+  ctaStyle?: string;
+  numberDateFormats?: { numbers?: string; dates?: string };
+}
+
+/**
+ * The voice rules stated in a delivered DESIGN.md.
+ *
+ * Empty rules are a legitimate answer, not a failure: the system may not state
+ * a voice, or may state it as prose the parser deliberately ignores. The card
+ * shows that as an empty state so the gap is visible instead of silent.
+ */
+export async function fetchVoiceRules(
+  attachmentId: string,
+  userId: string,
+): Promise<VoiceRules> {
+  const res = await fetch(
+    `${AUTH_API_URL}/api/v1/agent-chat/attachments/${encodeURIComponent(attachmentId)}/voice-rules`,
+    { credentials: "include", headers: { "x-user-id": userId } },
+  );
+  // Throws rather than returning null. The card's empty state is its whole
+  // point, and collapsing a 413 or a 500 into "no voice rules" made "we could
+  // not read this" indistinguishable from "this system states none".
+  if (!res.ok) throw new ApiError(res.status, `Could not read voice rules: HTTP ${res.status}`);
+  const body = (await res.json()) as { success: boolean; data?: VoiceRules };
+  if (!body.data) throw new ApiError(res.status, "Voice rules response carried no data");
+  return body.data;
+}
+
 /**
  * The validated brand summary for a delivered `brand.json`.
  *

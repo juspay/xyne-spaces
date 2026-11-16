@@ -8,13 +8,14 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
+import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, extractVoiceSection, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
 import { SERVER, PATHS } from "./config.js";
 import { join } from "node:path";
 
 import { createLogger } from "./logger.js";
 import { SandboxUnavailableError, isSandboxUnavailableDeferEnabled, isSandboxUnavailable } from "./sandbox-unavailable.js";
 import { CREATE_AGENT_TOOL, checkCreateAgent, createAgentDroppedToolsNote, createAgentRefusedText, createAgentUnknownToolsText } from "./create-agent-check.js";
+import { TASK_COMMANDS, buildDesignSystemPromptInjection } from "./task-commands.js";
 const log = createLogger("custom-tools");
 
 interface Attachment {
@@ -282,13 +283,32 @@ export function loadCustomTools(
   // Injected so `sandbox-copy-in` can stream a skill's companion file into the
   // sandbox server-side, confined to this root (mirrors the agent's skill read root).
   const skillsRoot = sessionId ? join(PATHS.dataDir, "session-skills", sessionId) : "";
-  const toolMeta: Record<string, string> | undefined = (meta || pinnedSandboxRepo || skillsRoot)
-    ? {
-        ...(meta ?? {}),
-        ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}),
-        ...(skillsRoot ? { skillsRoot } : {}),
-      }
-    : undefined;
+  // The design system's `## Voice` section, for design-voice-check (XYNE-66830).
+  // The run already has the whole DESIGN.md in its prompt, but a tool cannot
+  // read a prompt — same reason sandboxRepo is pinned above. Only the Voice
+  // section travels, not the 32k contract: it is the only part a tool checks.
+  //
+  // Taken from the injection's own RESULT, not from agentConfig, so the tool can
+  // only hold an artifact to rules the model was actually given. Read directly,
+  // the two disagreed wherever the injection declines: a system over the 32k cap
+  // is dropped from the prompt, and /brand extracts a system rather than being
+  // given one, yet both still pinned rules here. Only the run log said so.
+  const designVoice = (() => {
+    const command = TASK_COMMANDS.find((c) => c.command === meta?.["taskCommand"]) ?? null;
+    const injection = buildDesignSystemPromptInjection(command, agentConfig);
+    if (injection.status !== "injected") return "";
+    const section = extractVoiceSection(injection.injection.content);
+    return section ? `## Voice\n${section}` : "";
+  })();
+  const toolMeta: Record<string, string> | undefined =
+    (meta || pinnedSandboxRepo || skillsRoot || designVoice)
+      ? {
+          ...(meta ?? {}),
+          ...(pinnedSandboxRepo ? { sandboxRepo: pinnedSandboxRepo } : {}),
+          ...(skillsRoot ? { skillsRoot } : {}),
+          ...(designVoice ? { designVoice } : {}),
+        }
+      : undefined;
 
   const tools = customTools.map((ct) => {
     const resolvedConfig = resolveToolConfig(ct.configSchema, config);
