@@ -2317,7 +2317,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           "Auto-retry stopped. Mention me again when you're ready to retry.",
           capConversationId, capChannelId, capSpacesAppId,
         );
-        log.info(`[flow-action] capacity-retry cancel retryId=${retryToken} by=${callerUserId}`);
+        log.info(`[flow-action] capacity-retry cancel token=${retryToken} by=${callerUserId}`);
         return;
       }
 
@@ -2330,7 +2330,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         dispatched ? "▶ **Retrying now.**" : "This retry request expired. Mention me again to try.",
         capConversationId, capChannelId, capSpacesAppId,
       );
-      log.info(`[flow-action] capacity-retry now retryId=${retryToken} by=${callerUserId} dispatched=${dispatched}`);
+      log.info(`[flow-action] capacity-retry now token=${retryToken} by=${callerUserId} dispatched=${dispatched}`);
       return;
     }
 

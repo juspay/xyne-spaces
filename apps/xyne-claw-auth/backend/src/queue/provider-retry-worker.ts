@@ -129,7 +129,7 @@ export async function scheduleProviderRetry(params: {
     delay: backoffFor(0),
     jobId: jobId(params.retryToken, 0),
   });
-  log.info(`[capacity-retry] scheduled retryId=${params.retryToken} provider=${params.provider} automation=${params.automation}`);
+  log.info(`[capacity-retry] scheduled token=${params.retryToken} provider=${params.provider} automation=${params.automation}`);
 }
 
 /** "Retry now" button: dispatch immediately and stop the poller. Returns
@@ -145,7 +145,7 @@ export async function retryNowByToken(retryToken: string): Promise<boolean> {
 /** User tapped Stop, or a retry succeeded elsewhere: stop polling. */
 export async function cancelProviderRetry(retryToken: string): Promise<void> {
   await redisService.getConnection().set(cancelKey(retryToken), "1", "EX", CANCEL_TTL_SECONDS);
-  log.info(`[capacity-retry] cancelled retryId=${retryToken}`);
+  log.info(`[capacity-retry] cancelled token=${retryToken}`);
 }
 
 async function isCancelled(retryToken: string): Promise<boolean> {
@@ -209,7 +209,7 @@ async function redispatch(job: ProviderRetryJob): Promise<boolean> {
     const body = (await res.json().catch(() => ({}))) as { success?: boolean };
     return res.ok && body.success === true;
   } catch (err) {
-    log.error(`[capacity-retry] redispatch failed retryId=${job.retryToken}: ${errMsg(err)}`);
+    log.error(`[capacity-retry] redispatch failed token=${job.retryToken}: ${errMsg(err)}`);
     return false;
   }
 }
@@ -242,14 +242,14 @@ async function updateCard(job: ProviderRetryJob, phase: "retrying" | "exhausted"
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
-    log.warn(`[capacity-retry] card update failed retryId=${job.retryToken}: ${errMsg(err)}`);
+    log.warn(`[capacity-retry] card update failed token=${job.retryToken}: ${errMsg(err)}`);
   }
 }
 
 async function processRetryJob(bullJob: Job<ProviderRetryJob>): Promise<void> {
   const job = bullJob.data;
   if (await isCancelled(job.retryToken)) {
-    log.info(`[capacity-retry] retryId=${job.retryToken} cancelled — dropping`);
+    log.info(`[capacity-retry] token=${job.retryToken} cancelled — dropping`);
     return;
   }
 
@@ -260,7 +260,7 @@ async function processRetryJob(bullJob: Job<ProviderRetryJob>): Promise<void> {
     if (ok) {
       await cancelProviderRetry(job.retryToken); // stop any sibling attempts
       await updateCard(job, "retrying");
-      log.info(`[capacity-retry] retryId=${job.retryToken} provider back — re-dispatched (attempt ${job.attempt})`);
+      log.info(`[capacity-retry] token=${job.retryToken} provider back — re-dispatched (attempt ${job.attempt})`);
       return;
     }
     // Dispatch itself failed (not a capacity issue) — fall through to backoff.
@@ -269,7 +269,7 @@ async function processRetryJob(bullJob: Job<ProviderRetryJob>): Promise<void> {
   if (state === "permanent") {
     // A non-self-healing error (bad key, model not allowed). Waiting won't help.
     await updateCard(job, "exhausted");
-    log.warn(`[capacity-retry] retryId=${job.retryToken} permanent probe error — stopping`);
+    log.warn(`[capacity-retry] token=${job.retryToken} permanent probe error — stopping`);
     return;
   }
 
@@ -278,7 +278,7 @@ async function processRetryJob(bullJob: Job<ProviderRetryJob>): Promise<void> {
   const elapsed = Date.now() - job.startedAt;
   if (elapsed >= MAX_WINDOW_MS) {
     await updateCard(job, "exhausted");
-    log.info(`[capacity-retry] retryId=${job.retryToken} gave up after ${Math.round(elapsed / 60000)}m`);
+    log.info(`[capacity-retry] token=${job.retryToken} gave up after ${Math.round(elapsed / 60000)}m`);
     return;
   }
   const next = job.attempt + 1;
