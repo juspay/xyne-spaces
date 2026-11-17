@@ -26,6 +26,7 @@ export interface YSweetAuthToken {
   docId: string;
   token?: string;
   authorization?: 'full' | 'read-only';
+  wsPublicKey?: string;
 }
 
 export interface CanvasFileUploadResponse {
@@ -76,10 +77,14 @@ export class CanvasService {
   }
 
   /** A single-use WebSocket ticket. Only the provider's connect should ask for one. */
-  async getYSweetTicket(request: YSweetAuthRequest): Promise<YSweetAuthToken> {
+  async getYSweetTicket(
+    request: YSweetAuthRequest,
+    wsHandshakeHash?: string,
+  ): Promise<YSweetAuthToken> {
     const response = await apiInstance.post<YSweetAuthToken>('/ysweet/auth', {
       ...request,
       tokenType: 'ticket',
+      ...(wsHandshakeHash ? { wsHandshakeHash } : {}),
     });
     return response.data;
   }

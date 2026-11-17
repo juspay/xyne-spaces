@@ -171,6 +171,8 @@ export interface YSweetAuthRequest {
   userId: string;
   validForSeconds?: number;
   ticket?: boolean;
+  /** Base64 SHA-256 of the browser's WebSocket handshake frame. Binds the ticket to it. */
+  wsHandshakeHash?: string;
 }
 
 function withDocId(base: string, path: string, docId: string): string {

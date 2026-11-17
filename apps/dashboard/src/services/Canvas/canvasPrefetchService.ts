@@ -6,6 +6,7 @@ import { canvasService, fetchTicketPerAttempt } from './canvasService';
 import type { YSweetAuthToken } from './canvasService';
 import { logger, Event } from '../../utils/logger';
 import { stopYjsProviderPermanently } from './yjsProviderTeardown';
+import { withFrameEncryption } from './encryptedWebSocket';
 
 interface PrefetchedCanvas {
   doc: Y.Doc;
@@ -86,17 +87,21 @@ class CanvasPrefetchService {
         syncResolve = resolve;
       });
 
-      const getAuthToken = (): Promise<YSweetAuthToken> =>
-        canvasService.getYSweetTicket({
-          docId: canvasId,
-          ...(options?.channelId ? { channelId: options.channelId } : {}),
-        });
+      const encryption = withFrameEncryption(
+        wsHandshakeHash =>
+          canvasService.getYSweetTicket(
+            { docId: canvasId, ...(options?.channelId ? { channelId: options.channelId } : {}) },
+            wsHandshakeHash,
+          ),
+        authToken.wsPublicKey,
+      );
 
-      const provider = createYjsProvider(doc, actualDocId, getAuthToken, {
+      const provider = createYjsProvider(doc, actualDocId, encryption.getAuthToken, {
         offlineSupport: true,
         warnOnClose: false,
         showDebuggerLink: false,
         connect: true,
+        WebSocketPolyfill: encryption.WebSocketPolyfill,
       });
       fetchTicketPerAttempt(provider);
 
