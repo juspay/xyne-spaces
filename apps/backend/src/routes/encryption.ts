@@ -1,95 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import { DatabaseClient } from '@/database/client';
 import { getEncryptionProvider } from '@/services/encryption';
-import { AuthSessionStatus } from '@/services/authSessionService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
 const prisma = DatabaseClient.getInstance();
-
-// Client encryption keys are scoped to the auth session (JWT `sid`): one key per device
-// sign-in, shared across the workspaces that sign-in enters.
-router.get('/public-key', async (req: Request, res: Response) => {
-  const sessionId = req.user?.sid;
-  if (!req.user || !sessionId) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
-  try {
-    const data = await getEncryptionProvider().getPublicConfig();
-    res.json({ ...data, sessionFingerprint: sessionId });
-  } catch (err) {
-    res.status(502).json({ error: 'Encryption service unavailable' });
-  }
-});
-
-router.post('/register-client-key', async (req: Request, res: Response) => {
-  const sessionId = req.user?.sid;
-  if (!req.user || !sessionId) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
-  const { wrappedKey } = req.body as { wrappedKey?: string };
-  if (!wrappedKey) {
-    res.status(400).json({ error: 'Bad request', message: 'wrappedKey is required' });
-    return;
-  }
-
-  let orgId: string;
-  try {
-    const [session, workspace] = await prisma.$transaction([
-      prisma.authSession.findFirst({
-        where: {
-          id: sessionId,
-          orgMemberId: req.user.memberId,
-          status: AuthSessionStatus.ACTIVE,
-          refreshTokenExpiry: { gt: new Date() },
-        },
-        select: { id: true },
-      }),
-      prisma.workspace.findFirst({
-        where: {
-          id: req.user.workspaceId,
-          users: { some: { id: req.user.id } },
-        },
-        select: { orgId: true },
-      }),
-    ]);
-
-    if (!session) {
-      res.status(401).json({ error: 'Unauthorized', message: 'Active session not found' });
-      return;
-    }
-    if (!workspace) {
-      res.status(403).json({ error: 'Forbidden', message: 'Workspace access not found' });
-      return;
-    }
-
-    orgId = workspace.orgId;
-  } catch (err) {
-    logger.error('Failed to validate encryption key registration context', {
-      userId: req.user.id,
-      workspaceId: req.user.workspaceId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    res.status(500).json({ error: 'Failed to validate encryption key registration' });
-    return;
-  }
-
-  try {
-    const result = await getEncryptionProvider().registerSessionKey({
-      wrappedKey,
-      sessionId,
-      userId: req.user.id,
-      orgId,
-    });
-    res.json(result);
-  } catch (err) {
-    res.status(502).json({ error: 'Encryption service unavailable' });
-  }
-});
 
 router.post('/workspaces/backfill-provision', async (req: Request, res: Response) => {
   if (!req.user) {

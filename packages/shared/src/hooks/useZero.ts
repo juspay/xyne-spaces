@@ -14,6 +14,7 @@ import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
 import { encryptField, decryptField, isEncryptedField } from '../crypto/field-decrypt.js';
+import type { TransitKeyring } from '../crypto/keyring.js';
 import { validateQueryWhereClause } from '../zero/query-validation.js';
 import { wasInterrupted } from './metricValidity.js';
 import { trackMutationStart, trackMutationSettled } from './pendingMutations.js';
@@ -38,7 +39,7 @@ interface RunOptionsWithName {
 
 async function encryptMutationArgs(
   args: ReadonlyJSONValue | undefined,
-  key: CryptoKey,
+  keyring: TransitKeyring,
   metrics: MetricsRecorder,
   mutationName: string,
 ): Promise<ReadonlyJSONValue | undefined> {
@@ -53,7 +54,7 @@ async function encryptMutationArgs(
   for (const [fieldName, value] of Object.entries(record)) {
     if (typeof value === 'string' && value.length > 0) {
       const startTime = performance.now();
-      copy[fieldName] = await encryptField(value, key);
+      copy[fieldName] = await encryptField(value, keyring);
       const duration = performance.now() - startTime;
       metrics.recordLatency('crypto.encrypt.field', duration, {
         mutation: mutationName,
@@ -76,7 +77,7 @@ async function encryptMutationArgs(
 
 async function decryptQueryResult(
   result: unknown,
-  key: CryptoKey,
+  keyring: TransitKeyring,
   metrics: MetricsRecorder,
   queryName: string,
   depth: number = 0,
@@ -84,7 +85,7 @@ async function decryptQueryResult(
   if (typeof result === 'string' && isEncryptedField(result)) {
     const startTime = performance.now();
     try {
-      const decrypted = await decryptField(result, key);
+      const decrypted = await decryptField(result, keyring);
       const duration = performance.now() - startTime;
       metrics.recordLatency('crypto.decrypt.field', duration, {
         query: queryName,
@@ -105,14 +106,14 @@ async function decryptQueryResult(
   }
   if (Array.isArray(result)) {
     return await Promise.all(
-      result.map(item => decryptQueryResult(item, key, metrics, queryName, depth)),
+      result.map(item => decryptQueryResult(item, keyring, metrics, queryName, depth)),
     );
   }
   if (result && typeof result === 'object') {
     const obj = result as Record<string, unknown>;
     const decryptedObj: Record<string, unknown> = {};
     for (const [k, value] of Object.entries(obj)) {
-      decryptedObj[k] = await decryptQueryResult(value, key, metrics, queryName, depth + 1);
+      decryptedObj[k] = await decryptQueryResult(value, keyring, metrics, queryName, depth + 1);
     }
     return decryptedObj;
   }
@@ -121,18 +122,18 @@ async function decryptQueryResult(
 
 const decryptArgs = async (
   args: ReadonlyJSONValue | undefined,
-  encryptionKey: CryptoKey | null,
+  keyring: TransitKeyring | null,
   metrics: MetricsRecorder,
   mutationName: string,
 ): Promise<ReadonlyJSONValue | undefined> => {
-  if (!encryptionKey || !args) return args;
+  if (!keyring || !args) return args;
   if (typeof args === 'object' && args !== null) {
     const decrypted: Record<string, unknown> = {};
     for (const [k, value] of Object.entries(args)) {
       if (typeof value === 'string' && value.startsWith('ENC:')) {
         const startTime = performance.now();
         try {
-          decrypted[k] = await decryptField(value, encryptionKey);
+          decrypted[k] = await decryptField(value, keyring);
           const duration = performance.now() - startTime;
           metrics.recordLatency('crypto.decrypt.args', duration, {
             mutation: mutationName,
@@ -161,7 +162,7 @@ const decryptArgs = async (
 export function useZero(): Zero {
   const originalZero = useOriginalZero();
   const { logger, metrics } = useInstrumentation();
-  const { key: encryptionKey, config } = useEncryptionConfig();
+  const { keyring, config } = useEncryptionConfig();
   const clientEncryptionEnabled = config?.clientEncryptionEnabled ?? false;
 
   const handler: ProxyHandler<Zero> = {
@@ -256,12 +257,12 @@ export function useZero(): Zero {
               });
           };
 
-          if (encryptionKey && clientEncryptionEnabled) {
+          if (keyring && clientEncryptionEnabled) {
             const originalFn = originalMutator.fn;
             (originalMutator as { fn: (options: unknown) => Promise<unknown> }).fn = async (options: unknown) => {
               const decryptedArgs = await decryptArgs(
                 (options as { args?: ReadonlyJSONValue }).args,
-                encryptionKey,
+                keyring,
                 metrics,
                 mutationName,
               );
@@ -273,7 +274,7 @@ export function useZero(): Zero {
 
             const deferredResult = encryptMutationArgs(
               mutationRequest.args,
-              encryptionKey,
+              keyring,
               metrics,
               mutationName,
             ).then(encryptedArgs =>
@@ -333,11 +334,11 @@ export function useZero(): Zero {
             )) as HumanReadable<TReturn>;
 
             let result: HumanReadable<TReturn> = rawResult;
-            if (encryptionKey && clientEncryptionEnabled) {
+            if (keyring && clientEncryptionEnabled) {
               try {
                 result = (await decryptQueryResult(
                   rawResult,
-                  encryptionKey,
+                  keyring,
                   metrics,
                   queryName,
                   0,

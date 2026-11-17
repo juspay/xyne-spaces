@@ -18,7 +18,7 @@ interface QueryAST {
  */
 export type EncryptedWorkspaceScope = 'all' | string[] | null;
 
-/** Per-table encrypted-fields config, as served by the backend's /encryption/public-key. */
+/** Per-table encrypted-fields config, as served by the backend's /transit/config. */
 export interface EncryptedTableConfig {
   fields: string[];
   enforceClientEncryption: boolean;

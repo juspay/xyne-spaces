@@ -3,22 +3,30 @@ import type { EncryptedTableConfig } from '@xyne/shared';
 export type EncryptedFieldConfig = EncryptedTableConfig;
 
 export type ClientEncryptionConfig = {
-  publicKey: string;
   encryptedFields: Record<string, EncryptedFieldConfig>;
   clientEncryptionEnabled: boolean;
   apiClientEncryptionEnabled: boolean;
 };
 
-export type RegisterSessionKeyInput = {
-  wrappedKey: string;
-  sessionId: string;
-  userId: string;
-  orgId: string;
+/** Header the client sends its current ticket in; the cookie is the fallback for websockets. */
+export const TRANSIT_TICKET_HEADER = 'x-transit-ticket';
+export const TRANSIT_TICKET_COOKIE = 'xt';
+
+export type TransitHandshakeInput = {
+  /** Who the ticket is issued to: the auth session id (JWT `sid`). */
+  subject: string;
+  /** Client's ephemeral P-256 public key, base64 uncompressed point. */
+  publicKey: string;
+  /** A ticket of the same session to resume instead of minting a new key. */
+  ticket?: string;
 };
 
-export type RegisterSessionKeyResult = {
-  ok: boolean;
-  sessionFingerprint: string;
+export type TransitHandshakeResult = {
+  publicKey: string;
+  wrappedKey: string;
+  ticket: string;
+  /** Unix seconds. */
+  expiresAt: number;
 };
 
 export type EncryptBatchItem = {
@@ -53,14 +61,13 @@ export type StorageObjectKey = {
 };
 
 export interface EncryptionProvider {
-  getPublicConfig(): Promise<ClientEncryptionConfig>;
+  getClientConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
-  registerSessionKey(input: RegisterSessionKeyInput): Promise<RegisterSessionKeyResult>;
-  revokeSessionKey(sessionId: string): Promise<void>;
+  transitHandshake(input: TransitHandshakeInput): Promise<TransitHandshakeResult>;
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
   decryptBatch(values: string[]): Promise<string[]>;
-  encryptResponse<T>(body: T, sessionId: string): Promise<T>;
-  decryptRequest<T>(body: T, sessionId: string): Promise<T>;
+  encryptResponse<T>(body: T, subject: string, ticket?: string): Promise<T>;
+  decryptRequest<T>(body: T, subject: string): Promise<T>;
   initializeOrg(orgId: string): Promise<void>;
   provisionEntity(input: ProvisionEntityInput): Promise<void>;
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;

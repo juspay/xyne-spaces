@@ -33,7 +33,6 @@ import {
   getWorkspaceLandingChannelData,
   getRefreshTargetUserData,
 } from '@/bypassAcl/authServices';
-import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
   OrganizationDomainConflictError,
@@ -1367,7 +1366,6 @@ export class AuthV2Controller {
       if (req.user && sessionId) {
         logger.info(`[${requestId}] Ending auth session for user ${req.user.email}`);
         trackLogout(req, req.user.id, sessionId, 'USER_LOGOUT');
-        await getEncryptionProvider().revokeSessionKey(sessionId);
       }
 
       // Revoke the device's org-scoped auth session (by sid and/or member + device) and clear xs.
