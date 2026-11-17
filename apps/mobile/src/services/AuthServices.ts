@@ -7,6 +7,7 @@ import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttp
 import { isLikelyOfflineOrTransientNetworkError } from '@/src/utils/networkConnectivityErrors';
 import { getCookieValueFromJar, XYNE_LAST_WORKSPACE_COOKIE } from '@/src/utils/apiCookieHeader';
 import { getActiveWorkspaceId } from '../utils/activeWorkspace';
+import { isSessionEndedRefusal } from './sessionTokenPolicy';
 import { CommunityJoinResultStatus } from './CommunityServices';
 import {
   classifyRemoteLogoutResponse,
@@ -1596,7 +1597,18 @@ export function refreshAuthSession(
 
   const request = trackAuthSessionOperation(
     generation,
-    performRefreshAuthSession(workspaceId, generation, operation),
+    performRefreshAuthSession(workspaceId, generation, operation).then(result => {
+      // Announced here, before any caller resumes, so the keep-alive, Zero recovery,
+      // start-up check and 401 retry all end the session the same way, exactly once.
+      if (
+        !result.ok &&
+        result.kind === 'unauthorized' &&
+        isAuthScopeCurrent(generation, operation)
+      ) {
+        notifySessionEnded();
+      }
+      return result;
+    }),
   );
   const entry = { generation, operation, promise: request };
   inFlightRefreshes.set(key, entry);
@@ -1635,11 +1647,13 @@ async function performRefreshAuthSession(
       return { ok: false, kind: 'transient' };
     }
 
-    // 401 REFRESH_INVALID (session gone) and 403 WORKSPACE_ACCESS_DENIED (left or
-    // deactivated) both end the session. 503 REFRESH_BUSY, any other 5xx and network
-    // errors keep it: the caller fails this attempt and tries later.
+    // Only the backend's session-ended codes end the session. A bare 401/403 from a
+    // gateway, WAF or mTLS ingress, any 5xx and network errors
+    // keep it: the caller fails this attempt and tries later.
     if (response.statusCode === 401 || response.statusCode === 403) {
-      return { ok: false, kind: 'unauthorized' };
+      return isSessionEndedRefusal(response.statusCode, parseResponseJson<unknown>(response))
+        ? { ok: false, kind: 'unauthorized' }
+        : { ok: false, kind: 'transient' };
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -1690,8 +1704,8 @@ type SessionEndedListener = () => void;
 const sessionEndedListeners = new Set<SessionEndedListener>();
 
 /**
- * Fires when an API call's 401 led to a refresh the backend refused (401 REFRESH_INVALID or
- * 403 WORKSPACE_ACCESS_DENIED): the session is over and the user has to sign in again.
+ * Fires when any refresh is refused with a session-ended code (see
+ * `isSessionEndedRefusal`): the session is over and the user has to sign in again.
  */
 export function subscribeToSessionEnded(listener: SessionEndedListener): () => void {
   sessionEndedListeners.add(listener);
@@ -1700,23 +1714,16 @@ export function subscribeToSessionEnded(listener: SessionEndedListener): () => v
   };
 }
 
+function notifySessionEnded(): void {
+  for (const listener of sessionEndedListeners) {
+    listener();
+  }
+}
+
 // API calls that get a refreshable 401 renew the session here, then retry once.
-// refreshAuthSession is single-flight, so a burst of 401s shares one refresh.
+// refreshAuthSession is single-flight, so a burst of 401s shares one refresh, and it
+// announces a session-ended refusal itself.
 setSessionRefresher(async (): Promise<boolean> => {
-  const generation = getAuthSessionGeneration();
-  const operation = getAuthOperation();
-  const result = await refreshAuthSession(
-    getActiveWorkspaceId() ?? undefined,
-    generation,
-    operation,
-  );
-  if (result.ok) {
-    return true;
-  }
-  if (result.kind === 'unauthorized' && isAuthScopeCurrent(generation, operation)) {
-    for (const listener of sessionEndedListeners) {
-      listener();
-    }
-  }
-  return false;
+  const result = await refreshAuthSession(getActiveWorkspaceId() ?? undefined);
+  return result.ok;
 });

@@ -7,6 +7,7 @@ import {
   getProactiveRearmDelay,
   INITIAL_AUTH_RETRY_STATE,
   isDeadSessionFailure,
+  isSessionEndedRefusal,
   MAX_DEAD_SESSION_ATTEMPTS,
   nextAuthRetry,
   TOKEN_REFRESH_LEAD_SECONDS,
@@ -99,7 +100,7 @@ describe('nextAuthRetry', () => {
     }
   });
 
-  it('signs out only after the session cookie is refused repeatedly', () => {
+  it('signs out once the backend has ended the session', () => {
     for (const kind of ['unauthorized'] as const) {
       const decisions = replayFailures(kind, MAX_DEAD_SESSION_ATTEMPTS);
       const actions = decisions.map(decision => decision.action);
@@ -111,23 +112,36 @@ describe('nextAuthRetry', () => {
     }
   });
 
-  it('a transient blip between refusals resets the sign-out budget', () => {
+  it('signs out on the first session-ended refusal, even after transient blips', () => {
     let state: AuthRetryState = INITIAL_AUTH_RETRY_STATE;
-    const feed = (kind: RefreshFailureKind): void => {
-      const decision = nextAuthRetry(kind, state);
+    for (let i = 0; i < 3; i += 1) {
+      const decision = nextAuthRetry('transient', state);
       assert.equal(decision.action, 'retry');
       if (decision.action === 'retry') {
         state = decision.state;
       }
-    };
+    }
+    assert.equal(nextAuthRetry('unauthorized', state).action, 'sign-out');
+  });
+});
 
-    feed('unauthorized');
-    feed('unauthorized');
-    feed('transient');
-    assert.equal(state.deadSessionAttempts, 0);
-    // Backoff still remembers the total attempts.
-    assert.equal(state.attempts, 3);
-    feed('unauthorized');
-    assert.equal(nextAuthRetry('unauthorized', state).action, 'retry');
+describe('isSessionEndedRefusal', () => {
+  it('ends the session on the backend refresh codes', () => {
+    assert.equal(isSessionEndedRefusal(401, { code: 'REFRESH_INVALID' }), true);
+    assert.equal(isSessionEndedRefusal(403, { code: 'WORKSPACE_ACCESS_DENIED' }), true);
+    assert.equal(isSessionEndedRefusal(401, { error: 'email_domain_not_allowed' }), true);
+  });
+
+  it('ignores a 401/403 from a gateway, WAF or ingress that carries no such code', () => {
+    assert.equal(isSessionEndedRefusal(401, null), false);
+    assert.equal(isSessionEndedRefusal(403, null), false);
+    assert.equal(isSessionEndedRefusal(403, '<html>403 Forbidden</html>'), false);
+    assert.equal(isSessionEndedRefusal(401, { message: 'Unauthorized' }), false);
+  });
+
+  it('needs the code to match its status', () => {
+    assert.equal(isSessionEndedRefusal(403, { code: 'REFRESH_INVALID' }), false);
+    assert.equal(isSessionEndedRefusal(401, { code: 'WORKSPACE_ACCESS_DENIED' }), false);
+    assert.equal(isSessionEndedRefusal(503, { code: 'REFRESH_INVALID' }), false);
   });
 });
