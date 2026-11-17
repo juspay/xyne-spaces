@@ -1571,60 +1571,85 @@ export async function signOutUser(userId: string): Promise<RemoteLogoutOutcome> 
   }
 }
 
-const inFlightRefreshes = new Map<
-  string,
-  { generation: number; operation: number; promise: Promise<RefreshSessionResult> }
->();
+/**
+ * The one refresh on the wire. `xs` is a single token for the whole session, whatever
+ * workspace a caller wants, so there is exactly one of these, not one per workspace.
+ */
+let inFlightRefresh: {
+  generation: number;
+  operation: number;
+  promise: Promise<RefreshSessionResult>;
+} | null = null;
 
 /**
  * Refresh the workspace JWT using the `xs` refresh cookie (same endpoint as the dashboard).
  * Does not rely on JWT in the JSON body.
  *
- * Concurrent callers (proactive keep-alive, `needs-auth` recovery, access-token
- * resolution) share one in-flight request so they cannot rotate the session
- * cookie out from under each other.
+ * Every caller (keep-alive, Zero recovery, start-up check, 401 retry, token
+ * resolution) shares one in-flight request, whatever `workspaceId` it asks for, so a
+ * burst of callers costs one request. `workspaceId` only picks which workspace's
+ * JWT is read from the jar afterwards; the request itself is identical for everyone.
  */
 export function refreshAuthSession(
   workspaceId?: string,
   generation = getAuthSessionGeneration(),
   operation = getAuthOperation(),
 ): Promise<RefreshSessionResult> {
-  const key = workspaceId ?? '';
-  const inFlight = inFlightRefreshes.get(key);
-  if (inFlight && inFlight.generation === generation && inFlight.operation === operation) {
-    return inFlight.promise;
+  const shared = joinOrStartRefresh(generation, operation);
+  if (workspaceId === undefined) {
+    return shared;
+  }
+  return shared.then(async result => {
+    // The shared read looks at the last workspace; this caller's own may still be there.
+    if (!result.ok && result.kind !== 'missing_jwt_cookie') {
+      return result;
+    }
+    const token = await readJwtFromJarAfterInjection(workspaceId);
+    if (!isAuthScopeCurrent(generation, operation)) {
+      return { ok: false, kind: 'transient' };
+    }
+    return token ? { ok: true, token } : { ok: false, kind: 'missing_jwt_cookie' };
+  });
+}
+
+function joinOrStartRefresh(generation: number, operation: number): Promise<RefreshSessionResult> {
+  const current = inFlightRefresh;
+  if (current && current.generation === generation && current.operation === operation) {
+    return current.promise;
   }
 
+  // A refresh from an older auth scope may still be on the wire with the same `xs`.
+  // Start after it settles rather than beside it, so requests never overlap.
+  const previous: Promise<unknown> = current
+    ? current.promise.catch(() => undefined)
+    : Promise.resolve();
   const request = trackAuthSessionOperation(
     generation,
-    performRefreshAuthSession(workspaceId, generation, operation).then(result => {
-      // Announced here, before any caller resumes, so the keep-alive, Zero recovery,
-      // start-up check and 401 retry all end the session the same way, exactly once.
-      if (
-        !result.ok &&
-        result.kind === 'unauthorized' &&
-        isAuthScopeCurrent(generation, operation)
-      ) {
-        notifySessionEnded();
-      }
-      return result;
-    }),
+    previous
+      .then(() => performRefreshAuthSession(generation, operation))
+      .then(result => {
+        // Announced here, before any caller resumes, so the keep-alive, Zero recovery,
+        // start-up check and 401 retry all end the session the same way, exactly once.
+        if (
+          !result.ok &&
+          result.kind === 'unauthorized' &&
+          isAuthScopeCurrent(generation, operation)
+        ) {
+          notifySessionEnded();
+        }
+        return result;
+      }),
   );
   const entry = { generation, operation, promise: request };
-  inFlightRefreshes.set(key, entry);
-  void request.then(
-    () => {
-      if (inFlightRefreshes.get(key) === entry) inFlightRefreshes.delete(key);
-    },
-    () => {
-      if (inFlightRefreshes.get(key) === entry) inFlightRefreshes.delete(key);
-    },
-  );
+  inFlightRefresh = entry;
+  const clear = (): void => {
+    if (inFlightRefresh === entry) inFlightRefresh = null;
+  };
+  void request.then(clear, clear);
   return request;
 }
 
 async function performRefreshAuthSession(
-  workspaceId: string | undefined,
   generation: number,
   operation: number,
 ): Promise<RefreshSessionResult> {
@@ -1684,7 +1709,7 @@ async function performRefreshAuthSession(
       return { ok: false, kind: 'invalid_body' };
     }
 
-    const token = await readJwtFromJarAfterInjection(workspaceId);
+    const token = await readJwtFromJarAfterInjection();
     if (
       isAuthScopeCurrent(generation, operation) &&
       typeof token === 'string' &&
