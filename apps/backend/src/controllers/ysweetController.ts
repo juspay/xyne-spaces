@@ -147,7 +147,7 @@ export class YSweetController {
 
   async getClientToken(req: Request, res: Response): Promise<void> {
     try {
-      const { docId, channelId, projectId, folderId, title, tokenType } = req.body;
+      const { docId, channelId, projectId, folderId, title, tokenType, wsHandshakeHash } = req.body;
 
       if (!docId || typeof docId !== 'string') {
         res.status(400).json({
@@ -161,6 +161,17 @@ export class YSweetController {
         res.status(400).json({
           error: 'Invalid request',
           message: "tokenType must be 'ticket' or 'none'"
+        });
+        return;
+      }
+
+      if (
+        wsHandshakeHash !== undefined &&
+        (tokenType !== 'ticket' || typeof wsHandshakeHash !== 'string' || wsHandshakeHash.length !== 44)
+      ) {
+        res.status(400).json({
+          error: 'Invalid request',
+          message: 'wsHandshakeHash must be a base64 SHA-256 and needs tokenType ticket'
         });
         return;
       }
@@ -250,6 +261,7 @@ export class YSweetController {
         userId,
         validForSeconds: tokenType ? TOKEN_VALID_SECONDS : LEGACY_TOKEN_VALID_SECONDS,
         ticket: tokenType === 'ticket',
+        ...(wsHandshakeHash ? { wsHandshakeHash } : {}),
       });
       // Only the socket needs a token. Every other caller reads docId and authorization.
       if (tokenType === 'none') delete clientToken.token;
