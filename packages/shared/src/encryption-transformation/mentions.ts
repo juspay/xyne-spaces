@@ -1,7 +1,7 @@
 import type { ExtractorOutput } from '../enc-contracts/extractors.js';
 import { stripCodeRegions } from '../utils/mentionParser.js';
 
-const ZWSP = '​';
+const ZWSP = '\u200B';
 
 /**
  * Parsing half of the backend's extractAllUsersForNotification (utils/mentionUtils.ts):

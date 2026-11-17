@@ -14,7 +14,12 @@ import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
 import { encryptField, decryptField, isEncryptedField } from '../crypto/field-decrypt.js';
-import { CLIENT_MANIFEST_MUTATION_ARG, getClientManifest } from '../crypto/client-manifest.js';
+import {
+  CLIENT_MANIFEST_MUTATION_ARG,
+  CLIENT_MANIFEST_STALE_CODE,
+  getClientManifest,
+  refetchClientManifest,
+} from '../crypto/client-manifest.js';
 import { findMutatorRule } from '../crypto/manifest-encrypt.js';
 import type { TransitKeyring } from '../crypto/keyring.js';
 import { validateQueryWhereClause } from '../zero/query-validation.js';
@@ -268,35 +273,50 @@ export function useZero(): Zero {
             (originalMutator as { fn: (options: unknown) => Promise<unknown> }).fn = (options: unknown) =>
               originalFn({ ...(options as Record<string, unknown>), args: plainArgs } as Parameters<typeof originalFn>[0]);
 
-            const deferredResult = (async () => {
+            // Encrypts with the manifest held right now and sends.
+            const send = async () => {
               const manifest = getClientManifest();
               const rule = manifest ? findMutatorRule(manifest, mutationName) : undefined;
               const record = (plainArgs ?? {}) as Record<string, ReadonlyJSONValue>;
-              if (!manifest || !rule) return record;
-              const encrypted: Record<string, ReadonlyJSONValue> = { ...record };
-              for (const [field, fieldRule] of Object.entries(rule.fields)) {
-                const value = record[field];
-                if (fieldRule.client && typeof value === 'string' && value.length > 0) {
-                  encrypted[field] = await encryptField(value, keyring);
+              let args: Record<string, ReadonlyJSONValue> = record;
+              if (manifest && rule) {
+                args = { ...record };
+                for (const [field, fieldRule] of Object.entries(rule.fields)) {
+                  const value = record[field];
+                  if (fieldRule.client && typeof value === 'string' && value.length > 0) {
+                    args[field] = await encryptField(value, keyring);
+                  }
                 }
+                args[CLIENT_MANIFEST_MUTATION_ARG] = {
+                  tag: manifest.tag,
+                  version: manifest.version,
+                  environment: manifest.environment,
+                };
               }
-              encrypted[CLIENT_MANIFEST_MUTATION_ARG] = {
-                tag: manifest.tag,
-                version: manifest.version,
-                environment: manifest.environment,
-              };
-              return encrypted;
-            })().then(encryptedArgs =>
-              target.mutate({
+              return target.mutate({
                 ...mutationRequest,
-                args: encryptedArgs as TArgs,
+                args: args as TArgs,
                 mutator: originalMutator,
-              } as Parameters<Zero['mutate']>[0]),
-            );
+              } as Parameters<Zero['mutate']>[0]);
+            };
+
+            // A manifest published since this tab fetched its own is rejected with
+            // ENC_MANIFEST_STALE (the mutation is rolled back). Refetch it and send once more,
+            // re-encrypted, as the REST interceptor does for a 409.
+            const deferredResult = send();
+            const server = deferredResult
+              .then(r => r.server)
+              .then(async serverResult => {
+                if (!JSON.stringify(serverResult ?? null).includes(CLIENT_MANIFEST_STALE_CODE)) {
+                  return serverResult;
+                }
+                if (!(await refetchClientManifest())) return serverResult;
+                return (await send()).server;
+              });
 
             const result = {
               client: deferredResult.then(r => r.client),
-              server: deferredResult.then(r => r.server),
+              server,
             } as PromiseWithServerResult;
             handleCompletion(result);
             return result;

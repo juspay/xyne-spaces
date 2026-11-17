@@ -575,10 +575,13 @@ export class App {
     this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
       void new ReactionController().reactAsUser(req, res);
     });
-    // TEMPORARY: content extraction for the encryption service's transform-request, until the
+    // TEMPORARY (XYNE-67075): content extraction for the encryption service's
+    // transform-request (the REST reply route and the conversations.send mutator), until the
     // extractor runs as a sidecar container in the encryption-api pod (apps/encryption-extractor
     // in the private repo; switch back by pointing EXTRACTOR_URL at it and deleting this
-    // route). The body carries message plaintext: never log it.
+    // route). It cannot be switched off before then: client-encrypted writes need it. The body
+    // carries message plaintext: never log it (morgan and requestLogger log the request line
+    // only).
     this.app.post('/api/internal/content/extract', validateS2SKey, (req: Request, res: Response) => {
       const { text, extractors } = (req.body ?? {}) as { text?: unknown; extractors?: unknown };
       const known = new Set<string>(EXTRACTORS);

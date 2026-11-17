@@ -5,7 +5,7 @@ import {
   isEncryptedField,
   decryptionCache,
   getClientManifest,
-  refreshClientManifest,
+  refetchClientManifest,
   CLIENT_MANIFEST_VERSION_HEADER,
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_ENVIRONMENT_HEADER,
@@ -271,25 +271,6 @@ export async function encryptionResponseInterceptor(
   return response;
 }
 
-/** Waits between manifest refetches after a 409, about 11.5 s in all. */
-const MANIFEST_REFETCH_DELAYS_MS = [0, 500, 1000, 2000, 4000, 4000];
-
-/** Refetches until the manifest is the version and environment the server asked for. */
-async function refetchManifest(version?: number, environment?: string): Promise<boolean> {
-  for (const delay of MANIFEST_REFETCH_DELAYS_MS) {
-    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
-    const manifest = await refreshClientManifest().catch(() => null);
-    if (
-      manifest &&
-      (version === undefined || manifest.version === version) &&
-      (environment === undefined || manifest.environment === environment)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
  * Retry once when the backend rejects a write for a stale client manifest (409
  * ENC_MANIFEST_STALE): refresh the manifest, then re-send through `resend` (the same
@@ -318,7 +299,7 @@ export async function retryOnStaleClientManifest(
   }
   config._encManifestRetried = true;
 
-  if (!(await refetchManifest(data.latestVersion, data.environment))) {
+  if (!(await refetchClientManifest(data.latestVersion, data.environment))) {
     logger.error('[encryption] Client manifest still not the one the server expects', {
       url: config.url,
       latestVersion: data.latestVersion,

@@ -167,15 +167,13 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     // Validate content if provided
     if (data.content && data.content.trim() !== '') {
       await this.validateString(data.content, 'content');
-      // Ciphertext has no visible length to measure; the encryption service measured the
-      // plaintext with the same rule (derived `text.length`).
-      if (isEncryptedField(data.content)) {
-        if (data.contentLength === undefined) {
-          throw new Error('content length is required for encrypted content');
-        }
-        this.validateVisibleLength(data.contentLength);
-      } else {
+      // Ciphertext has no visible length to measure. A caller that turned plaintext into it
+      // passes the length the encryption service measured with the same rule (derived
+      // `text.length`); ciphertext copied from a stored row was checked when first written.
+      if (!isEncryptedField(data.content)) {
         this.validateContentLength(data.content); // Max 10k visible characters
+      } else if (data.contentLength !== undefined) {
+        this.validateVisibleLength(data.contentLength);
       }
     }
 

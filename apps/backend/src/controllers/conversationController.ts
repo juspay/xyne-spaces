@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import type { replyToConversationClient } from '@xyne/shared';
 import type { ContractRequest } from '@/types/express';
+import { isEncryptedField } from '@xyne/shared';
 import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
   ConversationRepository,
@@ -1058,6 +1059,16 @@ export class ConversationController {
       // Content that arrived as workspace-DEK ciphertext is opaque here; the encryption
       // service's extracted command (req.derived) stands in for parsing it.
       const derived = req.derived;
+      // Encrypted content is stored only with the visible length the encryption service measured;
+      // a rule whose extraction policy leaves out `text` cannot be accepted (policy lives in the
+      // encryption service's database, so this is a configuration error, not a client one).
+      if (content && isEncryptedField(content) && derived?.text?.length === undefined) {
+        res.status(400).json({
+          error: 'Encrypted content arrived without its derived length',
+          code: 'ENC_DERIVED_INVALID',
+        });
+        return;
+      }
       const isBotCommand = derived?.command
         ? derived.command.isBot
         : Boolean(content && content.trim() && BotCommandParser.isBotCommand(content.trim()));

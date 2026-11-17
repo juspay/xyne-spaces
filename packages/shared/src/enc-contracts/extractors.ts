@@ -42,7 +42,7 @@ export const derivedContentFactsSchema: z.ZodType<DerivedContentFacts> = z.objec
     .optional(),
   text: z
     .object({
-      length: z.number(),
+      length: z.number().int().nonnegative(),
       isEmpty: z.boolean(),
     })
     .optional(),

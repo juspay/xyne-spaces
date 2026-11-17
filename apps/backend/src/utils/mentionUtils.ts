@@ -11,6 +11,7 @@ import {logger} from '@/utils/logger';
 // A mention inside <pre>/<code> is a false positive — e.g. `@Example` inside the
 // email `alice@Example.com` in a SQL snippet — and must not notify.
 import { stripCodeRegions } from '@xyne/shared/utils';
+import { extractSpecialMentionFlags } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
 
 export interface ExtractedMention {
@@ -608,51 +609,16 @@ export async function getGroupMembersForNotification(groupId: string): Promise<{
 }
 
 /**
- * Detect special mentions (@channel, @here) in message content
+ * Detect special mentions (@channel, @here) in message content. The detection is shared
+ * with the encryption service's mentions extractor (extractSpecialMentionFlags), so both
+ * agree on what counts as a broadcast.
  */
 export function extractSpecialMentions(content: string): SpecialMentions {
-  const result: SpecialMentions = {
-    hasChannel: false,
-    hasHere: false
-  };
-
-  // Check for @channel - HTML span format
-  const channelSpanRegex = /<span[^>]*class="[^"]*chat-input-special-mention[^"]*"[^>]*data-mention-type="channel"[^>]*>@channel<\/span>/i;
-  if (channelSpanRegex.test(content)) {
-    result.hasChannel = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @channel mention (HTML span)');
+  const { channel, here } = extractSpecialMentionFlags(content);
+  if (channel || here) {
+    logger.info('✅ [SPECIAL-MENTION] Found special mention', { channel, here });
   }
-
-  // Check for @here - HTML span format
-  const hereSpanRegex = /<span[^>]*class="[^"]*chat-input-special-mention[^"]*"[^>]*data-mention-type="here"[^>]*>@here<\/span>/i;
-  if (hereSpanRegex.test(content)) {
-    result.hasHere = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @here mention (HTML span)');
-  }
-
-  const contentWithoutCode = stripCodeRegions(content);
-  // Fallback: Check for plain text @channel or @here (case-insensitive)
-  // Match @channel or @here as whole words (not part of other words)
-  const plainChannelRegex = /@channel\b/i;
-  const plainHereRegex = /@here\b/i;
-
-  // Also match the mrkdwn broadcast token format used in FlowJSON text components:
-  // Slack's <!channel>/<!here> are normalised to <broadcast:channel>/<broadcast:here>
-  // by the BlockKit→FlowJSON converter, so we need to detect that form too.
-  const broadcastChannelRegex = /<broadcast:channel>/i;
-  const broadcastHereRegex = /<broadcast:here>/i;
-
-  if (!result.hasChannel && (plainChannelRegex.test(contentWithoutCode) || broadcastChannelRegex.test(contentWithoutCode))) {
-    result.hasChannel = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @channel mention (plain text or broadcast token)');
-  }
-
-  if (!result.hasHere && (plainHereRegex.test(contentWithoutCode) || broadcastHereRegex.test(contentWithoutCode))) {
-    result.hasHere = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @here mention (plain text or broadcast token)');
-  }
-
-  return result;
+  return { hasChannel: channel, hasHere: here };
 }
 
 /**

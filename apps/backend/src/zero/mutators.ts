@@ -608,7 +608,9 @@ async function guestSafeContent(
 /**
  * guestSafeContent for encrypted content: the ciphertext cannot be rewritten, so a guest whose
  * message mentions someone outside the channel is refused instead of having the mention
- * stripped.
+ * stripped. Group mentions (keepMentionsWithin drops every mention when one remains) and
+ * `@name` handles (resolved to users only when notifying) are refused outright, since a guest
+ * cannot be limited to channel members through them.
  */
 async function assertGuestMentionsWithin(
   tx: Transaction<Schema>,
@@ -616,7 +618,11 @@ async function assertGuestMentionsWithin(
   channelId: string,
   derived: DerivedContentFacts,
 ): Promise<void> {
-  if (role !== WorkspaceRole.GUEST || !derived.mentions || derived.mentions.userIds.length === 0) return;
+  if (role !== WorkspaceRole.GUEST || !derived.mentions) return;
+  if (derived.mentions.groupIds.length > 0 || derived.mentions.handles.length > 0) {
+    throw new Error('Guests can only mention members of this channel');
+  }
+  if (derived.mentions.userIds.length === 0) return;
   const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
   const allowed = new Set(participants.map(participant => participant.userId));
   if (derived.mentions.userIds.some(userId => !allowed.has(userId))) {

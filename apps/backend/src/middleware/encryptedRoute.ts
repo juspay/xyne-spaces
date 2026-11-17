@@ -137,7 +137,7 @@ async function transformRequestBody(
       path: req.originalUrl,
       environment: manifestEnvironmentForRequest(req),
       client: {
-        tag: req.get(CLIENT_MANIFEST_TAG_HEADER) || undefined,
+        tag: req.get(CLIENT_MANIFEST_TAG_HEADER) || 'default',
         version: versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : undefined,
         environment: req.get(CLIENT_MANIFEST_ENVIRONMENT_HEADER) || undefined,
       },
