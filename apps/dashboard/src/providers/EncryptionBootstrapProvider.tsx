@@ -7,9 +7,9 @@ import {
 import { memoryTransitKeyStore } from '@xyne/shared';
 import type { TransitKeyStore } from '@xyne/shared';
 import { useAuth } from './AuthProvider';
-import { getOrCreateTransitKeyPair } from '../services/deviceIdentityStore';
+import { getOrCreateTransitKeyPair } from '../services/transitKeyStore';
 
-/** The persisted browser pair from the device identity store, else one for this page load. */
+/** The persisted browser pair, else one for this page load. */
 const transitKeyStore: TransitKeyStore = {
   getOrCreate: async () =>
     (await getOrCreateTransitKeyPair()) ?? memoryTransitKeyStore.getOrCreate(),
