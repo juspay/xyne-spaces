@@ -3,6 +3,7 @@ import { NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import CookieManager from '@react-native-cookies/cookies';
 import { clearAllAuthCookies } from '@/src/utils/clearAllAuthCookies';
+import { isRestoredFromAnotherInstall } from '@/src/services/authDeviceId';
 import {
   runBestEffortCleanup,
   summarizeAuthCleanup,
@@ -648,6 +649,16 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     const operation = getAuthOperation();
     try {
       logger.info(Event.LOTUS_AUTH_CHECK, { stage: 'initialization_start' });
+
+      // Restored from a backup or moved to a new phone: the cookie jar (and its `xs`)
+      // belongs to the original install's session. Refreshing it here would leave two
+      // phones sharing one session, so signing out on either would end it on both. Sign
+      // this copy out locally instead; the original phone keeps its session.
+      if (await isRestoredFromAnotherInstall()) {
+        logger.warn(Event.LOTUS_AUTH_CHECK, { stage: 'restored_install_session_discarded' });
+        await clearStoredAuth({ generation, operation, waitForOperations: false });
+        return;
+      }
 
       const verifyUserWithRefresh = async (
         userId: string,

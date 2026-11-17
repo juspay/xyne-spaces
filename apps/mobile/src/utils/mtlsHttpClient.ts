@@ -23,6 +23,7 @@ import { buildApiCookieHeader, mergeCookieHeader } from './apiCookieHeader';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from './logger';
 import { getActiveWorkspaceId } from './activeWorkspace';
+import { getAuthDeviceId } from '@/src/services/authDeviceId';
 import { SESSION_REFRESH_UNAVAILABLE_BODY, withSessionRefreshOn401 } from './sessionRefreshOn401';
 import { decodeBase64Bytes, decodeBase64Utf8 } from './base64Utf8';
 
@@ -293,7 +294,8 @@ async function prepareHeadersForTransport(
     nextHeaders['x-zero-client-group-id'] = zeroClientGroupId;
   }
 
-  const deviceId = await logger.getDeviceId();
+  // Kept out of backups, so it is never another phone's (see authDeviceId).
+  const deviceId = await getAuthDeviceId();
   if (deviceId) {
     nextHeaders['x-device-id'] = deviceId;
   }
