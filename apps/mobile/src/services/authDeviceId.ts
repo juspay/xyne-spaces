@@ -29,8 +29,26 @@ interface DeviceIdentity {
 
 let identity: Promise<DeviceIdentity> | null = null;
 
+// Every request awaits the device id, so nothing on this path may throw: a storage error
+// must cost at most the restore detection, never the request itself.
+function readBackedUpDeviceId(): string | null {
+  try {
+    return getString(BACKED_UP_DEVICE_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeBackedUpDeviceId(deviceId: string): void {
+  try {
+    setString(BACKED_UP_DEVICE_ID_KEY, deviceId);
+  } catch {
+    // Only the restore detection on a later launch depends on it.
+  }
+}
+
 async function loadDeviceIdentity(): Promise<DeviceIdentity> {
-  const backedUpId = getString(BACKED_UP_DEVICE_ID_KEY);
+  const backedUpId = readBackedUpDeviceId();
   let storedId: string | null;
   try {
     storedId = await SecureStore.getItemAsync(DEVICE_ID_KEY, DEVICE_ID_OPTIONS);
@@ -44,7 +62,7 @@ async function loadDeviceIdentity(): Promise<DeviceIdentity> {
 
   if (storedId) {
     if (backedUpId !== storedId) {
-      setString(BACKED_UP_DEVICE_ID_KEY, storedId);
+      writeBackedUpDeviceId(storedId);
     }
     return { deviceId: storedId, restoredFromAnotherInstall: false };
   }
@@ -52,7 +70,7 @@ async function loadDeviceIdentity(): Promise<DeviceIdentity> {
   const deviceId = uuidv4();
   try {
     await SecureStore.setItemAsync(DEVICE_ID_KEY, deviceId, DEVICE_ID_OPTIONS);
-    setString(BACKED_UP_DEVICE_ID_KEY, deviceId);
+    writeBackedUpDeviceId(deviceId);
   } catch {
     // Not persisted: keep this id for the process and decide again on the next launch.
   }
@@ -61,6 +79,10 @@ async function loadDeviceIdentity(): Promise<DeviceIdentity> {
   return { deviceId, restoredFromAnotherInstall: backedUpId !== null };
 }
 
+/**
+ * One shared load, so concurrent first callers (a login racing start-up) all get the same
+ * id instead of each minting and storing their own.
+ */
 function resolveDeviceIdentity(): Promise<DeviceIdentity> {
   identity ??= loadDeviceIdentity();
   return identity;
