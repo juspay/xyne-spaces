@@ -39,6 +39,15 @@ const provider: EncryptionProvider = {
     return unsupported('getTransitServerKeys');
   },
 
+  async registerTransitClientKey(_sessionId: string, _clientKey: string): Promise<TransitServerKeys> {
+    return unsupported('registerTransitClientKey');
+  },
+
+  async transitClientKey(_sessionId: string): Promise<string | undefined> {
+    if (!config.enc.clientEncryptionEnabled && !config.enc.apiClientEncryptionEnabled) return undefined;
+    return unsupported('transitClientKey');
+  },
+
   async encryptBatch(items: EncryptBatchItem[]): Promise<string[]> {
     if (!config.enc.enableDbEncryption) return items.map((item) => item.value);
     return unsupported('encryptBatch');

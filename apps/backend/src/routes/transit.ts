@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { getEncryptionProvider } from '@/services/encryption';
 import { TRANSIT_KEY_COOKIE } from '@/services/encryption/types';
-import { authSessionService, deviceCookieOptions } from '@/services/authSessionService';
+import { deviceCookieOptions } from '@/services/authSessionService';
 import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
 
@@ -39,11 +39,11 @@ router.get('/config', async (_req: Request, res: Response) => {
   }
 });
 
-// The client's P-256 public key, which every transit key for it is derived from. Stored on
-// the auth session (for pushes that carry no cookie) and set as the `xk` cookie for
-// websockets and the sync proxy, which cannot see headers the client sets. Responds with
-// the encryption service's public keys, the other half of the derivation; nothing secret
-// travels and nothing is minted.
+// The client's P-256 public key, which every transit key for it is derived from. Kept by
+// the encryption service under the auth session id (for pushes that carry no cookie) and
+// set as the `xk` cookie for websockets and the sync proxy, which cannot see headers the
+// client sets. Responds with the encryption service's public keys, the other half of the
+// derivation; nothing secret travels and nothing is minted.
 router.post('/register', registerLimiter, async (req: Request, res: Response) => {
   const sid = req.user?.sid;
   if (!req.user || !sid) {
@@ -58,8 +58,7 @@ router.post('/register', registerLimiter, async (req: Request, res: Response) =>
   }
 
   try {
-    const serverKeys = await getEncryptionProvider().getTransitServerKeys();
-    await authSessionService.setTransitPublicKey(sid, publicKey);
+    const serverKeys = await getEncryptionProvider().registerTransitClientKey(sid, publicKey);
     websocketService.setSessionTransitKey(sid, publicKey);
     res.cookie(TRANSIT_KEY_COOKIE, publicKey, {
       ...deviceCookieOptions(req),

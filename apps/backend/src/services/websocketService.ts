@@ -17,11 +17,11 @@ import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
 import { readAgentProgress, type AgentProgressEntry } from './agentProgressService';
 import {
+  getEncryptionProvider,
   containsServerCiphertext,
   transformPayloadForClient,
   TRANSIT_KEY_COOKIE,
 } from '@/services/encryption';
-import { authSessionService } from '@/services/authSessionService';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -1588,7 +1588,7 @@ class WebSocketService {
   /**
    * A transit key registered after the socket connected (`POST /api/transit/register`):
    * this pod's sockets of that session use it at once; sockets on other pods read it from
-   * the session row at their next recheck.
+   * the encryption service at their next recheck.
    */
   setSessionTransitKey(sessionId: string, transitKey: string): void {
     if (!this.io) return;
@@ -1622,7 +1622,7 @@ class WebSocketService {
           const recheck = Date.now() - (socket.transitKeyCheckedAt ?? 0) > TRANSIT_KEY_RECHECK_MS;
           if (!socket.transitKey && socket.user?.sid && recheck) {
             socket.transitKeyCheckedAt = Date.now();
-            socket.transitKey = (await authSessionService.transitPublicKey(socket.user.sid)) ?? null;
+            socket.transitKey = (await getEncryptionProvider().transitClientKey(socket.user.sid)) ?? null;
           }
           if (!socket.transitKey) {
             logger.warn(`[WS-ENC] Socket ${socketId} has no transit key; not sending ${event} with storage ciphertext`);

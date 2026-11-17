@@ -10,20 +10,19 @@ import {
 import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
 import { logger } from '@/utils/logger';
-import { manifestEnvironmentForRequest } from '@/services/encryption';
+import { getEncryptionProvider, manifestEnvironmentForRequest } from '@/services/encryption';
 import { transitKey } from '@/middleware/decryptionMiddleware';
-import { authSessionService } from '@/services/authSessionService';
 import type { MutationEncryptionContext } from '@/zero/encryptedMutation';
 
 /**
  * The caller's transit public key and the manifest lane a push was made under, for mutations
  * encrypted by their manifest rule. The key comes from the request (header or cookie) or,
  * when the push carries neither (the cookie is SameSite=Strict, native clients send no
- * cookie), from the auth session the client registered it on, as the websocket does.
+ * cookie), from the key the client registered for its auth session, as the websocket does.
  */
 async function mutationEncryptionContext(req: Request): Promise<MutationEncryptionContext> {
   const clientKey =
-    transitKey(req) ?? (req.user?.sid ? await authSessionService.transitPublicKey(req.user.sid) : undefined);
+    transitKey(req) ?? (req.user?.sid ? await getEncryptionProvider().transitClientKey(req.user.sid) : undefined);
   return { clientKey, environment: manifestEnvironmentForRequest(req) };
 }
 

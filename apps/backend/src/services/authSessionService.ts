@@ -431,20 +431,6 @@ export class AuthSessionService {
     }
   }
 
-  /** The transit public key the session's client registered (`POST /api/transit/register`). */
-  async setTransitPublicKey(id: string, transitPublicKey: string): Promise<void> {
-    const { count } = await db.authSession.updateMany({ where: { id }, data: { transitPublicKey } });
-    if (count === 0) {
-      logger.warn('[AUTH-SESSION] No auth session row to store the transit public key on', { sessionId: id });
-    }
-  }
-
-  /** The transit public key the session registered, for pushes to a socket that carried no `xk` cookie. */
-  async transitPublicKey(id: string): Promise<string | undefined> {
-    const row = await db.authSession.findUnique({ where: { id }, select: { transitPublicKey: true } });
-    return row?.transitPublicKey ?? undefined;
-  }
-
   /** True when the sid was logged out within the last access-token lifetime. Fails open on Redis errors. */
   async isSessionRevoked(sessionId: string): Promise<boolean> {
     try {

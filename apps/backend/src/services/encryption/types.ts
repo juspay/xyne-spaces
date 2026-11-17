@@ -106,6 +106,13 @@ export interface EncryptionProvider {
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
   /** The encryption service's public keys; the client derives its transit keys from them. */
   getTransitServerKeys(): Promise<TransitServerKeys>;
+  /**
+   * Keeps the client's transit public key for its auth session (the encryption service
+   * stores it, for pushes that carry no key) and returns the service's public keys.
+   */
+  registerTransitClientKey(sessionId: string, clientKey: string): Promise<TransitServerKeys>;
+  /** The transit public key the auth session's client registered; `undefined` when none. */
+  transitClientKey(sessionId: string): Promise<string | undefined>;
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
   decryptBatch(values: string[]): Promise<string[]>;
   /**
