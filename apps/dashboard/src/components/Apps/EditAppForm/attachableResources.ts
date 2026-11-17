@@ -36,11 +36,18 @@ export const ATTACHABLE_RESOURCES: AttachableResourceConfig[] = [
     noun: 'workflows',
     requiredPermission: 'workflows:start',
     async loadOptions(): Promise<AttachedResource[]> {
-      const response = await apiInstance.get<{ workflows: SdkWorkflow[] }>(
-        '/workflows-v2/workflows',
-        { params: { limit: 500 } },
-      );
-      return response.data.workflows.map(workflow => ({
+      // The SDK clamps a page to 100, so follow the cursor to get them all.
+      const all: SdkWorkflow[] = [];
+      let cursor: string | undefined;
+      do {
+        const response = await apiInstance.get<{
+          workflows: SdkWorkflow[];
+          nextCursor?: string | null;
+        }>('/workflows-v2/workflows', { params: { limit: 100, ...(cursor ? { cursor } : {}) } });
+        all.push(...response.data.workflows);
+        cursor = response.data.nextCursor ?? undefined;
+      } while (cursor);
+      return all.map(workflow => ({
         id: workflow.id,
         name: readWorkflowName(workflow.metadata, workflow.id),
       }));

@@ -280,11 +280,27 @@ const mount = (
         ? [express.raw({ type: () => true, limit: '10mb' })]
         : [express.json({ limit: '10mb' })];
 
-    router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
+    // Before the body parsers: the multipart one writes files to storage as it parses, so
+    // an unattached app must be refused before it reads a byte, not after it has uploaded.
+    const attachGuard: express.RequestHandler[] = workflowIdParam
+      ? [
+          (req, res, next) => {
+            void assertTriggerableWorkflow(req, ctxFromRequest(req), workflowIdParam).then(
+              () => next(),
+              (err: unknown) => {
+                const status = (err as { statusCode?: number }).statusCode ?? 500;
+                if (status >= 500) logger.error(`[workflows] ${key} guard failed`, err);
+                res.status(status).json({ error: status < 500 ? (err as Error).message : 'Internal error' });
+              },
+            );
+          },
+        ]
+      : [];
+
+    router[method](route.path, ...guards, ...attachGuard, ...middleware, (req: Request, res: Response) => {
       void (async () => {
         try {
           const ctx = authenticated || workflowIdParam ? ctxFromRequest(req) : null;
-          if (ctx && workflowIdParam) await assertTriggerableWorkflow(req, ctx, workflowIdParam);
 
           const routeRequest = buildRouteRequest(req, route.rawBody === true);
 
