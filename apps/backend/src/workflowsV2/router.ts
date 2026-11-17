@@ -4,6 +4,8 @@ import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne
 import { logger } from '@/utils/logger';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { workflowAttachmentUpload } from '@/middleware/upload';
+import { ShareableEntityType } from '@xyne/shared';
+import { appResourceAccessService } from '@/services/appResourceAccessService';
 import { persistence, workflowRuntime } from './runtime';
 import { attrsOf } from './utils';
 import type { XyneCtx } from './types';
@@ -45,6 +47,62 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  * create to stamp ownership and is not persisted.
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
+
+/**
+ * Route key → the path param naming the workflow it acts on. Mounted behind app auth
+ * rather than the session, and absent from {@link PUBLIC_ALLOWED_ROUTES} so nothing else
+ * exposes it. Re-check on an SDK bump.
+ */
+const APP_AUTH_ROUTES = new Map<string, string>([
+  ['POST /v2/workflows/:workflowId/trigger/v2', 'workflowId'],
+]);
+
+/**
+ * The authorization the SDK skips: the handler discards its `auth` and calls
+ * `triggerWebhookV2Public`, which by its own documentation "intentionally bypasses caller
+ * authorization". The workflow must be in the caller's workspace AND attached to this app.
+ *
+ * Both lookups always run, so "no such workflow", "not yours" and "not attached" give the
+ * same 404 at the same cost and cannot be told apart.
+ */
+const installedAppIdOf = (req: Request): string | null => {
+  const auth = (req as { auth?: { installedAppId?: unknown } }).auth;
+  return typeof auth?.installedAppId === 'string' ? auth.installedAppId : null;
+};
+
+const assertTriggerableWorkflow = async (
+  req: Request,
+  ctx: XyneCtx,
+  param: string,
+): Promise<void> => {
+  const workflowId = req.params[param];
+  const installedAppId = installedAppIdOf(req);
+  const [workflow, attached] = await Promise.all([
+    workflowId ? persistence.getWorkflow(workflowId) : Promise.resolve(null),
+    workflowId && installedAppId
+      ? appResourceAccessService.isAttached({
+          workspaceId: ctx.workspaceId,
+          installedAppId,
+          entityType: ShareableEntityType.WORKFLOW,
+          entityId: workflowId,
+        })
+      : Promise.resolve(false),
+  ]);
+
+  const ownedByCaller =
+    workflow !== null && attrsOf(workflow.attributes)?.workspaceId === ctx.workspaceId;
+
+  if (ownedByCaller && !attached) {
+    // A bare 404 and the wrapper only logs at 5xx, so this is the only trace an admin gets.
+    logger.warn(
+      `[workflows] install ${String(installedAppId)} is not attached to workflow ${String(workflowId)}`,
+    );
+  }
+
+  if (!ownedByCaller || !attached) {
+    throw Object.assign(new Error('Workflow not found'), { statusCode: 404 });
+  }
+};
 
 const resolveWorkflowUploadScope: express.RequestHandler = (req, res, next) => {
   void (async () => {
@@ -207,6 +265,7 @@ const mount = (
   for (const route of routes) {
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
+    const workflowIdParam = APP_AUTH_ROUTES.get(key);
 
     if (needsSession(route.access) !== authenticated) continue;
     if (allow && !allow.has(key)) continue;
@@ -224,7 +283,8 @@ const mount = (
     router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
       void (async () => {
         try {
-          const ctx = authenticated ? ctxFromRequest(req) : null;
+          const ctx = authenticated || workflowIdParam ? ctxFromRequest(req) : null;
+          if (ctx && workflowIdParam) await assertTriggerableWorkflow(req, ctx, workflowIdParam);
 
           const routeRequest = buildRouteRequest(req, route.rawBody === true);
 
@@ -255,3 +315,7 @@ mount(workflowsRouter, true);
 
 export const workflowsPublicRouter: Router = express.Router();
 mount(workflowsPublicRouter, false, PUBLIC_ALLOWED_ROUTES, [webhookLimiter]);
+
+/** Registers only {@link APP_AUTH_ROUTES}; mounted under `/api/apps/workflows` behind `authenticateApp`. */
+export const workflowsAppRouter: Router = express.Router();
+mount(workflowsAppRouter, false, new Set(APP_AUTH_ROUTES.keys()));
