@@ -1,7 +1,7 @@
 import { logger } from '@/utils/logger';
 import { AgentsConfig } from '@/agents/config';
 import { askDecision } from '@/services/decision/ask';
-import { isDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
+import { isPrivateDecisionEngineConfigured, decisionEngineModel } from '@/services/decision/targets';
 import type { ChoiceQuestion, AskFailure } from '@/services/decision/types';
 import type { CategoryConfig, GeneratedTag } from '../types';
 import { validateGeneratedTags } from './validate';
@@ -64,7 +64,7 @@ export async function runShadowTagGeneration(
   meta: { jobId: string; sourceId: string; sourceType: string },
 ): Promise<void> {
   try {
-    if (!isDecisionEngineConfigured()) return;
+    if (!isPrivateDecisionEngineConfigured()) return;
 
     const cacConfig = await AgentsConfig.fetch();
     if (!cacConfig.shadowTagGenerationEnabled) return;

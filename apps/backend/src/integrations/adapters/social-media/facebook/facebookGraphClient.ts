@@ -25,6 +25,27 @@ interface Paged<T> {
   paging?: { next?: string };
 }
 
+/** Paging links come from the response body; only follow them back to the Graph API host. */
+function graphNextUrl(next: string | undefined): string | undefined {
+  if (!next) return undefined;
+  try {
+    const url = new URL(next);
+    if (url.protocol === 'https:' && url.hostname === 'graph.facebook.com') return next;
+  } catch {
+    // fall through
+  }
+  logger.warn('[FacebookGraph] Ignoring paging link off graph.facebook.com');
+  return undefined;
+}
+
+/** Page, post and comment ids are digits and underscores; refuse anything else in a URL path. */
+function graphId(id: string): string {
+  if (!/^[0-9_]{1,128}$/.test(id)) {
+    throw new Error('Invalid Facebook Graph object id');
+  }
+  return id;
+}
+
 export interface FacebookHistoryMessage {
   id: string;
   created_time: string;
@@ -70,8 +91,9 @@ async function* iteratePages<T>(
   for (let fetched = 0; page; fetched++) {
     const data = page.data ?? [];
     yield data;
-    if (!page.paging?.next || done(data) || fetched >= MAX_HISTORY_PAGES) return;
-    page = (await axios.get<Paged<T>>(page.paging.next, bearer(accessToken))).data;
+    const next = graphNextUrl(page.paging?.next);
+    if (!next || done(data) || fetched >= MAX_HISTORY_PAGES) return;
+    page = (await axios.get<Paged<T>>(next, bearer(accessToken))).data;
   }
 }
 
@@ -157,7 +179,7 @@ export const facebookGraphClient = {
         await axios.get(url, { params, ...bearer(userAccessToken) });
       pages.push(...(response.data.data ?? []));
       // paging.next is a full URL that already carries the query string.
-      url = response.data.paging?.next;
+      url = graphNextUrl(response.data.paging?.next);
       params = undefined;
     }
     return pages;
@@ -166,7 +188,7 @@ export const facebookGraphClient = {
   // Requires the app-level Page webhook to be configured in the Meta App Dashboard first.
   async subscribePage(pageAccessToken: string, pageId: string): Promise<void> {
     try {
-      await axios.post(`${FB_BASE_URL}/${pageId}/subscribed_apps`, null, {
+      await axios.post(`${FB_BASE_URL}/${graphId(pageId)}/subscribed_apps`, null, {
         params: { subscribed_fields: PAGE_SUBSCRIBED_FIELDS },
         ...bearer(pageAccessToken),
       });
@@ -183,7 +205,7 @@ export const facebookGraphClient = {
   },
 
   async unsubscribePage(pageAccessToken: string, pageId: string): Promise<void> {
-    await axios.delete(`${FB_BASE_URL}/${pageId}/subscribed_apps`, bearer(pageAccessToken));
+    await axios.delete(`${FB_BASE_URL}/${graphId(pageId)}/subscribed_apps`, bearer(pageAccessToken));
   },
 
   async sendMessage(
@@ -195,7 +217,7 @@ export const facebookGraphClient = {
     humanAgent = false,
   ): Promise<{ recipient_id: string; message_id: string }> {
     const response = await axios.post<{ recipient_id: string; message_id: string }>(
-      `${FB_BASE_URL}/${pageId}/messages`,
+      `${FB_BASE_URL}/${graphId(pageId)}/messages`,
       {
         recipient: { id: recipientPsid },
         message: { text },
@@ -214,7 +236,7 @@ export const facebookGraphClient = {
     text: string,
   ): Promise<{ id: string }> {
     const response = await axios.post<{ id: string }>(
-      `${FB_BASE_URL}/${commentId}/comments`,
+      `${FB_BASE_URL}/${graphId(commentId)}/comments`,
       { message: text },
       bearer(pageAccessToken),
     );
@@ -230,7 +252,7 @@ export const facebookGraphClient = {
     since: Date,
   ): AsyncGenerator<Array<{ id: string; messages: FacebookHistoryMessage[] }>> {
     type Conversation = { id: string; updated_time?: string; messages?: Paged<FacebookHistoryMessage> };
-    const first = await axios.get<Paged<Conversation>>(`${FB_BASE_URL}/${pageId}/conversations`, {
+    const first = await axios.get<Paged<Conversation>>(`${FB_BASE_URL}/${graphId(pageId)}/conversations`, {
       params: {
         platform: 'messenger',
         fields:
@@ -268,7 +290,7 @@ export const facebookGraphClient = {
     recentOnly = false,
   ): AsyncGenerator<Array<{ id: string; comments: FacebookHistoryComment[] }>> {
     type Post = { id: string; comments?: Paged<FacebookHistoryComment> };
-    const first = await axios.get<Paged<Post>>(`${FB_BASE_URL}/${pageId}/feed`, {
+    const first = await axios.get<Paged<Post>>(`${FB_BASE_URL}/${graphId(pageId)}/feed`, {
       params: {
         fields:
           'id,comments.filter(stream).order(reverse_chronological).limit(100){id,created_time,from,message,parent{id},permalink_url}',
@@ -298,7 +320,7 @@ export const facebookGraphClient = {
     pageId: string,
     since: Date,
   ): Promise<FacebookTaggedPost[]> {
-    const first = await axios.get<Paged<FacebookTaggedPost>>(`${FB_BASE_URL}/${pageId}/tagged`, {
+    const first = await axios.get<Paged<FacebookTaggedPost>>(`${FB_BASE_URL}/${graphId(pageId)}/tagged`, {
       params: { fields: 'id,created_time,from,message,permalink_url', limit: '50' },
       ...bearer(pageAccessToken),
     });

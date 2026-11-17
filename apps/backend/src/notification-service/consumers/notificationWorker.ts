@@ -18,10 +18,16 @@ import {
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
 
+const STALE_CALL_PUSH_MS = 45_000;
+const STALE_PUSH_MS = 6 * 60 * 60 * 1000;
+
 // Utility function
 function getMessageTypeFromEvent(eventType: string | undefined): 'dm' | 'channel' {
   return (eventType === 'direct_message' || eventType === 'DIRECT_MESSAGE') ? 'dm' : 'channel';
 }
+
+const DLQ_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const DLQ_TRIM_INTERVAL_MS = 60 * 60 * 1000;
 
 export class NotificationWorker {
   private queue: Bull.Queue<NotificationJobData>;
@@ -29,6 +35,7 @@ export class NotificationWorker {
   private incomingCallQueue: Bull.Queue<NotificationJobData>;
   private incomingCallDlq: Bull.Queue<NotificationJobData>;
   private mobilePushChannel: MobilePushChannel;
+  private dlqTrimTimer: NodeJS.Timeout | null = null;
   private logger = logger.child({ module: 'NotificationWorker' });
 
 
@@ -68,6 +75,9 @@ export class NotificationWorker {
 
     this.logger.info('Starting Notification Worker consumers...');
     this.setupPushWorkers();
+    this.trimDlqs();
+    this.dlqTrimTimer = setInterval(() => this.trimDlqs(), DLQ_TRIM_INTERVAL_MS);
+    this.dlqTrimTimer.unref();
     
     this.isInitialized = true;
     this.logger.info('Notification Worker consumers started successfully');
@@ -91,15 +101,21 @@ export class NotificationWorker {
   }
 
   private async updateMobilePushStatus(
-    notificationId: string, 
+    notificationId: string,
+    userId: string,
     status: NotificationStatus
   ): Promise<void> {
-    try {  
-      await repositories.notifications.updateStatus(
+    try {
+      const updated = await repositories.notifications.updateStatusForUser(
         notificationId,
+        userId,
         status
       );
-      
+      if (updated === 0) {
+        this.logger.warn('Notification not found for user; status not updated', { notificationId, userId });
+        return;
+      }
+
       this.logger.info(`Updated notification mobile push status to ${status}`, { notificationId });
     } catch (error) {
       this.logger.error('Failed to update notification status', { notificationId, error });
@@ -119,12 +135,27 @@ export class NotificationWorker {
         appVersion: data.appVersion,
       });
 
+      const ageMs = Date.now() - job.timestamp;
+      const maxAgeMs = data.payload?.type === 'INCOMING_CALL' ? STALE_CALL_PUSH_MS : STALE_PUSH_MS;
+      if (ageMs > maxAgeMs) {
+        this.logger.warn(`${job.queue.name} job is stale — dropping`, {
+          jobId: job.id,
+          ageMs,
+          notificationId,
+          notificationType: data.payload?.type,
+        });
+        if (notificationId) {
+          await this.updateMobilePushStatus(notificationId, data.userId, NotificationStatus.FAILED);
+        }
+        return { success: false, error: 'Push job expired before delivery', isRetryable: false };
+      }
+
       const result = await this.mobilePushChannel.deliver(data);
 
       if (!result.success) {
         // Track failure in DB
         if (notificationId) {
-          await this.updateMobilePushStatus(notificationId, NotificationStatus.FAILED);
+          await this.updateMobilePushStatus(notificationId, data.userId, NotificationStatus.FAILED);
         }
 
         this.logger.error(`${job.queue.name} job failed`, { 
@@ -144,7 +175,7 @@ export class NotificationWorker {
       } else {
         // Track success in DB
         if (notificationId) {
-          await this.updateMobilePushStatus(notificationId, NotificationStatus.DELIVERED);
+          await this.updateMobilePushStatus(notificationId, data.userId, NotificationStatus.DELIVERED);
         }
         
         this.logger.info(`${job.queue.name} job successful`, {
@@ -278,6 +309,14 @@ export class NotificationWorker {
     });
   }
 
+  private trimDlqs(): void {
+    for (const dlq of [this.dlq, this.incomingCallDlq]) {
+      dlq.clean(DLQ_RETENTION_MS, 'wait').catch(error => {
+        this.logger.warn('Failed to trim DLQ', { queue: dlq.name, error });
+      });
+    }
+  }
+
   private async moveToDLQ(dlq: Bull.Queue, jobData: NotificationJobData, origin: string): Promise<void> {
     try {
       await dlq.add(`failed-${origin}`, jobData, {
@@ -384,6 +423,10 @@ export class NotificationWorker {
 
   async shutdown(): Promise<void> {
     try {
+      if (this.dlqTrimTimer) {
+        clearInterval(this.dlqTrimTimer);
+        this.dlqTrimTimer = null;
+      }
       await this.queue.close();
       await this.dlq.close();
       await this.incomingCallQueue.close();

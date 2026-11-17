@@ -364,6 +364,14 @@ class TeamIntelligenceWorker {
       `[TEAM-INTEL-WORKER] Processing job ${job.id} batchId=${batchId} userIngestionId=${userIngestionId} userEmail=${userEmail}`
     );
 
+    const existingUser = await teamIntelligenceRepository.findUserIngestionById(userIngestionId);
+    if (!existingUser || existingUser.batchId !== batchId) {
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Discarding user job ${job.id}; ingestion ${userIngestionId} is not in batch ${batchId}`
+      );
+      return;
+    }
+
     const userIngestion = await teamIntelligenceRepository.updateUserStatus(userIngestionId, {
       processingStatus: TeamIntelligenceUserIngestionStatus.PROCESSING,
       startedAt,
@@ -475,13 +483,13 @@ class TeamIntelligenceWorker {
     }
 
     await this.triggerTeamSummariesForBatchIfReady({
-      batchId: data.batchId,
-      reportDate: new Date(`${data.reportDate}T00:00:00.000Z`),
-      source: data.source,
-      orgId: data.orgId,
+      batchId: failedUser.batchId,
+      reportDate: failedUser.reportDate,
+      source: failedUser.source,
+      orgId: failedUser.orgId ?? '',
     });
 
-    await this.reconcileBatchStatus(data.batchId);
+    await this.reconcileBatchStatus(failedUser.batchId);
   }
 
   private async processTeamSummaryJob(job: Bull.Job<TeamIntelligenceTeamSummaryQueuedJobData>): Promise<void> {
@@ -491,6 +499,14 @@ class TeamIntelligenceWorker {
     logger.info(
       `[TEAM-INTEL-WORKER] Processing team summary job ${job.id} batchId=${batchId} teamSummaryId=${teamSummaryId} teamId=${teamId ?? 'null'} teamName=${teamName}`
     );
+
+    const existingTeamSummary = await teamIntelligenceRepository.findTeamSummaryById(teamSummaryId);
+    if (!existingTeamSummary || existingTeamSummary.batchId !== batchId) {
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Discarding team summary job ${job.id}; summary ${teamSummaryId} is not in batch ${batchId}`
+      );
+      return;
+    }
 
     const teamSummary = await teamIntelligenceRepository.updateTeamSummaryStatus(teamSummaryId, {
       status: TeamIntelligenceBatchStatus.PROCESSING,
@@ -681,6 +697,14 @@ class TeamIntelligenceWorker {
     logger.info(
       `[TEAM-INTEL-WORKER] Processing org summary job ${job.id} batchId=${batchId} orgSummaryId=${orgSummaryId}`
     );
+
+    const existingOrgSummary = await teamIntelligenceRepository.findOrgSummaryById(orgSummaryId);
+    if (!existingOrgSummary || existingOrgSummary.batchId !== batchId) {
+      logger.warn(
+        `[TEAM-INTEL-WORKER] Discarding org summary job ${job.id}; summary ${orgSummaryId} is not in batch ${batchId}`
+      );
+      return;
+    }
 
     const orgSummary = await teamIntelligenceRepository.updateOrgSummaryStatus(orgSummaryId, {
       status: TeamIntelligenceBatchStatus.PROCESSING,

@@ -113,7 +113,13 @@ export class TranscriptionAgentClient {
       const response = await axios.post<TranscribeRecordingResponse>(
         `${pythonAgentUrl}/transcribe-recording`,
         { jobId: input.jobId, recordingUrl: input.recordingUrl, ...(input.language && { language: input.language }) },
-        { headers: { 'Content-Type': 'application/json' }, timeout: this.timeoutMs },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(config.transcriptionAgentApiKey && { 'x-api-key': config.transcriptionAgentApiKey }),
+          },
+          timeout: this.timeoutMs,
+        },
       );
 
       const data = response.data;

@@ -87,7 +87,10 @@ export function getWorkspaceActivityCountsQuery(memberId: string): Promise<
  * batch atomically with FOR UPDATE SKIP LOCKED; the worker sweeps every workspace, so there
  * is no single tenant to scope to. SQL unchanged.
  */
+const CLAIM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export async function claimSpecialMentionAudienceActivitiesQuery() {
+  const since = new Date(Date.now() - CLAIM_WINDOW_MS);
   return rawQuery(
     ['Activity'],
     'activity classification worker: FOR UPDATE SKIP LOCKED claim so competing workers cannot double-process a batch',
@@ -97,6 +100,7 @@ export async function claimSpecialMentionAudienceActivitiesQuery() {
         FROM "activities"
         WHERE "classification" = ${ActivityClassification.PENDING}
           AND "classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
+          AND "createdAt" > ${since}
         ORDER BY "createdAt" ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
@@ -126,6 +130,7 @@ export async function claimSpecialMentionAudienceActivitiesQuery() {
  * single tenant to scope to. SQL unchanged.
  */
 export async function claimSingleActivitiesQuery(limit: number) {
+  const since = new Date(Date.now() - CLAIM_WINDOW_MS);
   return rawQuery(
     ['Activity'],
     'activity classification worker: FOR UPDATE SKIP LOCKED claim so competing workers cannot double-process a row',
@@ -135,6 +140,7 @@ export async function claimSingleActivitiesQuery(limit: number) {
         FROM "activities"
         WHERE "classification" = ${ActivityClassification.PENDING}
           AND ("classificationJobType" IS NULL OR "classificationJobType" = ${ActivityClassificationJobType.SINGLE})
+          AND "createdAt" > ${since}
         ORDER BY "createdAt" ASC
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED

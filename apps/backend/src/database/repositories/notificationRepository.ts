@@ -137,6 +137,19 @@ export class NotificationRepository extends BaseRepository<Notification, Notific
       }
     });
   }
+
+  /** Status write that only lands when the notification belongs to `userId`. */
+  async updateStatusForUser(
+    id: string,
+    userId: string,
+    status: NotificationStatus
+  ): Promise<number> {
+    const result = await this.db.notification.updateMany({
+      where: { id, userId },
+      data: { status },
+    });
+    return result.count;
+  }
 }
 
 // Define types for NotificationPreference

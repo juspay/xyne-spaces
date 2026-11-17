@@ -81,10 +81,17 @@ class EtaDeadlineWorker {
         for (const ticket of ticketBatch) {
           if (!ticket.eta) continue;
 
-          const actorId = await getTicketBotActorId(ticket.workspaceId);
           const daysOverdue = calculateDaysOverdueMidnight(new Date(ticket.eta), today);
 
           if (daysOverdue <= 0 || !BREACH_REMIND_DAYS.includes(daysOverdue)) {
+            continue;
+          }
+
+          let actorId: string;
+          try {
+            actorId = await getTicketBotActorId(ticket.workspaceId);
+          } catch {
+            logger.warn(`[ETA-DEADLINE-WORKER] Skipping ticket ${ticket.id}: no ticket bot in its workspace`);
             continue;
           }
 

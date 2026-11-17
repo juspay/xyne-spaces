@@ -1,14 +1,18 @@
 import Bull from 'bull';
+import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
-import type {
-  ComparedAnswer,
-  DecisionAnswer,
-  DecisionEngine,
-  DecisionQuestion,
-  QuestionFeature,
-  TaskFeature,
-  TaskInput,
+import {
+  DECISION_ENGINES,
+  QUESTION_FEATURES,
+  TASK_FEATURES,
+  type ComparedAnswer,
+  type DecisionAnswer,
+  type DecisionEngine,
+  type DecisionQuestion,
+  type QuestionFeature,
+  type TaskFeature,
+  type TaskInput,
 } from '@/services/decision/types';
 
 export const COMPARE_JOB = 'compare-xor';
@@ -20,6 +24,7 @@ export const JOB_TTL_MS = 60 * 60 * 1000;
 /** A decision on typed questions, to put to the engines that did not answer it. */
 export interface CompareJob {
   feature: QuestionFeature;
+  workspaceId: string;
   liveEngine: DecisionEngine;
   state: string | Record<string, unknown>;
   questions: Record<string, DecisionQuestion>;
@@ -29,10 +34,69 @@ export interface CompareJob {
 /** A decided task, to put to the engines that did not answer it live. */
 export interface EvaluateJob {
   feature: TaskFeature;
+  workspaceId: string;
   input: TaskInput;
   /** In the order they ran; the last is the answer users got. */
   liveAnswers: ComparedAnswer[];
 }
+
+const MAX_CONTENT_CHARS = 60_000;
+const MAX_QUESTIONS = 20;
+
+const boundedJson = (value: unknown): boolean => {
+  try {
+    return JSON.stringify(value).length <= MAX_CONTENT_CHARS;
+  } catch {
+    return false;
+  }
+};
+
+const QuestionShape = z.looseObject({ type: z.enum(['noul', 'choice', 'score']) });
+
+const CompareJobSchema = z.object({
+  feature: z.enum(QUESTION_FEATURES),
+  workspaceId: z.string().min(1).max(64),
+  liveEngine: z.enum(DECISION_ENGINES),
+  state: z.union([z.string().max(MAX_CONTENT_CHARS), z.record(z.string(), z.unknown())]).refine(boundedJson),
+  questions: z
+    .record(z.string().max(64), QuestionShape)
+    .refine((q) => Object.keys(q).length > 0 && Object.keys(q).length <= MAX_QUESTIONS)
+    .refine(boundedJson),
+  liveAnswers: z.record(z.string(), z.unknown()).nullable().refine(boundedJson),
+});
+
+const EvaluateJobSchema = z.object({
+  feature: z.enum(TASK_FEATURES),
+  workspaceId: z.string().min(1).max(64),
+  input: z.object({
+    channelId: z.string().min(1).max(64),
+    emailSubject: z.string().max(2_000),
+    emailBody: z.string().max(MAX_CONTENT_CHARS),
+    emailMetadata: z.record(z.string(), z.unknown()).optional().refine(boundedJson),
+    modelName: z.string().max(200),
+  }),
+  liveAnswers: z
+    .array(
+      z.object({
+        engine: z.enum(DECISION_ENGINES),
+        label: z.string().max(500).nullable(),
+        confidence: z.number().optional(),
+        model: z.string().max(200).optional(),
+      }),
+    )
+    .max(DECISION_ENGINES.length),
+});
+
+/** A queued job is only content in Redis: null unless it has the shape this module enqueues. */
+export const parseCompareJob = (data: unknown): CompareJob | null => {
+  const parsed = CompareJobSchema.safeParse(data);
+  return parsed.success ? (data as CompareJob) : null;
+};
+
+export const parseEvaluateJob = (data: unknown): EvaluateJob | null => {
+  const parsed = EvaluateJobSchema.safeParse(data);
+  return parsed.success ? (data as EvaluateJob) : null;
+};
 
 class DecisionEvaluationQueue {
   private queue: Bull.Queue | null = null;

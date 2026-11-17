@@ -8,9 +8,12 @@ import {
   EVALUATE_JOB,
   JOB_TTL_MS,
   decisionEvaluationQueue,
+  parseCompareJob,
+  parseEvaluateJob,
   type CompareJob,
   type EvaluateJob,
 } from '@/queues/decisionEvaluationQueue';
+import { db } from '@/database/client';
 
 /** Per job type; each job is a few LLM and Jev calls that only feed metrics. */
 const CONCURRENCY = config.decisionEval.concurrency;
@@ -33,11 +36,31 @@ class DecisionEvaluationWorker {
     if (!queue) return;
 
     void queue.process(COMPARE_JOB, CONCURRENCY, async (job) => {
-      if (!isExpired(job)) await compare(job.data as CompareJob);
+      if (isExpired(job)) return;
+      const data = parseCompareJob(job.data);
+      if (!data) {
+        logger.warn('[DECISION-EVALUATION-WORKER] Dropping malformed compare job', { jobId: job.id });
+        return;
+      }
+      await compare(data);
     });
     void queue.process(EVALUATE_JOB, CONCURRENCY, async (job) => {
       if (isExpired(job)) return;
-      const data = job.data as EvaluateJob;
+      const data = parseEvaluateJob(job.data);
+      if (!data) {
+        logger.warn('[DECISION-EVALUATION-WORKER] Dropping malformed evaluate job', { jobId: job.id });
+        return;
+      }
+      const channel = await db.channel.findFirst({
+        where: { id: data.input.channelId, workspaceId: data.workspaceId },
+        select: { id: true },
+      });
+      if (!channel) {
+        logger.warn('[DECISION-EVALUATION-WORKER] Evaluate job channel is not in its workspace — dropping', {
+          jobId: job.id,
+        });
+        return;
+      }
       const task = await emailClassificationService.evaluationTask(data.feature, data.input);
       if (task) await evaluate(task, data);
     });

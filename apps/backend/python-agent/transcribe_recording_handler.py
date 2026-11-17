@@ -18,6 +18,7 @@ Response codes
 --------------
 200  {text, provider}
 400  {error, code: "bad_request"}           missing/invalid body fields
+401  {error, code: "unauthorized"}          missing/wrong x-api-key (TRANSCRIPTION_AGENT_API_KEY)
 422  {error, code: "invalid_url"}           non-https / non-public host / pattern mismatch
 422  {error, code: "too_large"}             exceeds RECORDING_MAX_BYTES
 422  {error, code: "recording_unavailable"} upstream 403/404/410 (or empty body)
@@ -28,6 +29,7 @@ Response codes
 """
 
 import asyncio
+import hmac
 import ipaddress
 import os
 import re
@@ -291,6 +293,13 @@ async def transcribe_recording(request: web.Request) -> web.Response:
     JSON body: {jobId: str, recordingUrl: str, language?: str}
     """
     started = time.monotonic()
+    cfg = Config.load()
+    expected_key = cfg.transcription_agent_api_key or ""
+    presented_key = request.headers.get("x-api-key", "")
+    if not expected_key or not hmac.compare_digest(presented_key.encode(), expected_key.encode()):
+        logger.warning("[transcribe_recording] Rejected request without a valid API key")
+        return web.json_response({"error": "Unauthorized", "code": "unauthorized"}, status=401)
+
     try:
         body: Any = await request.json()
     except Exception:
@@ -311,7 +320,6 @@ async def transcribe_recording(request: web.Request) -> web.Response:
     recording_url = recording_url.strip()
     language = language.strip()
 
-    cfg = Config.load()
     provider = PROVIDER
     logger.info(
         f"[transcribe_recording] Job start | jobId={job_id} | provider={provider}"

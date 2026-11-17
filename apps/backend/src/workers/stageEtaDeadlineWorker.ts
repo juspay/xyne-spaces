@@ -352,7 +352,13 @@ class StageEtaDeadlineWorker {
         // transaction, so an overlapping run or a retry can't pass the check and then
         // both write. Without the lock this is check-then-write: two workers could
         // duplicate the risk activities and notify twice for one fingerprint.
-        const systemActorId = await getTicketBotActorId(ticket.workspaceId);
+        let systemActorId: string;
+        try {
+          systemActorId = await getTicketBotActorId(ticket.workspaceId);
+        } catch {
+          logger.warn(`[STAGE-ETA-DEADLINE-WORKER] Skipping ticket ${ticket.id}: no ticket bot in its workspace`);
+          continue;
+        }
         const committed = await commitStageEtaDecision({
           ticket,
           stageId: entry.stageId,

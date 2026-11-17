@@ -206,6 +206,13 @@ export class NudgeEvaluationEngine {
     }
   }
 
+  private async messagesInWorkspace(messageIds: string[], workspaceId: string): Promise<boolean> {
+    const ids = [...new Set(messageIds.filter(Boolean))];
+    if (ids.length === 0) return true;
+    const found = await db.message.count({ where: { messageId: { in: ids }, workspaceId } });
+    return found === ids.length;
+  }
+
   private async executeImplicitActions(
     candidates: NudgeCandidate[],
     sourceId: string,
@@ -219,11 +226,30 @@ export class NudgeEvaluationEngine {
       const actionType = actions.actionType as string | undefined;
 
       if (actionType === 'CREATE_SURFACE_LINK') {
+        const linkSourceType = ((actions.sourceType as SurfaceAreaType | undefined) ?? SurfaceAreaType.MESSAGE);
+        const linkSourceId = (actions.sourceId as string) ?? sourceId;
+        const linkTargetType = actions.targetType as SurfaceAreaType;
+        const linkTargetId = actions.targetId as string;
+        const inWorkspace = await this.messagesInWorkspace(
+          [
+            ...(linkSourceType === SurfaceAreaType.MESSAGE ? [linkSourceId] : []),
+            ...(linkTargetType === SurfaceAreaType.MESSAGE ? [linkTargetId] : []),
+          ],
+          workspaceId,
+        );
+        if (!inWorkspace) {
+          logger.warn('[NudgeEngine] Surface link refers to a message outside the workspace — skipping', {
+            workspaceId,
+            sourceId: linkSourceId,
+            targetId: linkTargetId,
+          });
+          continue;
+        }
         await surfaceLinkService.createLink({
-          sourceType: (actions.sourceType as any) ?? 'MESSAGE',
-          sourceId: (actions.sourceId as string) ?? sourceId,
-          targetType: actions.targetType as any,
-          targetId: actions.targetId as string,
+          sourceType: linkSourceType,
+          sourceId: linkSourceId,
+          targetType: linkTargetType,
+          targetId: linkTargetId,
           linkKind: actions.linkKind as any,
           createdBy: userId,
           workspaceId,
@@ -233,6 +259,7 @@ export class NudgeEvaluationEngine {
         await surfaceLinkService.deleteLinksForSource(
           (actions.sourceType as any) ?? 'MESSAGE',
           deleteSourceId,
+          workspaceId,
         );
         await nudgeService.dismissNudgesForSource(
           deleteSourceId,

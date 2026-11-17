@@ -1,4 +1,5 @@
 import { confidenceBucket, recordAgreement, recordRun } from '@/services/otel/decisionMetrics';
+import { currentWorkspaceId } from '@/database/tenant/context';
 import type { DecisionAnswer, DecisionQuestion } from './types';
 import {
   COMPARE_JOB,
@@ -24,8 +25,10 @@ const SHADOW_TIMEOUT_MS = 30_000;
 
 /** Queues `task` for the engines that did not answer it live; the worker runs `evaluate`. */
 export function evaluateInBackground<T>(task: DecisionTask<T>, liveRuns: EngineRun<T>[]): void {
+  const workspaceId = currentWorkspaceId();
+  if (!workspaceId) return;
   const liveAnswers = liveRuns.filter((run) => run.outcome !== 'unavailable').map((run) => comparedAnswer(task, run));
-  decisionEvaluationQueue.add(EVALUATE_JOB, { feature: task.feature, input: task.input, liveAnswers });
+  decisionEvaluationQueue.add(EVALUATE_JOB, { feature: task.feature, workspaceId, input: task.input, liveAnswers });
 }
 
 /** Queues a decision to be put to the engines that did not answer it; the worker runs `compare`. */
@@ -36,7 +39,9 @@ export function compareInBackground(
   questions: Record<string, DecisionQuestion>,
   liveAnswers: Record<string, DecisionAnswer> | null
 ): void {
-  decisionEvaluationQueue.add(COMPARE_JOB, { feature, liveEngine, state, questions, liveAnswers });
+  const workspaceId = currentWorkspaceId();
+  if (!workspaceId) return;
+  decisionEvaluationQueue.add(COMPARE_JOB, { feature, workspaceId, liveEngine, state, questions, liveAnswers });
 }
 
 /** Asks every other configured engine the task and records how often they agree with each other. */

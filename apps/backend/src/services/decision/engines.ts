@@ -137,6 +137,9 @@ type Ask = (
 const askClassifier =
   (engine: ClassifierEngine): Ask =>
   async (_feature, state, questions, timeoutMs, signal, { partial = false, onFailure } = {}) => {
+    if (!isEngineConfigured(engine, { customerContent: true })) {
+      return { engine, outcome: 'unavailable', answer: null, latencyMs: 0 };
+    }
     const target = classifierTarget(engine);
     const startedAt = performance.now();
     let failure: AskFailure | undefined;

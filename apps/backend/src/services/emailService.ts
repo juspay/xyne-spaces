@@ -68,7 +68,7 @@ import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
 import { notificationService } from '@/services/notificationService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-// Disabled (LLM)
+// Disabled (LLM: JAF description-generator)
 // import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { normalizeRfcMessageId } from '@/utils/emailRfcMessageId';
@@ -78,9 +78,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
-// Disabled (LLM)
-// import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
-import { type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask, buildOpeningDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -563,7 +561,7 @@ export class EmailService {
    * stays with the raw body if the AI call fails or times out, so webhook
    * ingestion is never blocked by AI availability.
    */
-  // Disabled (LLM)
+  // Disabled (LLM: JAF description-generator)
   // private async enrichTicketDescription(params: {
   //   ticketId: string;
   //   emailBody: string;
@@ -860,7 +858,6 @@ export class EmailService {
       });
     }
     if (draftingChannelId) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
-    if (draftingChannelId && (false as boolean)) await this.stopOpeningDraftRun(conversationId, draftingChannelId);
   }
 
   /**
@@ -1234,8 +1231,7 @@ export class EmailService {
       rating,
       clientVersionName,
       clientVersionCode,
-      // Disabled (LLM)
-      // scopeFieldValues,
+      scopeFieldValues,
       deferChannelSideEffects = false,
       onThreadCommitted,
     } = params;
@@ -1377,24 +1373,23 @@ export class EmailService {
 
     // Ticket-creating mail only: DEFAULT (inbound) and COMPOSE (outbound-new).
     // Fire-and-forget — a failure leaves the ticket with no related tickets, no retry.
-    // Disabled (LLM)
-    // if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
-    //   ticketDuplicateService.persistDuplicateReferences({
-    //     ticketId: ticket.id,
-    //     ticketCreatedBy: ticket.createdBy,
-    //     title: ticket.title,
-    //     description: ticket.description,
-    //     projectId: ticket.projectId,
-    //     userId,
-    //     channelId,
-    //     scopeFieldValues,
-    //   }).catch((error: unknown) => {
-    //     logger.error('[EmailService] Failed to persist duplicate references for ticket', {
-    //       ticketId: ticket.id,
-    //       error,
-    //     });
-    //   });
-    // }
+    if (emailType === EmailType.DEFAULT || emailType === EmailType.COMPOSE) {
+      ticketDuplicateService.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
+        title: ticket.title,
+        description: ticket.description,
+        projectId: ticket.projectId,
+        userId,
+        channelId,
+        scopeFieldValues,
+      }).catch((error: unknown) => {
+        logger.error('[EmailService] Failed to persist duplicate references for ticket', {
+          ticketId: ticket.id,
+          error,
+        });
+      });
+    }
 
     // Enqueue AI classification as a Redis worker job
     await emailClassificationQueue.getQueue().add('classify', {
@@ -1422,7 +1417,7 @@ export class EmailService {
       });
     }
 
-    // Disabled (LLM)
+    // Disabled (LLM: JAF description-generator)
     // // Fire-and-forget: enrich the ticket description via the AI agent. Never
     // // blocks ingestion; ticket keeps the raw email body if this fails or times out.
     // void this.enrichTicketDescription({
@@ -1818,7 +1813,7 @@ export class EmailService {
       });
     }
 
-    // Disabled (LLM)
+    // Disabled (LLM: JAF description-generator)
     // // Fire-and-forget enrichment — same pattern as createConversationWithEmail.
     // void this.enrichTicketDescription({
     //   ticketId: ticket.id,
@@ -2362,23 +2357,22 @@ export class EmailService {
 
       // isNew implies !existingFirstEmail, where projectId is resolved — so this is always
       // truthy here; the guard is what narrows string | undefined for TS.
-      // Disabled (LLM)
-      // if (projectId) {
-      //   ticketDuplicateService.persistDuplicateReferences({
-      //     ticketId: txResult.ticketId,
-      //     ticketCreatedBy: userId,
-      //     title: firstEmail.subject,
-      //     description: firstEmail.body,
-      //     projectId,
-      //     userId,
-      //     channelId,
-      //   }).catch((error: unknown) => {
-      //     logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
-      //       ticketId: txResult.ticketId,
-      //       error,
-      //     });
-      //   });
-      // }
+      if (projectId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: txResult.ticketId,
+          ticketCreatedBy: userId,
+          title: firstEmail.subject,
+          description: firstEmail.body,
+          projectId,
+          userId,
+          channelId,
+        }).catch((error: unknown) => {
+          logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
+            ticketId: txResult.ticketId,
+            error,
+          });
+        });
+      }
 
       // Enqueue AI classification as a Redis worker job
       await emailClassificationQueue.getQueue().add('classify', {

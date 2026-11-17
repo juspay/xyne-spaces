@@ -3,9 +3,56 @@ import { fcmPushService } from '@/services/fcmService';
 import { ApnsPayload, apnsService } from '@/services/apnsService';
 import { logger } from '@/utils/logger';
 import { getCallNotifications } from '@/services/otel';
+import { config } from '@/config/env';
+
+type DeliverableJob = MobilePushJobData & { token: string };
+
+function originOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Keep deep links on our own hosts: a relative path, or an absolute URL on FRONTEND_URL or the call invite host. */
+function safeActionUrl(actionUrl: unknown): string | undefined {
+  if (typeof actionUrl !== 'string' || !actionUrl) return undefined;
+  if (actionUrl.startsWith('/') && !actionUrl.startsWith('//')) return actionUrl;
+  const origin = originOf(actionUrl);
+  if (origin && (origin === originOf(config.frontendUrl) || origin === originOf(config.externalCallInviteBaseUrl))) {
+    return actionUrl;
+  }
+  logger.warn('[MobilePush] Dropping actionUrl that is not on our own hosts');
+  return undefined;
+}
+
+function withSafeActionUrls(payload: MobilePushJobData['payload']): MobilePushJobData['payload'] {
+  const metadata =
+    payload.metadata && 'actionUrl' in payload.metadata
+      ? { ...payload.metadata, actionUrl: safeActionUrl(payload.metadata.actionUrl) }
+      : payload.metadata;
+  return { ...payload, actionUrl: safeActionUrl(payload.actionUrl), ...(metadata ? { metadata } : {}) };
+}
 
 export class MobilePushChannel {
-  async deliver(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
+  async deliver(queued: MobilePushJobData): Promise<NotificationDeliveryResult> {
+    const targets = await fcmPushService.resolveSessionPushTokens(queued.sessionId, queued.userId);
+    if (!targets) {
+      logger.warn('[MobilePush] No active session token for job — dropping', {
+        userId: queued.userId,
+        notificationId: queued.payload?.notificationId,
+      });
+      return { success: false, error: 'Session has no push token', isRetryable: false };
+    }
+    const job: DeliverableJob = {
+      ...queued,
+      token: targets.token,
+      voipToken: targets.voipToken,
+      platform: targets.platform,
+      payload: withSafeActionUrls(queued.payload),
+    };
     const { token, voipToken, platform, payload, userId, appVersion } = job;
 
     logger.info('[MobilePush] Delivering push notification...', {
@@ -13,8 +60,8 @@ export class MobilePushChannel {
       platform,
       notificationId: payload.notificationId,
       type: payload.type,
-      voipToken: voipToken?.substring(0, 6),
-      token: token?.substring(0, 6),
+      hasVoipToken: !!voipToken,
+      hasToken: !!token,
       appVersion: appVersion,
     });
 
@@ -35,7 +82,7 @@ export class MobilePushChannel {
     }
   }
 
-  private async deliverFcm(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
+  private async deliverFcm(job: DeliverableJob): Promise<NotificationDeliveryResult> {
     const { sessionId, token, platform, payload, userId, appVersion } = job;
     const isIncomingCall = payload.type === 'INCOMING_CALL';
 
@@ -119,7 +166,7 @@ export class MobilePushChannel {
         try {
           // Only clear token if it's definitely invalid
           if (errorCode === 'UNREGISTERED' || errorCode === 'NOT_FOUND') {
-            await fcmPushService.clearSessionPushToken(sessionId);
+            await fcmPushService.clearSessionPushToken(sessionId, userId);
             logger.info('[MobilePush] Cleared invalid token for push notification');
           }
         } catch (clearError) {
@@ -158,7 +205,7 @@ export class MobilePushChannel {
     return 'UNKNOWN';
   }
 
-  private async deliverApn(job: MobilePushJobData): Promise<boolean> {
+  private async deliverApn(job: DeliverableJob): Promise<boolean> {
     const { voipToken, payload, userId } = job;
     
     getCallNotifications().add(1, { deliveryType: 'apns', platform: 'ios', status: 'created' });

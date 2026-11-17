@@ -260,21 +260,12 @@ class FcmPushService {
   }
 
   async registerToken(userId: string, payload: MobilePushRegistration): Promise<void> {
-    const fcmTokenPreview = payload.fcmToken
-      ? `${payload.fcmToken.slice(0, 10)}...${payload.fcmToken.slice(-8)}`
-      : null;
-    const voipTokenPreview = payload.voipToken
-      ? `${payload.voipToken.slice(0, 10)}...${payload.voipToken.slice(-8)}`
-      : null;
-
     logger.info('[FCM] registerToken step=enter', {
       userId,
       platform: payload.platform ?? null,
       deviceId: payload.deviceId ?? null,
       fcmTokenPresent: !!payload.fcmToken,
-      fcmTokenPreview,
       voipTokenPresent: !!payload.voipToken,
-      voipTokenPreview,
     });
 
     if (!payload.fcmToken) {
@@ -286,13 +277,10 @@ class FcmPushService {
       return;
     }
 
-    logger.info('[FCM] registerToken step=find_session', {
-      userId,
-      fcmTokenPreview,
-    });
+    logger.info('[FCM] registerToken step=find_session', { userId });
     const orgMemberId = await this.orgMemberIdOf(userId);
     if (!orgMemberId) {
-      logger.warn('[FCM] registerToken step=user_not_found', { userId, fcmTokenPreview });
+      logger.warn('[FCM] registerToken step=user_not_found', { userId });
       return;
     }
     const sessionSelect = { id: true, deviceKey: true, status: true, refreshTokenExpiry: true } as const;
@@ -324,8 +312,6 @@ class FcmPushService {
     if (!sessionEntry) {
       logger.warn('[FCM] registerToken step=session_not_found', {
         userId,
-        fcmTokenPreview,
-        voipTokenPreview,
         hasDeviceKey: !!payload.deviceKey,
       });
       return;
@@ -339,8 +325,6 @@ class FcmPushService {
         userId,
         sessionStatus: sessionEntry.status,
         refreshTokenExpiry: sessionEntry.refreshTokenExpiry.toISOString(),
-        fcmTokenPreview,
-        voipTokenPreview,
       });
       return;
     }
@@ -355,18 +339,9 @@ class FcmPushService {
       ? this.composeStoredToken(payload.platform, payload.voipToken)
       : null;
 
-    const composedTokenPreview = `${composedToken.slice(0, 10)}...${composedToken.slice(-8)}`;
-    const composedVoipTokenPreview = composedVoipToken
-      ? `${composedVoipToken.slice(0, 10)}...${composedVoipToken.slice(-8)}`
-      : null;
-
     logger.info('[FCM] registerToken step=compose_tokens', {
       userId,
       platform: payload.platform ?? null,
-      fcmTokenPreview,
-      composedTokenPreview,
-      voipTokenPreview,
-      composedVoipTokenPreview,
     });
 
     // The auth session is already keyed by the device (deviceKey); the client's deviceId is
@@ -391,8 +366,6 @@ class FcmPushService {
     logger.info('[FCM] registerToken step=update_target_session', {
       userId,
       nextDeviceId,
-      composedTokenPreview,
-      composedVoipTokenPreview,
     });
     await db.authSession.update({
       where: { id: sessionEntry.id },
@@ -409,7 +382,6 @@ class FcmPushService {
     if (composedVoipToken) {
       logger.info('[FCM] registerToken step=add_duplicate_condition_voip', {
         userId,
-        composedVoipTokenPreview,
       });
       duplicateConditions.push({ voipToken: composedVoipToken });
     }
@@ -418,8 +390,6 @@ class FcmPushService {
       userId,
       duplicateConditionCount: duplicateConditions.length,
       nextDeviceId,
-      composedTokenPreview,
-      composedVoipTokenPreview,
     });
     const duplicateCleanupResult = await db.authSession.updateMany({
       where: {
@@ -438,8 +408,6 @@ class FcmPushService {
       nextDeviceId,
       duplicateConditionCount: duplicateConditions.length,
       duplicateCleanupCount: duplicateCleanupResult.count,
-      composedTokenPreview,
-      composedVoipTokenPreview,
     });
   }
 
@@ -606,7 +574,7 @@ class FcmPushService {
 
   private async dispatchToFcm(token: string, payload: FcmNotificationPayload, platform?: string, appVersion?: string): Promise<void> {
     const isSilent = payload.prefetchOnly === true || payload.type === 'THREAD_READ' || payload.type === 'CHANNEL_READ' || payload.type === 'MESSAGE_DELETED' || payload.type === 'MESSAGE_EDITED';
-    if (config.env === 'development' && platform === 'ios') {
+    if (config.env === 'development' && platform === 'ios' && process.platform === 'darwin') {
       await sendLocalIosPush(payload, this.buildDataPayload(payload, isSilent));
       return;
     }
@@ -647,6 +615,7 @@ class FcmPushService {
       const accessToken = await manager.getAccessToken();
       return fetch(url, {
         method: 'POST',
+        signal: AbortSignal.timeout(FCM_REQUEST_TIMEOUT_MS),
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
@@ -826,15 +795,47 @@ class FcmPushService {
     return ['ios', 'android', 'unknown'].map((platform) => `${platform}:${trimmed}`);
   }
 
-  async clearSessionPushToken(sessionId: string): Promise<void> {
+  async clearSessionPushToken(sessionId: string, userId?: string): Promise<void> {
     try {
-      await db.authSession.update({
-        where: { id: sessionId },
+      if (userId === undefined) {
+        await db.authSession.update({
+          where: { id: sessionId },
+          data: { fcmToken: null, voipToken: null },
+        });
+        return;
+      }
+      const orgMemberId = await this.orgMemberIdOf(userId);
+      if (!orgMemberId) return;
+      await db.authSession.updateMany({
+        where: { id: sessionId, orgMemberId },
         data: { fcmToken: null, voipToken: null },
       });
     } catch (error) {
       logger.debug('Failed to clear session push token', { error });
     }
+  }
+
+  /** The push tokens stored on the user's own active session; null when the session is not theirs or has none. */
+  async resolveSessionPushTokens(
+    sessionId: string,
+    userId: string,
+  ): Promise<{ token: string; voipToken?: string; platform: string } | null> {
+    if (!sessionId || !userId) return null;
+    const orgMemberId = await this.orgMemberIdOf(userId);
+    if (!orgMemberId) return null;
+    const session = await db.authSession.findFirst({
+      where: {
+        id: sessionId,
+        orgMemberId,
+        status: AuthSessionStatus.ACTIVE,
+        refreshTokenExpiry: { gt: new Date() },
+      },
+      select: { id: true, fcmToken: true, voipToken: true, deviceInfo: true },
+    });
+    if (!session) return null;
+    const target = this.toPushTarget(session);
+    if (!target?.token) return null;
+    return { token: target.token, voipToken: target.voipToken, platform: target.platform };
   }
 
   /** Clear the push tokens of the device's auth session (explicit unregister). */
@@ -959,6 +960,7 @@ class FcmPushService {
 // FCM/APNs hard ceiling for the `data` payload. We trim proactively at
 // FCM_DATA_BYTE_BUDGET (below); this is the provider's actual reject point
 // and is used only to classify rejections in diagnostics.
+const FCM_REQUEST_TIMEOUT_MS = 10_000;
 const FCM_DATA_HARD_LIMIT = 4096;
 const FCM_DATA_BYTE_BUDGET = 3800;
 const MSG_BODY_MAX_CHARS = 500;

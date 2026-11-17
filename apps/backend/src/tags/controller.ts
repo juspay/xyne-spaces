@@ -290,7 +290,7 @@ export async function createConfig(req: Request, res: Response) {
 
   try {
     const created = await tagService.createConfig(configKey, sourceType, workspaceId, config, userId);
-    await invalidateTagConfigCache(configKey);
+    await invalidateTagConfigCache(configKey, workspaceId);
     return res.status(201).json({ config: created });
   } catch (error) {
     logger.error('[TAG][CTRL] Create config failed:', error);
@@ -313,7 +313,7 @@ export async function updateConfig(req: Request, res: Response) {
       return res.status(404).json({ error: `No active config found for configKey "${configKey}"` });
     }
     const updated = await tagService.updateConfig(configKey, config, userId);
-    await invalidateTagConfigCache(configKey);
+    await invalidateTagConfigCache(configKey, workspaceId);
     return res.json({ config: updated });
   } catch (error) {
     logger.error('[TAG][CTRL] Update config failed:', error);
@@ -335,7 +335,7 @@ export async function deleteConfig(req: Request, res: Response) {
       return res.status(404).json({ error: `No active config found for configKey "${configKey}"` });
     }
     await tagService.deleteConfig(configKey, userId);
-    await invalidateTagConfigCache(configKey);
+    await invalidateTagConfigCache(configKey, workspaceId);
     return res.json({ success: true });
   } catch (error) {
     logger.error('[TAG][CTRL] Delete config failed:', error);

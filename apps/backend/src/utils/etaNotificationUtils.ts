@@ -143,16 +143,17 @@ export async function getUsersToNotifyForTicket(
 }
 
 /**
- * Get the ticket bot actor ID for system-generated activities
+ * Get the ticket bot actor ID for system-generated activities. Without a bot in the workspace,
+ * returns `fallbackActorId` (the acting user) when given, otherwise throws.
  */
-export async function getTicketBotActorId(workspaceId: string): Promise<string> {
-  try {
-    const xyneTicketBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai', workspaceId);
-    return xyneTicketBot?.id || 'cmjkaarlm0001jq9oftpebya1';
-  } catch (error) {
-    logger.error('[ETA-UTILS] Error fetching ticket bot, using fallback actorId:', error);
-    return 'cmjkaarlm0001jq9oftpebya1';
+export async function getTicketBotActorId(workspaceId: string, fallbackActorId?: string): Promise<string> {
+  const xyneTicketBot = await unifiedBotUserService.getBotByEmail('ticket-bot@bot.xyne.ai', workspaceId);
+  if (!xyneTicketBot) {
+    if (fallbackActorId) return fallbackActorId;
+    logger.error('[ETA-UTILS] No ticket bot user in workspace', { workspaceId });
+    throw new Error(`Ticket bot user not found in workspace ${workspaceId}`);
   }
+  return xyneTicketBot.id;
 }
 
 /**

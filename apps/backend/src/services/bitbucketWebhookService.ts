@@ -14,8 +14,7 @@ import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runBitbucketWebhook } from '@/bypassAcl/webhookIngestServices';
 import { forwardPrCardStatus } from '@/services/prCardStatusForwarder';
-// Disabled (LLM)
-// import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
+import { resolveRadarOnPrMerge } from '@/bypassAcl/radarServices';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -124,20 +123,19 @@ export class BitbucketWebhookService {
         // gate. Fire-and-forget, like the GitHub hook. The raw self link, not
         // context.prUrl: that is rebuilt by string replace and can carry a
         // trailing "/overview" segment into the middle of the URL.
-        // Disabled (LLM)
-        // const pr = context.pr;
-        // resolveRadarOnPrMerge({
-        //   workspaceId: context.workspace,
-        //   provider: 'Bitbucket',
-        //   prUrl: pr.links?.self?.[0]?.href ?? context.prUrl,
-        //   storedPrUrl: context.prUrl,
-        //   prNumber: context.prId,
-        //   prTitle: pr.title,
-        //   repoFullName: `${context.projectName}/${pr.toRef.repository.slug}`,
-        //   baseBranch: context.destinationBranch,
-        //   mergedBy: payload.actor?.displayName ?? payload.actor?.name ?? context.prAuthor ?? 'unknown',
-        //   mergedAt: pr.closedDate ? new Date(pr.closedDate) : new Date(),
-        // }).catch(err => logger.error('[Bitbucket-Webhook] radar PR-merge pass failed:', err));
+        const pr = context.pr;
+        resolveRadarOnPrMerge({
+          workspaceId: context.workspace,
+          provider: 'Bitbucket',
+          prUrl: pr.links?.self?.[0]?.href ?? context.prUrl,
+          storedPrUrl: context.prUrl,
+          prNumber: context.prId,
+          prTitle: pr.title,
+          repoFullName: `${context.projectName}/${pr.toRef.repository.slug}`,
+          baseBranch: context.destinationBranch,
+          mergedBy: payload.actor?.displayName ?? payload.actor?.name ?? context.prAuthor ?? 'unknown',
+          mergedAt: pr.closedDate ? new Date(pr.closedDate) : new Date(),
+        }).catch(err => logger.error('[Bitbucket-Webhook] radar PR-merge pass failed:', err));
       }
 
         // PR doesn't exist or wasn't created by workflow - run full validation
