@@ -308,7 +308,9 @@ import {
   linkSubTicketConversationToParentFromZero,
 } from '../utils/ticketMetadata.js';
 import {
+  getSlashCommandArtifactDefinition,
   parseSlashCommandArtifactMessage,
+  resolveSlashCommandArtifactProjection,
   withSlashCommandArtifactClosed,
 } from '../utils/slashCommandArtifact.js';
 import { stringFromFormValue } from '../tickets/utils.js';
@@ -1976,6 +1978,8 @@ export const mutators = defineMutators({
         type: z.nativeEnum(MessageType),
         attachmentIds: z.array(z.string()).optional(),
         entityLinkContext: entityLinkContextSchema.optional(),
+        artifactCommand: z.string().optional(),
+        artifactPreview: z.string().optional(),
       }),
       async ({
         tx,
@@ -1989,6 +1993,8 @@ export const mutators = defineMutators({
           timestamp,
           attachmentIds,
           entityLinkContext,
+          artifactCommand,
+          artifactPreview,
         },
       }) => {
         if (content === '') {
@@ -2144,6 +2150,30 @@ export const mutators = defineMutators({
         const channel = await tx.run(zql.channels.where('id', channelId).one());
         if (!channel) {
           throw new Error("Channel doesn't exist");
+        }
+
+        // The artifact row is written here, by the sender, rather than derived
+        // from content by the server
+        const artifact = resolveSlashCommandArtifactProjection(content, {
+          command: artifactCommand,
+          messagePreview: artifactPreview,
+        });
+        if (artifact) {
+          await tx.mutate.message_artifacts.insert({
+            // One artifact per message, and the optimistic row must coincide
+            // with the server's — so the message id doubles as the row id.
+            id: messageId,
+            workspaceId: ctx.workspaceId,
+            messageId,
+            channelId,
+            conversationId,
+            isInitialMessage: true,
+            messagePreview: artifact.messagePreview,
+            messageCreatedAt: now,
+            command: artifact.command,
+            status: MessageArtifactStatus.ACTIVE,
+            updatedAt: now,
+          });
         }
 
         const participation = await tx.run(
@@ -2566,6 +2596,8 @@ export const mutators = defineMutators({
         messageId: z.string(),
         childConversationId: z.string().optional(),
         attachmentIds: z.array(z.string()).optional(),
+        artifactCommand: z.string().optional(),
+        artifactPreview: z.string().optional(),
       }),
       async ({
         tx,
@@ -2579,6 +2611,8 @@ export const mutators = defineMutators({
           messageId,
           childConversationId,
           attachmentIds,
+          artifactCommand,
+          artifactPreview,
         },
       }) => {
         if (content === '') {
@@ -2602,21 +2636,26 @@ export const mutators = defineMutators({
         // so a second /sev2 inside it would fork the responders across two cards
         // and two calls. The channel is unrestricted — that is where a genuinely
         // separate incident belongs.
-        const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+        // The projection comes from the sender (see conversations.send);
+        const outgoingArtifact = resolveSlashCommandArtifactProjection(content, {
+          command: artifactCommand,
+          messagePreview: artifactPreview,
+        });
         if (outgoingArtifact) {
           const openArtifact = await tx.run(
             zql.message_artifacts
               // channelId first: it is the only selective index on this table.
               .where('channelId', conversation.channelId)
               .where('conversationId', conversationId)
-              .where('command', outgoingArtifact.definition.command)
+              .where('command', outgoingArtifact.command)
               .where('status', MessageArtifactStatus.ACTIVE)
               .one(),
           );
           if (openArtifact) {
-            throw new Error(
-              `A ${outgoingArtifact.definition.badge} is already open in this thread`,
-            );
+            const badge =
+              getSlashCommandArtifactDefinition(outgoingArtifact.command)?.badge ??
+              outgoingArtifact.command;
+            throw new Error(`A ${badge} is already open in this thread`);
           }
         }
 
@@ -2742,6 +2781,22 @@ export const mutators = defineMutators({
 
         await tx.mutate.messages.insert(message);
 
+        if (outgoingArtifact) {
+          await tx.mutate.message_artifacts.insert({
+            id: messageId,
+            workspaceId: ctx.workspaceId,
+            messageId,
+            channelId: conversation.channelId,
+            conversationId,
+            isInitialMessage: false,
+            messagePreview: outgoingArtifact.messagePreview,
+            messageCreatedAt: timestamp,
+            command: outgoingArtifact.command,
+            status: MessageArtifactStatus.ACTIVE,
+            updatedAt: timestamp,
+          });
+        }
+
         if (type === MessageType.USER || type === MessageType.FORWARDED) {
           const repliesData = parseRepliesMd(conversation.replies_md);
           const updatedRepliesData = addReplyToData(repliesData, ctx.userID);
@@ -2810,8 +2865,14 @@ export const mutators = defineMutators({
       },
     ),
     update: defineMutator(
-      z.object({ messageId: z.string(), content: z.string().optional() }),
-      async ({ tx, ctx, args: { messageId, content } }) => {
+      z.object({
+        messageId: z.string(),
+        content: z.string().optional(),
+        // New one-line preview for the message's artifact row when an artifact
+        // message is edited; computed by the client from the plaintext body.
+        artifactPreview: z.string().optional(),
+      }),
+      async ({ tx, ctx, args: { messageId, content, artifactPreview } }) => {
         const message = await resolveMessage(tx, messageId);
 
         if (!message) {
@@ -2858,6 +2919,18 @@ export const mutators = defineMutators({
               edited: true,
             });
             await updateInitialMessageMdField(tx, { messageId }, { content, edited: true });
+          }
+        }
+
+        if (artifactPreview !== undefined) {
+          const artifact = await tx.run(
+            zql.message_artifacts.where('messageId', messageId).one(),
+          );
+          if (artifact) {
+            await tx.mutate.message_artifacts.update({
+              id: artifact.id,
+              messagePreview: artifactPreview,
+            });
           }
         }
       },
@@ -3273,6 +3346,12 @@ export const mutators = defineMutators({
           }
 
           await deleteConversationWithParticipants(tx, channelCopy.conversationId);
+        }
+
+        // The artifact row follows its message in both delete scenarios.
+        const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
+        if (artifact) {
+          await tx.mutate.message_artifacts.delete({ id: artifact.id });
         }
 
         // 5. Final Delete Logic
