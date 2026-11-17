@@ -24,6 +24,7 @@ import {
   resendRegistrationCode,
   signOutUser,
   subscribeToSessionEnded,
+  subscribeToSessionRefreshed,
   switchToWorkspace,
   User,
   verifyEmailRegistration,
@@ -923,6 +924,9 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     queryClient.clear();
   };
 
+  const latestTokenRef = useRef(token);
+  latestTokenRef.current = token;
+
   const applyRefreshedToken = async (
     newToken: string,
     operationGeneration = getAuthSessionGeneration(),
@@ -931,6 +935,11 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     const generation = operationGeneration;
     if (!isAuthSessionCurrent(generation) || !isAuthOperationCurrent(operation)) {
       return false;
+    }
+    // Every refresh is announced to the listener below, and the keep-alive and Zero
+    // also apply what they asked for; the second arrival has nothing left to do.
+    if (newToken === latestTokenRef.current) {
+      return true;
     }
     const tokenWorkspaceId = decodeAuthJwtClaims(newToken)?.workspaceId;
     const activeWorkspaceId = getActiveWorkspaceId();
@@ -960,7 +969,21 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
 
   const clearStoredAuthRef = useRef(clearStoredAuth);
   clearStoredAuthRef.current = clearStoredAuth;
+  const applyRefreshedTokenRef = useRef(applyRefreshedToken);
+  applyRefreshedTokenRef.current = applyRefreshedToken;
   const isSignedIn = user !== null;
+
+  // Any refresh, including one a 401 triggered deep in an API call, hands its token to
+  // state and SecureStore here. Otherwise the keep-alive keeps the expired token and
+  // refreshes again at once, and a cold start reloads the expired one.
+  useEffect(() => {
+    if (!isSignedIn) {
+      return undefined;
+    }
+    return subscribeToSessionRefreshed((refreshedToken, generation, operation) => {
+      void applyRefreshedTokenRef.current(refreshedToken, generation, operation);
+    });
+  }, [isSignedIn]);
 
   // The backend refused to refresh after a 401 (session revoked, expired, or the user left the
   // workspace): drop local auth and return to login. No remote logout; the session is

@@ -1628,14 +1628,15 @@ function joinOrStartRefresh(generation: number, operation: number): Promise<Refr
     previous
       .then(() => performRefreshAuthSession(generation, operation))
       .then(result => {
-        // Announced here, before any caller resumes, so the keep-alive, Zero recovery,
-        // start-up check and 401 retry all end the session the same way, exactly once.
-        if (
-          !result.ok &&
-          result.kind === 'unauthorized' &&
-          isAuthScopeCurrent(generation, operation)
-        ) {
-          notifySessionEnded();
+        // Announced here, before any caller resumes, so whichever path triggered the
+        // refresh (keep-alive, Zero recovery, start-up check, 401 retry), the app keeps
+        // the new token and ends a dead session the same way, exactly once.
+        if (isAuthScopeCurrent(generation, operation)) {
+          if (result.ok) {
+            notifySessionRefreshed(result.token, generation, operation);
+          } else if (result.kind === 'unauthorized') {
+            notifySessionEnded();
+          }
         }
         return result;
       }),
@@ -1742,6 +1743,29 @@ export function subscribeToSessionEnded(listener: SessionEndedListener): () => v
 function notifySessionEnded(): void {
   for (const listener of sessionEndedListeners) {
     listener();
+  }
+}
+
+type SessionRefreshedListener = (token: string, generation: number, operation: number) => void;
+
+const sessionRefreshedListeners = new Set<SessionRefreshedListener>();
+
+/**
+ * Fires with the new JWT after every successful refresh, whoever triggered it, so the
+ * app's token and its stored copy never lag behind the cookie jar. Without this a 401
+ * retry renewed only the jar, and the keep-alive (still holding the expired token)
+ * refreshed again at once.
+ */
+export function subscribeToSessionRefreshed(listener: SessionRefreshedListener): () => void {
+  sessionRefreshedListeners.add(listener);
+  return (): void => {
+    sessionRefreshedListeners.delete(listener);
+  };
+}
+
+function notifySessionRefreshed(token: string, generation: number, operation: number): void {
+  for (const listener of sessionRefreshedListeners) {
+    listener(token, generation, operation);
   }
 }
 
