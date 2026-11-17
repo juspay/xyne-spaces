@@ -2,7 +2,6 @@ import express, { type Request, type Response } from 'express';
 import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { config as appConfig } from '@/config/env';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
 import { ExternalSourcePlatform } from '../core/types';
@@ -128,35 +127,22 @@ router.post(
         return;
       }
 
-      if (appConfig.enableEmailFetchWorker) {
-        if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
-        const job = await emailFetchQueue.getQueue().add('social-media-refetch', {
-          sourceIds: sources.map((source) => source.id),
-          channelId: req.params.channelId,
-          requesterUserId: req.user!.id,
-          workspaceId,
-          ...(backfill && {
-            startDate: backfill.startDate.toISOString(),
-            endDate: backfill.endDate.toISOString(),
-          }),
-        });
-        res.status(202).json({
-          success: true,
-          queued: true,
-          jobId: String(job.id),
-        });
-        return;
-      }
-
-      let synced = 0;
-      for (const source of sources) {
-        const result = await socialMediaService.syncSource(source.id, {
-          ignoreSyncCursor: true,
-          ...(backfill && { backfill }),
-        });
-        synced += result.synced;
-      }
-      res.json({ synced, sourceCount: sources.length });
+      if (!emailFetchQueue.isReady) await emailFetchQueue.initialize();
+      const job = await emailFetchQueue.getQueue().add('social-media-refetch', {
+        sourceIds: sources.map((source) => source.id),
+        channelId: req.params.channelId,
+        requesterUserId: req.user!.id,
+        workspaceId,
+        ...(backfill && {
+          startDate: backfill.startDate.toISOString(),
+          endDate: backfill.endDate.toISOString(),
+        }),
+      });
+      res.status(202).json({
+        success: true,
+        queued: true,
+        jobId: String(job.id),
+      });
     } catch (error) {
       const googlePlayError = toGooglePlayErrorResponse(error);
       if (googlePlayError) {

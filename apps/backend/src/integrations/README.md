@@ -408,7 +408,7 @@ Points worth copying:
 #### Throttling
 
 - Pages are requested **back-to-back with no client-side delay** — page N+1 is issued as soon as page N is persisted, so a fast app will see a sustained serial request stream. To slow Xyne down, answer `429` (or `503`) with a `Retry-After` header (delta-seconds or HTTP-date); Xyne honors it, backs off in place, and continues the same export — up to 5 backoff-and-retry rounds per page (6 requests in total; a 6th throttled response ends the run), falling back to exponential backoff from 1s when the header is absent. Each retry is **re-signed**, so the `X-Xyne-Timestamp` skew window applies to the retry, not the original attempt. A `Retry-After` longer than the run's remaining budget is not slept through: the export stops cleanly, keeps what it ingested, and resumes from the same page on the next Fetch. Do not answer `429` without `Retry-After` if you need a specific pace — the exponential fallback may be shorter than you want.
-Fetch requires `ENABLE_EMAIL_FETCH_WORKER=true` in the backend; otherwise the route returns `409` without calling the app.
+Fetch is always enqueued as a background job (the route answers `202` without calling the app) and runs only when a worker pod is deployed with `ENABLE_EMAIL_FETCH_WORKER=true`. That flag gates job consumption on the worker (`worker.ts`) only — the API never checks it and never consumes the queue. Without such a worker the job waits in the queue and the app is never called.
 
 #### Before a first backfill: check the desk's automations
 
