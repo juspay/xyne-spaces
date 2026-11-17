@@ -45,5 +45,6 @@ export function extractCommand(text: string): ExtractorOutput['command'] {
     isBot: isBotCommandContent(text),
     name: parsed?.botName ?? null,
     args: parsed?.paramString ?? null,
+    parameters: parsed?.parameters ?? {},
   };
 }

@@ -25,6 +25,7 @@ export {
 } from './command.js';
 export type { ParsedBotCommandText } from './command.js';
 export { extractText } from './text.js';
+export { keepMentionsWithin } from './rewrite.js';
 
 const EXTRACTOR_FNS: { [K in ExtractorName]: (text: string) => ExtractorOutput[K] } = {
   mentions: extractMentions,

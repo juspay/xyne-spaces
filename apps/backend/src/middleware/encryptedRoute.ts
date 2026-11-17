@@ -14,6 +14,7 @@ import {
   getEncryptionProvider,
   isDekPassthrough,
   manifestEnvironmentForRequest,
+  resolveDerived,
   runWithDekPassthrough,
 } from '@/services/encryption';
 import { decryptRequestBody, sanitizeForLog, transitKey } from './decryptionMiddleware';
@@ -31,6 +32,8 @@ import { decryptRequestBody, sanitizeForLog, transitKey } from './decryptionMidd
  *
  * The manifest is the encryption service's alone: it picks the rule for the request and
  * runs every check against it; this file forwards the request and relays its verdict.
+ * However the body arrives, the handler gets `req.derived` (resolveDerived): the facts the
+ * encryption service extracted from encrypted fields, and the rest extracted here from plaintext.
  *
  * Mount it after the upload middleware (multer fills req.body) and right before the handler:
  *   router.post(path, uploadMultiple, ...encryptedRoute(contract, { resolveWorkspaceId }), handler)
@@ -62,7 +65,8 @@ function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): 
  * middleware: express.json() skips multipart, so `req.body` is still undefined when the
  * auth middleware runs and is only filled in by multer. Checks the body against the
  * route's contract, then has the encryption service transform it. With DB encryption off
- * there is no DEK to re-encrypt under, so it decrypts to plaintext as before.
+ * there is no DEK to re-encrypt under, so it decrypts to plaintext as before. Every path
+ * that reaches the handler goes through `proceed`, which sets `req.derived`.
  */
 function transformRequest(options: EncryptedRouteOptions) {
   const contractFields = Object.keys(options.contract.schema.shape);
@@ -73,8 +77,12 @@ function transformRequest(options: EncryptedRouteOptions) {
     res: Response,
     next: NextFunction,
   ): Promise<void> {
+    const proceed: NextFunction = (error?: unknown) => {
+      if (error === undefined) req.derived = resolveDerived(options.contract, req.body, req.derived);
+      next(error);
+    };
     if (!config.enc.apiClientEncryptionEnabled) {
-      return next();
+      return proceed();
     }
 
     // Shape check against the route's contract. passthrough() on purpose: keys the
@@ -91,7 +99,7 @@ function transformRequest(options: EncryptedRouteOptions) {
     }
 
     if (!config.enc.enableDbEncryption) {
-      return decryptRequestBody(req, next);
+      return decryptRequestBody(req, proceed);
     }
     // The response comes back from the DEK as transit ciphertext for the caller, so the
     // caller's transit public key must be known before the handler writes anything.
@@ -108,7 +116,7 @@ function transformRequest(options: EncryptedRouteOptions) {
       });
       return;
     }
-    return transformRequestBody(req, res, next, options, { contractFields, contractEncrypted, contractDerived });
+    return transformRequestBody(req, res, proceed, options, { contractFields, contractEncrypted, contractDerived });
   };
 }
 

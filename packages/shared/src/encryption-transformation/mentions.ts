@@ -1,5 +1,5 @@
 import type { ExtractorOutput } from '../enc-contracts/extractors.js';
-import { stripCodeRegions } from '../utils/mentionParser.js';
+import { extractAllMentions, stripCodeRegions } from '../utils/mentionParser.js';
 
 const ZWSP = '\u200B';
 
@@ -7,7 +7,9 @@ const ZWSP = '\u200B';
  * Parsing half of the backend's extractAllUsersForNotification (utils/mentionUtils.ts):
  * the same token formats, with every DB/Redis lookup left to the caller. `handles` are
  * the ZWSP `@name` tokens, which the backend resolves as user names and group
- * aliases/names exactly as it does today.
+ * aliases/names exactly as it does today. `participants` is what extractAllMentions finds
+ * (spans by data-mention-type only), which decides the conversation's mentioned
+ * participants; the two parsers accept different tokens, so both are kept.
  */
 export function extractMentions(text: string): ExtractorOutput['mentions'] {
   // A mention inside <pre>/<code> is a false positive and must not notify.
@@ -55,6 +57,7 @@ export function extractMentions(text: string): ExtractorOutput['mentions'] {
     handles: [...handles],
     channel,
     here,
+    participants: extractAllMentions(text),
   };
 }
 

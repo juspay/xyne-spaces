@@ -242,7 +242,7 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
-import { EXTRACTORS, runExtractors, type ExtractorName } from '@xyne/shared';
+import { EXTRACTORS, keepMentionsWithin, runExtractors, type ExtractorName } from '@xyne/shared';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';
 // Disabled (Claw)
@@ -575,7 +575,7 @@ export class App {
     this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
       void new ReactionController().reactAsUser(req, res);
     });
-    // TEMPORARY (XYNE-67075): content extraction for the encryption service's
+    // TEMPORARY (XYNE-67075): content extraction (and /rewrite below) for the encryption service's
     // transform-request (the REST reply route and the conversations.send mutator), until the
     // extractor runs as a sidecar container in the encryption-api pod (apps/encryption-extractor
     // in the private repo; switch back by pointing EXTRACTOR_URL at it and deleting this
@@ -594,6 +594,19 @@ export class App {
         return;
       }
       res.json(runExtractors(text, extractors));
+    });
+    // Same deal: a guest's encrypted message, scoped to the channel before it is re-encrypted.
+    this.app.post('/api/internal/content/rewrite', validateS2SKey, (req: Request, res: Response) => {
+      const { text, keepMentionsWithin: allowed } = (req.body ?? {}) as { text?: unknown; keepMentionsWithin?: unknown };
+      if (
+        typeof text !== 'string' ||
+        !Array.isArray(allowed) ||
+        !allowed.every((id): id is string => typeof id === 'string')
+      ) {
+        res.status(400).json({ error: 'Bad request', message: 'text must be a string and keepMentionsWithin an array of user ids' });
+        return;
+      }
+      res.json({ text: keepMentionsWithin(text, new Set(allowed)) });
     });
     this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
       try {
