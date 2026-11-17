@@ -10,7 +10,12 @@ import {
 } from '../utils/mtlsHttpClient';
 import { isProtectedHttpsHost } from '../utils/mtlsTransportPolicy';
 import { injectCookiesFromResponse } from '@/src/utils/cookie-injection';
-import { getAuthOperation, getAuthSessionGeneration } from './authSessionLifecycle';
+import { getActiveWorkspaceId } from '../utils/activeWorkspace';
+import {
+  getAuthOperation,
+  getAuthSessionGeneration,
+  isAuthScopeCurrent,
+} from './authSessionLifecycle';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -64,7 +69,26 @@ const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED', 'TOKEN
  *   (5xx, network).
  */
 export type SessionRefreshOutcome = 'refreshed' | 'session-ended' | 'unavailable';
-type SessionRefresher = () => Promise<SessionRefreshOutcome>;
+type SessionRefresher = (generation: number, operation: number) => Promise<SessionRefreshOutcome>;
+
+/** The account and workspace a request was sent under. */
+interface RequestAuthScope {
+  generation: number;
+  operation: number;
+  workspaceId: string | null;
+}
+
+/**
+ * Whether the app is still signed in as the same account, in the same workspace, as when
+ * the request went out. If not, the request belongs to a session that is gone: refreshing
+ * or resending it would run it as whoever is signed in now.
+ */
+function isRequestScopeCurrent(scope: RequestAuthScope): boolean {
+  return (
+    isAuthScopeCurrent(scope.generation, scope.operation) &&
+    getActiveWorkspaceId() === scope.workspaceId
+  );
+}
 
 /**
  * Stands in for the original 401 when the session is fine but could not be renewed, so
@@ -114,20 +138,26 @@ let refreshCooldownUntil = 0;
 async function fetchWithSessionRefresh(
   url: string,
   options: Parameters<typeof mtlsFetch>[1],
+  auth: { generation: number; operation: number },
 ): Promise<MtlsResponse> {
+  // Captured as the request goes out: `x-workspace-id` and the cookies are taken from
+  // this state, and a retry rebuilds them from whatever is current by then.
+  const scope: RequestAuthScope = { ...auth, workspaceId: getActiveWorkspaceId() };
   const response = await mtlsFetch(url, options);
-  if (!sessionRefresher || !isRefreshableAuthFailure(response)) {
+  if (!sessionRefresher || !isRefreshableAuthFailure(response) || !isRequestScopeCurrent(scope)) {
     return response;
   }
   if (Date.now() < refreshCooldownUntil) {
     return sessionRefreshUnavailableResponse();
   }
-  const outcome = await sessionRefresher();
+  const outcome = await sessionRefresher(scope.generation, scope.operation);
   if (outcome === 'unavailable') {
     refreshCooldownUntil = Date.now() + REFRESH_COOLDOWN_MS;
     return sessionRefreshUnavailableResponse();
   }
-  if (outcome === 'session-ended') {
+  // Checked again after the refresh: a sign-out, sign-in or workspace switch while it
+  // ran means a resend would go out as the new account or workspace.
+  if (outcome === 'session-ended' || !isRequestScopeCurrent(scope)) {
     return response;
   }
   const retried = await mtlsFetch(url, options);
@@ -261,7 +291,7 @@ export async function mtlsRequestJson<T>(path: string, options?: MtlsRequestOpti
     requestOptions.timeoutMs = options.timeoutMs;
   }
 
-  const response = await fetchWithSessionRefresh(url, requestOptions);
+  const response = await fetchWithSessionRefresh(url, requestOptions, { generation, operation });
 
   // Fire-and-forget. This only mirrors cookies into the WebView store for Canvas;
   // no caller needs it to have finished. Awaiting it made every API response wait on
@@ -292,12 +322,16 @@ export async function mtlsRequestText(
 
   const headers: Record<string, string> = { ...(options?.headers ?? {}) };
 
-  const response = await fetchWithSessionRefresh(url, {
-    method,
-    headers,
-    ...(options?.signal ? { signal: options.signal } : {}),
-    ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-  });
+  const response = await fetchWithSessionRefresh(
+    url,
+    {
+      method,
+      headers,
+      ...(options?.signal ? { signal: options.signal } : {}),
+      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    },
+    { generation, operation },
+  );
 
   void injectCookiesFromResponse(API_ORIGIN, response.headers, { generation, operation });
 

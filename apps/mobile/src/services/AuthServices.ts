@@ -1811,8 +1811,14 @@ function notifySessionRefreshed(token: string, generation: number, operation: nu
 // API calls that get a refreshable 401 renew the session here, then retry once.
 // refreshAuthSession is single-flight, so a burst of 401s shares one refresh, and it
 // announces a session-ended refusal itself.
-setSessionRefresher(async (): Promise<SessionRefreshOutcome> => {
-  const result = await refreshAuthSession(getActiveWorkspaceId() ?? undefined);
+setSessionRefresher(async (generation, operation): Promise<SessionRefreshOutcome> => {
+  // Refreshed under the request's own auth scope, so a refresh for a session that has
+  // since been signed out or switched away from neither applies nor announces anything.
+  const result = await refreshAuthSession(
+    getActiveWorkspaceId() ?? undefined,
+    generation,
+    operation,
+  );
   if (result.ok) {
     return 'refreshed';
   }
