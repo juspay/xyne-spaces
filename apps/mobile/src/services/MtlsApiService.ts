@@ -56,11 +56,31 @@ let isFetchGuardInstalled = false;
 const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED', 'TOKEN_INVALID']);
 
 /**
- * Renews the access JWT from the refresh cookie. `true` means the jar now holds a fresh
- * JWT; `false` means the request should fail as it was. Registered by AuthServices,
- * which imports this module and so cannot be imported from it.
+ * Renews the access JWT from the refresh cookie. Registered by AuthServices, which
+ * imports this module and so cannot be imported from it.
+ * - `refreshed`: the jar now holds a fresh JWT.
+ * - `session-ended`: the backend ended the session; the user is being signed out.
+ * - `unavailable`: the session is still valid but could not be renewed right now
+ *   (5xx, network).
  */
-type SessionRefresher = () => Promise<boolean>;
+export type SessionRefreshOutcome = 'refreshed' | 'session-ended' | 'unavailable';
+type SessionRefresher = () => Promise<SessionRefreshOutcome>;
+
+/**
+ * Stands in for the original 401 when the session is fine but could not be renewed, so
+ * screens show a "try again" message instead of telling a signed-in user to sign in.
+ */
+function sessionRefreshUnavailableResponse(): MtlsResponse {
+  return {
+    statusCode: 503,
+    headers: { 'content-type': 'application/json' },
+    body: {
+      error: 'Session refresh unavailable',
+      code: 'SESSION_REFRESH_UNAVAILABLE',
+      message: 'Could not reach the server to renew your session. Please try again.',
+    },
+  };
+}
 
 let sessionRefresher: SessionRefresher | null = null;
 
@@ -92,7 +112,11 @@ async function fetchWithSessionRefresh(
   if (!sessionRefresher || !isRefreshableAuthFailure(response)) {
     return response;
   }
-  if (!(await sessionRefresher())) {
+  const outcome = await sessionRefresher();
+  if (outcome === 'unavailable') {
+    return sessionRefreshUnavailableResponse();
+  }
+  if (outcome === 'session-ended') {
     return response;
   }
   return mtlsFetch(url, options);

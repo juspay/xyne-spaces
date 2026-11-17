@@ -1,6 +1,6 @@
 import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync } from 'expo-crypto';
 import { apiGet, apiPost, isMtlsRequestError } from './apiClient';
-import { setSessionRefresher } from './MtlsApiService';
+import { setSessionRefresher, type SessionRefreshOutcome } from './MtlsApiService';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 import { injectCookiesFromResponse } from '@/src/utils/cookie-injection';
 import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttpClient';
@@ -1723,7 +1723,10 @@ function notifySessionEnded(): void {
 // API calls that get a refreshable 401 renew the session here, then retry once.
 // refreshAuthSession is single-flight, so a burst of 401s shares one refresh, and it
 // announces a session-ended refusal itself.
-setSessionRefresher(async (): Promise<boolean> => {
+setSessionRefresher(async (): Promise<SessionRefreshOutcome> => {
   const result = await refreshAuthSession(getActiveWorkspaceId() ?? undefined);
-  return result.ok;
+  if (result.ok) {
+    return 'refreshed';
+  }
+  return result.kind === 'unauthorized' ? 'session-ended' : 'unavailable';
 });
