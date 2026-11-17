@@ -85,14 +85,14 @@ async function parseManifest(raw: unknown): Promise<ClientEncryptionManifest | n
   return manifest;
 }
 
-export function refreshClientManifest(tag = 'default'): Promise<ClientEncryptionManifest | null> {
+export function refreshClientManifest(): Promise<ClientEncryptionManifest | null> {
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
     const headers: Record<string, string> = {};
     // Ask for the response to be encrypted for our transit key.
     if (keyring) headers[TRANSIT_KEY_HEADER] = keyring.clientPublicKey;
-    const response = await fetch(`${API_BASE_URL}/encryption-manifest?tag=${encodeURIComponent(tag)}`, {
+    const response = await fetch(`${API_BASE_URL}/encryption-manifest`, {
       credentials: 'include',
       headers,
     });
@@ -127,7 +127,9 @@ const MANIFEST_REFETCH_DELAYS_MS = [0, 500, 1000, 2000, 4000, 4000];
 export async function refetchClientManifest(version?: number, environment?: string): Promise<boolean> {
   for (const delay of MANIFEST_REFETCH_DELAYS_MS) {
     if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
-    const manifest = await refreshClientManifest().catch(() => null);
+    const manifest = await refreshClientManifest().catch(() => undefined);
+    // 404 or a wrong-environment manifest: retrying will not change it.
+    if (manifest === null) return false;
     if (
       manifest &&
       (version === undefined || manifest.version === version) &&

@@ -22,7 +22,8 @@ router.get('/', async (req: Request, res: Response) => {
     return;
   }
 
-  const tag = typeof req.query.tag === 'string' && req.query.tag !== '' ? req.query.tag : 'default';
+  // Only one manifest family exists today.
+  const tag = 'default';
   const environment = manifestEnvironmentForRequest(req);
   const clientKey = transitKey(req);
   if (!clientKey) {

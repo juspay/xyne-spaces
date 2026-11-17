@@ -8,8 +8,8 @@ import { logger } from '@/utils/logger';
 
 const router = Router();
 
-// Base64 of a 65-byte uncompressed P-256 point.
-const P256_POINT_BASE64 = /^[A-Za-z0-9+/]{87}=$/;
+// Base64 of a 65-byte uncompressed P-256 point (leading 0x04 encodes as 'B').
+const P256_POINT_BASE64 = /^B[A-Za-z0-9+/]{86}=$/;
 // The key pair belongs to the browser, not the user, so the cookie outlives any session.
 const TRANSIT_KEY_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
