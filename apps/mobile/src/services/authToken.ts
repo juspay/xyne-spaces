@@ -2,7 +2,11 @@ import { API_ORIGIN } from '../config';
 import { decodeAuthJwtClaims, isTokenExpiringSoon } from './authJwtClaims';
 import type { AuthJwtClaims } from './authJwtClaims';
 import { refreshAuthSession } from './AuthServices';
-import { getCookieValueFromJar, XYNE_LAST_WORKSPACE_COOKIE } from '@/src/utils/apiCookieHeader';
+import {
+  getCookieValueFromJar,
+  workspaceTokenCookieName,
+  XYNE_LAST_WORKSPACE_COOKIE,
+} from '@/src/utils/apiCookieHeader';
 import {
   getAuthOperation,
   getAuthSessionGeneration,
@@ -73,7 +77,7 @@ export async function readWorkspaceTokenFromCookieJar(
   if (!workspaceId) {
     return undefined;
   }
-  return getCookieValueFromJar(API_ORIGIN, `xyne_ws_${workspaceId}_token`);
+  return getCookieValueFromJar(API_ORIGIN, workspaceTokenCookieName(workspaceId));
 }
 
 async function readJwtFromCookieJar(preferredWorkspaceId?: string): Promise<{

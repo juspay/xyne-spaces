@@ -4,6 +4,11 @@ import CookieManager from '@react-native-cookies/cookies';
 export const PENDING_AUTH_COOKIE = 'xyne_pending_auth';
 export const XYNE_LAST_WORKSPACE_COOKIE = 'xyne_last_workspace';
 
+/** The cookie holding a workspace's access JWT. */
+export function workspaceTokenCookieName(workspaceId: string): string {
+  return `xyne_ws_${workspaceId}_token`;
+}
+
 function cookieEntryToValue(
   entry: string | { value: string } | undefined | null,
 ): string | undefined {

@@ -2,10 +2,14 @@ import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync } from 'expo-c
 import { apiGet, apiPost, isMtlsRequestError } from './apiClient';
 import { setSessionRefresher, type SessionRefreshOutcome } from './MtlsApiService';
 import { API_BASE_URL, API_ORIGIN } from '../config';
-import { injectCookiesFromResponse } from '@/src/utils/cookie-injection';
+import { injectCookiesFromResponse, pointLastWorkspaceAt } from '@/src/utils/cookie-injection';
 import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttpClient';
 import { isLikelyOfflineOrTransientNetworkError } from '@/src/utils/networkConnectivityErrors';
-import { getCookieValueFromJar, XYNE_LAST_WORKSPACE_COOKIE } from '@/src/utils/apiCookieHeader';
+import {
+  getCookieValueFromJar,
+  workspaceTokenCookieName,
+  XYNE_LAST_WORKSPACE_COOKIE,
+} from '@/src/utils/apiCookieHeader';
 import { getActiveWorkspaceId } from '../utils/activeWorkspace';
 import { isSessionEndedRefusal } from './sessionTokenPolicy';
 import { CommunityJoinResultStatus } from './CommunityServices';
@@ -362,15 +366,28 @@ interface CreateWorkspaceResponse {
 const REFRESH_SESSION_URL = `${API_BASE_URL}/auth/refresh-session`;
 
 export type RefreshSessionResult =
-  | { ok: true; token: string }
+  | {
+      ok: true;
+      token: string;
+      /** The workspace the backend minted the JWT for (`data.workspaceId`). */
+      workspaceId?: string;
+    }
   | {
       ok: false;
-      kind: 'unauthorized' | 'invalid_body' | 'missing_jwt_cookie' | 'transient';
+      /**
+       * `workspace_mismatch`: the backend refreshed a different workspace than the
+       * caller asked for; that workspace's token is never handed out as this one's.
+       */
+      kind:
+        'unauthorized' | 'invalid_body' | 'missing_jwt_cookie' | 'workspace_mismatch' | 'transient';
     };
 
 async function readJwtFromJarAfterInjection(workspaceId?: string): Promise<string | undefined> {
   if (workspaceId) {
-    const workspaceToken = await getCookieValueFromJar(API_ORIGIN, `xyne_ws_${workspaceId}_token`);
+    const workspaceToken = await getCookieValueFromJar(
+      API_ORIGIN,
+      workspaceTokenCookieName(workspaceId),
+    );
     if (workspaceToken) {
       return workspaceToken;
     }
@@ -380,7 +397,7 @@ async function readJwtFromJarAfterInjection(workspaceId?: string): Promise<strin
   if (resolvedWorkspaceId) {
     const workspaceToken = await getCookieValueFromJar(
       API_ORIGIN,
-      `xyne_ws_${resolvedWorkspaceId}_token`,
+      workspaceTokenCookieName(resolvedWorkspaceId),
     );
     if (workspaceToken) {
       return workspaceToken;
@@ -1600,15 +1617,22 @@ export function refreshAuthSession(
     return shared;
   }
   return shared.then(async result => {
-    // The shared read looks at the last workspace; this caller's own may still be there.
-    if (!result.ok && result.kind !== 'missing_jwt_cookie') {
+    if (!result.ok) {
       return result;
     }
-    const token = await readJwtFromJarAfterInjection(workspaceId);
+    // Never hand out another workspace's token as this one's: its retry would carry
+    // `x-workspace-id` for this workspace, earn the same 401 and refresh
+    // again on every request.
+    if (result.workspaceId !== undefined) {
+      return result.workspaceId === workspaceId
+        ? result
+        : { ok: false, kind: 'workspace_mismatch' };
+    }
+    const token = await getCookieValueFromJar(API_ORIGIN, workspaceTokenCookieName(workspaceId));
     if (!isAuthScopeCurrent(generation, operation)) {
       return { ok: false, kind: 'transient' };
     }
-    return token ? { ok: true, token } : { ok: false, kind: 'missing_jwt_cookie' };
+    return token ? { ok: true, token, workspaceId } : { ok: false, kind: 'missing_jwt_cookie' };
   });
 }
 
@@ -1658,6 +1682,13 @@ async function performRefreshAuthSession(
     return { ok: false, kind: 'transient' };
   }
   const activeWorkspaceIdAtStart = getActiveWorkspaceId();
+
+  // The backend refreshes the workspace `xyne_last_workspace` names, not `x-workspace-id`.
+  // Make it name the workspace the app is in before asking.
+  const activeWorkspaceId = getActiveWorkspaceId();
+  if (activeWorkspaceId) {
+    await pointLastWorkspaceAt(API_ORIGIN, activeWorkspaceId, { generation, operation });
+  }
 
   // No local check for the refresh cookie: `xs` is httpOnly and path-scoped, so only the
   // backend can say whether it is there. A missing one comes back as 401 REFRESH_INVALID.
@@ -1710,13 +1741,21 @@ async function performRefreshAuthSession(
       return { ok: false, kind: 'invalid_body' };
     }
 
-    const token = await readJwtFromJarAfterInjection();
+    // Read the token of the workspace the backend says it refreshed, not whatever the
+    // jar falls back to, so callers can tell when that is not the one they wanted.
+    const mintedWorkspaceId =
+      typeof data.workspaceId === 'string' && data.workspaceId ? data.workspaceId : undefined;
+    const token = mintedWorkspaceId
+      ? await getCookieValueFromJar(API_ORIGIN, workspaceTokenCookieName(mintedWorkspaceId))
+      : await readJwtFromJarAfterInjection();
     if (
       isAuthScopeCurrent(generation, operation) &&
       typeof token === 'string' &&
       token.length > 0
     ) {
-      return { ok: true, token };
+      return mintedWorkspaceId
+        ? { ok: true, token, workspaceId: mintedWorkspaceId }
+        : { ok: true, token };
     }
 
     return { ok: false, kind: 'missing_jwt_cookie' };

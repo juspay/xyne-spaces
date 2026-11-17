@@ -179,3 +179,38 @@ async function injectCookiesFromResponseUnsafe(
     await new Promise<void>(r => setTimeout(r, __DEV__ ? 250 : 50));
   }
 }
+
+/** The backend's own lifetime for the pointer; it rewrites it on every refresh anyway. */
+const LAST_WORKSPACE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+
+/**
+ * Points the jar's `xyne_last_workspace` at `workspaceId` when it says otherwise. The
+ * refresh endpoint mints the JWT for the workspace this cookie names (it ignores
+ * `x-workspace-id`), so a pointer left on another workspace (a switch that succeeded on
+ * the server but was rolled back here) would refresh the wrong one forever. Written
+ * with the backend's attributes, through the same path as a real `Set-Cookie`.
+ */
+export async function pointLastWorkspaceAt(
+  origin: string,
+  workspaceId: string,
+  scope: { generation: number; operation: number },
+): Promise<void> {
+  let current: string | undefined;
+  try {
+    const cookies = await CookieManager.get(origin);
+    const entry = cookies[XYNE_LAST_WORKSPACE_COOKIE];
+    current = typeof entry === 'object' && entry !== null ? entry.value : undefined;
+  } catch {
+    return;
+  }
+  if (current === workspaceId) {
+    return;
+  }
+  await injectCookiesFromResponse(
+    origin,
+    {
+      'set-cookie': `${XYNE_LAST_WORKSPACE_COOKIE}=${workspaceId}; Path=/; Max-Age=${LAST_WORKSPACE_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=None`,
+    },
+    scope,
+  );
+}

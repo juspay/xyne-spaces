@@ -101,6 +101,13 @@ function isRefreshableAuthFailure(response: MtlsResponse): boolean {
 }
 
 /**
+ * After a refresh that did not fix the 401, further 401s wait this long before refreshing
+ * again, so a burst of requests does not each trigger one.
+ */
+const REFRESH_COOLDOWN_MS = 15_000;
+let refreshCooldownUntil = 0;
+
+/**
  * Sends the request; on a refreshable 401 renews the session and sends it once more.
  * The JWT travels as a cookie, so the retry picks up the renewed one from the jar.
  */
@@ -112,14 +119,22 @@ async function fetchWithSessionRefresh(
   if (!sessionRefresher || !isRefreshableAuthFailure(response)) {
     return response;
   }
+  if (Date.now() < refreshCooldownUntil) {
+    return sessionRefreshUnavailableResponse();
+  }
   const outcome = await sessionRefresher();
   if (outcome === 'unavailable') {
+    refreshCooldownUntil = Date.now() + REFRESH_COOLDOWN_MS;
     return sessionRefreshUnavailableResponse();
   }
   if (outcome === 'session-ended') {
     return response;
   }
-  return mtlsFetch(url, options);
+  const retried = await mtlsFetch(url, options);
+  // Refreshed, yet still refused: the new token is not the one this request needs.
+  // Refreshing again on the next request would not help either.
+  refreshCooldownUntil = isRefreshableAuthFailure(retried) ? Date.now() + REFRESH_COOLDOWN_MS : 0;
+  return retried;
 }
 
 function buildUrl(path: string): string {
