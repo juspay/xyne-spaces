@@ -180,7 +180,7 @@ function isTopLevelMainWindow(webContents: Electron.WebContents | undefined): bo
   return webContents === mainWindow.webContents;
 }
 // Mirrors preload.ts isTrustedOrigin(), but evaluated main-side against a webContents URL.
-function isFirstPartyUrl(rawUrl: string | undefined): boolean {
+export function isFirstPartyUrl(rawUrl: string | undefined): boolean {
   if (!rawUrl) return false;
   try {
     const { protocol, hostname } = new URL(rawUrl);

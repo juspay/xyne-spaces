@@ -273,6 +273,14 @@ const electronAPI = {
   setUserEmail: (email: string) => ipcRenderer.send('set-user-email', email),
   getClientSessionId: () => ipcRenderer.invoke('logger:get-client-session-id'),
 
+  // Transit encryption key, held by the main process (Secure Enclave on macOS): the page gets
+  // only the public key and ECDH results with the encryption service's public keys.
+  transitKey: {
+    getPublicKey: (): Promise<Uint8Array> => ipcRenderer.invoke('transit-key:get-public-key'),
+    deriveSharedSecret: (serverPoint: Uint8Array): Promise<Uint8Array> =>
+      ipcRenderer.invoke('transit-key:derive', serverPoint),
+  },
+
   // Browser Settings APIs
   getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),
   setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),

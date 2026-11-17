@@ -34,10 +34,12 @@
     "assets",
     "certs",
     "ui-active",
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "native/transit-key/transit-key"
   ],
   "asarUnpack": [
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "native/transit-key/transit-key"
   ],
   "mac": {
     "icon": "assets/images/xyne.png",
