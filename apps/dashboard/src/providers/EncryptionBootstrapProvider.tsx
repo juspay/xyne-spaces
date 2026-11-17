@@ -4,16 +4,44 @@ import {
   useEncryptionBootstrapInit,
   EncryptionBootstrapContextValue,
 } from '@xyne/shared/hooks';
-import { memoryTransitKeyStore } from '@xyne/shared';
+import {
+  chainTransitKeyStores,
+  deleteIndexedDbTransitKey,
+  indexedDbTransitKeyStore,
+  memoryTransitKeyStore,
+} from '@xyne/shared';
 import type { TransitKeyStore } from '@xyne/shared';
 import { useAuth } from './AuthProvider';
-import { getOrCreateTransitKeyPair } from '../services/transitKeyStore';
+import { logger, Event as LogEvent } from '../utils/logger';
+import { isElectronApp } from '../utils/electronApp';
+import { electronTransitKeyStore } from '../services/electronTransitKeyStore';
 
-/** The persisted browser pair, else one for this page load. */
-const transitKeyStore: TransitKeyStore = {
-  getOrCreate: async () =>
-    (await getOrCreateTransitKeyPair()) ?? memoryTransitKeyStore.getOrCreate(),
-};
+function logFallback(error: unknown): void {
+  logger.warn(LogEvent.FRONTEND_ERROR, {
+    type: 'transit_key',
+    message: '[TransitKey] Falling back to the next transit key store',
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+/**
+ * Desktop: the main process's key (Secure Enclave on macOS), else one for this page load —
+ * never IndexedDB, and any pair earlier desktop builds left there is removed.
+ * Browser: the persisted IndexedDB pair, else one for this page load.
+ */
+function selectTransitKeyStore(): TransitKeyStore {
+  if (isElectronApp()) {
+    void deleteIndexedDbTransitKey();
+    return chainTransitKeyStores([electronTransitKeyStore, memoryTransitKeyStore], {
+      onFallback: logFallback,
+    });
+  }
+  return chainTransitKeyStores([indexedDbTransitKeyStore, memoryTransitKeyStore], {
+    onFallback: logFallback,
+  });
+}
+
+const transitKeyStore = selectTransitKeyStore();
 
 interface EncryptionBootstrapProviderProps {
   children: ReactNode;

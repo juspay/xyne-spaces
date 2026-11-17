@@ -11,11 +11,18 @@ export type { EncryptionConfig } from './transit.js';
 export {
   TransitKeyring,
   generateTransitKeyPair,
+  webCryptoTransitKeyPair,
   deriveTransitKey,
   transitKeyId,
   parseTransitKeyId,
 } from './keyring.js';
 export type { TransitKeyPair, TransitKeyStore, TransitServerKey, TransitServerKeys } from './keyring.js';
+export {
+  indexedDbTransitKeyStore,
+  chainTransitKeyStores,
+  deleteIndexedDbTransitKey,
+} from './transit-key-stores.js';
+export type { ChainTransitKeyStoresOptions } from './transit-key-stores.js';
 export {
   getClientManifest,
   refreshClientManifest,
