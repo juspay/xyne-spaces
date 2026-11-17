@@ -23,6 +23,7 @@ import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
+import { cleanSpacesAnswer, friendlyRunError } from "../lib/answer-cleanup.js";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import {
   enqueueDelayedJob,
@@ -217,7 +218,7 @@ async function postScheduledFailureNotice(row: {
 }, error: string | null | undefined): Promise<void> {
   if (row.replyMode === WHATSAPP_REPLY_MODE) {
     const next = nextFireText(row);
-    const text = [`Your scheduled task didn't go through: ${error?.trim() || "something went wrong"}.`, ...(next ? [`I'll try again ${next}.`] : [])].join(" ");
+    const text = [`Your scheduled task didn't go through: ${friendlyRunError(error)}`, ...(next ? [`I'll try again ${next}.`] : [])].join(" ");
     const sent = await notifyUser({ userId: row.userId, orgId: row.orgId, text });
     if (!sent.ok) log.warn(`[scheduled-jobs/result] Job ${row.id}: WhatsApp failure notice not sent: ${sent.error}`);
     return;
@@ -243,7 +244,7 @@ async function postScheduledFailureNotice(row: {
 
   const next = nextFireText(row);
   const message = [
-    `Scheduled run failed: ${error?.trim() || "unknown error"}.`,
+    `Scheduled run failed: ${friendlyRunError(error)}`,
     ...(next ? [`Next run: ${next}.`] : []),
   ].join("\n");
   const appToken = decryptStoredField(agent.spacesAppToken);
@@ -1392,7 +1393,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   } catch (err) {
     log.warn(`[scheduled-jobs/result] Job ${id}: mention resolution failed, posting unresolved text:`, err instanceof Error ? err.message : err);
   }
-  resultText = expandSpacesMentions(resultText);
+  resultText = cleanSpacesAnswer(expandSpacesMentions(resultText));
   if (dashboardShareAnnouncement) {
     resultText = resultText.trim()
       ? `${resultText.trim()}\n\n${dashboardShareAnnouncement}`
