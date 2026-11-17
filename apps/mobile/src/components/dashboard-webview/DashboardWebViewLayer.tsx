@@ -32,10 +32,12 @@ import { useWebViewEngine } from './WebViewEngineContext';
 import { HeaderBackButton } from '@/src/components/ui/header-icon-button';
 import { tabRoute } from '@/src/navigation/routes';
 import {
-  DASHBOARD_SESSION_COOKIE_NAMES,
+  DASHBOARD_REFRESH_COOKIE_NAME,
   areDashboardSessionCookiesSynchronized,
+  hasDashboardRefreshCookie,
   selectDashboardSessionCookies,
 } from '@/src/utils/dashboardWebViewCookiePolicy';
+import { REFRESH_SESSION_URL } from '@/src/utils/apiCookieHeader';
 
 const USER_ID_KEY = '@lotus_user_id';
 
@@ -193,7 +195,11 @@ export default function DashboardWebViewLayer(): React.JSX.Element | null {
             }
 
             const CookieManager = await getCookieManager();
-            const sourceCookies = await CookieManager.get(API_ORIGIN);
+            // `xs` is path-scoped to the refresh endpoint, so the origin alone does not list it.
+            const sourceCookies = {
+              ...(await CookieManager.get(API_ORIGIN)),
+              ...(await CookieManager.get(REFRESH_SESSION_URL)),
+            };
             if (!isCurrent()) {
               synchronized = false;
               return;
@@ -202,9 +208,17 @@ export default function DashboardWebViewLayer(): React.JSX.Element | null {
             const sessionCookies = selectDashboardSessionCookies(
               sourceCookies as Record<string, unknown>,
             );
-            // An unauthenticated dashboard needs no cookie handoff.
-            if (sessionCookies.length === 0) {
+            // An unauthenticated dashboard needs no cookie handoff. Without `xs` the
+            // dashboard could not refresh, so it is not signed in either.
+            if (!hasDashboardRefreshCookie(sessionCookies)) {
               synchronized = !requireSessionCookie;
+              return;
+            }
+
+            // Android's WebView reads the app's own cookie store, so these cookies are
+            // already there with their real path and flags. Copying would only add a
+            // second `xs` without them (Android hands back name and value alone).
+            if (Platform.OS !== 'ios') {
               return;
             }
 
@@ -213,29 +227,21 @@ export default function DashboardWebViewLayer(): React.JSX.Element | null {
                 synchronized = false;
                 return;
               }
-              const persisted = await CookieManager.set(
-                DASHBOARD_ORIGIN,
-                cookie as never,
-                Platform.OS === 'ios',
-              );
+              const persisted = await CookieManager.set(DASHBOARD_ORIGIN, cookie as never, true);
               if (!persisted) {
                 synchronized = false;
                 return;
               }
-            }
-
-            if (Platform.OS === 'android') {
-              await CookieManager.flush();
             }
             if (!isCurrent()) {
               synchronized = false;
               return;
             }
 
-            const destinationCookies = await CookieManager.get(
-              DASHBOARD_ORIGIN,
-              Platform.OS === 'ios',
-            );
+            const destinationCookies = {
+              ...(await CookieManager.get(DASHBOARD_ORIGIN, true)),
+              ...(await CookieManager.get(REFRESH_SESSION_URL, true)),
+            };
             if (
               !areDashboardSessionCookiesSynchronized(
                 destinationCookies as Record<string, unknown>,
@@ -243,6 +249,7 @@ export default function DashboardWebViewLayer(): React.JSX.Element | null {
               )
             ) {
               synchronized = false;
+              return;
             }
           },
           isCurrent,
@@ -259,20 +266,10 @@ export default function DashboardWebViewLayer(): React.JSX.Element | null {
   const hasSessionCookie = useCallback(async (): Promise<boolean> => {
     try {
       const CookieManager = await getCookieManager();
-      const cookies = await CookieManager.get(API_ORIGIN);
-      for (const cookieName of DASHBOARD_SESSION_COOKIE_NAMES) {
-        const sessionCookie = cookies?.[cookieName];
-        if (!sessionCookie) continue;
-        if (typeof sessionCookie === 'string') return Boolean(sessionCookie);
-        if (
-          typeof sessionCookie === 'object' &&
-          'value' in sessionCookie &&
-          typeof sessionCookie.value === 'string'
-        ) {
-          return Boolean(sessionCookie.value);
-        }
-      }
-      return false;
+      // Signed in means the app holds `xs`, which only the refresh URL lists.
+      const cookies = await CookieManager.get(REFRESH_SESSION_URL);
+      const refreshCookie = cookies?.[DASHBOARD_REFRESH_COOKIE_NAME];
+      return typeof refreshCookie?.value === 'string' && refreshCookie.value.length > 0;
     } catch {
       return false;
     }

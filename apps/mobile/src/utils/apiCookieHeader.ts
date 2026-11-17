@@ -1,8 +1,16 @@
 import CookieManager from '@react-native-cookies/cookies';
 
+import { API_BASE_URL } from '../config';
+
 /** Short-lived (10 min) identity cookie set at sign-in, before a workspace is chosen. Not an access token. */
 export const PENDING_AUTH_COOKIE = 'xyne_pending_auth';
 export const XYNE_LAST_WORKSPACE_COOKIE = 'xyne_last_workspace';
+
+/**
+ * Root API path, never under `/v2`. The `xs` cookie is path-scoped to it, so reading
+ * `xs` from a cookie store has to ask for this URL, not just the origin.
+ */
+export const REFRESH_SESSION_URL = `${API_BASE_URL}/auth/refresh-session`;
 
 /** The cookie holding a workspace's access JWT. */
 export function workspaceTokenCookieName(workspaceId: string): string {

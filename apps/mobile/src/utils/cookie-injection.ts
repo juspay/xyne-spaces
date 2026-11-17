@@ -12,15 +12,27 @@ import {
   getAuthSessionGeneration,
   isAuthScopeCurrent,
 } from '@/src/services/authSessionLifecycle';
-import { PENDING_AUTH_COOKIE, XYNE_LAST_WORKSPACE_COOKIE } from '@/src/utils/apiCookieHeader';
+import {
+  PENDING_AUTH_COOKIE,
+  XYNE_LAST_WORKSPACE_COOKIE,
+  REFRESH_SESSION_URL,
+} from '@/src/utils/apiCookieHeader';
+import {
+  DASHBOARD_REFRESH_COOKIE_NAME,
+  isDashboardSessionCookieName,
+} from '@/src/utils/dashboardWebViewCookiePolicy';
 
 const SPLIT_COOKIE_REGEX = /,\s*(?=[^;,]+=)/g;
 
 /**
- * The only cookies the WebView itself reads. Mirroring anything else into the
- * WKWebView store costs a main-thread round trip per cookie for no benefit.
+ * The only cookies the WebView itself reads: the dashboard's session (`xs`, the workspace
+ * JWTs, `xyne_last_workspace`) and the pending sign-in cookie for finishing onboarding.
+ * Mirroring anything else into the WKWebView store costs a main-thread round trip per
+ * cookie for no benefit.
  */
-const WEBVIEW_COOKIE_NAMES = new Set<string>([PENDING_AUTH_COOKIE, XYNE_LAST_WORKSPACE_COOKIE]);
+function isWebViewCookieName(name: string): boolean {
+  return name === PENDING_AUTH_COOKIE || isDashboardSessionCookieName(name);
+}
 
 /**
  * Normalize Set-Cookie header for local dev (http, different ports).
@@ -145,11 +157,17 @@ async function injectCookiesFromResponseUnsafe(
   if (Platform.OS === 'ios') {
     const names = cookieHeaders
       .map(h => extractCookieName(h))
-      .filter((n): n is string => !!n && WEBVIEW_COOKIE_NAMES.has(n));
+      .filter((n): n is string => !!n && isWebViewCookieName(n));
 
     if (names.length > 0 && isCurrent()) {
       try {
-        const cookies = await CookieManager.get(origin);
+        // `xs` is path-scoped to the refresh endpoint, so the origin alone does not list it.
+        const cookies = {
+          ...(await CookieManager.get(origin)),
+          ...(names.includes(DASHBOARD_REFRESH_COOKIE_NAME)
+            ? await CookieManager.get(REFRESH_SESSION_URL)
+            : {}),
+        };
 
         for (const name of names) {
           if (!isCurrent()) return;

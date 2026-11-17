@@ -7,6 +7,7 @@ import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttp
 import { isLikelyOfflineOrTransientNetworkError } from '@/src/utils/networkConnectivityErrors';
 import {
   getCookieValueFromJar,
+  REFRESH_SESSION_URL,
   workspaceTokenCookieName,
   XYNE_LAST_WORKSPACE_COOKIE,
 } from '@/src/utils/apiCookieHeader';
@@ -358,12 +359,6 @@ interface CreateWorkspaceResponse {
   };
   selfDmChannelId?: string;
 }
-
-/**
- * The only URL the refresh cookie (`xs`) is sent to: the backend path-scopes it to
- * `/api/auth/refresh-session`, so this must not move under `/v2`.
- */
-const REFRESH_SESSION_URL = `${API_BASE_URL}/auth/refresh-session`;
 
 export type RefreshSessionResult =
   | {
