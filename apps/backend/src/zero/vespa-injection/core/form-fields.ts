@@ -135,3 +135,33 @@ export const buildFormFields = (
 
   return formFields;
 };
+
+export type TicketDynamicFieldRow = TicketDynamicFieldValue & { version?: number | null; updatedAt?: Date };
+
+const GRAM_FIELD_TYPES = new Set<FormFieldType>([FormFieldType.STRING, FormFieldType.NUMBER]);
+
+/**
+ * formFieldGrams entries: "<fieldId>::<value>" for the latest value (highest version, then newest) of every STRING or
+ * NUMBER field. The encryption gateway splits each value into hashed "<fieldId>::<gram>" tokens (vespa-core ticket.sd,
+ * formFieldGrams); the backend never builds grams.
+ */
+export const buildFormFieldGramEntries = (
+  values: TicketDynamicFieldRow[],
+  fieldTypeByFieldId: Map<string, FormFieldType>,
+): string[] => {
+  const latest = new Map<string, TicketDynamicFieldRow>();
+  for (const value of values) {
+    const fieldType = fieldTypeByFieldId.get(value.fieldId);
+    if (!fieldType || !GRAM_FIELD_TYPES.has(fieldType)) continue;
+    const raw = value.actualFieldValue;
+    if (!(typeof raw === 'number' && Number.isFinite(raw)) && !(typeof raw === 'string' && raw.trim())) continue;
+    const current = latest.get(value.fieldId);
+    const isNewer =
+      !current ||
+      (value.version ?? 1) > (current.version ?? 1) ||
+      ((value.version ?? 1) === (current.version ?? 1) &&
+        (value.updatedAt?.getTime() ?? 0) > (current.updatedAt?.getTime() ?? 0));
+    if (isNewer) latest.set(value.fieldId, value);
+  }
+  return [...latest].map(([fieldId, value]) => `${fieldId}::${String(value.actualFieldValue)}`);
+};

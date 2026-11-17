@@ -221,7 +221,6 @@ export interface VespaChatContainerDocument extends VespaDocument {
 
 export interface VespaChatMessageDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'> {
   text: string;
-  chunks: string[];
   links?: string[];
   hasLinks: boolean;
   userId: string;
@@ -282,6 +281,7 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   description_clean?: string;
   chunks: string[];
   ticketType: string;
+  isArchived: boolean;
   priority: TicketPriority;
   stage: string;
   createdAtTimestamp: number;
@@ -294,6 +294,8 @@ export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'work
   attachmentIds: string[];
   metadata: string;
   formFields: TicketFormFields;
+  /** "<fieldId>::<value>" entries; stored as hashed "<fieldId>::<gram>" tokens by the encryption gateway. */
+  formFieldGrams: string[];
   eta: string;
   channelName: string;
   boardName: string;
@@ -480,6 +482,8 @@ export interface VespaMailDocument extends VespaDocument {
   projectCode?: string;
   ticketFormFields?: TicketFormFields;
   ticketFormFieldValues?: string[]; // Indexed copy used for Desk/All lexical search.
+  formFieldGrams?: string[]; // As VespaTicketDocument.formFieldGrams, from the linked ticket.
+  mailChannelName?: string; // Own copy of the channel name (the imported channelName has no encrypted twin).
   subject: string;
   chunks: string[];
   timestamp: number;
