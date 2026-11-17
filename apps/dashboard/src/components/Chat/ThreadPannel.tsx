@@ -20,6 +20,7 @@ import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
 import {
   X,
   FileText,
+  Download,
   ClipboardCheck,
   Hash,
   Lock,
@@ -86,6 +87,7 @@ import {
   ChannelVisibility,
   BaseTicketType,
   parseTicketMd,
+  parseForwardedMessageXml,
 } from '@xyne/shared';
 import { usePendingForThread, buildPendingThreadMessage } from '@xyne/shared/messages';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
@@ -121,7 +123,12 @@ import { getDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { setThreadLastRead } from '../../machines/stateMachine';
-import { useSelf, useUser } from '../../hooks/useUsers';
+import {
+  downloadThreadMarkdown,
+  formatThreadMarkdown,
+  messageHtmlToMarkdown,
+} from '../../utils/threadExport';
+import { useSelf, useUser, useUsersById } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
@@ -673,6 +680,58 @@ export const ThreadMessages = ({
   const isDmReadOnly = useIsDmReadOnly(derivedChannelId);
 
   const zero = useZero();
+  const exportUsers = useUsersById();
+  const [isExportingMarkdown, setIsExportingMarkdown] = useState(false);
+  const handleDownloadMarkdown = async (): Promise<void> => {
+    if (!derivedConversationId || isExportingMarkdown) return;
+    setIsExportingMarkdown(true);
+    try {
+      // Preview props can contain a subset; export a complete authorized snapshot.
+      const thread = await zero.run(threadConversationQuery, { type: 'complete' });
+      if (!thread) throw new Error('Thread unavailable');
+      const title = discussionTitleOf(thread.messages[0]?.content ?? '') || 'Thread';
+      const markdown = formatThreadMarkdown({
+        title,
+        channel: channelDisplayName || 'Channel',
+        url: `${shareableOrigin}/chat/dir/${thread.channelId}/${thread.conversationId}`,
+        messages: thread.messages,
+        senderName: id => exportUsers.get(id)?.name || 'Unknown user',
+        convertContent: content => {
+          const forwarded = parseForwardedMessageXml(content);
+          if (!forwarded) return messageHtmlToMarkdown(content);
+          // The original sender name is plain text, not stored HTML.
+          const sender = forwarded.originalSenderName
+            .replace(/[\r\n]+/g, ' ')
+            .replace(/([\\`*_[\]<>])/g, '\\$1');
+          return [
+            messageHtmlToMarkdown(forwarded.optionalText ?? ''),
+            `Forwarded from ${sender}`,
+            messageHtmlToMarkdown(forwarded.content),
+          ]
+            .filter(Boolean)
+            .join('\n\n');
+        },
+      });
+      await downloadThreadMarkdown(title, markdown);
+    } catch {
+      toast.error('Failed to download thread', { description: 'Please try again.' });
+    } finally {
+      setIsExportingMarkdown(false);
+    }
+  };
+  const markdownExportMenuItem = (
+    <DropdownMenuItem
+      className='gap-2'
+      disabled={!conversation || conversationDetails.type !== 'complete' || isExportingMarkdown}
+      onSelect={() => {
+        void handleDownloadMarkdown();
+      }}
+      data-testid='thread-download-markdown'
+    >
+      <Download size={16} className='shrink-0' />
+      <span>{isExportingMarkdown ? 'Downloading…' : 'Download as Markdown'}</span>
+    </DropdownMenuItem>
+  );
 
   // Own skipMarkAsRead ref for thread — independent of channel's skipMarkAsRead in ConversationPanelV2
   const skipMarkAsReadThreadRef = useRef(false);
@@ -1424,6 +1483,7 @@ export const ThreadMessages = ({
               onCloseAutoFocus={e => e.preventDefault()}
               className='min-w-[180px]'
             >
+              {markdownExportMenuItem}
               {/* A `thread` column, not a channel scrolled to a message — the same
               distinction Streams.types draws. Only offered once both ids are known,
               since a thread column is meaningless without the conversation it is a
@@ -1683,6 +1743,7 @@ export const ThreadMessages = ({
                   onCloseAutoFocus={e => e.preventDefault()}
                   className='min-w-[180px]'
                 >
+                  {markdownExportMenuItem}
                   {derivedConversationId && (
                     <DropdownMenuItem className='p-0' onSelect={e => e.preventDefault()}>
                       <ConversationSubscription
