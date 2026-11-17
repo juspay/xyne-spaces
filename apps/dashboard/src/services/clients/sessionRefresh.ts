@@ -6,7 +6,12 @@
  * browser sends the `xs` refresh cookie to (and to nothing else). So every transport does
  * the same thing on a 401 from our backend:
  *
- *   not already retried, not the refresh call itself → refresh once → re-send the request
+ *   refreshable code, not already retried, not the refresh call itself
+ *     → refresh once → re-send the request
+ *
+ * "Refreshable" comes from the 401 body's `code` (see `isRefreshableAuthFailure`): only a
+ * missing or expired JWT is worth a refresh. An invalid token, a revoked session or a
+ * removed user is final, and the caller goes to login without the extra round-trip.
  *
  * The three transports plug into this module rather than carrying their own copy:
  *   - `apiInstance` (services/clients/apiClient.ts) — its response interceptor
@@ -25,6 +30,43 @@ import { API_BASE_URL } from '../../config';
 export type RefreshOutcome = 'ok' | 'dead' | 'transient';
 
 const REFRESH_SESSION_PATH = '/auth/refresh-session';
+
+// ── 401 reason ───────────────────────────────────────────────────────────────
+// Mirrors `AuthFailureCode` / `REFRESHABLE_AUTH_FAILURE_CODES` in the backend's
+// middleware/auth.ts. A refresh can only help when the session is still alive and just
+// the JWT is gone: TOKEN_MISSING (the browser dropped the cookie at expiry, the usual
+// case) or TOKEN_EXPIRED. TOKEN_INVALID, SESSION_REVOKED, USER_REMOVED and
+// EMAIL_DOMAIN_NOT_ALLOWED are final.
+
+const REFRESHABLE_AUTH_FAILURE_CODES: ReadonlySet<string> = new Set([
+  'TOKEN_MISSING',
+  'TOKEN_EXPIRED',
+]);
+
+/** The `code` string from a 401 JSON body, if the body has one. */
+export const readAuthFailureCode = (body: unknown): string | undefined => {
+  if (typeof body !== 'object' || body === null) return undefined;
+  const code = (body as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+};
+
+/**
+ * Whether a 401 is worth a `/auth/refresh-session` call. A body without a `code` (routes
+ * outside the auth middleware, non-JSON bodies) keeps the old behaviour and refreshes.
+ */
+export const isRefreshableAuthFailure = (body: unknown): boolean => {
+  const code = readAuthFailureCode(body);
+  return code === undefined || REFRESHABLE_AUTH_FAILURE_CODES.has(code);
+};
+
+/** `isRefreshableAuthFailure` for a fetch Response; reads a clone so the body stays usable. */
+export const isRefreshableAuthFailureResponse = async (response: Response): Promise<boolean> => {
+  try {
+    return isRefreshableAuthFailure(await response.clone().json());
+  } catch {
+    return true;
+  }
+};
 
 /** True for `/auth/refresh-session` itself: a 401 there is final, never retried. */
 export const isRefreshSessionUrl = (url: string | undefined): boolean =>
@@ -127,13 +169,16 @@ export const resolveAxiosUrl = (config: RetryableRequestConfig): string =>
 
 /**
  * Whether a failed axios request should go through refresh-and-retry: a 401 from our
- * backend, not the refresh call, not already retried. Marks the config as retried.
+ * backend with a refreshable `code` (see `isRefreshableAuthFailure`), not the refresh call,
+ * not already retried. Marks the config as retried.
  */
 export const claimAxiosRetry = (
   status: number | undefined,
   config: RetryableRequestConfig | undefined,
+  body?: unknown,
 ): boolean => {
   if (status !== 401 || !config || config._retry === true) return false;
+  if (!isRefreshableAuthFailure(body)) return false;
   const url = resolveAxiosUrl(config);
   if (!isBackendUrl(url) || isRefreshSessionUrl(url)) return false;
   config._retry = true;

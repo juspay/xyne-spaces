@@ -18,18 +18,54 @@ import {
 const logger = baseLogger.child({ module: 'AuthMiddleware' });
 
 /**
- * Why a request was rejected. The dashboard calls `GET /auth/refresh-session` on any of these and
- * retries; the middleware itself never refreshes.
+ * Why a request was rejected (401 body `code`). The dashboard decides from this whether to call
+ * `GET /auth/refresh-session` and retry, or to go straight to the login page; the middleware
+ * itself never refreshes.
+ *
+ * Refreshable (the session may still be alive, only the JWT is gone):
+ * - TOKEN_MISSING — no JWT cookie. The cookie's maxAge equals the JWT lifetime, so a browser
+ *   drops it at expiry; this is the usual form an expired token arrives in.
+ * - TOKEN_EXPIRED — the JWT arrived but is past `exp` (clock skew, non-browser clients).
+ *
+ * Final (a refresh cannot help, the client should log out):
+ * - TOKEN_INVALID — bad signature, malformed, or claims that do not match the request.
+ * - SESSION_REVOKED — the auth session behind the token was logged out.
+ * - USER_REMOVED — the user left or was deactivated in the workspace or organisation.
+ * - EMAIL_DOMAIN_NOT_ALLOWED — the user's email domain is blocked by policy.
  */
-export type AuthFailureCode = 'TOKEN_MISSING' | 'TOKEN_EXPIRED' | 'TOKEN_INVALID';
+export type AuthFailureCode =
+  | 'TOKEN_MISSING'
+  | 'TOKEN_EXPIRED'
+  | 'TOKEN_INVALID'
+  | 'SESSION_REVOKED'
+  | 'USER_REMOVED'
+  | 'EMAIL_DOMAIN_NOT_ALLOWED';
+
+/** Codes the client may answer with a `/auth/refresh-session` call; every other code is final. */
+export const REFRESHABLE_AUTH_FAILURE_CODES: ReadonlySet<AuthFailureCode> = new Set<AuthFailureCode>([
+  'TOKEN_MISSING',
+  'TOKEN_EXPIRED',
+]);
+
+/**
+ * RFC 6750 `WWW-Authenticate` challenge for a 401. The bearer vocabulary has no "expired" value:
+ * a missing credential is a bare challenge, everything else is `invalid_token`.
+ */
+const wwwAuthenticateFor = (code: AuthFailureCode, message: string): string => {
+  const description = message.replace(/["\\]/g, '');
+  return code === 'TOKEN_MISSING'
+    ? 'Bearer realm="xyne"'
+    : `Bearer realm="xyne", error="invalid_token", error_description="${description}"`;
+};
 
 /** Classify a jwtService.verifyToken failure. */
 export const classifyTokenError = (error: unknown): Exclude<AuthFailureCode, 'TOKEN_MISSING'> =>
   error instanceof Error && error.message === 'JWT token has expired' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID';
 
 export class AuthMiddleware {
-  private reject(res: Response, code: AuthFailureCode, message: string): void {
-    res.status(401).json({ error: 'Authentication required', code, message });
+  private reject(res: Response, code: AuthFailureCode, message: string, error = 'Authentication required'): void {
+    res.setHeader('WWW-Authenticate', wwwAuthenticateFor(code, message));
+    res.status(401).json({ error, code, message });
   }
 
   /**
@@ -75,7 +111,7 @@ export class AuthMiddleware {
 
       if (payload.sid && (await authSessionService.isSessionRevoked(payload.sid))) {
         logger.warn(`${logPrefix} Token belongs to a logged-out session`, { tokenPreview, sid: payload.sid });
-        this.reject(res, 'TOKEN_INVALID', 'Session has been logged out');
+        this.reject(res, 'SESSION_REVOKED', 'Session has been logged out');
         return;
       }
 
@@ -114,10 +150,7 @@ export class AuthMiddleware {
           leftAt: user.leftAt,
           status: user.status,
         });
-        res.status(401).json({
-          error: 'User removed from workspace',
-          message: 'You have been removed from this workspace',
-        });
+        this.reject(res, 'USER_REMOVED', 'You have been removed from this workspace', 'User removed from workspace');
         return;
       }
 
@@ -126,19 +159,13 @@ export class AuthMiddleware {
           userId: user.id,
           orgMemberLeftAt: orgMember.leftAt,
         });
-        res.status(401).json({
-          error: 'User removed from organization',
-          message: 'You have been removed from this organization',
-        });
+        this.reject(res, 'USER_REMOVED', 'You have been removed from this organization', 'User removed from organization');
         return;
       }
 
       if (!isEmailDomainAllowed(user.email)) {
         logger.warn(`${logPrefix} Request rejected (reason=email_domain_not_allowed)`, { userId: user.id });
-        res.status(401).json({
-          error: EMAIL_DOMAIN_NOT_ALLOWED_ERROR,
-          message: EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE,
-        });
+        this.reject(res, 'EMAIL_DOMAIN_NOT_ALLOWED', EMAIL_DOMAIN_NOT_ALLOWED_MESSAGE, EMAIL_DOMAIN_NOT_ALLOWED_ERROR);
         return;
       }
 
