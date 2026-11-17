@@ -2,11 +2,15 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import {
   CLIENT_MANIFEST_MUTATION_ARG,
+  WorkspaceRole,
   conversationsSendClient,
   derivedContentFactsSchema,
+  isEncryptedField,
+  keepMentionsWithin,
 } from '@xyne/shared';
 import type { DerivedContentFacts, RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
+import { db } from '@/database/client';
 import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
@@ -22,18 +26,34 @@ import { logger } from '@/utils/logger';
  * Two steps, so no encryption-service call is made while a database transaction holds a
  * connection: prepareEncryptedMutations transforms a push's rule-encrypted mutations before
  * Zero opens any transaction, and runEncryptedMutation, inside it, only looks the result up.
+ * prepareEncryptedMutations also scopes a guest's mentions (scopeGuestMentions) on every
+ * mutation that declares it, plaintext or encrypted alike.
  */
 
 /** Set on prepared args (server-side only): the key of the mutation's outcome. */
 const PREPARED_ARG = '_encPrepared';
 
+/** What a mutator declares about its args. */
+type MutationSpec = {
+  /** Its request contract. */
+  contract: RequestContract;
+  /** The arg naming the channel a guest's mentions must stay within (scopeGuestMentions). */
+  guestMentionsWithinChannelArg?: string;
+};
+
 /** Mutators with a request contract, by Zero mutator name. */
-const MUTATION_CONTRACTS: Record<string, RequestContract> = {
-  'conversations.send': conversationsSendClient,
+const MUTATIONS: Record<string, MutationSpec> = {
+  'conversations.send': { contract: conversationsSendClient, guestMentionsWithinChannelArg: 'channelId' },
 };
 
 /** Who is mutating, for the encryption service: the caller's transit public key and the request's manifest lane. */
 export type MutationEncryptionContext = { clientKey?: string; environment: string };
+
+/** The mutating user, as the mutators see it (authData). */
+export type MutationAuth = { workspaceId: string; role?: string };
+
+/** A push after prepareEncryptedMutations: each prepared mutation's outcome, and whether any args changed. */
+export type PreparedPush = { prepared: PreparedMutations; changed: boolean };
 
 /** Each prepared mutation's outcome: the facts to run with, or why it is refused. */
 export type PreparedMutations = Map<string, { derived?: DerivedContentFacts; error?: Error }>;
@@ -66,6 +86,7 @@ async function transformMutationArgs(
   args: Record<string, unknown>,
   enc: MutationEncryptionContext | undefined,
   workspaceId: string,
+  mentionScope: string[] | undefined,
 ): Promise<{ body: Record<string, unknown>; derived?: DerivedContentFacts }> {
   const { [CLIENT_MANIFEST_MUTATION_ARG]: client, ...body } = args;
   if (!config.enc.apiClientEncryptionEnabled || !config.enc.enableDbEncryption) {
@@ -78,7 +99,7 @@ async function transformMutationArgs(
     throw new MutationEncryptionError('TRANSIT_KEY_REQUIRED', 'Client-encrypted mutation without a transit key');
   }
   // The contract only feeds the drift check; a rule mutator without one is still transformed.
-  const contract = MUTATION_CONTRACTS[mutatorName];
+  const contract = MUTATIONS[mutatorName]?.contract;
 
   let transformed: { body: unknown; derived?: unknown };
   try {
@@ -99,6 +120,7 @@ async function transformMutationArgs(
             contractDerived: [...contract.derived],
           }
         : {}),
+      ...(mentionScope ? { keepMentionsWithin: mentionScope } : {}),
       entityId: workspaceId,
       entityType: 'WORKSPACE',
     });
@@ -135,19 +157,68 @@ async function transformMutationArgs(
 }
 
 /**
- * Transforms every rule-encrypted mutation of a push body (`{ mutations: [{ name, args }] }`,
- * args as one object or a one-element array) in place, concurrently, before any transaction
- * opens. Each one's args are replaced by the transformed args (or, when it is refused, the
- * args without the manifest) tagged with PREPARED_ARG; the outcome goes into the result.
+ * The user ids a guest's mentions must stay within (the channel's members), for a mutator
+ * that declares guestMentionsWithinChannelArg; undefined for anyone else.
+ */
+async function guestMentionScope(
+  spec: MutationSpec | undefined,
+  args: Record<string, unknown>,
+  auth: MutationAuth,
+): Promise<string[] | undefined> {
+  if (!spec?.guestMentionsWithinChannelArg || auth.role !== WorkspaceRole.GUEST) return undefined;
+  const channelId = args[spec.guestMentionsWithinChannelArg];
+  if (typeof channelId !== 'string') return undefined;
+  const participants = await db.channelParticipant.findMany({ where: { channelId }, select: { userId: true } });
+  return participants.map(participant => participant.userId);
+}
+
+/**
+ * A guest may only mention members of the channel: any other mention loses its tag and stays
+ * as plain text (keepMentionsWithin), so the stored message is the same however it arrived.
+ *
+ * - plaintext: rewritten here.
+ * - encrypted: opaque here, so the scope goes to the encryption service, which has the
+ *   content extractor rewrite the decrypted text before re-encrypting it and extracting its
+ *   facts (transformMutationArgs).
+ *
+ * Returns the plaintext args to run (rewritten or as given) and the scope to send with
+ * encrypted args.
+ */
+async function scopeGuestMentions(
+  mutatorName: string,
+  args: Record<string, unknown>,
+  auth: MutationAuth,
+): Promise<{ args: Record<string, unknown>; mentionScope?: string[] }> {
+  const spec = MUTATIONS[mutatorName];
+  const mentionScope = await guestMentionScope(spec, args, auth);
+  if (!mentionScope) return { args };
+
+  const field = spec.contract.derivedFrom;
+  const text = field ? args[field] : undefined;
+  if (CLIENT_MANIFEST_MUTATION_ARG in args || typeof text !== 'string' || isEncryptedField(text)) {
+    return { args, mentionScope };
+  }
+  const scoped = keepMentionsWithin(text, new Set(mentionScope));
+  return { args: scoped === text ? args : { ...args, [field!]: scoped } };
+}
+
+/**
+ * Prepares every mutation of a push body (`{ mutations: [{ name, args }] }`, args as one
+ * object or a one-element array) in place, concurrently, before any transaction opens:
+ * a guest's mentions are scoped (scopeGuestMentions), and each rule-encrypted mutation's args
+ * are replaced by the transformed args (or, when it is refused, the args without the
+ * manifest) tagged with PREPARED_ARG; its outcome goes into the result. `changed` says
+ * whether the push body has to be re-sent.
  */
 export async function prepareEncryptedMutations(
   body: unknown,
   enc: MutationEncryptionContext | undefined,
-  workspaceId: string,
-): Promise<PreparedMutations> {
+  auth: MutationAuth,
+): Promise<PreparedPush> {
   const prepared: PreparedMutations = new Map();
+  let changed = false;
   const mutations = (body as { mutations?: unknown } | null)?.mutations;
-  if (!Array.isArray(mutations)) return prepared;
+  if (!Array.isArray(mutations)) return { prepared, changed };
 
   await Promise.all(
     mutations.map(async (mutation) => {
@@ -158,12 +229,17 @@ export async function prepareEncryptedMutations(
       const set = (next: Record<string, unknown>) => {
         if (wrapped) (m!.args as unknown[])[0] = next;
         else m!.args = next;
+        changed = true;
       };
+      const name = String(m!.name);
+      const scoped = await scopeGuestMentions(name, args as Record<string, unknown>, auth);
       if (!(CLIENT_MANIFEST_MUTATION_ARG in args)) {
         // PREPARED_ARG is set here only; one the client sent is dropped.
-        if (PREPARED_ARG in args) {
-          const { [PREPARED_ARG]: _forged, ...rest } = args as Record<string, unknown>;
+        if (PREPARED_ARG in scoped.args) {
+          const { [PREPARED_ARG]: _forged, ...rest } = scoped.args;
           set(rest);
+        } else if (scoped.args !== args) {
+          set(scoped.args);
         }
         return;
       }
@@ -172,10 +248,11 @@ export async function prepareEncryptedMutations(
       let next: Record<string, unknown>;
       try {
         const { body: transformed, derived } = await transformMutationArgs(
-          String(m!.name),
+          name,
           args as Record<string, unknown>,
           enc,
-          workspaceId,
+          auth.workspaceId,
+          scoped.mentionScope,
         );
         prepared.set(key, { derived });
         next = { ...transformed, [PREPARED_ARG]: key };
@@ -187,7 +264,7 @@ export async function prepareEncryptedMutations(
       set(next);
     }),
   );
-  return prepared;
+  return { prepared, changed };
 }
 
 /**

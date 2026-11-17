@@ -64,7 +64,23 @@ export class BotCommandParser {
         return { error: 'Invalid bot command format' };
       }
       logger.info('✅ [BOT-PARSER] Command parsed successfully:', command);
+      return await this.validate(command);
+    } catch (error) {
+      logger.info('❌ [BOT-PARSER] Failed to parse and validate bot command:', error);
+      logger.error('Failed to parse and validate bot command:', error);
+      return { error: 'Failed to process bot command' };
+    }
+  }
 
+  /**
+   * Registry lookup and input validation of an already-parsed command: the `command` fact a
+   * message's derived facts carry (parsed the same way, by parseBotCommandText), so a message
+   * is never parsed twice and ciphertext needs no command text.
+   */
+  static async validate(
+    command: Pick<BotCommand, 'botName' | 'parameters'> & { rawCommand?: string },
+  ): Promise<ParsedBotCommand | { error: string; errorFlowJson?: string }> {
+    try {
       // Get bot from registry
       const botEntry = botRegistry.getBot(command.botName);
       if (!botEntry) {
@@ -87,7 +103,7 @@ export class BotCommandParser {
             botName: command.botName,
             validatedInput: validationResult.validatedInput,
             inputFlowJson: validationResult.flowJson,
-            rawCommand: command.rawCommand
+            rawCommand: command.rawCommand ?? ''
           };
         } else {
           logger.info('❌ [BOT-PARSER] Input validation failed:', validationResult.flowJson);
@@ -102,8 +118,8 @@ export class BotCommandParser {
         return { error: `Bot validation failed: ${validationError.message || 'Unknown error'}` };
       }
     } catch (error) {
-      logger.info('❌ [BOT-PARSER] Failed to parse and validate bot command:', error);
-      logger.error('Failed to parse and validate bot command:', error);
+      logger.info('❌ [BOT-PARSER] Failed to validate bot command:', error);
+      logger.error('Failed to validate bot command:', error);
       return { error: 'Failed to process bot command' };
     }
   }

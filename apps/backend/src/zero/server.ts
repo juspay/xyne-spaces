@@ -277,9 +277,9 @@ export async function handleMutate(request: Request, enc?: MutationEncryptionCon
 
   // Rule-encrypted mutations go to the encryption service here, before any transaction holds
   // a database connection; inside it the mutator only reads the outcome.
-  const prepared = await prepareEncryptedMutations(pushBody, enc, authData.workspaceId);
+  const { prepared, changed } = await prepareEncryptedMutations(pushBody, enc, authData);
   let pushRequest = request;
-  if (prepared.size > 0) {
+  if (changed) {
     const headers = new Headers(request.headers);
     headers.delete('content-length');
     pushRequest = new Request(request.url, { method: request.method, headers, body: JSON.stringify(pushBody) });
@@ -862,7 +862,7 @@ export async function runCatalogMutation(
 
   // As in handleMutate: the encryption service is called before the transaction opens.
   const push = { mutations: [{ name, args }] };
-  const prepared = await prepareEncryptedMutations(push, enc, ctx.workspaceId);
+  const { prepared } = await prepareEncryptedMutations(push, enc, authData);
   const preparedArgs = push.mutations[0].args;
 
   await dbProvider.transaction(async (tx) => {

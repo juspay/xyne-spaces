@@ -13,6 +13,7 @@ import { defineRequestContract, type RequestOf } from '../define.js';
 export const replyToConversationClient = defineRequestContract({
   encrypted: [],
   derived: ['mentions', 'links', 'command', 'text'],
+  derivedFrom: 'content',
   schema: z.object({
     content: z.string().optional(),
     msgType: z.enum([MessageType.USER, MessageType.BOT]).optional(),
@@ -29,11 +30,13 @@ export type ReplyToConversationRequest = RequestOf<typeof replyToConversationCli
 /**
  * Zero mutator `conversations.send` (start a conversation); its args are this body. The
  * client encrypts `content` under its transit ticket; the mutator gets workspace-DEK
- * ciphertext and reads mentions, links, the bot command and the length from `derived`.
+ * ciphertext and reads mentions, links, the bot command and the length from `derived`
+ * (extracted by the backend from `content` when it arrives as plaintext).
  */
 export const conversationsSendClient = defineRequestContract({
   encrypted: ['content'],
   derived: ['mentions', 'links', 'command', 'text'],
+  derivedFrom: 'content',
   schema: z.object({
     channelId: z.string(),
     content: z.string(),

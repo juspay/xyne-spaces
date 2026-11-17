@@ -83,6 +83,12 @@ export type TransformRequestInput<T> = {
   contractFields?: string[];
   contractEncrypted?: string[];
   contractDerived?: string[];
+  /**
+   * A guest's message: the user ids its mentions must stay within (the channel's members).
+   * The encryption service has keepMentionsWithin run on each decrypted client field before
+   * it is re-encrypted and its facts extracted, as the backend does to a plaintext message.
+   */
+  keepMentionsWithin?: string[];
   /** Owner of the row the request writes: the workspace whose DEK its fields go under. */
   entityId?: string;
   entityType?: string;

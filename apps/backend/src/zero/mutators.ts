@@ -133,7 +133,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
-import { isEncryptedField } from '@xyne/shared';
+import { conversationsSendClient, isEncryptedField } from '@xyne/shared';
 import type { DerivedContentFacts } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
@@ -245,7 +245,7 @@ import {
 import { ensureFlowSkippedStage } from '@/services/flowStageTransitionRecovery';
 import { assertTicketUpdateAccess } from './acl/tables/tickets-acl';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
-import { getEncryptionProvider } from '@/services/encryption';
+import { getEncryptionProvider, resolveDerived } from '@/services/encryption';
 import { escapeHtml } from '@/utils/htmlEscape';
 
 function sortCallParticipantsForPreview<T extends {
@@ -606,11 +606,10 @@ async function guestSafeContent(
 }
 
 /**
- * guestSafeContent for encrypted content: the ciphertext cannot be rewritten, so a guest whose
- * message mentions someone outside the channel is refused instead of having the mention
- * stripped. Group mentions (keepMentionsWithin drops every mention when one remains) and
- * `@name` handles (resolved to users only when notifying) are refused outright, since a guest
- * cannot be limited to channel members through them.
+ * Backstop for scopeGuestMentions (zero/encryptedMutation.ts), which scoped a guest's mentions
+ * to the channel before the transaction, plaintext and encrypted alike: refuses the message
+ * if a mention it left in place is outside the channel now (membership changed in between).
+ * Checks what keepMentionsWithin guarantees, the participant mentions.
  */
 async function assertGuestMentionsWithin(
   tx: Transaction<Schema>,
@@ -619,13 +618,14 @@ async function assertGuestMentionsWithin(
   derived: DerivedContentFacts,
 ): Promise<void> {
   if (role !== WorkspaceRole.GUEST || !derived.mentions) return;
-  if (derived.mentions.groupIds.length > 0 || derived.mentions.handles.length > 0) {
+  const { userIds, groupIds } = derived.mentions.participants;
+  if (groupIds.length > 0) {
     throw new Error('Guests can only mention members of this channel');
   }
-  if (derived.mentions.userIds.length === 0) return;
+  if (userIds.length === 0) return;
   const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
   const allowed = new Set(participants.map(participant => participant.userId));
-  if (derived.mentions.userIds.some(userId => !allowed.has(userId))) {
+  if (userIds.some(userId => !allowed.has(userId))) {
     throw new Error('Guests can only mention members of this channel');
   }
 }
@@ -2866,14 +2866,18 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
-          // Under its manifest rule `content` arrives as workspace-DEK ciphertext; the facts the
-          // mutator needs come from the encryption service instead of parsing it.
-          const derived = isEncryptedField(content) ? getMutationDerived() : undefined;
-          if (derived) {
-            await assertGuestMentionsWithin(tx, authData.role, channelId, derived);
-          } else {
-            content = await guestSafeContent(tx, authData.role, channelId, content);
+          // Under its manifest rule `content` arrives as workspace-DEK ciphertext, described only
+          // by the encryption service's facts; plaintext is extracted here. Everything below
+          // reads `derived`. A guest's mentions were already scoped to the channel either way
+          // (scopeGuestMentions, before the transaction).
+          const encrypted = isEncryptedField(content);
+          if (encrypted && !getMutationDerived()) {
+            throw new Error('Encrypted message content arrived without its derived facts');
           }
+          const derived = resolveDerived(conversationsSendClient, { content }, getMutationDerived()) ?? {
+            version: 1,
+          };
+          await assertGuestMentionsWithin(tx, authData.role, channelId, derived);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3145,7 +3149,7 @@ export function createMutators(
               asyncTasks.push(async () => {
                 try {
                   await processMeetLinksFromChatMessage(
-                    derived?.links ? derived.links.meet.join(' ') : message.content,
+                    (derived.links?.meet ?? []).join(' '),
                     authData.workspaceId,
                     conversationId,
                     message.messageId,
@@ -3187,9 +3191,7 @@ export function createMutators(
           });
 
           // Add mentioned users as MENTIONED participants within Zero transaction
-          const mentions = derived?.mentions
-            ? { userIds: derived.mentions.userIds, groupIds: derived.mentions.groupIds }
-            : extractAllMentions(content);
+          const mentions = derived.mentions?.participants ?? { userIds: [], groupIds: [] };
           logger.info('[MENTION]:', mentions.userIds.length, mentions.groupIds.length, messageId);
           const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
             tx,
@@ -3245,8 +3247,9 @@ export function createMutators(
                     // Execute bot - this creates the bot response message
                     const result = await executionOrchestrator.execute({
                       botId: botDefinition.id,
-                      message: derived?.command
-                        ? derived.command.name
+                      // The bot gets the message itself; ciphertext only as its extracted command.
+                      message: encrypted
+                        ? derived.command?.name
                           ? `/${derived.command.name} ${derived.command.args ?? ''}`
                           : '/'
                         : content,
