@@ -31,9 +31,19 @@ interface AuthenticatedSocket extends Socket {
   orgMemberId?: string;
   workspaceId?: string;
   workspaceName?: string;
-  /** The client's transit public key (its `xk` cookie at connect, else the one its session registered); pushes are encrypted for it. */
-  transitKey?: string;
+  /**
+   * The client's transit public key (its `xk` cookie at connect, else the one its session
+   * registered); pushes are encrypted for it. `null` once the session row was read and had
+   * none, rechecked after TRANSIT_KEY_RECHECK_MS.
+   */
+  transitKey?: string | null;
+  transitKeyCheckedAt?: number;
 }
+
+type TransitKeyedSocket = Socket & { user?: { sid?: string }; transitKey?: string | null; transitKeyCheckedAt?: number };
+
+/** How long a socket whose session has no registered transit key waits before asking the session row again. */
+const TRANSIT_KEY_RECHECK_MS = 60_000;
 
 // interface JoinSessionData {
 //   sessionId: string; // This will be channelId or conversationId
@@ -1576,6 +1586,19 @@ class WebSocketService {
   }
 
   /**
+   * A transit key registered after the socket connected (`POST /api/transit/register`):
+   * this pod's sockets of that session use it at once; sockets on other pods read it from
+   * the session row at their next recheck.
+   */
+  setSessionTransitKey(sessionId: string, transitKey: string): void {
+    if (!this.io) return;
+    for (const socket of this.io.sockets.sockets.values()) {
+      const keyed = socket as TransitKeyedSocket;
+      if (keyed.user?.sid === sessionId) keyed.transitKey = transitKey;
+    }
+  }
+
+  /**
    * Storage ciphertext to transit ciphertext per recipient socket, for the transit public
    * key the socket connected with (its `xk` cookie) or, failing that, the one its session
    * registered. One encryption-service call per recipient, run concurrently, so a busy room
@@ -1591,15 +1614,15 @@ class WebSocketService {
   ): Promise<void> {
     await Promise.all(
       socketIds.map(async (socketId) => {
-        const socket = this.io?.sockets.sockets.get(socketId) as
-          | (Socket & { user?: { sid?: string }; transitKey?: string })
-          | undefined;
+        const socket = this.io?.sockets.sockets.get(socketId) as TransitKeyedSocket | undefined;
         // Not connected to this pod any more; a plain emit would be a no-op too.
         if (!socket) return;
 
         try {
-          if (!socket.transitKey && socket.user?.sid) {
-            socket.transitKey = await authSessionService.transitPublicKey(socket.user.sid);
+          const recheck = Date.now() - (socket.transitKeyCheckedAt ?? 0) > TRANSIT_KEY_RECHECK_MS;
+          if (!socket.transitKey && socket.user?.sid && recheck) {
+            socket.transitKeyCheckedAt = Date.now();
+            socket.transitKey = (await authSessionService.transitPublicKey(socket.user.sid)) ?? null;
           }
           if (!socket.transitKey) {
             logger.warn(`[WS-ENC] Socket ${socketId} has no transit key; not sending ${event} with storage ciphertext`);

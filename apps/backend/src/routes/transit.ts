@@ -1,9 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 import { TRANSIT_KEY_COOKIE } from '@/services/encryption/types';
-import { authSessionService } from '@/services/authSessionService';
+import { authSessionService, deviceCookieOptions } from '@/services/authSessionService';
+import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
@@ -30,11 +30,8 @@ function serviceUnavailable(res: Response, what: string, req: Request, err: unkn
   res.status(502).json({ error: 'Encryption service unavailable' });
 }
 
-router.get('/config', async (req: Request, res: Response) => {
-  if (!req.user?.sid) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
+// The router is mounted behind authMiddleware.authenticate; only `register` needs the session.
+router.get('/config', async (_req: Request, res: Response) => {
   try {
     res.json(await getEncryptionProvider().getClientConfig());
   } catch {
@@ -63,10 +60,9 @@ router.post('/register', registerLimiter, async (req: Request, res: Response) =>
   try {
     const serverKeys = await getEncryptionProvider().getTransitServerKeys();
     await authSessionService.setTransitPublicKey(sid, publicKey);
+    websocketService.setSessionTransitKey(sid, publicKey);
     res.cookie(TRANSIT_KEY_COOKIE, publicKey, {
-      httpOnly: true,
-      secure: config.env === 'production',
-      sameSite: 'strict',
+      ...deviceCookieOptions(req),
       path: '/',
       maxAge: TRANSIT_KEY_COOKIE_MAX_AGE_MS,
     });
@@ -79,10 +75,6 @@ router.post('/register', registerLimiter, async (req: Request, res: Response) =>
 // The encryption service's public keys, for a client that meets a key id it has not
 // derived yet (a server key added by rotation).
 router.get('/server-keys', async (req: Request, res: Response) => {
-  if (!req.user?.sid) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
   try {
     res.json(await getEncryptionProvider().getTransitServerKeys());
   } catch (err) {

@@ -40,7 +40,10 @@ export function parseTransitKeyId(keyId: string): number | null {
 }
 
 export function toBase64(bytes: ArrayBuffer | Uint8Array): string {
-  return btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = '';
+  for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
+  return btoa(binary);
 }
 
 export function fromBase64(value: string): Uint8Array<ArrayBuffer> {

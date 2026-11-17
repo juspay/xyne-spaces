@@ -1,13 +1,9 @@
 import { Event } from '../logger/events.js';
 import { getCryptoLogger } from './crypto-logger.js';
-import { parseTransitKeyId, type TransitKeyring } from './keyring.js';
+import { parseTransitKeyId, toBase64, type TransitKeyring } from './keyring.js';
 
 const IV_LENGTH = 12;
 const CIPHERTEXT_VERSION = 'v1';
-
-function toBase64(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes));
-}
 
 export async function encryptField(
   plaintext: string,
