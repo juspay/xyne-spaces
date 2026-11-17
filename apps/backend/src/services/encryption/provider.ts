@@ -10,6 +10,7 @@ import type {
   StorageObjectKey,
   TransformRequestInput,
   TransformRequestResult,
+  TransitCaller,
   TransitEncryptResult,
   TransitServerKeys,
 } from './types';
@@ -58,12 +59,12 @@ const provider: EncryptionProvider = {
     return unsupported('decryptBatch');
   },
 
-  async encryptResponse<T>(body: T, _clientKey: string | undefined): Promise<TransitEncryptResult<T>> {
+  async encryptResponse<T>(body: T, _caller: TransitCaller): Promise<TransitEncryptResult<T>> {
     if (!config.enc.apiClientEncryptionEnabled) return { body };
     return unsupported('encryptResponse');
   },
 
-  async decryptRequest<T>(body: T, _clientKey: string): Promise<T> {
+  async decryptRequest<T>(body: T, _caller: TransitCaller): Promise<T> {
     if (!config.enc.apiClientEncryptionEnabled) return body;
     return unsupported('decryptRequest');
   },
@@ -73,7 +74,7 @@ const provider: EncryptionProvider = {
     return unsupported('transformRequest');
   },
 
-  async transformResponse<T>(body: T, _clientKey: string): Promise<TransitEncryptResult<T>> {
+  async transformResponse<T>(body: T, _caller: TransitCaller): Promise<TransitEncryptResult<T>> {
     if (!config.enc.apiClientEncryptionEnabled) return { body };
     return unsupported('transformResponse');
   },
@@ -110,11 +111,9 @@ const provider: EncryptionProvider = {
   },
 
 
-  async getTransitClientManifest(_params: {
-    tag: string;
-    environment: string;
-    clientKey: string;
-  }): Promise<{ clientManifest: string } | null> {
+  async getTransitClientManifest(
+    _params: { tag: string; environment: string } & TransitCaller,
+  ): Promise<{ clientManifest: string } | null> {
     if (!config.enc.apiClientEncryptionEnabled) return null;
     return unsupported('getTransitClientManifest');
   },

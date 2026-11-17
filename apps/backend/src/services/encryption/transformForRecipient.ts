@@ -1,5 +1,5 @@
 import { getEncryptionProvider } from './provider';
-import type { TransitEncryptResult } from './types';
+import type { TransitCaller, TransitEncryptResult } from './types';
 
 // Storage ciphertext (`ENC:v1|<dekId>|…`); transit ciphertext (`ENC:v1|tk-…|…`) is excluded.
 const SERVER_CIPHERTEXT_PATTERN = /^ENC:v1\|(?!tk-)[^|]+\|/;
@@ -19,8 +19,8 @@ export function containsServerCiphertext(value: unknown): boolean {
 
 /**
  * Storage ciphertext in `payload` becomes transit ciphertext for one recipient: the
- * client whose transit public key is `clientKey`.
+ * client of `caller` (its session's registered transit key).
  */
-export async function transformPayloadForClient<T>(payload: T, clientKey: string): Promise<TransitEncryptResult<T>> {
-  return getEncryptionProvider().transformResponse(payload, clientKey);
+export async function transformPayloadForClient<T>(payload: T, caller: TransitCaller): Promise<TransitEncryptResult<T>> {
+  return getEncryptionProvider().transformResponse(payload, caller);
 }

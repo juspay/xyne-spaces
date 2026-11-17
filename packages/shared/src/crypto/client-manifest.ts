@@ -3,7 +3,7 @@ import { Event } from '../logger/events.js';
 import type { ClientEncryptionManifest } from '../enc-contracts/manifest.js';
 import { getCryptoLogger } from './crypto-logger.js';
 import { decryptField, isEncryptedField } from './field-decrypt.js';
-import { TRANSIT_KEY_HEADER, type TransitKeyring } from './keyring.js';
+import type { TransitKeyring } from './keyring.js';
 
 // The manifest types are defined once, next to the contracts they are generated from.
 export type {
@@ -89,12 +89,9 @@ export function refreshClientManifest(): Promise<ClientEncryptionManifest | null
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
-    const headers: Record<string, string> = {};
-    // Ask for the response to be encrypted for our transit key.
-    if (keyring) headers[TRANSIT_KEY_HEADER] = keyring.clientPublicKey;
+    // Encrypted for the transit key registered for this session, which the server looks up.
     const response = await fetch(`${API_BASE_URL}/encryption-manifest`, {
       credentials: 'include',
-      headers,
     });
 
     if (response.status === 404) {

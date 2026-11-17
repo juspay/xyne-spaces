@@ -64,6 +64,12 @@ declare global {
       user?: AuthenticatedUser;
       /** Facts the encryption service extracted from this request's encrypted fields. */
       derived?: DerivedContentFacts;
+      /**
+       * The verified access token the request authenticated with (authMiddleware): forwarded
+       * to the encryption service, which reads its `sid` and uses the session's registered
+       * transit key (transitCaller).
+       */
+      authToken?: string;
     }
   }
 }

@@ -4,7 +4,7 @@ import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import { CLIENT_MANIFEST_MUTATION_ARG } from '@xyne/shared';
 import { getEncryptionProvider, isDekPassthrough } from '@/services/encryption';
-import { TRANSIT_KEY_COOKIE, TRANSIT_KEY_HEADER } from '@/services/encryption/types';
+import { TRANSIT_KEY_COOKIE, type TransitCaller } from '@/services/encryption/types';
 
 export function sanitizeForLog(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, '');
@@ -85,9 +85,9 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
       return next();
     }
 
-    const clientKey = transitKey(req);
+    const caller = transitCaller(req);
 
-    if (!clientKey) {
+    if (!hasTransitCaller(caller)) {
       logger.warn('[decryptionMiddleware] encrypted fields present but client transit key missing', {
         method: sanitizeForLog(method),
         path: sanitizeForLog(req.path),
@@ -106,7 +106,7 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
       path: sanitizeForLog(req.path),
     });
 
-    req.body = await getEncryptionProvider().decryptRequest(req.body, clientKey);
+    req.body = await getEncryptionProvider().decryptRequest(req.body, caller);
     held.restore(req.body);
 
     logger.info('[decryptionMiddleware] request body decrypted successfully', {
@@ -130,12 +130,24 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
   next();
 }
 
-/** The caller's transit public key: the header first, then the `xk` cookie the register route set. */
-export function transitKey(req: Request): string | undefined {
-  const header = req.header(TRANSIT_KEY_HEADER);
-  if (header) return header;
+/**
+ * Whom the request's transit operations are for. The encryption service reads the `sid` of the
+ * forwarded access token and uses the transit key the client registered for that session
+ * (`POST /api/transit/register`); the backend never holds it. The `xk` cookie the register
+ * route set goes along for a session the service has no key for.
+ */
+export function transitCaller(req: Request): TransitCaller {
   const cookie: unknown = req.cookies?.[TRANSIT_KEY_COOKIE];
-  return typeof cookie === 'string' && cookie.length > 0 ? cookie : undefined;
+  const clientKey = typeof cookie === 'string' && cookie.length > 0 ? cookie : undefined;
+  return {
+    ...(req.authToken ? { authToken: req.authToken } : {}),
+    ...(clientKey ? { clientKey } : {}),
+  };
+}
+
+/** Whether the request names a transit key at all (an access token or a key of its own). */
+export function hasTransitCaller(caller: TransitCaller): boolean {
+  return Boolean(caller.authToken || caller.clientKey);
 }
 
 /**
@@ -159,7 +171,7 @@ export function encryptResponseBodyMiddleware(
     }
 
     void getEncryptionProvider()
-      .encryptResponse(body, transitKey(req))
+      .encryptResponse(body, transitCaller(req))
       .then((result) => originalJson(result.body))
       .catch((error) => {
         // The service's own verdict (no client key for a body that needs encrypting) goes

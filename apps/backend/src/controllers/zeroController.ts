@@ -10,20 +10,17 @@ import {
 import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
 import { logger } from '@/utils/logger';
-import { getEncryptionProvider, manifestEnvironmentForRequest } from '@/services/encryption';
-import { transitKey } from '@/middleware/decryptionMiddleware';
+import { manifestEnvironmentForRequest } from '@/services/encryption';
+import { transitCaller } from '@/middleware/decryptionMiddleware';
 import type { MutationEncryptionContext } from '@/zero/encryptedMutation';
 
 /**
- * The caller's transit public key and the manifest lane a push was made under, for mutations
- * encrypted by their manifest rule. The key comes from the request (header or cookie) or,
- * when the push carries neither (the cookie is SameSite=Strict, native clients send no
- * cookie), from the key the client registered for its auth session, as the websocket does.
+ * Whom a push's mutations encrypted by their manifest rule are for (transitCaller: the access
+ * token, whose session's registered transit key the encryption service uses) and the manifest
+ * lane the push was made under.
  */
-async function mutationEncryptionContext(req: Request): Promise<MutationEncryptionContext> {
-  const clientKey =
-    transitKey(req) ?? (req.user?.sid ? await getEncryptionProvider().transitClientKey(req.user.sid) : undefined);
-  return { clientKey, environment: manifestEnvironmentForRequest(req) };
+function mutationEncryptionContext(req: Request): MutationEncryptionContext {
+  return { ...transitCaller(req), environment: manifestEnvironmentForRequest(req) };
 }
 
 function handleZeroError(res: Response, error: unknown, rateLimitMessage: string): void {
@@ -75,7 +72,7 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
         body: JSON.stringify(req.body),
       });
 
-    const result = await handleMutate(webRequest, await mutationEncryptionContext(req));
+    const result = await handleMutate(webRequest, mutationEncryptionContext(req));
 
     res.json(result);
   } catch (error) {
@@ -199,7 +196,7 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       body: JSON.stringify(req.body),
     });
 
-    const result = await handleMutateFallback(webRequest, await mutationEncryptionContext(req));
+    const result = await handleMutateFallback(webRequest, mutationEncryptionContext(req));
 
     res.json(result);
   } catch (error) {

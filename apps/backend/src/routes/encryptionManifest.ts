@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { config } from '@/config/env';
 import { getEncryptionProvider, manifestEnvironmentForRequest } from '@/services/encryption';
-import { transitKey } from '@/middleware/decryptionMiddleware';
+import { hasTransitCaller, transitCaller } from '@/middleware/decryptionMiddleware';
 import { logger } from '@/utils/logger';
 
 const router = Router();
@@ -25,14 +25,14 @@ router.get('/', async (req: Request, res: Response) => {
   // Only one manifest family exists today.
   const tag = 'default';
   const environment = manifestEnvironmentForRequest(req);
-  const clientKey = transitKey(req);
-  if (!clientKey) {
+  const caller = transitCaller(req);
+  if (!hasTransitCaller(caller)) {
     res.status(400).json({ error: 'Client manifest requires the client transit key', code: 'TRANSIT_KEY_REQUIRED' });
     return;
   }
 
   try {
-    const result = await getEncryptionProvider().getTransitClientManifest({ tag, environment, clientKey });
+    const result = await getEncryptionProvider().getTransitClientManifest({ tag, environment, ...caller });
     if (!result) {
       res.status(404).json({ error: 'Not found', message: 'No client encryption manifest for this environment' });
       return;

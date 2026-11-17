@@ -17,10 +17,10 @@ import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
 import { readAgentProgress, type AgentProgressEntry } from './agentProgressService';
 import {
-  getEncryptionProvider,
   containsServerCiphertext,
   transformPayloadForClient,
   TRANSIT_KEY_COOKIE,
+  type TransitCaller,
 } from '@/services/encryption';
 
 
@@ -32,18 +32,15 @@ interface AuthenticatedSocket extends Socket {
   workspaceId?: string;
   workspaceName?: string;
   /**
-   * The client's transit public key (its `xk` cookie at connect, else the one its session
-   * registered); pushes are encrypted for it. `null` once the session row was read and had
-   * none, rechecked after TRANSIT_KEY_RECHECK_MS.
+   * The access token the socket authenticated with: pushes are encrypted for the transit key
+   * its session registered, which the encryption service looks up from the token's `sid`.
    */
+  authToken?: string;
+  /** The client's transit public key from its `xk` cookie, for a session that registered none. */
   transitKey?: string | null;
-  transitKeyCheckedAt?: number;
 }
 
-type TransitKeyedSocket = Socket & { user?: { sid?: string }; transitKey?: string | null; transitKeyCheckedAt?: number };
-
-/** How long a socket whose session has no registered transit key waits before asking the session row again. */
-const TRANSIT_KEY_RECHECK_MS = 60_000;
+type TransitKeyedSocket = Socket & { user?: { sid?: string }; authToken?: string; transitKey?: string | null };
 
 // interface JoinSessionData {
 //   sessionId: string; // This will be channelId or conversationId
@@ -220,6 +217,7 @@ class WebSocketService {
             (socket as any).userEmail = req.user.email;
             (socket as any).userName = req.user.displayName || req.user.name;
             (socket as any).user = req.user;
+            (socket as any).authToken = req.authToken;
             (socket as any).transitKey = cookies[TRANSIT_KEY_COOKIE];
 
             logger.info(`WebSocket authenticated: ${req.user.email} (${req.user.id})`);
@@ -1619,16 +1617,18 @@ class WebSocketService {
         if (!socket) return;
 
         try {
-          const recheck = Date.now() - (socket.transitKeyCheckedAt ?? 0) > TRANSIT_KEY_RECHECK_MS;
-          if (!socket.transitKey && socket.user?.sid && recheck) {
-            socket.transitKeyCheckedAt = Date.now();
-            socket.transitKey = (await getEncryptionProvider().transitClientKey(socket.user.sid)) ?? null;
-          }
-          if (!socket.transitKey) {
+          // The handshake token outlives its expiry on an open socket (nothing re-authenticates
+          // it), so the encryption service checks its signature only: the socket keeps
+          // receiving pushes as it did before, for the session it authenticated as.
+          const caller: TransitCaller = {
+            ...(socket.authToken ? { authToken: socket.authToken, allowExpiredAuthToken: true } : {}),
+            ...(socket.transitKey ? { clientKey: socket.transitKey } : {}),
+          };
+          if (!caller.authToken && !caller.clientKey) {
             logger.warn(`[WS-ENC] Socket ${socketId} has no transit key; not sending ${event} with storage ciphertext`);
             return;
           }
-          const { body } = await transformPayloadForClient(data, socket.transitKey);
+          const { body } = await transformPayloadForClient(data, caller);
           socket.emit(event, wrap(body));
         } catch (error) {
           logger.warn(`[WS-ENC] DEK to transit transform failed for socket ${socketId}; not sending ${event}`, {

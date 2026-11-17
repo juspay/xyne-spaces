@@ -10,7 +10,6 @@ export {
 export type { EncryptionConfig } from './transit.js';
 export {
   TransitKeyring,
-  TRANSIT_KEY_HEADER,
   generateTransitKeyPair,
   deriveTransitKey,
   transitKeyId,

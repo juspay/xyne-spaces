@@ -2,7 +2,7 @@
 export interface TransitKeyPair {
   /** ECDH P-256, `deriveBits` only. */
   privateKey: CryptoKey;
-  /** Base64 uncompressed point: what `x-transit-key` carries and the register route stores. */
+  /** Base64 uncompressed point: what the register route stores for the session. */
   publicKey: string;
 }
 
@@ -23,7 +23,6 @@ export interface TransitKeyStore {
   getOrCreate(): Promise<TransitKeyPair>;
 }
 
-export const TRANSIT_KEY_HEADER = 'x-transit-key';
 const TRANSIT_KEY_ID_PREFIX = 'tk-';
 const DERIVE_INFO = 'transit/v1';
 const ECDH = { name: 'ECDH', namedCurve: 'P-256' } as const;
@@ -111,7 +110,7 @@ export class TransitKeyring {
     this.serverKeys = serverKeys;
   }
 
-  /** Base64 P-256 point every request names in `x-transit-key`. */
+  /** Base64 P-256 point the client registers for its session (`POST /api/transit/register`). */
   get clientPublicKey(): string {
     return this.pair.publicKey;
   }

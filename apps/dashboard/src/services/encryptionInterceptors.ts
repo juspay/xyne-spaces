@@ -13,7 +13,6 @@ import {
   findRequestRule,
   encryptBodyWithRule,
   encryptFormDataWithRule,
-  TRANSIT_KEY_HEADER,
 } from '@xyne/shared';
 import type { ClientManifestRule } from '@xyne/shared';
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
@@ -166,9 +165,6 @@ export async function encryptionRequestInterceptor(
   if (!isEncryptionReady() || !getEncryptionState().apiClientEncryptionEnabled) {
     return config;
   }
-
-  // Every request names the client's public key the response should be encrypted for.
-  config.headers.set(TRANSIT_KEY_HEADER, getEncryptionState().keyring!.clientPublicKey);
 
   // Only encrypt request bodies for mutating methods
   const method = config.method?.toLowerCase();

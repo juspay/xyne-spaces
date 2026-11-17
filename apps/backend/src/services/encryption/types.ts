@@ -12,10 +12,10 @@ export type ClientEncryptionConfig = {
 };
 
 /**
- * Header the client sends its transit public key (base64 P-256 point) in; the cookie,
- * set by `POST /api/transit/register`, is the fallback for websockets and the sync proxy.
+ * Cookie `POST /api/transit/register` sets with the client's transit public key (base64 P-256
+ * point): read by the sync proxy, and sent along as a fallback for a session the encryption
+ * service has no registered key for.
  */
-export const TRANSIT_KEY_HEADER = 'x-transit-key';
 export const TRANSIT_KEY_COOKIE = 'xk';
 
 export type TransitServerKey = {
@@ -61,10 +61,23 @@ export type StorageObjectKey = {
   wrappedKey: string;
 };
 
-export type TransformRequestInput<T> = {
-  body: T;
-  /** The caller's transit public key, which the transit ciphertext in `body` is under. */
+/**
+ * Whom a transit operation is for. `authToken` (the caller's access token) names its auth
+ * session, whose registered transit key the encryption service looks up and uses; `clientKey`
+ * (the public key the request itself carried) applies when that session registered none.
+ */
+export type TransitCaller = {
   clientKey?: string;
+  authToken?: string;
+  /**
+   * Accept `authToken` past its expiry (signature still checked): a websocket's handshake
+   * token, which the socket keeps using after the token's lifetime.
+   */
+  allowExpiredAuthToken?: boolean;
+};
+
+export type TransformRequestInput<T> = TransitCaller & {
+  body: T;
   /**
    * What the request is, for the encryption service to pick the manifest rule: a REST
    * request's `method` + `path` as made, or a Zero mutation's `mutator` name.
@@ -116,13 +129,13 @@ export interface EncryptionProvider {
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
   decryptBatch(values: string[]): Promise<string[]>;
   /**
-   * Transit-encrypt the configured plaintext fields of `body` for the client with
-   * `clientKey`. Without a key the body comes back as is when it has nothing to encrypt,
+   * Transit-encrypt the configured plaintext fields of `body` for the client of `caller`.
+   * Without a key the body comes back as is when it has nothing to encrypt,
    * else the service answers 400 `TRANSIT_KEY_REQUIRED`.
    */
-  encryptResponse<T>(body: T, clientKey: string | undefined): Promise<TransitEncryptResult<T>>;
-  /** Decrypt the transit ciphertext in `body`, which the client with `clientKey` encrypted. */
-  decryptRequest<T>(body: T, clientKey: string): Promise<T>;
+  encryptResponse<T>(body: T, caller: TransitCaller): Promise<TransitEncryptResult<T>>;
+  /** Decrypt the transit ciphertext in `body`, which the client of `caller` encrypted. */
+  decryptRequest<T>(body: T, caller: TransitCaller): Promise<T>;
   initializeOrg(orgId: string): Promise<void>;
   provisionEntity(input: ProvisionEntityInput): Promise<void>;
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;
@@ -132,11 +145,7 @@ export interface EncryptionProvider {
    * The manifest for a client, encrypted with its transit key, as a string to send as is.
    * `null` when there is no manifest (404).
    */
-  getTransitClientManifest(params: {
-    tag: string;
-    environment: string;
-    clientKey: string;
-  }): Promise<{ clientManifest: string } | null>;
+  getTransitClientManifest(params: { tag: string; environment: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
   /**
    * Rule-driven counterpart of decryptRequest. Transit-encrypted fields the rule marks
    * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to
@@ -147,9 +156,9 @@ export interface EncryptionProvider {
   transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>>;
   /**
    * DEK-to-transit counterpart of encryptResponse: storage ciphertext (ENC:v1|<dekId>|…) in
-   * `body` comes back as transit ciphertext (ENC:v1|tk-…|…) for the client with
-   * `clientKey`; plaintext configured fields are transit-encrypted as encryptResponse does;
+   * `body` comes back as transit ciphertext (ENC:v1|tk-…|…) for the client of `caller`;
+   * plaintext configured fields are transit-encrypted as encryptResponse does;
    * the backend never sees the plaintext.
    */
-  transformResponse<T>(body: T, clientKey: string): Promise<TransitEncryptResult<T>>;
+  transformResponse<T>(body: T, caller: TransitCaller): Promise<TransitEncryptResult<T>>;
 }

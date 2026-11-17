@@ -16,7 +16,8 @@ import {
   manifestEnvironmentForRequest,
   runWithDekPassthrough,
 } from '@/services/encryption';
-import { decryptRequestBody, sanitizeForLog, transitKey } from './decryptionMiddleware';
+import type { TransitCaller } from '@/services/encryption';
+import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } from './decryptionMiddleware';
 
 /**
  * Everything a route whose body is under a client manifest rule runs, in order:
@@ -95,7 +96,8 @@ function transformRequest(options: EncryptedRouteOptions) {
     }
     // The response comes back from the DEK as transit ciphertext for the caller, so the
     // caller's transit public key must be known before the handler writes anything.
-    if (!transitKey(req)) {
+    const caller = transitCaller(req);
+    if (!hasTransitCaller(caller)) {
       getCryptoOperations().add(1, {
         operation: 'transform_request_body',
         status: 'error',
@@ -108,7 +110,7 @@ function transformRequest(options: EncryptedRouteOptions) {
       });
       return;
     }
-    return transformRequestBody(req, res, next, options, { contractFields, contractEncrypted, contractDerived });
+    return transformRequestBody(req, res, next, options, caller, { contractFields, contractEncrypted, contractDerived });
   };
 }
 
@@ -122,6 +124,7 @@ async function transformRequestBody(
   res: Response,
   next: NextFunction,
   options: EncryptedRouteOptions,
+  caller: TransitCaller,
   contract: { contractFields: string[]; contractEncrypted: string[]; contractDerived: string[] },
 ): Promise<void> {
   try {
@@ -132,7 +135,7 @@ async function transformRequestBody(
     const versionHeader = req.get(CLIENT_MANIFEST_VERSION_HEADER);
     const { body, derived } = await getEncryptionProvider().transformRequest({
       body: req.body,
-      clientKey: transitKey(req),
+      ...caller,
       method: req.method,
       path: req.originalUrl,
       environment: manifestEnvironmentForRequest(req),
@@ -217,8 +220,8 @@ async function transformRequestBody(
  * ciphertext to it, which then passes it through unchanged.
  */
 function transformResponse(req: Request, res: Response, next: NextFunction): void {
-  const clientKey = req.user?.sid ? transitKey(req) : undefined;
-  if (!isDekPassthrough() || !clientKey) {
+  const caller = transitCaller(req);
+  if (!isDekPassthrough() || !req.user?.sid || !hasTransitCaller(caller)) {
     return next();
   }
 
@@ -229,7 +232,7 @@ function transformResponse(req: Request, res: Response, next: NextFunction): voi
     }
 
     void getEncryptionProvider()
-      .transformResponse(body, clientKey)
+      .transformResponse(body, caller)
       .then((result) => originalJson(result.body))
       .catch((error) => {
         logger.error('[encryptedRoute] failed to transform response body', {

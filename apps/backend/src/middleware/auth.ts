@@ -156,6 +156,7 @@ export class AuthMiddleware {
         sid: payload.sid,
         tokenExpiresAt: payload.exp ? payload.exp * 1000 : undefined,
       };
+      req.authToken = token;
 
       this.setCohortCookie(req, res, user.id);
 

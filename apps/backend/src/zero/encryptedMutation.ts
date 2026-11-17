@@ -8,6 +8,7 @@ import {
 import type { DerivedContentFacts, RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
+import type { TransitCaller } from '@/services/encryption';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 
@@ -32,8 +33,8 @@ const MUTATION_CONTRACTS: Record<string, RequestContract> = {
   'conversations.send': conversationsSendClient,
 };
 
-/** Who is mutating, for the encryption service: the caller's transit public key and the request's manifest lane. */
-export type MutationEncryptionContext = { clientKey?: string; environment: string };
+/** Who is mutating, for the encryption service: the transit caller (transitCaller) and the request's manifest lane. */
+export type MutationEncryptionContext = TransitCaller & { environment: string };
 
 /** Each prepared mutation's outcome: the facts to run with, or why it is refused. */
 export type PreparedMutations = Map<string, { derived?: DerivedContentFacts; error?: Error }>;
@@ -74,7 +75,7 @@ async function transformMutationArgs(
       'Client-encrypted mutations need API client encryption and DB encryption enabled',
     );
   }
-  if (!enc?.clientKey) {
+  if (!enc?.authToken && !enc?.clientKey) {
     throw new MutationEncryptionError('TRANSIT_KEY_REQUIRED', 'Client-encrypted mutation without a transit key');
   }
   // The contract only feeds the drift check; a rule mutator without one is still transformed.
@@ -84,7 +85,8 @@ async function transformMutationArgs(
   try {
     transformed = await getEncryptionProvider().transformRequest({
       body,
-      clientKey: enc.clientKey,
+      ...(enc.authToken ? { authToken: enc.authToken } : {}),
+      ...(enc.clientKey ? { clientKey: enc.clientKey } : {}),
       mutator: mutatorName,
       environment: enc.environment,
       client: (client && typeof client === 'object' ? client : {}) as {
