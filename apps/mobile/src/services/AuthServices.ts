@@ -1,6 +1,6 @@
 import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync } from 'expo-crypto';
 import { apiGet, apiPost, isMtlsRequestError } from './apiClient';
-import { setSessionRefresher, type SessionRefreshOutcome } from './MtlsApiService';
+import { setSessionRefresher, type SessionRefreshOutcome } from '@/src/utils/sessionRefreshOn401';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 import { injectCookiesFromResponse, pointLastWorkspaceAt } from '@/src/utils/cookie-injection';
 import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttpClient';
@@ -1698,6 +1698,7 @@ async function performRefreshAuthSession(
       headers: {
         Accept: 'application/json',
       },
+      skipSessionRefresh: true,
     });
 
     if (!isAuthScopeCurrent(generation, operation)) {

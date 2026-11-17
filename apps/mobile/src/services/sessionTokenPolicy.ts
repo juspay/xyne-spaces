@@ -49,6 +49,30 @@ export function getProactiveRearmDelay(
   return { delayMs: getAuthRetryDelay(attempt), stillDue: true };
 }
 
+/** 401 codes from the auth middleware that a session refresh can fix. */
+const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED', 'TOKEN_INVALID']);
+
+/**
+ * Whether a 401 body carries one of the codes a refresh can fix. File downloads report
+ * the body as a string, so JSON text is read too.
+ */
+export function isRefreshableAuthFailure(statusCode: number, body: unknown): boolean {
+  if (statusCode !== 401) {
+    return false;
+  }
+  let parsed = body;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return false;
+    }
+  }
+  const code =
+    typeof parsed === 'object' && parsed !== null ? (parsed as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && REFRESHABLE_AUTH_CODES.has(code);
+}
+
 /**
  * Whether a refresh-session refusal is the backend ending the session: 401
  * REFRESH_INVALID (`xs` missing, revoked, expired or reused), 403

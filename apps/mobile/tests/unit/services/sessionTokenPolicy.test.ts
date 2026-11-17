@@ -7,6 +7,7 @@ import {
   getProactiveRearmDelay,
   INITIAL_AUTH_RETRY_STATE,
   isDeadSessionFailure,
+  isRefreshableAuthFailure,
   isSessionEndedRefusal,
   MAX_DEAD_SESSION_ATTEMPTS,
   nextAuthRetry,
@@ -143,5 +144,28 @@ describe('isSessionEndedRefusal', () => {
     assert.equal(isSessionEndedRefusal(403, { code: 'REFRESH_INVALID' }), false);
     assert.equal(isSessionEndedRefusal(401, { code: 'WORKSPACE_ACCESS_DENIED' }), false);
     assert.equal(isSessionEndedRefusal(503, { code: 'REFRESH_INVALID' }), false);
+  });
+});
+
+describe('isRefreshableAuthFailure', () => {
+  it('refreshes on the auth middleware 401 codes', () => {
+    for (const code of ['TOKEN_MISSING', 'TOKEN_EXPIRED', 'TOKEN_INVALID']) {
+      assert.equal(isRefreshableAuthFailure(401, { code }), true);
+    }
+  });
+
+  it('reads a JSON string body, as file downloads report it', () => {
+    assert.equal(isRefreshableAuthFailure(401, '{"code":"TOKEN_EXPIRED"}'), true);
+  });
+
+  it('leaves other 401s alone, including the refresh endpoint refusing', () => {
+    assert.equal(isRefreshableAuthFailure(401, { code: 'REFRESH_INVALID' }), false);
+    assert.equal(isRefreshableAuthFailure(401, { message: 'Unauthorized' }), false);
+    assert.equal(isRefreshableAuthFailure(401, '<html>401</html>'), false);
+    assert.equal(isRefreshableAuthFailure(401, null), false);
+  });
+
+  it('only applies to 401', () => {
+    assert.equal(isRefreshableAuthFailure(403, { code: 'TOKEN_EXPIRED' }), false);
   });
 });

@@ -23,6 +23,7 @@ import { buildApiCookieHeader, mergeCookieHeader } from './apiCookieHeader';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from './logger';
 import { getActiveWorkspaceId } from './activeWorkspace';
+import { SESSION_REFRESH_UNAVAILABLE_BODY, withSessionRefreshOn401 } from './sessionRefreshOn401';
 import { decodeBase64Bytes, decodeBase64Utf8 } from './base64Utf8';
 
 /**
@@ -251,6 +252,11 @@ export interface MtlsFetchOptions {
   signal?: AbortSignal;
   /** Hard deadline. Defaults to DEFAULT_REQUEST_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * Skip renewing the session on a 401. Only for the refresh call itself, which must
+   * never trigger another refresh.
+   */
+  skipSessionRefresh?: boolean;
 }
 
 /** Matches the native URLSession request timeout. */
@@ -505,20 +511,36 @@ export async function mtlsDownloadToFile(
     throw new Error('Download destination is not allowed');
   }
 
-  const headers = await prepareHeadersForTransport(url, options?.headers);
-
-  if (shouldUseNativeFileDownload(url) && CertificateModule?.downloadMtlsFile) {
+  const downloadMtlsFile = CertificateModule?.downloadMtlsFile?.bind(CertificateModule);
+  if (shouldUseNativeFileDownload(url) && downloadMtlsFile) {
     const nativePath = fileUriToNativePath(destinationPath);
-    const result = await CertificateModule.downloadMtlsFile(url, nativePath, headers);
-    return {
-      statusCode: result.status,
-      ok: result.ok === true && typeof result.uri === 'string' && result.uri.length > 0,
-      uri: result.uri ?? null,
-      size: typeof result.size === 'number' ? result.size : 0,
-      mimeType: result.mimeType ?? null,
-      errorBody: result.errorBody ?? '',
-      headers: result.headers ?? {},
+    const downloadNatively = async (): Promise<MtlsDownloadResult> => {
+      // Rebuilt per attempt so a retry after a session refresh carries the new cookie.
+      const attemptHeaders = await prepareHeadersForTransport(url, options?.headers);
+      const result = await downloadMtlsFile(url, nativePath, attemptHeaders);
+      return {
+        statusCode: result.status,
+        ok: result.ok === true && typeof result.uri === 'string' && result.uri.length > 0,
+        uri: result.uri ?? null,
+        size: typeof result.size === 'number' ? result.size : 0,
+        mimeType: result.mimeType ?? null,
+        errorBody: result.errorBody ?? '',
+        headers: result.headers ?? {},
+      };
     };
+    return withSessionRefreshOn401({
+      send: downloadNatively,
+      readFailure: download => ({ statusCode: download.statusCode, body: download.errorBody }),
+      unavailable: () => ({
+        statusCode: 503,
+        ok: false,
+        uri: null,
+        size: 0,
+        mimeType: null,
+        errorBody: JSON.stringify(SESSION_REFRESH_UNAVAILABLE_BODY),
+        headers: {},
+      }),
+    });
   }
 
   const maxJsFallbackBytes = options?.maxJsFallbackBytes;
@@ -526,9 +548,11 @@ export async function mtlsDownloadToFile(
     throw new Error('Native streaming download is required. Rebuild the app.');
   }
 
+  // `mtlsFetch` prepares the headers itself, per attempt, so a retry after a session
+  // refresh sends the renewed cookie rather than one captured here.
   const response = await mtlsFetch(url, {
     method: 'GET',
-    headers,
+    headers: options?.headers ?? {},
   });
   const contentLength = Number.parseInt(headerValue(response.headers, 'content-length') ?? '', 10);
   if (Number.isFinite(contentLength) && contentLength > maxJsFallbackBytes) {
@@ -544,7 +568,26 @@ export async function mtlsDownloadToFile(
   return written;
 }
 
+/**
+ * Sends an API request. On a 401 for an expired or missing JWT it renews the session and
+ * sends the request once more (see `withSessionRefreshOn401`), so no caller has to.
+ */
 export async function mtlsFetch(url: string, options?: MtlsFetchOptions): Promise<MtlsResponse> {
+  if (options?.skipSessionRefresh) {
+    return sendMtlsRequest(url, options);
+  }
+  return withSessionRefreshOn401({
+    send: () => sendMtlsRequest(url, options),
+    readFailure: response => ({ statusCode: response.statusCode, body: response.body }),
+    unavailable: () => ({
+      statusCode: 503,
+      headers: { 'content-type': 'application/json' },
+      body: { ...SESSION_REFRESH_UNAVAILABLE_BODY },
+    }),
+  });
+}
+
+async function sendMtlsRequest(url: string, options?: MtlsFetchOptions): Promise<MtlsResponse> {
   if (!isApprovedTransportDestination(url)) {
     throw new Error('[mTLS] Refusing request to unapproved destination');
   }
