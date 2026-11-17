@@ -1465,11 +1465,20 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     // current workspace's cookie, and an active target would label the request with a
     // workspace that has no token yet.
     setActiveWorkspaceId(null);
+    // The workspace whose cookie authenticates the switch. `||`, not `??`: a fallback user
+    // carries `workspaceId: ''`, and an empty id would send no `x-workspace-id`, leaving
+    // the backend to pick from a possibly stale `xyne_last_workspace`. The current token's
+    // own claim names exactly the workspace the backend will check.
+    const currentWorkspaceId =
+      user?.workspaceId ||
+      decodeAuthJwtClaims(currentToken)?.workspaceId ||
+      previousWorkspaceId ||
+      undefined;
     try {
       const response = await switchToWorkspace(
         workspaceId,
         currentToken,
-        user?.workspaceId ?? previousWorkspaceId ?? undefined,
+        currentWorkspaceId,
         generation,
         operation,
       );
