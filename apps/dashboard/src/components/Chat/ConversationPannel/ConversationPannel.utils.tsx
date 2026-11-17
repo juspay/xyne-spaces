@@ -1,6 +1,7 @@
 import { ReactElement, useMemo } from 'react';
 
 import {
+  BookmarkDefault,
   ChatDefault,
   FolderDefault,
   PinDefault,
@@ -72,6 +73,12 @@ export const STATIC_TABS: ConversationTabListType[] = [
     value: 'links',
     description: 'Links shared in this channel',
     icon: <LinkChainSlant size={14} />,
+  },
+  {
+    label: 'Bookmarks',
+    value: 'bookmarks',
+    description: 'Your bookmarks from this channel (only visible to you)',
+    icon: <BookmarkDefault size={14} />,
   },
 ];
 

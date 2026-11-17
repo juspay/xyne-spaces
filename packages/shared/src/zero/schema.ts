@@ -1480,6 +1480,7 @@ export const bookmarkTable = table('bookmarks')
     isDeleted: boolean(),
     isCompleted: boolean(),
     metadata: json().optional(),
+    channelId: string().optional(),
   })
   .primaryKey('id');
 

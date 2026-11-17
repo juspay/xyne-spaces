@@ -4070,6 +4070,17 @@ export const queries = defineQueries({
   userBookmarks: defineQuery(() => {
     return zql.bookmarks.where('isDeleted', false).orderBy('createdAt', 'desc');
   }),
+  // Query for the current user's bookmarks in a single channel (channel Bookmarks tab).
+  // Row-level ACL (BookmarksACL) already scopes this to ctx.userID.
+  userChannelBookmarks: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.bookmarks
+        .where('channelId', channelId)
+        .where('isDeleted', false)
+        .orderBy('createdAt', 'desc');
+    },
+  ),
   // Query for user's email signatures
   userEmailSignatures: defineQuery(({ ctx }) => {
     return zql.email_signatures.where('userId', ctx.userID).orderBy('createdAt', 'asc');

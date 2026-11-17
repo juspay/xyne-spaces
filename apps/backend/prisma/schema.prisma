@@ -3632,8 +3632,10 @@ model Bookmark {
   isDeleted  Boolean            @default(false)
   isCompleted Boolean            @default(false)
   metadata   Json?              // Additional metadata
+  channelId  String?            // Channel the bookmarked entity lives in (server-resolved; null for non-message / unresolved)
 
   @@unique([userId, entityId, entityType]) // User can only bookmark an entity once
+  @@index([userId, channelId, isDeleted]) // Channel-scoped bookmarks tab
   @@index([userId, entityType]) // Fast lookup of user's bookmarks by type
   @@index([userId, createdAt]) // Fast lookup of user's bookmarks sorted by time
   @@index([userId, isCompleted, updatedAt])
