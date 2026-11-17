@@ -54,7 +54,7 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
 
   const server = createServer((req, res) => {
     route(req, res).catch((err: unknown) => {
-      log.error('unhandled request error', { url: req.url, err });
+      log.error('unhandled request error', { url: req.url?.replace(/\?.*$/s, '?...'), err });
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end('edge: internal error\n');

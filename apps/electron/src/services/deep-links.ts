@@ -32,6 +32,9 @@ let mainWindow: BrowserWindow | null = null;
  */
 const DEEP_LINK_ROUTE_ALLOWLIST: readonly string[] = [];
 
+// Deep-link queries can carry OAuth code/state; keep a marker so logs show one was dropped.
+const withoutQuery = (url: string): string => url.replace(/\?.*$/s, '?...');
+
 function isAllowedDeepLinkRoute(pathStr: string): boolean {
   if (DEEP_LINK_ROUTE_ALLOWLIST.length === 0) return true;
   const [firstSegment] = pathStr.replace(/^\//, '').split(/[/?#]/);
@@ -77,7 +80,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
   app.on('open-url', (event, url) => {
     event.preventDefault();
     Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, { 
-      url,
+      url: withoutQuery(url),
       origin: 'open-url'
     });
     void handleDeepLink(url);
@@ -101,7 +104,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
     const url = commandLine.find(arg => arg.startsWith(`${config.DEEP_LINK_PROTOCOL}://`));
     if (url) {
       Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, { 
-        url,
+        url: withoutQuery(url),
         origin: 'second-instance'
       });
       void handleDeepLink(url);
@@ -113,7 +116,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
     const url = process.argv.find(arg => arg.startsWith(`${config.DEEP_LINK_PROTOCOL}://`));
     if (url){
       Logger.info(EnrollmentEvent.DEEP_LINK_OPENED, { 
-        url,
+        url: withoutQuery(url),
         origin: 'windows-startup'
       });
       void handleDeepLink(url);
@@ -127,7 +130,7 @@ export function setupDeepLinks(createWindowFn: () => void): boolean {
  * Handles incoming deep links
  */
 async function handleDeepLink(url: string): Promise<void> {
-  log.info('Handling deep link URL:', url);
+  log.info('Handling deep link URL:', withoutQuery(url));
 
   // Ensure app is ready and services (like mTLS) are initialized
   await app.whenReady();

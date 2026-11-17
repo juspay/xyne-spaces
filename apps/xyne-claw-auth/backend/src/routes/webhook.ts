@@ -247,7 +247,7 @@ async function scheduleCapacityRetryIfNeeded(
     redispatch,
     ...(card ? { card } : {}),
   });
-  clog.info(`[capacity-retry] scheduled token=${retryToken} interactive=${interactive} automation=${!!ctx.resultForwardUrl} conv=${ctx.conversationId}`);
+  clog.info(`[capacity-retry] scheduled interactive=${interactive} automation=${!!ctx.resultForwardUrl} conv=${ctx.conversationId}`);
   return true;
 }
 
