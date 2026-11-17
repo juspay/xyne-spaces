@@ -108,6 +108,13 @@ extraObjects:
 {{- define "xyne-root.vespaFeed" -}}
 {{ include "xyne-root.vespaHostsService" (dict "name" "vespa-feed" "port" 8080 "istio" .Values.addons.istio.enabled) }}
 fullnameOverride: vespa-feed
+# The openai-embedders send this to tei-batch-proxy as `Authorization: Bearer`; self-hosted
+# Vespa resolves api-key-secret-ref "teiProxyS2sKey" from this env var.
+secretEnv:
+  VESPA_SECRET_TEI_PROXY_S2S_KEY:
+    name: xyne-vespa-secrets
+    key: TEI_PROXY_S2S_KEY
+    optional: true
 args:
   - services
 containerPorts:
@@ -142,6 +149,13 @@ persistence:
 {{- define "xyne-root.vespaSearch" -}}
 {{ include "xyne-root.vespaHostsService" (dict "name" "vespa-search" "port" 8080 "istio" .Values.addons.istio.enabled) }}
 fullnameOverride: vespa-search
+# The openai-embedders send this to tei-batch-proxy as `Authorization: Bearer`; self-hosted
+# Vespa resolves api-key-secret-ref "teiProxyS2sKey" from this env var.
+secretEnv:
+  VESPA_SECRET_TEI_PROXY_S2S_KEY:
+    name: xyne-vespa-secrets
+    key: TEI_PROXY_S2S_KEY
+    optional: true
 args:
   - services
 containerPorts:
