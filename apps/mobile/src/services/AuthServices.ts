@@ -1498,44 +1498,13 @@ function extractErrorMessage(response: MtlsResponse, statusCode: number): string
   return `Request failed: ${statusCode}`;
 }
 
+/** Goes through `refreshAuthSession` so it shares the in-flight request. */
 async function refreshTokenFromSessionCookie(
   generation = getAuthSessionGeneration(),
   operation = getAuthOperation(),
 ): Promise<string | undefined> {
-  return trackAuthSessionOperation(
-    generation,
-    performRefreshTokenFromSessionCookie(generation, operation),
-  );
-}
-
-async function performRefreshTokenFromSessionCookie(
-  generation: number,
-  operation: number,
-): Promise<string | undefined> {
-  if (!isAuthScopeCurrent(generation, operation)) {
-    return undefined;
-  }
-
-  const response = await mtlsFetch(REFRESH_SESSION_URL, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    return undefined;
-  }
-
-  await injectCookiesFromResponse(API_ORIGIN, response.headers, {
-    waitForPropagation: true,
-    generation,
-    operation,
-  });
-  if (!isAuthScopeCurrent(generation, operation)) {
-    return undefined;
-  }
-  return readJwtFromJarAfterInjection();
+  const result = await refreshAuthSession(undefined, generation, operation);
+  return result.ok ? result.token : undefined;
 }
 
 export async function getWorkspaces(token: string): Promise<WorkspaceItem[]> {
