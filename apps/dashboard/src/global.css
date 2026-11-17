@@ -3352,7 +3352,23 @@ html .bn-code-block-source-popup-ok-button:hover {
   padding-bottom: 4px;
 }
 
-/* Bullet — a drawn 6px dot rather than BlockNote's "•" text glyph. The extra
+/* Let the text fill the row so a click right of it lands at the end of the line;
+   otherwise Chrome hit-tests the marker first and puts the caret at offset 0.
+   Empty items are skipped: BlockNote's placeholder is the row's ::after, and a
+   full-width text box would push it to the far right. */
+.canvas-surface
+  .bn-editor
+  .bn-block-content:is(
+    [data-content-type="bulletListItem"],
+    [data-content-type="numberedListItem"],
+    [data-content-type="checkListItem"]
+  ):not(:has(.ProseMirror-trailingBreak:only-child))
+  > .bn-inline-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Bullet —a drawn 6px dot rather than BlockNote's "•" text glyph. The extra
    ancestors are needed to outrank BlockNote's own `content` rules. */
 .canvas-surface
   .bn-editor
