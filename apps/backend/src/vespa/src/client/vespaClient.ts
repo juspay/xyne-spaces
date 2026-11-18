@@ -181,7 +181,7 @@ class VespaClient {
     }
   }
 
-  async insert(document: InsertDocument, options: VespaConfigValues): Promise<void> {
+  async insert(document: InsertDocument, options: VespaConfigValues & { workspaceId?: string }): Promise<void> {
     try {
       // Clean document fields to remove Unicode replacement characters before insertion
       const cleanedDocument = cleanDocumentFields(document);
@@ -191,6 +191,8 @@ class VespaClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // the encryption gateway encrypts under this workspace instead of reading Vespa to find it
+          ...(options.workspaceId ? { 'X-Workspace-Id': options.workspaceId } : {}),
         },
         body: JSON.stringify({ fields: cleanedDocument }),
       }, 0, this.feedTimeoutMs);
@@ -246,9 +248,9 @@ class VespaClient {
 
   async updateDocument(
     updatedFields: Record<string, any>,
-    options: VespaConfigValues & { docId: string; create?: boolean },
+    options: VespaConfigValues & { docId: string; create?: boolean; workspaceId?: string },
   ): Promise<void> {
-    const { docId, namespace, schema, create } = options;
+    const { docId, namespace, schema, create, workspaceId } = options;
     // create=true upserts: Vespa builds the doc from these assign ops when it
     // doesn't exist yet, instead of silently no-oping the partial update.
     const url = `${this.feedEndpoint}${documentPath(namespace, schema, docId)}${
@@ -267,18 +269,22 @@ class VespaClient {
         {} as Record<string, any>,
       );
 
+      // An upsert stands in for a put (CRUDService.insert), so it gets the feed timeout too.
       const response = await this.fetchWithRetry(url, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          // the encryption gateway encrypts under this workspace instead of reading Vespa to find it
+          ...(workspaceId ? { 'X-Workspace-Id': workspaceId } : {}),
         },
         body: JSON.stringify({
           fields: updateObject,
         }),
-      });
+      }, 0, create ? this.feedTimeoutMs : undefined);
 
       if (!response.ok) {
         const errorText = response.statusText;
+        this.logger.error(`Vespa error: ${await response.text()}`);
         throw new Error(`Failed to update document: ${response.status} ${errorText}`);
       }
 
@@ -317,7 +323,7 @@ class VespaClient {
 
   async feedBatch(
     documents: InsertDocument[],
-    options: VespaConfigValues,
+    options: VespaConfigValues & { workspaceId?: string },
   ): Promise<BatchResult[]> {
     this.logger.info(`[BATCH FEED] Starting batch insert of ${documents.length} documents with concurrency limit`);
     const startTime = Date.now();
@@ -343,7 +349,7 @@ class VespaClient {
   }
 
   async updateBatch(
-    updates: { docId: string; fields: Record<string, any> }[],
+    updates: { docId: string; fields: Record<string, any>; workspaceId?: string }[],
     options: VespaConfigValues & { create?: boolean },
   ): Promise<BatchResult[]> {
     this.logger.info(`[BATCH UPDATE] Starting batch update of ${updates.length} documents with concurrency limit`);
@@ -352,7 +358,7 @@ class VespaClient {
     const results = await Promise.allSettled(
       updates.map((update) =>
         this.concurrencyLimit(() =>
-          this.updateDocument(update.fields, { ...options, docId: update.docId }),
+          this.updateDocument(update.fields, { ...options, docId: update.docId, workspaceId: update.workspaceId }),
         ),
       ),
     );

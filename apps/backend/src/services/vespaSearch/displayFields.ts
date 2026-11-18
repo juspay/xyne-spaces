@@ -1,7 +1,7 @@
 import { AttachmentEntityType, ChannelScopeType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
-import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { chunkPlainText, extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { getFlowJsonContentForNotification } from '@/utils/flowJson';
 import { extractLinksFromContent } from '@/utils/urlUtils';
 import { buildFormFields, type TicketDynamicFieldValue } from '@/zero/vespa-injection/core/form-fields';
@@ -205,7 +205,7 @@ const loaders: Record<string, Loader> = {
   mail: async (hits) => {
     const emails = await db.email.findMany({
       where: { id: { in: ids(hits.map((h) => h.docId)) } },
-      select: { id: true, subject: true, from: true, to: true, conversationId: true },
+      select: { id: true, subject: true, from: true, to: true, body: true, conversationId: true },
     });
     const tickets = await db.ticket.findMany({
       where: { conversationId: { in: ids(emails.map((e) => e.conversationId)) } },
@@ -221,6 +221,8 @@ const loaders: Record<string, Loader> = {
         subject: e.subject,
         from: e.from,
         to: e.to,
+        // the body's chunks exactly as mapEmail indexed them, so the n-th chunk lines up with the n-th hashed one
+        chunks: chunkPlainText(extractPlainTextFromHtml(e.body || '') || e.subject),
         ...(ticket?.xyneId != null ? { xyneId: ticket.xyneId } : {}),
         ticketFormFields: fields,
         ticketFormFieldValues: Array.from(new Set(fields.map((f) => f.fieldValue))),

@@ -13,20 +13,14 @@ import { getErrorMessage } from '../utils';
 import { ErrorPerformingSearch } from '../error';
 
 /**
- * Fields owned by entity extraction, not by any mapper: the extractor resolves entities
- * onto messages and tickets, claw assigns a channel's approved types, and both write
- * with partial updates. A feed is a Vespa *put*, so an unrelated re-index (a message
- * edit, a ticket update, a channel_stats bump) would erase them. They are read back off
- * the indexed document and re-attached to the payload instead.
+ * Schemas with fields owned by entity extraction, not by any mapper: the extractor resolves entities onto messages and
+ * tickets (entityIds, entityNames, entitySurfaceForms), claw assigns a channel's approved types (entityTypes,
+ * entityTypeDefs), and both write with partial updates. A put would erase them on any unrelated re-index, and reading
+ * them back off the indexed document to re-put them sends the encryption gateway its own hashed values as plaintext,
+ * which it hashes again. So these schemas are fed as partial updates instead: every mapped field is assigned and
+ * create=true builds a missing document, and the fields the mapper does not set are left as stored.
  */
-const EXTRACTED_ENTITY_FIELDS = ['entityIds', 'entityNames', 'entitySurfaceForms'] as const;
-
-const EXTERNALLY_OWNED_FIELDS: Partial<Record<VespaSchema, readonly string[]>> = {
-  [messageSchema]: EXTRACTED_ENTITY_FIELDS,
-  [ticketSchema]: EXTRACTED_ENTITY_FIELDS,
-  // Not extracted entities but the channel's approved types, which claw publishes.
-  [channelSchema]: ['entityTypes', 'entityTypeDefs'],
-};
+const UPSERTED_SCHEMAS: ReadonlySet<VespaSchema> = new Set([messageSchema, ticketSchema, channelSchema]);
 
 export class CRUDService {
   private logger: ILogger;
@@ -38,19 +32,27 @@ export class CRUDService {
     this.vespa = vespaClient;
   }
 
-  insert = async (documents: InsertDocument[], schema: VespaSchema): Promise<BatchResult[]> => {
+  // workspaceId: the documents' workspace, when the caller knows it (the encryption gateway then need not read Vespa)
+  insert = async (documents: InsertDocument[], schema: VespaSchema, opts?: { workspaceId?: string }): Promise<BatchResult[]> => {
     try {
-      // Only chat_message, ticket and chat_container carry externally owned fields; every
-      // other schema feeds straight through without an extra read.
-      const owned = EXTERNALLY_OWNED_FIELDS[schema];
-      const payload = owned
-        ? await this.withExternallyOwnedFields(documents, schema, owned)
-        : documents;
-
-      return this.vespa.feedBatch(payload, {
+      if (UPSERTED_SCHEMAS.has(schema)) {
+        return this.vespa.updateBatch(
+          documents.map((document) => ({
+            docId: document.docId,
+            workspaceId: opts?.workspaceId,
+            // a field the mapper leaves undefined is cleared, as a put would clear it
+            fields: Object.fromEntries(
+              Object.entries(document).map(([field, value]) => [field, value === undefined ? null : value]),
+            ),
+          })),
+          { namespace: this.config.namespace, cluster: this.config.cluster, schema, create: true },
+        );
+      }
+      return this.vespa.feedBatch(documents, {
         namespace: this.config.namespace,
         cluster: this.config.cluster,
         schema,
+        workspaceId: opts?.workspaceId,
       });
     } catch (error) {
       this.logger.error(
@@ -60,51 +62,9 @@ export class CRUDService {
     }
   };
 
-  /**
-   * Re-attach the entity fields listed in EXTERNALLY_OWNED_FIELDS from the currently
-   * indexed document, for the schemas that have them. Only fields the caller left
-   * unset are carried over, so a writer that does mean to change them still wins.
-   */
-  private withExternallyOwnedFields = async (
-    documents: InsertDocument[],
-    schema: VespaSchema,
-    owned: readonly string[],
-  ): Promise<InsertDocument[]> => {
-    return Promise.all(
-      documents.map(async (document) => {
-        const provided = document as unknown as Record<string, unknown>;
-        const missing = owned.filter((field) => provided[field] === undefined);
-        if (missing.length === 0) return document;
-
-        try {
-          const indexed = await this.getDocument(document.docId, schema);
-          const fields = indexed?.fields as Record<string, unknown> | undefined;
-          if (!fields) return document;
-
-          const carried = Object.fromEntries(
-            missing
-              .filter((field) => fields[field] !== undefined && fields[field] !== null)
-              .map((field) => [field, fields[field]]),
-          );
-          if (Object.keys(carried).length === 0) return document;
-
-          this.logger.info(
-            `Preserving [${Object.keys(carried).join(', ')}] on "${schema}" document "${document.docId}"`,
-          );
-          return { ...document, ...carried } as InsertDocument;
-        } catch (error) {
-          // Failing the feed would be worse than losing the carry-over.
-          this.logger.error(
-            `Could not read "${schema}" document "${document.docId}" to preserve entity fields: ${getErrorMessage(error)}`,
-          );
-          return document;
-        }
-      }),
-    );
-  };
-
   update = async (
-    updates: { docId: string; fields: Record<string, any> }[],
+    // workspaceId, when the caller knows it: the encryption gateway then need not read Vespa to find it
+    updates: { docId: string; fields: Record<string, any>; workspaceId?: string }[],
     schema: VespaSchema,
     opts?: { create?: boolean },
   ): Promise<BatchResult[]> => {

@@ -221,6 +221,8 @@ export class VespaFileWorker {
 			}
 
 			let mappedData: InsertDocument | Partial<InsertDocument>;
+			// sent with a field-scoped update, so the encryption gateway need not read Vespa for the file's workspace
+			let updateWorkspaceId: string | undefined;
 
 			if (jobType === 'delete') {
 				mappedData = {};
@@ -241,6 +243,7 @@ export class VespaFileWorker {
 					// nameOnly: map metadata only (no content download/parse) — the requested
 					// fields don't need it, e.g. a transcript's title/ACL/labels refresh.
 					const fullDoc = await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId, job.data.nameOnly);
+					updateWorkspaceId = (fullDoc as { workspaceId?: string }).workspaceId || undefined;
 					mappedData = Object.fromEntries(
 						fields
 							.filter((field) => field in fullDoc)
@@ -264,7 +267,7 @@ export class VespaFileWorker {
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {
 				feed: () => this.handleFeed(schema, mappedData as InsertDocument),
-				update: () => this.handleUpdate(docId, schema, mappedData as InsertDocument),
+				update: () => this.handleUpdate(docId, schema, mappedData as InsertDocument, updateWorkspaceId),
 				delete: () => this.handleDelete(schema, docId),
 			};
 
@@ -313,9 +316,9 @@ export class VespaFileWorker {
 	/**
 	 * Handle update operation
 	 */
-	private async handleUpdate(docId: string, schema: VespaSchema, data: Partial<InsertDocument>): Promise<void> {
+	private async handleUpdate(docId: string, schema: VespaSchema, data: Partial<InsertDocument>, workspaceId?: string): Promise<void> {
 		logger.info(`[VESPA_FILE_WORKER]: update ${schema}/${docId}`);
-		const [result] = await vespaClient.crudService.update([{ docId, fields: data }], schema);
+		const [result] = await vespaClient.crudService.update([{ docId, fields: data, workspaceId }], schema);
 		if (!result.success) {
 			throw new Error(`Failed to update ${docId}: ${result.error}`);
 		}
