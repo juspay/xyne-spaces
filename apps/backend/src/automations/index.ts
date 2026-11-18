@@ -43,8 +43,7 @@ import { promoteMessageToTicketStep } from './steps/promote-message-to-ticket.st
 import { updateFormFieldsStep } from './steps/update-form-fields.step';
 import { sendCsatRequestStep } from './steps/send-csat-request.step';
 import { makeCallStep } from './steps/make-call.step';
-// Disabled (LLM)
-// import { askJevStep } from './steps/ask-jev.step';
+import { askJevStep } from './steps/ask-jev.step';
 import { sendReviewReplyStep } from './steps/send-review-reply.step';
 import { resolveConversationStep } from './steps/resolve-conversation.step';
 
@@ -98,8 +97,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(updateFormFieldsStep);
   stepRegistry.register(sendCsatRequestStep);
   stepRegistry.register(makeCallStep);
-  // Disabled (LLM)
-  // stepRegistry.register(askJevStep);
+  stepRegistry.register(askJevStep);
   stepRegistry.register(sendReviewReplyStep);
   stepRegistry.register(resolveConversationStep);
 
