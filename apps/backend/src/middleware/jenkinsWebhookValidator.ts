@@ -28,14 +28,11 @@ class JenkinsWebhookMiddleware {
       }
 
       const signature = req.headers['x-jenkins-signature'];
-      logger.info('[Webhook-Validator] Jenkins webhook received');
-      logger.info('[Webhook-Validator] Signature header:', signature);
-      logger.info('[Webhook-Validator] Body type:', typeof req.body);
-      logger.info('[Webhook-Validator] Body is Buffer:', req.body instanceof Buffer);
-      if (req.body instanceof Buffer) {
-        logger.info('[Webhook-Validator] Body length:', req.body.length);
-        logger.info('[Webhook-Validator] Body preview:', req.body.toString('utf8').substring(0, 100));
-      }
+      // Never log the signature or body before verification: both are attacker-supplied, and a
+      // logged signature over a known body prefix helps replay.
+      logger.debug('[Webhook-Validator] Jenkins webhook received', {
+        bodyBytes: req.body instanceof Buffer ? req.body.length : undefined,
+      });
 
       if (!signature || typeof signature !== 'string') {
         logger.warn('Missing Jenkins webhook signature');

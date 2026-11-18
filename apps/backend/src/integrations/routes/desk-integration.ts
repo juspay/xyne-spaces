@@ -20,6 +20,7 @@
  *     with a different email than the desk is bound to, the callback rejects.
  */
 
+import { randomUUID } from 'crypto';
 import express, { Request, Response } from 'express';
 import { authMiddleware } from '@/middleware/auth';
 import { db } from '@/database/client';
@@ -263,7 +264,7 @@ router.post(
       }
 
       if (source.sourceType === ExternalSourcePlatform.GOOGLE) {
-        const state = Math.random().toString(36).substring(7);
+        const state = randomUUID();
         await setGoogleOAuthState(state, {
           mode: 'reconnect',
           channelId,
@@ -395,7 +396,7 @@ router.post(
       }
 
       if (provider === 'google') {
-        const state = Math.random().toString(36).substring(7);
+        const state = randomUUID();
         await setGoogleOAuthState(state, {
           mode: 'dl-member-sync',
           channelId,

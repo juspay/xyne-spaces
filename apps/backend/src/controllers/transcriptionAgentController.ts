@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { CallType, TicketStatusV2 } from '@xyne/shared';
+import { CallStatus, CallType, TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -10,6 +10,8 @@ import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
+import { callEncryptionService } from '@/services/callEncryptionService';
+import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
 import { TicketController } from './ticketController';
 // import { CallController } from './callController';
 
@@ -17,6 +19,30 @@ import { TicketController } from './ticketController';
  * Controller for transcription agent webhooks and tool calls
  * Handles S2S (service-to-service) authenticated requests from Python transcription agent
  */
+/** A dispatched agent may still be joining before the webhook flips the call ACTIVE. */
+const SESSION_CALL_STATUSES = new Set<CallStatus>([
+  CallStatus.PENDING,
+  CallStatus.SCHEDULED,
+  CallStatus.ACTIVE,
+  CallStatus.IN_PROGRESS,
+]);
+
+/** How long a dispatch stays bound to the agent key that claimed it. */
+const AGENT_DISPATCH_CLAIM_TTL_SECONDS = 60 * 60;
+
+/** Raw 32-byte X25519 public key, base64. */
+const callSessionBodySchema = z.object({
+  publicKey: z.string().refine((value) => callEncryptionService.isUsableAgentPublicKey(value), 'publicKey must be a 32-byte X25519 key'),
+  /** The LiveKit dispatch this job belongs to (`ctx.job.dispatch_id`). */
+  dispatchId: z.string().min(1).max(128),
+});
+
+/** A caller-supplied `limit` query param, parsed and bounded so one request can't pull a whole table. */
+const clampLimit = (value: unknown, fallback: number, max: number): number => {
+  const parsed = typeof value === 'string' ? parseInt(value, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+};
+
 class TranscriptionAgentController {
   private ticketController: TicketController;
   // private callController: CallController;
@@ -109,6 +135,64 @@ class TranscriptionAgentController {
     } catch (error) {
       logger.error(`[TranscriptReady] Failed to process transcript for call ${callId}:`, error);
       res.status(500).json({ success: false, error: 'Failed to process transcript' });
+    }
+  };
+
+  /**
+   * POST /api/transcriptionAgent/:callId/session
+   * The agent calls this after LiveKit hands it a job and before it joins the room: it
+   * joins an encrypted call only with the key from here, never anything LiveKit carried.
+   * The key is sealed to the job's one-time X25519 public key (body `publicKey`).
+   * Only a dispatch this backend created (recorded in Redis at dispatch time) gets a
+   * session, bound to the first public key that claims it: a stolen agent API key can't
+   * fetch keys on its own, and LiveKit can't invent a dispatch. Retries with the same key
+   * get the same answer, which is useless to anyone without the job's private key.
+   */
+  callSession = async (req: Request, res: Response): Promise<void> => {
+    const { callId } = req.params;
+    res.set('Cache-Control', 'no-store');
+
+    const parsed = callSessionBodySchema.safeParse(req.body);
+    if (!callId || !parsed.success) {
+      res.status(400).json({ success: false, error: 'callId, publicKey and dispatchId are required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!SESSION_CALL_STATUSES.has(call.status as CallStatus)) {
+        logger.warn(`[${callId}] agent_call_session_refused | reason=call_status, status=${call.status}`);
+        res.status(409).json({ success: false, error: 'Call is not running' });
+        return;
+      }
+
+      const { dispatchId, publicKey } = parsed.data;
+      const claim = await redisService.claimAgentDispatch(dispatchId, callId, publicKey, AGENT_DISPATCH_CLAIM_TTL_SECONDS);
+      if (claim !== 'claimed_by_caller') {
+        // `unknown` (not recorded for this call) may just mean the record hasn't landed yet,
+        // so the agent retries it briefly; `claimed` by another key is final.
+        logger.warn(`[${callId}] agent_call_session_refused | reason=dispatch_${claim}, dispatch_id=${dispatchId}`);
+        res.status(403).json({ success: false, error: 'Dispatch not recognised', reason: `dispatch_${claim}` });
+        return;
+      }
+
+      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion);
+      if (!encryption) {
+        logger.info(`[${callId}] agent_call_session_issued | encrypted=false, dispatch_id=${dispatchId}`);
+        res.json({ success: true, encrypted: false });
+        return;
+      }
+
+      const sealedKey = callEncryptionService.sealKeyForAgent(callId, encryption.key, publicKey);
+      logger.info(`[${callId}] agent_call_session_issued | encrypted=true, dispatch_id=${dispatchId}`);
+      res.json({ success: true, encrypted: true, sealedKey });
+    } catch (error) {
+      logger.error(`[${callId}] agent_call_session_failed`, error);
+      res.status(500).json({ success: false, error: 'Failed to open call session' });
     }
   };
 
@@ -269,6 +353,14 @@ class TranscriptionAgentController {
         return;
       }
 
+      // The agent's key is shared, so only answer for someone who is actually in this call.
+      const isInCall = userId === call.createdByUserId || (await repositories.calls.findParticipant(call.id, userId)) !== null;
+      if (!isInCall) {
+        logger.warn(`[GetMyTickets] Refused: user ${userId} is not a participant of call ${callId}`);
+        res.status(403).json({ success: false, error: 'User is not a participant of this call' });
+        return;
+      }
+
       // Build query filters
       const whereClause: any = {
         assignedTo: userId,
@@ -283,7 +375,7 @@ class TranscriptionAgentController {
       const tickets = await db.ticket.findMany({
         where: whereClause,
         orderBy: { createdAt: 'desc' },
-        take: parseInt(limit as string, 10),
+        take: clampLimit(limit, 10, 50),
         select: {
           id: true,
           xyneId: true,
@@ -325,8 +417,8 @@ class TranscriptionAgentController {
         return;
       }
 
-      if (!q || typeof q !== 'string') {
-        res.status(400).json({ success: false, error: 'Search query (q) is required' });
+      if (!q || typeof q !== 'string' || q.trim().length < 2) {
+        res.status(400).json({ success: false, error: 'Search query (q) of at least 2 characters is required' });
         return;
       }
 
@@ -352,7 +444,7 @@ class TranscriptionAgentController {
       // Search users by name (case-insensitive)
       const users = await db.user.findMany({
         where: whereClause,
-        take: parseInt(limit as string, 10),
+        take: clampLimit(limit, 5, 20),
         select: {
           id: true,
           name: true,

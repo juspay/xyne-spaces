@@ -228,7 +228,7 @@ async function createGoogleChannelConnectAuthUrl(
     throw new GoogleAuthRouteError('Project not found', 404);
   }
 
-  const state = Math.random().toString(36).substring(7);
+  const state = randomUUID();
   await setOAuthState(state, {
     channelData: {
       name: params.name,
@@ -269,7 +269,7 @@ async function createGoogleWorkspaceConnectAuthUrl(
     throw new GoogleAuthRouteError('Workspace already has a shared desk email configured', 409);
   }
 
-  const state = Math.random().toString(36).substring(7);
+  const state = randomUUID();
   await setOAuthState(state, {
     mode: 'workspace',
     workspaceId,
@@ -299,7 +299,7 @@ async function createGoogleChannelEmailWorkspaceAuthUrl(
 
   GoogleService.validatePushInfrastructure();
 
-  const state = Math.random().toString(36).substring(7);
+  const state = randomUUID();
   await setOAuthState(state, {
     mode: 'channel-email-workspace',
     workspaceId,
