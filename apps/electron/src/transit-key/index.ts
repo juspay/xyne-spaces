@@ -4,6 +4,12 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import log from 'electron-log/main';
 import { createEnclaveKey, enclaveAgree } from './secure-enclave';
+import {
+  deleteWindowsKey,
+  isKeyFailure,
+  windowsAgree,
+  type WindowsKeyProvider,
+} from './windows-key';
 
 /**
  * The desktop app's transit key (ECDH P-256), held by the main process for every window. The
@@ -11,13 +17,15 @@ import { createEnclaveKey, enclaveAgree } from './secure-enclave';
  *
  * macOS: the key lives in the Secure Enclave. Its encrypted handle is sealed with safeStorage
  * (the Keychain) in userData, so the same key is used across launches.
+ * Windows: the key lives in the TPM, else in the Windows software key storage provider; Windows
+ * keeps it by name per user and app flavor, so the app stores nothing.
  * Anywhere that fails, and on other platforms for now: a key held in this process's memory
  * only, new each launch. Losing the key costs nothing — it protects no stored data and is
  * registered again on every load — so every failure falls back silently and never prompts
  * or holds up login.
  */
 
-type TransitKeyStorage = 'secure_enclave' | 'memory';
+type TransitKeyStorage = 'secure_enclave' | WindowsKeyProvider | 'memory';
 
 interface TransitKeyBackend {
   storage: TransitKeyStorage;
@@ -27,7 +35,7 @@ interface TransitKeyBackend {
 }
 
 const FILE_NAME = 'transit-key.bin';
-/** The most the Secure Enclave may take to be ready before this launch uses a memory key. */
+/** The most the platform key may take to be ready before this launch uses a memory key. */
 const SELECT_TIMEOUT_MS = 5000;
 
 let backend: Promise<TransitKeyBackend> | null = null;
@@ -67,12 +75,44 @@ async function writeSealedBlob(blob: Buffer): Promise<void> {
   }
 }
 
-async function secureEnclaveBackend(): Promise<TransitKeyBackend> {
-  // One ECDH against a throwaway point, checked from the other side, proves the key works on
-  // this Mac's Enclave before anything relies on it, and yields its public key.
+// One ECDH against a throwaway point, checked from the other side, proves a platform key works
+// before anything relies on it, and yields its public key.
+function createProbe(): {
+  point: Buffer;
+  check(result: { secret: Buffer; publicKey: Buffer }): void;
+} {
   const probe = createECDH('prime256v1');
   probe.generateKeys();
-  const probePoint = probe.getPublicKey();
+  return {
+    point: probe.getPublicKey(),
+    check({ secret, publicKey }) {
+      if (!probe.computeSecret(publicKey).equals(secret)) {
+        throw new Error('Transit key agreement self-check failed');
+      }
+    },
+  };
+}
+
+/** Each server key version is derived once per launch and reused; failures are not kept. */
+function derivePerServerKey(
+  agree: (serverPoint: Uint8Array) => Promise<Buffer>
+): (serverPoint: Uint8Array) => Promise<Buffer> {
+  const derived = new Map<string, Promise<Buffer>>();
+  return (serverPoint) => {
+    const id = Buffer.from(serverPoint).toString('base64');
+    let pending = derived.get(id);
+    if (!pending) {
+      pending = agree(serverPoint);
+      pending.catch(() => derived.delete(id));
+      derived.set(id, pending);
+    }
+    return pending;
+  };
+}
+
+async function secureEnclaveBackend(): Promise<TransitKeyBackend> {
+  const probe = createProbe();
+  const probePoint = probe.point;
 
   let blob = await readSealedBlob();
   let checked = blob
@@ -86,26 +126,37 @@ async function secureEnclaveBackend(): Promise<TransitKeyBackend> {
     checked = await enclaveAgree(blob, probePoint);
     await writeSealedBlob(blob);
   }
-  if (!probe.computeSecret(checked.publicKey).equals(checked.secret)) {
-    throw new Error('Secure Enclave key agreement self-check failed');
-  }
+  probe.check(checked);
 
   const key = blob;
-  // Each server key version is derived once per launch; the result is reused.
-  const derived = new Map<string, Promise<Buffer>>();
   return {
     storage: 'secure_enclave',
     publicKey: checked.publicKey,
-    derive(serverPoint) {
-      const id = Buffer.from(serverPoint).toString('base64');
-      let pending = derived.get(id);
-      if (!pending) {
-        pending = enclaveAgree(key, serverPoint).then(({ secret }) => secret);
-        pending.catch(() => derived.delete(id));
-        derived.set(id, pending);
-      }
-      return pending;
-    },
+    derive: derivePerServerKey(
+      async (serverPoint) => (await enclaveAgree(key, serverPoint)).secret
+    ),
+  };
+}
+
+async function windowsBackend(provider: WindowsKeyProvider): Promise<TransitKeyBackend> {
+  const probe = createProbe();
+  // Windows keeps the key by name and the helper creates it on first use; one that exists but
+  // no longer works is replaced. Any other failure (no helper, no provider) has no key to
+  // replace, so it goes straight to the caller, which tries the next tier.
+  const checked = await windowsAgree(provider, probe.point).catch(async (error: unknown) => {
+    if (!isKeyFailure(error)) throw error;
+    log.warn(`[TransitKey] Stored ${provider} key is unusable; creating a new one`, error);
+    await deleteWindowsKey(provider);
+    return windowsAgree(provider, probe.point);
+  });
+  probe.check(checked);
+
+  return {
+    storage: provider,
+    publicKey: checked.publicKey,
+    derive: derivePerServerKey(
+      async (serverPoint) => (await windowsAgree(provider, serverPoint)).secret
+    ),
   };
 }
 
@@ -119,16 +170,28 @@ function memoryBackend(): TransitKeyBackend {
   };
 }
 
-async function hardwareBackend(): Promise<TransitKeyBackend | null> {
-  if (process.platform !== 'darwin') return null;
+function startPlatformBackend(): Promise<TransitKeyBackend> | null {
+  if (process.platform === 'darwin') return secureEnclaveBackend();
+  if (process.platform === 'win32') {
+    return windowsBackend('tpm').catch((error: unknown) => {
+      log.warn('[TransitKey] TPM key unavailable; trying the software key provider', error);
+      return windowsBackend('software');
+    });
+  }
+  return null;
+}
+
+async function platformBackend(): Promise<TransitKeyBackend | null> {
+  const pending = startPlatformBackend();
+  if (!pending) return null;
   let timer: NodeJS.Timeout | undefined;
   const timedOut = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('timed out')), SELECT_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([secureEnclaveBackend(), timedOut]);
+    return await Promise.race([pending, timedOut]);
   } catch (error) {
-    log.warn('[TransitKey] Secure Enclave key unavailable; using a memory key', error);
+    log.warn('[TransitKey] Platform key unavailable; using a memory key', error);
     return null;
   } finally {
     clearTimeout(timer);
@@ -136,7 +199,7 @@ async function hardwareBackend(): Promise<TransitKeyBackend | null> {
 }
 
 async function selectBackend(): Promise<TransitKeyBackend> {
-  const selected = (await hardwareBackend()) ?? memoryBackend();
+  const selected = (await platformBackend()) ?? memoryBackend();
   log.info(`[TransitKey] Using ${selected.storage} storage`);
   return selected;
 }
