@@ -1,4 +1,7 @@
 import { Request, Response } from 'express';
+import type { replyToConversationClient } from '@xyne/shared';
+import type { ContractRequest } from '@/types/express';
+import { isEncryptedField } from '@xyne/shared';
 import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
   ConversationRepository,
@@ -950,20 +953,13 @@ export class ConversationController {
   };
 
   // POST /api/conversations/{conversationId}/messages - Reply to conversation (with optional file attachments)
-  replyToConversation = async (req: Request, res: Response): Promise<void> => {
+  replyToConversation = async (
+    req: ContractRequest<typeof replyToConversationClient>,
+    res: Response,
+  ): Promise<void> => {
     try {
       const { conversationId } = req.params;
-      const {
-        content,
-        msgType,
-        visibleTo,
-        fileMetadata: fileMetadataJson,
-      }: {
-        content: string;
-        msgType?: MessageType;
-        visibleTo?: string | null;
-        fileMetadata?: string;
-      } = req.body;
+      const { content, msgType, visibleTo, fileMetadata: fileMetadataJson } = req.body;
       const reqFiles =
         (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } })
           .files || {};
@@ -1059,9 +1055,30 @@ export class ConversationController {
         }
       }
 
-      // Check if this is a bot command (only for text content, not file uploads)
-      if (content && content.trim() && BotCommandParser.isBotCommand(content.trim())) {
-        await this.handleBotCommand(content.trim(), conversationId, userId, res);
+      // Check if this is a bot command (only for text content, not file uploads).
+      // Content that arrived as workspace-DEK ciphertext is opaque here; the encryption
+      // service's extracted command (req.derived) stands in for parsing it.
+      const derived = req.derived;
+      // Encrypted content is stored only with the visible length the encryption service measured;
+      // a rule whose extraction policy leaves out `text` cannot be accepted (policy lives in the
+      // encryption service's database, so this is a configuration error, not a client one).
+      if (content && isEncryptedField(content) && derived?.text?.length === undefined) {
+        res.status(400).json({
+          error: 'Encrypted content arrived without its derived length',
+          code: 'ENC_DERIVED_INVALID',
+        });
+        return;
+      }
+      const isBotCommand = derived?.command
+        ? derived.command.isBot
+        : Boolean(content && content.trim() && BotCommandParser.isBotCommand(content.trim()));
+      if (isBotCommand) {
+        const commandText = derived?.command
+          ? derived.command.name
+            ? `/${derived.command.name} ${derived.command.args ?? ''}`
+            : '/'
+          : undefined;
+        await this.handleBotCommand((content ?? '').trim(), conversationId, userId, res, { commandText });
         return;
       }
 
@@ -1078,6 +1095,7 @@ export class ConversationController {
         showInChannel: showInChannel,
         childConversationId: childConversationId,
         visibleTo: visibleTo ?? null,
+        contentLength: req.derived?.text?.length,
       };
 
       const message = await this.messageRepository.create(messageData);
@@ -1150,7 +1168,8 @@ export class ConversationController {
         channel?.scopeType === ChannelScopeType.DEFAULT
       ) {
         void processMeetLinksFromChatMessage(
-          message.content,
+          // Extracted Meet links stand in for encrypted content.
+          derived?.links ? derived.links.meet.join(' ') : message.content,
           req.user.workspaceId,
           conversationId,
           message.messageId,
@@ -1213,6 +1232,7 @@ export class ConversationController {
           entityId: message.messageId,
           entityType: 'messages',
           operation: 'insert',
+          ...(derived ? { derived } : {}),
         })
         .catch((err) => logger.error('Side-effect handler error: replyToConversation', err));
 
@@ -1399,15 +1419,21 @@ export class ConversationController {
       isNewConversation?: boolean;
       channelId?: string;
       initialMessageId?: string;
+      /**
+       * Command to parse when `content` is ciphertext (rebuilt from the encryption
+       * service's extracted command); `content` is still what gets stored.
+       */
+      commandText?: string;
     }
   ): Promise<void> {
     try {
+      const commandText = options?.commandText ?? content;
       // Parse and validate bot command
-      const parseResult = await BotCommandParser.parseAndValidate(content);
+      const parseResult = await BotCommandParser.parseAndValidate(commandText);
 
       if ('error' in parseResult) {
         // Get bot name for sender ID, fallback to bot-system
-        const botName = BotCommandParser.extractBotName(content);
+        const botName = BotCommandParser.extractBotName(commandText);
         const senderId = botName || 'bot-system';
 
         // Use FlowJson error if available, otherwise create simple error

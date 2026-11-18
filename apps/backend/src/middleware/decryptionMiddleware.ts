@@ -2,15 +2,17 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
-import { getEncryptionProvider } from '@/services/encryption';
+import { CLIENT_MANIFEST_MUTATION_ARG } from '@xyne/shared';
+import { getEncryptionProvider, isDekPassthrough } from '@/services/encryption';
+import { TRANSIT_KEY_COOKIE, type TransitCaller } from '@/services/encryption/types';
 
-function sanitizeForLog(value: unknown): string {
+export function sanitizeForLog(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, '');
 }
 
 function hasEncryptedFields(obj: unknown): boolean {
   if (typeof obj === 'string') {
-    return obj.startsWith('ENC:v1|sess|');
+    return obj.startsWith('ENC:v1|tk-');
   }
 
   if (Array.isArray(obj)) {
@@ -30,8 +32,8 @@ function hasEncryptedFields(obj: unknown): boolean {
 }
 
 /**
- * Decrypt `ENC:v1|sess|…` fields with the caller's session key. The key is scoped to the
- * auth session (JWT `sid`), so this runs after authentication: the auth middlewares call
+ * Decrypt `ENC:v1|tk-<version>|…` fields with the keys derived for the caller's transit
+ * public key (header or `xk` cookie). Runs after authentication: the auth middlewares call
  * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
  */
 export async function decryptRequestBodyMiddleware(
@@ -39,6 +41,35 @@ export async function decryptRequestBodyMiddleware(
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
+  await decryptRequestBody(req, next);
+}
+
+/**
+ * Takes the Zero mutations that carry CLIENT_MANIFEST_MUTATION_ARG out of a push body for
+ * the whole-body decrypt; `restore` puts them back at their positions.
+ */
+function holdRuleEncryptedMutations(body: unknown): { restore: (body: unknown) => void } {
+  const mutations = (body as { mutations?: unknown } | null)?.mutations;
+  if (!Array.isArray(mutations)) return { restore: () => undefined };
+  const held = new Map<number, unknown>();
+  mutations.forEach((mutation, index) => {
+    const args = (mutation as { args?: unknown } | null)?.args;
+    const first = Array.isArray(args) ? args[0] : args;
+    if (first && typeof first === 'object' && CLIENT_MANIFEST_MUTATION_ARG in first) {
+      held.set(index, mutation);
+      mutations[index] = null;
+    }
+  });
+  return {
+    restore: (target) => {
+      const out = (target as { mutations?: unknown[] } | null)?.mutations;
+      if (!Array.isArray(out)) return;
+      for (const [index, mutation] of held) out[index] = mutation;
+    },
+  };
+}
+
+export async function decryptRequestBody(req: Request, next: NextFunction): Promise<void> {
   try {
     const method = req.method?.toUpperCase();
 
@@ -46,25 +77,28 @@ export async function decryptRequestBodyMiddleware(
       return next();
     }
 
+    // Zero pushes: mutations the client encrypted by their manifest rule are transformed one
+    // by one before their mutator runs (zero/encryptedMutation.ts), so leave them as sent.
+    const held = holdRuleEncryptedMutations(req.body);
     if (!hasEncryptedFields(req.body)) {
+      held.restore(req.body);
       return next();
     }
 
-    const sessionId = req.user?.sid;
+    const caller = transitCaller(req);
 
-    if (!sessionId) {
-      logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
+    if (!hasTransitCaller(caller)) {
+      logger.warn('[decryptionMiddleware] encrypted fields present but client transit key missing', {
         method: sanitizeForLog(method),
         path: sanitizeForLog(req.path),
-        hasSessionId: Boolean(sessionId),
       });
       getCryptoOperations().add(1, {
         operation: 'decrypt_request_body',
         status: 'error',
-        reason: !sessionId ? 'missing_session' : 'missing_user',
+        reason: 'missing_client_key',
         path: req.path,
       });
-      return next(new AppError('Encrypted request body requires an active session', 400));
+      return next(new AppError('Encrypted request body requires the client transit key', 400));
     }
 
     logger.info('[decryptionMiddleware] encrypted fields detected in request body', {
@@ -72,7 +106,8 @@ export async function decryptRequestBodyMiddleware(
       path: sanitizeForLog(req.path),
     });
 
-    req.body = await getEncryptionProvider().decryptRequest(req.body, sessionId);
+    req.body = await getEncryptionProvider().decryptRequest(req.body, caller);
+    held.restore(req.body);
 
     logger.info('[decryptionMiddleware] request body decrypted successfully', {
       method: sanitizeForLog(method),
@@ -96,8 +131,32 @@ export async function decryptRequestBodyMiddleware(
 }
 
 /**
- * Encrypt JSON responses for the caller's session key. Mounted globally: `res.json` runs
- * after the route's auth middleware, so `req.user.sid` is already resolved by then.
+ * Whom the request's transit operations are for. The encryption service reads the `sid` of the
+ * forwarded access token and uses the transit key the client registered for that session
+ * (`POST /api/transit/register`); the backend never holds it. The `xk` cookie the register
+ * route set goes along for a session the service has no key for.
+ */
+export function transitCaller(req: Request): TransitCaller {
+  const cookie: unknown = req.cookies?.[TRANSIT_KEY_COOKIE];
+  const clientKey = typeof cookie === 'string' && cookie.length > 0 ? cookie : undefined;
+  return {
+    ...(req.authToken ? { authToken: req.authToken } : {}),
+    ...(clientKey ? { clientKey } : {}),
+  };
+}
+
+/** Whether the request names a transit key at all (an access token or a key of its own). */
+export function hasTransitCaller(caller: TransitCaller): boolean {
+  return Boolean(caller.authToken || caller.clientKey);
+}
+
+/**
+ * Encrypt JSON responses for the caller's transit public key. Mounted globally: `res.json`
+ * runs after the route's auth middleware, so `req.user` is already resolved. The encryption
+ * service decides whether the body has fields to encrypt; when it has and the caller
+ * presented no key, the response is `400 TRANSIT_KEY_REQUIRED` rather than plaintext.
+ * Routes mounted with encryptedRoute re-encrypt their own response from the DEK; under DEK
+ * passthrough this passes that body through.
  */
 export function encryptResponseBodyMiddleware(
   req: Request,
@@ -107,14 +166,22 @@ export function encryptResponseBodyMiddleware(
   const originalJson = res.json.bind(res);
 
   res.json = ((body?: unknown): Response => {
-    const sessionId = req.user?.sid;
-    if (!sessionId || !body || typeof body !== 'object') {
+    if (!req.user?.sid || !body || typeof body !== 'object' || isDekPassthrough()) {
       return originalJson(body);
     }
 
-    void getEncryptionProvider().encryptResponse(body, sessionId)
-      .then((encryptedBody) => originalJson(encryptedBody))
+    void getEncryptionProvider()
+      .encryptResponse(body, transitCaller(req))
+      .then((result) => originalJson(result.body))
       .catch((error) => {
+        // The service's own verdict (no client key for a body that needs encrypting) goes
+        // to the client as sent, with its code.
+        const { status, body: verdict } = error as { status?: unknown; body?: unknown };
+        if (status === 400 && typeof (verdict as { code?: unknown } | undefined)?.code === 'string' && !res.headersSent) {
+          res.status(400);
+          originalJson(verdict);
+          return;
+        }
         logger.error('[decryptionMiddleware] failed to encrypt response body', {
           method: sanitizeForLog(req.method),
           path: sanitizeForLog(req.path),

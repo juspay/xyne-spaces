@@ -1,5 +1,46 @@
 export { encryptField, decryptField, isEncryptedField } from './field-decrypt.js';
 export { decryptionCache } from './decryption-cache.js';
 export { getCryptoLogger, setCryptoLogger } from './crypto-logger.js';
-export { fetchEncryptionConfig, registerClientKey } from './key-exchange.js';
-export type { EncryptionConfig } from './key-exchange.js';
+export {
+  fetchEncryptionConfig,
+  registerTransitKey,
+  fetchTransitServerKeys,
+  memoryTransitKeyStore,
+} from './transit.js';
+export type { EncryptionConfig } from './transit.js';
+export {
+  TransitKeyring,
+  generateTransitKeyPair,
+  deriveTransitKey,
+  transitKeyId,
+  parseTransitKeyId,
+} from './keyring.js';
+export type { TransitKeyPair, TransitKeyStore, TransitServerKey, TransitServerKeys } from './keyring.js';
+export {
+  getClientManifest,
+  refreshClientManifest,
+  clearClientManifest,
+  setAllowedManifestEnvironments,
+  setClientManifestKeyring,
+  CLIENT_MANIFEST_VERSION_HEADER,
+  CLIENT_MANIFEST_ENVIRONMENT_HEADER,
+  CLIENT_MANIFEST_MUTATION_ARG,
+  refetchClientManifest,
+  CLIENT_MANIFEST_TAG_HEADER,
+  CLIENT_MANIFEST_STALE_CODE,
+} from './client-manifest.js';
+export type {
+  ClientEncryptionManifest,
+  ClientManifestRule,
+  ClientManifestFieldRule,
+  ClientManifestTransform,
+  PersistPolicy,
+  ExtractionPolicy,
+} from './client-manifest.js';
+export {
+  findRequestRule,
+  findMutatorRule,
+  encryptBodyWithRule,
+  encryptFormDataWithRule,
+} from './manifest-encrypt.js';
+export type { FieldEncryptor } from './manifest-encrypt.js';

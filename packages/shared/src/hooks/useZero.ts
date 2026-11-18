@@ -14,6 +14,14 @@ import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
 import { encryptField, decryptField, isEncryptedField } from '../crypto/field-decrypt.js';
+import {
+  CLIENT_MANIFEST_MUTATION_ARG,
+  CLIENT_MANIFEST_STALE_CODE,
+  getClientManifest,
+  refetchClientManifest,
+} from '../crypto/client-manifest.js';
+import { findMutatorRule } from '../crypto/manifest-encrypt.js';
+import type { TransitKeyring } from '../crypto/keyring.js';
 import { validateQueryWhereClause } from '../zero/query-validation.js';
 import { wasInterrupted } from './metricValidity.js';
 import { trackMutationStart, trackMutationSettled } from './pendingMutations.js';
@@ -38,7 +46,7 @@ interface RunOptionsWithName {
 
 async function encryptMutationArgs(
   args: ReadonlyJSONValue | undefined,
-  key: CryptoKey,
+  keyring: TransitKeyring,
   metrics: MetricsRecorder,
   mutationName: string,
 ): Promise<ReadonlyJSONValue | undefined> {
@@ -53,7 +61,7 @@ async function encryptMutationArgs(
   for (const [fieldName, value] of Object.entries(record)) {
     if (typeof value === 'string' && value.length > 0) {
       const startTime = performance.now();
-      copy[fieldName] = await encryptField(value, key);
+      copy[fieldName] = await encryptField(value, keyring);
       const duration = performance.now() - startTime;
       metrics.recordLatency('crypto.encrypt.field', duration, {
         mutation: mutationName,
@@ -76,7 +84,7 @@ async function encryptMutationArgs(
 
 async function decryptQueryResult(
   result: unknown,
-  key: CryptoKey,
+  keyring: TransitKeyring,
   metrics: MetricsRecorder,
   queryName: string,
   depth: number = 0,
@@ -84,7 +92,7 @@ async function decryptQueryResult(
   if (typeof result === 'string' && isEncryptedField(result)) {
     const startTime = performance.now();
     try {
-      const decrypted = await decryptField(result, key);
+      const decrypted = await decryptField(result, keyring);
       const duration = performance.now() - startTime;
       metrics.recordLatency('crypto.decrypt.field', duration, {
         query: queryName,
@@ -105,14 +113,14 @@ async function decryptQueryResult(
   }
   if (Array.isArray(result)) {
     return await Promise.all(
-      result.map(item => decryptQueryResult(item, key, metrics, queryName, depth)),
+      result.map(item => decryptQueryResult(item, keyring, metrics, queryName, depth)),
     );
   }
   if (result && typeof result === 'object') {
     const obj = result as Record<string, unknown>;
     const decryptedObj: Record<string, unknown> = {};
     for (const [k, value] of Object.entries(obj)) {
-      decryptedObj[k] = await decryptQueryResult(value, key, metrics, queryName, depth + 1);
+      decryptedObj[k] = await decryptQueryResult(value, keyring, metrics, queryName, depth + 1);
     }
     return decryptedObj;
   }
@@ -121,18 +129,18 @@ async function decryptQueryResult(
 
 const decryptArgs = async (
   args: ReadonlyJSONValue | undefined,
-  encryptionKey: CryptoKey | null,
+  keyring: TransitKeyring | null,
   metrics: MetricsRecorder,
   mutationName: string,
 ): Promise<ReadonlyJSONValue | undefined> => {
-  if (!encryptionKey || !args) return args;
+  if (!keyring || !args) return args;
   if (typeof args === 'object' && args !== null) {
     const decrypted: Record<string, unknown> = {};
     for (const [k, value] of Object.entries(args)) {
       if (typeof value === 'string' && value.startsWith('ENC:')) {
         const startTime = performance.now();
         try {
-          decrypted[k] = await decryptField(value, encryptionKey);
+          decrypted[k] = await decryptField(value, keyring);
           const duration = performance.now() - startTime;
           metrics.recordLatency('crypto.decrypt.args', duration, {
             mutation: mutationName,
@@ -161,8 +169,9 @@ const decryptArgs = async (
 export function useZero(): Zero {
   const originalZero = useOriginalZero();
   const { logger, metrics } = useInstrumentation();
-  const { key: encryptionKey, config } = useEncryptionConfig();
+  const { keyring, config } = useEncryptionConfig();
   const clientEncryptionEnabled = config?.clientEncryptionEnabled ?? false;
+  const apiClientEncryptionEnabled = config?.apiClientEncryptionEnabled ?? false;
 
   const handler: ProxyHandler<Zero> = {
     get(target, prop) {
@@ -256,12 +265,69 @@ export function useZero(): Zero {
               });
           };
 
-          if (encryptionKey && clientEncryptionEnabled) {
+          // Mutators with a manifest rule: encrypt only the rule's client fields and say which
+          // manifest did it; the local (optimistic) run keeps the plaintext args.
+          if (keyring && apiClientEncryptionEnabled && getClientManifest() && findMutatorRule(getClientManifest()!, mutationName)) {
+            const plainArgs = mutationRequest.args;
+            const originalFn = originalMutator.fn;
+            (originalMutator as { fn: (options: unknown) => Promise<unknown> }).fn = (options: unknown) =>
+              originalFn({ ...(options as Record<string, unknown>), args: plainArgs } as Parameters<typeof originalFn>[0]);
+
+            // Encrypts with the manifest held right now and sends.
+            const send = async () => {
+              const manifest = getClientManifest();
+              const rule = manifest ? findMutatorRule(manifest, mutationName) : undefined;
+              const record = (plainArgs ?? {}) as Record<string, ReadonlyJSONValue>;
+              let args: Record<string, ReadonlyJSONValue> = record;
+              if (manifest && rule) {
+                args = { ...record };
+                for (const [field, fieldRule] of Object.entries(rule.fields)) {
+                  const value = record[field];
+                  if (fieldRule.client && typeof value === 'string' && value.length > 0) {
+                    args[field] = await encryptField(value, keyring);
+                  }
+                }
+                args[CLIENT_MANIFEST_MUTATION_ARG] = {
+                  tag: manifest.tag,
+                  version: manifest.version,
+                  environment: manifest.environment,
+                };
+              }
+              return target.mutate({
+                ...mutationRequest,
+                args: args as TArgs,
+                mutator: originalMutator,
+              } as Parameters<Zero['mutate']>[0]);
+            };
+
+            // A manifest published since this tab fetched its own is rejected with
+            // ENC_MANIFEST_STALE (the mutation is rolled back). Refetch it and send once more,
+            // re-encrypted, as the REST interceptor does for a 409.
+            const deferredResult = send();
+            const server = deferredResult
+              .then(r => r.server)
+              .then(async serverResult => {
+                if (!JSON.stringify(serverResult ?? null).includes(CLIENT_MANIFEST_STALE_CODE)) {
+                  return serverResult;
+                }
+                if (!(await refetchClientManifest())) return serverResult;
+                return (await send()).server;
+              });
+
+            const result = {
+              client: deferredResult.then(r => r.client),
+              server,
+            } as PromiseWithServerResult;
+            handleCompletion(result);
+            return result;
+          }
+
+          if (keyring && clientEncryptionEnabled) {
             const originalFn = originalMutator.fn;
             (originalMutator as { fn: (options: unknown) => Promise<unknown> }).fn = async (options: unknown) => {
               const decryptedArgs = await decryptArgs(
                 (options as { args?: ReadonlyJSONValue }).args,
-                encryptionKey,
+                keyring,
                 metrics,
                 mutationName,
               );
@@ -273,7 +339,7 @@ export function useZero(): Zero {
 
             const deferredResult = encryptMutationArgs(
               mutationRequest.args,
-              encryptionKey,
+              keyring,
               metrics,
               mutationName,
             ).then(encryptedArgs =>
@@ -333,11 +399,11 @@ export function useZero(): Zero {
             )) as HumanReadable<TReturn>;
 
             let result: HumanReadable<TReturn> = rawResult;
-            if (encryptionKey && clientEncryptionEnabled) {
+            if (keyring && clientEncryptionEnabled) {
               try {
                 result = (await decryptQueryResult(
                   rawResult,
-                  encryptionKey,
+                  keyring,
                   metrics,
                   queryName,
                   0,

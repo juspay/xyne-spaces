@@ -2,7 +2,7 @@ import { BaseRepository } from './base';
 import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
+import { getMessageContentLength, isEncryptedField, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -20,6 +20,8 @@ export interface CreateMessageInput {
   metadata?: Record<string, any>;
   workspaceId?: string; // denormalized tenant key; resolved from the conversation when omitted
   createdAt?: Date; // Optional custom timestamp for migrations
+  /** Visible length of `content` when it is ciphertext (the encryption service's text extractor). */
+  contentLength?: number;
 }
 
 export interface UpdateMessageInput {
@@ -103,7 +105,11 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
    * message accepted client-side is never rejected here purely due to markup.
    */
   private validateContentLength(content: string, maxLength: number = MAX_MESSAGE_CONTENT_LENGTH): void {
-    if (getMessageContentLength(content) > maxLength) {
+    this.validateVisibleLength(getMessageContentLength(content), maxLength);
+  }
+
+  private validateVisibleLength(length: number, maxLength: number = MAX_MESSAGE_CONTENT_LENGTH): void {
+    if (length > maxLength) {
       throw new Error(`content must be less than ${maxLength} characters`);
     }
   }
@@ -161,7 +167,14 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     // Validate content if provided
     if (data.content && data.content.trim() !== '') {
       await this.validateString(data.content, 'content');
-      this.validateContentLength(data.content); // Max 10k visible characters
+      // Ciphertext has no visible length to measure. A caller that turned plaintext into it
+      // passes the length the encryption service measured with the same rule (derived
+      // `text.length`); ciphertext copied from a stored row was checked when first written.
+      if (!isEncryptedField(data.content)) {
+        this.validateContentLength(data.content); // Max 10k visible characters
+      } else if (data.contentLength !== undefined) {
+        this.validateVisibleLength(data.contentLength);
+      }
     }
 
     if (data.msgType) {

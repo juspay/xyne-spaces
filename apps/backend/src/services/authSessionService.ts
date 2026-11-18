@@ -156,19 +156,25 @@ const mintToken = (): { token: string; tokenHash: string } => {
   return { token, tokenHash: hashToken(token) };
 };
 
+/**
+ * Cookie flags for the device-bound cookies (`xs`, `xk`). Native mobile cookies follow the
+ * existing mobile-exchange convention (sameSite none + secure); everything else matches the
+ * login-workspace cookies.
+ */
+export const deviceCookieOptions = (req: Request) => {
+  const platform = resolveDevicePlatform(req);
+  const isMobileNative = platform === 'android' || platform === 'ios';
+  return {
+    httpOnly: true,
+    secure: config.env === 'production' || isMobileNative,
+    sameSite: isMobileNative ? ('none' as const) : ('strict' as const),
+  };
+};
+
 export class AuthSessionService {
-  // Native mobile cookies follow the existing mobile-exchange convention
-  // (sameSite none + secure); everything else matches the login-workspace cookies.
   // Path-scoped so the refresh token never travels on ordinary API calls.
   private authSessionCookieOptions(req: Request) {
-    const platform = resolveDevicePlatform(req);
-    const isMobileNative = platform === 'android' || platform === 'ios';
-    return {
-      httpOnly: true,
-      secure: config.env === 'production' || isMobileNative,
-      sameSite: isMobileNative ? ('none' as const) : ('strict' as const),
-      path: AUTH_SESSION_COOKIE_PATH,
-    };
+    return { ...deviceCookieOptions(req), path: AUTH_SESSION_COOKIE_PATH };
   }
 
   /** Clear the `xs` cookie with the same options it was set with. */

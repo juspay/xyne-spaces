@@ -89,6 +89,8 @@ import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
 import userHeaderOverridesRoutes from '@/routes/userHeaderOverrides';
 import encryptionRoutes from '@/routes/encryption';
+import encryptionManifestRoutes from '@/routes/encryptionManifest';
+import transitRoutes from '@/routes/transit';
 import userGroupRoutes from '@/routes/userGroups';
 import attachmentRoutes from '@/routes/attachments';
 import draftAttachmentRoutes from '@/routes/draftAttachments';
@@ -240,6 +242,7 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
+import { EXTRACTORS, runExtractors, type ExtractorName } from '@xyne/shared';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';
 // Disabled (Claw)
@@ -530,6 +533,8 @@ export class App {
     this.app.use('/api/zero', zeroRoutes);
     this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
     this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
+    this.app.use('/api/encryption-manifest', authMiddleware.authenticate, encryptionManifestRoutes);
+    this.app.use('/api/transit', authMiddleware.authenticate, transitRoutes);
 
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
@@ -569,6 +574,26 @@ export class App {
     });
     this.app.post('/api/internal/reactAsUser', validateS2SKey, (req: Request, res: Response) => {
       void new ReactionController().reactAsUser(req, res);
+    });
+    // TEMPORARY (XYNE-67075): content extraction for the encryption service's
+    // transform-request (the REST reply route and the conversations.send mutator), until the
+    // extractor runs as a sidecar container in the encryption-api pod (apps/encryption-extractor
+    // in the private repo; switch back by pointing EXTRACTOR_URL at it and deleting this
+    // route). It cannot be switched off before then: client-encrypted writes need it. The body
+    // carries message plaintext: never log it (morgan and requestLogger log the request line
+    // only).
+    this.app.post('/api/internal/content/extract', validateS2SKey, (req: Request, res: Response) => {
+      const { text, extractors } = (req.body ?? {}) as { text?: unknown; extractors?: unknown };
+      const known = new Set<string>(EXTRACTORS);
+      if (
+        typeof text !== 'string' ||
+        !Array.isArray(extractors) ||
+        !extractors.every((name): name is ExtractorName => typeof name === 'string' && known.has(name))
+      ) {
+        res.status(400).json({ error: 'Bad request', message: 'text must be a string and extractors known extractor names' });
+        return;
+      }
+      res.json(runExtractors(text, extractors));
     });
     this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
       try {

@@ -16,6 +16,12 @@ import { activityTrackingService, ActivityEventPayload } from './activityTrackin
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
 import { readAgentProgress, type AgentProgressEntry } from './agentProgressService';
+import {
+  containsServerCiphertext,
+  transformPayloadForClient,
+  TRANSIT_KEY_COOKIE,
+  type TransitCaller,
+} from '@/services/encryption';
 
 
 interface AuthenticatedSocket extends Socket {
@@ -25,7 +31,16 @@ interface AuthenticatedSocket extends Socket {
   orgMemberId?: string;
   workspaceId?: string;
   workspaceName?: string;
+  /**
+   * The access token the socket authenticated with: pushes are encrypted for the transit key
+   * its session registered, which the encryption service looks up from the token's `sid`.
+   */
+  authToken?: string;
+  /** The client's transit public key from its `xk` cookie, for a session that registered none. */
+  transitKey?: string | null;
 }
+
+type TransitKeyedSocket = Socket & { user?: { sid?: string }; authToken?: string; transitKey?: string | null };
 
 // interface JoinSessionData {
 //   sessionId: string; // This will be channelId or conversationId
@@ -202,6 +217,8 @@ class WebSocketService {
             (socket as any).userEmail = req.user.email;
             (socket as any).userName = req.user.displayName || req.user.name;
             (socket as any).user = req.user;
+            (socket as any).authToken = req.authToken;
+            (socket as any).transitKey = cookies[TRANSIT_KEY_COOKIE];
 
             logger.info(`WebSocket authenticated: ${req.user.email} (${req.user.id})`);
             logger.info(`Socket ${socket.id} assigned user: ${req.user.name} (${req.user.email})`);
@@ -226,6 +243,7 @@ class WebSocketService {
     });
 
     this.setupZeroFallbackConfigSubscription();
+
 
     // Setup global presence subscription (for multi-server support)
     this.setupPresenceSubscription();
@@ -1503,6 +1521,16 @@ class WebSocketService {
       if (subscribedSockets && subscribedSockets.size > 0) {
         logger.info(`📤 [REDIS-RELAY] Relaying to ${subscribedSockets.size} sockets:`, Array.from(subscribedSockets));
 
+        if (this.requiresRecipientTransform(message)) {
+          void this.emitPerRecipient(Array.from(subscribedSockets), 'session_activity', message, (recipientMessage) => ({
+            sessionId,
+            message: recipientMessage,
+            type: 'new_message',
+            timestamp: new Date()
+          }));
+          return;
+        }
+
         // Send to each subscribed socket
         for (const socketId of subscribedSockets) {
           this.io?.to(socketId).emit('session_activity', {
@@ -1531,7 +1559,84 @@ class WebSocketService {
 
     const roomName = `session:${sessionId}`;
 
+    if (this.requiresRecipientTransform(data)) {
+      // Room membership is this pod's in-memory adapter, the same sockets io.to(room) reaches.
+      const socketIds = Array.from(this.io.sockets.adapter.rooms.get(roomName) ?? []);
+      await this.emitPerRecipient(socketIds, event, data, (recipientData) => recipientData);
+      return;
+    }
+
     this.io.to(roomName).emit(event, data);
+  }
+
+  /**
+   * A payload carrying storage ciphertext (`ENC:v1|<dekId>|…`, left in place by DEK
+   * passthrough) must be re-encrypted per recipient before it reaches a socket: each
+   * client only holds its own transit keys. Payloads without it (every broadcast except
+   * passthrough routes) skip this and never call the encryption service.
+   */
+  private requiresRecipientTransform(data: unknown): boolean {
+    return (
+      config.enc.enableDbEncryption &&
+      config.enc.apiClientEncryptionEnabled &&
+      containsServerCiphertext(data)
+    );
+  }
+
+  /**
+   * A transit key registered after the socket connected (`POST /api/transit/register`):
+   * this pod's sockets of that session use it at once; sockets on other pods read it from
+   * the encryption service at their next recheck.
+   */
+  setSessionTransitKey(sessionId: string, transitKey: string): void {
+    if (!this.io) return;
+    for (const socket of this.io.sockets.sockets.values()) {
+      const keyed = socket as TransitKeyedSocket;
+      if (keyed.user?.sid === sessionId) keyed.transitKey = transitKey;
+    }
+  }
+
+  /**
+   * Storage ciphertext to transit ciphertext per recipient socket, for the transit public
+   * key the socket connected with (its `xk` cookie) or, failing that, the one its session
+   * registered. One encryption-service call per recipient, run concurrently, so a busy room
+   * costs N calls per message. A socket with no key, or whose transform fails, gets
+   * nothing: sending the payload as-is would leak storage ciphertext it cannot (and must
+   * not) decrypt.
+   */
+  private async emitPerRecipient<T>(
+    socketIds: string[],
+    event: string,
+    data: T,
+    wrap: (recipientData: T) => unknown,
+  ): Promise<void> {
+    await Promise.all(
+      socketIds.map(async (socketId) => {
+        const socket = this.io?.sockets.sockets.get(socketId) as TransitKeyedSocket | undefined;
+        // Not connected to this pod any more; a plain emit would be a no-op too.
+        if (!socket) return;
+
+        try {
+          // The handshake token outlives its expiry on an open socket (nothing re-authenticates
+          // it), so the encryption service checks its signature only: the socket keeps
+          // receiving pushes as it did before, for the session it authenticated as.
+          const caller: TransitCaller = {
+            ...(socket.authToken ? { authToken: socket.authToken, allowExpiredAuthToken: true } : {}),
+            ...(socket.transitKey ? { clientKey: socket.transitKey } : {}),
+          };
+          if (!caller.authToken && !caller.clientKey) {
+            logger.warn(`[WS-ENC] Socket ${socketId} has no transit key; not sending ${event} with storage ciphertext`);
+            return;
+          }
+          const { body } = await transformPayloadForClient(data, caller);
+          socket.emit(event, wrap(body));
+        } catch (error) {
+          logger.warn(`[WS-ENC] DEK to transit transform failed for socket ${socketId}; not sending ${event}`, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }),
+    );
   }
 
   /**
