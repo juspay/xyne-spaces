@@ -3,8 +3,9 @@ import {
   MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { ChannelRole, ChannelVisibility, FormEntityType, GuestEntity, Schema, WorkspaceRole } from '@xyne/shared';
+import { ChannelRole, ChannelVisibility, FormEntityType, Schema, WorkspaceRole } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
+import { hasGuestTicketAccess } from '../core/guest-access';
 import { zql } from '../../queries';
 
 export class FormEntityValuesACL extends BaseACL<'form_entity_values'> {
@@ -43,22 +44,8 @@ export class FormEntityValuesACL extends BaseACL<'form_entity_values'> {
     if (entityType !== FormEntityType.TICKET) {
       throw new MutationACLError('Form entity value failed: guests can only edit ticket fields', 'form_entity_values');
     }
-    const ticket = await tx.run(zql.tickets.where('id', entityId).related('channel').one());
-    const channel = ticket?.channel;
-    if (!ticket || ticket.workspaceId !== this.ctx.workspaceId || !channel) {
-      throw new MutationACLError('Form entity value failed: guests can only edit ticket fields', 'form_entity_values');
-    }
-    const [participant, guestAccess] = await Promise.all([
-      tx.run(zql.channel_participants.where('channelId', channel.id).where('userId', this.ctx.userID).one()),
-      tx.run(
-        zql.guest_access
-          .where('userId', this.ctx.userID)
-          .where('accessibleEntityType', GuestEntity.CHANNEL)
-          .where('accessibleEntityId', channel.id)
-          .one(),
-      ),
-    ]);
-    if (!participant && !guestAccess) {
+    const ticket = await tx.run(zql.tickets.where('id', entityId).one());
+    if (!ticket || !(await hasGuestTicketAccess(this.ctx, tx, ticket))) {
       throw new MutationACLError('Form entity value failed: you do not have access to the referenced ticket', 'form_entity_values');
     }
   }
