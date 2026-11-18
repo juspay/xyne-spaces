@@ -35,6 +35,8 @@ import { createZeroAuditJobs, flushAuditTrail } from './audit';
 import type { AuditJobsAccumulator } from './audit';
 import { decryptQueryResult } from './encryption-interceptor';
 import { executeFlatCatalogQuery, NOT_FLAT } from './flat-catalog-query';
+import { prepareEncryptedMutations, runEncryptedMutation, type MutationEncryptionContext } from './encryptedMutation';
+import type { DerivedContentFacts } from '@xyne/shared';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -209,11 +211,29 @@ function getMutationErrors(result: unknown): Record<string, unknown>[] {
   });
 }
 
+/**
+ * The message a mutator inserted for the user (`args.messageId`) gets the derived facts, so its
+ * side effects (notifications, link previews) use them instead of parsing the ciphertext.
+ */
+function attachDerivedToMessageJobs(
+  jobs: SideEffectJobsAccumulator,
+  args: unknown,
+  derived: DerivedContentFacts | undefined,
+): void {
+  const messageId = (args as { messageId?: unknown } | undefined)?.messageId;
+  if (!derived || typeof messageId !== 'string') return;
+  for (const job of jobs) {
+    if (job.entityType === 'messages' && job.operation === 'insert' && job.entityId === messageId) {
+      job.derived = derived;
+    }
+  }
+}
+
 function getMutationErrorMessage(errorObj: Record<string, unknown>): unknown {
   return errorObj['message'] || errorObj['details'] || errorObj['error'];
 }
 
-export async function handleMutate(request: Request): Promise<unknown> {
+export async function handleMutate(request: Request, enc?: MutationEncryptionContext): Promise<unknown> {
   const startTime = Date.now();
   // Accumulators for post-processing
   const asyncTasks: (() => Promise<void>)[] = [];
@@ -231,10 +251,11 @@ export async function handleMutate(request: Request): Promise<unknown> {
   // Clone the request so the body can be read again by handleMutateRequest
   const clonedRequest = request.clone();
   let batchSize = 1;
+  let pushBody: { mutations?: unknown[] } | undefined;
   try {
-    const body = await clonedRequest.json() as { mutations?: unknown[] };
-    if (body.mutations && Array.isArray(body.mutations)) {
-      batchSize = Math.max(1, body.mutations.length);
+    pushBody = await clonedRequest.json() as { mutations?: unknown[] };
+    if (pushBody.mutations && Array.isArray(pushBody.mutations)) {
+      batchSize = Math.max(1, pushBody.mutations.length);
     }
   } catch {
     // If body parsing fails, fall back to counting as 1
@@ -254,6 +275,16 @@ export async function handleMutate(request: Request): Promise<unknown> {
   vespaJobs = createVespaJobsAccumulator();
   sideEffectJobs = createSideEffectJobsAccumulator();
 
+  // Rule-encrypted mutations go to the encryption service here, before any transaction holds
+  // a database connection; inside it the mutator only reads the outcome.
+  const prepared = await prepareEncryptedMutations(pushBody, enc, authData.workspaceId);
+  let pushRequest = request;
+  if (prepared.size > 0) {
+    const headers = new Headers(request.headers);
+    headers.delete('content-length');
+    pushRequest = new Request(request.url, { method: request.method, headers, body: JSON.stringify(pushBody) });
+  }
+
   try {
     const context = {
       userID: authData.sub,
@@ -265,7 +296,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
     const result = await handleMutateRequest({
       dbProvider,
       userID: authData.sub,
-      request,
+      request: pushRequest,
       handler: transact => {
         const mutationAsyncTasks: (() => Promise<void>)[] = [];
         const mutationAwaitedPostCommitTasks: (() => Promise<void>)[] = [];
@@ -290,7 +321,11 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAuditJobs,
           );
           const mutator = mustGetMutator(mutators, mutatorName);
-          return mutator.fn({ tx: wrappedTx, args, ctx: context });
+          return runEncryptedMutation(args, prepared, async (mutationArgs, derived) => {
+            const result = await mutator.fn({ tx: wrappedTx, args: mutationArgs as typeof args, ctx: context });
+            attachDerivedToMessageJobs(mutationSideEffectJobs, mutationArgs, derived);
+            return result;
+          });
         }).then(async mutatorResult => {
           // Zero resolves application failures as mutation results after rolling
           // back the transaction. Do not dispatch work staged by that rollback.
@@ -808,6 +843,7 @@ export async function runCatalogMutation(
   name: string,
   args: unknown,
   authData: AuthData,
+  enc?: MutationEncryptionContext,
 ): Promise<void> {
   const ctx: Context = {
     userID: authData.sub,
@@ -824,12 +860,20 @@ export async function runCatalogMutation(
   const mutators = createMutators(authData, asyncTasks, awaitedPostCommitTasks);
   const mutator = mustGetCatalogMutator(mutators, name);
 
+  // As in handleMutate: the encryption service is called before the transaction opens.
+  const push = { mutations: [{ name, args }] };
+  const prepared = await prepareEncryptedMutations(push, enc, ctx.workspaceId);
+  const preparedArgs = push.mutations[0].args;
+
   await dbProvider.transaction(async (tx) => {
     const auditJobs = await createZeroAuditJobs(tx, ctx.userID);
     const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name, auditJobs);
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.
-    await mutator.fn({ tx: wrappedTx, args: args as never, ctx });
+    await runEncryptedMutation(preparedArgs, prepared, async (mutationArgs, derived) => {
+      await mutator.fn({ tx: wrappedTx, args: mutationArgs as never, ctx });
+      attachDerivedToMessageJobs(sideEffectJobs, mutationArgs, derived);
+    });
     // Audit tables live outside the Zero graph (non_zero schema); the flush is
     // its own commit via the shared Prisma client. Catalog mutations can run
     // under service principals whose id is not a users row; audit failures here
@@ -898,7 +942,7 @@ export async function runCatalogMutation(
   );
 }
 
-export async function handleMutateFallback(request: Request): Promise<unknown> {
+export async function handleMutateFallback(request: Request, enc?: MutationEncryptionContext): Promise<unknown> {
   const authData = await extractAuthDataFromRequest(request);
   if (!authData) {
     throw new Error("Unauthorized");
@@ -912,7 +956,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
 
     logger.info(`Fallback executing mutation: ${mutation.name}`);
 
-    await runCatalogMutation(mutation.name, mutation.args, authData);
+    await runCatalogMutation(mutation.name, mutation.args, authData, enc);
     return { success: true };
   } catch (error) {
     logger.error('Fallback mutate request failed', error);

@@ -19,6 +19,7 @@ import { useFallbackQuery } from './useFallbackQuery.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
 import { decryptionCache } from '../crypto/decryption-cache.js';
 import { isEncryptedField } from '../crypto/field-decrypt.js';
+import type { TransitKeyring } from '../crypto/keyring.js';
 import { wasInterrupted } from './metricValidity.js';
 import type { MetricsRecorder } from '../logger/index.js';
 
@@ -29,7 +30,7 @@ import type { MetricsRecorder } from '../logger/index.js';
  */
 function decryptResultData<TData>(
   data: TData,
-  key: CryptoKey | null,
+  keyring: TransitKeyring | null,
   encryptedFields: Record<string, { fields: string[]; enforceClientEncryption: boolean }>,
   metrics?: MetricsRecorder,
   queryName?: string,
@@ -87,9 +88,9 @@ function decryptResultData<TData>(
           modified = true;
           cacheHits++;
         } else {
-          if (key) {
+          if (keyring) {
             const prefetchStart = performance.now();
-            void decryptionCache.prefetch(encryptedValue, key);
+            void decryptionCache.prefetch(encryptedValue, keyring);
             const prefetchLatency = performance.now() - prefetchStart;
             metrics?.recordLatency?.('crypto.decrypt.cache.prefetch', prefetchLatency, {
               query: queryName ?? 'unknown',
@@ -351,7 +352,7 @@ export function useQuery<
   }, [data, details, queryName, startTime, metrics, logger]);
 
   // Decryption pass — uses server-provided config from context
-  const { key, config: encConfig } = useEncryptionConfig();
+  const { keyring, config: encConfig } = useEncryptionConfig();
   const encryptedFields = encConfig?.encryptedFields ?? {};
   const clientEncryptionEnabled = encConfig?.clientEncryptionEnabled ?? false;
   const hasEncrypted = Object.keys(encryptedFields).length > 0;
@@ -366,9 +367,9 @@ export function useQuery<
   const lastSourceDataRef = useRef<typeof data | null>(null);
 
   const [decryptedData, hasPending] = useMemo(
-    () => (shouldDecrypt ? decryptResultData(data, key, encryptedFields, metrics, queryName) : [data, false]),
+    () => (shouldDecrypt ? decryptResultData(data, keyring, encryptedFields, metrics, queryName) : [data, false]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, key, encryptedFields, decryptionTick, shouldDecrypt],
+    [data, keyring, encryptedFields, decryptionTick, shouldDecrypt],
   );
 
   // Update stable ref only when we have complete decrypted data
@@ -447,7 +448,7 @@ export function useRawQuery<
   }, [data, details, queryName]);
 
   // Decryption pass — uses server-provided config from context
-  const { key, config: encConfig } = useEncryptionConfig();
+  const { keyring, config: encConfig } = useEncryptionConfig();
   const encryptedFields = encConfig?.encryptedFields ?? {};
   const clientEncryptionEnabled = encConfig?.clientEncryptionEnabled ?? false;
   const hasEncrypted = Object.keys(encryptedFields).length > 0;
@@ -462,9 +463,9 @@ export function useRawQuery<
   const lastSourceDataRef = useRef<typeof data | null>(null);
 
   const [decryptedData, hasPending] = useMemo(
-    () => (shouldDecrypt ? decryptResultData(data, key, encryptedFields, metrics, queryName) : [data, false]),
+    () => (shouldDecrypt ? decryptResultData(data, keyring, encryptedFields, metrics, queryName) : [data, false]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data, key, encryptedFields, decryptionTick, shouldDecrypt],
+    [data, keyring, encryptedFields, decryptionTick, shouldDecrypt],
   );
 
   // Update stable ref only when we have complete decrypted data

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { DerivedContentFacts, RequestContract, RequestOf } from '@xyne/shared';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -61,6 +62,14 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthenticatedUser;
+      /** Facts the encryption service extracted from this request's encrypted fields. */
+      derived?: DerivedContentFacts;
+      /**
+       * The verified access token the request authenticated with (authMiddleware): forwarded
+       * to the encryption service, which reads its `sid` and uses the session's registered
+       * transit key (transitCaller).
+       */
+      authToken?: string;
     }
   }
 }
@@ -68,6 +77,13 @@ declare global {
 export interface RawBodyRequest extends Request {
   rawBody: string;
 }
+
+/**
+ * What a handler on a contracted route receives: the contract's RequestOf (body as the
+ * client sends it, derived facts the contract names) on the Express request.
+ */
+export type ContractRequest<C extends RequestContract> = Request<Request['params'], unknown, RequestOf<C>['body']> &
+  Pick<RequestOf<C>, 'derived'>;
 
 // ---------------------------------------------------------------------------
 // Call Lobby — shared between routes/callLobby.ts and controllers/callLobbyController.ts

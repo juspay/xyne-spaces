@@ -11,6 +11,8 @@ import {logger} from '@/utils/logger';
 // A mention inside <pre>/<code> is a false positive — e.g. `@Example` inside the
 // email `alice@Example.com` in a SQL snippet — and must not notify.
 import { stripCodeRegions } from '@xyne/shared/utils';
+import { extractSpecialMentionFlags } from '@xyne/shared';
+import type { ExtractorOutput } from '@xyne/shared';
 
 export interface ExtractedMention {
   userId: string;
@@ -416,6 +418,116 @@ export async function extractAllUsersForNotification(
 }
 
 /**
+ * extractAllUsersForNotification for a message whose content the backend cannot read:
+ * the encryption service already parsed it (DerivedContentFacts.mentions). User and
+ * group ids are used directly; `handles` (legacy ZWSP `@name` tokens) go through the same
+ * user / group-alias lookups as the content path; @channel/@here expand the same way.
+ */
+export async function extractAllUsersForNotificationFromDerived(
+  mentions: ExtractorOutput['mentions'],
+  workspaceId: string,
+  channelId?: string,
+  forceChannelMention?: boolean
+): Promise<ExtractedMentionForNotification[]> {
+  const allUsersToNotify: ExtractedMentionForNotification[] = [];
+  const processedUserIds = new Set<string>();
+
+  // Handles are resolved by the existing content parsers fed only those tokens.
+  const ZWSP = '\u200B';
+  const handleContent = mentions.handles.map(handle => `${ZWSP}@${handle}${ZWSP}`).join(' ');
+  const [handleUserMentions, handleGroupMentions] = handleContent
+    ? await Promise.all([
+        extractMentionsFromContent(handleContent),
+        extractGroupMentionsFromContent(handleContent, workspaceId),
+      ])
+    : [[], []];
+
+  const userRepository = new UserRepository();
+  const directUsers = mentions.userIds.length > 0
+    ? await userRepository.findMany({ where: { id: { in: mentions.userIds } } })
+    : [];
+  const directUserMap = new Map(directUsers.map(user => [user.id, user]));
+
+  const userMentions: ExtractedMention[] = [
+    ...mentions.userIds.map(userId => {
+      const user = directUserMap.get(userId);
+      return {
+        userId,
+        username: user?.name ?? userId,
+        userEmail: user?.email,
+        userPicture: user?.picture || undefined,
+      };
+    }),
+    ...handleUserMentions,
+  ];
+
+  for (const userMention of userMentions) {
+    if (!processedUserIds.has(userMention.userId)) {
+      processedUserIds.add(userMention.userId);
+      allUsersToNotify.push({ ...userMention, mentionSource: 'direct' });
+    }
+  }
+
+  const userGroupRepository = new UserGroupRepository();
+  const groupMentions: ExtractedGroupMention[] = [
+    ...(await Promise.all(
+      mentions.groupIds.map(async groupId => {
+        const group = await userGroupRepository.findById(groupId);
+        return { groupId, groupName: group?.name ?? groupId };
+      })
+    )),
+    ...handleGroupMentions,
+  ];
+
+  const processedGroupIds = new Set<string>();
+  for (const groupMention of groupMentions) {
+    if (processedGroupIds.has(groupMention.groupId)) continue;
+    processedGroupIds.add(groupMention.groupId);
+    try {
+      const groupMembers = await getGroupMembersForNotification(groupMention.groupId);
+      for (const member of groupMembers) {
+        if (!processedUserIds.has(member.userId)) {
+          processedUserIds.add(member.userId);
+          allUsersToNotify.push({
+            userId: member.userId,
+            username: member.name,
+            userEmail: member.email,
+            userPicture: undefined,
+            mentionSource: 'group',
+            groupId: groupMention.groupId,
+            groupName: groupMention.groupName,
+          });
+        }
+      }
+    } catch (error) {
+      logger.error(`❌ [MENTION-EXPANSION] Error expanding group @${groupMention.groupName}:`, error);
+    }
+  }
+
+  if (channelId) {
+    if (mentions.channel || forceChannelMention) {
+      for (const user of await getChannelParticipantsForMention(channelId)) {
+        if (!processedUserIds.has(user.userId)) {
+          processedUserIds.add(user.userId);
+          allUsersToNotify.push(user);
+        }
+      }
+    }
+    if (mentions.here) {
+      for (const user of await getOnlineChannelParticipants(channelId)) {
+        if (!processedUserIds.has(user.userId)) {
+          processedUserIds.add(user.userId);
+          allUsersToNotify.push(user);
+        }
+      }
+    }
+  }
+
+  logger.info(`🏷️ [MENTION-EXPANSION] Total users to notify from derived facts: ${allUsersToNotify.length}`);
+  return allUsersToNotify;
+}
+
+/**
  * Check if message content contains any group mentions
  */
 export function hasGroupMentions(content: string): boolean {
@@ -497,51 +609,16 @@ export async function getGroupMembersForNotification(groupId: string): Promise<{
 }
 
 /**
- * Detect special mentions (@channel, @here) in message content
+ * Detect special mentions (@channel, @here) in message content. The detection is shared
+ * with the encryption service's mentions extractor (extractSpecialMentionFlags), so both
+ * agree on what counts as a broadcast.
  */
 export function extractSpecialMentions(content: string): SpecialMentions {
-  const result: SpecialMentions = {
-    hasChannel: false,
-    hasHere: false
-  };
-
-  // Check for @channel - HTML span format
-  const channelSpanRegex = /<span[^>]*class="[^"]*chat-input-special-mention[^"]*"[^>]*data-mention-type="channel"[^>]*>@channel<\/span>/i;
-  if (channelSpanRegex.test(content)) {
-    result.hasChannel = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @channel mention (HTML span)');
+  const { channel, here } = extractSpecialMentionFlags(content);
+  if (channel || here) {
+    logger.info('✅ [SPECIAL-MENTION] Found special mention', { channel, here });
   }
-
-  // Check for @here - HTML span format
-  const hereSpanRegex = /<span[^>]*class="[^"]*chat-input-special-mention[^"]*"[^>]*data-mention-type="here"[^>]*>@here<\/span>/i;
-  if (hereSpanRegex.test(content)) {
-    result.hasHere = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @here mention (HTML span)');
-  }
-
-  const contentWithoutCode = stripCodeRegions(content);
-  // Fallback: Check for plain text @channel or @here (case-insensitive)
-  // Match @channel or @here as whole words (not part of other words)
-  const plainChannelRegex = /@channel\b/i;
-  const plainHereRegex = /@here\b/i;
-
-  // Also match the mrkdwn broadcast token format used in FlowJSON text components:
-  // Slack's <!channel>/<!here> are normalised to <broadcast:channel>/<broadcast:here>
-  // by the BlockKit→FlowJSON converter, so we need to detect that form too.
-  const broadcastChannelRegex = /<broadcast:channel>/i;
-  const broadcastHereRegex = /<broadcast:here>/i;
-
-  if (!result.hasChannel && (plainChannelRegex.test(contentWithoutCode) || broadcastChannelRegex.test(contentWithoutCode))) {
-    result.hasChannel = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @channel mention (plain text or broadcast token)');
-  }
-
-  if (!result.hasHere && (plainHereRegex.test(contentWithoutCode) || broadcastHereRegex.test(contentWithoutCode))) {
-    result.hasHere = true;
-    logger.info('✅ [SPECIAL-MENTION] Found @here mention (plain text or broadcast token)');
-  }
-
-  return result;
+  return { hasChannel: channel, hasHere: here };
 }
 
 /**
