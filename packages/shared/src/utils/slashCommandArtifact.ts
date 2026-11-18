@@ -1,11 +1,11 @@
-import type { FlowComponent, FlowDefinition } from "../types/flowUI";
+import type { FlowComponent, FlowDefinition } from "../types/flowUI.js";
 import {
   flowDefinitionSchema,
   slashCommandArtifactPropsSchema,
   type SlashCommandArtifactClosed,
   type SlashCommandArtifactEndedCall,
   type SlashCommandArtifactProps,
-} from "../validation/flowSchema";
+} from "../validation/flowSchema.js";
 
 const FLOW_JSON_ATTRIBUTE_PATTERN = /data-flow-json="([^"]+)"/i;
 

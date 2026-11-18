@@ -79,6 +79,8 @@ interface RenderMessageWithHTMLProps {
     senderId?: string;
     createdAt?: number;
     surface?: 'channel' | 'thread';
+    /** The message HTML, filled in here (not by callers): the artifact card rewrites it to close. */
+    content?: string;
   };
 }
 
@@ -1476,9 +1478,19 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
             ...(artifactSenderId !== undefined && { senderId: artifactSenderId }),
             ...(artifactCreatedAt !== undefined && { createdAt: artifactCreatedAt }),
             ...(artifactSurface !== undefined && { surface: artifactSurface }),
+            // The card closes the artifact by sending the rewritten message: the server
+            // only sees ciphertext under client encryption, so the rewrite happens here.
+            content: message,
           }
         : undefined,
-    [hasArtifactContext, artifactChannelId, artifactSenderId, artifactCreatedAt, artifactSurface],
+    [
+      hasArtifactContext,
+      artifactChannelId,
+      artifactSenderId,
+      artifactCreatedAt,
+      artifactSurface,
+      message,
+    ],
   );
 
   const parsedContent = useMemo<React.ReactNode[]>(() => {

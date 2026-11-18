@@ -6,6 +6,8 @@ export interface FlowMessageContext {
   senderId?: string;
   createdAt?: number;
   surface?: 'channel' | 'thread';
+  /** The message HTML the flow was rendered from (slash-command artifacts rewrite it to close). */
+  content?: string;
 }
 
 export interface FlowContextValue {

@@ -9,6 +9,7 @@ import {
   getSlashCommandArtifactDiagnosticKey,
   parseSlashCommandArtifactMessage,
   slashCommandArtifactPropsSchema,
+  withSlashCommandArtifactClosed,
   type FlowComponent,
   type SlashCommandArtifactClosed,
   type SlashCommandArtifactDefinition,
@@ -239,6 +240,8 @@ interface SlashCommandArtifactCardProps {
   senderId?: string;
   createdAt?: number;
   surface?: 'channel' | 'thread';
+  /** The message HTML this card was rendered from; closing rewrites it client-side. */
+  content?: string;
 }
 
 export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> = ({
@@ -252,6 +255,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
   senderId,
   createdAt,
   surface,
+  content,
 }) => {
   const sender = useUser(senderId ?? '');
   const { user } = useAuthContext();
@@ -361,8 +365,21 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
 
     setIsClosing(true);
     try {
+      // The server stores the message as ciphertext it cannot rewrite, so the closed
+      // artifact XML is produced here from the rendered content and sent as the new content.
+      const timestamp = Date.now();
+      const closedContent = content
+        ? withSlashCommandArtifactClosed(content, { closedAt: timestamp, closedBy: user?.id ?? '' })
+        : null;
+      if (!closedContent) {
+        throw new Error('Message is not a slash command artifact');
+      }
       const result = zero.mutate(
-        mutators.messages.closeSlashCommandArtifact({ messageId, timestamp: Date.now() }),
+        mutators.messages.closeSlashCommandArtifact({
+          messageId,
+          timestamp,
+          content: closedContent,
+        }),
       );
       await result.server;
       logger.info(Event.SLASH_COMMAND_ARTIFACT_ACTION, {
@@ -581,6 +598,7 @@ export const SlashCommandArtifactNode: React.FC<{
       {...(messageContext?.senderId && { senderId: messageContext.senderId })}
       {...(messageContext?.createdAt !== undefined && { createdAt: messageContext.createdAt })}
       {...(messageContext?.surface && { surface: messageContext.surface })}
+      {...(messageContext?.content !== undefined && { content: messageContext.content })}
     >
       {children}
     </SlashCommandArtifactCard>
