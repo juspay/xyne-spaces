@@ -50,7 +50,7 @@ import { config } from '@/config/env';
 import { TextStrategy } from '../strategies/TextStrategy';
 import { getStorageService } from '@/services/storage';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
-import { buildFormFields, type TicketDynamicFieldValue } from './form-fields';
+import { buildFormFieldGramEntries, buildFormFields, type TicketDynamicFieldRow } from './form-fields';
 import { DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 
 const MAX_INDEXABLE_OBJECT_BYTES = 100 * 1024 * 1024;
@@ -90,8 +90,10 @@ const loadTicketFormFields = async (ticketId: string) => {
     select: {
       fieldId: true,
       actualFieldValue: true,
+      version: true,
+      updatedAt: true,
     },
-  }) as TicketDynamicFieldValue[];
+  }) as TicketDynamicFieldRow[];
 
   // FormEntityValues.fieldId holds the GlobalField id for global-backed fields and
   // the FormFields id only for legacy ones (resolveFormFieldDefinitionsForForm
@@ -106,7 +108,11 @@ const loadTicketFormFields = async (ticketId: string) => {
     [...fieldDefinitions].map(([fieldId, definition]) => [fieldId, definition.fieldType]),
   );
 
-  return buildFormFields(formEntityValues, fieldTypeByFieldId);
+  return {
+    formFields: buildFormFields(formEntityValues, fieldTypeByFieldId),
+    // "<fieldId>::<value>" entries; the encryption gateway turns them into hashed "<fieldId>::<gram>" tokens
+    formFieldGrams: buildFormFieldGramEntries(formEntityValues, fieldTypeByFieldId),
+  };
 };
 
 const getRef = (schema: VespaSchema, docId: string) => `id:${NAMESPACE}:${schema}::${docId}`
@@ -396,7 +402,7 @@ export const mapChannel = async (
     lastSyncedAt: toTimestamp(lastActivityAt),
     topic: "",// TODO: handle topic,
     memberCount: channelParticipants.length,
-    isArchived: false, // TODO: handle archived state
+    isArchived: args.isArchived ?? false,
     workspaceId: effectiveWorkspaceId,
     orgId: effectiveOrgId,
   };
@@ -542,7 +548,6 @@ export const mapMessage = async (
     docId: args.messageId,
     docType: VespaDocType.MESSAGE,
     text: messageContent,
-    chunks: chunkPlainText(messageContent),
     links: messageLinks,
     hasLinks: messageLinks.length > 0,
     username: sender?.name || '',
@@ -719,7 +724,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
   }
 
   const resolvedChannelName = await resolveChannelName(channel?.name || '', channel?.scopeType);
-  const vespaFormFields = await loadTicketFormFields(args.id);
+  const { formFields: vespaFormFields, formFieldGrams } = await loadTicketFormFields(args.id);
 
   // Our tag-generation framework's tags, sourced from the latest email in this
   // ticket's conversation (the framework only tags desk-email, not tickets directly).
@@ -757,7 +762,8 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     workflowType: "",// later we should populate workflow type
     description: args.description,
     chunks: chunkPlainText(extractPlainTextFromHtml(args.description || '')),
-    ticketType: "", // later we should populate ticket type
+    ticketType: args.ticketType ?? '',
+    isArchived: args.isArchived ?? false,
     priority: args.priority,
     stage: args.stageName,
     createdAtTimestamp: toTimestamp(args.createdAt),
@@ -770,6 +776,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     attachmentIds: attachments.map(a => a.id),
     metadata: JSON.stringify(args.metadata),
     formFields: vespaFormFields,
+    formFieldGrams,
     eta: toDateString(args.eta),
     channelName: resolvedChannelName,
     boardName: board?.name || '',
@@ -1517,7 +1524,7 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
   // 1. Resolve conversation → channelId and linked ticket
   const conversation = await db.conversation.findUnique({
     where: { conversationId: email.conversationId },
-    select: { channelId: true },
+    select: { channelId: true, channel: { select: { name: true } } },
   });
   const channelId = conversation?.channelId ?? '';
 
@@ -1525,7 +1532,9 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     where: { conversationId: email.conversationId },
     select: { id: true, xyneId: true, project: { select: { code: true } } },
   });
-  const ticketFormFields = ticket ? await loadTicketFormFields(ticket.id) : [];
+  const { formFields: ticketFormFields, formFieldGrams } = ticket
+    ? await loadTicketFormFields(ticket.id)
+    : { formFields: [], formFieldGrams: [] };
 
   const { workspaceId: effectiveWorkspaceId, orgId: effectiveOrgId } = await resolveOrgAndWorkspace(
     email.workspaceId ||
@@ -1589,6 +1598,9 @@ export const mapEmail = async (email: Email, workspaceId?: string, orgId?: strin
     projectCode: ticket?.project?.code ?? undefined,
     ticketFormFields,
     ticketFormFieldValues: Array.from(new Set(ticketFormFields.map(field => field.fieldValue))),
+    formFieldGrams,
+    // own copy of the channel name: the imported channelName has no encrypted twin
+    mailChannelName: conversation?.channel?.name ?? '',
     subject: email.subject,
     chunks,
     timestamp: toTimestamp(email.createdAt),
