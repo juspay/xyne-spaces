@@ -31,6 +31,7 @@ from livekit.agents import (
     AgentSession,
     JobContext,
     LanguageCode,
+    ModelSettings,
     StopResponse,
     llm,
     room_io,

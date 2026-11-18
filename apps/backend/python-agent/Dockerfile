@@ -1,38 +1,35 @@
-FROM mirror.gcr.io/library/python:3.11-slim
-
-WORKDIR /app
+# Build stage: has pip, gcc and a shell. None of it ships in the final image.
+# It uses Debian 12's own python3 (3.11.2), the same interpreter the distroless image ships,
+# so pip resolves environment markers (e.g. python_full_version) the same way in both stages.
+FROM mirror.gcr.io/library/debian:12-slim AS build
 
 ARG DIARIZATION_ENABLED=false
 
-# Redirect all cache/config dirs to /app so the container never writes to / or /.cache
-ENV HOME=/app \
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-venv \
+        python3-dev \
+        gcc \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Debian's bundled pip is too old for this hash-pinned requirements.txt.
+RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir pip==25.1.1
+
+ENV PATH=/opt/venv/bin:$PATH \
+    HOME=/app \
     HF_HOME=/app/.cache/huggingface \
     HF_HUB_CACHE=/app/.cache/huggingface \
     TRANSFORMERS_CACHE=/app/.cache/huggingface \
     TORCH_HOME=/app/.cache/torch \
     XDG_CACHE_HOME=/app/.cache \
     XDG_CONFIG_HOME=/app/.config \
-    MPLCONFIGDIR=/app/.config/matplotlib \
-    DIARIZATION_ENABLED=${DIARIZATION_ENABLED}
+    MPLCONFIGDIR=/app/.config/matplotlib
 
-# Install system dependencies required by LiveKit SDK and health checks
-RUN apt-get update && apt-get install -y \
-    gcc \
-    curl \
-    ca-certificates \
-    libglib2.0-0 \
-    libgstreamer1.0-0 \
-    gstreamer1.0-plugins-base \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create runtime-writable directories before pip/model imports touch caches
-RUN mkdir -p /app/transcriptions /app/.cache/huggingface /app/.cache/torch /app/.config/matplotlib \
-    && chmod -R 777 /app/transcriptions /app/.cache /app/.config
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-COPY requirements-diarization.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-diarization.txt ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 RUN case "$DIARIZATION_ENABLED" in \
         true|True|TRUE|1|yes|Yes|YES|on|On|ON) \
             echo "Installing diarization dependencies"; \
@@ -43,18 +40,43 @@ RUN case "$DIARIZATION_ENABLED" in \
             ;; \
     esac
 
-# Copy application code
 COPY . .
 
-# Run as an unprivileged user. Created before the model download so the caches under /app
-# are owned by the account that reads and updates them at runtime.
-RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
-USER appuser
+# Bake the model files into the image (turn detector, Silero VAD). The runtime image runs
+# with HF_HUB_OFFLINE=1, so a model missing here fails at startup instead of downloading later.
+RUN python download_models.py \
+    && mkdir -p /app/transcriptions /app/.config/matplotlib \
+    && rm -f Dockerfile requirements-diarization.txt system.excalidraw
 
-# Pre-download model files (ONNX model, tokenizer, languages.json)
-# Using dedicated script to avoid heavy main.py imports that need env vars
-RUN python download_models.py
+# Runtime: distroless Python 3.11 on Debian 12. No shell, no package manager, no curl.
+# The chart's health checks are httpGet probes run by the kubelet, so they need nothing here.
+FROM gcr.io/distroless/python3-debian12:nonroot
+
+ARG DIARIZATION_ENABLED=false
+
+WORKDIR /app
+
+ENV HOME=/app \
+    HF_HOME=/app/.cache/huggingface \
+    HF_HUB_CACHE=/app/.cache/huggingface \
+    TRANSFORMERS_CACHE=/app/.cache/huggingface \
+    TORCH_HOME=/app/.cache/torch \
+    XDG_CACHE_HOME=/app/.cache \
+    XDG_CONFIG_HOME=/app/.config \
+    MPLCONFIGDIR=/app/.config/matplotlib \
+    HF_HUB_OFFLINE=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt/venv/lib/python3.11/site-packages \
+    DIARIZATION_ENABLED=${DIARIZATION_ENABLED}
+
+COPY --from=build /opt/venv/lib/python3.11/site-packages /opt/venv/lib/python3.11/site-packages
+# uid 1001 matches runAsUser/fsGroup in the xyne-transcription-agent chart.
+COPY --from=build --chown=1001:1001 /app /app
+
+USER 1001:1001
 
 EXPOSE 8080
 
-CMD ["python", "main.py", "start"]
+ENTRYPOINT ["/usr/bin/python3", "main.py"]
+CMD ["start"]
