@@ -127,6 +127,8 @@ const APPROVAL_POLICY = {
 const executor = new WorkflowExecutor(persistence, connectors, services, {
   eventBus,
   baseUrl: BASE_URL,
+  // Direct egress is blocked; the SDK's HTTP steps must go through the same proxy as safeWebhookFetch.
+  egressProxyUrl: config.ssrf.egressProxyUrl,
   storage,
   logger: sdkLogger,
 });
