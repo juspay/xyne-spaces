@@ -393,3 +393,20 @@ export function generatePlainTextContent(htmlContent: string): string {
   
   return plainText;
 }
+
+/** Split plain text into chunks of at most `maxLen` characters on word boundaries (the Vespa `chunks` of a ticket or mail). */
+export const chunkPlainText = (text: string, maxLen = 1500): string[] => {
+  const words = text.split(/\s+/).filter(Boolean);
+  const chunks: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (current.length + word.length + 1 > maxLen && current.length > 0) {
+      chunks.push(current);
+      current = word;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [''];
+};
