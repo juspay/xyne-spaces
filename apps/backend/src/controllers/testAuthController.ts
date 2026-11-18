@@ -8,6 +8,7 @@ import { completeLogin, respondDeviceKeyRequired } from '@/services/loginComplet
 import { readWorkspaceJwt } from '@/services/accessTokenService';
 import { DatabaseClient } from '@/database/client';
 import { TestAuthSeeder } from '@/controllers/testAuthSeeder';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface TestUserData {
   googleId: string;
@@ -390,9 +391,9 @@ export class TestAuthController {
             });
 
             if (!existingResource) {
-              await db.resource.create({
+              await withWorkspaceScope(() => db.resource.create({
                 data: resourceData,
-              });
+              }));
               logger.info(`[${requestId}] Created essential resource: ${resourceData.name}`);
             }
           }

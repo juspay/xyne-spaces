@@ -8,6 +8,7 @@ import { notificationService } from '@/services/notificationService';
 import { ActivityClassification } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import type { UpdateUserPresenceInput } from '@/types/database';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class UserAssignmentStateService {
   private readonly prisma = DatabaseClient.getInstance();
@@ -90,13 +91,13 @@ export class UserAssignmentStateService {
 
       // Update UserPresence with assignmentUnavailableUntil
       // UserPresence should already exist (created during login via ensureUserPresence)
-      await this.prisma.userPresence.update({
+      await withWorkspaceScope(() => this.prisma.userPresence.update({
         where: { userId },
         data: {
           assignmentUnavailableUntil: new Date(unavailableUntil),
           updatedAt: new Date(),
         } as UpdateUserPresenceInput,
-      });
+      }));
 
       // Schedule restoration job (single job per user)
       await assignmentReactivationQueue.scheduleReactivation(userId, unavailableUntil);
@@ -325,13 +326,13 @@ export class UserAssignmentStateService {
       // users and user_presence, so clearing only user_presence leaves a stale timestamp on
       // users forever.
       await Promise.all([
-        this.prisma.userPresence.updateMany({
+        withWorkspaceScope(() => this.prisma.userPresence.updateMany({
           where: { userId },
           data: {
             assignmentUnavailableUntil: null,
             updatedAt: new Date(),
           } as UpdateUserPresenceInput,
-        }),
+        })),
         this.prisma.user.updateMany({
           where: { id: userId },
           data: { assignmentUnavailableUntil: null },

@@ -7,6 +7,7 @@ import { DatabaseClient } from '../client';
 import { Prisma } from '@prisma/client';
 import { MessageDirection, ExternalEntityType } from '@xyne/shared';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class ExternalMessageRepository {
   private db = DatabaseClient.getInstance();
@@ -127,7 +128,7 @@ export class ExternalMessageRepository {
         ? await resolveWorkspaceIdFromModel(this.db, 'email', { id: data.entityId })
         : await resolveWorkspaceIdFromModel(this.db, 'message', { messageId: data.entityId });
 
-      return await this.db.externalMessage.create({
+      return await withWorkspaceScope(() => this.db.externalMessage.create({
         data: {
           externalSourceId: data.externalSourceId,
           externalId: data.externalId,
@@ -139,7 +140,7 @@ export class ExternalMessageRepository {
           ...(data.entityType && { entityType: data.entityType }),
           ...(data.createdAt && { createdAt: data.createdAt }),
         }
-      });
+      }));
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const existing = await this.findByExternalId(data.externalSourceId, data.externalId);
@@ -180,8 +181,8 @@ export class ExternalMessageRepository {
    * Delete external message
    */
   async delete(id: string) {
-    return await this.db.externalMessage.delete({
+    return await withWorkspaceScope(() => this.db.externalMessage.delete({
       where: { id }
-    });
+    }));
   }
 }

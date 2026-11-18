@@ -510,10 +510,10 @@ export class InvitationController {
       // Reject if the owner email is already an active member of any org
       // Checks membership of ANY org, not just the caller's.
       const existingMembership = await withWorkspaceScope(() =>
-        prisma.orgMember.findFirst({
+        withWorkspaceScope(() => prisma.orgMember.findFirst({
           where: { email: normalizedOwnerEmail, leftAt: null },
           select: { orgId: true },
-        }),
+        })),
       );
       if (existingMembership) {
         res.status(409).json({
@@ -565,24 +565,24 @@ export class InvitationController {
         await invitationService.deleteInvitation(invitation.id);
         
         // 1a. Delete organization domain mappings
-        await prisma.organizationDomain.deleteMany({
+        await withWorkspaceScope(() => prisma.organizationDomain.deleteMany({
           where: { orgId: org.orgId },
-        });
+        }));
 
         // 2. Delete org member
         await withWorkspaceScope(() =>
-          prisma.orgMember.delete({ where: { email: normalizedOwnerEmail } }),
+          withWorkspaceScope(() => prisma.orgMember.delete({ where: { email: normalizedOwnerEmail } })),
         );
         
         // 3. Delete workspace-organization link
-        await prisma.workspaceOrganization.delete({ 
+        await withWorkspaceScope(() => prisma.workspaceOrganization.delete({ 
           where: { 
             orgId_workspaceId: {
               orgId: org.orgId,
               workspaceId: workspace.id,
             },
           }, 
-        });
+        }));
         
         // 4. Delete DM project
         await prisma.project.deleteMany({ 
@@ -590,9 +590,9 @@ export class InvitationController {
         });
         
         // 5. Delete workspace users (including bots created during sync)
-        await prisma.user.deleteMany({ 
+        await withWorkspaceScope(() => prisma.user.deleteMany({ 
           where: { workspaceId: workspace.id } 
-        });
+        }));
         
         // 6. Delete workspace
         await prisma.workspace.delete({ 

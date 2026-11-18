@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 /**
  * Get all activity aliases
@@ -59,7 +60,7 @@ export async function createAlias(req: Request, res: Response): Promise<void> {
     }
 
     // Create the alias (preserve alias values even when blacklisting)
-    const alias = await db.activityAlias.create({
+    const alias = await withWorkspaceScope(() => db.activityAlias.create({
       data: {
         eventName,
         eventCategory,
@@ -68,7 +69,7 @@ export async function createAlias(req: Request, res: Response): Promise<void> {
         isBlacklisted,
         createdAt: new Date(),
       },
-    });
+    }));
 
     logger.info(`[ACTIVITY-ALIASES] Created alias: ${eventName} -> ${aliasEventName}`);
     res.json({ alias });
@@ -108,14 +109,14 @@ export async function updateAlias(req: Request, res: Response): Promise<void> {
     }
 
     // Update the alias - keep alias values even when blacklisting
-    const updatedAlias = await db.activityAlias.update({
+    const updatedAlias = await withWorkspaceScope(() => db.activityAlias.update({
       where: { id },
       data: {
         aliasEventName: aliasEventName ?? existingAlias.aliasEventName,
         aliasEventCategory: aliasEventCategory ?? existingAlias.aliasEventCategory,
         isBlacklisted: newIsBlacklisted,
       },
-    });
+    }));
 
     logger.info(`[ACTIVITY-ALIASES] Updated alias: ${existingAlias.eventName}`);
     res.json({ alias: updatedAlias });
@@ -143,9 +144,9 @@ export async function deleteAlias(req: Request, res: Response): Promise<void> {
     }
 
     // Delete the alias
-    await db.activityAlias.delete({
+    await withWorkspaceScope(() => db.activityAlias.delete({
       where: { id },
-    });
+    }));
 
     logger.info(`[ACTIVITY-ALIASES] Deleted alias: ${existingAlias.eventName}`);
     res.status(204).send();

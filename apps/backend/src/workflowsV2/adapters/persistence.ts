@@ -91,6 +91,7 @@ import {
   toWorkflowRecord,
 } from '../utils';
 import { createExecutionTx } from '@/bypassAcl/transactions/adaptersPersistence';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
@@ -777,7 +778,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   async listCredentials(filter: XyneFilter, page: CursorPage): Promise<Paged<CredentialListItem>> {
     const seek = page.cursor !== undefined ? decodeSeek(page.cursor) : null;
     const after = seek?.[0];
-    const rows = await db.workflowCredential.findMany({
+    const rows = await withWorkspaceScope(() => db.workflowCredential.findMany({
       where: {
         workspaceId: filter.workspaceId,
         ...(after !== undefined ? { name: { gt: after } } : {}),
@@ -785,7 +786,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
       select: CREDENTIAL_SUMMARY_SELECT,
       orderBy: { name: 'asc' },
       take: page.limit + 1,
-    });
+    }));
 
     const hasMore = rows.length > page.limit;
     const items = (hasMore ? rows.slice(0, page.limit) : rows).map((row) => ({
@@ -797,10 +798,10 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   }
 
   async getCredentialByName(filter: XyneFilter, name: string): Promise<CredentialListItem | null> {
-    const row = await db.workflowCredential.findFirst({
+    const row = await withWorkspaceScope(() => db.workflowCredential.findFirst({
       where: { workspaceId: filter.workspaceId, name },
       select: CREDENTIAL_SUMMARY_SELECT,
-    });
+    }));
     return row
       ? {
           summary: toCredentialSummary(row),
@@ -816,16 +817,16 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     const workspaceId = requireWorkspaceId(attributes, 'createCredential');
     const values = validateCredentialValues(input.authType, input.values);
 
-    const existing = await db.workflowCredential.findUnique({
+    const existing = await withWorkspaceScope(() => db.workflowCredential.findUnique({
       where: { workspaceId_name: { workspaceId, name: input.name } },
       select: { name: true },
-    });
+    }));
     if (existing) {
       throw new Error(`Credential "${input.name}" already exists`);
     }
 
     const now = new Date();
-    const row = await db.workflowCredential.create({
+    const row = await withWorkspaceScope(() => db.workflowCredential.create({
       data: {
         workspaceId,
         name: input.name,
@@ -837,7 +838,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         updatedAt: now,
       },
       select: CREDENTIAL_SUMMARY_SELECT,
-    });
+    }));
     return toCredentialSummary(row);
   }
 
@@ -847,13 +848,13 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     values: AuthSpecificValues,
   ): Promise<CredentialSummary | null> {
     const workspaceId = requireWorkspaceId(attributes, 'replaceCredentialValues');
-    const existing = await db.workflowCredential.findUnique({
+    const existing = await withWorkspaceScope(() => db.workflowCredential.findUnique({
       where: { workspaceId_name: { workspaceId, name } },
       select: { authType: true },
-    });
+    }));
     if (!existing) return null;
     const validated = validateCredentialValues(existing.authType as CredentialAuthType, values);
-    const row = await db.workflowCredential.update({
+    const row = await withWorkspaceScope(() => db.workflowCredential.update({
       where: { workspaceId_name: { workspaceId, name } },
       data: {
         data: encrypt(JSON.stringify(validated)),
@@ -861,7 +862,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         updatedAt: new Date(),
       },
       select: CREDENTIAL_SUMMARY_SELECT,
-    });
+    }));
     return toCredentialSummary(row);
   }
 
@@ -875,15 +876,15 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     name: string,
   ): Promise<CredentialSummary | null> {
     const workspaceId = requireWorkspaceId(attributes, 'revokeCredential');
-    const { count } = await db.workflowCredential.updateMany({
+    const { count } = await withWorkspaceScope(() => db.workflowCredential.updateMany({
       where: { workspaceId, name },
       data: { status: CREDENTIAL_REVOKED, updatedAt: new Date() },
-    });
+    }));
     if (count === 0) return null;
-    const row = await db.workflowCredential.findUnique({
+    const row = await withWorkspaceScope(() => db.workflowCredential.findUnique({
       where: { workspaceId_name: { workspaceId, name } },
       select: CREDENTIAL_SUMMARY_SELECT,
-    });
+    }));
     return row ? toCredentialSummary(row) : null;
   }
 
@@ -906,10 +907,10 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         : workflowOrAttributes;
     const workspaceId = requireWorkspaceId(attributes, 'resolveCredential');
 
-    const row = await db.workflowCredential.findUnique({
+    const row = await withWorkspaceScope(() => db.workflowCredential.findUnique({
       where: { workspaceId_name: { workspaceId, name } },
       select: { name: true, credType: true, authType: true, status: true, data: true },
-    });
+    }));
     if (!row || row.status !== CREDENTIAL_ACTIVE) return null;
 
     const values = JSON.parse(decrypt(row.data)) as unknown;

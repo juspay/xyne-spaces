@@ -41,6 +41,7 @@ import {
   syncConversationTicketMdFromPrismaTicket,
 } from '@/utils/ticketMd';
 import { processIssuesChunkTx } from '@/bypassAcl/transactions/jiraMigrationImportService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 type JiraFieldDefinition = {
   id: string;
@@ -2874,7 +2875,7 @@ export class JiraMigrationImportService {
     const workspaceId = this.currentWorkspaceId;
     if (!workspaceId) throw new Error('workspaceId required: no active migration run context');
 
-    await db.externalMessage.createMany({
+    await withWorkspaceScope(() => db.externalMessage.createMany({
       data: pendingMappings.map(mapping => ({
         externalSourceId: mapping.externalSourceId,
         externalId: mapping.externalId,
@@ -2886,7 +2887,7 @@ export class JiraMigrationImportService {
         workspaceId,
       })),
       skipDuplicates: true,
-    });
+    }));
   }
 
   private async ensureTicketExternalMapping(

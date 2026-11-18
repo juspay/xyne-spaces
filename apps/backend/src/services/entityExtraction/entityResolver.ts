@@ -2,6 +2,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { normalize, type Mention } from '@/services/entityExtraction/pipeline';
 import { fuzzyMatchEntityAlias } from '@/bypassAcl/entityServices';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 /**
  * Turns raw typed mentions into entities in the registry — the "one entity,
@@ -175,7 +176,7 @@ class EntityResolver {
   /** Create a new entity + its first alias; returns the entity id. */
   private async createEntity(workspaceId: string, g: FormGroup): Promise<string> {
     try {
-      const entity = await this.prisma.entity.create({
+      const entity = await withWorkspaceScope(() => this.prisma.entity.create({
         data: {
           workspaceId,
           type: g.type,
@@ -183,8 +184,8 @@ class EntityResolver {
           normalizedName: g.normalizedForm,
           mentionCount: g.count,
         },
-      });
-      await this.prisma.entityAlias.create({
+      }));
+      await withWorkspaceScope(() => this.prisma.entityAlias.create({
         data: {
           workspaceId,
           entityId: entity.id,
@@ -193,7 +194,7 @@ class EntityResolver {
           normalizedForm: g.normalizedForm,
           count: g.count,
         },
-      });
+      }));
       return entity.id;
     } catch {
       // Unique violation — another form created this entity between our lookup
@@ -223,26 +224,26 @@ class EntityResolver {
     normalizedForm: string,
     count: number,
   ): Promise<void> {
-    await this.prisma.entityAlias.upsert({
+    await withWorkspaceScope(() => this.prisma.entityAlias.upsert({
       where: { workspaceId_type_normalizedForm: { workspaceId, type, normalizedForm } },
       create: { workspaceId, entityId, type, surfaceForm, normalizedForm, count },
       update: { count: { increment: count } },
-    });
+    }));
   }
 
   private async link(aliasId: string, entityId: string, count: number): Promise<void> {
-    await this.prisma.entityAlias.update({
+    await withWorkspaceScope(() => this.prisma.entityAlias.update({
       where: { id: aliasId },
       data: { count: { increment: count } },
-    });
+    }));
     await this.bumpEntity(entityId, count);
   }
 
   private async bumpEntity(entityId: string, count: number): Promise<void> {
-    await this.prisma.entity.update({
+    await withWorkspaceScope(() => this.prisma.entity.update({
       where: { id: entityId },
       data: { mentionCount: { increment: count } },
-    });
+    }));
   }
 }
 

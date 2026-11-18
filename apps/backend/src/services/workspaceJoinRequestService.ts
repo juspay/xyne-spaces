@@ -98,7 +98,7 @@ export class WorkspaceJoinRequestService {
       };
     }
 
-    const joinRequest = await this.prisma.workspaceJoinRequest.create({
+    const joinRequest = await withWorkspaceScope(() => this.prisma.workspaceJoinRequest.create({
       data: {
         workspaceId: workspace.id,
         email,
@@ -106,7 +106,7 @@ export class WorkspaceJoinRequestService {
         createdAt: new Date(),
         updatedAt: new Date(),
       },
-    });
+    }));
 
     logger.info('[WorkspaceJoinRequestService] Created workspace join request', {
       email,
@@ -298,7 +298,7 @@ export class WorkspaceJoinRequestService {
         select: { memberId: true, role: true },
       });
 
-      await this.prisma.orgMember.upsert({
+      await withWorkspaceScope(() => this.prisma.orgMember.upsert({
         where: { email: request.email },
         create: {
           orgId,
@@ -311,7 +311,7 @@ export class WorkspaceJoinRequestService {
           role: OrgRole.MEMBER,
           leftAt: null,
         },
-      });
+      }));
 
       return current;
     });

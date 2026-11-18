@@ -199,6 +199,66 @@ function stampNestedWrite(child: string, isList: boolean, write: Row, ws: string
   return out;
 }
 
+// ── nested-insert walk (read-only) ───────────────────────────────────────────
+
+/**
+ * Call `visit(childModel, row)` for every row a write payload for `model` INSERTS through a
+ * nested relation write, at any depth. The payload's own top-level row is not visited.
+ *
+ * Covers the same insert branches the stamper fills — create / createMany.data /
+ * connectOrCreate.create / upsert.create — and recurses through the branches that touch
+ * existing rows (upsert.update, update) for the creates nested inside them. Never mutates.
+ * Used by the ACL extension to refuse a nested row that names another workspace.
+ */
+export function forEachNestedInsert(
+  model: string,
+  payload: unknown,
+  visit: (childModel: string, row: Record<string, unknown>) => void,
+): void {
+  if (!isObject(payload)) return;
+  for (const { field, child, isList } of RELATIONS.get(model) ?? []) {
+    const write = payload[field];
+    if (!isObject(write)) continue;
+
+    const each = (value: unknown, fn: (v: unknown) => void): void => {
+      if (Array.isArray(value)) value.forEach(fn);
+      else fn(value);
+    };
+    const inserted = (row: unknown): void => {
+      if (!isObject(row)) return;
+      visit(child, row);
+      forEachNestedInsert(child, row, visit);
+    };
+    const updated = (row: unknown): void => forEachNestedInsert(child, row, visit);
+
+    if ('create' in write) each(write.create, inserted);
+
+    const createMany = write.createMany;
+    if (isObject(createMany) && Array.isArray(createMany.data)) createMany.data.forEach(inserted);
+
+    if ('connectOrCreate' in write)
+      each(write.connectOrCreate, (entry) => isObject(entry) && inserted(entry.create));
+
+    if ('upsert' in write)
+      each(write.upsert, (entry) => {
+        if (!isObject(entry)) return;
+        inserted(entry.create);
+        updated(entry.update);
+      });
+
+    // update: to-many → [{ where, data }] | { where, data }; to-one → the data itself, or
+    // { where?, data } in Prisma's to-one-with-where form.
+    const update = write.update;
+    if (update && typeof update === 'object') {
+      if (isList) each(update, (entry) => isObject(entry) && updated(entry.data));
+      else {
+        updated(update);
+        if (isObject((update as Row).data)) updated((update as Row).data);
+      }
+    }
+  }
+}
+
 // ── the extension ────────────────────────────────────────────────────────────
 
 function isWriteOp(op: string): boolean {

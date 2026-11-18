@@ -8,6 +8,7 @@ import {
   OrgLLMServiceAccountPurpose,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { decrypt, encrypt } from '@/services/encryptionService';
@@ -95,7 +96,7 @@ export class AiProvisioningBackfillController {
     subjectType: AIProvisioningSubjectType,
     subjectId: string,
   ): Promise<boolean> {
-    const row = await this.prisma.aiProvisioningStatus.findUnique({
+    const row = await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.findUnique({
       where: {
         subjectType_subjectId_provider: {
           subjectType,
@@ -104,7 +105,7 @@ export class AiProvisioningBackfillController {
         },
       },
       select: { status: true },
-    });
+    }));
     return row?.status === AIProvisioningStatusValue.SUCCESS;
   }
 
@@ -115,7 +116,7 @@ export class AiProvisioningBackfillController {
     error?: string,
   ): Promise<void> {
     const now = new Date();
-    const existing = await this.prisma.aiProvisioningStatus.findUnique({
+    const existing = await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.findUnique({
       where: {
         subjectType_subjectId_provider: {
           subjectType,
@@ -123,10 +124,10 @@ export class AiProvisioningBackfillController {
           provider: AIProvisioningProvider.CLAW_LITELLM,
         },
       },
-    });
+    }));
 
     if (existing) {
-      await this.prisma.aiProvisioningStatus.update({
+      await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.update({
         where: { id: existing.id },
         data: {
           status,
@@ -134,9 +135,9 @@ export class AiProvisioningBackfillController {
           lastAttemptedAt: now,
           updatedAt: now,
         },
-      });
+      }));
     } else {
-      await this.prisma.aiProvisioningStatus.create({
+      await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.create({
         data: {
           subjectType,
           subjectId,
@@ -148,7 +149,7 @@ export class AiProvisioningBackfillController {
           createdAt: now,
           updatedAt: now,
         },
-      });
+      }));
     }
   }
 
@@ -204,7 +205,8 @@ export class AiProvisioningBackfillController {
   }
 
   private static async getOrgLiteLLMTeamId(orgId: string): Promise<string | null> {
-    const credential = await this.prisma.orgLLMServiceAccountCredential.findUnique({
+    // Backend read of a hidden column (credentials); see orgLLMCredentialService.
+    const credential = await withWorkspaceScope(() => this.prisma.orgLLMServiceAccountCredential.findUnique({
       where: {
         orgId_provider_purpose: {
           orgId,
@@ -213,7 +215,7 @@ export class AiProvisioningBackfillController {
         },
       },
       select: { credentials: true, status: true },
-    });
+    }));
 
     if (!credential || credential.status === OrgLLMServiceAccountCredentialStatus.REVOKED) {
       return null;
@@ -658,15 +660,15 @@ export class AiProvisioningBackfillController {
       ]);
 
       const [orgsDone, workspacesDone, usersDone] = await Promise.all([
-        this.prisma.aiProvisioningStatus.count({
+        withWorkspaceScope(() => this.prisma.aiProvisioningStatus.count({
           where: { subjectType: AIProvisioningSubjectType.ORG, status: AIProvisioningStatusValue.SUCCESS },
-        }),
-        this.prisma.aiProvisioningStatus.count({
+        })),
+        withWorkspaceScope(() => this.prisma.aiProvisioningStatus.count({
           where: { subjectType: AIProvisioningSubjectType.WORKSPACE, status: AIProvisioningStatusValue.SUCCESS },
-        }),
-        this.prisma.aiProvisioningStatus.count({
+        })),
+        withWorkspaceScope(() => this.prisma.aiProvisioningStatus.count({
           where: { subjectType: AIProvisioningSubjectType.USER, status: AIProvisioningStatusValue.SUCCESS },
-        }),
+        })),
       ]);
 
       res.status(200).json({

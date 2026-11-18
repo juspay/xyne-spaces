@@ -5,6 +5,7 @@ import {
 } from '@xyne/shared';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 
@@ -234,7 +235,9 @@ class OrgLLMCredentialService {
       return cached.value;
     }
 
-    const row = await this.prisma.orgLLMServiceAccountCredential.findUnique({
+    // Backend read: `credentials` is a hidden column, masked from user requests, so read it as
+    // the backend even when an agent runs inside one.
+    const row = await withWorkspaceScope(() => this.prisma.orgLLMServiceAccountCredential.findUnique({
       where: {
         orgId_provider_purpose: {
           orgId,
@@ -247,7 +250,7 @@ class OrgLLMCredentialService {
         status: true,
         purpose: true,
       },
-    });
+    }));
 
     if (!row || row.status !== OrgLLMServiceAccountCredentialStatus.ACTIVE) {
       this.cache.set(key, {

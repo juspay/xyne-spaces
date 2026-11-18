@@ -14,6 +14,7 @@ import {
   getEnabledSummaryTemplateSections,
   hasDisabledNonMandatorySummarySection,
 } from './summaryTemplateSections';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export type SummaryTemplateCreateInput = Pick<
   Prisma.SummaryTemplateUncheckedCreateInput,
@@ -431,16 +432,18 @@ export class SummaryTemplateService {
       throw new SummaryTemplateError('Only the template creator can delete it', 403);
     }
 
-    await this.db.$transaction([
-      this.db.entityAccess.deleteMany({
-        where: {
-          workspaceId,
-          shareableEntityType: ShareableEntityType.SUMMARY_TEMPLATE,
-          entityId: templateId,
-        },
-      }),
-      this.db.summaryTemplate.delete({ where: { id: templateId } }),
-    ]);
+    // The template is deleted under the caller's own rule first; its share rows are backend
+    // bookkeeping (EntityAccess is backend-written) and are cleaned up after. A leftover share row
+    // pointing at a deleted template is harmless; deleting shares for a template that then
+    // survives would not be.
+    await this.db.summaryTemplate.delete({ where: { id: templateId } });
+    await withWorkspaceScope(() => this.db.entityAccess.deleteMany({
+      where: {
+        workspaceId,
+        shareableEntityType: ShareableEntityType.SUMMARY_TEMPLATE,
+        entityId: templateId,
+      },
+    }));
   }
 }
 

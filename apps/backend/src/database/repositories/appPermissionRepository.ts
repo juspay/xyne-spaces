@@ -9,6 +9,7 @@ import { AppPermissionStatus, AppPermissionType } from '@xyne/shared';
 import { setInstalledPermissionsTx } from '@/bypassAcl/transactions/appPermissionRepository';
 import { activateInstalledPermissionsTx } from '@/bypassAcl/transactions/appPermissionRepository';
 import { syncFromAppApprovedTx } from '@/bypassAcl/transactions/appPermissionRepository';
+import { withWorkspaceScope } from '@/database/tenant/context';
 export type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 // ─── Typed row shapes from Prisma includes ────────────────────────────────────
@@ -59,7 +60,7 @@ export class AppPermissionRepository extends BaseRepository<
 
 
   async create(data: Prisma.AvailableAppPermissionUncheckedCreateInput) {
-    return this.db.availableAppPermission.create({ data });
+    return withWorkspaceScope(() => this.db.availableAppPermission.create({ data }));
   }
 
   async findById(id: string) {
@@ -76,11 +77,11 @@ export class AppPermissionRepository extends BaseRepository<
   }
 
   async update(id: string, data: Prisma.AvailableAppPermissionUpdateInput) {
-    return this.db.availableAppPermission.update({ where: { id }, data });
+    return withWorkspaceScope(() => this.db.availableAppPermission.update({ where: { id }, data }));
   }
 
   async delete(id: string) {
-    return this.db.availableAppPermission.delete({ where: { id } });
+    return withWorkspaceScope(() => this.db.availableAppPermission.delete({ where: { id } }));
   }
 
   /** Look up a single registry entry by its scope string (e.g. "chat:write"). */
@@ -99,11 +100,11 @@ export class AppPermissionRepository extends BaseRepository<
 
   async upsertByScope(scope: string, description?: string) {
     const { name, type } = parseScope(scope);
-    return this.db.availableAppPermission.upsert({
+    return withWorkspaceScope(() => this.db.availableAppPermission.upsert({
       where: { name_type: { name, type } },
       create: { name, type, description },
       update: {},
-    });
+    }));
   }
 
   async getAppPermissions(appId: string): Promise<string[]> {

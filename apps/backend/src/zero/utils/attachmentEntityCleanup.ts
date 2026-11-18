@@ -6,6 +6,7 @@ import { deleteVideoRenditions, isVideoMimetype } from '@/services/videoRenditio
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { zql } from '../queries';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 async function deleteEntityAttachmentsByType(
   tx: Transaction<Schema>,
@@ -105,10 +106,10 @@ export async function cleanupDelayedMessageAttachmentsPrisma(
   }
 
   try {
-    await db.delayedMessage.update({
+    await withWorkspaceScope(() => db.delayedMessage.update({
       where: { id: delayedMessageId },
       data: { hasAttachment: false },
-    });
+    }));
   } catch (error) {
     logger.warn(
       `Could not clear hasAttachment for delayed message ${delayedMessageId}:`,

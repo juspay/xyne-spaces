@@ -5,6 +5,7 @@ import type {
   UpdateDashboardActivityInput,
   QueryOptions,
 } from '@/types/database';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class DashboardActivityRepository extends BaseRepository<
   DashboardActivity,
@@ -16,7 +17,7 @@ export class DashboardActivityRepository extends BaseRepository<
   }
 
   async create(data: CreateDashboardActivityInput): Promise<DashboardActivity> {
-    return this.db.dashboardActivity.create({ data });
+    return withWorkspaceScope(() => this.db.dashboardActivity.create({ data }));
   }
 
   async findById(id: string): Promise<DashboardActivity | null> {
@@ -58,10 +59,10 @@ export class DashboardActivityRepository extends BaseRepository<
     id: string,
     data: UpdateDashboardActivityInput,
   ): Promise<DashboardActivity> {
-    return this.db.dashboardActivity.update({ where: { id }, data });
+    return withWorkspaceScope(() => this.db.dashboardActivity.update({ where: { id }, data }));
   }
 
   async delete(id: string): Promise<DashboardActivity> {
-    return this.db.dashboardActivity.delete({ where: { id } });
+    return withWorkspaceScope(() => this.db.dashboardActivity.delete({ where: { id } }));
   }
 }

@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 import { AuthSessionStatus } from './authSessionService';
 import { getOrgMemberIdForUserQuery } from '@/bypassAcl/notificationServices';
 import { getNotificationPushSessionSource, type PushSessionFallbackReason } from '@/services/otel/notificationMetrics';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 type CachedAccessToken = {
   accessToken: string;
@@ -296,15 +297,15 @@ class FcmPushService {
       return;
     }
     const sessionSelect = { id: true, deviceKey: true, status: true, refreshTokenExpiry: true } as const;
-    let sessionEntry = await db.authSession.findFirst({
+    let sessionEntry = await withWorkspaceScope(() => db.authSession.findFirst({
       where: { id: payload.sessionId, orgMemberId },
       select: sessionSelect,
-    });
+    }));
 
     // Fallback: the device's active auth session by (orgMemberId, deviceKey) when the JWT's
     // session id does not resolve (e.g. a token minted before the session was replaced).
     if (!sessionEntry && payload.orgMemberId && payload.deviceKey) {
-      sessionEntry = await db.authSession.findFirst({
+      sessionEntry = await withWorkspaceScope(() => db.authSession.findFirst({
         where: {
           orgMemberId: payload.orgMemberId,
           deviceKey: payload.deviceKey,
@@ -312,7 +313,7 @@ class FcmPushService {
           refreshTokenExpiry: { gt: new Date() },
         },
         select: sessionSelect,
-      });
+      }));
       if (sessionEntry) {
         logger.info('[FCM] registerToken step=session_resolved_by_device', {
           userId,
@@ -377,10 +378,10 @@ class FcmPushService {
     let deviceInfoUpdate: string | undefined;
     if (payload.appVersion) {
       try {
-        const existing = await db.authSession.findUnique({
+        const existing = await withWorkspaceScope(() => db.authSession.findUnique({
           where: { id: sessionEntry.id },
           select: { deviceInfo: true },
-        });
+        }));
         const parsed = existing?.deviceInfo ? JSON.parse(existing.deviceInfo) : {};
         deviceInfoUpdate = JSON.stringify({ ...parsed, appVersion: payload.appVersion });
       } catch {
@@ -394,7 +395,7 @@ class FcmPushService {
       composedTokenPreview,
       composedVoipTokenPreview,
     });
-    await db.authSession.update({
+    await withWorkspaceScope(() => db.authSession.update({
       where: { id: sessionEntry.id },
       data: {
         fcmToken: composedToken,
@@ -402,7 +403,7 @@ class FcmPushService {
         ...(deviceInfoUpdate ? { deviceInfo: deviceInfoUpdate } : {}),
         updatedAt: new Date(),
       },
-    });
+    }));
 
     const duplicateConditions: Prisma.AuthSessionWhereInput[] = [{ fcmToken: composedToken }];
 
@@ -421,7 +422,7 @@ class FcmPushService {
       composedTokenPreview,
       composedVoipTokenPreview,
     });
-    const duplicateCleanupResult = await db.authSession.updateMany({
+    const duplicateCleanupResult = await withWorkspaceScope(() => db.authSession.updateMany({
       where: {
         orgMemberId,
         id: { not: sessionEntry.id },
@@ -431,7 +432,7 @@ class FcmPushService {
         fcmToken: null,
         voipToken: null,
       },
-    });
+    }));
 
     logger.info('[FCM] registerToken step=complete', {
       userId,
@@ -450,7 +451,7 @@ class FcmPushService {
 
     const orgMemberId = await this.orgMemberIdOf(userId);
     if (!orgMemberId) return;
-    await db.authSession.updateMany({
+    await withWorkspaceScope(() => db.authSession.updateMany({
       where: {
         orgMemberId,
         ...(sessionId ? { id: sessionId } : {}),
@@ -465,32 +466,32 @@ class FcmPushService {
         fcmToken: null,
         voipToken: null,
       },
-    });
+    }));
   }
 
   async unregisterUserTokens(userId: string): Promise<void> {
     const orgMemberId = await this.orgMemberIdOf(userId);
     if (!orgMemberId) return;
-    await db.authSession.updateMany({
+    await withWorkspaceScope(() => db.authSession.updateMany({
       where: { orgMemberId },
       data: {
         fcmToken: null,
         voipToken: null,
       },
-    });
+    }));
   }
 
   async hasActiveTokens(userId: string): Promise<boolean> {
     const orgMemberId = await this.orgMemberIdOf(userId);
     if (!orgMemberId) return false;
-    const activeCount = await db.authSession.count({
+    const activeCount = await withWorkspaceScope(() => db.authSession.count({
       where: {
         orgMemberId,
         status: AuthSessionStatus.ACTIVE,
         refreshTokenExpiry: { gt: new Date() },
         OR: [{ fcmToken: { not: null } }, { voipToken: { not: null } }],
       },
-    });
+    }));
     return activeCount > 0;
   }
 
@@ -501,7 +502,7 @@ class FcmPushService {
 
     const orgMemberId = await this.orgMemberIdOf(userId);
     if (!orgMemberId) return;
-    const sessions = await db.authSession.findMany({
+    const sessions = await withWorkspaceScope(() => db.authSession.findMany({
       where: {
         orgMemberId,
         status: AuthSessionStatus.ACTIVE,
@@ -514,7 +515,7 @@ class FcmPushService {
         deviceKey: true,
       },
       orderBy: { updatedAt: 'desc' },
-    });
+    }));
 
     const targets = sessions
       .map((session) => {
@@ -548,10 +549,10 @@ class FcmPushService {
     );
 
     if (successfulSessionIds.length > 0) {
-      await db.authSession.updateMany({
+      await withWorkspaceScope(() => db.authSession.updateMany({
         where: { id: { in: successfulSessionIds } },
         data: { updatedAt: new Date() },
-      });
+      }));
     }
   }
 
@@ -828,10 +829,10 @@ class FcmPushService {
 
   async clearSessionPushToken(sessionId: string): Promise<void> {
     try {
-      await db.authSession.update({
+      await withWorkspaceScope(() => db.authSession.update({
         where: { id: sessionId },
         data: { fcmToken: null, voipToken: null },
-      });
+      }));
     } catch (error) {
       logger.debug('Failed to clear session push token', { error });
     }
@@ -839,10 +840,10 @@ class FcmPushService {
 
   /** Clear the push tokens of the device's auth session (explicit unregister). */
   async clearDevicePushToken(orgMemberId: string, deviceKey: string): Promise<void> {
-    await db.authSession.updateMany({
+    await withWorkspaceScope(() => db.authSession.updateMany({
       where: { orgMemberId, deviceKey, status: AuthSessionStatus.ACTIVE },
       data: { fcmToken: null, voipToken: null },
-    });
+    }));
   }
 
   /**
@@ -860,7 +861,7 @@ class FcmPushService {
     if (!orgMemberId) {
       reason = 'no_org_member';
     } else {
-      const rows = await db.authSession.findMany({
+      const rows = await withWorkspaceScope(() => db.authSession.findMany({
         where: {
           orgMemberId,
           status: AuthSessionStatus.ACTIVE,
@@ -868,7 +869,7 @@ class FcmPushService {
         },
         select: { id: true, platform: true, fcmToken: true, voipToken: true, deviceInfo: true },
         orderBy: { updatedAt: 'desc' },
-      });
+      }));
 
       const targets = rows
         .filter((row) => row.fcmToken)

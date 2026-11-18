@@ -9,6 +9,7 @@ import {
   PaginatedResult,
 } from '@/types/database';
 import { aclAuditService } from '@/services/aclAuditService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export class ResourceRepository extends BaseRepository<Resource, CreateResourceInput, UpdateResourceInput> {
   constructor() {
@@ -18,9 +19,9 @@ export class ResourceRepository extends BaseRepository<Resource, CreateResourceI
   async create(data: CreateResourceInput, actorUserId?: string): Promise<Resource> {
     await this.validateString(data.name, 'name', 255);
 
-    const resource = await this.db.resource.create({
+    const resource = await withWorkspaceScope(() => this.db.resource.create({
       data,
-    });
+    }));
 
     // Log audit event
     await aclAuditService.logResourceCreated(resource.id, resource.name, actorUserId);
@@ -71,10 +72,10 @@ export class ResourceRepository extends BaseRepository<Resource, CreateResourceI
       await this.validateString(data.name, 'name', 255);
     }
 
-    const resource = await this.db.resource.update({
+    const resource = await withWorkspaceScope(() => this.db.resource.update({
       where: { id },
       data,
-    });
+    }));
 
     // Log audit event
     await aclAuditService.logResourceUpdated(resource.id, resource.name, actorUserId);
@@ -86,9 +87,9 @@ export class ResourceRepository extends BaseRepository<Resource, CreateResourceI
     // Get resource name before deletion for audit log
     const resource = await this.findById(id);
 
-    const deletedResource = await this.db.resource.delete({
+    const deletedResource = await withWorkspaceScope(() => this.db.resource.delete({
       where: { id },
-    });
+    }));
 
     // Log audit event
     if (resource) {

@@ -91,10 +91,10 @@ export async function installApp(appId: string, workspaceId: string) {
     const orgMember = await withWorkspaceScope(async () => {
       const existing = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
       if (existing) return existing;
-      return db.orgMember.create({
+      return withWorkspaceScope(() => db.orgMember.create({
         data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
         select: { memberId: true },
-      });
+      }));
     });
     let appUser = await repositories.users.findByEmail(email, workspaceId);
     if (!appUser) {

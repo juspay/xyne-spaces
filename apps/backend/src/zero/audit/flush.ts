@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AuditAction, type AuditChangeDraft } from '@xyne/shared';
 import type { AuditJobsAccumulator, AuditScope } from './types';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 /**
  * Flush the per-save accumulator: drafts are grouped by (entityType, entityId)
@@ -86,7 +87,7 @@ export async function flushAuditTrail(
   for (const group of groups) {
     if (group.drafts.length === 0) continue;
 
-    await db.auditLog.create({
+    await withWorkspaceScope(() => db.auditLog.create({
       data: {
         id: uuidv4(),
         workspaceId: ctx.workspaceId,
@@ -107,6 +108,6 @@ export async function flushAuditTrail(
           })),
         },
       },
-    });
+    }));
   }
 }

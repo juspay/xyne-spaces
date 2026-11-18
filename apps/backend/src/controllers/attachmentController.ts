@@ -31,6 +31,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { cacheManager } from '../utils/cacheManager';
 import { pipeline } from 'node:stream/promises';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const db = DatabaseClient.getInstance();
 
@@ -153,7 +154,7 @@ export class AttachmentController {
         // Log failed insertion to Postgres
         try {
           if (db.vespaInsertionLogs && workspaceId) {
-            await db.vespaInsertionLogs.create({
+            await withWorkspaceScope(() => db.vespaInsertionLogs.create({
               data: {
                 status: "FAILED",
                 type: "INSERT",
@@ -166,7 +167,7 @@ export class AttachmentController {
                 userId: userId,
                 createdAt: new Date(),
               },
-            });
+            }));
           }
         } catch (dbError) {
           logger.error('Failed to log Vespa insertion error to database:', dbError);

@@ -5,6 +5,7 @@ import {
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { aiProvisioningQueue } from '@/queues/aiProvisioningQueue';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 class AIProvisioningService {
   private prisma = DatabaseClient.getInstance();
@@ -32,7 +33,7 @@ class AIProvisioningService {
 
     if (!memberRow) return;
 
-    await this.prisma.aiProvisioningStatus.updateMany({
+    await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.updateMany({
       where: {
         subjectType: AIProvisioningSubjectType.USER,
         subjectId: memberRow.memberId,
@@ -43,7 +44,7 @@ class AIProvisioningService {
         lastError: null,
         updatedAt: new Date(),
       },
-    });
+    }));
 
     await this.enqueueUserSync(memberRow.memberId);
   }
@@ -54,7 +55,7 @@ class AIProvisioningService {
   ) {
     const now = new Date();
     const provider = AIProvisioningProvider.CLAW_LITELLM;
-    const existing = await this.prisma.aiProvisioningStatus.findUnique({
+    const existing = await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.findUnique({
       where: {
         subjectType_subjectId_provider: {
           subjectType,
@@ -62,22 +63,22 @@ class AIProvisioningService {
           provider,
         },
       },
-    });
+    }));
 
     if (existing?.status === AIProvisioningStatusValue.SUCCESS) {
       return existing;
     }
 
     const status = existing
-      ? await this.prisma.aiProvisioningStatus.update({
+      ? await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.update({
           where: { id: existing.id },
           data: {
             status: AIProvisioningStatusValue.PENDING,
             lastError: null,
             updatedAt: now,
           },
-        })
-      : await this.prisma.aiProvisioningStatus.create({
+        }))
+      : await withWorkspaceScope(() => this.prisma.aiProvisioningStatus.create({
           data: {
             subjectType,
             subjectId,
@@ -87,7 +88,7 @@ class AIProvisioningService {
             createdAt: now,
             updatedAt: now,
           },
-        });
+        }));
 
     await aiProvisioningQueue.enqueue({
       provisioningStatusId: status.id,

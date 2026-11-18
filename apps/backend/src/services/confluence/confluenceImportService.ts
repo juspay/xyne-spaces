@@ -32,6 +32,7 @@ import {
 } from './contentTransformer';
 import { ConfluenceUserResolver, type UnresolvedConfluenceUser } from './userResolver';
 import { buildConfluencePageTree, getConfluenceSectionRoots, type ConfluencePageTreeNode } from './pageTree';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 export type ConfluenceSectionMapping =
   | { type: 'channel'; channelId?: string; channelName?: string }
@@ -1198,7 +1199,7 @@ export class ConfluenceImportService {
   ): Promise<void> {
     if (!externalSourceId) return;
 
-    await db.externalMessage.upsert({
+    await withWorkspaceScope(() => db.externalMessage.upsert({
       where: {
         externalSourceId_externalId: {
           externalSourceId,
@@ -1222,7 +1223,7 @@ export class ConfluenceImportService {
         messageId: canvasId,
         direction: MessageDirection.INCOMING,
       },
-    });
+    }));
   }
 
   private async createCanvasRecord(
@@ -1629,7 +1630,7 @@ export class ConfluenceImportService {
   ): Promise<void> {
     if (!externalSourceId) return;
 
-    await db.externalMessage.upsert({
+    await withWorkspaceScope(() => db.externalMessage.upsert({
       where: {
         externalSourceId_externalId: {
           externalSourceId,
@@ -1653,7 +1654,7 @@ export class ConfluenceImportService {
         messageId: attachmentRowId,
         direction: MessageDirection.INCOMING,
       },
-    });
+    }));
   }
 
   private async findExistingAttachment(

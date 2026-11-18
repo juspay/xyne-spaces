@@ -45,6 +45,7 @@ import { deleteCredentialTx } from '@/bypassAcl/transactions/SdlcVcsService';
 import { performRepositoryCheckTx } from '@/bypassAcl/transactions/SdlcVcsService';
 import { performRepositoryCheckTx2 } from '@/bypassAcl/transactions/SdlcVcsService';
 import { invalidateCredentialTx } from '@/bypassAcl/transactions/SdlcVcsService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const ACCESS_REFRESH_CHUNK = 5;
 
@@ -898,7 +899,7 @@ export class SdlcVcsService implements SdlcVcs {
         : action === 'disconnected'
           ? ACLAuditEventType.RESOURCE_DELETED
           : ACLAuditEventType.RESOURCE_UPDATED;
-    await this.prisma.aCLAuditLog.create({
+    await withWorkspaceScope(() => this.prisma.aCLAuditLog.create({
       data: {
         workspaceId: actor.workspaceId,
         actorUserId: actor.userId,
@@ -907,7 +908,7 @@ export class SdlcVcsService implements SdlcVcs {
         targetId,
         description: `SDLC VCS credential ${action}; metadata only`,
       },
-    });
+    }));
   }
 
   accessCheckAudit(

@@ -4,6 +4,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 const db = DatabaseClient.getInstance();
 
@@ -26,7 +27,7 @@ export const queueWhatsAppChannelVespaJob = (channelId: string, userId: string, 
       if (!ws) {
         throw new Error(`Could not resolve workspaceId for channel ${channelId}`);
       }
-      await db.vespaInsertionLogs.create({
+      await withWorkspaceScope(() => db.vespaInsertionLogs.create({
         data: {
           status: VespaInsertionStatus.FAILED,
           type: VespaOperationType.INSERT,
@@ -39,7 +40,7 @@ export const queueWhatsAppChannelVespaJob = (channelId: string, userId: string, 
           workspaceId: ws,
           createdAt: new Date(),
         },
-      });
+      }));
     } catch (dbError) {
       logger.error('[WhatsAppMigration] Failed to log Vespa channel insertion error', dbError, { channelId });
     }

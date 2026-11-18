@@ -41,6 +41,7 @@ import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-h
 import { buildUserQueryContext } from '@/utils/queryContext';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { channelsDeskTicketForConversation } from '@/bypassAcl/channelsDeskServices';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface UserInfo {
   id: string;
@@ -260,7 +261,7 @@ export class ConversationService {
             logger.error(`[ConversationService] Cannot log Vespa insertion error: no workspaceId for channel ${channelId}`);
             return;
           }
-          await db.vespaInsertionLogs.create({
+          await withWorkspaceScope(() => db.vespaInsertionLogs.create({
             data: {
               status: VespaInsertionStatus.FAILED,
               type: VespaOperationType.INSERT,
@@ -273,7 +274,7 @@ export class ConversationService {
               workspaceId: resolvedWorkspaceId,
               createdAt: new Date(),
             },
-          });
+          }));
         }
       } catch (dbError) {
         logger.error('[ConversationService] Failed to log Vespa channel insertion error to database:', dbError);
@@ -324,7 +325,7 @@ export class ConversationService {
               logger.error(`[ConversationService] Cannot log Vespa insertion error: no workspaceId for attachment ${attachment.id}`);
               return;
             }
-            await db.vespaInsertionLogs.create({
+            await withWorkspaceScope(() => db.vespaInsertionLogs.create({
               data: {
                 status: "FAILED",
                 type: "INSERT",
@@ -337,7 +338,7 @@ export class ConversationService {
                 workspaceId: resolvedWorkspaceId,
                 createdAt: new Date(),
               },
-            });
+            }));
           }
         } catch (dbError) {
           logger.error('Failed to log Vespa insertion error to database:', dbError);

@@ -1,14 +1,15 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 /**
  * Returns the stored password hash for a member from OrgMemberCredential, or null when none is set.
  */
 export async function getPasswordHash(memberId: string): Promise<string | null> {
-  const row = await db.orgMemberCredential.findUnique({
+  const row = await withWorkspaceScope(() => db.orgMemberCredential.findUnique({
     where: { memberId },
     select: { passwordHash: true },
-  });
+  }));
   return row?.passwordHash ?? null;
 }
 
