@@ -130,7 +130,6 @@ import {
 import {
   MessageArtifactStatus,
   parseSlashCommandArtifactMessage,
-  withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import { isEncryptedField } from '@xyne/shared';
@@ -175,8 +174,7 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
-import { getMutationDerived } from './encryptedMutation';
+import { requireMutationDerived } from './encryptedMutation';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
@@ -593,24 +591,12 @@ async function resolveCollectionPermissionRole(
   return role;
 }
 
-/** Guests may only mention people in the channel (see keepMentionsWithin). */
-async function guestSafeContent(
-  tx: Transaction<Schema>,
-  role: string | undefined,
-  channelId: string,
-  content: string,
-): Promise<string> {
-  if (role !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
-  const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
-  return keepMentionsWithin(content, new Set(participants.map(participant => participant.userId)));
-}
-
 /**
- * guestSafeContent for encrypted content: the ciphertext cannot be rewritten, so a guest whose
- * message mentions someone outside the channel is refused instead of having the mention
- * stripped. Group mentions (keepMentionsWithin drops every mention when one remains) and
- * `@name` handles (resolved to users only when notifying) are refused outright, since a guest
- * cannot be limited to channel members through them.
+ * Guests may only mention people in the channel. The content is opaque to the mutator (it
+ * may be ciphertext), so it cannot be rewritten to strip a mention the way the old
+ * keepMentionsWithin path did: a guest whose message mentions someone outside the channel is
+ * refused instead. Group mentions and `@name` handles (resolved to users only when notifying)
+ * are refused outright, since a guest cannot be limited to channel members through them.
  */
 async function assertGuestMentionsWithin(
   tx: Transaction<Schema>,
@@ -628,6 +614,23 @@ async function assertGuestMentionsWithin(
   if (derived.mentions.userIds.some(userId => !allowed.has(userId))) {
     throw new Error('Guests can only mention members of this channel');
   }
+}
+
+/** The mention ids a mutator acts on, from its facts; none when the rule did not extract them. */
+function mentionsFromDerived(derived: DerivedContentFacts): { userIds: string[]; groupIds: string[] } {
+  return derived.mentions
+    ? { userIds: derived.mentions.userIds, groupIds: derived.mentions.groupIds }
+    : { userIds: [], groupIds: [] };
+}
+
+/**
+ * What a bot in a DM is told the user sent, rebuilt from the command fact (`/name args`): the
+ * content itself is opaque to the mutator. A message that is not a command reaches the bot as
+ * `/`, so free-text AI bots do not get the text (direct consumer, see the migration plan).
+ */
+function botMessageFromDerived(derived: DerivedContentFacts): string {
+  const command = derived.command;
+  return command?.name ? `/${command.name} ${command.args ?? ''}`.trimEnd() : '/';
 }
 
 async function resolveMentionParticipantUserIds(
@@ -1783,12 +1786,18 @@ export function createMutators(
       updateCallSummaryPrompt: defineMutator(
         z.object({
           channelId: z.string(),
-          prompt: z
-            .string()
-            .max(SUMMARY_PROMPT_MAX_LENGTH, 'Call summary template must be 20000 characters or less')
-            .nullable(),
+          // No schema max: under its manifest rule `prompt` is ciphertext, longer than the
+          // text. The visible length is checked below from the text fact.
+          prompt: z.string().nullable(),
         }),
         async ({ tx, args: { channelId, prompt } }) => {
+          // `prompt` is opaque here (DEK ciphertext under its manifest rule, or plaintext the
+          // mutator never parses); length and emptiness come from the text fact.
+          const derived = prompt ? requireMutationDerived('channel.updateCallSummaryPrompt') : undefined;
+          if (derived?.text && derived.text.length > SUMMARY_PROMPT_MAX_LENGTH) {
+            throw new Error('Call summary template must be 20000 characters or less');
+          }
+          const promptIsEmpty = !prompt || (derived?.text ? derived.text.isEmpty : false);
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exist");
@@ -1804,7 +1813,7 @@ export function createMutators(
 
           await tx.mutate.channels.update({
             id: channelId,
-            callSummaryPrompt: prompt?.trim() ? prompt : null,
+            callSummaryPrompt: promptIsEmpty ? null : prompt,
           });
         },
       ),
@@ -1894,9 +1903,13 @@ export function createMutators(
             // Find the channel-level draft (conversationId === null)
             const draft = channelDrafts.find(d => d.conversationId === null);
 
-            if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+            // `draftMessage` is opaque here (DEK ciphertext under its manifest rule, or
+            // plaintext the mutator never parses); blankness comes from the text fact.
+            const draftDerived = draftMessage !== '' ? requireMutationDerived('channel.markChannelAsViewed') : undefined;
+            const draftIsBlank = draftMessage === '' || (draftDerived?.text?.isEmpty ?? false);
+            if (draft && draftIsBlank && !draft.hasAttachment) {
               await tx.mutate.draft_messages.delete({ id: draft.id });
-            } else if (draftMessage.trim() !== '') {
+            } else if (!draftIsBlank) {
               await tx.mutate.draft_messages.upsert({
                 workspaceId: authData.workspaceId,
                 id: draft?.id || draftMessageId,
@@ -2866,14 +2879,12 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
-          // Under its manifest rule `content` arrives as workspace-DEK ciphertext; the facts the
-          // mutator needs come from the encryption service instead of parsing it.
-          const derived = isEncryptedField(content) ? getMutationDerived() : undefined;
-          if (derived) {
-            await assertGuestMentionsWithin(tx, authData.role, channelId, derived);
-          } else {
-            content = await guestSafeContent(tx, authData.role, channelId, content);
-          }
+          // `content` is opaque here: workspace-DEK ciphertext under its manifest rule, or
+          // plaintext the mutator still never parses. Every fact comes from `derived`
+          // (encryptedMutation.ts: the encryption service for ciphertext, the same extractors
+          // locally for plaintext).
+          const derived = requireMutationDerived('conversations.send');
+          await assertGuestMentionsWithin(tx, authData.role, channelId, derived);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3145,7 +3156,7 @@ export function createMutators(
               asyncTasks.push(async () => {
                 try {
                   await processMeetLinksFromChatMessage(
-                    derived?.links ? derived.links.meet.join(' ') : message.content,
+                    derived.links?.meet.join(' ') ?? '',
                     authData.workspaceId,
                     conversationId,
                     message.messageId,
@@ -3187,9 +3198,7 @@ export function createMutators(
           });
 
           // Add mentioned users as MENTIONED participants within Zero transaction
-          const mentions = derived?.mentions
-            ? { userIds: derived.mentions.userIds, groupIds: derived.mentions.groupIds }
-            : extractAllMentions(content);
+          const mentions = mentionsFromDerived(derived);
           logger.info('[MENTION]:', mentions.userIds.length, mentions.groupIds.length, messageId);
           const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
             tx,
@@ -3245,11 +3254,7 @@ export function createMutators(
                     // Execute bot - this creates the bot response message
                     const result = await executionOrchestrator.execute({
                       botId: botDefinition.id,
-                      message: derived?.command
-                        ? derived.command.name
-                          ? `/${derived.command.name} ${derived.command.args ?? ''}`
-                          : '/'
-                        : content,
+                      message: botMessageFromDerived(derived),
                       channelId: channel.id,
                       conversationId,
                       userMessageId: message.messageId,
@@ -3734,7 +3739,10 @@ export function createMutators(
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
-          content = await guestSafeContent(tx, authData.role, conversation.channelId, content);
+          // `content` is opaque here (DEK ciphertext under its manifest rule, or plaintext the
+          // mutator never parses): every fact comes from `derived`, see encryptedMutation.ts.
+          const derived = requireMutationDerived('messages.send');
+          await assertGuestMentionsWithin(tx, authData.role, conversation.channelId, derived);
           const [channel, participant, channelDrafts] = await Promise.all([
             tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
             tx.run(zql.channel_participants
@@ -3758,6 +3766,8 @@ export function createMutators(
           // so a second /sev2 inside it would fork the responders across two cards
           // and two calls. The channel is unrestricted — that is where a genuinely
           // separate incident belongs.
+          // Direct consumer of the text: there is no artifact fact yet, so for ciphertext
+          // this parses nothing and the check does not run (tracked in the migration plan).
           const outgoingArtifact = parseSlashCommandArtifactMessage(content);
           if (outgoingArtifact) {
             const openArtifact = await tx.run(zql.message_artifacts
@@ -3904,7 +3914,7 @@ export function createMutators(
               asyncTasks.push(async () => {
                 try {
                   await processMeetLinksFromChatMessage(
-                    message.content,
+                    derived.links?.meet.join(' ') ?? '',
                     authData.workspaceId,
                     conversationId,
                     message.messageId,
@@ -4061,7 +4071,7 @@ export function createMutators(
           const user = await tx.run(zql.users.where('id', authData.sub).one());
 
           // Add mentioned users as MENTIONED participants within Zero transaction
-          const mentions = extractAllMentions(content);
+          const mentions = mentionsFromDerived(derived);
           const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
             tx,
             mentions.userIds,
@@ -4120,7 +4130,7 @@ export function createMutators(
                     // Execute bot - this creates the bot response message
                     const result = await executionOrchestrator.execute({
                       botId: botDefinition.id,
-                      message: content,
+                      message: botMessageFromDerived(derived),
                       channelId: channel.id,
                       conversationId,
                       userMessageId: message.messageId,
@@ -4182,41 +4192,25 @@ export function createMutators(
               throw new Error('BOT Messages cannot be edited');
             }
           }
-          if (content !== undefined && authData.role === WorkspaceRole.GUEST) {
+          // The new `content` is opaque here (DEK ciphertext under its manifest rule, or
+          // plaintext the mutator never parses); its facts come from `derived`. An empty edit
+          // (allowed for forwarded messages) has no facts.
+          const derived = content !== undefined && content !== '' ? requireMutationDerived('messages.update') : undefined;
+          if (derived && authData.role === WorkspaceRole.GUEST) {
             const edited = await tx.run(zql.conversations.where('conversationId', message.conversationId).one());
-            content = await guestSafeContent(tx, authData.role, edited?.channelId ?? '', content);
+            await assertGuestMentionsWithin(tx, authData.role, edited?.channelId ?? '', derived);
           }
 
-          // Only process mention changes if content is being updated
+          // Everyone mentioned in the new content becomes a MENTIONED participant (adding is
+          // idempotent). Participants who are no longer mentioned are kept: the stored content
+          // is ciphertext, so the old mentions cannot be read to diff against (tracked in the
+          // migration plan as a direct consumer).
           let newlyMentionedUsers: string[] = [];
           let newlyMentionedGroups: string[] = [];
-          let noLongerMentionedUsers: string[] = [];
-
-          if (content !== undefined) {
-            // For forwarded messages, parse XML to extract mentions from optionalText
-            // For regular messages, extract mentions from the message content
-            let oldContentToCheck = message.content;
-            if (isForwardedMessage) {
-              const parsedForwarded = parseForwardedMessageXml(message.content);
-              oldContentToCheck = parsedForwarded?.optionalText || '';
-            }
-
-            // Extract mentions from old and new content
-            const oldMentions = extractAllMentions(oldContentToCheck);
-            const newMentions = extractAllMentions(content);
-
-            // Find users that are newly mentioned (in new content but not in old)
-            newlyMentionedUsers = newMentions.userIds.filter(
-              userId => !oldMentions.userIds.includes(userId)
-            );
-            newlyMentionedGroups = newMentions.groupIds.filter(
-              groupId => !oldMentions.groupIds.includes(groupId)
-            );
-
-            // Find users that are no longer mentioned (in old content but not in new)
-            noLongerMentionedUsers = oldMentions.userIds.filter(
-              userId => !newMentions.userIds.includes(userId)
-            );
+          if (derived) {
+            const newMentions = mentionsFromDerived(derived);
+            newlyMentionedUsers = newMentions.userIds;
+            newlyMentionedGroups = newMentions.groupIds;
           }
 
           const now = Date.now();
@@ -4258,40 +4252,14 @@ export function createMutators(
             );
           }
 
-          // Remove users who are no longer mentioned (only if they're MENTIONED type)
-          if (noLongerMentionedUsers.length > 0) {
-            // Get all OTHER messages in the conversation (excluding the one being updated)
-            const allMessages = await tx.run(zql.messages
-              .where('conversationId', message.conversationId));
-
-            const otherMessages = allMessages.filter(m => m.messageId !== messageId);
-
-            for (const userId of noLongerMentionedUsers) {
-              // Check if user is still mentioned in any other message
-              const stillMentioned = otherMessages.some((msg) => {
-                const msgMentions = extractAllMentions(msg.content);
-                return msgMentions.userIds.includes(userId);
-              });
-
-              // If not mentioned elsewhere, check if they're a MENTIONED participant and remove them
-              if (!stillMentioned) {
-                const participant = await tx.run(zql.conversation_participants
-                  .where('conversationId', message.conversationId)
-                  .where('userId', userId)
-                  .one());
-
-                // Only delete if they're MENTIONED type (keep AUTHOR participants)
-                if (participant && participant.participationType === ConversationParticipation.MENTIONED) {
-                  await tx.mutate.conversation_participants.delete({
-                    id: participant.id
-                  });
-                }
-              }
-            }
-          }
-
           if (content !== undefined) {
             if (isForwardedMessage) {
+              // Direct consumer of the text: the note is spliced into the stored forwarded XML,
+              // which needs both the stored content and the note as plaintext. Refused for
+              // ciphertext until the client sends the whole re-serialized message (migration plan).
+              if (isEncryptedField(message.content) || isEncryptedField(content)) {
+                throw new Error('Editing the note of a forwarded message is not supported for encrypted content yet');
+              }
               // For forwarded messages, parse XML, update optionalText, and re-serialize
               const parsedForwarded = parseForwardedMessageXml(message.content);
               if (parsedForwarded) {
@@ -4457,8 +4425,12 @@ export function createMutators(
        * once the row has left the ACTIVE-only artifact subscription.
        */
       closeSlashCommandArtifact: defineMutator(
-        z.object({ messageId: z.string(), timestamp: z.number() }),
-        async ({ tx, args: { messageId, timestamp } }) => {
+        // `content` is the message rewritten as closed (withSlashCommandArtifactClosed), built
+        // by the client, which has the plaintext: here the message is DEK ciphertext (or
+        // plaintext this mutator still never parses), so it cannot be rewritten server-side.
+        // The lifecycle itself is the message_artifacts row; the content is the rendering.
+        z.object({ messageId: z.string(), timestamp: z.number(), content: z.string() }),
+        async ({ tx, args: { messageId, timestamp, content } }) => {
           const message = await tx.run(zql.messages.where('messageId', messageId).one());
           if (!message) {
             throw new Error('Message not available');
@@ -4466,18 +4438,13 @@ export function createMutators(
           if (message.senderId !== authData.sub) {
             throw new Error('Only the author can close this incident');
           }
+          if (content === '') {
+            throw new Error('Closed message content is required');
+          }
 
           const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
           if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
             throw new Error('This incident is already closed');
-          }
-
-          const content = withSlashCommandArtifactClosed(message.content, {
-            closedAt: timestamp,
-            closedBy: authData.sub,
-          });
-          if (!content) {
-            throw new Error('Message is not a slash command artifact');
           }
 
           if (artifact) {
@@ -4735,34 +4702,10 @@ export function createMutators(
           const hasTicket = await conversationHasTicket(tx, conversation.conversationId);
           const shouldSoftDelete = isInitialMessage && (hasReplies || hasTicket);
 
-          // Clean up MENTIONED participants within Zero transaction
-          const mentions = extractAllMentions(message.content);
-
-          if (mentions.userIds.length > 0) {
-            // For each mentioned user, check if they're still mentioned elsewhere
-            for (const userId of mentions.userIds) {
-              // Check if user is still mentioned in any other message
-              const stillMentioned = otherMessages.some((msg) => {
-                const msgMentions = extractAllMentions(msg.content);
-                return msgMentions.userIds.includes(userId);
-              });
-
-              // If not mentioned elsewhere, check if they're a MENTIONED participant and remove them
-              if (!stillMentioned && userId !== conversation.createdBy) {
-                const participant = await tx.run(zql.conversation_participants
-                  .where('conversationId', message.conversationId)
-                  .where('userId', userId)
-                  .one());
-
-                // Only delete if they're MENTIONED type (keep AUTHOR participants for now)
-                if (participant && participant.participationType === ConversationParticipation.MENTIONED) {
-                  await tx.mutate.conversation_participants.delete({
-                    id: participant.id
-                  });
-                }
-              }
-            }
-          }
+          // MENTIONED participants added by this message are kept. Working out who it mentioned
+          // (and whether another message still mentions them) needs the stored content as text,
+          // which is ciphertext here; the mention facts were not persisted at send time.
+          // Tracked in the migration plan as a direct consumer.
 
           // Clean up AUTHOR participant if this was their only message.
           // Exception: never remove the conversation creator — they are permanently
@@ -5843,9 +5786,13 @@ export function createMutators(
               .one(),
           );
 
-          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+          // `draftMessage` is opaque here (DEK ciphertext under its manifest rule, or plaintext
+          // the mutator never parses); blankness comes from the text fact.
+          const draftDerived = draftMessage !== '' ? requireMutationDerived('activities.markThreadActivitiesAsRead') : undefined;
+          const draftIsBlank = draftMessage === '' || (draftDerived?.text?.isEmpty ?? false);
+          if (draft && draftIsBlank && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else if (draftMessage.trim() !== '') {
+          } else if (!draftIsBlank) {
             await tx.mutate.draft_messages.upsert({
               workspaceId: authData.workspaceId,
               id: draft?.id || draftMessageId,
@@ -5919,9 +5866,13 @@ export function createMutators(
               .one(),
           );
 
-          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+          // `draftMessage` is opaque here (DEK ciphertext under its manifest rule, or plaintext
+          // the mutator never parses); blankness comes from the text fact.
+          const draftDerived = draftMessage !== '' ? requireMutationDerived('activities.markThreadActivitiesAsRead') : undefined;
+          const draftIsBlank = draftMessage === '' || (draftDerived?.text?.isEmpty ?? false);
+          if (draft && draftIsBlank && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else if (draftMessage.trim() !== '') {
+          } else if (!draftIsBlank) {
             await tx.mutate.draft_messages.upsert({
               workspaceId: authData.workspaceId,
               id: draft?.id || draftMessageId,
@@ -18191,7 +18142,11 @@ export function createMutators(
             )
             : [];
 
-          if (content.trim() === '' && scheduledAttachments.length === 0) {
+          // `content` is opaque here (DEK ciphertext under its manifest rule, or plaintext the
+          // mutator never parses); emptiness comes from the text fact, see encryptedMutation.ts.
+          const derived = content !== '' ? requireMutationDerived('delayedMessages.create') : undefined;
+          const contentIsEmpty = derived?.text ? derived.text.isEmpty : content === '';
+          if (contentIsEmpty && scheduledAttachments.length === 0) {
             throw new Error('Message content is required');
           }
 
@@ -18203,7 +18158,7 @@ export function createMutators(
             channelId,
             conversationId: conversationId ?? null,
             senderId: ctx.userID,
-            content: content.trim(),
+            content: contentIsEmpty ? '' : content,
             hasAttachment: scheduledAttachments.length > 0,
             scheduledFor,
             status: DelayedMessageStatus.PENDING,
@@ -18310,9 +18265,16 @@ export function createMutators(
             );
           }
 
+          // `content` is opaque here; the text fact says whether it is blank (zod's min(1) only
+          // rules out the empty string).
+          const derived = requireMutationDerived('delayedMessages.edit');
+          if (derived.text?.isEmpty) {
+            throw new Error('Message content is required');
+          }
+
           await tx.mutate.delayed_messages.update({
             id,
-            content: content.trim(),
+            content,
             updatedAt,
           });
         }
@@ -18438,9 +18400,14 @@ export function createMutators(
           if (!draft) {
             throw new Error('Draft not found');
           }
+          // `content` is opaque here; the text fact says whether it is blank (zod's min(1) only
+          // rules out the empty string).
+          if (requireMutationDerived('draftMessages.edit').text?.isEmpty) {
+            throw new Error('Draft content is required');
+          }
           await tx.mutate.draft_messages.update({
             id,
-            content: content.trim(),
+            content,
             updatedAt: timestamp,
           });
         }

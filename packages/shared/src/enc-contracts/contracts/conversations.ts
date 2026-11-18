@@ -47,3 +47,60 @@ export const conversationsSendClient = defineRequestContract({
 });
 
 export type ConversationsSendRequest = RequestOf<typeof conversationsSendClient>;
+
+/**
+ * Zero mutator `messages.send` (reply in a thread). Same shape of facts as conversations.send:
+ * the mutator checks guest mentions, adds mentioned participants, records Meet links and hands
+ * the bot command on from `derived`, never from the content. The slash-command artifact check
+ * (one open artifact per thread) still parses content and so does not run for ciphertext.
+ */
+export const messagesSendClient = defineRequestContract({
+  encrypted: ['content'],
+  derived: ['mentions', 'links', 'command', 'text'],
+  schema: z.object({
+    conversationId: z.string(),
+    content: z.string(),
+    type: z.nativeEnum(MessageType),
+    showInChannel: z.boolean().optional(),
+    timestamp: z.number(),
+    messageId: z.string(),
+    childConversationId: z.string().optional(),
+    attachmentIds: z.array(z.string()).optional(),
+  }),
+});
+
+export type MessagesSendRequest = RequestOf<typeof messagesSendClient>;
+
+/**
+ * Zero mutator `messages.update` (edit). `content` is optional (metadata-only edits). The
+ * mutator checks guest mentions and adds newly mentioned participants from `derived.mentions`;
+ * it no longer removes participants who stopped being mentioned, since the previous content is
+ * ciphertext it cannot compare against.
+ */
+export const messagesUpdateClient = defineRequestContract({
+  encrypted: ['content'],
+  derived: ['mentions', 'text'],
+  schema: z.object({
+    messageId: z.string(),
+    content: z.string().optional(),
+  }),
+});
+
+export type MessagesUpdateRequest = RequestOf<typeof messagesUpdateClient>;
+
+/**
+ * Zero mutator `messages.closeSlashCommandArtifact`. `content` is the artifact message already
+ * rewritten as closed by the client (the server cannot rewrite ciphertext); nothing is derived,
+ * the server only re-keys it to the workspace DEK and stores it.
+ */
+export const messagesCloseSlashCommandArtifactClient = defineRequestContract({
+  encrypted: ['content'],
+  derived: [],
+  schema: z.object({
+    messageId: z.string(),
+    timestamp: z.number(),
+    content: z.string(),
+  }),
+});
+
+export type MessagesCloseSlashCommandArtifactRequest = RequestOf<typeof messagesCloseSlashCommandArtifactClient>;

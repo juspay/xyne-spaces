@@ -2,8 +2,40 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import {
   CLIENT_MANIFEST_MUTATION_ARG,
+  activitiesMarkThreadActivitiesAsReadClient,
+  activitiesMarkThreadActivitiesAsReadV2Client,
+  canvasCreateClient,
+  canvasUpdateClient,
+  channelMarkChannelAsViewedClient,
+  channelUpdateCallSummaryPromptClient,
+  coeCreateClient,
+  coeUpdateClient,
   conversationsSendClient,
+  delayedMessagesCreateClient,
+  delayedMessagesEditClient,
+  deriveFactsFromPlaintext,
   derivedContentFactsSchema,
+  draftCreateAttachmentsClient,
+  draftMessagesEditClient,
+  emailChannelPreferenceUpsertClassificationConfigClient,
+  emailChannelPreferenceUpsertPriorityClassificationConfigClient,
+  emailDraftUpsertClient,
+  emailDraftUpsertComposeDraftClient,
+  emailSignatureCreateClient,
+  emailSignatureUpdateClient,
+  impactCreateClient,
+  impactUpdateClient,
+  linksCreateClient,
+  linksUpdateClient,
+  messagesCloseSlashCommandArtifactClient,
+  messagesSendClient,
+  messagesUpdateClient,
+  rcaCreateClient,
+  rcaUpdateClient,
+  recapSetCustomRecapPromptClient,
+  subTicketCreateClient,
+  ticketUpdateClient,
+  userPresenceUpsertClient,
 } from '@xyne/shared';
 import type { DerivedContentFacts, RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
@@ -23,6 +55,14 @@ import { logger } from '@/utils/logger';
  * Two steps, so no encryption-service call is made while a database transaction holds a
  * connection: prepareEncryptedMutations transforms a push's rule-encrypted mutations before
  * Zero opens any transaction, and runEncryptedMutation, inside it, only looks the result up.
+ *
+ * A contracted mutator whose args arrived as plaintext (the client had no manifest: client
+ * encryption off, or the encryption service unavailable to it) still gets its facts: the same
+ * extractors run here, over the contract's fields, so the mutator reads getMutationDerived()
+ * in both cases and never has to parse content itself. That run stays outside the DEK
+ * passthrough, so the Prisma extension encrypts the plaintext at rest as before. Args that
+ * carry a manifest can only be transformed by the service (they are transit ciphertext), so a
+ * service outage refuses them rather than falling back.
  */
 
 /** Set on prepared args (server-side only): the key of the mutation's outcome. */
@@ -31,19 +71,82 @@ const PREPARED_ARG = '_encPrepared';
 /** Mutators with a request contract, by Zero mutator name. */
 const MUTATION_CONTRACTS: Record<string, RequestContract> = {
   'conversations.send': conversationsSendClient,
+  'messages.send': messagesSendClient,
+  'messages.update': messagesUpdateClient,
+  'messages.closeSlashCommandArtifact': messagesCloseSlashCommandArtifactClient,
+  'delayedMessages.create': delayedMessagesCreateClient,
+  'delayedMessages.edit': delayedMessagesEditClient,
+  'channel.updateCallSummaryPrompt': channelUpdateCallSummaryPromptClient,
+  'recap.setCustomRecapPrompt': recapSetCustomRecapPromptClient,
+  'userPresence.upsert': userPresenceUpsertClient,
+  'rca.create': rcaCreateClient,
+  'rca.update': rcaUpdateClient,
+  'impact.create': impactCreateClient,
+  'impact.update': impactUpdateClient,
+  'coe.create': coeCreateClient,
+  'coe.update': coeUpdateClient,
+  'emailDraft.upsert': emailDraftUpsertClient,
+  'emailDraft.upsertComposeDraft': emailDraftUpsertComposeDraftClient,
+  'emailSignature.create': emailSignatureCreateClient,
+  'emailSignature.update': emailSignatureUpdateClient,
+  'emailChannelPreference.upsertClassificationConfig': emailChannelPreferenceUpsertClassificationConfigClient,
+  'emailChannelPreference.upsertPriorityClassificationConfig': emailChannelPreferenceUpsertPriorityClassificationConfigClient,
+  'links.create': linksCreateClient,
+  'links.update': linksUpdateClient,
+  'draft.createAttachments': draftCreateAttachmentsClient,
+  'channel.markChannelAsViewed': channelMarkChannelAsViewedClient,
+  'activities.markThreadActivitiesAsRead': activitiesMarkThreadActivitiesAsReadClient,
+  'activities.markThreadActivitiesAsReadV2': activitiesMarkThreadActivitiesAsReadV2Client,
+  'draftMessages.edit': draftMessagesEditClient,
+  'canvas.create': canvasCreateClient,
+  'canvas.update': canvasUpdateClient,
+  'ticket.update': ticketUpdateClient,
+  'subTicket.create': subTicketCreateClient,
 };
 
 /** Who is mutating, for the encryption service: the transit caller (transitCaller) and the request's manifest lane. */
 export type MutationEncryptionContext = TransitCaller & { environment: string };
 
-/** Each prepared mutation's outcome: the facts to run with, or why it is refused. */
-export type PreparedMutations = Map<string, { derived?: DerivedContentFacts; error?: Error }>;
+/**
+ * Each prepared mutation's outcome: the facts to run with and whether its fields are now
+ * workspace-DEK ciphertext (run under DEK passthrough), or why it is refused.
+ */
+export type PreparedMutations = Map<string, { derived?: DerivedContentFacts; dekPassthrough?: boolean; error?: Error }>;
+
+/**
+ * Facts for a contracted mutator's plaintext args, extracted here instead of by the
+ * encryption service. Undefined when the mutator has no contract, the contract derives
+ * nothing, or none of its fields holds plaintext.
+ */
+function deriveLocally(mutatorName: string, args: Record<string, unknown>): DerivedContentFacts | undefined {
+  const contract = MUTATION_CONTRACTS[mutatorName];
+  if (!contract || contract.derived.length === 0) return undefined;
+  const derived = deriveFactsFromPlaintext(args, contract.encrypted, contract.derived);
+  if (derived) {
+    getCryptoOperations().add(1, { operation: 'derive_mutation_local', status: 'ok' });
+  }
+  return derived;
+}
 
 const mutationDerivedContext = new AsyncLocalStorage<DerivedContentFacts | undefined>();
 
 /** Facts the encryption service extracted from this mutation's encrypted args, if any. */
 export function getMutationDerived(): DerivedContentFacts | undefined {
   return mutationDerivedContext.getStore();
+}
+
+/**
+ * The facts a contracted mutator runs on. They exist whenever its contract field held text
+ * (extracted by the encryption service for ciphertext, locally for plaintext), so their
+ * absence means the mutator is not in MUTATION_CONTRACTS or the field was empty: a wiring
+ * bug, not a case to parse the content for.
+ */
+export function requireMutationDerived(mutatorName: string): DerivedContentFacts {
+  const derived = mutationDerivedContext.getStore();
+  if (!derived) {
+    throw new MutationEncryptionError('ENC_DERIVED_MISSING', `${mutatorName} ran without derived content facts`);
+  }
+  return derived;
 }
 
 /** An encryption-service verdict on the mutation (stale manifest, rule violation, drift). */
@@ -163,9 +266,15 @@ export async function prepareEncryptedMutations(
       };
       if (!(CLIENT_MANIFEST_MUTATION_ARG in args)) {
         // PREPARED_ARG is set here only; one the client sent is dropped.
-        if (PREPARED_ARG in args) {
-          const { [PREPARED_ARG]: _forged, ...rest } = args as Record<string, unknown>;
-          set(rest);
+        const { [PREPARED_ARG]: _forged, ...plain } = args as Record<string, unknown>;
+        // Plaintext args of a contracted mutator: extract the facts here, no passthrough.
+        const derived = deriveLocally(String(m!.name), plain);
+        if (derived) {
+          const key = randomUUID();
+          prepared.set(key, { derived, dekPassthrough: false });
+          set({ ...plain, [PREPARED_ARG]: key });
+        } else if (PREPARED_ARG in args) {
+          set(plain);
         }
         return;
       }
@@ -179,7 +288,7 @@ export async function prepareEncryptedMutations(
           enc,
           workspaceId,
         );
-        prepared.set(key, { derived });
+        prepared.set(key, { derived, dekPassthrough: true });
         next = { ...transformed, [PREPARED_ARG]: key };
       } catch (error) {
         prepared.set(key, { error: error instanceof Error ? error : new Error(String(error)) });
@@ -194,8 +303,9 @@ export async function prepareEncryptedMutations(
 
 /**
  * Inside the mutation's transaction: runs `run` with the args prepareEncryptedMutations
- * transformed and their derived facts (DEK passthrough on), or throws its refusal. Args that
- * were never encrypted by a rule run as sent.
+ * transformed and their derived facts (DEK passthrough on), or with plaintext args and the
+ * facts extracted locally (passthrough off), or throws its refusal. Args of a mutator without
+ * a contract run as sent.
  */
 export async function runEncryptedMutation<T>(
   args: unknown,
@@ -217,5 +327,6 @@ export async function runEncryptedMutation<T>(
   }
   if (outcome.error) throw outcome.error;
   const derived = outcome.derived;
-  return runWithDekPassthrough(() => mutationDerivedContext.run(derived, () => run(body, derived)));
+  const withDerived = () => mutationDerivedContext.run(derived, () => run(body, derived));
+  return outcome.dekPassthrough ? runWithDekPassthrough(withDerived) : withDerived();
 }

@@ -309,7 +309,6 @@ import {
 } from '../utils/ticketMetadata.js';
 import {
   parseSlashCommandArtifactMessage,
-  withSlashCommandArtifactClosed,
 } from '../utils/slashCommandArtifact.js';
 import { stringFromFormValue } from '../tickets/utils.js';
 
@@ -2872,8 +2871,10 @@ export const mutators = defineMutators({
      * once the row has left the ACTIVE-only artifact subscription.
      */
     closeSlashCommandArtifact: defineMutator(
-      z.object({ messageId: z.string(), timestamp: z.number() }),
-      async ({ tx, ctx, args: { messageId, timestamp } }) => {
+      // `content` is the message rewritten as closed (withSlashCommandArtifactClosed), built by
+      // the caller: the server holds the message as ciphertext it cannot rewrite.
+      z.object({ messageId: z.string(), timestamp: z.number(), content: z.string() }),
+      async ({ tx, ctx, args: { messageId, timestamp, content } }) => {
         const message = await resolveMessage(tx, messageId);
         if (!message) {
           throw new Error('Message not available');
@@ -2881,7 +2882,7 @@ export const mutators = defineMutators({
         if (message.senderId !== ctx.userID) {
           throw new Error('Only the author can close this incident');
         }
-        if (!parseSlashCommandArtifactMessage(message.content)) {
+        if (!parseSlashCommandArtifactMessage(message.content) || !parseSlashCommandArtifactMessage(content)) {
           throw new Error('Message is not a slash command artifact');
         }
 
@@ -2890,14 +2891,6 @@ export const mutators = defineMutators({
         );
         if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
           throw new Error('This incident is already closed');
-        }
-
-        const content = withSlashCommandArtifactClosed(message.content, {
-          closedAt: timestamp,
-          closedBy: ctx.userID,
-        });
-        if (!content) {
-          throw new Error('Message is not a slash command artifact');
         }
 
         if (artifact) {
