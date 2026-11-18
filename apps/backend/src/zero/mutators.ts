@@ -129,7 +129,6 @@ import {
 } from '@/services/messageClassification/vocabulary';
 import {
   MessageArtifactStatus,
-  parseSlashCommandArtifactMessage,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import { isEncryptedField } from '@xyne/shared';
@@ -3766,19 +3765,17 @@ export function createMutators(
           // so a second /sev2 inside it would fork the responders across two cards
           // and two calls. The channel is unrestricted — that is where a genuinely
           // separate incident belongs.
-          // Direct consumer of the text: there is no artifact fact yet, so for ciphertext
-          // this parses nothing and the check does not run (tracked in the migration plan).
-          const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+          const outgoingArtifact = derived.artifact;
           if (outgoingArtifact) {
             const openArtifact = await tx.run(zql.message_artifacts
               // channelId first: it is the only selective index on this table.
               .where('channelId', conversation.channelId)
               .where('conversationId', conversationId)
-              .where('command', outgoingArtifact.definition.command)
+              .where('command', outgoingArtifact.command)
               .where('status', MessageArtifactStatus.ACTIVE)
               .one());
             if (openArtifact) {
-              throw new Error(`A ${outgoingArtifact.definition.badge} is already open in this thread`);
+              throw new Error(`A ${outgoingArtifact.badge} is already open in this thread`);
             }
           }
 

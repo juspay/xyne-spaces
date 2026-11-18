@@ -3,6 +3,7 @@ import { extractMentions } from './mentions.js';
 import { extractLinks } from './links.js';
 import { extractCommand } from './command.js';
 import { extractText } from './text.js';
+import { extractArtifact } from './artifact.js';
 
 export { extractMentions, extractSpecialMentionFlags } from './mentions.js';
 export {
@@ -25,12 +26,14 @@ export {
 } from './command.js';
 export type { ParsedBotCommandText } from './command.js';
 export { extractText } from './text.js';
+export { extractArtifact } from './artifact.js';
 
 const EXTRACTOR_FNS: { [K in ExtractorName]: (text: string) => ExtractorOutput[K] } = {
   mentions: extractMentions,
   links: extractLinks,
   command: extractCommand,
   text: extractText,
+  artifact: extractArtifact,
 };
 
 /**

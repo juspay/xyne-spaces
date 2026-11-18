@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** Server-side facts the encryption service can derive from an encrypted field's plaintext. */
-export const EXTRACTORS = ['mentions', 'links', 'command', 'text'] as const;
+export const EXTRACTORS = ['mentions', 'links', 'command', 'text', 'artifact'] as const;
 export type ExtractorName = (typeof EXTRACTORS)[number];
 
 export interface ExtractorOutput {
@@ -9,6 +9,11 @@ export interface ExtractorOutput {
   links: { all: string[]; first: string | null; pr: string[]; meet: string[] };
   command: { isBot: boolean; name: string | null; args: string | null } | null;
   text: { length: number; isEmpty: boolean };
+  /**
+   * The slash-command artifact a FlowJSON message carries (`/sev2` and friends): its registry
+   * command id and badge, nothing from the body. Null when the message is not an artifact.
+   */
+  artifact: { command: string; badge: string } | null;
 }
 
 export type DerivedContentFacts = { version: 1 } & { [K in ExtractorName]?: ExtractorOutput[K] };
@@ -45,5 +50,12 @@ export const derivedContentFactsSchema: z.ZodType<DerivedContentFacts> = z.objec
       length: z.number().int().nonnegative(),
       isEmpty: z.boolean(),
     })
+    .optional(),
+  artifact: z
+    .object({
+      command: z.string(),
+      badge: z.string(),
+    })
+    .nullable()
     .optional(),
 });

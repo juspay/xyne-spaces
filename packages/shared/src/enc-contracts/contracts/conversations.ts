@@ -49,14 +49,14 @@ export const conversationsSendClient = defineRequestContract({
 export type ConversationsSendRequest = RequestOf<typeof conversationsSendClient>;
 
 /**
- * Zero mutator `messages.send` (reply in a thread). Same shape of facts as conversations.send:
- * the mutator checks guest mentions, adds mentioned participants, records Meet links and hands
- * the bot command on from `derived`, never from the content. The slash-command artifact check
- * (one open artifact per thread) still parses content and so does not run for ciphertext.
+ * Zero mutator `messages.send` (reply in a thread). Same facts as conversations.send plus the
+ * slash-command artifact: the mutator checks guest mentions, adds mentioned participants,
+ * records Meet links, hands the bot command on and enforces one open artifact per thread, all
+ * from `derived`, never from the content.
  */
 export const messagesSendClient = defineRequestContract({
   encrypted: ['content'],
-  derived: ['mentions', 'links', 'command', 'text'],
+  derived: ['mentions', 'links', 'command', 'text', 'artifact'],
   schema: z.object({
     conversationId: z.string(),
     content: z.string(),
