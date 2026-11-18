@@ -83,6 +83,7 @@ import {
   type RecoverySessionContext,
 } from "../queue/run-recovery-worker.js";
 import { appendCitations, buildThreadCitationMeta } from "../lib/citations.js";
+import { cleanSpacesAnswer, friendlyRunError, stripWorkingNote } from "../lib/answer-cleanup.js";
 import { htmlToPlainText } from "../lib/html-to-text.js";
 import {
   parseChainWorkflowDefinition,
@@ -3291,7 +3292,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   const llmCitations = (payload as { llmCitations?: unknown }).llmCitations;
 
   let resultWithCitations = payload.status === "completed" && payload.result
-    ? appendCitations(payload.result, payload.toolInvocations, {
+    ? appendCitations(stripWorkingNote(payload.result), payload.toolInvocations, {
       baseUrl: CONFIG.spacesAppUrl,
       includeCitations,
       ...(ctx?.channelId ? { defaultChannelId: ctx.channelId } : {}),
@@ -3826,7 +3827,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             {
               channelId: ctx.channelId,
               conversationId: ctx.conversationId,
-              markdownText: `**Agent chain escalation**: \`${ctx.agentSlug}\` failed. Error: ${payload.error ?? "unknown"}. Manual intervention needed.`,
+              markdownText: `**Agent chain escalation**: \`${ctx.agentSlug}\` failed. ${friendlyRunError(payload.error)} Manual intervention needed.`,
               metadata: { contentFormat: "markdown" },
             }
           ).catch(() => {});
@@ -4794,6 +4795,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       ? { clawRunOrigin: { kind: "local-harness", ...payload.localHarness } }
       : {};
 
+    const cleanForThread = (text: string): string => {
+      const tc = buildThreadCitationMeta(citationInvocations, text);
+      return cleanSpacesAnswer(text, {
+        renderableToolCallIds: new Set(tc?.clawCitations.map((c) => c.toolCallId) ?? []),
+      });
+    };
+
     const buildPostMetadata = (text: string): Record<string, unknown> => {
       const meta: Record<string, unknown> = { contentFormat: "markdown", ...runOriginMeta };
       const tc = buildThreadCitationMeta(citationInvocations, text);
@@ -5041,9 +5049,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // prepare() bundles >MAX_ATTACHMENTS_PER_MESSAGE into gallery+zip so we
         // never exceed the cap, and length-guards the body. Mentions are already
         // resolved via resolvePendingMentions, so we don't pass a sender token.
-        const combinedText = await resolvePendingMentions(
+        const combinedText = cleanForThread(await resolvePendingMentions(
           payload.pendingResponses.map((pr) => pr.message).join("\n\n"),
-        );
+        ));
         const prepared = await prepareAgentResultForPosting(
           combinedText,
           payload.attachments as OutgoingAttachment[],
@@ -5088,7 +5096,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         }
       } else {
         for (const pr of payload.pendingResponses) {
-          const prText = await resolvePendingMentions(pr.message);
+          const prText = cleanForThread(await resolvePendingMentions(pr.message));
           await postAgentMessage(
             { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
             {
@@ -5186,7 +5194,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             }
           : {}),
       };
-      const agentResult = resultWithCitations;
+      const agentResult = cleanSpacesAnswer(resultWithCitations, {
+        renderableToolCallIds: new Set(threadCitationMeta?.clawCitations.map((c) => c.toolCallId) ?? []),
+        workingNoteStripped: true,
+      });
 
       // Resolve the triggering human's Spaces session so prepareAgentResultForPosting
       // can do name → userId lookups for plain `@Name` mentions the LLM emitted

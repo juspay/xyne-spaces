@@ -13,6 +13,7 @@ import {
   claimAxiosRetry,
   isBackendUrl,
   isRefreshSessionUrl,
+  isRefreshableAuthFailureResponse,
   refreshSessionOnce,
   resolveAxiosUrl,
   type RetryableRequestConfig,
@@ -619,10 +620,12 @@ setReactNativeBridgeLogger(logger);
 // by resolved URL prefix so third-party requests (presigned uploads, CDNs) never get it.
 //
 // The same two hooks also do the session refresh for those transports: a 401 from our
-// backend → one shared /auth/refresh-session call → the request is sent again once. The
-// backend never refreshes on its own, so without this every bare-axios / fetch call would
-// fail after the JWT cookie expired. (apiInstance has the same logic in its own
-// interceptor.) A refresh that fails leaves the 401 to the caller; nothing here logs out.
+// backend with a refreshable `code` (missing/expired JWT) → one shared /auth/refresh-session
+// call → the request is sent again once. A final code (invalid token, revoked session,
+// removed user) is handed back untouched. The backend never refreshes on its own, so without
+// this every bare-axios / fetch call would fail after the JWT cookie expired. (apiInstance has
+// the same logic in its own interceptor.) A refresh that fails leaves the 401 to the caller;
+// nothing here logs out.
 const DEVICE_KEY_HEADER = 'x-device-id';
 
 axios.interceptors.request.use(config => {
@@ -641,7 +644,9 @@ axios.interceptors.response.use(
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
     const config = error.config as (typeof error.config & RetryableRequestConfig) | undefined;
-    if (!claimAxiosRetry(error.response?.status, config) || !config) return Promise.reject(error);
+    if (!claimAxiosRetry(error.response?.status, config, error.response?.data) || !config) {
+      return Promise.reject(error);
+    }
     if ((await refreshSessionOnce()) !== 'ok') return Promise.reject(error);
     return axios(config);
   },
@@ -665,6 +670,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   if (response.status !== 401 || isRefreshSessionUrl(url) || init?.body instanceof ReadableStream) {
     return response;
   }
+  if (!(await isRefreshableAuthFailureResponse(response))) return response;
   if ((await refreshSessionOnce()) !== 'ok') return response;
   return nativeFetch(retryInput, { ...init, headers });
 };

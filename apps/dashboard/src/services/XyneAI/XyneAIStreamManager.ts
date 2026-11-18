@@ -58,7 +58,7 @@ import type {
   WorkerOutgoingMessage,
   WorkerStartStreamMessage,
 } from './xyneAIStream.worker';
-import { refreshSessionOnce } from '../clients/sessionRefresh';
+import { isRefreshableAuthFailure, refreshSessionOnce } from '../clients/sessionRefresh';
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
 import { fetchV2ConversationMessages } from './XyneAISessionsV2Service';
 import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
@@ -436,13 +436,17 @@ class XyneAIStreamManager {
   }
 
   /**
-   * The backend answered the stream request with 401 (expired JWT cookie): refresh the
-   * session once and re-send the same request. A second 401, or a dead session, surfaces
-   * as a normal stream error.
+   * The backend answered the stream request with 401. For a missing/expired JWT cookie,
+   * refresh the session once and re-send the same request. A final code (TOKEN_INVALID,
+   * SESSION_REVOKED, USER_REMOVED, ...), a second 401, or a dead session surfaces as a
+   * normal stream error.
    */
-  private async handleWorkerStreamUnauthorized(streamId: string): Promise<void> {
+  private async handleWorkerStreamUnauthorized(streamId: string, code?: string): Promise<void> {
     const start = this.lastStartMessages.get(streamId);
-    const canRetry = !!start && !this.streamsRetriedAfterRefresh.has(streamId);
+    const canRetry =
+      !!start &&
+      !this.streamsRetriedAfterRefresh.has(streamId) &&
+      isRefreshableAuthFailure({ code });
     if (canRetry) {
       this.streamsRetriedAfterRefresh.add(streamId);
       if ((await refreshSessionOnce()) === 'ok') {
@@ -511,7 +515,7 @@ class XyneAIStreamManager {
 
       case 'STREAM_UNAUTHORIZED':
         this.workerActiveStreams.delete(payload.streamId);
-        void this.handleWorkerStreamUnauthorized(payload.streamId);
+        void this.handleWorkerStreamUnauthorized(payload.streamId, payload.code);
         break;
 
       case 'WORKER_LOG_ERROR':
