@@ -38,7 +38,7 @@ import {
 } from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { transformUserToVespa } from '@/services/vespaTransformers';
-import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { chunkPlainText, extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { flowMessageSearchText } from '@/utils/flowJson';
 import { extractLinksFromContent } from '@/utils/urlUtils';
 import vespaClient from '@/vespa/client';
@@ -271,6 +271,8 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
   });
 
   if (!ticket) return; // Not a ticket conversation
+  // sent with the update so the encryption gateway need not read Vespa for the ticket's workspace
+  const workspaceId = ticket.workspaceId;
 
   const [{ messages, threadMentions, threadSenders }, conversation] = await Promise.all([
     getThreadInfo(conversationId),
@@ -286,6 +288,7 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
     await vespaClient.crudService.update(
       [{
         docId: ticket.id,
+        workspaceId,
         fields: {
           docType: VespaDocType.TICKET,
           docId: ticket.id,
@@ -317,6 +320,7 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
   await vespaClient.crudService.update(
     [{
       docId: ticket.id,
+      workspaceId,
       fields: {
         docType: VespaDocType.TICKET,
         docId: ticket.id,
@@ -442,6 +446,8 @@ export const mapAndUpdatePreviousMessagesMentions = async (
 
   const updates = filteredMessages.map(message => ({
     docId: message.messageId,
+    // sent with the update so the encryption gateway need not read Vespa for the message's workspace
+    workspaceId: message.workspaceId,
     fields: {
       docType: VespaDocType.MESSAGE,
       docId: message.messageId,
@@ -1494,22 +1500,6 @@ export const mapFile = async (
  * Chunk a plain-text string into segments of at most `maxLen` characters,
  * splitting on word boundaries so search snippets are coherent.
  */
-const chunkPlainText = (text: string, maxLen = 1500): string[] => {
-  const words = text.split(/\s+/).filter(Boolean);
-  const chunks: string[] = [];
-  let current = '';
-  for (const word of words) {
-    if (current.length + word.length + 1 > maxLen && current.length > 0) {
-      chunks.push(current);
-      current = word;
-    } else {
-      current = current ? `${current} ${word}` : word;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks.length > 0 ? chunks : [''];
-};
-
 /**
  * Map a Prisma Email record to a VespaMailDocument ready for ingestion.
  * Performs the following side-queries:

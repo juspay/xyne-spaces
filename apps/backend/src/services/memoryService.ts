@@ -336,6 +336,7 @@ export async function getMemoryById(
       docId: fields.docId,
       docType: fields.docType,
       userId: fields.userId,
+      workspaceId: fields.workspaceId,
       sessionId: fields.sessionId,
       repoUrl: fields.repoUrl,
       commitId: fields.commitId,
@@ -407,6 +408,8 @@ export async function updateMemory(
         cluster: CLUSTER,
         schema: MEMORY_SCHEMA as VespaSchema,
         docId,
+        // the stored document's workspace, so the encryption gateway need not read Vespa for it
+        workspaceId: oldDoc.workspaceId || undefined,
       }
     );
 

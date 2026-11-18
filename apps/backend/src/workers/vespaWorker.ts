@@ -3,10 +3,23 @@ import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
 import { InsertDocument, samTranscriptSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
-import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema } from '@/zero/vespa-injection/core/mapper';
+import { fetchDataBySchema, mapBySchema } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { config } from '@/config/env';
 import { validateVespaJob } from '@/zero/vespa-injection/core/jobValidation';
+
+/**
+ * The workspace a document's encrypted twins go under: the mapped document's own workspaceId, else its source row's
+ * (tickets and messages have no workspaceId field in Vespa, only channelRef). Sent to the encryption gateway so it
+ * need not read Vespa to find it; undefined leaves the gateway to find it.
+ */
+const workspaceOf = (...sources: unknown[]): string | undefined => {
+	for (const source of sources) {
+		const workspaceId = (source as { workspaceId?: unknown } | null | undefined)?.workspaceId;
+		if (typeof workspaceId === 'string' && workspaceId) return workspaceId;
+	}
+	return undefined;
+};
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -165,6 +178,7 @@ export class VespaWorker {
 
 		try {
 			let mappedData: InsertDocument | Partial<InsertDocument>;
+			let writeWorkspaceId: string | undefined;
 
 			const isSamTranscript = schema === samTranscriptSchema;
 			const preTransformedData = job.data.data;
@@ -177,6 +191,7 @@ export class VespaWorker {
 				}
 				logger.info(`[VESPA_WORKER] Using pre-transformed data for SAM transcript ${docId}`);
 				mappedData = preTransformedData as InsertDocument;
+				writeWorkspaceId = workspaceOf(mappedData);
 			} else if (jobType === 'update' && job.data.fields?.length) {
 				// Field-scoped update: build the full document the same way a 'feed' would,
 				// then only keep the requested fields for the partial Vespa update.
@@ -186,14 +201,21 @@ export class VespaWorker {
 					throw new Error(`Data not found for ${schema}/${docId}`);
 				}
 				const fullDoc = await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId);
+				writeWorkspaceId = workspaceOf(fullDoc, rawData);
 				mappedData = Object.fromEntries(
 					job.data.fields
 						.filter((field) => field in fullDoc)
 						.map((field) => [field, (fullDoc as Record<string, unknown>)[field]])
 				) as Partial<InsertDocument>;
 			} else {
+				// feed or update: fetchAndMapBySchema's two steps, keeping the row, whose workspaceId goes with the write
 				logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
-				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app, job.data.workspaceId, job.data.orgId);
+				const rawData = await fetchDataBySchema(schema, docId, app);
+				if (!rawData) {
+					throw new Error(`Data not found for ${schema}/${docId}`);
+				}
+				mappedData = await mapBySchema(schema, rawData, jobType, app, job.data.workspaceId, job.data.orgId);
+				writeWorkspaceId = workspaceOf(mappedData, rawData);
 			}
 
 			// What we are about to send to Vespa, so an indexed document can be compared
@@ -209,8 +231,8 @@ export class VespaWorker {
 			}
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {
-				feed: () => this.handleFeed(schema, mappedData as InsertDocument),
-				update: () => this.handleUpdate(docId, schema, mappedData as InsertDocument, job.data.create),
+				feed: () => this.handleFeed(schema, mappedData as InsertDocument, writeWorkspaceId),
+				update: () => this.handleUpdate(docId, schema, mappedData as InsertDocument, job.data.create, writeWorkspaceId),
 				delete: () => this.handleDelete(schema, docId),
 			}
 			const handler = handlers[jobType];
@@ -239,9 +261,10 @@ export class VespaWorker {
 	private async handleFeed(
 		schema: VespaSchema,
 		data: InsertDocument,
+		workspaceId?: string,
 	): Promise<void> {
 		logger.info(`[Vespa-Worker]: queue ${schema} insert ${schema}/${data.docId}`);
-		const [result] = await vespaClient.crudService.insert([data], schema);
+		const [result] = await vespaClient.crudService.insert([data], schema, { workspaceId });
 		if (!result.success) {
 			throw new Error(`Failed to insert ${data.docId}: ${result.error}`);
 		}
@@ -252,12 +275,13 @@ export class VespaWorker {
 		schema: VespaSchema,
 		data: Partial<InsertDocument>,
 		create?: boolean,
+		workspaceId?: string,
 	): Promise<void> {
 		logger.info(`[Vespa-Worker]: queue ${schema} update ${schema}/${docId}`);
 		// create=true upserts a missing doc (used for user docs); undefined keeps the
 		// default partial-update behaviour for every other schema.
 		const [result] = await vespaClient.crudService.update(
-			[{ docId, fields: data }],
+			[{ docId, fields: data, workspaceId }],
 			schema,
 			create ? { create: true } : undefined,
 		);
