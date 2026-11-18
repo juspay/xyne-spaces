@@ -17,6 +17,7 @@ jest.mock('@xyne/shared', () => ({
   CallType: { AUDIO: 'AUDIO', VIDEO: 'VIDEO', HEADLESS: 'HEADLESS' },
 }));
 
+import { createDecipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, type KeyObject } from 'crypto';
 import type { Call } from '@prisma/client';
 import { callEncryptionService } from './callEncryptionService';
 
@@ -93,5 +94,49 @@ describe('callEncryptionService.credentialsForJoin', () => {
     await expect(callEncryptionService.credentialsForJoin(joinRow('ACTIVE', { enabled: true }), pin)).resolves.toEqual({ key: keyAt(1) });
     await expect(callEncryptionService.credentialsForJoin(joinRow('ACTIVE'), pin)).resolves.toBeUndefined();
     expect(pin).not.toHaveBeenCalled();
+  });
+});
+
+describe('callEncryptionService.sealKeyForAgent', () => {
+  const CALL_KEY = Buffer.alloc(32, 7).toString('base64');
+  // Mirrors the agent's unseal (python-agent/infra/call_session.py).
+  const unseal = (roomName: string, agentPrivateKey: KeyObject, sealed: { ephemeralPublicKey: string; nonce: string; ciphertext: string }) => {
+    const ephemeral = createPublicKey({
+      key: { kty: 'OKP', crv: 'X25519', x: Buffer.from(sealed.ephemeralPublicKey, 'base64').toString('base64url') },
+      format: 'jwk',
+    });
+    const shared = diffieHellman({ privateKey: agentPrivateKey, publicKey: ephemeral });
+    const wrapKey = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), Buffer.from('xyne-agent-call-key:v1'), 32));
+    const blob = Buffer.from(sealed.ciphertext, 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', wrapKey, Buffer.from(sealed.nonce, 'base64'));
+    decipher.setAAD(Buffer.from(roomName, 'utf8'));
+    decipher.setAuthTag(blob.subarray(blob.length - 16));
+    return Buffer.concat([decipher.update(blob.subarray(0, blob.length - 16)), decipher.final()]).toString('utf8');
+  };
+  const agentKeys = () => {
+    const pair = generateKeyPairSync('x25519');
+    const raw = Buffer.from(pair.publicKey.export({ format: 'jwk' }).x as string, 'base64url').toString('base64');
+    return { privateKey: pair.privateKey, publicKeyB64: raw };
+  };
+
+  it('only the job holding the private key can open it, and only for that room', () => {
+    const agent = agentKeys();
+    const sealed = callEncryptionService.sealKeyForAgent('room-1', CALL_KEY, agent.publicKeyB64);
+    expect(sealed.ciphertext).not.toContain(CALL_KEY);
+    expect(unseal('room-1', agent.privateKey, sealed)).toBe(CALL_KEY);
+    expect(() => unseal('room-2', agent.privateKey, sealed)).toThrow();
+    expect(() => unseal('room-1', agentKeys().privateKey, sealed)).toThrow();
+  });
+
+  it('uses a fresh ephemeral key and nonce every time', () => {
+    const agent = agentKeys();
+    const a = callEncryptionService.sealKeyForAgent('room-1', CALL_KEY, agent.publicKeyB64);
+    const b = callEncryptionService.sealKeyForAgent('room-1', CALL_KEY, agent.publicKeyB64);
+    expect(a.ephemeralPublicKey).not.toBe(b.ephemeralPublicKey);
+    expect(a.nonce).not.toBe(b.nonce);
+  });
+
+  it('rejects a public key that is not 32 raw bytes', () => {
+    expect(() => callEncryptionService.sealKeyForAgent('room-1', CALL_KEY, Buffer.alloc(31).toString('base64'))).toThrow(/32 bytes/);
   });
 });
