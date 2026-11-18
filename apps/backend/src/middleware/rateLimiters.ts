@@ -52,6 +52,25 @@ export const chatProjectsLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Per-install limiter for the workflow routes an app may call. Keyed on the install, not the
+ * IP, so apps behind one egress don't share a bucket; the ceiling sits above a polling
+ * client (`GET /conversations/:id` with `waitMs`) and only stops a stuck loop.
+ */
+export const appWorkflowLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  keyGenerator: (req): string =>
+    (req as { auth?: { installedAppId?: string } }).auth?.installedAppId ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'Too many workflow requests. Please slow down and try again shortly.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const designSharesLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000,
   max: 300,

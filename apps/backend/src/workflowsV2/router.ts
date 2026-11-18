@@ -2,7 +2,7 @@ import { pipeline } from 'node:stream/promises';
 import express, { type Request, type Response, type Router } from 'express';
 import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne/workflow-sdk';
 import { logger } from '@/utils/logger';
-import { webhookLimiter } from '@/middleware/rateLimiters';
+import { appWorkflowLimiter, webhookLimiter } from '@/middleware/rateLimiters';
 import { workflowAttachmentUpload } from '@/middleware/upload';
 import { ShareableEntityType } from '@xyne/shared';
 import { appResourceAccessService } from '@/services/appResourceAccessService';
@@ -20,7 +20,7 @@ import type { XyneCtx } from './types';
  */
 const NAME_PATTERN = /^[A-Za-z0-9 _()+-]+$/;
 
-/** The workflow a run belongs to, for the upload scope check. */
+/** The workflow a run belongs to, for the upload scope check and the app attachment guard. */
 const workflowOfExecution = async (id: unknown): Promise<string | undefined> => {
   if (typeof id !== 'string' || id === '') return undefined;
   return (await persistence.getExecution(id))?.workflowId ?? undefined;
@@ -48,13 +48,39 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
 
+/** How to find the workflow a request acts on; `undefined` is refused as "not found". */
+type WorkflowUnderTest = (req: Request) => Promise<string | undefined>;
+
+/** Mirrors the SDK's `str()`: blank counts as absent. */
+const nonBlank = (v: unknown): string | undefined =>
+  typeof v === 'string' && v.trim() !== '' ? v : undefined;
+
 /**
- * Route key → the path param naming the workflow it acts on. Mounted behind app auth
- * rather than the session, and absent from {@link PUBLIC_ALLOWED_ROUTES} so nothing else
- * exposes it. Re-check on an SDK bump.
+ * Route key → how to find the workflow it acts on. Mounted behind app auth rather than
+ * the session, and absent from {@link PUBLIC_ALLOWED_ROUTES} so nothing else exposes it.
+ * Re-check on an SDK bump.
+ *
+ * A trigger names its workflow in the path. A conversation names it only when it starts;
+ * after that it is identified by the run it created, so the workflow behind it is looked
+ * up. A wait is answered on a run, likewise. Either way the same check follows: in this
+ * workspace, attached to this install.
  */
-const APP_AUTH_ROUTES = new Map<string, string>([
-  ['POST /v2/workflows/:workflowId/trigger/v2', 'workflowId'],
+const APP_AUTH_ROUTES = new Map<string, WorkflowUnderTest>([
+  ['POST /v2/workflows/:workflowId/trigger/v2', (req) => Promise.resolve(req.params['workflowId'])],
+  ['POST /executions/:execId/waits/:stepId', (req) => workflowOfExecution(req.params['execId'])],
+  [
+    'POST /conversations',
+    (req) => {
+      const body: unknown = req.body;
+      const b = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+      // Same precedence as the SDK: a conversationId wins, and workflowId is only read to
+      // start. Reading workflowId first would let an attached id vouch for someone else's run.
+      const conversationId = nonBlank(b['conversationId']);
+      return conversationId ? workflowOfExecution(conversationId) : Promise.resolve(nonBlank(b['workflowId']));
+    },
+  ],
+  ['GET /conversations/:id', (req) => workflowOfExecution(req.params['id'])],
+  ['POST /conversations/:id/end', (req) => workflowOfExecution(req.params['id'])],
 ]);
 
 /**
@@ -73,9 +99,9 @@ const installedAppIdOf = (req: Request): string | null => {
 const assertTriggerableWorkflow = async (
   req: Request,
   ctx: XyneCtx,
-  param: string,
+  find: WorkflowUnderTest,
 ): Promise<void> => {
-  const workflowId = req.params[param];
+  const workflowId = await find(req);
   const installedAppId = installedAppIdOf(req);
   const [workflow, attached] = await Promise.all([
     workflowId ? persistence.getWorkflow(workflowId) : Promise.resolve(null),
@@ -255,6 +281,7 @@ const mount = (
   authenticated: boolean,
   allow?: ReadonlySet<string>,
   guards: readonly express.RequestHandler[] = [],
+  appAuth?: ReadonlyMap<string, WorkflowUnderTest>,
 ): void => {
   const routes = createWorkflowRouter<XyneCtx>(workflowRuntime, {
     authenticate: () => {
@@ -265,9 +292,11 @@ const mount = (
   for (const route of routes) {
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
-    const workflowIdParam = APP_AUTH_ROUTES.get(key);
+    const findWorkflow = appAuth?.get(key);
 
-    if (needsSession(route.access) !== authenticated) continue;
+    // App-auth routes bypass the filter: the conversation routes are `session` in the SDK
+    // but are mounted here behind app auth.
+    if (!findWorkflow && needsSession(route.access) !== authenticated) continue;
     if (allow && !allow.has(key)) continue;
 
     const middleware: express.RequestHandler[] = route.multipart
@@ -280,12 +309,10 @@ const mount = (
         ? [express.raw({ type: () => true, limit: '10mb' })]
         : [express.json({ limit: '10mb' })];
 
-    // Before the body parsers: the multipart one writes files to storage as it parses, so
-    // an unattached app must be refused before it reads a byte, not after it has uploaded.
-    const attachGuard: express.RequestHandler[] = workflowIdParam
+    const attachGuard: express.RequestHandler[] = findWorkflow
       ? [
           (req, res, next) => {
-            void assertTriggerableWorkflow(req, ctxFromRequest(req), workflowIdParam).then(
+            void assertTriggerableWorkflow(req, ctxFromRequest(req), findWorkflow).then(
               () => next(),
               (err: unknown) => {
                 const status = (err as { statusCode?: number }).statusCode ?? 500;
@@ -297,10 +324,15 @@ const mount = (
         ]
       : [];
 
-    router[method](route.path, ...guards, ...attachGuard, ...middleware, (req: Request, res: Response) => {
+    // Multipart: the guard goes before the parser, which writes files to storage as it
+    // parses, so an unattached app is refused before it reads a byte (ids are in the path).
+    // JSON: after the parser, because `POST /conversations` names its workflow in the body.
+    const chain = route.multipart ? [...attachGuard, ...middleware] : [...middleware, ...attachGuard];
+
+    router[method](route.path, ...guards, ...chain, (req: Request, res: Response) => {
       void (async () => {
         try {
-          const ctx = authenticated || workflowIdParam ? ctxFromRequest(req) : null;
+          const ctx = authenticated || findWorkflow ? ctxFromRequest(req) : null;
 
           const routeRequest = buildRouteRequest(req, route.rawBody === true);
 
@@ -334,4 +366,4 @@ mount(workflowsPublicRouter, false, PUBLIC_ALLOWED_ROUTES, [webhookLimiter]);
 
 /** Registers only {@link APP_AUTH_ROUTES}; mounted under `/api/apps/workflows` behind `authenticateApp`. */
 export const workflowsAppRouter: Router = express.Router();
-mount(workflowsAppRouter, false, new Set(APP_AUTH_ROUTES.keys()));
+mount(workflowsAppRouter, false, new Set(APP_AUTH_ROUTES.keys()), [appWorkflowLimiter], APP_AUTH_ROUTES);
