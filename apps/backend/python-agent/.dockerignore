@@ -1,0 +1,10 @@
+# Keep local secrets, caches and outputs out of the build context.
+.env
+.env.*
+!.env.example
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+transcriptions/
+*.md
