@@ -11,6 +11,7 @@ import {logger} from '@/utils/logger';
 // A mention inside <pre>/<code> is a false positive — e.g. `@Example` inside the
 // email `alice@Example.com` in a SQL snippet — and must not notify.
 import { stripCodeRegions } from '@xyne/shared/utils';
+import type { ExtractorOutput } from '@xyne/shared';
 
 export interface ExtractedMention {
   userId: string;
@@ -412,6 +413,116 @@ export async function extractAllUsersForNotification(
 
   logger.info(`🏷️ [MENTION-EXPANSION] Total users to notify: ${allUsersToNotify.length} (${directCount} direct + ${groupCount} from groups + ${channelCount} from @channel + ${hereCount} from @here)`);
 
+  return allUsersToNotify;
+}
+
+/**
+ * extractAllUsersForNotification for a message whose content the backend cannot read:
+ * the encryption service already parsed it (DerivedContentFacts.mentions). User and
+ * group ids are used directly; `handles` (legacy ZWSP `@name` tokens) go through the same
+ * user / group-alias lookups as the content path; @channel/@here expand the same way.
+ */
+export async function extractAllUsersForNotificationFromDerived(
+  mentions: ExtractorOutput['mentions'],
+  workspaceId: string,
+  channelId?: string,
+  forceChannelMention?: boolean
+): Promise<ExtractedMentionForNotification[]> {
+  const allUsersToNotify: ExtractedMentionForNotification[] = [];
+  const processedUserIds = new Set<string>();
+
+  // Handles are resolved by the existing content parsers fed only those tokens.
+  const ZWSP = '\u200B';
+  const handleContent = mentions.handles.map(handle => `${ZWSP}@${handle}${ZWSP}`).join(' ');
+  const [handleUserMentions, handleGroupMentions] = handleContent
+    ? await Promise.all([
+        extractMentionsFromContent(handleContent),
+        extractGroupMentionsFromContent(handleContent, workspaceId),
+      ])
+    : [[], []];
+
+  const userRepository = new UserRepository();
+  const directUsers = mentions.userIds.length > 0
+    ? await userRepository.findMany({ where: { id: { in: mentions.userIds } } })
+    : [];
+  const directUserMap = new Map(directUsers.map(user => [user.id, user]));
+
+  const userMentions: ExtractedMention[] = [
+    ...mentions.userIds.map(userId => {
+      const user = directUserMap.get(userId);
+      return {
+        userId,
+        username: user?.name ?? userId,
+        userEmail: user?.email,
+        userPicture: user?.picture || undefined,
+      };
+    }),
+    ...handleUserMentions,
+  ];
+
+  for (const userMention of userMentions) {
+    if (!processedUserIds.has(userMention.userId)) {
+      processedUserIds.add(userMention.userId);
+      allUsersToNotify.push({ ...userMention, mentionSource: 'direct' });
+    }
+  }
+
+  const userGroupRepository = new UserGroupRepository();
+  const groupMentions: ExtractedGroupMention[] = [
+    ...(await Promise.all(
+      mentions.groupIds.map(async groupId => {
+        const group = await userGroupRepository.findById(groupId);
+        return { groupId, groupName: group?.name ?? groupId };
+      })
+    )),
+    ...handleGroupMentions,
+  ];
+
+  const processedGroupIds = new Set<string>();
+  for (const groupMention of groupMentions) {
+    if (processedGroupIds.has(groupMention.groupId)) continue;
+    processedGroupIds.add(groupMention.groupId);
+    try {
+      const groupMembers = await getGroupMembersForNotification(groupMention.groupId);
+      for (const member of groupMembers) {
+        if (!processedUserIds.has(member.userId)) {
+          processedUserIds.add(member.userId);
+          allUsersToNotify.push({
+            userId: member.userId,
+            username: member.name,
+            userEmail: member.email,
+            userPicture: undefined,
+            mentionSource: 'group',
+            groupId: groupMention.groupId,
+            groupName: groupMention.groupName,
+          });
+        }
+      }
+    } catch (error) {
+      logger.error(`❌ [MENTION-EXPANSION] Error expanding group @${groupMention.groupName}:`, error);
+    }
+  }
+
+  if (channelId) {
+    if (mentions.channel || forceChannelMention) {
+      for (const user of await getChannelParticipantsForMention(channelId)) {
+        if (!processedUserIds.has(user.userId)) {
+          processedUserIds.add(user.userId);
+          allUsersToNotify.push(user);
+        }
+      }
+    }
+    if (mentions.here) {
+      for (const user of await getOnlineChannelParticipants(channelId)) {
+        if (!processedUserIds.has(user.userId)) {
+          processedUserIds.add(user.userId);
+          allUsersToNotify.push(user);
+        }
+      }
+    }
+  }
+
+  logger.info(`🏷️ [MENTION-EXPANSION] Total users to notify from derived facts: ${allUsersToNotify.length}`);
   return allUsersToNotify;
 }
 

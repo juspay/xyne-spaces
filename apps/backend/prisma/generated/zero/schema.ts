@@ -545,6 +545,7 @@ export const authSessionTable = table("auth_sessions")
     deviceInfo: string().optional(),
     fcmToken: string().optional(),
     voipToken: string().optional(),
+    transitPublicKey: string().optional(),
     revokedAt: number().optional(),
     revokeReason: string().optional(),
     createdAt: number(),

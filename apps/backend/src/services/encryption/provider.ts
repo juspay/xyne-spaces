@@ -7,9 +7,11 @@ import type {
   GenerateStorageKeyInput,
   ProvisionEntityInput,
   ProvisionEntityResult,
-  RegisterSessionKeyInput,
-  RegisterSessionKeyResult,
   StorageObjectKey,
+  TransformRequestInput,
+  TransformRequestResult,
+  TransitEncryptResult,
+  TransitServerKeys,
 } from './types';
 
 function unsupported(operation: string): never {
@@ -17,16 +19,15 @@ function unsupported(operation: string): never {
 }
 
 const provider: EncryptionProvider = {
-  async getPublicConfig(): Promise<ClientEncryptionConfig> {
+  async getClientConfig(): Promise<ClientEncryptionConfig> {
     if (!config.enc.clientEncryptionEnabled && !config.enc.apiClientEncryptionEnabled) {
       return {
-        publicKey: '',
         encryptedFields: {},
         clientEncryptionEnabled: false,
         apiClientEncryptionEnabled: false,
       };
     }
-    return unsupported('getPublicConfig');
+    return unsupported('getClientConfig');
   },
 
   async getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>> {
@@ -34,16 +35,8 @@ const provider: EncryptionProvider = {
     return unsupported('getEncryptedFieldsConfig');
   },
 
-  async registerSessionKey(input: RegisterSessionKeyInput): Promise<RegisterSessionKeyResult> {
-    if (!config.enc.clientEncryptionEnabled && !config.enc.apiClientEncryptionEnabled) {
-      return { ok: false, sessionFingerprint: input.sessionId };
-    }
-    return unsupported('registerSessionKey');
-  },
-
-  async revokeSessionKey(_sessionId: string): Promise<void> {
-    if (!config.enc.clientEncryptionEnabled && !config.enc.apiClientEncryptionEnabled) return;
-    return unsupported('revokeSessionKey');
+  async getTransitServerKeys(): Promise<TransitServerKeys> {
+    return unsupported('getTransitServerKeys');
   },
 
   async encryptBatch(items: EncryptBatchItem[]): Promise<string[]> {
@@ -56,14 +49,24 @@ const provider: EncryptionProvider = {
     return unsupported('decryptBatch');
   },
 
-  async encryptResponse<T>(body: T, _sessionId: string): Promise<T> {
-    if (!config.enc.apiClientEncryptionEnabled) return body;
+  async encryptResponse<T>(body: T, _clientKey: string | undefined): Promise<TransitEncryptResult<T>> {
+    if (!config.enc.apiClientEncryptionEnabled) return { body };
     return unsupported('encryptResponse');
   },
 
-  async decryptRequest<T>(body: T, _sessionId: string): Promise<T> {
+  async decryptRequest<T>(body: T, _clientKey: string): Promise<T> {
     if (!config.enc.apiClientEncryptionEnabled) return body;
     return unsupported('decryptRequest');
+  },
+
+  async transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>> {
+    if (!config.enc.apiClientEncryptionEnabled) return { body: input.body };
+    return unsupported('transformRequest');
+  },
+
+  async transformResponse<T>(body: T, _clientKey: string): Promise<TransitEncryptResult<T>> {
+    if (!config.enc.apiClientEncryptionEnabled) return { body };
+    return unsupported('transformResponse');
   },
 
   async initializeOrg(_orgId: string): Promise<void> {
@@ -95,6 +98,16 @@ const provider: EncryptionProvider = {
   async unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]> {
     if (wrappedKeys.length === 0) return [];
     return unsupported('unwrapStorageKeys');
+  },
+
+
+  async getTransitClientManifest(_params: {
+    tag: string;
+    environment: string;
+    clientKey: string;
+  }): Promise<{ clientManifest: string } | null> {
+    if (!config.enc.apiClientEncryptionEnabled) return null;
+    return unsupported('getTransitClientManifest');
   },
 };
 

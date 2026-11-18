@@ -23,6 +23,7 @@ import { stateMachineActor } from '../../machines/stateMachine';
 import {
   encryptionRequestInterceptor,
   encryptionResponseInterceptor,
+  retryOnStaleClientManifest,
 } from '../encryptionInterceptors';
 
 // Define the base URL
@@ -254,6 +255,14 @@ apiConfig.interceptors.response.use(
         error_type: axiosError.code || 'unknown',
       });
     });
+
+    // Stale client encryption manifest (409): refresh it and re-send once.
+    const manifestRetry = await retryOnStaleClientManifest(axiosError, retryConfig =>
+      apiInstance(retryConfig),
+    );
+    if (manifestRetry) {
+      return manifestRetry;
+    }
 
     // External guests have no session to lose, so a 401 must not log them out of the call.
     if (axiosError.response?.status === 401 && !isExternalApp) {

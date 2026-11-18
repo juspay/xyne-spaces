@@ -10,6 +10,18 @@ import {
 import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
 import { logger } from '@/utils/logger';
+import { manifestEnvironmentForRequest } from '@/services/encryption';
+import { transitKey } from '@/middleware/decryptionMiddleware';
+import type { MutationEncryptionContext } from '@/zero/encryptedMutation';
+
+/**
+ * The caller's transit public key and the manifest lane a push was made under, for mutations
+ * encrypted by their manifest rule. zero-cache forwards the browser's cookies on the push, so
+ * the key's cookie is there.
+ */
+function mutationEncryptionContext(req: Request): MutationEncryptionContext {
+  return { clientKey: transitKey(req), environment: manifestEnvironmentForRequest(req) };
+}
 
 function handleZeroError(res: Response, error: unknown, rateLimitMessage: string): void {
   if (error instanceof Error && error.message === 'Rate limit exceeded') {
@@ -60,7 +72,7 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
         body: JSON.stringify(req.body),
       });
 
-    const result = await handleMutate(webRequest);
+    const result = await handleMutate(webRequest, mutationEncryptionContext(req));
 
     res.json(result);
   } catch (error) {
@@ -184,7 +196,7 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       body: JSON.stringify(req.body),
     });
 
-    const result = await handleMutateFallback(webRequest);
+    const result = await handleMutateFallback(webRequest, mutationEncryptionContext(req));
 
     res.json(result);
   } catch (error) {

@@ -212,6 +212,7 @@ import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
 import StreamsScreen from '../components/Streams/StreamsScreen';
 import { useAuth } from '../hooks/useAuth';
+import { useDeviceIdentity } from '../hooks/useDeviceIdentity';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
@@ -326,6 +327,7 @@ const WorkspaceRedirect = (): ReactElement => {
 
 const AppRoot = (): ReactElement => {
   useWorkspacePageTools();
+  useDeviceIdentity();
   const { recordingVersion } = useRecordingVersion();
   // Create panel refs for WebView
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
