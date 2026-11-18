@@ -215,6 +215,8 @@ export interface ArtifactAppsAnalyticsDay {
 
 export interface ArtifactAppsAnalytics {
   range: { days: ArtifactAppsAnalyticsDays; from: string; to: string };
+  /** True when a table had more rows than one request reads; figures cover the most recent only. */
+  truncated: boolean;
   /** All time, across every app in the workspace (counts only). */
   totals: {
     apps: number;
@@ -256,7 +258,7 @@ export interface ArtifactAppsAnalytics {
     storageRecords: number;
     updatedAt: string;
   }[];
-  /** Latest failed builds on the caller's OWN apps; the first line of each error only. */
+  /** Latest failed agent runs the caller started, on apps they can open; one-line summaries. */
   recentErrors: {
     appId: string;
     appTitle: string;

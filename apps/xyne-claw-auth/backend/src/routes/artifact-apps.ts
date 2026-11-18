@@ -29,6 +29,8 @@ import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js
 import { buildReactArtifact } from "xyne-claw-shared/tools/react-artifact";
 import { ICON_META } from "@xyne/icons/meta";
 import { createLogger } from "../logger.js";
+import { formatDayIST } from "../lib/ist-time.js";
+import { summarizeError } from "../lib/error-summary.js";
 
 const log = createLogger("artifact-apps");
 export const artifactAppsRouter: Router = Router();
@@ -880,49 +882,60 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
 });
 
 const ANALYTICS_RANGES = new Set([7, 30, 90]);
-/** Upper bounds on rows read per request, so one busy workspace can't make it unbounded. */
+/**
+ * Upper bound on rows read per table per request, so one busy workspace can't
+ * make it unbounded. Reads are newest first, so a capped read keeps the latest
+ * rows and the response says `truncated: true` rather than quietly undercounting.
+ */
 const ANALYTICS_ROW_CAP = 50_000;
 const ANALYTICS_TOP_APPS = 10;
 const ANALYTICS_RECENT_ERRORS = 10;
-/** Postgres caps bind parameters near 32k; `in` lists are chunked well below that. */
+/** Prisma caps one query near 32k bind parameters (Postgres itself allows 65,535); `in` lists stay well below. */
 const IN_CHUNK = 5_000;
+/**
+ * A run row that never got a claw AgentRun (AgentRun.start failing is only
+ * logged) has no way to finish. Past this age it counts as failed, not as in
+ * progress forever.
+ */
+const ORPHAN_RUN_AFTER_MS = 60 * 60 * 1000;
+/** Each response is reused for a minute per caller, workspace and range: the
+ *  data moves slowly and a busy dashboard shouldn't re-run every query. */
+const ANALYTICS_CACHE_TTL_MS = 60_000;
+const ANALYTICS_CACHE_MAX = 500;
+const analyticsCache = new Map<string, { at: number; body: unknown }>();
 
 /**
- * Analytics days are IST calendar days (UTC+5:30). IST has no daylight saving,
- * so a fixed offset is exact: shift an instant by it and its UTC date is the IST date.
+ * Analytics days are IST calendar days. `formatDayIST` names the day an instant
+ * falls on; IST has no daylight saving, so the window's start is a fixed offset.
  */
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const clock = {
-  /** The IST calendar day (YYYY-MM-DD) an instant falls on. */
-  dayOf: (d: Date): string => new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10),
-  addDays: (day: string, n: number): string =>
-    new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10),
-  /** IST midnight at the start of `day`. */
-  startOf: (day: string): Date => new Date(Date.parse(`${day}T00:00:00Z`) - IST_OFFSET_MS),
-};
-
-/** First line of an error, whitespace collapsed and capped: enough to recognise
- *  it, without dumping a stack trace or a long tool payload into the UI. */
-const errorSummary = (raw: string): string =>
-  (raw.split("\n").find((line) => line.trim()) ?? raw).replace(/\s+/g, " ").trim().slice(0, 200);
+const addDays = (day: string, n: number): string =>
+  new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+/** IST midnight at the start of `day`. */
+const istMidnight = (day: string): Date => new Date(Date.parse(`${day}T00:00:00Z`) - IST_OFFSET_MS);
 
 /**
  * GET /analytics?days=7|30|90 — Apps Marketplace analytics for the caller's
  * workspace, built only from tables that already exist (no event log yet).
  *
  * What a caller may see, by section:
- *  - `totals`, `period`, `composition`, `daily`: plain counts over every app in
- *    the workspace. No titles, owners or content, so private apps stay private.
- *  - `topApps`: only apps the caller can open (their own, or published).
- *  - `recentErrors`: only the caller's OWN apps. Errors come from runs other
- *    viewers started, and the owner is the one who can act on them. Only the
- *    first line of the error is returned, never the run's prompt.
+ *  - `totals`, `period`, `composition`, `daily`: counts over every app in the
+ *    workspace. No titles, owners or content. Counts can still hint at activity
+ *    (in a small workspace, a day's numbers may show a colleague worked on a
+ *    private app), so nothing finer than a day per workspace is returned.
+ *  - `topApps`: only apps the caller can open (their own, or published), and
+ *    only ones with activity in the range.
+ *  - `recentErrors`: only agent runs the caller started themselves, on apps they
+ *    can open. Viewers never see each other's runs (see GET /runs in
+ *    artifact-app-agents.ts), and an error line can hold someone's data. Only a
+ *    one-line summary of the error is returned, never the run's prompt.
  *
- * Days are IST calendar days.
+ * "Agent runs" are runs of an app's agent, started by anyone using the app; they
+ * are not builds of the app.
  *
- * Built with the query builder only (no raw SQL, per scripts/validate-no-raw-sql.sh):
- * bounded reads of the window, bucketed per day here.
+ * Days are IST calendar days. Built with the query builder only (no raw SQL, per
+ * scripts/validate-no-raw-sql.sh): bounded reads of the window, bucketed per day here.
  */
 artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promise<void> => {
   const requesterId = getRequesterId(req);
@@ -933,16 +946,24 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
 
   const requestedDays = Number(req.query["days"] ?? 30);
   const days = ANALYTICS_RANGES.has(requestedDays) ? requestedDays : 30;
-  const now = new Date();
-  // IST midnight of the first day in the window, so every bucket is a whole day.
-  const firstDay = clock.addDays(clock.dayOf(now), -(days - 1));
-  const since = clock.startOf(firstDay);
 
   const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
   if (!workspaceId) {
     res.status(409).json({ success: false, error: "No Spaces workspace for this user" });
     return;
   }
+
+  const cacheKey = `${requesterId}:${workspaceId}:${days}`;
+  const cached = analyticsCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < ANALYTICS_CACHE_TTL_MS) {
+    res.json(cached.body);
+    return;
+  }
+
+  const now = new Date();
+  // IST midnight of the first day in the window, so every bucket is a whole day.
+  const firstDay = addDays(formatDayIST(now), -(days - 1));
+  const since = istMidnight(firstDay);
 
   const [apps, versionCounts, recordCounts, periodVersions, restores, appRuns] = await Promise.all([
     prisma.artifactApp.findMany({
@@ -960,6 +981,7 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
         createdAt: true,
         updatedAt: true,
       },
+      orderBy: { createdAt: "desc" },
       take: ANALYTICS_ROW_CAP,
     }),
     prisma.artifactAppVersion.groupBy({ by: ["appId"], where: { workspaceId }, _count: { _all: true } }),
@@ -967,16 +989,18 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
     prisma.artifactAppVersion.findMany({
       where: { workspaceId, createdAt: { gte: since } },
       select: { appId: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
       take: ANALYTICS_ROW_CAP,
     }),
     prisma.artifactAppRestore.count({ where: { workspaceId, createdAt: { gte: since } } }),
     prisma.artifactAppAgentRun.findMany({
       where: { workspaceId, appId: { not: null }, createdAt: { gte: since } },
-      select: { appId: true, status: true, error: true, sessionId: true, createdAt: true },
+      select: { appId: true, userId: true, status: true, error: true, sessionId: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: ANALYTICS_ROW_CAP,
     }),
   ]);
+  const truncated = [apps, periodVersions, appRuns].some((rows) => rows.length >= ANALYTICS_ROW_CAP);
 
   // A run's live state is on claw's AgentRun; the app row only knows dispatch.
   const sessionIds = appRuns.map((r) => r.sessionId).filter((s): s is string => Boolean(s));
@@ -993,19 +1017,31 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
   type RunOutcome = "completed" | "failed" | "cancelled" | "inProgress";
   const runs = appRuns.map((r) => {
     const live = r.sessionId ? runBySession.get(r.sessionId) : undefined;
-    const status = live?.status ?? r.status;
+    let status = live?.status ?? r.status;
+    let error = live?.error ?? r.error ?? null;
+    // No AgentRun and long past dispatch: it never started and never will finish.
+    const orphaned = !live && now.getTime() - r.createdAt.getTime() > ORPHAN_RUN_AFTER_MS;
+    if (orphaned && status !== "completed" && status !== "failed" && status !== "cancelled") {
+      status = "failed";
+      error ??= "The run never started.";
+    }
     const outcome: RunOutcome =
       status === "completed" || status === "failed" || status === "cancelled" ? status : "inProgress";
-    // A dispatch failure has no AgentRun; a run-time one has its error there.
-    const error = live?.error ?? r.error ?? null;
-    return { appId: r.appId as string, outcome, error, source: live ? "run" : "dispatch", createdAt: r.createdAt };
+    return {
+      appId: r.appId as string,
+      userId: r.userId,
+      outcome,
+      error,
+      source: live ? "run" : "dispatch",
+      createdAt: r.createdAt,
+    };
   });
 
   const versionsByApp = new Map(versionCounts.map((v) => [v.appId, v._count._all]));
   const recordsByApp = new Map(recordCounts.map((r) => [r.appId, r._count._all]));
-  const live = apps.filter((a) => !a.isArchived);
   const isEmpty = (a: (typeof apps)[number]): boolean =>
     !a.headVersionId && !a.publishedVersionId && !versionsByApp.get(a.id);
+  const live = apps.filter((a) => !a.isArchived);
 
   // One part per app, mutually exclusive, so the parts add up to every app.
   const composition = { published: 0, private: 0, empty: 0, archived: 0 };
@@ -1018,7 +1054,7 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
 
   // Every day in the window, including quiet ones, so a chart's x-axis is honest.
   const daily = Array.from({ length: days }, (_, i) => ({
-    date: clock.addDays(firstDay, i),
+    date: addDays(firstDay, i),
     appsCreated: 0,
     versions: 0,
     runsCompleted: 0,
@@ -1027,10 +1063,11 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
   }));
   const dayIndex = new Map(daily.map((d, i) => [d.date, i]));
   const bump = (at: Date, field: Exclude<keyof (typeof daily)[number], "date">): void => {
-    const i = dayIndex.get(clock.dayOf(at));
+    const i = dayIndex.get(formatDayIST(at));
     if (i !== undefined) daily[i]![field] += 1;
   };
-  for (const a of apps) bump(a.createdAt, "appsCreated");
+  // New apps are counted among the live ones, so the "new" figure can't exceed "live".
+  for (const a of live) bump(a.createdAt, "appsCreated");
   for (const v of periodVersions) bump(v.createdAt, "versions");
   for (const r of runs) {
     if (r.outcome === "completed") bump(r.createdAt, "runsCompleted");
@@ -1042,7 +1079,7 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
   for (const r of runs) runTotals[r.outcome] += 1;
   const settled = runTotals.completed + runTotals.failed;
 
-  // Per-app rows: only apps this caller can open.
+  // Per-app rows: only apps this caller can open, and only ones that did something.
   const visible = live.filter((a) => a.ownerUserId === requesterId || a.visibility === VISIBILITY_WORKSPACE);
   const periodVersionsByApp = new Map<string, number>();
   for (const v of periodVersions) periodVersionsByApp.set(v.appId, (periodVersionsByApp.get(v.appId) ?? 0) + 1);
@@ -1059,6 +1096,7 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
       versions: periodVersionsByApp.get(a.id) ?? 0,
       runs: runsByApp.get(a.id) ?? { total: 0, failed: 0 },
     }))
+    .filter((t) => t.versions + t.runs.total > 0)
     .sort(
       (x, y) =>
         y.versions + y.runs.total - (x.versions + x.runs.total) || y.app.updatedAt.getTime() - x.app.updatedAt.getTime(),
@@ -1071,25 +1109,28 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
     : [];
   const ownerNames = new Map(owners.map((u) => [u.id, u.name?.trim() || u.email?.split("@")[0] || null] as const));
 
-  const mine = new Map(live.filter((a) => a.ownerUserId === requesterId).map((a) => [a.id, a]));
+  const visibleById = new Map(visible.map((a) => [a.id, a]));
   const recentErrors = runs
-    .filter((r) => r.outcome === "failed" && r.error && mine.has(r.appId))
+    .filter((r) => r.outcome === "failed" && r.error && r.userId === requesterId && visibleById.has(r.appId))
     .slice(0, ANALYTICS_RECENT_ERRORS) // runs are already newest first
     .map((r) => ({
       appId: r.appId,
-      appTitle: mine.get(r.appId)?.title ?? "",
+      appTitle: visibleById.get(r.appId)?.title ?? "",
       at: r.createdAt,
       source: r.source,
-      message: errorSummary(r.error as string),
+      message: summarizeError(r.error as string, 200),
     }));
 
-  res.json({
+  const body = {
     success: true,
     range: { days, from: since.toISOString(), to: now.toISOString() },
+    truncated,
     totals: {
       apps: live.length,
       published: composition.published,
-      builders: new Set(live.map((a) => a.ownerUserId)).size,
+      // People with at least one live app that has been built, not everyone who
+      // only clicked "Create app".
+      builders: new Set(live.filter((a) => !isEmpty(a)).map((a) => a.ownerUserId)).size,
       versions: [...versionsByApp.values()].reduce((sum, n) => sum + n, 0),
       storageRecords: [...recordsByApp.values()].reduce((sum, n) => sum + n, 0),
     },
@@ -1099,7 +1140,7 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
       restores,
       archived: apps.filter((a) => a.archivedAt && a.archivedAt >= since).length,
       agentRuns: runTotals,
-      // Share of FINISHED runs that failed; null when nothing has finished yet.
+      // Share of FINISHED agent runs that failed; null when nothing has finished yet.
       failureRate: settled > 0 ? runTotals.failed / settled : null,
     },
     composition,
@@ -1118,7 +1159,14 @@ artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promis
       updatedAt: a.updatedAt,
     })),
     recentErrors,
-  });
+  };
+
+  if (analyticsCache.size >= ANALYTICS_CACHE_MAX) {
+    const oldest = analyticsCache.keys().next().value;
+    if (oldest !== undefined) analyticsCache.delete(oldest);
+  }
+  analyticsCache.set(cacheKey, { at: Date.now(), body });
+  res.json(body);
 });
 
 /**

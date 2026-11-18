@@ -93,15 +93,3 @@ export function spacesBaseUrl(): string {
  */
 export const CLI_NPM_PACKAGE = '@xyne/spaces-cli';
 export const CLI_NPM_MAJOR = '1';
-
-/**
- * The address the CLI should talk to: this page's origin (which serves `/claw`
- * and `/api`, through the dev proxy locally), with a leading `app.` dropped.
- * In Electron, where the page isn't http(s), the configured API origin instead.
- */
-export function cliBaseUrl(): string {
-  const page = /^https?:$/.test(window.location.protocol)
-    ? new URL(window.location.origin)
-    : new URL(API_BASE_URL, window.location.origin);
-  return withoutAppPrefix(page);
-}

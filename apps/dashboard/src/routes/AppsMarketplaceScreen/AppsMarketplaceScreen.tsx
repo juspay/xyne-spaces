@@ -31,7 +31,9 @@ const AppsMarketplaceScreen = (): ReactElement => {
     const params = new URLSearchParams(searchParams);
     if (next === 'analytics') params.set('view', 'analytics');
     else params.delete('view');
-    setSearchParams(params, { replace: true });
+    // A history entry, not a replace: Back from Analytics returns to the apps list
+    // instead of leaving the marketplace.
+    setSearchParams(params);
   };
   const [searchOpen, setSearchOpen] = useState(query.length > 0);
   const [createOpen, setCreateOpen] = useState(false);

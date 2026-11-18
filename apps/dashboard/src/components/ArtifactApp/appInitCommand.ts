@@ -1,7 +1,7 @@
 import {
   CLI_NPM_PACKAGE,
   CLI_NPM_MAJOR,
-  cliBaseUrl,
+  spacesBaseUrl,
 } from '@/routes/AIScreen/library/developers/developerTools';
 
 /** The project folder `spaces app init` creates for an app: its name, kebab-cased. */
@@ -26,10 +26,11 @@ export function appFolderName(title: string): string {
  *   default the first time, so a later `spaces app push` targets it too.
  *
  * Every part is safe to paste: the folder name is reduced to [a-z0-9-], the app
- * id is a server-issued cuid, and the URL is this page's own origin.
+ * id is a server-issued cuid, and the URL is `spacesBaseUrl()`, this Spaces' own
+ * address (its API origin without a leading `app.`).
  */
 export function appInitCommand(title: string, appId: string): string {
-  return `npx -y ${CLI_NPM_PACKAGE}@${CLI_NPM_MAJOR} app init ${appFolderName(title)} --app-id ${appId} --url ${cliBaseUrl()}`;
+  return `npx -y ${CLI_NPM_PACKAGE}@${CLI_NPM_MAJOR} app init ${appFolderName(title)} --app-id ${appId} --url ${spacesBaseUrl()}`;
 }
 
 /**

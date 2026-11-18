@@ -1,5 +1,5 @@
 import { type ReactElement } from 'react';
-import { CLI_NPM_PACKAGE, CLI_NPM_MAJOR, cliBaseUrl } from '../developerTools';
+import { CLI_NPM_PACKAGE, CLI_NPM_MAJOR, spacesBaseUrl } from '../developerTools';
 import {
   Callout,
   CodeBlock,
@@ -73,8 +73,7 @@ const SURFACES: { name: string; description: string }[] = [
 ];
 
 export function CliDoc(): ReactElement {
-  // The address the CLI talks to (it serves /claw), not the SDK's API origin.
-  const baseUrl = cliBaseUrl();
+  const baseUrl = spacesBaseUrl();
 
   return (
     <>

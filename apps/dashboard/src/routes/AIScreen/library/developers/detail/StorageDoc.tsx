@@ -1,6 +1,6 @@
 import { type ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { STORAGE_NPM_PACKAGE, cliBaseUrl } from '../developerTools';
+import { STORAGE_NPM_PACKAGE, spacesBaseUrl } from '../developerTools';
 import {
   Callout,
   CodeBlock,
@@ -63,8 +63,7 @@ const LIMITS: { name: string; description: string }[] = [
 export function StorageDoc(): ReactElement {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const cliPath = `${workspaceId ? `/${workspaceId}` : ''}/ai/library/developers/cli`;
-  // Storage is served under /claw on this Spaces' own address.
-  const baseUrl = cliBaseUrl();
+  const baseUrl = spacesBaseUrl();
   const standalone = `import { XyneStorageClient } from '${STORAGE_NPM_PACKAGE}';
 
 const storage = new XyneStorageClient({
