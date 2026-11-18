@@ -470,7 +470,7 @@ class ReactNativeBridge {
     logger.info(LogEvent.INFO, {
       type: 'migrated_console_info',
       message: String('[RN Bridge] <='),
-      context: [message.type, message.payload ?? null],
+      context: [message.type],
     });
 
     if (message.type === NativeInboundMessageType.NATIVE_READY) {
@@ -559,7 +559,7 @@ class ReactNativeBridge {
       logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
         message: String('[RN Bridge] =>'),
-        context: [type, payload ?? null],
+        context: [type],
       });
       bridge.postMessage(JSON.stringify(envelope));
       return true;

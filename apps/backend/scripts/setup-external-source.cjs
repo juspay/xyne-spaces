@@ -148,7 +148,6 @@ function validateEnv() {
     JSON.parse(process.env.CREDENTIALS);
   } catch (e) {
     console.error('ERROR: CREDENTIALS must be valid JSON');
-    console.error(`Got: ${process.env.CREDENTIALS}`);
     process.exit(1);
   }
 }
