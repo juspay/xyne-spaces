@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     origin,
   });
 
-  const server = createEdgeServer(store, origin, config);
+  const server = createEdgeServer(store, origin);
   await new Promise<void>((resolveListen) => {
     server.listen(config.listen.port, config.listen.addr, () => resolveListen());
   });

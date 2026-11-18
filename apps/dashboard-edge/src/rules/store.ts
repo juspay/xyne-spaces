@@ -39,31 +39,6 @@ interface ExistenceEntry {
   expiresAt: number;
 }
 
-export interface RuleStatus {
-  id: string;
-  match: Rule['matchSpec'];
-  lane: string;
-  version?: string;
-  bundle: string;
-  fingerprint?: string;
-  cache: Rule['cache'];
-  ttl?: number;
-  healthy: boolean;
-  enabled: boolean;
-  error?: string;
-}
-
-export interface StoreStatus {
-  file: string;
-  generation: number;
-  loaded_at?: string;
-  last_error?: string;
-  last_health_check?: string;
-  reload_interval_s: number;
-  health_interval_s: number;
-  rules: RuleStatus[];
-}
-
 const EXISTS_TTL_MS = 60_000;
 const MISSING_TTL_MS = 15_000;
 const HISTORY_DEPTH = 8;
@@ -114,50 +89,6 @@ export class RulesStore {
       };
     }
     return { ready: true };
-  }
-
-  status(): StoreStatus {
-    const out: StoreStatus = {
-      file: this.opts.file,
-      generation: this.active?.generation ?? 0,
-      reload_interval_s: this.opts.reloadIntervalMs / 1000,
-      health_interval_s: this.opts.healthIntervalMs / 1000,
-      rules: [],
-    };
-    if (this.active) {
-      out.loaded_at = new Date(this.active.loadedAt).toISOString();
-    }
-    if (this.lastError !== undefined) {
-      out.last_error = this.lastError;
-    }
-    if (this.lastHealthCheck > 0) {
-      out.last_health_check = new Date(this.lastHealthCheck).toISOString();
-    }
-    for (const r of this.active?.rules ?? []) {
-      const rs: RuleStatus = {
-        id: r.id,
-        match: r.matchSpec,
-        lane: r.lane,
-        bundle: r.bundle,
-        cache: r.cache,
-        healthy: r.healthy,
-        enabled: r.enabled,
-      };
-      if (r.version !== undefined) {
-        rs.version = r.version;
-      }
-      if (r.fingerprint !== undefined) {
-        rs.fingerprint = r.fingerprint;
-      }
-      if (r.ttl !== undefined) {
-        rs.ttl = r.ttl;
-      }
-      if (r.error !== undefined) {
-        rs.error = r.error;
-      }
-      out.rules.push(rs);
-    }
-    return out;
   }
 
   private async bucketLanes(): Promise<string[]> {
@@ -229,16 +160,6 @@ export class RulesStore {
       this.existence.set(bundle, { value, expiresAt: now + ttl });
     }
     return value;
-  }
-
-  async reload(force = true): Promise<void> {
-    while (this.running) {
-      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-    }
-    if (force) {
-      this.existence.clear();
-    }
-    await this.tick(force);
   }
 
   private schedule(): void {

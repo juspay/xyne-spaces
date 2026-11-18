@@ -1,6 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
-import type { Config } from '../config.js';
 import { log } from '../log.js';
 import type { Origin } from '../origin/index.js';
 import type { RulesStore } from '../rules/store.js';
@@ -8,10 +7,10 @@ import { makeObjectsHandler } from './objects.js';
 import { makeResolveHandler } from './resolve.js';
 import { makeStatusHandlers } from './status.js';
 
-export function createEdgeServer(store: RulesStore, origin: Origin, config: Config): Server {
+export function createEdgeServer(store: RulesStore, origin: Origin): Server {
   const resolveHandler = makeResolveHandler(store);
   const objectsHandler = makeObjectsHandler(origin, store);
-  const statusHandlers = makeStatusHandlers(store, origin, config);
+  const statusHandlers = makeStatusHandlers(store);
 
   const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const pathname = (req.url ?? '/').split('?')[0] ?? '/';
@@ -25,14 +24,6 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
     }
     // Static dispatch on purpose: no lookup keyed by the request path, so
     // the callee is never derived from request data.
-    if (req.method === 'POST' && pathname === '/_edge/reload') {
-      await statusHandlers.reload(req, res);
-      return;
-    }
-    if (req.method === 'POST' && pathname === '/_edge/validate') {
-      await statusHandlers.validate(req, res);
-      return;
-    }
     if (req.method === 'GET' || req.method === 'HEAD') {
       switch (pathname) {
         case '/_edge/healthz':
@@ -40,9 +31,6 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
           return;
         case '/_edge/ready':
           await statusHandlers.ready(req, res);
-          return;
-        case '/_edge/status':
-          await statusHandlers.status(req, res);
           return;
         default:
           break;

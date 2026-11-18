@@ -5,7 +5,7 @@
 // to answer, then run nginx in the foreground for the life of the container.
 // As PID 1 it handles every signal it forwards and reaps its own children (the
 // app and the nginx master; nginx reaps its workers), so no init is needed.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { constants } from 'node:os';
@@ -72,7 +72,7 @@ let stopping = false;
 function substitute(text: string, vars: readonly string[]): string {
   return text.replace(
     /\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/g,
-    (whole: string, braced: string | undefined, bare: string | undefined) => {
+    (whole: string, braced: string | undefined, bare: string | undefined): string => {
       const name = braced ?? bare ?? '';
       return vars.includes(name) ? (process.env[name] ?? '') : whole;
     },
@@ -134,7 +134,7 @@ async function waitForApp(): Promise<void> {
 }
 
 /** Stop the app (it flushes its metrics on SIGTERM), then leave with `exitStatus`. */
-async function exit(exitStatus: number): Promise<void> {
+async function exit(exitStatus: number): Promise<never> {
   stopping = true;
   const child = app;
   if (child && child.exitCode === null && child.signalCode === null) {
