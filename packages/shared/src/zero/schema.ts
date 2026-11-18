@@ -4710,6 +4710,11 @@ export const formContextMappingTableRelationships = relationships(formContextMap
     destField: ['id'],
     destSchema: stageTable,
   }),
+  board: one({
+    sourceField: ['contextId'],
+    destField: ['id'],
+    destSchema: boardTable,
+  }),
 }));
 
 export const globalFieldsTableRelationships = relationships(globalFieldsTable, ({ one, many }) => ({
@@ -4778,6 +4783,12 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
   // (contextId = tickets.id); used to gate reads on the ticket's channel.
   contextTicket: one({
     sourceField: ['contextId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  // The ticket a TICKET row describes (entityId = tickets.id); other rows match none.
+  ticket: one({
+    sourceField: ['entityId'],
     destField: ['id'],
     destSchema: ticketTable,
   }),
