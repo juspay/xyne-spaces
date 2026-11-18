@@ -25,7 +25,7 @@ Examples use project `acme-spaces-prod`, region `asia-south1` and office network
 | Network | VPC with subnet `10.10.0.0/20`, secondary ranges for pods `10.20.0.0/16` and services `10.30.0.0/20`, Cloud NAT, private services range `10.40.0.0/16` |
 | Cluster | regional GKE, VPC-native, Dataplane V2 (enforces NetworkPolicy), private nodes, Workload Identity, release channel `REGULAR`, one node pool per enabled pool |
 | Postgres | Cloud SQL for PostgreSQL 16 on a private IP, `db-custom-2-8192`, `REGIONAL` HA, daily backups at 02:00 UTC (7 kept), 7 days of point-in-time recovery, logical decoding on, the five databases, user `xyne` |
-| Redis | Memorystore for Redis 7.2, `STANDARD_HA`, 4 GB, AUTH on, TLS off |
+| Redis | Memorystore for Valkey, `STANDARD_SMALL`, one shard with one replica, IAM auth (service accounts, no password), TLS on |
 | Object storage | eight Cloud Storage buckets `<project>-xyne-{main,docs,canvas,recordings,workflows,transcription,bundles,claw}`, `STANDARD` class, CORS for `https://<domain>` |
 | Identities | one Google service account per app, bound with Workload Identity |
 | Ingress | in the default `gateway` mode, a reserved regional address `xyne-ingress` pinned to the gateway Service; `cloud-lb` builds a global external HTTPS load balancer instead, `external` builds none |
@@ -71,14 +71,15 @@ plan failing on a data source:
 ```bash
 gcloud services enable compute.googleapis.com container.googleapis.com iam.googleapis.com \
   iamcredentials.googleapis.com cloudresourcemanager.googleapis.com servicenetworking.googleapis.com \
-  sqladmin.googleapis.com redis.googleapis.com storage.googleapis.com secretmanager.googleapis.com \
-  dns.googleapis.com logging.googleapis.com monitoring.googleapis.com
+  sqladmin.googleapis.com memorystore.googleapis.com networkconnectivity.googleapis.com \
+  storage.googleapis.com secretmanager.googleapis.com dns.googleapis.com logging.googleapis.com \
+  monitoring.googleapis.com
 ```
 
 **Permissions.** `roles/owner` on the project is simplest. The least-privilege set: Compute
-Admin, Kubernetes Engine Admin, Cloud SQL Admin, Cloud Memorystore Redis Admin, Storage Admin,
+Admin, Kubernetes Engine Admin, Cloud SQL Admin, Memorystore Admin, Storage Admin,
 Service Account Admin, Service Account User, Project IAM Admin, Secret Manager Admin, Service
-Usage Admin, DNS Administrator, Service Networking Admin; IAP-secured Tunnel User for the bastion.
+Usage Admin, DNS Administrator, Service Networking Admin, Network Connectivity Service Connection Policy Admin; IAP-secured Tunnel User for the bastion.
 
 **Quota.** A regional cluster with the default pool plus a `REGIONAL` Cloud SQL instance needs
 about 24 vCPUs at the start and 60 at full scale:
@@ -129,7 +130,6 @@ The variables that only exist on GCP, or behave differently here:
 | `master_authorized_networks` | who may reach the Kubernetes API. Empty makes the control plane private, and `kubectl` then runs from inside the VPC |
 | `dns_zone` | the Cloud DNS managed zone *name* (`xyne-example-com`), not the DNS name |
 | `ingress_static_ip` | default `true`: reserve `xyne-ingress` and pin the gateway Service to it |
-| `redis_tls` | keep `false`; the Memorystore CA is not handed to the apps ([Known limits](#known-limits)) |
 | `sandbox_enabled` | a pool with `UBUNTU_CONTAINERD` and nested virtualization on N1/N2 machines |
 
 GCP has no GPU pool yet, so the [OCR](../features/ocr.md) model server and the
@@ -278,15 +278,15 @@ gcloud storage ls --project acme-spaces-prod | grep -- -xyne-                  #
 ## Cost
 
 Largest first, for the defaults: the `general` pool (three `e2-standard-4` at minimum), Cloud SQL
-`REGIONAL` (HA doubles it), Memorystore `STANDARD_HA`, Cloud NAT and egress, the reserved address,
+`REGIONAL` (HA doubles it), Memorystore for Valkey, Cloud NAT and egress, the reserved address,
 the GKE cluster fee, Cloud Storage by volume. LiveKit adds two `n2-standard-4` VMs and a global
 load balancer; Vespa adds `n2-standard-8` nodes with `pd-ssd`; `postgres_read_replica` adds a
 second Cloud SQL instance. The bastion (`e2-small`) is negligible.
 
 ## Known limits
 
-- **Memorystore TLS**: `redis_tls = true` turns server TLS on, but the apps are not given its CA
-  and cannot verify it. Keep `false`; traffic stays inside the VPC.
+- **Memorystore and LiveKit**: Memorystore uses IAM auth and has no password, so `livekit_enabled`
+  needs `redis_mode = external`.
 - **No GPU pool** yet on GCP.
 - **The sandbox pool** needs an N1 or N2 machine type (`n1-standard-4` default), not E2, and has
   secure boot off.

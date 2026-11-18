@@ -1,3 +1,4 @@
+import "./redis-iam-auth.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("main");
 

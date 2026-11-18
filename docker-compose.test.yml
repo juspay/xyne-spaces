@@ -354,10 +354,10 @@ services:
       start_period: 60s
       test:
         - CMD
-        - redis-cli
+        - valkey-cli
         - ping
       timeout: 3s
-    image: mirror.gcr.io/library/redis:7-alpine
+    image: mirror.gcr.io/valkey/valkey:8-alpine
     networks:
       default: null
     ports:

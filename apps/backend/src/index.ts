@@ -1,4 +1,5 @@
 import './profiling.js';
+import '@/services/redisIamAuth';
 import { App } from './app.js';
 import { describeRejection, logger } from '@/utils/logger';
 import { warnIfNoGoogleClientsConfigured } from '@/services/googleOAuthClients';

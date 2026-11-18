@@ -7,7 +7,8 @@ locals {
     "cloudresourcemanager.googleapis.com",
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
-    "redis.googleapis.com",
+    "memorystore.googleapis.com",
+    "networkconnectivity.googleapis.com",
     "storage.googleapis.com",
     "secretmanager.googleapis.com",
     "dns.googleapis.com",
@@ -193,18 +194,14 @@ module "redis" {
   count  = local.redis_managed ? 1 : 0
   source = "../../../modules/gcp/redis"
 
-  project                    = var.project
-  region                     = var.region
-  name                       = var.name
-  network                    = module.network.network_id
-  private_service_range_name = module.network.private_service_range_name
-  tier                       = var.redis_tier
-  memory_size_gb             = var.redis_memory_size_gb
-  redis_version              = var.redis_version
-  tls                        = var.redis_tls
-  maintenance_window         = var.redis_maintenance_window
-  redis_configs              = var.redis_configs
-  labels                     = var.labels
+  project            = var.project
+  region             = var.region
+  name               = var.name
+  network            = module.network.network_id
+  subnetwork         = module.network.subnet_id
+  maintenance_window = var.redis_maintenance_window
+  redis_configs      = var.redis_configs
+  labels             = var.labels
 
   depends_on = [module.network]
 }
@@ -237,6 +234,7 @@ module "iam" {
   namespace    = var.namespace
   worker_names = var.worker_names
   buckets      = local.storage_managed ? module.storage[0].bucket_names : {}
+  redis_iam    = local.redis_managed
 
   depends_on = [google_project_service.this]
 }
