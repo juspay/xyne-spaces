@@ -6,78 +6,75 @@
 # distroless lacks (pcre2, libcrypt) and their dpkg entries so scanners see
 # them. Runs as `edge` (uid 1001). Build context is the repo root:
 #   docker build -f apps/dashboard-edge/Dockerfile .
-#
-# The bases can be swapped for a mirror without editing this file:
-#   --build-arg BUILD_IMAGE=... --build-arg NGINX_BASE_IMAGE=... --build-arg RUNTIME_IMAGE=...
-
-# node:22.23.4-trixie-slim, debian:13-slim and distroless nodejs22-debian13:nonroot (multi-arch indexes).
-ARG BUILD_IMAGE=docker.io/library/node:22.23.4-trixie-slim@sha256:2117f713a417f3aff682ac8f5bc2ebbdf1beed51f36e67ab1e0fd3866b6d2d8f
-ARG NGINX_BASE_IMAGE=docker.io/library/debian:13-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
-ARG RUNTIME_IMAGE=gcr.io/distroless/nodejs22-debian13:nonroot@sha256:8ad9cc935b7843c4024b7e1487b5ef472c354ea847b97c667023e2618552607e
 
 # --- app build ---------------------------------------------------------------
-FROM ${BUILD_IMAGE} AS builder
+FROM --platform=$BUILDPLATFORM node:22.23.4-slim AS builder
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 WORKDIR /repo
 
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-COPY packages/storage/package.json      packages/storage/
-COPY apps/dashboard-edge/package.json   apps/dashboard-edge/
-
-# Drop the root workspace package's deps (release tooling, @juspay/yama and its
-# ML stack), which the filter would otherwise install and `pnpm deploy` would
-# ship; the lockfile stays frozen for everything else.
-RUN awk 'BEGIN{skip=0} /^importers:/{imp=1} imp&&/^  \.:/{print "  .: {}"; skip=1; next} skip&&/^  [^ ]/{skip=0} skip&&/^[^ ]/{skip=0} !skip{print}' pnpm-lock.yaml > /tmp/lock \
- && mv /tmp/lock pnpm-lock.yaml \
- && node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('package.json'));delete j.dependencies;delete j.devDependencies;delete j.optionalDependencies;delete j.scripts;fs.writeFileSync('package.json',JSON.stringify(j,null,2))"
+COPY packages/storage/package.json packages/storage/
 
 # --ignore-scripts: only manifests exist at this layer; @xyne/storage's
 # prepare hook (tsc) runs explicitly after its sources are copied.
-RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-spaces-dashboard-edge...
-
+RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter @xyne/storage
 COPY packages/storage packages/storage
 RUN pnpm --filter @xyne/storage run build
 
-COPY apps/dashboard-edge/tsconfig.json apps/dashboard-edge/
-COPY apps/dashboard-edge/src           apps/dashboard-edge/src
-RUN pnpm --filter xyne-spaces-dashboard-edge run build
+WORKDIR /repo/apps/dashboard-edge
+COPY apps/dashboard-edge/package.json apps/dashboard-edge/pnpm-lock.yaml apps/dashboard-edge/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts
+COPY apps/dashboard-edge/tsconfig.json ./
+COPY apps/dashboard-edge/src ./src
+RUN pnpm run build
 
 # Self-contained production tree: dist + production node_modules only.
-RUN pnpm --filter xyne-spaces-dashboard-edge deploy --legacy --prod /out/app
+RUN pnpm prune --prod \
+ && mkdir -p /out/app && cp -a package.json dist node_modules /out/app/
+
+FROM --platform=$BUILDPLATFORM alpine:3.21 AS cabundle
+RUN apk upgrade --no-cache ca-certificates-bundle \
+ && v="$(apk list -I ca-certificates-bundle | awk '{print $1}' | sed 's/^ca-certificates-bundle-//')" \
+ && { [ "$(apk version -t "$v" 20261020-r0)" != "<" ] \
+      || { echo "ca-certificates-bundle ${v:-missing} is older than 20261020-r0" >&2; exit 1; }; }
 
 # --- nginx -------------------------------------------------------------------
-# Debian 13 with current security updates, nginx from nginx.org's repo pinned
-# to one version. Collects what the runtime needs under /out.
-FROM ${NGINX_BASE_IMAGE} AS nginx
-ARG NGINX_VERSION=1.31.8-1~trixie
-RUN apt-get update \
- && apt-get -y upgrade \
- && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
- && curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg \
- && echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/mainline/debian/ trixie nginx" > /etc/apt/sources.list.d/nginx.list \
- && apt-get update \
- && apt-get install -y --no-install-recommends "nginx=${NGINX_VERSION}" \
- && rm -rf /var/lib/apt/lists/*
+FROM nginx:1.30.7-trixie AS nginx
+
+FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:39c66687298417dbf3ff2fb8b6012c20554494e16414ef7afd07b9abbb45b501 AS distroless
+FROM debian:trixie-slim AS rootfs
+COPY --from=nginx /usr/sbin/nginx /usr/sbin/nginx
+COPY --from=nginx /var/lib/dpkg/status /nginx-dpkg/status
+COPY --from=distroless /etc/passwd /etc/group /out/etc/
 # Shared libraries distroless does not ship, dpkg entries for everything
 # copied (so image scanners can see it), the edge user, and the writable dirs.
-RUN set -eu \
- && mkdir -p /out/etc /out/var/lib/dpkg/status.d /dirs/cache /dirs/run /dirs/rules \
- && for p in libpcre2-8-0 libcrypt1; do dpkg -L "$p" | grep '\.so' | xargs -I{} cp --parents -a {} /out; done \
- && for p in nginx libpcre2-8-0 libcrypt1 ca-certificates; do dpkg -s "$p" > "/out/var/lib/dpkg/status.d/$p"; done \
- && printf 'root:x:0:0:root:/root:/sbin/nologin\nnobody:x:65534:65534:nobody:/nonexistent:/sbin/nologin\nnonroot:x:65532:65532:nonroot:/home/nonroot:/sbin/nologin\nedge:x:1001:1001:edge:/nonexistent:/sbin/nologin\n' > /out/etc/passwd \
- && printf 'root:x:0:\nnobody:x:65534:\nnonroot:x:65532:\nedge:x:1001:\n' > /out/etc/group
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpcre2-8-0 libcrypt1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /out/var/lib/dpkg/status.d \
+ && for pkg in libcrypt1:libcrypt.so.1 libpcre2-8-0:libpcre2-8.so.0; do \
+      so="${pkg#*:}"; pkg="${pkg%%:*}"; \
+      p="$(ldd /usr/sbin/nginx | awk -v so="$so" '$1 == so { print $3 }')"; \
+      [ -n "$p" ] || { echo "nginx does not link $so" >&2; exit 1; }; \
+      d="/out$(dirname "$(readlink -f "$p")")"; mkdir -p "$d"; cp -L "$p" "$d/$so"; \
+      dpkg-query -s "$pkg" > "/out/var/lib/dpkg/status.d/$pkg"; \
+    done \
+ && dpkg-query --admindir=/nginx-dpkg -s nginx > /out/var/lib/dpkg/status.d/nginx \
+ && echo 'edge:x:1001:1001:edge:/nonexistent:/sbin/nologin' >> /out/etc/passwd \
+ && echo 'edge:x:1001:' >> /out/etc/group \
+ && mkdir -p /dirs/cache /dirs/run /dirs/rules
 
 # --- runtime -----------------------------------------------------------------
-FROM ${RUNTIME_IMAGE} AS runner
-COPY --from=nginx /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=nginx /out/etc/passwd /out/etc/group /etc/
-COPY --from=nginx /out/usr/lib/ /usr/lib/
-COPY --from=nginx /out/var/lib/dpkg/status.d/ /var/lib/dpkg/status.d/
+FROM distroless AS runner
+COPY --from=cabundle /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=rootfs /out/etc/passwd /out/etc/group /etc/
+COPY --from=rootfs /out/usr/lib/ /usr/lib/
+COPY --from=rootfs /out/var/lib/dpkg/status.d/ /var/lib/dpkg/status.d/
 COPY --from=nginx /usr/sbin/nginx /usr/sbin/nginx
-COPY --from=nginx --chown=1001:1001 /dirs/cache /var/cache/edge
-COPY --from=nginx --chown=1001:1001 /dirs/run   /var/run/edge
-COPY --from=nginx --chown=1001:1001 /dirs/rules /etc/edge/rules
+COPY --from=rootfs --chown=1001:1001 /dirs/cache /var/cache/edge
+COPY --from=rootfs --chown=1001:1001 /dirs/run /var/run/edge
+COPY --from=rootfs --chown=1001:1001 /dirs/rules /etc/edge/rules
 
 # Root-owned: the edge user can read but not change its own code or templates.
 COPY --from=builder --chown=0:0 /out/app /opt/edge/app
