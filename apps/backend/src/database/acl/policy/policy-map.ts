@@ -100,6 +100,11 @@ import {
   WorkspacesACL,
 } from '../tables'
 import { UserActivityEventsAcl } from '../tables/user_activity_acl'
+import {
+  AgentProactivityDecisionsACL,
+  AgentProactivityXorCallsACL,
+  AgentProactivityXorQuestionsACL,
+} from '../tables/agent-proactivity-decisions-acl'
 import { admin, custom, entity, member, org, platform, secret, self, system, type PolicyFactory } from './constructors'
 import { parent } from './parents'
 import {
@@ -349,6 +354,10 @@ export const POLICY: Record<Prisma.ModelName, PolicyFactory> = {
   ReactionCount: system({ read: messageParent, guest: 'read' }),
   ProactiveNudge: custom(ProactiveNudgesACL),
   SurfaceNudge: custom(SurfaceNudgesACL),
+  // Agent proactivity pipeline records: readable and writable by members of their channel.
+  AgentProactivityDecision: custom(AgentProactivityDecisionsACL),
+  AgentProactivityXorCall: custom(AgentProactivityXorCallsACL),
+  AgentProactivityXorQuestion: custom(AgentProactivityXorQuestionsACL),
   ExternalMessage: system({ read: parent({ model: 'message', path: 'entity', fk: 'entityId', pk: 'messageId' }) }),
   // Created with the PR message it links, in the same batch: anyone who can see the conversation.
   PrThreadLink: entity(conversationByKey, { writeVia: 'read' }),
