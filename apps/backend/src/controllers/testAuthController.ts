@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { AccessType, AuthProvider, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { getEncryptionProvider } from '@/services/encryption';
 import { config } from '@/config/env';
 import { UserService } from '@/services/userService';
 import { authSessionService, AuthSessionRevokeReason } from '@/services/authSessionService';
@@ -512,9 +511,6 @@ export class TestAuthController {
       if (sessionId) {
         await authSessionService.revokeById(sessionId, AuthSessionRevokeReason.TEST_CLEANUP).catch((err: unknown) =>
           logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
-        );
-        await getEncryptionProvider().revokeSessionKey(sessionId).catch((err: unknown) =>
-          logger.warn(`[${requestId}] Session key revoke failed: ${err instanceof Error ? err.message : String(err)}`)
         );
       }
       await authSessionService.revokeOnLogout(req, res, { sessionId });
