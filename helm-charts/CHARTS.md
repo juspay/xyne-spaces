@@ -261,7 +261,7 @@ and routes requests to bundle lanes by rule.
 **Ports.** Container `http` 8080; Service `http` 80 and `http-app` 8080.
 
 **Health.** Readiness `GET /_edge/ready` (503 until the rules are loaded and the default bundle
-exists), liveness `GET /_edge/healthz`. `GET /_edge/status` reports the loaded rule set.
+exists), liveness `GET /_edge/healthz`.
 
 **Secrets.** None by default. Secret-valued storage options go through `secretEnv`:
 `STORAGE_AUTH_HEADER`, `AZURE_STORAGE_SAS_TOKEN`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.

@@ -57,7 +57,6 @@ export interface Matchers {
 export interface Rule {
   id: string;
   match: Matchers;
-  /** The match block as written, for /_edge/status. */
   matchSpec: RawMatch;
   lane: string;
   version?: string;

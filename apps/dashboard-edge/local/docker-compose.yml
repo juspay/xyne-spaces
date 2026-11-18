@@ -5,7 +5,6 @@
 #   ./seed.sh                      # creates buckets and four sample bundles
 #   curl -si localhost:8089/ | head -20     # GCS-backed edge
 #   curl -si localhost:8090/ | head -20     # S3-backed edge (MinIO)
-#   curl -s localhost:8089/_edge/status | jq
 # Edit rules.json; both edges reload it within EDGE_RELOAD_INTERVAL seconds.
 services:
   fake-gcs:
