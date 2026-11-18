@@ -580,14 +580,26 @@ artifactAppsRouter.post("/:id/publish", async (req: Request<{ id: string }>, res
     return;
   }
 
-  const updated = await prisma.artifactApp.update({
-    where: { id: app.id },
-    data: {
-      visibility: VISIBILITY_WORKSPACE,
-      publishedVersionId: version.id,
-      publishedAt: new Date(),
-    },
-  });
+  // `isArchived: false` in the update itself, not only the check above: an archive
+  // landing between the two would otherwise leave an archived app published, and
+  // unarchive would then bring it back published.
+  let updated;
+  try {
+    updated = await prisma.artifactApp.update({
+      where: { id: app.id, isArchived: false },
+      data: {
+        visibility: VISIBILITY_WORKSPACE,
+        publishedVersionId: version.id,
+        publishedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      res.status(404).json({ success: false, error: "App not found" });
+      return;
+    }
+    throw err;
+  }
 
   res.json({ success: true, app: updated });
 });

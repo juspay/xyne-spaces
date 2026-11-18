@@ -17,6 +17,7 @@ import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import { LibraryToolbarPortal } from '../shared/components/LibraryToolbarSlot';
 import { useToolbarApps } from '@/hooks/useToolbarApps';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import {
   LibrarySections,
   LibraryTabShell,
@@ -43,8 +44,19 @@ const cardActionClass = cn(
 const AppsV2 = ({ query }: { query: string }): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
-  const { isPinned, togglePin, unpinApp, isFull } = useToolbarApps();
+  const { isPinned, togglePin, pinApp, unpinApp, isFull } = useToolbarApps();
   const queryClient = useQueryClient();
+  const { confirm, ConfirmDialog } = useConfirmDialog();
+  // Every app with an archive or unarchive in flight. A mutation only remembers
+  // its latest call, so archiving A then B would otherwise re-enable A's button.
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
+  const setPending = (appId: string, on: boolean): void =>
+    setPendingIds(prev => {
+      const next = new Set(prev);
+      if (on) next.add(appId);
+      else next.delete(appId);
+      return next;
+    });
   // null = the live list; ARCHIVED_VIEW = my archived apps, where they can be restored.
   const [view, setView] = useState<string | null>(null);
   const showArchived = view === ARCHIVED_VIEW;
@@ -81,18 +93,31 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
     enabled: showArchived,
   });
 
-  // Every listing changes when an app moves in or out of the archive.
-  const refreshLists = (): void => {
-    void queryClient.invalidateQueries({ queryKey: ['artifact-apps'] });
+  // Every listing changes when an app moves in or out of the archive, and so
+  // does the app's own page (its header and versions live under 'artifact-app').
+  // "mine" refetches first: the workspace list hides apps that are in "mine", so
+  // if it landed first an unarchived app would flash under other people's apps.
+  const refreshLists = async (appId: string): Promise<void> => {
+    void queryClient.invalidateQueries({ queryKey: ['artifact-app', appId] });
+    await queryClient.invalidateQueries({ queryKey: ['artifact-apps', 'mine'] });
+    await queryClient.invalidateQueries({
+      queryKey: ['artifact-apps'],
+      predicate: q => q.queryKey[1] !== 'mine',
+    });
   };
 
   const unarchive = useMutation({
-    mutationFn: (app: ArtifactAppSummary) => unarchiveArtifactApp(app.id),
-    onSuccess: ({ app }) => {
-      refreshLists();
-      toast.success(`Restored ${app.title}`, {
+    // `repin`: put it back on the sidebar, for an Undo of an archive that unpinned it.
+    mutationFn: ({ app }: { app: ArtifactAppSummary; repin?: boolean }) =>
+      unarchiveArtifactApp(app.id),
+    onMutate: ({ app }) => setPending(app.id, true),
+    onSettled: (_r, _e, { app }) => setPending(app.id, false),
+    onSuccess: async ({ app: restored }, { app, repin }) => {
+      if (repin) pinApp({ id: app.id, title: app.title, icon: app.icon });
+      await refreshLists(app.id);
+      toast.success(`Restored ${restored.title}`, {
         description:
-          app.visibility === 'WORKSPACE'
+          restored.visibility === 'WORKSPACE'
             ? 'It is published to your workspace again.'
             : 'It is back in your apps.',
       });
@@ -105,16 +130,20 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
 
   const archive = useMutation({
     mutationFn: (app: ArtifactAppSummary) => archiveArtifactApp(app.id),
-    onSuccess: (_result, app) => {
-      // A pinned archived app would open to "not found", so take it off the bar.
-      if (isPinned(app.id)) unpinApp(app.id);
-      refreshLists();
+    onMutate: app => setPending(app.id, true),
+    onSettled: (_r, _e, app) => setPending(app.id, false),
+    onSuccess: async (_result, app) => {
+      // A pinned archived app would open to "not found", so take it off the bar,
+      // and remember that, so Undo puts it back where it was.
+      const wasPinned = isPinned(app.id);
+      if (wasPinned) unpinApp(app.id);
+      await refreshLists(app.id);
       toast.success(`Archived ${app.title}`, {
         description:
           app.visibility === 'WORKSPACE'
             ? 'Your workspace can no longer open it. Nothing was deleted.'
             : 'Nothing was deleted. Find it under Show → Archived.',
-        action: { label: 'Undo', onClick: () => unarchive.mutate(app) },
+        action: { label: 'Undo', onClick: () => unarchive.mutate({ app, repin: wasPinned }) },
       });
     },
     onError: (error: unknown) =>
@@ -122,6 +151,25 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
         description: error instanceof Error ? error.message : undefined,
       }),
   });
+
+  /**
+   * Archiving a published app takes it away from everyone in the workspace (their
+   * pins and chat links go to "not found"), so that one asks first. A private app
+   * only affects its owner and keeps the one-click archive with Undo.
+   */
+  const requestArchive = async (app: ArtifactAppSummary): Promise<void> => {
+    if (app.visibility === 'WORKSPACE') {
+      const ok = await confirm({
+        title: `Archive ${app.title}?`,
+        description:
+          'It is published, so everyone in your workspace loses access, including their pins and links to it. Nothing is deleted, and you can unarchive it any time.',
+        confirmLabel: 'Archive',
+        variant: 'destructive',
+      });
+      if (!ok) return;
+    }
+    archive.mutate(app);
+  };
 
   const isLoading = showArchived ? archived.isLoading : mine.isLoading || workspace.isLoading;
   const isError = showArchived ? archived.isError : mine.isError || workspace.isError;
@@ -277,8 +325,8 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
                 <div className='absolute right-2 top-2 z-[1] flex items-center'>
                   <button
                     type='button'
-                    onClick={() => unarchive.mutate(app)}
-                    disabled={unarchive.isPending && unarchive.variables?.id === app.id}
+                    onClick={() => unarchive.mutate({ app })}
+                    disabled={pendingIds.has(app.id)}
                     aria-label={`Unarchive ${app.title}`}
                     title='Unarchive: restore this app exactly as it was'
                     className={cardActionClass}
@@ -329,9 +377,9 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
                       onClick={e => {
                         e.preventDefault();
                         e.stopPropagation();
-                        archive.mutate(app);
+                        void requestArchive(app);
                       }}
-                      disabled={archive.isPending && archive.variables?.id === app.id}
+                      disabled={pendingIds.has(app.id)}
                       aria-label={`Archive ${app.title}`}
                       title='Archive: hide this app everywhere, without deleting it'
                       className={cardActionClass}
@@ -405,6 +453,7 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
           ),
         }))}
       />
+      <ConfirmDialog />
     </LibraryTabShell>
   );
 };
