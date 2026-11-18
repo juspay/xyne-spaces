@@ -198,6 +198,47 @@ export interface HostRequestResultMessage {
 }
 
 /**
+ * Host → app, a streamed answer to a `request` sent with `stream: true`, when the
+ * response is an event stream (`text/event-stream`, e.g. `claw.runStream`).
+ * `request-head` carries the status and headers, then one `request-chunk` per
+ * read of the body as it arrives, then `request-end` (with `error` if reading
+ * failed). Any other response is still answered with one `request-result`, and a
+ * host that predates streaming always answers that way — so an app must accept
+ * either.
+ */
+export interface HostRequestHeadMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'request-head';
+  requestId: string;
+  status: number;
+  headers: Record<string, string>;
+}
+
+export interface HostRequestChunkMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'request-chunk';
+  requestId: string;
+  /** Decoded UTF-8 text of one read. */
+  chunk: string;
+}
+
+export interface HostRequestEndMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'request-end';
+  requestId: string;
+  error?: string;
+}
+
+export type HostRequestMessage =
+  | HostRequestResultMessage
+  | HostRequestHeadMessage
+  | HostRequestChunkMessage
+  | HostRequestEndMessage;
+
+/**
  * Where an app is running, as the host sees it.
  *
  * An app can be opened from several places now — the rail, the Inbox menubar, a
@@ -263,6 +304,7 @@ export interface AppArtifactMessage {
     | 'agent-attach'
     | 'error'
     | 'request'
+    | 'request-abort'
     | 'context-request';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
@@ -274,6 +316,9 @@ export interface AppArtifactMessage {
   url?: string;
   headers?: Record<string, string>;
   body?: string;
+  /** `request` only: answer an event-stream response as it arrives
+   *  (`request-head` / `request-chunk` / `request-end`) instead of buffering it. */
+  stream?: boolean;
   /** Agent messages: which conversation thread this concerns. */
   runKey?: string;
   /** `agent-run` only. */
@@ -309,6 +354,7 @@ export function isAppArtifactMessage(value: unknown): value is AppArtifactMessag
       typeof msg.url === 'string'
     );
   }
+  if (msg.type === 'request-abort') return typeof msg.requestId === 'string';
   return msg.type === 'mutate' && typeof msg.requestId === 'string' && typeof msg.name === 'string';
 }
 

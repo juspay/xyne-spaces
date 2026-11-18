@@ -2,7 +2,7 @@ import { useEffect, type MutableRefObject } from 'react';
 import {
   ARTIFACT_DATA_PROTOCOL_VERSION,
   isAppArtifactMessage,
-  type HostRequestResultMessage,
+  type HostRequestMessage,
 } from './artifactData.constants';
 import { API_BASE_URL } from '../../../config';
 import type { PreviewClientRef } from './useArtifactDataBridge';
@@ -65,7 +65,10 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
     const appWindow = (): Window | null =>
       previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
 
-    const post = (message: HostRequestResultMessage): void => {
+    /** Streamed requests in flight, so `request-abort` and unmount can stop reading. */
+    const streams = new Map<string, AbortController>();
+
+    const post = (message: HostRequestMessage): void => {
       const target = appWindow();
       if (!target) return;
       try {
@@ -105,12 +108,65 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
       }
     };
 
+    /**
+     * Forward an event stream as it arrives: head, then one chunk per read, then
+     * end. Aborting (the app's `request-abort`, or unmount) stops READING only —
+     * a Claw run started this way keeps going server-side, exactly as when the
+     * dashboard's own chat is closed mid-run.
+     */
+    const pipe = async (
+      requestId: string,
+      res: Response,
+      controller: AbortController,
+    ): Promise<void> => {
+      const base = {
+        source: 'xyne-artifact-host',
+        v: ARTIFACT_DATA_PROTOCOL_VERSION,
+        requestId,
+      } as const;
+      post({
+        ...base,
+        type: 'request-head',
+        status: res.status,
+        headers: Object.fromEntries(res.headers.entries()),
+      });
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      const onAbort = (): void => void reader.cancel().catch(() => undefined);
+      controller.signal.addEventListener('abort', onAbort, { once: true });
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          if (chunk) post({ ...base, type: 'request-chunk', chunk });
+        }
+        const tail = decoder.decode();
+        if (tail) post({ ...base, type: 'request-chunk', chunk: tail });
+        post({ ...base, type: 'request-end' });
+      } catch (err) {
+        post({
+          ...base,
+          type: 'request-end',
+          error: controller.signal.aborted
+            ? 'aborted'
+            : err instanceof Error
+              ? err.message
+              : 'Stream failed.',
+        });
+      } finally {
+        controller.signal.removeEventListener('abort', onAbort);
+        streams.delete(requestId);
+      }
+    };
+
     const run = async (
       requestId: string,
       method: string,
       rawUrl: string,
       headers: Record<string, string> | undefined,
       body: string | undefined,
+      stream: boolean,
     ): Promise<void> => {
       const url = resolveUrl(rawUrl);
       if (!url) {
@@ -151,16 +207,33 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
           : url.toString();
         // Transparent proxy: forward the raw status/headers/text, including
         // 4xx/5xx, which axios would throw on — fetch is deliberate here.
+        // Streaming needs the raw body as it arrives, which axios cannot give.
+        const controller = new AbortController();
+        if (stream) streams.set(requestId, controller);
         // eslint-disable-next-line local-rules/no-fetch-use-axios
         const res = await fetch(target, {
           method,
           headers: outHeaders,
           ...(outBody !== undefined ? { body: outBody } : {}),
           credentials: 'include',
+          signal: controller.signal,
         });
+        // Only an event stream is piped; anything else (including an error answered
+        // as JSON) is one `request-result`, which a streaming app also accepts.
+        if (
+          stream &&
+          res.ok &&
+          res.body &&
+          (res.headers.get('content-type') ?? '').includes('text/event-stream')
+        ) {
+          await pipe(requestId, res, controller);
+          return;
+        }
+        streams.delete(requestId);
         const text = await res.text();
         reply(requestId, res.status, Object.fromEntries(res.headers.entries()), text);
       } catch (err) {
+        streams.delete(requestId);
         reply(requestId, 0, {}, '', err instanceof Error ? err.message : 'Request failed.');
       }
     };
@@ -171,14 +244,23 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
       // only accept messages from *our* iframe.
       const target = appWindow();
       if (!target || event.source !== target) return;
+      if (event.data.type === 'request-abort') {
+        if (event.data.requestId) streams.get(event.data.requestId)?.abort();
+        return;
+      }
       if (event.data.type !== 'request') return;
 
-      const { requestId, method, url, headers, body } = event.data;
+      const { requestId, method, url, headers, body, stream } = event.data;
       if (!requestId || !method || !url) return;
-      void run(requestId, method, url, headers, body);
+      void run(requestId, method, url, headers, body, stream === true);
     };
 
     window.addEventListener('message', onMessage);
-    return (): void => window.removeEventListener('message', onMessage);
+    return (): void => {
+      window.removeEventListener('message', onMessage);
+      // The iframe is going away: stop reading its streams (runs continue server-side).
+      for (const controller of streams.values()) controller.abort();
+      streams.clear();
+    };
   }, [previewRef, appId]);
 }
