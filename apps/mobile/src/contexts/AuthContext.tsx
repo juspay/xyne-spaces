@@ -996,9 +996,10 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     });
   }, [isSignedIn]);
 
-  // The backend refused to refresh after a 401 (session revoked, expired, or the user left the
-  // workspace): drop local auth and return to login. No remote logout; the session is
-  // already gone. Starting a new auth session makes a burst of these act only once.
+  // The backend ended the session: it refused a refresh (session revoked, expired, or the
+  // user left the workspace), or refused an API request with a session-ended 401 code.
+  // Drop local auth and return to login. No remote logout; the session is already gone.
+  // Starting a new auth session makes a burst of these act only once.
   useEffect(() => {
     if (!isSignedIn) {
       return undefined;

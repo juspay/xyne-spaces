@@ -8,6 +8,7 @@ import {
   INITIAL_AUTH_RETRY_STATE,
   isDeadSessionFailure,
   isRefreshableAuthFailure,
+  isSessionEndedAuthFailure,
   isSessionEndedRefusal,
   MAX_DEAD_SESSION_ATTEMPTS,
   nextAuthRetry,
@@ -148,9 +149,20 @@ describe('isSessionEndedRefusal', () => {
 });
 
 describe('isRefreshableAuthFailure', () => {
-  it('refreshes on the auth middleware 401 codes', () => {
-    for (const code of ['TOKEN_MISSING', 'TOKEN_EXPIRED', 'TOKEN_INVALID']) {
+  it('refreshes on a missing or expired JWT', () => {
+    for (const code of ['TOKEN_MISSING', 'TOKEN_EXPIRED']) {
       assert.equal(isRefreshableAuthFailure(401, { code }), true);
+    }
+  });
+
+  it('does not refresh on the final auth middleware codes', () => {
+    for (const code of [
+      'TOKEN_INVALID',
+      'SESSION_REVOKED',
+      'USER_REMOVED',
+      'EMAIL_DOMAIN_NOT_ALLOWED',
+    ]) {
+      assert.equal(isRefreshableAuthFailure(401, { code }), false);
     }
   });
 
@@ -167,5 +179,27 @@ describe('isRefreshableAuthFailure', () => {
 
   it('only applies to 401', () => {
     assert.equal(isRefreshableAuthFailure(403, { code: 'TOKEN_EXPIRED' }), false);
+  });
+});
+
+describe('isSessionEndedAuthFailure', () => {
+  it('ends the session on a revoked session, a removed user or a blocked domain', () => {
+    for (const code of ['SESSION_REVOKED', 'USER_REMOVED', 'EMAIL_DOMAIN_NOT_ALLOWED']) {
+      assert.equal(isSessionEndedAuthFailure(401, { code }), true);
+    }
+    assert.equal(isSessionEndedAuthFailure(401, '{"code":"SESSION_REVOKED"}'), true);
+  });
+
+  it('keeps the session for an invalid, missing or expired token', () => {
+    for (const code of ['TOKEN_INVALID', 'TOKEN_MISSING', 'TOKEN_EXPIRED']) {
+      assert.equal(isSessionEndedAuthFailure(401, { code }), false);
+    }
+  });
+
+  it('keeps the session for 401s without a code and for other statuses', () => {
+    assert.equal(isSessionEndedAuthFailure(401, { error: 'User removed from workspace' }), false);
+    assert.equal(isSessionEndedAuthFailure(401, '<html>401</html>'), false);
+    assert.equal(isSessionEndedAuthFailure(401, null), false);
+    assert.equal(isSessionEndedAuthFailure(403, { code: 'USER_REMOVED' }), false);
   });
 });

@@ -3,7 +3,10 @@ import {
   getAuthSessionGeneration,
   isAuthScopeCurrent,
 } from '@/src/services/authSessionLifecycle';
-import { isRefreshableAuthFailure } from '@/src/services/sessionTokenPolicy';
+import {
+  isRefreshableAuthFailure,
+  isSessionEndedAuthFailure,
+} from '@/src/services/sessionTokenPolicy';
 import { getActiveWorkspaceId } from './activeWorkspace';
 
 /**
@@ -21,6 +24,16 @@ let sessionRefresher: SessionRefresher | null = null;
 
 export function setSessionRefresher(refresher: SessionRefresher): void {
   sessionRefresher = refresher;
+}
+
+/**
+ * Ends the session after an API 401 that says it is over (see `isSessionEndedAuthFailure`).
+ * Registered by AuthServices for the same reason as the refresher.
+ */
+let sessionEndedHandler: (() => void) | null = null;
+
+export function setSessionEndedHandler(handler: () => void): void {
+  sessionEndedHandler = handler;
 }
 
 /** Body standing in for the original 401 when the session is fine but was not renewed. */
@@ -53,6 +66,8 @@ interface SessionRefreshOn401<T> {
  *
  * - The retry only goes out under the account and workspace the request was sent under:
  *   a sign-out, sign-in or switch in between returns the original 401 instead.
+ * - A 401 saying the session is over (revoked, user removed) signs the user out at once,
+ *   instead of after the next refresh is refused.
  * - A refresh that cannot help (unavailable, or refreshed yet still refused) puts later
  *   401s on a short cooldown, so a burst of requests does not refresh on every call.
  */
@@ -72,8 +87,17 @@ export async function withSessionRefreshOn401<T>({
     const { statusCode, body } = readFailure(result);
     return isRefreshableAuthFailure(statusCode, body);
   };
+  // Only for the session the request went out under: a 401 for one already replaced by
+  // a sign-in or switch says nothing about the current one.
+  const endSessionIfOver = (result: T): T => {
+    const { statusCode, body } = readFailure(result);
+    if (isSessionEndedAuthFailure(statusCode, body) && isScopeCurrent()) {
+      sessionEndedHandler?.();
+    }
+    return result;
+  };
 
-  const result = await send();
+  const result = endSessionIfOver(await send());
   if (!sessionRefresher || !isRefreshable(result) || !isScopeCurrent()) {
     return result;
   }
@@ -90,7 +114,7 @@ export async function withSessionRefreshOn401<T>({
   if (outcome === 'session-ended' || !isScopeCurrent()) {
     return result;
   }
-  const retried = await send();
+  const retried = endSessionIfOver(await send());
   // Refreshed, yet still refused: the new token is not the one this request needs.
   refreshCooldownUntil = isRefreshable(retried) ? Date.now() + REFRESH_COOLDOWN_MS : 0;
   return retried;

@@ -1,6 +1,10 @@
 import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync } from 'expo-crypto';
 import { apiGet, apiPost, isMtlsRequestError } from './apiClient';
-import { setSessionRefresher, type SessionRefreshOutcome } from '@/src/utils/sessionRefreshOn401';
+import {
+  setSessionEndedHandler,
+  setSessionRefresher,
+  type SessionRefreshOutcome,
+} from '@/src/utils/sessionRefreshOn401';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 import { injectCookiesFromResponse, pointLastWorkspaceAt } from '@/src/utils/cookie-injection';
 import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttpClient';
@@ -1766,7 +1770,8 @@ const sessionEndedListeners = new Set<SessionEndedListener>();
 
 /**
  * Fires when any refresh is refused with a session-ended code (see
- * `isSessionEndedRefusal`): the session is over and the user has to sign in again.
+ * `isSessionEndedRefusal`), or any API request with one (see `isSessionEndedAuthFailure`):
+ * the session is over and the user has to sign in again.
  */
 export function subscribeToSessionEnded(listener: SessionEndedListener): () => void {
   sessionEndedListeners.add(listener);
@@ -1807,6 +1812,8 @@ function notifySessionRefreshed(token: string, generation: number, operation: nu
 // API calls that get a refreshable 401 renew the session here, then retry once.
 // refreshAuthSession is single-flight, so a burst of 401s shares one refresh, and it
 // announces a session-ended refusal itself.
+setSessionEndedHandler(notifySessionEnded);
+
 setSessionRefresher(async (generation, operation): Promise<SessionRefreshOutcome> => {
   // Refreshed under the request's own auth scope, so a refresh for a session that has
   // since been signed out or switched away from neither applies nor announces anything.

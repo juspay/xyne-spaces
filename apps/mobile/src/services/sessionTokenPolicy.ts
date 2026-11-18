@@ -49,28 +49,60 @@ export function getProactiveRearmDelay(
   return { delayMs: getAuthRetryDelay(attempt), stillDue: true };
 }
 
-/** 401 codes from the auth middleware that a session refresh can fix. */
-const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED', 'TOKEN_INVALID']);
+/**
+ * 401 codes from the auth middleware (`AuthFailureCode` in the backend's middleware/auth.ts)
+ * that a session refresh can fix: the JWT is missing or expired, but the session may still
+ * be alive. TOKEN_INVALID is final: no refresh fixes a bad signature or claims that do not
+ * match the request.
+ */
+const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED']);
+
+/** 401 codes with which the auth middleware says the session itself is over. */
+const SESSION_ENDED_AUTH_CODES = new Set([
+  'SESSION_REVOKED',
+  'USER_REMOVED',
+  'EMAIL_DOMAIN_NOT_ALLOWED',
+]);
 
 /**
- * Whether a 401 body carries one of the codes a refresh can fix. File downloads report
- * the body as a string, so JSON text is read too.
+ * The `code` of a 401 body, if it has one. File downloads report the body as a string,
+ * so JSON text is read too.
  */
-export function isRefreshableAuthFailure(statusCode: number, body: unknown): boolean {
+function readAuthFailureCode(statusCode: number, body: unknown): string | undefined {
   if (statusCode !== 401) {
-    return false;
+    return undefined;
   }
   let parsed = body;
   if (typeof parsed === 'string') {
     try {
       parsed = JSON.parse(parsed);
     } catch {
-      return false;
+      return undefined;
     }
   }
   const code =
     typeof parsed === 'object' && parsed !== null ? (parsed as { code?: unknown }).code : undefined;
-  return typeof code === 'string' && REFRESHABLE_AUTH_CODES.has(code);
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Whether a 401 carries one of the codes a refresh can fix. A 401 without a code comes
+ * from something other than the auth middleware, which a refresh cannot fix either.
+ */
+export function isRefreshableAuthFailure(statusCode: number, body: unknown): boolean {
+  const code = readAuthFailureCode(statusCode, body);
+  return code !== undefined && REFRESHABLE_AUTH_CODES.has(code);
+}
+
+/**
+ * Whether an API 401 says the session is over: logged out (SESSION_REVOKED), the user
+ * left or was deactivated (USER_REMOVED), or the email domain is blocked. A refresh cannot
+ * bring it back and every later request is refused the same way, so the app signs out.
+ * TOKEN_INVALID is not one of these: it can come from this one request alone.
+ */
+export function isSessionEndedAuthFailure(statusCode: number, body: unknown): boolean {
+  const code = readAuthFailureCode(statusCode, body);
+  return code !== undefined && SESSION_ENDED_AUTH_CODES.has(code);
 }
 
 /**
