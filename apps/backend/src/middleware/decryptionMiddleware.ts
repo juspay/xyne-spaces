@@ -2,7 +2,21 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
-import { getEncryptionProvider } from '@/services/encryption';
+import {
+  CLIENT_MANIFEST_STALE_CODE,
+  CLIENT_MANIFEST_TAG_HEADER,
+  CLIENT_MANIFEST_VERSION_HEADER,
+  derivedContentFactsSchema,
+  findRequestContract,
+  findRequestRule,
+  findRuleViolations,
+} from '@xyne/shared';
+import { config } from '@/config/env';
+import { getEncryptionProvider, getLatestClientManifest, isDekPassthrough } from '@/services/encryption';
+import type { ClientManifestRule } from '@/services/encryption';
+
+/** Entity type of the keys the Prisma encryption extension writes rows under. */
+const WORKSPACE_ENTITY_TYPE = 'WORKSPACE';
 
 function sanitizeForLog(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, '');
@@ -30,15 +44,79 @@ function hasEncryptedFields(obj: unknown): boolean {
 }
 
 /**
+ * Reject writes to manifest-listed routes whose `x-enc-manifest-version` is older than
+ * the latest manifest (409 ENC_MANIFEST_STALE), so the client refreshes and retries.
+ * Routes not in the manifest pass through.
+ */
+export async function enforceClientManifestVersion(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const method = req.method?.toUpperCase();
+  if (!config.enc.apiClientEncryptionEnabled || !['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    return next();
+  }
+
+  const tagHeader = req.get(CLIENT_MANIFEST_TAG_HEADER);
+  const tag = tagHeader ? tagHeader : 'default';
+
+  let latest: Awaited<ReturnType<typeof getLatestClientManifest>>;
+  try {
+    latest = await getLatestClientManifest(tag);
+  } catch (error) {
+    // Fail open: a manifest lookup failure must not take every write down with it.
+    logger.error('[decryptionMiddleware] failed to load client manifest, skipping version check', {
+      method: sanitizeForLog(method),
+      path: sanitizeForLog(req.path),
+      tag: sanitizeForLog(tag),
+      error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
+    });
+    return next();
+  }
+  if (!latest) return next();
+
+  if (!findRequestRule(latest, method, req.originalUrl)) {
+    return next();
+  }
+
+  const versionHeader = req.get(CLIENT_MANIFEST_VERSION_HEADER);
+  const version = versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : NaN;
+  // A version newer than ours means this backend's cache is behind; let it through.
+  if (Number.isNaN(version) || version < latest.version) {
+    res.status(409).json({
+      error: 'Client encryption manifest is stale',
+      code: CLIENT_MANIFEST_STALE_CODE,
+      latestVersion: latest.version,
+    });
+    return;
+  }
+
+  next();
+}
+
+/**
  * Decrypt `ENC:v1|sess|…` fields with the caller's session key. The key is scoped to the
  * auth session (JWT `sid`), so this runs after authentication: the auth middlewares call
  * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
  */
 export async function decryptRequestBodyMiddleware(
   req: Request,
-  _res: Response,
+  res: Response,
   next: NextFunction,
 ): Promise<void> {
+  // The manifest version check runs first; it either calls back here or has already
+  // answered with 409.
+  let manifestCurrent = false;
+  await enforceClientManifestVersion(req, res, () => {
+    manifestCurrent = true;
+  });
+  if (!manifestCurrent) return;
+
+  await decryptRequestBody(req, next);
+}
+
+async function decryptRequestBody(req: Request, next: NextFunction): Promise<void> {
   try {
     const method = req.method?.toUpperCase();
 
@@ -96,6 +174,193 @@ export async function decryptRequestBodyMiddleware(
 }
 
 /**
+ * Transform session-encrypted fields by their manifest rule instead of decrypting them:
+ * `MASTER_DEK` fields come back as workspace-DEK ciphertext the Prisma extension stores
+ * as-is, `NONE` fields as plaintext. The controller never sees a MASTER_DEK plaintext.
+ */
+async function transformRequestBody(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  rule: ClientManifestRule,
+  options: ManifestRequestBodyOptions,
+): Promise<void> {
+  try {
+    if (!req.body || typeof req.body !== 'object' || !hasEncryptedFields(req.body)) {
+      return next();
+    }
+
+    const sessionId = req.user?.sid;
+    if (!sessionId) {
+      logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
+        method: sanitizeForLog(req.method),
+        path: sanitizeForLog(req.path),
+        hasSessionId: false,
+      });
+      getCryptoOperations().add(1, {
+        operation: 'transform_request_body',
+        status: 'error',
+        reason: 'missing_session',
+        path: req.path,
+      });
+      return next(new AppError('Encrypted request body requires an active session', 400));
+    }
+
+    // The DEK is the owning workspace's, the same one the Prisma extension would pick for
+    // the row, so the stored value is indistinguishable from one it encrypted itself.
+    const needsDek = Object.values(rule.fields).some(
+      (field) => field.client && field.transform === 'MASTER_DEK',
+    );
+    const owner = needsDek
+      ? { entityId: await options.resolveWorkspaceId(req), entityType: WORKSPACE_ENTITY_TYPE }
+      : {};
+
+    const { body, derived } = await getEncryptionProvider().transformRequest({
+      body: req.body,
+      sessionId,
+      rule: { type: rule.type, value: rule.value, revision: rule.revision },
+      ...owner,
+    });
+    req.body = body;
+    req.encRule = rule;
+
+    // Facts the encryption service extracted from the plaintext; validated before any
+    // consumer trusts them in place of parsing `content`.
+    if (derived !== undefined) {
+      const parsedDerived = derivedContentFactsSchema.safeParse(derived);
+      if (!parsedDerived.success) {
+        logger.error('[decryptionMiddleware] encryption service returned invalid derived facts', {
+          method: sanitizeForLog(req.method),
+          path: sanitizeForLog(req.path),
+          route: sanitizeForLog(rule.value),
+          issues: parsedDerived.error.issues,
+        });
+        getCryptoOperations().add(1, {
+          operation: 'transform_request_body',
+          status: 'error',
+          reason: 'derived_invalid',
+          path: sanitizeForLog(req.path),
+        });
+        res.status(400).json({
+          error: 'Derived content facts from the encryption service are invalid',
+          code: 'ENC_DERIVED_INVALID',
+        });
+        return;
+      }
+      req.derived = parsedDerived.data;
+    }
+
+    logger.info('[decryptionMiddleware] request body transformed by manifest rule', {
+      method: sanitizeForLog(req.method),
+      path: sanitizeForLog(req.path),
+      route: sanitizeForLog(rule.value),
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return next(error);
+    }
+    logger.error('[decryptionMiddleware] failed to transform request body', {
+      method: sanitizeForLog(req.method),
+      path: sanitizeForLog(req.path),
+      error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
+    });
+    getCryptoOperations().add(1, {
+      operation: 'transform_request_body',
+      status: 'error',
+      reason: 'transform_failed',
+      path: sanitizeForLog(req.path),
+    });
+    return next(new AppError('Failed to transform encrypted request body', 502));
+  }
+  next();
+}
+
+export type ManifestRequestBodyOptions = {
+  /**
+   * Workspace whose DEK the rule's `MASTER_DEK` fields are re-encrypted under: the one the
+   * row being written belongs to (what the Prisma extension resolves for it). Called only
+   * when the matched rule has such a field. Throw an AppError (for example a 404) when the
+   * target row does not exist.
+   */
+  resolveWorkspaceId: (req: Request) => Promise<string>;
+};
+
+/**
+ * Per-route counterpart of decryptRequestBodyMiddleware for multipart routes listed in
+ * the client manifest. Mount it after the upload middleware: express.json() skips
+ * multipart, so `req.body` is still undefined when the auth middleware runs and is only
+ * filled in by multer. Rejects bodies that violate the manifest rule (400
+ * ENC_MANIFEST_VIOLATION), then, when the route has a rule and DB encryption is on,
+ * transforms session-key fields by that rule (MASTER_DEK fields stay ciphertext, now under
+ * the workspace DEK). Without a rule, or with DB encryption off (no DEK to re-encrypt
+ * under), it decrypts to plaintext as before. The manifest version check already ran in
+ * the auth middleware.
+ */
+export function manifestRequestBodyMiddleware(options: ManifestRequestBodyOptions) {
+  return async function manifestRequestBody(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    if (!config.enc.apiClientEncryptionEnabled) {
+      return next();
+    }
+
+    const tagHeader = req.get(CLIENT_MANIFEST_TAG_HEADER);
+    const tag = tagHeader ? tagHeader : 'default';
+
+    let latest: Awaited<ReturnType<typeof getLatestClientManifest>> = null;
+    try {
+      latest = await getLatestClientManifest(tag);
+    } catch (error) {
+      // Fail open on the rule check, as enforceClientManifestVersion does; decryption below
+      // still runs.
+      logger.error('[decryptionMiddleware] failed to load client manifest, skipping rule check', {
+        method: sanitizeForLog(req.method),
+        path: sanitizeForLog(req.path),
+        tag: sanitizeForLog(tag),
+        error: sanitizeForLog(error instanceof Error ? error.message : String(error)),
+      });
+    }
+
+    const rule = latest ? findRequestRule(latest, req.method, req.originalUrl) : undefined;
+    if (rule) {
+      const violations = findRuleViolations(req.body, rule);
+      if (violations.length > 0) {
+        res.status(400).json({
+          error: 'Request violates the client encryption manifest',
+          code: 'ENC_MANIFEST_VIOLATION',
+          violations,
+        });
+        return;
+      }
+    }
+
+    // Shape check against the route's contract. passthrough() on purpose: keys the
+    // contract does not list are allowed for now. Only validates; req.body is not replaced
+    // with the parsed (coerced) value.
+    const contract = findRequestContract(req.method, req.originalUrl);
+    if (contract) {
+      const parsed = contract.schema.passthrough().safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Request body does not match its contract',
+          code: 'ENC_CONTRACT_VIOLATION',
+          issues: parsed.error.issues,
+        });
+        return;
+      }
+    }
+
+    if (rule && config.enc.enableDbEncryption) {
+      return transformRequestBody(req, res, next, rule, options);
+    }
+
+    await decryptRequestBody(req, next);
+  };
+}
+
+/**
  * Encrypt JSON responses for the caller's session key. Mounted globally: `res.json` runs
  * after the route's auth middleware, so `req.user.sid` is already resolved by then.
  */
@@ -112,7 +377,14 @@ export function encryptResponseBodyMiddleware(
       return originalJson(body);
     }
 
-    void getEncryptionProvider().encryptResponse(body, sessionId)
+    // Under DEK passthrough the body still holds storage ciphertext; the encryption
+    // service turns it into session ciphertext without the backend seeing plaintext.
+    const provider = getEncryptionProvider();
+    const encrypted = isDekPassthrough()
+      ? provider.transformResponse(body, sessionId)
+      : provider.encryptResponse(body, sessionId);
+
+    void encrypted
       .then((encryptedBody) => originalJson(encryptedBody))
       .catch((error) => {
         logger.error('[decryptionMiddleware] failed to encrypt response body', {

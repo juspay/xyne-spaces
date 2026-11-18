@@ -1,9 +1,28 @@
 import { Router } from 'express';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
+import { manifestRequestBodyMiddleware } from '../middleware/decryptionMiddleware';
+import { AppError } from '../middleware/errorHandler';
+import { db } from '../database/client';
+import { dekPassthroughMiddleware } from '../services/encryption';
 
 const router = Router();
 const conversationController = new ConversationController();
+
+// A reply is stored under its conversation's workspace (messageRepository.create resolves it
+// the same way), so that workspace's DEK is what the manifest's MASTER_DEK fields become.
+const transformReplyBody = manifestRequestBodyMiddleware({
+  resolveWorkspaceId: async (req) => {
+    const conversation = await db.conversation.findUnique({
+      where: { conversationId: req.params.conversationId },
+      select: { workspaceId: true },
+    });
+    if (!conversation) {
+      throw new AppError('Conversation not found', 404);
+    }
+    return conversation.workspaceId;
+  },
+});
 
 // Static route must be registered before any /:conversationId routes.
 router.get('/threads', conversationController.getUserThreads);
@@ -14,7 +33,12 @@ router.post('/reply-drafts/:draftId/decline', conversationController.declineRepl
 router.get('/recent-visited', conversationController.getRecentVisitedConversations);
 
 // Keep replyToConversation for file upload handling
-router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
+// Multipart: the manifest rule check and session-key transform run here, after multer has
+// filled req.body (it is still empty when the auth middleware runs). With the manifest rule
+// active, `content` reaches the controller as workspace-DEK ciphertext, not plaintext.
+// dekPassthroughMiddleware goes first so the whole chain, including the response, runs in
+// passthrough: storage ciphertext stays encrypted on reads and the response is DEK→CEK.
+router.post('/:conversationId/messages', dekPassthroughMiddleware, uploadMultiple, transformReplyBody, conversationController.replyToConversation);
 
 // Get a single conversation message by conversationId + messageId (for mobile background prefetch)
 router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);
