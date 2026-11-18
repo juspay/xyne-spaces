@@ -35,6 +35,7 @@ import {
   ActivityClassification,
   ActivityClassificationJobType, ChannelType, ChannelRole,
   normalizeHistoryScope,
+  MARK_READ_REQUEST_MAX_CHANNELS,
   type AddGroupDmParticipantsRequest,
   type AddGroupDmParticipantsResponse,
 } from '@xyne/shared';
@@ -1722,6 +1723,56 @@ export class ChannelController {
   };
 
   // POST /api/channels/member-counts - Participant counts for a set of channels
+  /**
+   * POST /api/channels/mark-read — marks a set of channels viewed for the caller.
+   *
+   * Deliberately HTTP rather than a Zero mutator: Zero replays a mutator optimistically on
+   * the browser's main thread, which froze the UI for ~640ms when a section held 60
+   * channels. Over HTTP the client has no work to do, and Zero replication clears the
+   * sidebar when the rows land.
+   *
+   * Callers only ever mark their OWN channels read — the userId comes from the session, never
+   * the body.
+   */
+  markChannelsAsRead = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const { channelIds } = req.body as { channelIds?: unknown };
+      if (!Array.isArray(channelIds) || channelIds.some(id => typeof id !== 'string')) {
+        res.status(400).json({ success: false, error: 'channelIds must be an array of strings' });
+        return;
+      }
+
+      // A payload bound, not a capacity one: the service costs a flat handful of
+      // statements however many channels it is given. Callers are not expected to hit
+      // this — useMarkChannelsAsRead splits larger sets into successive requests using
+      // the same constant — so a body over the bound means a caller that did not batch.
+      if (channelIds.length > MARK_READ_REQUEST_MAX_CHANNELS) {
+        res.status(400).json({
+          success: false,
+          error: `channelIds exceeds the maximum of ${MARK_READ_REQUEST_MAX_CHANNELS} per request`,
+        });
+        return;
+      }
+
+      if (channelIds.length === 0) {
+        res.status(200).json({ success: true, data: { channelsUpdated: 0, activitiesRead: 0 } });
+        return;
+      }
+
+      const result = await unreadService.markChannelsAsViewed(channelIds as string[], userId);
+      res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      logger.error('Error in markChannelsAsRead:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+
   getChannelMemberCounts = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;

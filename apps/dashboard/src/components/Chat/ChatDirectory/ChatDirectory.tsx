@@ -29,6 +29,7 @@ import {
   ChatDefault,
   ThreeDotsMenuVertical,
   type PikaIconProps,
+  MarkAsRead,
 } from '@xyne/icons';
 import {
   DropdownMenu,
@@ -38,10 +39,11 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { useAuthContextValues, useAuth } from '../../../hooks/useAuth';
-import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
+import { ChatDirectoryProps, ChannelCategory, type MarkReadTarget } from './ChatDirectory.types';
 import { keyBetween, parseDMParticipantIds } from './ChatDirectory.utils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
+import { useMarkChannelsAsRead } from '../../../hooks/useMarkChannelsAsRead';
 import { useAllMentionCount } from '../../../hooks/useMentionCount';
 import UnreadMentionsPill, { useOffscreenUnreadSections } from './UnreadMentionsPill';
 import { useMutation } from '@tanstack/react-query';
@@ -62,6 +64,7 @@ import SectionOrganizerDialog, {
   type OrganizerMode,
 } from './SectionOrganizerDialog';
 import ManageSectionChannelsDialog from './ManageSectionChannelsDialog';
+import MarkChannelsReadDialog from './MarkChannelsReadDialog';
 import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -211,6 +214,7 @@ const GroupSettingsMenu = ({
     icon: ComponentType<PikaIconProps>;
     trackName: string;
     onSelect: () => void;
+    disabled?: boolean;
   }[];
 }): ReactElement => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -254,6 +258,7 @@ const GroupSettingsMenu = ({
             <DropdownMenuItem
               key={action.label}
               className={MENU_ROW}
+              disabled={action.disabled ?? false}
               onClick={e => {
                 e.stopPropagation();
                 action.onSelect();
@@ -298,6 +303,7 @@ const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
 };
 
 const NO_SECTIONS: ChannelSection[] = [];
+const NO_CHANNEL_IDS: string[] = [];
 
 const ChatDirectory = ({
   channelData,
@@ -350,6 +356,9 @@ const ChatDirectory = ({
   const pendingScheduledCount = usePendingDelayedMessagesCount();
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
   const unreadCounts = useAllUnreadCount();
+  const markChannelsAsRead = useMarkChannelsAsRead();
+  // Every bulk mark-as-read is confirmed first; this holds the one being asked about.
+  const [markReadTarget, setMarkReadTarget] = useState<MarkReadTarget | null>(null);
   const mentionCounts = useAllMentionCount();
   const { starred, channels, directMessages, groupPreferences, setGroupPreference } =
     useChannelSort(channelData, allChannelsUserStatus, context.userID);
@@ -363,6 +372,10 @@ const ChatDirectory = ({
     dmDisplayChannels,
     starredDisplayChannels,
     sectionUnreadCounts,
+    sectionUnreadChannelIds,
+    defaultUnreadChannelIds,
+    dmUnreadChannelIds,
+    starredUnreadChannelIds,
     defaultUnreadCount,
     dmUnreadCount,
     starredUnreadCount,
@@ -1409,6 +1422,20 @@ const ChatDirectory = ({
                           trackName='STARRED_SECTION_OPTIONS'
                           groupPreferences={groupPreferences}
                           setGroupPreference={setGroupPreference}
+                          actions={[
+                            {
+                              label: 'Mark all as read',
+                              icon: MarkAsRead,
+                              trackName: 'MARK_STARRED_AS_READ',
+                              disabled: starredUnreadChannelIds.length === 0,
+                              onSelect: (): void =>
+                                setMarkReadTarget({
+                                  kind: 'channels',
+                                  label: 'Starred',
+                                  channelIds: starredUnreadChannelIds,
+                                }),
+                            },
+                          ]}
                         />
                       </div>
                     </Accordion.Header>
@@ -1449,9 +1476,17 @@ const ChatDirectory = ({
                     sections={channelSections ?? NO_SECTIONS}
                     unreadCounts={unreadCounts}
                     sectionUnreadCount={sectionUnreadCounts[section.id] ?? 0}
+                    unreadChannelIds={sectionUnreadChannelIds[section.id] ?? NO_CHANNEL_IDS}
                     activeChannelId={activeChannelId}
                     onRename={setSectionToRename}
                     onDelete={setSectionToDelete}
+                    onMarkAsRead={(markedSection, channelIds) =>
+                      setMarkReadTarget({
+                        kind: 'channels',
+                        label: markedSection.name,
+                        channelIds,
+                      })
+                    }
                     onManageChannels={setSectionToManage}
                     onCreateSection={() => {
                       setAddSectionSource('channels');
@@ -1610,6 +1645,18 @@ const ChatDirectory = ({
                             },
                           },
                           ...suggestionMenuActions,
+                          {
+                            label: 'Mark all as read',
+                            icon: MarkAsRead,
+                            trackName: 'MARK_CHANNELS_AS_READ',
+                            disabled: defaultUnreadChannelIds.length === 0,
+                            onSelect: (): void =>
+                              setMarkReadTarget({
+                                kind: 'channels',
+                                label: 'Channels',
+                                channelIds: defaultUnreadChannelIds,
+                              }),
+                          },
                         ]}
                       />
                     </div>
@@ -1709,6 +1756,18 @@ const ChatDirectory = ({
                           },
                         },
                         ...suggestionMenuActions,
+                        {
+                          label: 'Mark all as read',
+                          icon: MarkAsRead,
+                          trackName: 'MARK_DMS_AS_READ',
+                          disabled: dmUnreadChannelIds.length === 0,
+                          onSelect: (): void =>
+                            setMarkReadTarget({
+                              kind: 'dms',
+                              label: 'Direct messages',
+                              channelIds: dmUnreadChannelIds,
+                            }),
+                        },
                       ]}
                     />
                   </div>
@@ -1942,6 +2001,15 @@ const ChatDirectory = ({
             </div>
           )}
         </Dialog>
+
+        <MarkChannelsReadDialog
+          target={markReadTarget}
+          onCancel={() => setMarkReadTarget(null)}
+          onConfirm={channelIds => {
+            void markChannelsAsRead(channelIds);
+            setMarkReadTarget(null);
+          }}
+        />
 
         <Dialog
           open={!!sectionToDelete}
