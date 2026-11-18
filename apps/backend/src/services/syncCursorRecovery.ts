@@ -7,20 +7,40 @@ import { db } from '@/database/client';
 const TAG = '[SyncCursorRecovery]';
 const externalSourceRepo = new ExternalSourceRepository();
 
-/** Move the cursor forward after a range has been fully accounted for. */
+/** Compare-and-set attempts before giving up on a cursor other writers keep moving. */
+const ADVANCE_ATTEMPTS = 3;
+
+/**
+ * Move the cursor forward after a range has been fully accounted for.
+ *
+ * Compare-and-set: the write only lands if the cursor still holds the value just read,
+ * so two writers on one mailbox can never move it backwards (a read-then-write let the
+ * slower writer overwrite a newer cursor with its older one).
+ */
 export async function advanceSyncCursor(sourceId: string, historyId: string): Promise<void> {
   try {
-    const source = await externalSourceRepo.findById(sourceId);
-    if (!source) return;
-    if (source.lastSyncCursor && BigInt(historyId) <= BigInt(source.lastSyncCursor)) return;
+    for (let attempt = 0; attempt < ADVANCE_ATTEMPTS; attempt += 1) {
+      const source = await externalSourceRepo.findById(sourceId);
+      if (!source) return;
+      const current = source.lastSyncCursor;
+      if (current && BigInt(historyId) <= BigInt(current)) return;
 
-    await externalSourceRepo.update(sourceId, { lastSyncCursor: historyId });
-    logger.info(`${TAG} [CURSOR_ADVANCED]`, {
-      sourceId,
-      sourceName: source.name,
-      from: source.lastSyncCursor,
-      to: historyId,
-    });
+      const { count } = await db.externalSource.updateMany({
+        where: { id: sourceId, lastSyncCursor: current },
+        data: { lastSyncCursor: historyId },
+      });
+      if (count === 1) {
+        logger.info(`${TAG} [CURSOR_ADVANCED]`, {
+          sourceId,
+          sourceName: source.name,
+          from: current,
+          to: historyId,
+        });
+        return;
+      }
+      // Another writer moved the cursor since the read: re-read and compare again.
+    }
+    logger.warn(`${TAG} cursor kept changing, not advanced`, { sourceId, to: historyId });
   } catch (error) {
     logger.warn(`${TAG} failed to advance sync cursor`, { sourceId, error });
   }

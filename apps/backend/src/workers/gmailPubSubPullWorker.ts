@@ -23,11 +23,18 @@ import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { decrypt } from '@/services/encryptionService';
 import { GoogleService } from '@/services/googleService';
+import { redisService } from '@/services/redisService';
+import { acquireLock, releaseLock, renewLock } from '@/utils/distributedLock';
 
 const TAG = '[GmailPullWorker]';
 const STATS_INTERVAL_MS = 60_000;
 // Keep extending a message's lease while ingest runs (long attachment downloads).
 const MAX_LEASE_EXTENSION_MINUTES = 30;
+// Mailbox lock across replicas: renewed while held, so the TTL only matters if a worker dies.
+const MAILBOX_LOCK_TTL_SECONDS = 120;
+const MAILBOX_LOCK_RENEW_MS = 40_000;
+// A pending note older than this is stale: the next notification resumes from the cursor anyway.
+const MAILBOX_PENDING_TTL_SECONDS = 3600;
 
 const repo = new ExternalSourceRepository();
 
@@ -45,7 +52,55 @@ const deps: PulledNotificationDeps = {
   ingest(source, payload) {
     return ingestExternalSource(source.workspaceId, googleAdapter, source.name, payload, source);
   },
+  mailboxLock: {
+    async tryAcquire(source) {
+      const handle = await acquireLock(mailboxLockKey(source.id), { ttlSeconds: MAILBOX_LOCK_TTL_SECONDS });
+      if (!handle) return null;
+      // Ingest can outlast the TTL (long attachment downloads), so keep the lease alive while it runs.
+      const heartbeat = setInterval(() => {
+        void renewLock(handle, MAILBOX_LOCK_TTL_SECONDS).then(owned => {
+          if (!owned) logger.warn(`${TAG} mailbox lock lost during ingest`, { sourceId: source.id });
+        });
+      }, MAILBOX_LOCK_RENEW_MS);
+      heartbeat.unref();
+      return {
+        async release() {
+          clearInterval(heartbeat);
+          await releaseLock(handle);
+        },
+      };
+    },
+    async markPending(source) {
+      try {
+        await redisService.set(mailboxPendingKey(source.id), '1', MAILBOX_PENDING_TTL_SECONDS);
+      } catch (error) {
+        // The deferred notification is lost from this path; the next one for the mailbox resumes from the cursor.
+        logger.warn(`${TAG} could not mark mailbox pending`, { sourceId: source.id, error: errorText(error) });
+      }
+    },
+    async takePending(source) {
+      try {
+        const removed = await redisService.getClient().del(mailboxPendingKey(source.id));
+        return removed > 0;
+      } catch (error) {
+        logger.warn(`${TAG} could not read mailbox pending flag`, { sourceId: source.id, error: errorText(error) });
+        return false;
+      }
+    },
+  },
 };
+
+function mailboxLockKey(sourceId: string): string {
+  return `lock:gmail-pull:mailbox:${sourceId}`;
+}
+
+function mailboxPendingKey(sourceId: string): string {
+  return `gmail-pull:mailbox-pending:${sourceId}`;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 type Counters = { received: number; processed: number; skipped: number; retried: number; streamErrors: number };
 

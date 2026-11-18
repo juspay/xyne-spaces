@@ -53,7 +53,31 @@ export interface PulledNotificationDeps {
   credentialsEmail(source: ExternalSource): string | undefined;
   /** The push route's ingest: google adapter preprocess, transform, sync. */
   ingest(source: ExternalSource, payload: GooglePubSubMessage): Promise<unknown[]>;
+  /** Cross-replica mailbox exclusion. Without it, ingest runs unlocked (one-replica setups). */
+  mailboxLock?: MailboxLockDeps;
 }
+
+/** A held lock on one mailbox. */
+export interface MailboxLock {
+  release(): Promise<void>;
+}
+
+/**
+ * Lets replicas that share the subscription take turns on a mailbox. Two
+ * notifications for one mailbox on two replicas would otherwise read the same
+ * cursor and ingest the same history at the same time.
+ */
+export interface MailboxLockDeps {
+  /** Take the mailbox's lock without waiting; null when another worker holds it. */
+  tryAcquire(source: ExternalSource): Promise<MailboxLock | null>;
+  /** Note that the mailbox changed while another worker held it. */
+  markPending(source: ExternalSource): Promise<void>;
+  /** Read and clear that note. */
+  takePending(source: ExternalSource): Promise<boolean>;
+}
+
+/** Passes one holder makes over a mailbox before leaving the rest to the next notification. */
+const MAX_MAILBOX_PASSES = 5;
 
 /**
  * Process one pulled message and decide its ack.
@@ -105,12 +129,70 @@ export async function handlePulledGmailNotification(
     },
     subscription,
   };
-  try {
-    const results = await deps.ingest(source, payload);
-    return { action: 'ack', reason: 'processed', emailAddress, sourceName: source.name, resultCount: results.length };
-  } catch (error) {
-    return { action: 'nack', reason: 'ingest-failed', emailAddress, sourceName: source.name, error: errorMessage(error) };
+  if (!deps.mailboxLock) {
+    try {
+      const results = await deps.ingest(source, payload);
+      return { action: 'ack', reason: 'processed', emailAddress, sourceName: source.name, resultCount: results.length };
+    } catch (error) {
+      return { action: 'nack', reason: 'ingest-failed', emailAddress, sourceName: source.name, error: errorMessage(error) };
+    }
   }
+  return ingestExclusively(source, emailAddress, payload, deps, deps.mailboxLock);
+}
+
+/**
+ * Ingest while holding the mailbox's lock. A worker that finds the lock taken
+ * marks the mailbox pending and acks (nacking would burn delivery attempts and
+ * dead-letter the message during a long ingest); the holder then makes another
+ * pass from the cursor, which covers that change. Marking before the second
+ * acquire attempt, and checking after release, means a change can't land
+ * between "holder finished" and "holder let go" and be missed.
+ */
+async function ingestExclusively(
+  initialSource: ExternalSource,
+  emailAddress: string,
+  payload: GooglePubSubMessage,
+  deps: PulledNotificationDeps,
+  lockDeps: MailboxLockDeps,
+): Promise<PullDecision> {
+  const sourceName = initialSource.name;
+  let source = initialSource;
+  let resultCount = 0;
+  let passes = 0;
+  try {
+    while (passes < MAX_MAILBOX_PASSES) {
+      let lock = await lockDeps.tryAcquire(source);
+      if (!lock) {
+        await lockDeps.markPending(source);
+        lock = await lockDeps.tryAcquire(source);
+        if (!lock) {
+          return passes === 0
+            ? { action: 'ack', reason: 'mailbox-busy-deferred', emailAddress, sourceName }
+            : { action: 'ack', reason: 'processed', emailAddress, sourceName, resultCount };
+        }
+      }
+      try {
+        // Cleared before ingest: anything marked while this pass runs gets another pass.
+        await lockDeps.takePending(source);
+        if (passes > 0) {
+          // Later passes resume from the cursor the earlier pass advanced.
+          source = (await deps.findSource(emailAddress)) ?? source;
+        }
+        const results = await deps.ingest(source, payload);
+        resultCount += results.length;
+        passes += 1;
+      } finally {
+        await lock.release();
+      }
+      if (!(await lockDeps.takePending(source))) {
+        return { action: 'ack', reason: 'processed', emailAddress, sourceName, resultCount };
+      }
+    }
+  } catch (error) {
+    return { action: 'nack', reason: 'ingest-failed', emailAddress, sourceName, error: errorMessage(error) };
+  }
+  // Still changing after the last pass: retry this message later rather than leave the change unread.
+  return { action: 'nack', reason: 'mailbox-still-pending', emailAddress, sourceName, resultCount };
 }
 
 function errorMessage(error: unknown): string {
