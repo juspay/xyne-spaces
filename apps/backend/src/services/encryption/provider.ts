@@ -36,6 +36,11 @@ const provider: EncryptionProvider = {
     return unsupported('getEncryptedFieldsConfig');
   },
 
+  async getClientEncryptedMutators(): Promise<string[]> {
+    if (!config.enc.apiClientEncryptionEnabled) return [];
+    return unsupported('getClientEncryptedMutators');
+  },
+
   async getTransitServerKeys(): Promise<TransitServerKeys> {
     return unsupported('getTransitServerKeys');
   },

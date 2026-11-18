@@ -2,12 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
-import {
-  CLIENT_MANIFEST_ENVIRONMENT_HEADER,
-  CLIENT_MANIFEST_TAG_HEADER,
-  CLIENT_MANIFEST_VERSION_HEADER,
-  derivedContentFactsSchema,
-} from '@xyne/shared';
+import { derivedContentFactsSchema } from '@xyne/shared';
 import type { RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
 import {
@@ -132,18 +127,12 @@ async function transformRequestBody(
       return next();
     }
 
-    const versionHeader = req.get(CLIENT_MANIFEST_VERSION_HEADER);
     const { body, derived } = await getEncryptionProvider().transformRequest({
       body: req.body,
       ...caller,
       method: req.method,
       path: req.originalUrl,
       environment: manifestEnvironmentForRequest(req),
-      client: {
-        tag: req.get(CLIENT_MANIFEST_TAG_HEADER) || 'default',
-        version: versionHeader && /^\d+$/.test(versionHeader) ? Number(versionHeader) : undefined,
-        environment: req.get(CLIENT_MANIFEST_ENVIRONMENT_HEADER) || undefined,
-      },
       ...contract,
       entityId: await options.resolveWorkspaceId(req),
       entityType: WORKSPACE_ENTITY_TYPE,

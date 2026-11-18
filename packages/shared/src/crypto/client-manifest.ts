@@ -15,17 +15,7 @@ export type {
   ExtractionPolicy,
 } from '../enc-contracts/manifest.js';
 
-export const CLIENT_MANIFEST_VERSION_HEADER = 'x-enc-manifest-version';
-export const CLIENT_MANIFEST_TAG_HEADER = 'x-enc-manifest-tag';
 export const CLIENT_MANIFEST_STALE_CODE = 'ENC_MANIFEST_STALE';
-/** Environment of the manifest a write was encrypted with ('production', 'playground', ...). */
-export const CLIENT_MANIFEST_ENVIRONMENT_HEADER = 'x-enc-manifest-environment';
-/**
- * Zero mutations carry no client headers to the backend (zero-cache makes the push call), so
- * a mutation encrypted by its manifest rule carries the manifest it used in this arg instead:
- * `{ tag, version, environment }`. The backend strips it before the mutator runs.
- */
-export const CLIENT_MANIFEST_MUTATION_ARG = '_encManifest';
 
 // Module-level store: the manifest is independent of the transit keyring, so it
 // is kept here rather than in EncryptionConfig or key storage.
