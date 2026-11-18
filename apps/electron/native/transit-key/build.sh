@@ -10,10 +10,10 @@ fi
 echo "Building transit-key universal binary..."
 
 # Compile for Apple Silicon
-swiftc main.swift -O -target arm64-apple-macos12.0 -o transit-key-arm64
+swiftc secure-enclave.swift -O -target arm64-apple-macos12.0 -o transit-key-arm64
 
 # Compile for Intel (Macs with a T2 chip have a Secure Enclave)
-swiftc main.swift -O -target x86_64-apple-macos12.0 -o transit-key-x86_64
+swiftc secure-enclave.swift -O -target x86_64-apple-macos12.0 -o transit-key-x86_64
 
 # Create universal binary
 lipo -create transit-key-arm64 transit-key-x86_64 -output transit-key
