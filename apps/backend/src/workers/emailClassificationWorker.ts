@@ -103,7 +103,10 @@ export class EmailClassificationWorker {
     const runClassification = false; // Disabled (LLM) --- IGNORE ---
     // const runPriority = job.data.runPriority ?? true;
     const runPriority = false; // Disabled (LLM) --- IGNORE ---
-    const runAssignment = job.data.runAssignment ?? false;
+    // Classification and priority are disabled above, so for flag-less jobs from normal
+    // ingestion the only meaningful task left is assignment — default it to true so new
+    // tickets get auto-assigned (the sweep passes explicit flags anyway).
+    const runAssignment = job.data.runAssignment ?? true;
 
     logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority} runAssignment=${runAssignment}`);
 
