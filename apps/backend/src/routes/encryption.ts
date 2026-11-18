@@ -6,6 +6,31 @@ import { logger } from '@/utils/logger';
 const router = Router();
 const prisma = DatabaseClient.getInstance();
 
+// Dashboard bundles that still bootstrap here (instead of `/api/transit/config`) register an
+// RSA-wrapped session key only when a client encryption flag is on. The backend has no RSA
+// key any more, so these bundles get both flags off and run plaintext.
+router.get('/public-key', (req: Request, res: Response) => {
+  const sessionId = req.user?.sid;
+  if (!req.user || !sessionId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  res.json({
+    publicKey: '',
+    encryptedFields: {},
+    clientEncryptionEnabled: false,
+    apiClientEncryptionEnabled: false,
+    sessionFingerprint: sessionId,
+  });
+});
+
+router.post('/register-client-key', (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: 'Gone',
+    message: 'RSA session keys are no longer supported; reload to get a bundle that uses /api/transit',
+  });
+});
+
 router.post('/workspaces/backfill-provision', async (req: Request, res: Response) => {
   if (!req.user) {
     res.status(401).json({ error: 'Unauthorized' });
