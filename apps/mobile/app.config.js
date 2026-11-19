@@ -190,6 +190,7 @@ module.exports = ({ config }) => {
       './plugins/with-lotus-crash-reporter-ios/index.cjs',
       './plugins/with-lotus-crash-reporter-android/index.cjs',
       './plugins/with-downloads-module-android/index.cjs',
+      './plugins/with-transit-key-module-android/index.cjs',
       [
         'react-native-vision-camera',
         {

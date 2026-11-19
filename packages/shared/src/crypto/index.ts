@@ -16,6 +16,8 @@ export {
   deriveTransitKey,
   transitKeyId,
   parseTransitKeyId,
+  toBase64,
+  fromBase64,
 } from './keyring.js';
 export type { TransitKeyPair, TransitKeyStore, TransitServerKey, TransitServerKeys } from './keyring.js';
 export {
