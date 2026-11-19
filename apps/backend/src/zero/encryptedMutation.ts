@@ -70,6 +70,11 @@ function deriveLocally(mutatorName: string, args: Record<string, unknown>): Deri
 
 const mutationDerivedContext = new AsyncLocalStorage<DerivedFacts | undefined>();
 
+/** Logs that a mutation got its derived facts and where they came from. */
+function logDerivedFacts(mutatorName: string, source: 'local' | 'encryption-service', derived: DerivedFacts | undefined): void {
+  logger.info(`[encryptedMutation] ${mutatorName}: ${derived ? 'derived facts extracted' : 'no derived facts'} via ${source}`);
+}
+
 /** Facts the encryption service extracted from this mutation's encrypted args, if any. */
 export function getMutationDerived(): DerivedFacts | undefined {
   return mutationDerivedContext.getStore();
@@ -226,6 +231,7 @@ export async function prepareEncryptedMutations(
         // Plaintext args of a contracted mutator: extract the facts here, no passthrough.
         const derived = deriveLocally(String(m!.name), plain);
         if (derived) {
+          logDerivedFacts(String(m!.name), 'local', derived);
           const key = randomUUID();
           prepared.set(key, { derived, dekPassthrough: false });
           set({ ...plain, [PREPARED_ARG]: key });
@@ -244,6 +250,7 @@ export async function prepareEncryptedMutations(
           enc,
           workspaceId,
         );
+        logDerivedFacts(String(m!.name), 'encryption-service', derived);
         prepared.set(key, { derived, dekPassthrough: true });
         next = { ...transformed, [PREPARED_ARG]: key };
       } catch (error) {
