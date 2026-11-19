@@ -616,7 +616,7 @@ async function assertGuestMentionsWithin(
   tx: Transaction<Schema>,
   role: string | undefined,
   channelId: string,
-  mentions: Pick<ExtractorOutput['mentions'], 'userIds' | 'groupIds' | 'handles'> | undefined,
+  mentions: Pick<ExtractorOutput, 'userIds' | 'groupIds' | 'handles'> | undefined,
 ): Promise<void> {
   if (role !== WorkspaceRole.GUEST || !mentions) return;
   if (mentions.groupIds.length > 0 || mentions.handles.length > 0) {
@@ -2870,7 +2870,7 @@ export function createMutators(
           // the mutator still never parses. Every fact comes from the contract's picks, extracted by
           // the encryption service for ciphertext and locally for plaintext (encryptedMutation.ts).
           const facts = requireMutationFacts(conversationsSendClient, 'content');
-          await assertGuestMentionsWithin(tx, authData.role, channelId, facts.mentions);
+          await assertGuestMentionsWithin(tx, authData.role, channelId, facts);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3142,7 +3142,7 @@ export function createMutators(
               asyncTasks.push(async () => {
                 try {
                   await processMeetLinksFromChatMessage(
-                    facts.links.meet.join(' '),
+                    facts.meetLinks.join(' '),
                     authData.workspaceId,
                     conversationId,
                     message.messageId,
@@ -3184,7 +3184,7 @@ export function createMutators(
           });
 
           // Add mentioned users as MENTIONED participants within Zero transaction
-          const mentions = { userIds: facts.mentions.userIds, groupIds: facts.mentions.groupIds };
+          const mentions = { userIds: facts.userIds, groupIds: facts.groupIds };
           logger.info('[MENTION]:', mentions.userIds.length, mentions.groupIds.length, messageId);
           const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
             tx,
@@ -3242,7 +3242,7 @@ export function createMutators(
                       botId: botDefinition.id,
                       // The bot gets the command rebuilt from the facts, or `/` when the message was
                       // not a command: the content itself is opaque here, free text never reaches it.
-                      message: facts.command?.name ? `/${facts.command.name} ${facts.command.args ?? ''}` : '/',
+                      message: facts.commandName ? `/${facts.commandName} ${facts.commandArgs ?? ''}` : '/',
                       channelId: channel.id,
                       conversationId,
                       userMessageId: message.messageId,

@@ -7,7 +7,7 @@ import {
   CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_VERSION_HEADER,
   derivedFactsSchema,
-  derivedSelection,
+  derivedNames,
   sourceFieldNames,
 } from '@xyne/shared';
 import type { RequestContract } from '@xyne/shared';
@@ -70,7 +70,7 @@ function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): 
 function transformRequest(options: EncryptedRouteOptions) {
   const contractFields = Object.keys(options.contract.schema.shape);
   const contractEncrypted = sourceFieldNames(options.contract);
-  const contractDerived = derivedSelection(options.contract);
+  const contractDerived = derivedNames(options.contract);
   return async function transformRequestMiddleware(
     req: Request,
     res: Response,
@@ -127,7 +127,7 @@ async function transformRequestBody(
   next: NextFunction,
   options: EncryptedRouteOptions,
   caller: TransitCaller,
-  contract: { contractFields: string[]; contractEncrypted: string[]; contractDerived: Record<string, Record<string, string[]>> },
+  contract: { contractFields: string[]; contractEncrypted: string[]; contractDerived: Record<string, string[]> },
 ): Promise<void> {
   try {
     if (!req.body || typeof req.body !== 'object') {

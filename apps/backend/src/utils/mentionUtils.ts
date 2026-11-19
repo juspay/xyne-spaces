@@ -424,7 +424,7 @@ export async function extractAllUsersForNotification(
  * user / group-alias lookups as the content path; @channel/@here expand the same way.
  */
 export async function extractAllUsersForNotificationFromDerived(
-  mentions: Pick<ExtractorOutput['mentions'], 'userIds' | 'groupIds' | 'handles' | 'channel' | 'here'>,
+  mentions: Pick<ExtractorOutput, 'userIds' | 'groupIds' | 'handles' | 'mentionsChannel' | 'mentionsHere'>,
   workspaceId: string,
   channelId?: string,
   forceChannelMention?: boolean
@@ -505,7 +505,7 @@ export async function extractAllUsersForNotificationFromDerived(
   }
 
   if (channelId) {
-    if (mentions.channel || forceChannelMention) {
+    if (mentions.mentionsChannel || forceChannelMention) {
       for (const user of await getChannelParticipantsForMention(channelId)) {
         if (!processedUserIds.has(user.userId)) {
           processedUserIds.add(user.userId);
@@ -513,7 +513,7 @@ export async function extractAllUsersForNotificationFromDerived(
         }
       }
     }
-    if (mentions.here) {
+    if (mentions.mentionsHere) {
       for (const user of await getOnlineChannelParticipants(channelId)) {
         if (!processedUserIds.has(user.userId)) {
           processedUserIds.add(user.userId);

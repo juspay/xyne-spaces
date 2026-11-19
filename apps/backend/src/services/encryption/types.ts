@@ -95,8 +95,8 @@ export type TransformRequestInput<T> = TransitCaller & {
    */
   contractFields?: string[];
   contractEncrypted?: string[];
-  /** `{ <field>: { <extractor>: [<picked output keys>] } }` from the contract's sourceToDerived. */
-  contractDerived?: Record<string, Record<string, string[]>>;
+  /** `{ <field>: [<fact names>] }` from the contract's sourceToDerived. */
+  contractDerived?: Record<string, string[]>;
   /** Owner of the row the request writes: the workspace whose DEK its fields go under. */
   entityId?: string;
   entityType?: string;

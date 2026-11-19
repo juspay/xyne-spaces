@@ -1066,20 +1066,20 @@ export class ConversationController {
       // Encrypted content is stored only with the visible length the encryption service measured;
       // a rule whose extraction policy leaves out `text` cannot be accepted (policy lives in the
       // encryption service's database, so this is a configuration error, not a client one).
-      if (content && isEncryptedField(content) && facts?.text?.length === undefined) {
+      if (content && isEncryptedField(content) && facts?.textLength === undefined) {
         res.status(400).json({
           error: 'Encrypted content arrived without its derived length',
           code: 'ENC_DERIVED_INVALID',
         });
         return;
       }
-      const isBotCommand = facts?.command
-        ? facts.command.isBot
+      const isBotCommand = facts?.isBotCommand !== undefined
+        ? facts.isBotCommand
         : Boolean(content && content.trim() && BotCommandParser.isBotCommand(content.trim()));
       if (isBotCommand) {
-        const commandText = facts?.command
-          ? facts.command.name
-            ? `/${facts.command.name} ${facts.command.args ?? ''}`
+        const commandText = facts?.isBotCommand !== undefined
+          ? facts.commandName
+            ? `/${facts.commandName} ${facts.commandArgs ?? ''}`
             : '/'
           : undefined;
         await this.handleBotCommand((content ?? '').trim(), conversationId, userId, res, { commandText });
@@ -1099,7 +1099,7 @@ export class ConversationController {
         showInChannel: showInChannel,
         childConversationId: childConversationId,
         visibleTo: visibleTo ?? null,
-        contentLength: facts?.text?.length,
+        contentLength: facts?.textLength,
       };
 
       const message = await this.messageRepository.create(messageData);
@@ -1173,7 +1173,7 @@ export class ConversationController {
       ) {
         void processMeetLinksFromChatMessage(
           // Extracted Meet links stand in for encrypted content.
-          facts?.links?.meet ? facts.links.meet.join(' ') : message.content,
+          facts?.meetLinks ? facts.meetLinks.join(' ') : message.content,
           req.user.workspaceId,
           conversationId,
           message.messageId,

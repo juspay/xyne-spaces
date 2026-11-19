@@ -234,7 +234,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
     // With derived facts (encrypted content) the preview resolves from the extracted first URL.
-    const linkPreviewSource = contentFacts?.links ? contentFacts.links.first : message.content;
+    const linkPreviewSource = contentFacts ? contentFacts.firstUrl : message.content;
     if (linkPreviewSource && message.msgType === MessageType.USER) {
       this.resolveLinkPreview(message.messageId, message.conversationId, linkPreviewSource).catch(error => {
         logger.error('[MessagesSideEffect] Failed to resolve link preview:', {
@@ -348,7 +348,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       sender.userType !== UserType.APP &&
       sender.userType !== UserType.AGENT &&
       channel?.scopeType === ChannelScopeType.DEFAULT &&
-      (contentFacts?.links ? contentFacts.links.pr.length > 0 : content?.includes('/pull-requests/'))
+      (contentFacts ? contentFacts.prLinks.length > 0 : content?.includes('/pull-requests/'))
     ) {
       prCheckApprovalService
         .postApprovalButtonForPrLinkMessage({
@@ -357,7 +357,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           channelId,
           senderId,
           // Extracted PR URLs stand in for the encrypted content; the host check still runs.
-          content: contentFacts?.links ? contentFacts.links.pr.join(' ') : content,
+          content: contentFacts ? contentFacts.prLinks.join(' ') : content,
           workspaceId: this.ctx.workspaceId,
         })
         .catch(error => {
@@ -405,8 +405,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const allowBroadcastExpansion =
       artifactBroadcastsToChannel || !isReply || allowThreadBroadcastMentions;
     const specialMentions = allowBroadcastExpansion
-      ? contentFacts?.mentions
-        ? { hasChannel: contentFacts.mentions.channel, hasHere: contentFacts.mentions.here }
+      ? contentFacts
+        ? { hasChannel: contentFacts.mentionsChannel, hasHere: contentFacts.mentionsHere }
         : extractSpecialMentions(contentForMentions)
       : { hasChannel: false, hasHere: false };
     // Reuses the @channel pipeline wholesale: mention-tier notification
@@ -1981,9 +1981,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     forceChannelMention: boolean | undefined,
     derived: DerivedFacts | undefined,
   ) {
-    const mentions = messageContentFacts(derived)?.mentions;
-    return mentions
-      ? extractAllUsersForNotificationFromDerived(mentions, workspaceId, channelId, forceChannelMention)
+    const facts = messageContentFacts(derived);
+    return facts
+      ? extractAllUsersForNotificationFromDerived(facts, workspaceId, channelId, forceChannelMention)
       : extractAllUsersForNotification(contentForMentions, workspaceId, channelId, forceChannelMention);
   }
 

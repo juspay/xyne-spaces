@@ -5,7 +5,7 @@ import {
   conversationsSendClient,
   deriveFactsFromPlaintext,
   derivedFactsSchema,
-  derivedSelection,
+  derivedNames,
   sourceFieldNames,
 } from '@xyne/shared';
 import type { DerivedFacts, FieldDerived, RequestContract } from '@xyne/shared';
@@ -61,7 +61,7 @@ export type PreparedMutations = Map<string, { derived?: DerivedFacts; dekPassthr
 function deriveLocally(mutatorName: string, args: Record<string, unknown>): DerivedFacts | undefined {
   const contract = MUTATION_CONTRACTS[mutatorName];
   if (!contract) return undefined;
-  const derived = deriveFactsFromPlaintext(args, derivedSelection(contract));
+  const derived = deriveFactsFromPlaintext(args, derivedNames(contract));
   if (derived) {
     getCryptoOperations().add(1, { operation: 'derive_mutation_local', status: 'ok' });
   }
@@ -162,7 +162,7 @@ async function transformMutationArgs(
         ? {
             contractFields: Object.keys(contract.schema.shape),
             contractEncrypted: sourceFieldNames(contract),
-            contractDerived: derivedSelection(contract),
+            contractDerived: derivedNames(contract),
           }
         : {}),
       entityId: workspaceId,
