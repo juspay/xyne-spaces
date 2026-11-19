@@ -6,10 +6,12 @@ import { DYNAMIC_HEADERS_CHANGED_EVENT } from '../services/clients/dynamicHeader
 import type { YSweetProvider } from '@y-sweet/client';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
-import { canvasService } from '../services/Canvas/canvasService';
+import { isAxiosError } from 'axios';
+import { canvasService, fetchTicketPerAttempt } from '../services/Canvas/canvasService';
 import type { YSweetAuthToken } from '../services/Canvas/canvasService';
 import { canvasPrefetchService } from '../services/Canvas/canvasPrefetchService';
 import { stopYjsProviderPermanently } from '../services/Canvas/yjsProviderTeardown';
+import { withFrameEncryption } from '../services/Canvas/encryptedWebSocket';
 import { logger, Event } from '../utils/logger';
 import { afterReturn, usePageCoverage } from './usePageCoverage';
 
@@ -236,7 +238,8 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     if (authTokenData) {
       const readOnly = authTokenData.authorization === 'read-only';
       permissionReadOnlyRef.current = readOnly;
-      if (providerRef.current) {
+      // While reconnecting, stay read-only. The `connected` handler applies the ref.
+      if (providerRef.current?.status === 'connected') {
         setIsReadOnly(readOnly);
       }
     }
@@ -259,16 +262,26 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     }
   }, [authTokenData]);
 
-  const getAuthToken = useCallback(async (): Promise<YSweetAuthToken> => {
-    if (errorCountRef.current >= 5) {
-      throw new Error('Authentication retry limit reached');
-    }
-    const { data, isError, error } = await refetch();
-    if (isError || !data) {
-      throw error || new Error('Failed to refetch auth token');
-    }
-    return data;
-  }, [refetch]);
+  const getTicket = useCallback(
+    async (wsHandshakeHash?: string): Promise<YSweetAuthToken> => {
+      if (errorCountRef.current >= 5) {
+        throw new Error('Authentication retry limit reached');
+      }
+      try {
+        const ticket = await canvasService.getYSweetTicket(
+          { docId: canvasId, ...(channelId ? { channelId } : {}) },
+          wsHandshakeHash,
+        );
+        permissionReadOnlyRef.current = ticket.authorization === 'read-only';
+        return ticket;
+      } catch (error) {
+        // Access is gone: the metadata refetch fails too, and the authError effect stops the canvas.
+        if (isAxiosError(error) && error.response?.status === 403) void refetch();
+        throw error;
+      }
+    },
+    [canvasId, channelId, refetch],
+  );
 
   useEffect(() => {
     if (prefetchedCanvas?.provider && !prefetchedProviderDestroyedRef.current) {
@@ -374,12 +387,15 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     errorCountRef.current = 0;
     setConnectionFailed(false);
 
-    const provider = createYjsProvider(doc, actualDocId, getAuthToken, {
+    const encryption = withFrameEncryption(getTicket, authTokenData.wsPublicKey);
+    const provider = createYjsProvider(doc, actualDocId, encryption.getAuthToken, {
       offlineSupport: true,
       warnOnClose: true,
       showDebuggerLink: false,
       connect: true,
+      WebSocketPolyfill: encryption.WebSocketPolyfill,
     });
+    fetchTicketPerAttempt(provider);
 
     providerRef.current = provider;
     setAwareness(provider.awareness);
@@ -472,7 +488,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
 
       setAwareness(null);
     };
-  }, [doc, canvasId, hasAuthToken, getAuthToken, reconnectNonce]);
+  }, [doc, canvasId, hasAuthToken, getTicket, reconnectNonce]);
 
   const reconnect = useCallback((): void => {
     if (isReconnecting) return;
