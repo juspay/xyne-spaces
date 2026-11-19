@@ -3,6 +3,8 @@ export type TelephonyStatus = 'RINGING' | 'ANSWERED' | 'ENDED' | 'MISSED' | 'FAI
 export type TelephonyDirection = 'INBOUND' | 'OUTBOUND';
 
 export interface TelephonyEvent {
+  /** Call provider id, e.g. "ozonetel"; stored on the call email body. */
+  provider: string;
   externalId: string;
   status: TelephonyStatus;
   workspaceId: string;

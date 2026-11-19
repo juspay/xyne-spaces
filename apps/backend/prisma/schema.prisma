@@ -2956,6 +2956,26 @@ model ExternalSource {
   @@schema("workflow")
 }
 
+// Which workspace call connection (an ExternalSource) feeds a desk, and how its calls become tickets.
+model DeskCallSettings {
+  channelId       String   @id               // the desk; one call connection per desk
+  workspaceId     String                     // denormalized tenant key (stamped on insert)
+  connectionId    String                     // ExternalSource.id of the call connection
+  provider        String                     // ExternalSource.sourceType, e.g. "ozonetel"
+  isDefault       Boolean  @default(false)   // takes the connection's calls no routing key claims
+  routingKeys     String[] @default([])      // provider routing keys (Ozonetel campaigns)
+  ticketRules     Json?                      // { createTicketOnEvent, callTypes, subjectTemplate }
+  phoneFieldNames String[] @default([])      // APP desks: ticket fields holding dialable numbers
+  updatedBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([connectionId])
+  @@index([workspaceId])
+  @@map("desk_call_settings")
+  @@schema("non_zero")
+}
+
 model ExternalMessage {
   workspaceId String // denormalized tenant key (stamped on insert)
   channelConnectId String? // Slack Connect: the owning channel's connect_group handle (via its parent); null when none / un-backfilled

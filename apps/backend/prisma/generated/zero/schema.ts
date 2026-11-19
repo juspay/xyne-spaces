@@ -1700,6 +1700,22 @@ export const userExternalTokenTable = table("user_external_tokens")
   })
   .primaryKey("id");
 
+export const deskCallSettingsTable = table("desk_call_settings")
+  .columns({
+    channelId: string(),
+    workspaceId: string(),
+    connectionId: string(),
+    provider: string(),
+    isDefault: boolean(),
+    routingKeys: json<string[]>(),
+    ticketRules: json().optional(),
+    phoneFieldNames: json<string[]>(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("channelId");
+
 export const externalMessageTable = table("external_messages")
   .columns({
     workspaceId: string(),
@@ -5679,6 +5695,7 @@ export const schema = createSchema(
       customEmojiTable,
       activityTable,
       userExternalTokenTable,
+      deskCallSettingsTable,
       externalMessageTable,
       proactiveNudgeTable,
       surfaceNudgeTable,
@@ -6011,6 +6028,7 @@ export type ReactionCount = Row<typeof schema.tables.reaction_counts>;
 export type CustomEmoji = Row<typeof schema.tables.custom_emojis>;
 export type Activity = Row<typeof schema.tables.activities>;
 export type UserExternalToken = Row<typeof schema.tables.user_external_tokens>;
+export type DeskCallSettings = Row<typeof schema.tables.desk_call_settings>;
 export type ExternalMessage = Row<typeof schema.tables.external_messages>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
