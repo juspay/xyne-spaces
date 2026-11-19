@@ -9,8 +9,7 @@ import { defineRequestContract, type RequestOf } from '../define.js';
  * encryption service's extractor.
  */
 export const appsChatPostMessageClient = defineRequestContract({
-  encrypted: ['markdownText'],
-  derived: [],
+  sourceToDerived: { markdownText: {} },
   schema: z.object({
     channelId: z.string().optional(),
     channelName: z.string().optional(),
@@ -30,8 +29,7 @@ export type AppsChatPostMessageRequest = RequestOf<typeof appsChatPostMessageCli
  * `text` and `flowJSON` stay plaintext (mentions, BlockKit and flow HTML are built from them).
  */
 export const appsChatUpdateMessageClient = defineRequestContract({
-  encrypted: ['markdownText'],
-  derived: [],
+  sourceToDerived: { markdownText: {} },
   schema: z.object({
     messageId: z.string(),
     channelId: z.string().optional(),
