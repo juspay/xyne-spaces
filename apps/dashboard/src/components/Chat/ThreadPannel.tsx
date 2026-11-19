@@ -87,7 +87,6 @@ import {
   ChannelVisibility,
   BaseTicketType,
   parseTicketMd,
-  parseForwardedMessageXml,
 } from '@xyne/shared';
 import { usePendingForThread, buildPendingThreadMessage } from '@xyne/shared/messages';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
@@ -126,7 +125,8 @@ import { setThreadLastRead } from '../../machines/stateMachine';
 import {
   downloadThreadMarkdown,
   formatThreadMarkdown,
-  messageHtmlToMarkdown,
+  getThreadExportTitle,
+  resolveThreadSenderNames,
 } from '../../utils/threadExport';
 import { useSelf, useUser, useUsersById } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
@@ -689,28 +689,28 @@ export const ThreadMessages = ({
       // Preview props can contain a subset; export a complete authorized snapshot.
       const thread = await zero.run(threadConversationQuery, { type: 'complete' });
       if (!thread) throw new Error('Thread unavailable');
-      const title = discussionTitleOf(thread.messages[0]?.content ?? '') || 'Thread';
+      const initialMessage = thread.messages.find(
+        message =>
+          message.messageId === thread.initialMessageId && message.isSent && !message.isDeleted,
+      );
+      const title = getThreadExportTitle(
+        initialMessage,
+        channelDisplayName,
+        discussionTitleOf(initialMessage?.content ?? ''),
+      );
+      const senderNames = await resolveThreadSenderNames({
+        messages: thread.messages,
+        cachedUsers: exportUsers,
+        lookupUser: userId => zero.run(queries.getUserById({ userId }), { type: 'complete' }),
+        maskEmailForOthers: zero.context.role === 'COMMUNITY_MEMBER',
+        selfId: zero.userID ?? '',
+      });
       const markdown = formatThreadMarkdown({
         title,
         channel: channelDisplayName || 'Channel',
         url: `${shareableOrigin}/chat/dir/${thread.channelId}/${thread.conversationId}`,
         messages: thread.messages,
-        senderName: id => exportUsers.get(id)?.name || 'Unknown user',
-        convertContent: content => {
-          const forwarded = parseForwardedMessageXml(content);
-          if (!forwarded) return messageHtmlToMarkdown(content);
-          // The original sender name is plain text, not stored HTML.
-          const sender = forwarded.originalSenderName
-            .replace(/[\r\n]+/g, ' ')
-            .replace(/([\\`*_[\]<>])/g, '\\$1');
-          return [
-            messageHtmlToMarkdown(forwarded.optionalText ?? ''),
-            `Forwarded from ${sender}`,
-            messageHtmlToMarkdown(forwarded.content),
-          ]
-            .filter(Boolean)
-            .join('\n\n');
-        },
+        senderName: id => senderNames.get(id) ?? 'Unknown',
       });
       await downloadThreadMarkdown(title, markdown);
     } catch {

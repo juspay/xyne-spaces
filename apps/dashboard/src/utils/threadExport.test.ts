@@ -17,7 +17,7 @@ const format = (messages: ThreadExportMessage[]): string =>
     url: 'https://example.com/thread',
     messages,
     senderName: () => 'Alice',
-    convertContent: value => value,
+    convertContent: message => message.content,
   });
 
 describe('thread Markdown export', () => {

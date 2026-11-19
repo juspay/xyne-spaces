@@ -1,9 +1,93 @@
+import { parseForwardedMessageXml } from '@xyne/shared';
+import { marked } from 'marked';
+import { getUserDisplayName } from './userDisplayName';
+
+export function escapeMarkdown(value: string): string {
+  return value.replace(/([\\`*_[\]<>])/g, '\\$1');
+}
+
+function messageMetadata(message: { metadata?: unknown }): Record<string, unknown> {
+  return message.metadata && typeof message.metadata === 'object'
+    ? (message.metadata as Record<string, unknown>)
+    : {};
+}
+
+/** Preserve Markdown messages exactly; only composer HTML needs conversion. */
+export function threadMessageToMarkdown(message: { content: string; metadata?: unknown }): string {
+  const isMarkdown = messageMetadata(message)['contentFormat'] === 'markdown';
+  const forwarded = parseForwardedMessageXml(message.content);
+  if (!forwarded) return isMarkdown ? message.content : messageHtmlToMarkdown(message.content);
+  return [
+    messageHtmlToMarkdown(forwarded.optionalText ?? ''),
+    `Forwarded from ${escapeMarkdown(forwarded.originalSenderName.replace(/[\r\n]+/g, ' '))}`,
+    isMarkdown ? forwarded.content : messageHtmlToMarkdown(forwarded.content),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** Use the discussion title, then readable opening text, then the channel name. */
+export function getThreadExportTitle(
+  message: { content: string; metadata?: unknown } | undefined,
+  channelName: string,
+  discussionTitle = '',
+): string {
+  if (discussionTitle.trim()) return discussionTitle.trim();
+  const content = message ? threadMessageToMarkdown(message) : '';
+  const html = marked.parse(content, { async: false });
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, style, iframe').forEach(node => node.remove());
+  const text = (doc.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return text.slice(0, 100) || channelName.trim() || 'Thread';
+}
+
+/** Call cards have their own UI label, even when their sender is the system user. */
+export function getThreadSenderLabel(message: {
+  senderId: string;
+  metadata?: unknown;
+}): string | undefined {
+  if (messageMetadata(message)['isCallMessage'] === true) return 'Xyne Call';
+  if (message.senderId === 'system') return 'System';
+  return undefined;
+}
+
+type ExportUser = {
+  name?: string | null;
+  displayName?: string | null;
+  email?: string | null;
+};
+
+/** Await missing senders using the same cache/point-query strategy as useUserLookup. */
+export async function resolveThreadSenderNames(options: {
+  messages: readonly ThreadExportMessage[];
+  cachedUsers: ReadonlyMap<string, ExportUser>;
+  lookupUser: (id: string) => Promise<ExportUser | null | undefined>;
+  maskEmailForOthers: boolean;
+  selfId: string;
+}): Promise<Map<string, string>> {
+  const senderIds = [
+    ...new Set(
+      options.messages
+        .filter(message => message.isSent && !message.isDeleted && !getThreadSenderLabel(message))
+        .map(message => message.senderId),
+    ),
+  ];
+  const names = await Promise.all(
+    senderIds.map(async id => {
+      const user = options.cachedUsers.get(id) ?? (await options.lookupUser(id));
+      const visibleUser =
+        user && options.maskEmailForOthers && id !== options.selfId ? { ...user, email: '' } : user;
+      return [id, getUserDisplayName(visibleUser)] as const;
+    }),
+  );
+  return new Map(names);
+}
+
 /** Convert stored composer HTML without reading the virtualized message DOM. */
 export function messageHtmlToMarkdown(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  const escape = (value: string): string => value.replace(/([\\`*_[\]<>])/g, '\\$1');
   const walk = (node: Node): string => {
-    if (node.nodeType === 3) return escape(node.textContent ?? '');
+    if (node.nodeType === 3) return escapeMarkdown(node.textContent ?? '');
     if (!(node instanceof Element)) return '';
     const tag = node.tagName.toLowerCase();
     if (['script', 'style', 'iframe'].includes(tag)) return '';
@@ -24,7 +108,7 @@ export function messageHtmlToMarkdown(html: string): string {
       return `${fence} ${code} ${fence}`;
     }
     if (node.getAttribute('data-type') === 'mention') {
-      return escape(
+      return escapeMarkdown(
         `@${node.getAttribute('data-label') ?? node.textContent ?? 'mention'}`.replace(/^@@/, '@'),
       );
     }
@@ -46,7 +130,7 @@ export function messageHtmlToMarkdown(html: string): string {
     if (tag === 's' || tag === 'del') return `~~${text()}~~`;
     if (tag === 'a' || tag === 'img') {
       const rawUrl = node.getAttribute(tag === 'a' ? 'href' : 'src') ?? '';
-      const label = tag === 'a' ? text() : escape(node.getAttribute('alt') ?? 'Image');
+      const label = tag === 'a' ? text() : escapeMarkdown(node.getAttribute('alt') ?? 'Image');
       try {
         const url = new URL(rawUrl, window.location.origin);
         if (!['https:', 'http:', 'mailto:'].includes(url.protocol)) return label;
@@ -109,6 +193,7 @@ export type ThreadExportMessage = {
   messageId: string;
   senderId: string;
   content: string;
+  metadata?: unknown;
   createdAt: number;
   isDeleted: boolean;
   isSent: boolean;
@@ -121,10 +206,9 @@ export function formatThreadMarkdown(options: {
   url: string;
   messages: readonly ThreadExportMessage[];
   senderName: (id: string) => string;
-  convertContent: (html: string) => string;
+  convertContent?: (message: ThreadExportMessage) => string;
 }): string {
-  const label = (value: string): string =>
-    value.replace(/[\r\n]+/g, ' ').replace(/([\\`*_[\]<>])/g, '\\$1');
+  const label = (value: string): string => escapeMarkdown(value.replace(/[\r\n]+/g, ' '));
   const seen = new Set<string>();
   const messages = [...options.messages]
     .filter(message => {
@@ -147,8 +231,8 @@ export function formatThreadMarkdown(options: {
         }
       });
     return [
-      `## ${label(options.senderName(message.senderId))} — ${new Date(message.createdAt).toISOString()}`,
-      options.convertContent(message.content),
+      `## ${label(getThreadSenderLabel(message) ?? options.senderName(message.senderId))} — ${new Date(message.createdAt).toISOString()}`,
+      (options.convertContent ?? threadMessageToMarkdown)(message),
       ...(attachments.length ? ['### Attachments', attachments.join('\n')] : []),
     ].join('\n\n');
   });
