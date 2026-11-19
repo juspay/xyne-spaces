@@ -183,9 +183,10 @@ describe('isRefreshableAuthFailure', () => {
 });
 
 describe('isSessionEndedAuthFailure', () => {
-  it('ends the session on an invalid token, a revoked session, a removed user or a blocked domain', () => {
+  it('ends the session on an invalid token, a gone or revoked session, a removed user or a blocked domain', () => {
     for (const code of [
       'TOKEN_INVALID',
+      'REFRESH_INVALID',
       'SESSION_REVOKED',
       'USER_REMOVED',
       'EMAIL_DOMAIN_NOT_ALLOWED',

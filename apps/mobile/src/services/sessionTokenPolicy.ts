@@ -59,11 +59,14 @@ const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED']);
 /**
  * The final 401 codes, on which the backend says the client should log out. TOKEN_INVALID
  * is one: a bad signature, claims that do not match the request, or a user that no longer
- * exists. A 401 for a request sent under an account or workspace that is no longer the
- * current one never signs out (see withSessionRefreshOn401).
+ * exists. REFRESH_INVALID comes from the routes that use the session behind the JWT
+ * (refresh, switch-workspace, create-workspace) when that session is gone. A 401 for a
+ * request sent under an account or workspace that is no longer the current one never
+ * signs out (see withSessionRefreshOn401).
  */
 const SESSION_ENDED_AUTH_CODES = new Set([
   'TOKEN_INVALID',
+  'REFRESH_INVALID',
   'SESSION_REVOKED',
   'USER_REMOVED',
   'EMAIL_DOMAIN_NOT_ALLOWED',
@@ -101,8 +104,9 @@ export function isRefreshableAuthFailure(statusCode: number, body: unknown): boo
 
 /**
  * Whether an API 401 says the session is over: the token is invalid or its user no longer
- * exists (TOKEN_INVALID), logged out (SESSION_REVOKED), the user left or was deactivated
- * (USER_REMOVED), or the email domain is blocked. A refresh cannot bring it back and every
+ * exists (TOKEN_INVALID), the session behind it is gone (REFRESH_INVALID), logged out
+ * (SESSION_REVOKED), the user left or was deactivated (USER_REMOVED), or the email domain
+ * is blocked. A refresh cannot bring it back and every
  * later request is refused the same way, so the app signs out.
  */
 export function isSessionEndedAuthFailure(statusCode: number, body: unknown): boolean {
