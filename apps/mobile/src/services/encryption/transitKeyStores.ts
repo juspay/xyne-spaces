@@ -4,10 +4,11 @@ import { LotusTransitKey } from '../../modules/transit-key/NativeTransitKeyModul
 import { Event, logger } from '../../utils/logger';
 
 /**
- * The mobile app's transit key, kept by the OS through the native module: the Android Keystore
- * (StrongBox, else the TEE), or on older Android a key stored encrypted by the Keystore. React
- * Native has no WebCrypto, so the shared WebCrypto stores do not apply here, and there is no
- * memory fallback: without the native module there is no transit key.
+ * The mobile app's transit key, kept by the OS through the native module: on Android the
+ * Keystore (StrongBox, else the TEE), else a key stored encrypted by the Keystore; on iOS the
+ * Secure Enclave, else a key kept in the Keychain. React Native has no WebCrypto, so the shared
+ * WebCrypto stores do not apply here, and there is no memory fallback: without the native
+ * module there is no transit key.
  */
 
 /** As long as the dashboard gives a key store, so a stuck Keystore cannot stall the caller. */

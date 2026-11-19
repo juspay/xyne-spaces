@@ -184,6 +184,9 @@ module.exports = ({ config }) => {
         },
       ],
       'expo-document-picker',
+      // Before with-certificate-module-ios: entitlement mods apply in reverse order, and that
+      // plugin replaces the keychain-access-groups list, which would drop the transit key's group.
+      './plugins/with-transit-key-module-ios/index.cjs',
       './plugins/with-certificate-module-ios/index.cjs',
       './plugins/with-certificate-module-android/index.cjs',
       './plugins/with-integrity-module-android/index.cjs',
