@@ -1,13 +1,17 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
+import { defineMutator } from '@rocicorp/zero';
+import type { DefaultContext, DefaultSchema, DefaultWrappedTransaction, ReadonlyJSONValue, Transaction } from '@rocicorp/zero';
+import type { z } from 'zod';
 import {
   conversationsSendClient,
   deriveFactsFromPlaintext,
   derivedFactsSchema,
   derivedNames,
+  makeUnreadable,
   sourceFieldNames,
 } from '@xyne/shared';
-import type { DerivedFacts, FieldDerived, RequestContract } from '@xyne/shared';
+import type { DerivedFacts, FieldDerived, RequestContract, UnreadableBody } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
@@ -106,6 +110,31 @@ export function requireMutationFacts<C extends RequestContract, F extends Extrac
     throw new MutationEncryptionError('ENC_DERIVED_MISSING', `${name} ran without derived facts for "${field}"`);
   }
   return facts;
+}
+
+/**
+ * `defineMutator` for a mutator with a request contract: the one place a contracted mutator's
+ * args are made unreadable. The mutator body gets the contract's `unreadableString()` fields
+ * as `UnreadableString` and never holds them as plain values; it reads one only through
+ * reveal(). The wrapping happens here, after Zero has validated the args against `validator`,
+ * because a mutator's validated args must be JSON and an `UnreadableString` is not.
+ */
+export function defineContractMutator<
+  C extends RequestContract,
+  TInput extends ReadonlyJSONValue | undefined,
+  TOutput extends ReadonlyJSONValue & object,
+>(
+  contract: C,
+  validator: z.ZodType<TOutput, TInput>,
+  mutator: (options: {
+    tx: Transaction<DefaultSchema, DefaultWrappedTransaction>;
+    ctx: DefaultContext;
+    args: UnreadableBody<C, TOutput>;
+  }) => Promise<void>,
+) {
+  return defineMutator<TInput, TOutput>(validator, ({ tx, ctx, args }) =>
+    mutator({ tx, ctx, args: makeUnreadable(contract, args) }),
+  );
 }
 
 /** An encryption-service verdict on the mutation (stale manifest, rule violation, drift). */

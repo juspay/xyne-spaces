@@ -134,7 +134,7 @@ import {
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
-import { conversationsSendClient } from '@xyne/shared';
+import { conversationsSendClient, reveal } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
@@ -176,7 +176,7 @@ import {
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
-import { requireMutationFacts } from './encryptedMutation';
+import { defineContractMutator, requireMutationFacts } from './encryptedMutation';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
@@ -2839,7 +2839,8 @@ export function createMutators(
       ),
     },
     conversations: {
-      send: defineMutator(
+      send: defineContractMutator(
+        conversationsSendClient,
         z.object({
           channelId: z.string(),
           content: z.string(),
@@ -2863,7 +2864,7 @@ export function createMutators(
             entityLinkContext,
           },
         }) => {
-          if (content === '') {
+          if (reveal(content) === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
           // `content` is opaque here: workspace-DEK ciphertext under its manifest rule, or plaintext
@@ -3029,7 +3030,7 @@ export function createMutators(
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            content: content.trim(),
+            content: reveal(content).trim(),
             msgType: type,
             hasAttachment: false,
             edited: false,
