@@ -419,12 +419,12 @@ export async function extractAllUsersForNotification(
 
 /**
  * extractAllUsersForNotification for a message whose content the backend cannot read:
- * the encryption service already parsed it (DerivedContentFacts.mentions). User and
+ * the encryption service already parsed it (the field's `mentions` facts). User and
  * group ids are used directly; `handles` (legacy ZWSP `@name` tokens) go through the same
  * user / group-alias lookups as the content path; @channel/@here expand the same way.
  */
 export async function extractAllUsersForNotificationFromDerived(
-  mentions: ExtractorOutput['mentions'],
+  mentions: Pick<ExtractorOutput['mentions'], 'userIds' | 'groupIds' | 'handles' | 'channel' | 'here'>,
   workspaceId: string,
   channelId?: string,
   forceChannelMention?: boolean

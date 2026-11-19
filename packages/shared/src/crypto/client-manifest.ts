@@ -11,8 +11,6 @@ export type {
   ClientManifestFieldRule,
   ClientManifestRule,
   ClientEncryptionManifest,
-  PersistPolicy,
-  ExtractionPolicy,
 } from '../enc-contracts/manifest.js';
 
 export const CLIENT_MANIFEST_VERSION_HEADER = 'x-enc-manifest-version';
