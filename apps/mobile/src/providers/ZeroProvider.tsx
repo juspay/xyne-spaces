@@ -4,6 +4,7 @@ import { dropAllDatabases, UpdateNeededReason, Zero } from '@rocicorp/zero';
 import { useSelector } from '@xstate/react';
 
 import { schema } from '@xyne/shared';
+import { useEncryptionBootstrap } from '@xyne/shared/hooks';
 import { stateMachineActor } from '@xyne/shared/machines';
 import { ZERO_SERVER_URL } from '@/src/config';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -65,6 +66,9 @@ const resolvedAccessTokenMatchesWorkspace = (
 
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user, token } = useAuth();
+  // Zero opens only once the transit key is registered and its cookie set (never on a failed
+  // setup): the sync proxy reads the key once, when the websocket connects.
+  const { isReady: encryptionReady } = useEncryptionBootstrap();
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
   const unsubscribeConnectionTimingRef = useRef<(() => void) | null>(null);
@@ -148,7 +152,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   }, [token, uid, workspaceId, refreshCount]);
 
   useEffect(() => {
-    if (!uid || !workspaceId || !resolvedAuthTokenRef.current) {
+    if (!uid || !workspaceId || !resolvedAuthTokenRef.current || !encryptionReady) {
       unsubscribeConnectionTimingRef.current?.();
       unsubscribeConnectionTimingRef.current = null;
       unsubscribeHeartbeatRef.current?.();
@@ -263,6 +267,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     };
   }, [
     currentWorkspaceId,
+    encryptionReady,
     hasResolvedAuthToken,
     memberId,
     orgRole,
