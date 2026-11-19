@@ -580,14 +580,26 @@ artifactAppsRouter.post("/:id/publish", async (req: Request<{ id: string }>, res
     return;
   }
 
-  const updated = await prisma.artifactApp.update({
-    where: { id: app.id },
-    data: {
-      visibility: VISIBILITY_WORKSPACE,
-      publishedVersionId: version.id,
-      publishedAt: new Date(),
-    },
-  });
+  // `isArchived: false` in the update itself, not only the check above: an archive
+  // landing between the two would otherwise leave an archived app published, and
+  // unarchive would then bring it back published.
+  let updated;
+  try {
+    updated = await prisma.artifactApp.update({
+      where: { id: app.id, isArchived: false },
+      data: {
+        visibility: VISIBILITY_WORKSPACE,
+        publishedVersionId: version.id,
+        publishedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      res.status(404).json({ success: false, error: "App not found" });
+      return;
+    }
+    throw err;
+  }
 
   res.json({ success: true, app: updated });
 });
@@ -706,7 +718,78 @@ artifactAppsRouter.post("/:id/unpublish", async (req: Request<{ id: string }>, r
   res.json({ success: true, app: updated });
 });
 
-/** GET /?scope=mine|workspace — gallery listings. Manifests only, never bytes. */
+/**
+ * POST /:id/archive — hide the app everywhere, without deleting anything.
+ *
+ * Every other route already treats an archived app as not found (listings, the
+ * payload, storage, agents), so setting the flag is the whole change. Versions,
+ * storage records and the publish pin are kept as they are, which is what makes
+ * unarchive a true undo: a published app comes back published. Idempotent.
+ */
+artifactAppsRouter.post("/:id/archive", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  // An archived app is invisible to everyone but its owner: same 404 as missing.
+  if (!app || (app.isArchived && app.ownerUserId !== requesterId)) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  if (app.ownerUserId !== requesterId) {
+    res.status(403).json({ success: false, error: "Forbidden" });
+    return;
+  }
+  if (app.isArchived) {
+    res.json({ success: true, app });
+    return;
+  }
+
+  const updated = await prisma.artifactApp.update({
+    where: { id: app.id },
+    data: { isArchived: true, archivedAt: new Date() },
+  });
+
+  log.info(`app ${app.id} archived by ${requesterId}`);
+  res.json({ success: true, app: updated });
+});
+
+/** POST /:id/unarchive — bring an archived app back exactly as it was. Idempotent. */
+artifactAppsRouter.post("/:id/unarchive", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  // Only the owner may know an archived app exists, so a non-owner gets 404, not 403.
+  if (!app || app.ownerUserId !== requesterId) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  if (!app.isArchived) {
+    res.json({ success: true, app });
+    return;
+  }
+
+  const updated = await prisma.artifactApp.update({
+    where: { id: app.id },
+    data: { isArchived: false, archivedAt: null },
+  });
+
+  log.info(`app ${app.id} unarchived by ${requesterId}`);
+  res.json({ success: true, app: updated });
+});
+
+/**
+ * GET /?scope=mine|workspace|archived — gallery listings. Manifests only, never
+ * bytes. `archived` is the owner's own archived apps, so they can be found and
+ * unarchived; nothing else ever lists them.
+ */
 artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> => {
   const requesterId = getRequesterId(req);
   if (!requesterId) {
@@ -720,11 +803,12 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
     return;
   }
 
-  const scope = req.query["scope"] === "workspace" ? "workspace" : "mine";
+  const rawScope = req.query["scope"];
+  const scope = rawScope === "workspace" ? "workspace" : rawScope === "archived" ? "archived" : "mine";
   const where =
     scope === "workspace"
       ? { workspaceId, visibility: VISIBILITY_WORKSPACE, isArchived: false }
-      : { workspaceId, ownerUserId: requesterId, isArchived: false };
+      : { workspaceId, ownerUserId: requesterId, isArchived: scope === "archived" };
 
   const apps = await prisma.artifactApp.findMany({
     where,
@@ -744,7 +828,7 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
   const pinnedById = new Map(pinned.map((v) => [v.id, v]));
 
   const latestByApp = new Map<string, { manifest: unknown; versionNumber: number }>();
-  if (scope === "mine" && apps.length) {
+  if (scope !== "workspace" && apps.length) {
     const all = await prisma.artifactAppVersion.findMany({
       where: { appId: { in: apps.map((a) => a.id) } },
       orderBy: { versionNumber: "desc" },
@@ -787,6 +871,7 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
         ownerName: ownerNames.get(a.ownerUserId) ?? null,
         icon: a.icon,
         publishedAt: a.publishedAt,
+        archivedAt: a.archivedAt,
         updatedAt: a.updatedAt,
         manifest: v?.manifest ?? null,
       };

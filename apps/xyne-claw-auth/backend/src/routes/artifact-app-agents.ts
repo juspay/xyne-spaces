@@ -612,6 +612,15 @@ artifactAppAgentsRouter.get("/runs", async (req: Request, res: Response): Promis
     return;
   }
 
+  // An archived app is "not found" on every route, this one included.
+  if (appId) {
+    const app = await prisma.artifactApp.findUnique({ where: { id: appId }, select: { isArchived: true } });
+    if (app?.isArchived) {
+      res.status(404).json({ success: false, error: "App not found" });
+      return;
+    }
+  }
+
   // Scoped by userId, so this needs no app-level ACL: a viewer can only ever see
   // their own runs, and two people using one published app never see each other's.
   const rows = await prisma.artifactAppAgentRun.findMany({

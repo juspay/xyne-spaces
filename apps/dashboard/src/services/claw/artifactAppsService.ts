@@ -24,6 +24,8 @@ export interface ArtifactAppSummary {
   /** Xyne icon id, or null for the fallback mark. */
   icon: string | null;
   publishedAt: string | null;
+  /** When it was archived. Set only on `archived` listings. */
+  archivedAt?: string | null;
   updatedAt: string;
   manifest: ReactArtifactManifest | null;
 }
@@ -154,9 +156,25 @@ export async function unpublishArtifactApp(appId: string): Promise<{ app: Artifa
   return clawRequest(`${BASE}/${encodeURIComponent(appId)}/unpublish`, { method: 'POST' });
 }
 
-/** `mine` = everything I saved; `workspace` = what others have published. */
+/**
+ * Hide an app everywhere without deleting it. Versions, storage and the publish
+ * pin are kept, so unarchiving restores it exactly. Owner only; idempotent.
+ */
+export async function archiveArtifactApp(appId: string): Promise<{ app: ArtifactAppDetail }> {
+  return clawRequest(`${BASE}/${encodeURIComponent(appId)}/archive`, { method: 'POST' });
+}
+
+/** Bring an archived app back as it was (still published if it was). Owner only. */
+export async function unarchiveArtifactApp(appId: string): Promise<{ app: ArtifactAppDetail }> {
+  return clawRequest(`${BASE}/${encodeURIComponent(appId)}/unarchive`, { method: 'POST' });
+}
+
+/**
+ * `mine` = everything I saved; `workspace` = what others have published;
+ * `archived` = my own archived apps (nothing else ever lists them).
+ */
 export async function listArtifactApps(
-  scope: 'mine' | 'workspace',
+  scope: 'mine' | 'workspace' | 'archived',
 ): Promise<{ apps: ArtifactAppSummary[] }> {
   return clawRequest(`${BASE}?scope=${scope}`);
 }
