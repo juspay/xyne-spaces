@@ -21,7 +21,6 @@ export type { TransitKeyPair, TransitKeyStore, TransitServerKey, TransitServerKe
 export {
   indexedDbTransitKeyStore,
   chainTransitKeyStores,
-  deleteIndexedDbTransitKey,
 } from './transit-key-stores.js';
 export type { ChainTransitKeyStoresOptions } from './transit-key-stores.js';
 export {

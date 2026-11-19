@@ -7,7 +7,8 @@ import type { TransitKeyPair, TransitKeyStore } from './keyring.js';
  * It is persisted in IndexedDB as a CryptoKey object and reused on later loads, surviving
  * logout: the transit AES keys are derived from it and the encryption service's public keys,
  * so with a persisted pair the server can encrypt for this browser at any time.
- * Not for Electron, where the key lives in the main process (TPM, Secure Enclave, ...).
+ * In Electron, where the key lives in the main process (TPM, Secure Enclave, ...), this is only
+ * the fallback for a window that cannot reach it.
  */
 
 const DB_NAME = 'xyne-transit-key';
@@ -111,18 +112,6 @@ export const indexedDbTransitKeyStore: TransitKeyStore = {
     });
   },
 };
-
-/**
- * Removes the persisted browser pair, for hosts that keep the key elsewhere (the desktop app
- * holds it in its main process). Never fails; a missing database is fine.
- */
-export function deleteIndexedDbTransitKey(): Promise<void> {
-  if (typeof indexedDB === 'undefined') return Promise.resolve();
-  return new Promise(resolve => {
-    const request = indexedDB.deleteDatabase(DB_NAME);
-    request.onsuccess = request.onerror = request.onblocked = (): void => resolve();
-  });
-}
 
 /** Login waits on the transit key, so a store that hangs is skipped after this long. */
 const STORE_TIMEOUT_MS = 6000;
