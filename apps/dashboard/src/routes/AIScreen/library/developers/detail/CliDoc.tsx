@@ -1,5 +1,5 @@
 import { type ReactElement } from 'react';
-import { CLI_VERSION, cliDownloadUrl, spacesBaseUrl } from '../developerTools';
+import { CLI_NPM_PACKAGE, CLI_NPM_MAJOR, spacesBaseUrl } from '../developerTools';
 import {
   Callout,
   CodeBlock,
@@ -28,13 +28,22 @@ const COMMANDS: { group: string; rows: { name: string; description: string }[] }
       },
       { name: 'spaces app unpublish', description: 'Make a published app private again.' },
       {
+        name: 'spaces app archive [<appId>]',
+        description:
+          'Hide an app everywhere without deleting it. Versions, storage and its published state are kept.',
+      },
+      {
+        name: 'spaces app unarchive [<appId>]',
+        description: 'Bring an archived app back exactly as it was.',
+      },
+      {
         name: 'spaces app versions',
         description: "List an app's versions, with head and published marked.",
       },
       { name: 'spaces app restore <v>', description: 'Move head back to a version. Reversible.' },
       {
-        name: 'spaces app list [--workspace]',
-        description: "Your apps, or the workspace's published ones.",
+        name: 'spaces app list [--workspace | --archived]',
+        description: "Your apps, the workspace's published ones, or your archived ones.",
       },
       { name: 'spaces app pull <appId>', description: "Download an app's files into a folder." },
     ],
@@ -65,7 +74,6 @@ const SURFACES: { name: string; description: string }[] = [
 
 export function CliDoc(): ReactElement {
   const baseUrl = spacesBaseUrl();
-  const downloadUrl = cliDownloadUrl();
 
   return (
     <>
@@ -74,7 +82,7 @@ export function CliDoc(): ReactElement {
           { value: '1', label: 'command to scaffold an app' },
           { value: '5', label: 'places an app can live' },
           { value: '0', label: 'lines of sign-in code' },
-          { value: `v${CLI_VERSION}`, label: 'current version' },
+          { value: `v${CLI_NPM_MAJOR}`, label: 'latest release on npm' },
         ]}
       />
 
@@ -119,18 +127,20 @@ export function CliDoc(): ReactElement {
 
       <DocSection eyebrow='Get started' title='Install and ship your first app'>
         <Callout>
-          macOS only for now, with Node 22 or later. Sign in to Spaces in Chrome, Brave, Edge or Arc
-          first: the CLI reads that browser session, so there is no separate login.
+          macOS only for now, with Node 22 or later. Sign in to Spaces in Chrome, Brave, Edge, Arc
+          or Firefox first: the CLI reads that browser session, so there is no separate login.
         </Callout>
         <div className='flex flex-col'>
-          <Step n={1} title='Install'>
-            <Text>npm installs it straight from this Spaces:</Text>
+          <Step n={1} title='Install from npm'>
             <CodeBlock
-              code={`npm install -g ${downloadUrl}\nspaces help`}
+              code={`npm install -g ${CLI_NPM_PACKAGE}\nspaces help`}
               trackName='Spaces CLI: copy install'
             />
           </Step>
           <Step n={2} title='Point it at this Spaces'>
+            <Text>
+              The CLI has no built-in host, so tell it once. Your Spaces address is filled in below.
+            </Text>
             <CodeBlock
               code={`spaces config set url ${baseUrl}`}
               trackName='Spaces CLI: copy config url'
@@ -151,6 +161,14 @@ spaces app publish       # ship it to your workspace`}
             </Text>
           </Step>
         </div>
+        <Callout>
+          Rather not install anything? Run it straight from npm. This also sets this Spaces as the
+          host, so later commands need no setup:
+        </Callout>
+        <CodeBlock
+          code={`npx -y ${CLI_NPM_PACKAGE}@${CLI_NPM_MAJOR} app init my-app --url ${baseUrl}`}
+          trackName='Spaces CLI: copy npx init'
+        />
       </DocSection>
 
       <DocSection

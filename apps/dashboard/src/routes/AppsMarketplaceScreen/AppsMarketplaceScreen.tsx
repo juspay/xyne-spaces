@@ -5,17 +5,36 @@ import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button/index';
 import AppsV2 from '@/routes/AIScreen/library/apps/AppsV2';
 import { LibraryToolbarSlotProvider } from '@/routes/AIScreen/library/shared/components/LibraryToolbarSlot';
+import { SegmentedToggle } from '@/components/ui/SegmentedToggle';
 import { CreateAppDialog } from './CreateAppDialog';
+import AppsAnalytics from './AppsAnalytics';
+
+type MarketplaceView = 'apps' | 'analytics';
+const VIEW_OPTIONS: { value: MarketplaceView; label: string }[] = [
+  { value: 'apps', label: 'Apps' },
+  { value: 'analytics', label: 'Analytics' },
+];
 
 /**
  * Apps Marketplace: the workspace's apps as their own rail module.
  *
  * The list is Agent Hub → Apps itself (`AppsV2`), so the two never drift; this
- * adds the module's own header and the way to start a new app from a name.
+ * adds the module's own header, the way to start a new app from a name, and an
+ * Analytics view (`?view=analytics`) the Agent Hub tab doesn't have.
  */
 const AppsMarketplaceScreen = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get('q') ?? '';
+  // In the URL, so the analytics view can be linked to and survives a reload.
+  const view: MarketplaceView = searchParams.get('view') === 'analytics' ? 'analytics' : 'apps';
+  const setView = (next: MarketplaceView): void => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'analytics') params.set('view', 'analytics');
+    else params.delete('view');
+    // A history entry, not a replace: Back from Analytics returns to the apps list
+    // instead of leaving the marketplace.
+    setSearchParams(params);
+  };
   const [searchOpen, setSearchOpen] = useState(query.length > 0);
   const [createOpen, setCreateOpen] = useState(false);
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
@@ -53,21 +72,24 @@ const AppsMarketplaceScreen = (): ReactElement => {
               </p>
             </div>
             <div className='flex shrink-0 items-center gap-2'>
-              <button
-                type='button'
-                onClick={toggleSearch}
-                aria-label='Search apps'
-                aria-expanded={searchOpen}
-                className={cn(
-                  'flex size-9 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
-                  searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
-                )}
-                data-track-category='Apps'
-                data-track-name='AppsMarketplaceSearchToggle'
-              >
-                <SearchDefault className='size-4' />
-              </button>
-              <div ref={setToolbarSlot} className='flex items-center' />
+              {view === 'apps' && (
+                <button
+                  type='button'
+                  onClick={toggleSearch}
+                  aria-label='Search apps'
+                  aria-expanded={searchOpen}
+                  className={cn(
+                    'flex size-9 items-center justify-center rounded-[10px] transition-colors hover:bg-muted',
+                    searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground',
+                  )}
+                  data-track-category='Apps'
+                  data-track-name='AppsMarketplaceSearchToggle'
+                >
+                  <SearchDefault className='size-4' />
+                </button>
+              )}
+              {/* The list's own toolbar (the Show filter) portals in here. */}
+              {view === 'apps' && <div ref={setToolbarSlot} className='flex items-center' />}
               <Button
                 type='button'
                 onClick={() => setCreateOpen(true)}
@@ -80,7 +102,18 @@ const AppsMarketplaceScreen = (): ReactElement => {
             </div>
           </div>
 
-          {searchOpen && (
+          <div className='pt-4'>
+            <SegmentedToggle
+              options={VIEW_OPTIONS}
+              value={view}
+              onChange={setView}
+              className='self-start'
+              trackCategory='Apps'
+              trackPrefix='AppsMarketplaceView'
+            />
+          </div>
+
+          {view === 'apps' && searchOpen && (
             <div className='relative pt-4'>
               <SearchDefault className='pointer-events-none absolute left-3 top-[calc(50%+8px)] size-4 -translate-y-1/2 text-muted-foreground' />
               <input
@@ -104,11 +137,17 @@ const AppsMarketplaceScreen = (): ReactElement => {
           <div className='pb-3' />
         </div>
 
-        <LibraryToolbarSlotProvider value={toolbarSlot}>
+        {view === 'analytics' ? (
           <div className='mt-5'>
-            <AppsV2 query={query} />
+            <AppsAnalytics />
           </div>
-        </LibraryToolbarSlotProvider>
+        ) : (
+          <LibraryToolbarSlotProvider value={toolbarSlot}>
+            <div className='mt-5'>
+              <AppsV2 query={query} />
+            </div>
+          </LibraryToolbarSlotProvider>
+        )}
       </div>
 
       <CreateAppDialog open={createOpen} onOpenChange={setCreateOpen} />

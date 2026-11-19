@@ -1,0 +1,40 @@
+/*
+ * Chart colours for Apps Marketplace analytics, by role, so the chart code never
+ * names a colour.
+ *
+ * Chrome (surface, grid, axis) comes from the app's own theme tokens, so it
+ * follows every theme, including ones added later.
+ *
+ * The series and status colours are a fixed, validated set: the four series
+ * slots were checked with the dataviz palette validator against the app's
+ * light and midnight backgrounds, and every adjacent pair clears the
+ * colour-blind and normal-vision separation gates. global.css's --chart-1..5
+ * are shadcn defaults that were never checked that way, so they aren't used.
+ * Light aqua and yellow sit below 3:1 contrast, so every chart here also has a
+ * table view and the status bar prints its counts.
+ *
+ * Status colours mean a state (a run completed or failed) and are never used as
+ * series colours; they always appear with a text label.
+ */
+.apps-analytics {
+  --viz-series-1: #2a78d6; /* blue */
+  --viz-series-2: #eb6834; /* orange */
+  --viz-series-3: #1baf7a; /* aqua */
+  --viz-series-4: #eda100; /* yellow */
+  --viz-on-series-4: #0b0b0b; /* label ink inside the yellow fill */
+  --viz-status-good: #0ca30c;
+  --viz-status-critical: #d03b3b;
+  --viz-neutral: hsl(var(--muted-foreground)); /* cancelled, and other "no outcome" states */
+  --viz-grid: hsl(var(--border));
+  --viz-axis: hsl(var(--muted-foreground));
+  --viz-surface: hsl(var(--background));
+}
+
+/* Dark themes: the same hues, stepped for a dark surface. */
+[data-theme="midnight"] .apps-analytics {
+  --viz-series-1: #3987e5;
+  --viz-series-2: #d95926;
+  --viz-series-3: #199e70;
+  --viz-series-4: #c98500;
+  --viz-on-series-4: #ffffff;
+}

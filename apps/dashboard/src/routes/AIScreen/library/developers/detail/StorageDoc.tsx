@@ -1,5 +1,6 @@
 import { type ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { STORAGE_NPM_PACKAGE, spacesBaseUrl } from '../developerTools';
 import {
   Callout,
   CodeBlock,
@@ -62,6 +63,17 @@ const LIMITS: { name: string; description: string }[] = [
 export function StorageDoc(): ReactElement {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const cliPath = `${workspaceId ? `/${workspaceId}` : ''}/ai/library/developers/cli`;
+  const baseUrl = spacesBaseUrl();
+  const standalone = `import { XyneStorageClient } from '${STORAGE_NPM_PACKAGE}';
+
+const storage = new XyneStorageClient({
+  baseUrl: '${baseUrl}',
+  token: process.env.XYNE_TOKEN!, // your Spaces session, e.g. written by \`spaces token\`
+  appId: process.env.XYNE_APP_ID!, // the app whose records to use
+});
+
+const prefs = storage.collection<{ theme: string }>('prefs');
+await prefs.put('me', { theme: 'dark' });`;
 
   return (
     <>
@@ -79,7 +91,7 @@ export function StorageDoc(): ReactElement {
         title='Already in every app the CLI scaffolds'
         intro={
           <>
-            There is nothing to install. Apps made with{' '}
+            In a CLI app there is nothing to install. Apps made with{' '}
             <Link
               to={cliPath}
               data-track-category='Developer tools'
@@ -119,6 +131,30 @@ const saved = await prefs.get('me'); // { key, scope, value, createdAt, updatedA
             </Text>
           </Step>
         </div>
+      </DocSection>
+
+      <DocSection
+        eyebrow='Get started'
+        title='Use it in your own code'
+        intro='For scripts, tests or tooling around an app, install it from npm. It has no dependencies and runs in Node 18+ and browsers.'
+      >
+        <div className='flex flex-col'>
+          <Step n={1} title='Install from npm'>
+            <CodeBlock
+              code={`pnpm add ${STORAGE_NPM_PACKAGE}`}
+              trackName='Storage SDK: copy install'
+            />
+          </Step>
+          <Step n={2} title='Read and write an app’s records'>
+            <Text>Your Spaces address is filled in below.</Text>
+            <CodeBlock code={standalone} trackName='Storage SDK: copy standalone' />
+          </Step>
+        </div>
+        <Callout>
+          The token is your Spaces session: it can do anything you can, until it expires. Keep it in
+          an environment variable, never in code you share. The client sends it only to an{' '}
+          <InlineCode>https://</InlineCode> address, or to <InlineCode>localhost</InlineCode>.
+        </Callout>
       </DocSection>
 
       <DocSection
@@ -180,6 +216,16 @@ const saved = await prefs.get('me'); // { key, scope, value, createdAt, updatedA
 
       <DocSection eyebrow='Reference' title='Limits'>
         <RefTable rows={LIMITS} />
+        <a
+          href={`https://www.npmjs.com/package/${STORAGE_NPM_PACKAGE}`}
+          target='_blank'
+          rel='noreferrer'
+          data-track-category='Developer tools'
+          data-track-name='Storage SDK: open npm'
+          className='w-fit text-sm text-primary hover:underline'
+        >
+          Full API, wire formats and error codes on npm →
+        </a>
       </DocSection>
     </>
   );
