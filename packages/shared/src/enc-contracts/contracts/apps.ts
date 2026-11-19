@@ -23,3 +23,24 @@ export const appsChatPostMessageClient = defineRequestContract({
 });
 
 export type AppsChatPostMessageRequest = RequestOf<typeof appsChatPostMessageClient>;
+
+/**
+ * Xyne Apps `POST /apps/chat/updateMessage`: same treatment as postMessage. The ingress
+ * gateway encrypts `markdownText`; the handler stores the workspace-DEK ciphertext as-is.
+ * `text` and `flowJSON` stay plaintext (mentions, BlockKit and flow HTML are built from them).
+ */
+export const appsChatUpdateMessageClient = defineRequestContract({
+  encrypted: ['markdownText'],
+  derived: [],
+  schema: z.object({
+    messageId: z.string(),
+    channelId: z.string().optional(),
+    channelName: z.string().optional(),
+    text: z.string().optional(),
+    markdownText: z.string().optional(),
+    flowJSON: z.unknown().optional(),
+    attachments: z.array(z.unknown()).optional(),
+  }),
+});
+
+export type AppsChatUpdateMessageRequest = RequestOf<typeof appsChatUpdateMessageClient>;

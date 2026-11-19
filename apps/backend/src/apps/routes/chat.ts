@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { ChatController } from '../controllers/chatController';
 import { validateChannelAccessForGet, validateChannelAccessForPost, validateChannelAccessForPostWithDm } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
-import { appsChatPostMessageClient } from '@xyne/shared';
+import { appsChatPostMessageClient, appsChatUpdateMessageClient } from '@xyne/shared';
 import { encryptedRoute } from '@/middleware/encryptedRoute';
 
 const router = Router();
@@ -17,7 +17,10 @@ const encryptedPostMessage = encryptedRoute(appsChatPostMessageClient, {
 });
 router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPostWithDm, ...encryptedPostMessage, chatController.postMessage);
 router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
-router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, chatController.updateMessage);
+const encryptedUpdateMessage = encryptedRoute(appsChatUpdateMessageClient, {
+  resolveWorkspaceId: async (req) => req.user!.workspaceId,
+});
+router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, ...encryptedUpdateMessage, chatController.updateMessage);
 router.post('/deleteMessage', requirePermission('chat:delete'), validateChannelAccessForPost, chatController.deleteMessage);
 router.post('/agentProgress', requirePermission('chat:write'), validateChannelAccessForPost, chatController.agentProgress);
 router.get('/channelHistory', requirePermission('channels:read'), validateChannelAccessForGet, chatController.channelHistory);
