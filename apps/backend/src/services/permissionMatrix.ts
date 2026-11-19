@@ -169,7 +169,7 @@ export async function grantPermissionsForRole(
 
 /**
  * Guests have no SUPPORT access by role, so a guest invited into a desk channel
- * could never open the Support screen to reach it. Grant READ for that case.
+ * could never open the Support screen or work its tickets. Grant WRITE for that case.
  * Add-only like the role grants; reconcileUserPermissions only manages ADMIN rows,
  * so this survives later reconciles.
  */
@@ -182,7 +182,7 @@ export async function grantGuestDeskAccess(
     userId,
     email,
     WorkspaceRole.GUEST,
-    [{ resourceName: 'SUPPORT', accessType: AccessType.READ }],
+    [{ resourceName: 'SUPPORT', accessType: AccessType.WRITE }],
     workspaceId,
     '[grantGuestDeskAccess]',
   );
