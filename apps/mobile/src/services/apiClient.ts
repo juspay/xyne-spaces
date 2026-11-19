@@ -5,6 +5,8 @@ import {
   mtlsRequestJson,
   mtlsRequestText,
 } from './MtlsApiService';
+import { decryptTransitFields } from '@xyne/shared';
+import { getActiveKeyring } from './encryption/activeKeyring';
 
 type RequestExtras = {
   token?: string;
@@ -42,7 +44,10 @@ export async function apiRequest<T>(
   if (options?.body !== undefined) {
     requestOptions.body = options.body;
   }
-  return mtlsRequestJson<T>(path, requestOptions);
+  const data = await mtlsRequestJson<T>(path, requestOptions);
+  // Fields the backend encrypted for this device's transit key.
+  const keyring = getActiveKeyring();
+  return keyring ? ((await decryptTransitFields(data, keyring)) as T) : data;
 }
 
 export async function apiGet<T>(path: string, options?: RequestExtras): Promise<T> {

@@ -1,3 +1,5 @@
+import type { TransitAesKey } from './transit-crypto.js';
+import { getTransitPlatform } from './transit-platform.js';
 /**
  * The client's P-256 key pair. The private key never leaves its store (WebCrypto, Secure
  * Enclave, TPM, ...); only the result of ECDH with a server public key does.
@@ -82,7 +84,7 @@ export async function generateTransitKeyPair(): Promise<TransitKeyPair> {
 export async function deriveTransitKey(
   pair: TransitKeyPair,
   serverPublicKey: string,
-): Promise<CryptoKey> {
+): Promise<TransitAesKey> {
   return deriveFromShared(pair, serverPublicKey, new TextEncoder().encode(DERIVE_INFO));
 }
 
@@ -95,7 +97,7 @@ export async function deriveSocketKey(
   serverPublicKey: string,
   nonce: Uint8Array,
   docId: string,
-): Promise<CryptoKey> {
+): Promise<TransitAesKey> {
   const label = new TextEncoder().encode(SOCKET_DERIVE_INFO);
   const doc = new TextEncoder().encode(docId);
   const info = new Uint8Array(label.length + nonce.length + doc.length);
@@ -109,21 +111,14 @@ async function deriveFromShared(
   pair: TransitKeyPair,
   serverPublicKey: string,
   info: Uint8Array<ArrayBuffer>,
-): Promise<CryptoKey> {
+): Promise<TransitAesKey> {
   const clientPoint = fromBase64(pair.publicKey);
   const serverPoint = fromBase64(serverPublicKey);
   const shared = await pair.deriveSharedSecret(serverPoint);
-  const hkdfKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
   const salt = new Uint8Array(clientPoint.length + serverPoint.length);
   salt.set(clientPoint, 0);
   salt.set(serverPoint, clientPoint.length);
-  return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt, info },
-    hkdfKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  );
+  return getTransitPlatform().crypto.deriveKey(shared, salt, info);
 }
 
 /**
@@ -133,7 +128,7 @@ async function deriveFromShared(
  * server keys. Keys never leave memory.
  */
 export class TransitKeyring {
-  private readonly derived = new Map<number, Promise<CryptoKey>>();
+  private readonly derived = new Map<number, Promise<TransitAesKey>>();
   private serverKeys: TransitServerKeys;
   private refetching: Promise<TransitServerKeys> | null = null;
 
@@ -150,12 +145,12 @@ export class TransitKeyring {
     return this.pair.publicKey;
   }
 
-  async current(): Promise<{ key: CryptoKey; keyId: string }> {
+  async current(): Promise<{ key: TransitAesKey; keyId: string }> {
     const version = this.serverKeys.current;
     return { key: await this.forVersion(version), keyId: transitKeyId(version) };
   }
 
-  async forKeyId(keyId: string): Promise<CryptoKey> {
+  async forKeyId(keyId: string): Promise<TransitAesKey> {
     const version = parseTransitKeyId(keyId);
     if (version === null) throw new Error(`Not a transit key id: ${keyId}`);
     if (!this.has(version)) {
@@ -171,7 +166,7 @@ export class TransitKeyring {
   }
 
   /** The key for one canvas socket, from the nonce and server key version the ticket carries. */
-  async socketKey(version: number, nonce: string, docId: string): Promise<CryptoKey> {
+  async socketKey(version: number, nonce: string, docId: string): Promise<TransitAesKey> {
     if (!this.has(version)) {
       await this.refetch();
       if (!this.has(version))
@@ -185,7 +180,7 @@ export class TransitKeyring {
     return this.serverKeys.keys.some(k => k.version === version);
   }
 
-  private forVersion(version: number): Promise<CryptoKey> {
+  private forVersion(version: number): Promise<TransitAesKey> {
     let pending = this.derived.get(version);
     if (!pending) {
       const server = this.serverKeys.keys.find(k => k.version === version);

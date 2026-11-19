@@ -1,4 +1,5 @@
 export { encryptField, decryptField, isCiphertextValue, isEncryptedField } from './field-decrypt.js';
+export { decryptTransitFields } from './decrypt-transit-fields.js';
 export { decryptionCache } from './decryption-cache.js';
 export { decryptPokeMessage, createDecryptingWebSocket, installSyncDecryption, SYNC_DECRYPTED_TABLES } from './sync-decrypt.js';
 export { getCryptoLogger, setCryptoLogger } from './crypto-logger.js';
@@ -65,3 +66,7 @@ export {
   decryptDownloadedFile,
 } from './file-container.js';
 export type { FileContainerHeader } from './file-container.js';
+export { webCryptoTransitCrypto } from './transit-crypto.js';
+export type { TransitCrypto, TransitAesKey } from './transit-crypto.js';
+export { setTransitPlatform, getTransitPlatform } from './transit-platform.js';
+export type { TransitPlatform, TransitHttp, TransitResponse } from './transit-platform.js';
