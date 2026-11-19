@@ -29,6 +29,27 @@ interface DeviceIdentity {
 
 let identity: Promise<DeviceIdentity> | null = null;
 
+/** Waits before each extra read of an unreadable SecureStore: a Keystore hiccup is brief. */
+const READ_RETRY_DELAYS_MS = [100, 300];
+
+/**
+ * The device-only id, or null when there is none. Throws when SecureStore stays
+ * unreadable after the retries.
+ */
+async function readStoredDeviceId(): Promise<string | null> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await SecureStore.getItemAsync(DEVICE_ID_KEY, DEVICE_ID_OPTIONS);
+    } catch (error) {
+      const delayMs = READ_RETRY_DELAYS_MS[attempt];
+      if (delayMs === undefined) {
+        throw error;
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 // Every request awaits the device id, so nothing on this path may throw: a storage error
 // must cost at most the restore detection, never the request itself.
 function readBackedUpDeviceId(): string | null {
@@ -51,11 +72,14 @@ async function loadDeviceIdentity(): Promise<DeviceIdentity> {
   const backedUpId = readBackedUpDeviceId();
   let storedId: string | null;
   try {
-    storedId = await SecureStore.getItemAsync(DEVICE_ID_KEY, DEVICE_ID_OPTIONS);
+    storedId = await readStoredDeviceId();
   } catch {
     // Unreadable is not missing (e.g. before the first unlock): never persist a new id or
     // call this a restore on the strength of it, and never borrow the backed-up copy,
     // which may be another phone's. Use a throwaway id and retry on the next call.
+    // Someone signing in has the phone unlocked, so a login only lands here when
+    // SecureStore keeps failing. No id could be kept then anyway, and failing the login
+    // would lock the user out, so its session is keyed to the throwaway id instead.
     identity = null;
     return { deviceId: uuidv4(), restoredFromAnotherInstall: false };
   }
