@@ -52,13 +52,18 @@ export function getProactiveRearmDelay(
 /**
  * 401 codes from the auth middleware (`AuthFailureCode` in the backend's middleware/auth.ts)
  * that a session refresh can fix: the JWT is missing or expired, but the session may still
- * be alive. TOKEN_INVALID is final: no refresh fixes a bad signature or claims that do not
- * match the request.
+ * be alive. Every other code is final.
  */
 const REFRESHABLE_AUTH_CODES = new Set(['TOKEN_MISSING', 'TOKEN_EXPIRED']);
 
-/** 401 codes with which the auth middleware says the session itself is over. */
+/**
+ * The final 401 codes, on which the backend says the client should log out. TOKEN_INVALID
+ * is one: a bad signature, claims that do not match the request, or a user that no longer
+ * exists. A 401 for a request sent under an account or workspace that is no longer the
+ * current one never signs out (see withSessionRefreshOn401).
+ */
 const SESSION_ENDED_AUTH_CODES = new Set([
+  'TOKEN_INVALID',
   'SESSION_REVOKED',
   'USER_REMOVED',
   'EMAIL_DOMAIN_NOT_ALLOWED',
@@ -95,10 +100,10 @@ export function isRefreshableAuthFailure(statusCode: number, body: unknown): boo
 }
 
 /**
- * Whether an API 401 says the session is over: logged out (SESSION_REVOKED), the user
- * left or was deactivated (USER_REMOVED), or the email domain is blocked. A refresh cannot
- * bring it back and every later request is refused the same way, so the app signs out.
- * TOKEN_INVALID is not one of these: it can come from this one request alone.
+ * Whether an API 401 says the session is over: the token is invalid or its user no longer
+ * exists (TOKEN_INVALID), logged out (SESSION_REVOKED), the user left or was deactivated
+ * (USER_REMOVED), or the email domain is blocked. A refresh cannot bring it back and every
+ * later request is refused the same way, so the app signs out.
  */
 export function isSessionEndedAuthFailure(statusCode: number, body: unknown): boolean {
   const code = readAuthFailureCode(statusCode, body);

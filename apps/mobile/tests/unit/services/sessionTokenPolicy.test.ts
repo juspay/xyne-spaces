@@ -183,15 +183,20 @@ describe('isRefreshableAuthFailure', () => {
 });
 
 describe('isSessionEndedAuthFailure', () => {
-  it('ends the session on a revoked session, a removed user or a blocked domain', () => {
-    for (const code of ['SESSION_REVOKED', 'USER_REMOVED', 'EMAIL_DOMAIN_NOT_ALLOWED']) {
+  it('ends the session on an invalid token, a revoked session, a removed user or a blocked domain', () => {
+    for (const code of [
+      'TOKEN_INVALID',
+      'SESSION_REVOKED',
+      'USER_REMOVED',
+      'EMAIL_DOMAIN_NOT_ALLOWED',
+    ]) {
       assert.equal(isSessionEndedAuthFailure(401, { code }), true);
     }
     assert.equal(isSessionEndedAuthFailure(401, '{"code":"SESSION_REVOKED"}'), true);
   });
 
-  it('keeps the session for an invalid, missing or expired token', () => {
-    for (const code of ['TOKEN_INVALID', 'TOKEN_MISSING', 'TOKEN_EXPIRED']) {
+  it('keeps the session for a missing or expired token', () => {
+    for (const code of ['TOKEN_MISSING', 'TOKEN_EXPIRED']) {
       assert.equal(isSessionEndedAuthFailure(401, { code }), false);
     }
   });
