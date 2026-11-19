@@ -11,13 +11,14 @@ import {
   AuthProvider,
   ChannelRole,
   CanvasRole,
-  OrgRole, UserStatus } from '@xyne/shared';
+  OrgRole, UserStatus,
+  isDeskChannelType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { resolveCanvasConnectId } from '@/database/connectGroup';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
-import { reconcileUserPermissions } from './permissionMatrix';
+import { grantGuestDeskAccess, reconcileUserPermissions } from './permissionMatrix';
 import crypto from 'crypto';
 import { hashPassword } from '../utils/passwordUtils';
 import { EmailDomainNotAllowedError, organizationDomainService } from './organizationDomainService';
@@ -795,6 +796,21 @@ export class InvitationService {
     // Not add-only: a re-accepted invitation can demote an existing user (workspace or org role).
     await reconcileUserPermissions(newWorkspaceUser.id, newWorkspaceUser.id);
     logger.info(`[InvitationService] Permission grants completed for ${invitation.role} user ${userData.email}`);
+
+    if (
+      invitation.role === 'GUEST' &&
+      invitation.entityType === GuestEntity.CHANNEL &&
+      invitation.entityId &&
+      invitation.workspaceId
+    ) {
+      const channel = await this.prisma.channel.findUnique({
+        where: { id: invitation.entityId },
+        select: { type: true },
+      });
+      if (channel && isDeskChannelType(channel.type)) {
+        await grantGuestDeskAccess(newWorkspaceUser.id, userData.email, invitation.workspaceId);
+      }
+    }
 
     logger.info(`[InvitationService] User ${userData.email} accepted invitation to workspace ${invitation.workspaceId}`);
 
