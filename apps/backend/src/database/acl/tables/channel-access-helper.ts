@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility } from '@xyne/shared';import type { ACLContext } from '../base-acl'
+import { Prisma, PrismaClient } from '@prisma/client';import { GuestEntity, CanvasVisibility, ChannelVisibility, FormContextType } from '@xyne/shared';import type { ACLContext } from '../base-acl'
 
 type GuestScope = {
   workspaceId: string
@@ -113,6 +113,58 @@ export async function hasGuestChannelAccess(
   )
 
   return accessibleChannelIds.includes(channelId)
+}
+
+/**
+ * The form-context mappings a guest reaches: those bound to a board linked to one of
+ * their channels, or to a stage of such a board (mirrors the sync layer's
+ * guestFormContextMappingWhere). A board is never reached through its project.
+ */
+export async function getGuestFormContextMappingWhere(
+  prisma: PrismaClient,
+  workspaceId: string,
+  userId: string
+): Promise<Prisma.FormContextMappingWhereInput> {
+  const channelIds = await getGuestAccessibleChannelIds(prisma, workspaceId, userId)
+  const boardIds = channelIds.length
+    ? unique(
+        (
+          await prisma.channelBoardMapping.findMany({
+            where: { workspaceId, channelId: { in: channelIds } },
+            select: { boardId: true },
+          })
+        ).map((mapping) => mapping.boardId)
+      )
+    : []
+  const stageIds = boardIds.length
+    ? (
+        await prisma.stage.findMany({
+          where: { workspaceId, boardId: { in: boardIds } },
+          select: { id: true },
+        })
+      ).map((stage) => stage.id)
+    : []
+
+  return {
+    workspaceId,
+    OR: [
+      { contextType: FormContextType.BOARD, contextId: { in: boardIds } },
+      { contextType: FormContextType.STAGE, contextId: { in: stageIds } },
+    ],
+  }
+}
+
+/** Ids of the forms a guest reaches through getGuestFormContextMappingWhere. */
+export async function getGuestAccessibleFormIds(
+  prisma: PrismaClient,
+  workspaceId: string,
+  userId: string
+): Promise<string[]> {
+  const mappings = await prisma.formContextMapping.findMany({
+    where: await getGuestFormContextMappingWhere(prisma, workspaceId, userId),
+    select: { formId: true },
+  })
+  return unique(mappings.map((mapping) => mapping.formId))
 }
 
 export async function getAccessibleChannelIds(
