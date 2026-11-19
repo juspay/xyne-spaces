@@ -198,7 +198,11 @@ async function injectCookiesFromResponseUnsafe(
   }
 }
 
-/** The backend's own lifetime for the pointer; it rewrites it on every refresh anyway. */
+/**
+ * The backend's default lifetime for the pointer (`SESSION_EXPIRY_DAYS`, 180). It is
+ * configurable there, but the backend rewrites the cookie with its own value on every
+ * refresh, switch and login, so this only has to outlive the next one.
+ */
 const LAST_WORKSPACE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
 
 /**
@@ -206,7 +210,9 @@ const LAST_WORKSPACE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
  * refresh endpoint mints the JWT for the workspace this cookie names (it ignores
  * `x-workspace-id`), so a pointer left on another workspace (a switch that succeeded on
  * the server but was rolled back here) would refresh the wrong one forever. Written
- * with the backend's attributes, through the same path as a real `Set-Cookie`.
+ * through the same path as a real `Set-Cookie`, with the attributes `setAccessCookies`
+ * gives it in production; on local http that path drops `Secure` as it does for the
+ * backend's own cookies.
  */
 export async function pointLastWorkspaceAt(
   origin: string,
@@ -227,7 +233,7 @@ export async function pointLastWorkspaceAt(
   await injectCookiesFromResponse(
     origin,
     {
-      'set-cookie': `${XYNE_LAST_WORKSPACE_COOKIE}=${workspaceId}; Path=/; Max-Age=${LAST_WORKSPACE_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=None`,
+      'set-cookie': `${XYNE_LAST_WORKSPACE_COOKIE}=${workspaceId}; Path=/; Max-Age=${LAST_WORKSPACE_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=Strict`,
     },
     scope,
   );
