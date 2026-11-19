@@ -1,4 +1,4 @@
-import { EXECUTION_ACTIONS, WORKFLOW_ACTIONS } from '@xyne/workflow-sdk';
+import { CREDENTIAL_ACTIONS, EXECUTION_ACTIONS, WORKFLOW_ACTIONS } from '@xyne/workflow-sdk';
 import type { ExecutionRecord, ResourceRef, WorkflowRecord } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import { XyneWorkflowAuthorizer } from './authorizer';
@@ -57,5 +57,38 @@ describe('XyneWorkflowAuthorizer', () => {
     const workflow = { id: 'wf', attributes: { workspaceId: 'ws_a' } } as unknown as WorkflowRecord;
     await expect(authorizer.permissions(inA, { type: 'workflow', id: 'wf', record: workflow })).resolves.toEqual(WORKFLOW_ACTIONS);
     expect(findMany).not.toHaveBeenCalled();
+  });
+
+  describe('credentials', () => {
+    const credential = (attributes: Record<string, string>): ResourceRef => ({
+      type: 'credential',
+      id: 'stripe',
+      record: { id: 'stripe', name: 'stripe', type: 'bearer', attributes } as never,
+    });
+
+    it('gives the owner full control of their credential', async () => {
+      const ref = credential({ workspaceId: 'ws_a', ownerId: 'u1' });
+      await expect(authorizer.permissions(inA, ref)).resolves.toEqual(CREDENTIAL_ACTIONS);
+    });
+
+    it('denies a workspace member who is not the owner', async () => {
+      const ref = credential({ workspaceId: 'ws_a', ownerId: 'someone_else' });
+      await expect(authorizer.permissions(inA, ref)).resolves.toEqual([]);
+    });
+
+    it('denies the owner’s credential from another workspace', async () => {
+      const ref = credential({ workspaceId: 'ws_b', ownerId: 'u1' });
+      await expect(authorizer.permissions(inA, ref)).resolves.toEqual([]);
+    });
+
+    it('lets any workspace member manage an unowned legacy credential', async () => {
+      const ref = credential({ workspaceId: 'ws_a' });
+      await expect(authorizer.permissions(inA, ref)).resolves.toEqual(CREDENTIAL_ACTIONS);
+    });
+
+    it('denies an unowned credential from another workspace', async () => {
+      const ref = credential({ workspaceId: 'ws_b' });
+      await expect(authorizer.permissions(inA, ref)).resolves.toEqual([]);
+    });
   });
 });

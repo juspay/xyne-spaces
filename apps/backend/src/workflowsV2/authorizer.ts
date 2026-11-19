@@ -55,8 +55,13 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
     return refs.map((ref) => this.decide(ctx, ref, workspaceOf, mayApprove));
   }
 
-  visibleFilter(ctx: XyneCtx, _type: ResourceType): Promise<XyneFilter> {
-    return Promise.resolve({ workspaceId: ctx.workspaceId });
+  visibleFilter(ctx: XyneCtx, type: ResourceType): Promise<XyneFilter> {
+    // Credentials are private to their owner.
+    return Promise.resolve(
+      type === 'credential'
+        ? { workspaceId: ctx.workspaceId, ownerId: ctx.userId }
+        : { workspaceId: ctx.workspaceId },
+    );
   }
 
   private async mayApprove(ctx: XyneCtx): Promise<boolean> {
@@ -96,10 +101,13 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
       case 'folder':
         return this.sameWorkspace(ctx, ref.record.attributes) ? FOLDER_FULL : DENIED;
 
-      case 'credential':
-        return this.sameWorkspace(ctx, ref.record.attributes)
-          ? CREDENTIAL_ACTIONS
-          : DENIED;
+      case 'credential': {
+        // Owner only. A row with no owner predates ownership: any workspace member
+        // may manage it (to revoke and re-add it scoped).
+        if (!this.sameWorkspace(ctx, ref.record.attributes)) return DENIED;
+        const ownerId = attrsOf(ref.record.attributes)?.ownerId;
+        return ownerId === undefined || ownerId === ctx.userId ? CREDENTIAL_ACTIONS : DENIED;
+      }
 
       case 'execution':
         return workspaceOf.get(ref.id) === ctx.workspaceId ? EXECUTION_ACTIONS : DENIED;

@@ -72,8 +72,11 @@ import {
   TERMINAL_EXECUTION_STATUSES,
   WORKFLOWS_TYPE,
 } from '../constants';
-import type { XyneFilter, XyneResourceAttrs } from '../types';
+import type { XyneFilter } from '../types';
 import {
+  attrsOf,
+  credentialAttributes,
+  credentialOwnerWhere,
   decodeCursor,
   decodeSeek,
   encodeCursor,
@@ -780,6 +783,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     const rows = await db.workflowCredential.findMany({
       where: {
         workspaceId: filter.workspaceId,
+        ...credentialOwnerWhere(filter),
         ...(after !== undefined ? { name: { gt: after } } : {}),
       },
       select: CREDENTIAL_SUMMARY_SELECT,
@@ -790,7 +794,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     const hasMore = rows.length > page.limit;
     const items = (hasMore ? rows.slice(0, page.limit) : rows).map((row) => ({
       summary: toCredentialSummary(row),
-      attributes: { workspaceId: row.workspaceId } satisfies XyneResourceAttrs,
+      attributes: credentialAttributes(row),
     }));
     const last = hasMore ? rows[page.limit - 1] : undefined;
     return last ? { items, nextCursor: encodeSeek([last.name]) } : { items };
@@ -798,13 +802,13 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
   async getCredentialByName(filter: XyneFilter, name: string): Promise<CredentialListItem | null> {
     const row = await db.workflowCredential.findFirst({
-      where: { workspaceId: filter.workspaceId, name },
+      where: { workspaceId: filter.workspaceId, ...credentialOwnerWhere(filter), name },
       select: CREDENTIAL_SUMMARY_SELECT,
     });
     return row
       ? {
           summary: toCredentialSummary(row),
-          attributes: { workspaceId: row.workspaceId } satisfies XyneResourceAttrs,
+          attributes: credentialAttributes(row),
         }
       : null;
   }
@@ -824,6 +828,19 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
       throw new Error(`Credential "${input.name}" already exists`);
     }
 
+    // Ownership comes from the server-injected attributes, never the request body.
+    const ownerId = attrsOf(attributes)?.createdByUserId;
+    if (!ownerId) {
+      throw new Error('createCredential called without attributes.createdByUserId');
+    }
+    // `allowedWorkflowIds` is on the input from the SDK release that adds it; the
+    // widening lets this compile against the pin until that release is adopted.
+    const allowedWorkflowIds = await this.requireWorkflowsInWorkspace(
+      workspaceId,
+      (input as CreateCredentialInput & { allowedWorkflowIds?: readonly string[] })
+        .allowedWorkflowIds ?? [],
+    );
+
     const now = new Date();
     const row = await db.workflowCredential.create({
       data: {
@@ -835,10 +852,47 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         status: CREDENTIAL_ACTIVE,
         createdAt: now,
         updatedAt: now,
+        ownerId,
+        allowedWorkflowIds,
       },
       select: CREDENTIAL_SUMMARY_SELECT,
     });
     return toCredentialSummary(row);
+  }
+
+  /** The ids, unique, once each is confirmed to be a workflows-v2 workflow in this workspace. */
+  private async requireWorkflowsInWorkspace(
+    workspaceId: string,
+    workflowIds: readonly string[],
+  ): Promise<string[]> {
+    const ids = [...new Set(workflowIds)];
+    if (ids.length === 0) return ids;
+    const found = await db.workflow.count({
+      where: { id: { in: ids }, workspaceId, workflowType: WORKFLOWS_TYPE },
+    });
+    if (found !== ids.length) {
+      throw new Error('allowedWorkflowIds contains an id that is not a workflow in this workspace');
+    }
+    return ids;
+  }
+
+  async updateCredentialAccess(
+    attributes: ResourceAttributes<'credential'>,
+    name: string,
+    workflowIds: readonly string[],
+  ): Promise<CredentialSummary | null> {
+    const workspaceId = requireWorkspaceId(attributes, 'updateCredentialAccess');
+    const allowedWorkflowIds = await this.requireWorkflowsInWorkspace(workspaceId, workflowIds);
+    const { count } = await db.workflowCredential.updateMany({
+      where: { workspaceId, name },
+      data: { allowedWorkflowIds, updatedAt: new Date() },
+    });
+    if (count === 0) return null;
+    const row = await db.workflowCredential.findUnique({
+      where: { workspaceId_name: { workspaceId, name } },
+      select: CREDENTIAL_SUMMARY_SELECT,
+    });
+    return row ? toCredentialSummary(row) : null;
   }
 
   async replaceCredentialValues(
@@ -908,9 +962,28 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
     const row = await db.workflowCredential.findUnique({
       where: { workspaceId_name: { workspaceId, name } },
-      select: { name: true, credType: true, authType: true, status: true, data: true },
+      select: {
+        name: true,
+        credType: true,
+        authType: true,
+        status: true,
+        data: true,
+        allowedWorkflowIds: true,
+        ownerId: true,
+      },
     });
     if (!row || row.status !== CREDENTIAL_ACTIVE) return null;
+
+    // An owned credential is usable only by the workflows its owner listed; a
+    // caller with no workflow identity is refused. A legacy credential (no owner)
+    // stays usable by every workflow until someone revokes and re-adds it scoped.
+    if (row.ownerId !== null) {
+      const workflowId =
+        workflowOrAttributes && typeof workflowOrAttributes === 'object' && 'attributes' in workflowOrAttributes
+          ? (workflowOrAttributes as WorkflowContext['workflow']).id
+          : attrsOf(attributes)?.workflowId;
+      if (!workflowId || !row.allowedWorkflowIds.includes(workflowId)) return null;
+    }
 
     const values = JSON.parse(decrypt(row.data)) as unknown;
     const auth = validateCredentialAuth(row.authType as CredentialAuthType, values);

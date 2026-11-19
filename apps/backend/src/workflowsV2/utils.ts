@@ -123,7 +123,10 @@ export const toWorkflowRecord = (row: Workflow): WorkflowRecord => ({
   folderId: row.folderId ?? DEFAULT_FOLDER_ID,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
-  attributes: { workspaceId: row.workspaceId } satisfies XyneResourceAttrs,
+  // The workflow's own id rides in its attributes so every credential lookup
+  // that carries them (activation, webhook ingest, trigger hooks) can be checked
+  // against the credential's allow-list, not only the executor's.
+  attributes: { workspaceId: row.workspaceId, workflowId: row.id } satisfies XyneResourceAttrs,
 });
 
 export const toFolderRecord = (row: WorkflowFolder): FolderRecord => ({
@@ -223,14 +226,32 @@ export const toCredentialSummary = (row: {
   status: string;
   createdAt: Date;
   updatedAt: Date;
-}): CredentialSummary => ({
+  allowedWorkflowIds: string[];
+  // `allowedWorkflowIds` is on `CredentialSummary` from the SDK release that adds it.
+}): CredentialSummary & { allowedWorkflowIds: string[] } => ({
   name: row.name,
   credType: row.credType,
   authType: row.authType as CredentialAuthType,
   status: row.status as CredentialStatus,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
+  allowedWorkflowIds: row.allowedWorkflowIds,
 });
+
+/** The attributes a credential record carries: its tenant and its owner. */
+export const credentialAttributes = (row: {
+  workspaceId: string;
+  ownerId: string | null;
+}): XyneResourceAttrs => ({
+  workspaceId: row.workspaceId,
+  ...(row.ownerId !== null ? { ownerId: row.ownerId } : {}),
+});
+
+/** Narrow a credential query to the caller's own rows plus unowned legacy rows. */
+export const credentialOwnerWhere = (
+  filter: { ownerId?: string },
+): { OR?: Array<{ ownerId: string | null }> } =>
+  filter.ownerId === undefined ? {} : { OR: [{ ownerId: filter.ownerId }, { ownerId: null }] };
 
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
