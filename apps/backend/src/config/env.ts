@@ -578,6 +578,12 @@ const envSchema = Joi.object({
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Egress transit proxy for app event webhooks. Set: external deliveries are sealed by the
+  // encryption service and posted by the proxy, never by the backend. Empty = direct (default).
+  TRANSIT_PROXY_EGRESS_URL: Joi.string().uri().allow('').default(''),
+  // The egress proxy's key version as pinned in the encryption service (PROXY_EGRESS_CLIENT_KEYS).
+  TRANSIT_PROXY_EGRESS_KEY_VERSION: Joi.number().integer().min(1).default(1),
+  TRANSIT_PROXY_EGRESS_TIMEOUT_MS: Joi.number().integer().min(1).default(15000),
   // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
   INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
   // Dedicated secret for POST /internal/users/deactivate, sent in the standard
@@ -1487,6 +1493,9 @@ export const config = {
   internal: {
     encryptionS2sKey: envVars.ENC_S2S_KEY as string,
     encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
+    transitProxyEgressUrl: (envVars.TRANSIT_PROXY_EGRESS_URL as string).trim().replace(/\/+$/, ''),
+    transitProxyEgressKeyVersion: envVars.TRANSIT_PROXY_EGRESS_KEY_VERSION as number,
+    transitProxyEgressTimeoutMs: envVars.TRANSIT_PROXY_EGRESS_TIMEOUT_MS as number,
     encryptionRequestTimeoutMs: envVars.ENCRYPTION_REQUEST_TIMEOUT_MS as number,
   },
   emailFetch: {

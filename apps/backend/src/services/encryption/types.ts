@@ -66,6 +66,14 @@ export type StorageObjectKey = {
  * session, whose registered transit key the encryption service looks up and uses; `clientKey`
  * (the public key the request itself carried) applies when that session registered none.
  */
+export type SealEventInput = {
+  /** The event JSON exactly as the bot will receive it. */
+  event: string;
+  webhookUrl: string;
+  signingSecret: string;
+  proxyClient: { role: 'egress'; version: number };
+};
+
 export type TransitCaller = {
   /**
    * Xyne Apps traffic relayed by the ingress or egress proxy. The encryption service then
@@ -154,6 +162,12 @@ export interface EncryptionProvider {
    * `null` when there is no manifest (404).
    */
   getTransitClientManifest(params: { tag: string; environment: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
+  /**
+   * Seal an outbound app event for the egress transit proxy: the encryption service signs
+   * `event` with the app's signing secret and encrypts `{ url, body, signature }` to the
+   * pinned egress proxy key. Only the proxy can open it.
+   */
+  sealEvent(input: SealEventInput): Promise<{ sealed: string }>;
   /**
    * Rule-driven counterpart of decryptRequest. Transit-encrypted fields the rule marks
    * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to
