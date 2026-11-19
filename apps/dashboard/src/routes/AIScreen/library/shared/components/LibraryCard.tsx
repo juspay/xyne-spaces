@@ -62,7 +62,9 @@ export function LibraryStatusDot({
 }
 
 export interface LibraryCardProps {
-  to: string;
+  /** Where the card opens. Omit for a card with nowhere to go (an archived app,
+   *  whose page answers "not found"): it then renders as a plain block. */
+  to?: string | undefined;
   testId?: string;
   icon: ReactNode;
   name: string;
@@ -90,15 +92,13 @@ export function LibraryCard({
   footer,
   dimmed = false,
 }: LibraryCardProps): ReactElement {
-  return (
-    <Link
-      to={to}
-      data-testid={testId}
-      className={cn(
-        'flex items-start gap-3 overflow-hidden rounded-[20px] border border-border bg-background p-4 transition-colors hover:bg-muted/40',
-        dimmed && 'opacity-60',
-      )}
-    >
+  const className = cn(
+    'flex items-start gap-3 overflow-hidden rounded-[20px] border border-border bg-background p-4 transition-colors',
+    to && 'hover:bg-muted/40',
+    dimmed && 'opacity-60',
+  );
+  const body = (
+    <>
       {icon}
       <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
         <div className='flex min-w-0 items-center gap-2'>
@@ -122,7 +122,16 @@ export function LibraryCard({
           </p>
         )}
       </div>
+    </>
+  );
+  return to ? (
+    <Link to={to} data-testid={testId} className={className}>
+      {body}
     </Link>
+  ) : (
+    <div data-testid={testId} className={className}>
+      {body}
+    </div>
   );
 }
 

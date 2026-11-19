@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
-import { CLIENT_MANIFEST_MUTATION_ARG } from '@xyne/shared';
 import { getEncryptionProvider, isDekPassthrough } from '@/services/encryption';
 import { TRANSIT_KEY_COOKIE, type TransitCaller } from '@/services/encryption/types';
 
@@ -45,17 +44,16 @@ export async function decryptRequestBodyMiddleware(
 }
 
 /**
- * Takes the Zero mutations that carry CLIENT_MANIFEST_MUTATION_ARG out of a push body for
- * the whole-body decrypt; `restore` puts them back at their positions.
+ * Takes the Zero mutations that have a MUTATOR rule out of a push body for the whole-body
+ * decrypt; `restore` puts them back at their positions.
  */
-function holdRuleEncryptedMutations(body: unknown): { restore: (body: unknown) => void } {
+async function holdRuleEncryptedMutations(body: unknown): Promise<{ restore: (body: unknown) => void }> {
   const mutations = (body as { mutations?: unknown } | null)?.mutations;
   if (!Array.isArray(mutations)) return { restore: () => undefined };
+  const ruled = new Set(await getEncryptionProvider().getClientEncryptedMutators());
   const held = new Map<number, unknown>();
   mutations.forEach((mutation, index) => {
-    const args = (mutation as { args?: unknown } | null)?.args;
-    const first = Array.isArray(args) ? args[0] : args;
-    if (first && typeof first === 'object' && CLIENT_MANIFEST_MUTATION_ARG in first) {
+    if (ruled.has(String((mutation as { name?: unknown } | null)?.name))) {
       held.set(index, mutation);
       mutations[index] = null;
     }
@@ -77,9 +75,9 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
       return next();
     }
 
-    // Zero pushes: mutations the client encrypted by their manifest rule are transformed one
-    // by one before their mutator runs (zero/encryptedMutation.ts), so leave them as sent.
-    const held = holdRuleEncryptedMutations(req.body);
+    // Zero pushes: mutations with a manifest rule are transformed one by one before their
+    // mutator runs (zero/encryptedMutation.ts), so leave them as sent.
+    const held = await holdRuleEncryptedMutations(req.body);
     if (!hasEncryptedFields(req.body)) {
       held.restore(req.body);
       return next();

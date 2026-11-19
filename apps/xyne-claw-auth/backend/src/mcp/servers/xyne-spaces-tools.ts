@@ -32,6 +32,7 @@ import {
 } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
+import { stripAnsi, summarizeError } from "../../lib/error-summary.js";
 
 const log = createLogger("xyne-spaces-tools");
 
@@ -9309,11 +9310,6 @@ interface AutomationRunSummary {
   completedAt: string | null;
 }
 
-// Run errors often carry Prisma's ANSI color codes; they are noise to the model.
-function stripAnsi(text: string): string {
-  return text.replace(/\u001b\[[0-9;]*m/g, "");
-}
-
 function clipJson(value: unknown, max = 600): string {
   if (value === null || value === undefined) return "(none)";
   const text = typeof value === "string" ? value : JSON.stringify(value);
@@ -9734,9 +9730,8 @@ const spacesAutomationRuns: ToolDef = {
       const completedAt = finishedAt(r);
       const took = durationText(r.startedAt, completedAt);
       const finished = completedAt ? ` · finished ${completedAt}${took ? ` · took ${took}` : ""}` : " · not finished";
-      // Multi-line errors (Prisma) put the cause on the LAST line, so keep both ends.
-      const errorLines = r.error ? stripAnsi(r.error).split("\n").map((l) => l.trim()).filter(Boolean) : [];
-      const errorText = errorLines.length > 1 ? `${errorLines[0]} … ${errorLines[errorLines.length - 1]}` : (errorLines[0] ?? "");
+      // Multi-line errors (Prisma) put the cause on the LAST line; summarizeError keeps both ends.
+      const errorText = r.error ? summarizeError(r.error, Number.MAX_SAFE_INTEGER) : "";
       const error = errorText ? `\n    error: ${clipJson(errorText, 300)}` : "";
       return `- ${r.id} · ${r.status} · started ${r.startedAt}${finished}${error}`;
     });

@@ -24,6 +24,8 @@ export interface ArtifactAppSummary {
   /** Xyne icon id, or null for the fallback mark. */
   icon: string | null;
   publishedAt: string | null;
+  /** When it was archived. Set only on `archived` listings. */
+  archivedAt?: string | null;
   updatedAt: string;
   manifest: ReactArtifactManifest | null;
 }
@@ -154,9 +156,25 @@ export async function unpublishArtifactApp(appId: string): Promise<{ app: Artifa
   return clawRequest(`${BASE}/${encodeURIComponent(appId)}/unpublish`, { method: 'POST' });
 }
 
-/** `mine` = everything I saved; `workspace` = what others have published. */
+/**
+ * Hide an app everywhere without deleting it. Versions, storage and the publish
+ * pin are kept, so unarchiving restores it exactly. Owner only; idempotent.
+ */
+export async function archiveArtifactApp(appId: string): Promise<{ app: ArtifactAppDetail }> {
+  return clawRequest(`${BASE}/${encodeURIComponent(appId)}/archive`, { method: 'POST' });
+}
+
+/** Bring an archived app back as it was (still published if it was). Owner only. */
+export async function unarchiveArtifactApp(appId: string): Promise<{ app: ArtifactAppDetail }> {
+  return clawRequest(`${BASE}/${encodeURIComponent(appId)}/unarchive`, { method: 'POST' });
+}
+
+/**
+ * `mine` = everything I saved; `workspace` = what others have published;
+ * `archived` = my own archived apps (nothing else ever lists them).
+ */
 export async function listArtifactApps(
-  scope: 'mine' | 'workspace',
+  scope: 'mine' | 'workspace' | 'archived',
 ): Promise<{ apps: ArtifactAppSummary[] }> {
   return clawRequest(`${BASE}?scope=${scope}`);
 }
@@ -179,4 +197,80 @@ export async function getArtifactApp(appId: string): Promise<{
 export function artifactAppPayloadUrl(appId: string, versionId?: string): string {
   const q = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
   return `${BASE}/${encodeURIComponent(appId)}/payload${q}`;
+}
+
+/** Ranges the analytics endpoint accepts; anything else falls back to 30. */
+export type ArtifactAppsAnalyticsDays = 7 | 30 | 90;
+
+/** One IST calendar day of activity. Every day in the window is present, quiet ones as zeros. */
+export interface ArtifactAppsAnalyticsDay {
+  /** YYYY-MM-DD, an IST calendar day. */
+  date: string;
+  appsCreated: number;
+  versions: number;
+  runsCompleted: number;
+  runsFailed: number;
+  runsCancelled: number;
+}
+
+export interface ArtifactAppsAnalytics {
+  range: { days: ArtifactAppsAnalyticsDays; from: string; to: string };
+  /** True when a table had more rows than one request reads; figures cover the most recent only. */
+  truncated: boolean;
+  /** All time, across every app in the workspace (counts only). */
+  totals: {
+    apps: number;
+    published: number;
+    builders: number;
+    versions: number;
+    storageRecords: number;
+  };
+  /** Within the range. */
+  period: {
+    appsCreated: number;
+    versions: number;
+    restores: number;
+    archived: number;
+    agentRuns: {
+      total: number;
+      completed: number;
+      failed: number;
+      cancelled: number;
+      inProgress: number;
+    };
+    /** Failed share of finished runs; null when none finished in the range. */
+    failureRate: number | null;
+  };
+  /** Every app in exactly one part: the parts add up to all apps. */
+  composition: { published: number; private: number; empty: number; archived: number };
+  daily: ArtifactAppsAnalyticsDay[];
+  /** Most active apps the caller can open (their own, or published). */
+  topApps: {
+    id: string;
+    title: string;
+    icon: string | null;
+    visibility: ArtifactAppVisibility;
+    isMine: boolean;
+    ownerName: string | null;
+    versions: number;
+    agentRuns: number;
+    failedRuns: number;
+    storageRecords: number;
+    updatedAt: string;
+  }[];
+  /** Latest failed agent runs the caller started, on apps they can open; one-line summaries. */
+  recentErrors: {
+    appId: string;
+    appTitle: string;
+    at: string;
+    source: 'dispatch' | 'run';
+    message: string;
+  }[];
+}
+
+/** Apps Marketplace analytics for the caller's workspace, counted in IST calendar days. */
+export async function getArtifactAppsAnalytics(
+  days: ArtifactAppsAnalyticsDays,
+): Promise<ArtifactAppsAnalytics> {
+  return clawRequest(`${BASE}/analytics?days=${days}`);
 }

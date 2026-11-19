@@ -20,9 +20,8 @@ export interface DeveloperTool {
   npmPackage?: string;
 }
 
-/** The CLI ships as a tarball served by this dashboard, from `public/downloads/spaces-cli/`. */
-export const CLI_VERSION = '0.1.10';
-export const CLI_TARBALL = `xyne-spaces-cli-${CLI_VERSION}.tgz`;
+/** The storage SDK on npm; CLI apps bundle it, other code installs it directly. */
+export const STORAGE_NPM_PACKAGE = '@xyne/xyne-storage-sdk';
 
 export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
   {
@@ -56,6 +55,7 @@ export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
       'already wired in, runs it locally, and publishes it to your workspace. No sign-in code: ' +
       'Spaces runs the app as whoever opens it.',
     badge: 'Inside Spaces',
+    npmPackage: '@xyne/spaces-cli',
   },
   {
     id: 'storage',
@@ -66,6 +66,7 @@ export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
       'scaffolds. Keep records private to each person, or share one record with everyone who ' +
       'uses the app — no database or backend to run.',
     badge: 'Comes with the CLI',
+    npmPackage: '@xyne/xyne-storage-sdk',
   },
 ];
 
@@ -84,9 +85,11 @@ export function spacesBaseUrl(): string {
   return `${withoutAppPrefix(api)}${path}`;
 }
 
-export function cliDownloadUrl(): string {
-  const page = /^https?:$/.test(window.location.protocol)
-    ? new URL(window.location.origin)
-    : new URL(API_BASE_URL, window.location.origin);
-  return `${withoutAppPrefix(page)}/downloads/spaces-cli/${CLI_TARBALL}`;
-}
+/**
+ * The CLI on npm. The create-app command runs it with `npx -y`, at this MAJOR
+ * version: npx resolves `@1` to the newest 1.x, so a patch or minor release
+ * reaches users the moment it is published, while a breaking 2.0 only arrives
+ * when this is changed. 1.0.1 is the first with `app archive`.
+ */
+export const CLI_NPM_PACKAGE = '@xyne/spaces-cli';
+export const CLI_NPM_MAJOR = '1';

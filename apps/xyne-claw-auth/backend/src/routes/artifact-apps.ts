@@ -29,6 +29,8 @@ import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js
 import { buildReactArtifact } from "xyne-claw-shared/tools/react-artifact";
 import { ICON_META } from "@xyne/icons/meta";
 import { createLogger } from "../logger.js";
+import { formatDayIST } from "../lib/ist-time.js";
+import { summarizeError } from "../lib/error-summary.js";
 
 const log = createLogger("artifact-apps");
 export const artifactAppsRouter: Router = Router();
@@ -580,14 +582,26 @@ artifactAppsRouter.post("/:id/publish", async (req: Request<{ id: string }>, res
     return;
   }
 
-  const updated = await prisma.artifactApp.update({
-    where: { id: app.id },
-    data: {
-      visibility: VISIBILITY_WORKSPACE,
-      publishedVersionId: version.id,
-      publishedAt: new Date(),
-    },
-  });
+  // `isArchived: false` in the update itself, not only the check above: an archive
+  // landing between the two would otherwise leave an archived app published, and
+  // unarchive would then bring it back published.
+  let updated;
+  try {
+    updated = await prisma.artifactApp.update({
+      where: { id: app.id, isArchived: false },
+      data: {
+        visibility: VISIBILITY_WORKSPACE,
+        publishedVersionId: version.id,
+        publishedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      res.status(404).json({ success: false, error: "App not found" });
+      return;
+    }
+    throw err;
+  }
 
   res.json({ success: true, app: updated });
 });
@@ -706,7 +720,78 @@ artifactAppsRouter.post("/:id/unpublish", async (req: Request<{ id: string }>, r
   res.json({ success: true, app: updated });
 });
 
-/** GET /?scope=mine|workspace — gallery listings. Manifests only, never bytes. */
+/**
+ * POST /:id/archive — hide the app everywhere, without deleting anything.
+ *
+ * Every other route already treats an archived app as not found (listings, the
+ * payload, storage, agents), so setting the flag is the whole change. Versions,
+ * storage records and the publish pin are kept as they are, which is what makes
+ * unarchive a true undo: a published app comes back published. Idempotent.
+ */
+artifactAppsRouter.post("/:id/archive", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  // An archived app is invisible to everyone but its owner: same 404 as missing.
+  if (!app || (app.isArchived && app.ownerUserId !== requesterId)) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  if (app.ownerUserId !== requesterId) {
+    res.status(403).json({ success: false, error: "Forbidden" });
+    return;
+  }
+  if (app.isArchived) {
+    res.json({ success: true, app });
+    return;
+  }
+
+  const updated = await prisma.artifactApp.update({
+    where: { id: app.id },
+    data: { isArchived: true, archivedAt: new Date() },
+  });
+
+  log.info(`app ${app.id} archived by ${requesterId}`);
+  res.json({ success: true, app: updated });
+});
+
+/** POST /:id/unarchive — bring an archived app back exactly as it was. Idempotent. */
+artifactAppsRouter.post("/:id/unarchive", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const app = await prisma.artifactApp.findUnique({ where: { id: req.params.id } });
+  // Only the owner may know an archived app exists, so a non-owner gets 404, not 403.
+  if (!app || app.ownerUserId !== requesterId) {
+    res.status(404).json({ success: false, error: "App not found" });
+    return;
+  }
+  if (!app.isArchived) {
+    res.json({ success: true, app });
+    return;
+  }
+
+  const updated = await prisma.artifactApp.update({
+    where: { id: app.id },
+    data: { isArchived: false, archivedAt: null },
+  });
+
+  log.info(`app ${app.id} unarchived by ${requesterId}`);
+  res.json({ success: true, app: updated });
+});
+
+/**
+ * GET /?scope=mine|workspace|archived — gallery listings. Manifests only, never
+ * bytes. `archived` is the owner's own archived apps, so they can be found and
+ * unarchived; nothing else ever lists them.
+ */
 artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> => {
   const requesterId = getRequesterId(req);
   if (!requesterId) {
@@ -720,11 +805,12 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
     return;
   }
 
-  const scope = req.query["scope"] === "workspace" ? "workspace" : "mine";
+  const rawScope = req.query["scope"];
+  const scope = rawScope === "workspace" ? "workspace" : rawScope === "archived" ? "archived" : "mine";
   const where =
     scope === "workspace"
       ? { workspaceId, visibility: VISIBILITY_WORKSPACE, isArchived: false }
-      : { workspaceId, ownerUserId: requesterId, isArchived: false };
+      : { workspaceId, ownerUserId: requesterId, isArchived: scope === "archived" };
 
   const apps = await prisma.artifactApp.findMany({
     where,
@@ -744,7 +830,7 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
   const pinnedById = new Map(pinned.map((v) => [v.id, v]));
 
   const latestByApp = new Map<string, { manifest: unknown; versionNumber: number }>();
-  if (scope === "mine" && apps.length) {
+  if (scope !== "workspace" && apps.length) {
     const all = await prisma.artifactAppVersion.findMany({
       where: { appId: { in: apps.map((a) => a.id) } },
       orderBy: { versionNumber: "desc" },
@@ -787,11 +873,300 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
         ownerName: ownerNames.get(a.ownerUserId) ?? null,
         icon: a.icon,
         publishedAt: a.publishedAt,
+        archivedAt: a.archivedAt,
         updatedAt: a.updatedAt,
         manifest: v?.manifest ?? null,
       };
     }),
   });
+});
+
+const ANALYTICS_RANGES = new Set([7, 30, 90]);
+/**
+ * Upper bound on rows read per table per request, so one busy workspace can't
+ * make it unbounded. Reads are newest first, so a capped read keeps the latest
+ * rows and the response says `truncated: true` rather than quietly undercounting.
+ */
+const ANALYTICS_ROW_CAP = 50_000;
+const ANALYTICS_TOP_APPS = 10;
+const ANALYTICS_RECENT_ERRORS = 10;
+/** Prisma caps one query near 32k bind parameters (Postgres itself allows 65,535); `in` lists stay well below. */
+const IN_CHUNK = 5_000;
+/**
+ * A run row that never got a claw AgentRun (AgentRun.start failing is only
+ * logged) has no way to finish. Past this age it counts as failed, not as in
+ * progress forever.
+ */
+const ORPHAN_RUN_AFTER_MS = 60 * 60 * 1000;
+/** Each response is reused for a minute per caller, workspace and range: the
+ *  data moves slowly and a busy dashboard shouldn't re-run every query. */
+const ANALYTICS_CACHE_TTL_MS = 60_000;
+const ANALYTICS_CACHE_MAX = 500;
+const analyticsCache = new Map<string, { at: number; body: unknown }>();
+
+/**
+ * Analytics days are IST calendar days. `formatDayIST` names the day an instant
+ * falls on; IST has no daylight saving, so the window's start is a fixed offset.
+ */
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const addDays = (day: string, n: number): string =>
+  new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+/** IST midnight at the start of `day`. */
+const istMidnight = (day: string): Date => new Date(Date.parse(`${day}T00:00:00Z`) - IST_OFFSET_MS);
+
+/**
+ * GET /analytics?days=7|30|90 — Apps Marketplace analytics for the caller's
+ * workspace, built only from tables that already exist (no event log yet).
+ *
+ * What a caller may see, by section:
+ *  - `totals`, `period`, `composition`, `daily`: counts over every app in the
+ *    workspace. No titles, owners or content. Counts can still hint at activity
+ *    (in a small workspace, a day's numbers may show a colleague worked on a
+ *    private app), so nothing finer than a day per workspace is returned.
+ *  - `topApps`: only apps the caller can open (their own, or published), and
+ *    only ones with activity in the range.
+ *  - `recentErrors`: only agent runs the caller started themselves, on apps they
+ *    can open. Viewers never see each other's runs (see GET /runs in
+ *    artifact-app-agents.ts), and an error line can hold someone's data. Only a
+ *    one-line summary of the error is returned, never the run's prompt.
+ *
+ * "Agent runs" are runs of an app's agent, started by anyone using the app; they
+ * are not builds of the app.
+ *
+ * Days are IST calendar days. Built with the query builder only (no raw SQL, per
+ * scripts/validate-no-raw-sql.sh): bounded reads of the window, bucketed per day here.
+ */
+artifactAppsRouter.get("/analytics", async (req: Request, res: Response): Promise<void> => {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Unauthorized" });
+    return;
+  }
+
+  const requestedDays = Number(req.query["days"] ?? 30);
+  const days = ANALYTICS_RANGES.has(requestedDays) ? requestedDays : 30;
+
+  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
+  if (!workspaceId) {
+    res.status(409).json({ success: false, error: "No Spaces workspace for this user" });
+    return;
+  }
+
+  const cacheKey = `${requesterId}:${workspaceId}:${days}`;
+  const cached = analyticsCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < ANALYTICS_CACHE_TTL_MS) {
+    res.json(cached.body);
+    return;
+  }
+
+  const now = new Date();
+  // IST midnight of the first day in the window, so every bucket is a whole day.
+  const firstDay = addDays(formatDayIST(now), -(days - 1));
+  const since = istMidnight(firstDay);
+
+  const [apps, versionCounts, recordCounts, periodVersions, restores, appRuns] = await Promise.all([
+    prisma.artifactApp.findMany({
+      where: { workspaceId },
+      select: {
+        id: true,
+        title: true,
+        icon: true,
+        ownerUserId: true,
+        visibility: true,
+        headVersionId: true,
+        publishedVersionId: true,
+        isArchived: true,
+        archivedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: ANALYTICS_ROW_CAP,
+    }),
+    prisma.artifactAppVersion.groupBy({ by: ["appId"], where: { workspaceId }, _count: { _all: true } }),
+    prisma.artifactAppRecord.groupBy({ by: ["appId"], where: { workspaceId }, _count: { _all: true } }),
+    prisma.artifactAppVersion.findMany({
+      where: { workspaceId, createdAt: { gte: since } },
+      select: { appId: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: ANALYTICS_ROW_CAP,
+    }),
+    prisma.artifactAppRestore.count({ where: { workspaceId, createdAt: { gte: since } } }),
+    prisma.artifactAppAgentRun.findMany({
+      where: { workspaceId, appId: { not: null }, createdAt: { gte: since } },
+      select: { appId: true, userId: true, status: true, error: true, sessionId: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: ANALYTICS_ROW_CAP,
+    }),
+  ]);
+  const truncated = [apps, periodVersions, appRuns].some((rows) => rows.length >= ANALYTICS_ROW_CAP);
+
+  // A run's live state is on claw's AgentRun; the app row only knows dispatch.
+  const sessionIds = appRuns.map((r) => r.sessionId).filter((s): s is string => Boolean(s));
+  const agentRuns: { sessionId: string; status: string; error: string | null }[] = [];
+  for (let i = 0; i < sessionIds.length; i += IN_CHUNK) {
+    agentRuns.push(
+      ...(await prisma.agentRun.findMany({
+        where: { sessionId: { in: sessionIds.slice(i, i + IN_CHUNK) } },
+        select: { sessionId: true, status: true, error: true },
+      })),
+    );
+  }
+  const runBySession = new Map(agentRuns.map((r) => [r.sessionId, r]));
+  type RunOutcome = "completed" | "failed" | "cancelled" | "inProgress";
+  const runs = appRuns.map((r) => {
+    const live = r.sessionId ? runBySession.get(r.sessionId) : undefined;
+    let status = live?.status ?? r.status;
+    let error = live?.error ?? r.error ?? null;
+    // No AgentRun and long past dispatch: it never started and never will finish.
+    const orphaned = !live && now.getTime() - r.createdAt.getTime() > ORPHAN_RUN_AFTER_MS;
+    if (orphaned && status !== "completed" && status !== "failed" && status !== "cancelled") {
+      status = "failed";
+      error ??= "The run never started.";
+    }
+    const outcome: RunOutcome =
+      status === "completed" || status === "failed" || status === "cancelled" ? status : "inProgress";
+    return {
+      appId: r.appId as string,
+      userId: r.userId,
+      outcome,
+      error,
+      source: live ? "run" : "dispatch",
+      createdAt: r.createdAt,
+    };
+  });
+
+  const versionsByApp = new Map(versionCounts.map((v) => [v.appId, v._count._all]));
+  const recordsByApp = new Map(recordCounts.map((r) => [r.appId, r._count._all]));
+  const isEmpty = (a: (typeof apps)[number]): boolean =>
+    !a.headVersionId && !a.publishedVersionId && !versionsByApp.get(a.id);
+  const live = apps.filter((a) => !a.isArchived);
+
+  // One part per app, mutually exclusive, so the parts add up to every app.
+  const composition = { published: 0, private: 0, empty: 0, archived: 0 };
+  for (const a of apps) {
+    if (a.isArchived) composition.archived += 1;
+    else if (isEmpty(a)) composition.empty += 1;
+    else if (a.visibility === VISIBILITY_WORKSPACE) composition.published += 1;
+    else composition.private += 1;
+  }
+
+  // Every day in the window, including quiet ones, so a chart's x-axis is honest.
+  const daily = Array.from({ length: days }, (_, i) => ({
+    date: addDays(firstDay, i),
+    appsCreated: 0,
+    versions: 0,
+    runsCompleted: 0,
+    runsFailed: 0,
+    runsCancelled: 0,
+  }));
+  const dayIndex = new Map(daily.map((d, i) => [d.date, i]));
+  const bump = (at: Date, field: Exclude<keyof (typeof daily)[number], "date">): void => {
+    const i = dayIndex.get(formatDayIST(at));
+    if (i !== undefined) daily[i]![field] += 1;
+  };
+  // New apps are counted among the live ones, so the "new" figure can't exceed "live".
+  for (const a of live) bump(a.createdAt, "appsCreated");
+  for (const v of periodVersions) bump(v.createdAt, "versions");
+  for (const r of runs) {
+    if (r.outcome === "completed") bump(r.createdAt, "runsCompleted");
+    else if (r.outcome === "failed") bump(r.createdAt, "runsFailed");
+    else if (r.outcome === "cancelled") bump(r.createdAt, "runsCancelled");
+  }
+
+  const runTotals = { total: runs.length, completed: 0, failed: 0, cancelled: 0, inProgress: 0 };
+  for (const r of runs) runTotals[r.outcome] += 1;
+  const settled = runTotals.completed + runTotals.failed;
+
+  // Per-app rows: only apps this caller can open, and only ones that did something.
+  const visible = live.filter((a) => a.ownerUserId === requesterId || a.visibility === VISIBILITY_WORKSPACE);
+  const periodVersionsByApp = new Map<string, number>();
+  for (const v of periodVersions) periodVersionsByApp.set(v.appId, (periodVersionsByApp.get(v.appId) ?? 0) + 1);
+  const runsByApp = new Map<string, { total: number; failed: number }>();
+  for (const r of runs) {
+    const entry = runsByApp.get(r.appId) ?? { total: 0, failed: 0 };
+    entry.total += 1;
+    if (r.outcome === "failed") entry.failed += 1;
+    runsByApp.set(r.appId, entry);
+  }
+  const top = visible
+    .map((a) => ({
+      app: a,
+      versions: periodVersionsByApp.get(a.id) ?? 0,
+      runs: runsByApp.get(a.id) ?? { total: 0, failed: 0 },
+    }))
+    .filter((t) => t.versions + t.runs.total > 0)
+    .sort(
+      (x, y) =>
+        y.versions + y.runs.total - (x.versions + x.runs.total) || y.app.updatedAt.getTime() - x.app.updatedAt.getTime(),
+    )
+    .slice(0, ANALYTICS_TOP_APPS);
+
+  const ownerIds = [...new Set(top.map((t) => t.app.ownerUserId))];
+  const owners = ownerIds.length
+    ? await prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true, email: true } })
+    : [];
+  const ownerNames = new Map(owners.map((u) => [u.id, u.name?.trim() || u.email?.split("@")[0] || null] as const));
+
+  const visibleById = new Map(visible.map((a) => [a.id, a]));
+  const recentErrors = runs
+    .filter((r) => r.outcome === "failed" && r.error && r.userId === requesterId && visibleById.has(r.appId))
+    .slice(0, ANALYTICS_RECENT_ERRORS) // runs are already newest first
+    .map((r) => ({
+      appId: r.appId,
+      appTitle: visibleById.get(r.appId)?.title ?? "",
+      at: r.createdAt,
+      source: r.source,
+      message: summarizeError(r.error as string, 200),
+    }));
+
+  const body = {
+    success: true,
+    range: { days, from: since.toISOString(), to: now.toISOString() },
+    truncated,
+    totals: {
+      apps: live.length,
+      published: composition.published,
+      // People with at least one live app that has been built, not everyone who
+      // only clicked "Create app".
+      builders: new Set(live.filter((a) => !isEmpty(a)).map((a) => a.ownerUserId)).size,
+      versions: [...versionsByApp.values()].reduce((sum, n) => sum + n, 0),
+      storageRecords: [...recordsByApp.values()].reduce((sum, n) => sum + n, 0),
+    },
+    period: {
+      appsCreated: daily.reduce((sum, d) => sum + d.appsCreated, 0),
+      versions: periodVersions.length,
+      restores,
+      archived: apps.filter((a) => a.archivedAt && a.archivedAt >= since).length,
+      agentRuns: runTotals,
+      // Share of FINISHED agent runs that failed; null when nothing has finished yet.
+      failureRate: settled > 0 ? runTotals.failed / settled : null,
+    },
+    composition,
+    daily,
+    topApps: top.map(({ app: a, versions, runs: r }) => ({
+      id: a.id,
+      title: a.title,
+      icon: a.icon,
+      visibility: a.visibility,
+      isMine: a.ownerUserId === requesterId,
+      ownerName: ownerNames.get(a.ownerUserId) ?? null,
+      versions,
+      agentRuns: r.total,
+      failedRuns: r.failed,
+      storageRecords: recordsByApp.get(a.id) ?? 0,
+      updatedAt: a.updatedAt,
+    })),
+    recentErrors,
+  };
+
+  if (analyticsCache.size >= ANALYTICS_CACHE_MAX) {
+    const oldest = analyticsCache.keys().next().value;
+    if (oldest !== undefined) analyticsCache.delete(oldest);
+  }
+  analyticsCache.set(cacheKey, { at: Date.now(), body });
+  res.json(body);
 });
 
 /**

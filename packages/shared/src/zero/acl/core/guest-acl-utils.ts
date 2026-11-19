@@ -1,6 +1,6 @@
 import type { Query } from '@rocicorp/zero';
 import type { Context, Schema } from '../../schema';
-import { ChannelScopeType, GuestEntity, WorkspaceRole } from '../../schema';
+import { ChannelScopeType, FormContextType, GuestEntity, WorkspaceRole } from '../../schema';
 
 type GuestPredicate = (helpers: any) => any;
 
@@ -59,6 +59,29 @@ export const guestProjectAccessWhere = (ctx: Context): GuestPredicate => ({ or, 
     ),
     nonDmParticipantChannelExists(ctx)(exists),
   );
+
+// A board is visible to a guest only through a channel it is linked to (a channel can
+// link several boards) — never through the board's project.
+const guestBoardAccessWhere = (ctx: Context): GuestPredicate => ({ exists }: any) =>
+  exists('channelMappings', (mapping: any) =>
+    mapping.whereExists('channel', (channel: any) => channel.where(guestChannelAccessWhere(ctx))),
+  );
+
+// A form reaches a guest through the board it is bound to: directly for board-level
+// custom fields (contextType BOARD), or via the stage for stage-level forms.
+export const guestFormContextMappingWhere = (ctx: Context): GuestPredicate => ({
+  or,
+  and,
+  cmp,
+  exists,
+}: any) => {
+  const guestBoard = (board: any) =>
+    board.where('workspaceId', '=', ctx.workspaceId).where(guestBoardAccessWhere(ctx));
+  return or(
+    exists('stage', (stage: any) => stage.whereExists('board', guestBoard)),
+    and(cmp('contextType', '=', FormContextType.BOARD), exists('board', guestBoard)),
+  );
+};
 
 export const guestTicketAccessWhere = (ctx: Context): GuestPredicate => ({ or, exists }: any) =>
   or(

@@ -154,18 +154,50 @@ export async function grantPermissionsForRole(
   role: WorkspaceRole,
   workspaceId: string,
 ): Promise<void> {
-  const logPrefix = '[grantPermissionsForRole]';
-  const wsContext = workspaceId ? ` (workspace: ${workspaceId})` : '';
-  const actorId = userId;
-
   const entries = PERMISSION_MATRIX[role];
 
   if (entries.length === 0) {
+    const wsContext = workspaceId ? ` (workspace: ${workspaceId})` : '';
     logger.warn(
-      `${logPrefix} Role ${role} has no permission entries. Skipping permission grants for user ${email}${wsContext}.`,
+      `[grantPermissionsForRole] Role ${role} has no permission entries. Skipping permission grants for user ${email}${wsContext}.`,
     );
     return;
   }
+
+  await grantResourceEntries(userId, email, role, entries, workspaceId, '[grantPermissionsForRole]');
+}
+
+/**
+ * Guests have no SUPPORT access by role, so a guest invited into a desk channel
+ * could never open the Support screen or work its tickets. Grant WRITE for that case.
+ * Add-only like the role grants; reconcileUserPermissions only manages ADMIN rows,
+ * so this survives later reconciles.
+ */
+export async function grantGuestDeskAccess(
+  userId: string,
+  email: string,
+  workspaceId: string,
+): Promise<void> {
+  await grantResourceEntries(
+    userId,
+    email,
+    WorkspaceRole.GUEST,
+    [{ resourceName: 'SUPPORT', accessType: AccessType.WRITE }],
+    workspaceId,
+    '[grantGuestDeskAccess]',
+  );
+}
+
+async function grantResourceEntries(
+  userId: string,
+  email: string,
+  role: WorkspaceRole,
+  entries: readonly PermissionEntry[],
+  workspaceId: string,
+  logPrefix: string,
+): Promise<void> {
+  const wsContext = workspaceId ? ` (workspace: ${workspaceId})` : '';
+  const actorId = userId;
 
   let grantedCount = 0;
 

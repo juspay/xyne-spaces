@@ -2,7 +2,7 @@ import type { Query } from '@rocicorp/zero';
 import { type Schema, type Context, FormEntityType, WorkspaceRole } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 import { channelAccessWhere } from '../core/channel-access';
-import { guestProjectAccessWhere, isGuestContext } from '../core/guest-acl-utils';
+import { guestFormContextMappingWhere, guestTicketAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class FormEntityValuesACL extends BaseQueryACL<'form_entity_values'> {
   constructor(ctx: Context) {
@@ -13,13 +13,19 @@ export class FormEntityValuesACL extends BaseQueryACL<'form_entity_values'> {
     query: Query<'form_entity_values', Schema, TReturn>
   ): Query<'form_entity_values', Schema, TReturn> {
     if (isGuestContext(this.ctx)) {
-      return query.whereExists('form', (f) =>
-        f.whereExists('formContextMappings', (fcm) =>
-          fcm.whereExists('stage', (s) =>
-            s.whereExists('board', (b) =>
-              b
-                .where('workspaceId', '=', this.ctx.workspaceId)
-                .whereExists('project', (p) => p.where(guestProjectAccessWhere(this.ctx)))
+      // A ticket's values follow the ticket: visible whenever the guest can see the
+      // ticket (its channel), whichever project the ticket's board belongs to.
+      return query.where(({ or, and, cmp, exists }) =>
+        or(
+          exists('form', (f) =>
+            f.whereExists('formContextMappings', (fcm) =>
+              fcm.where(guestFormContextMappingWhere(this.ctx))
+            )
+          ),
+          and(
+            cmp('entityType', '=', FormEntityType.TICKET),
+            exists('ticket', (t) =>
+              t.where('workspaceId', '=', this.ctx.workspaceId).where(guestTicketAccessWhere(this.ctx))
             )
           )
         )

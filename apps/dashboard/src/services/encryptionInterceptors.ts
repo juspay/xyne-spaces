@@ -6,9 +6,6 @@ import {
   decryptionCache,
   getClientManifest,
   refetchClientManifest,
-  CLIENT_MANIFEST_VERSION_HEADER,
-  CLIENT_MANIFEST_TAG_HEADER,
-  CLIENT_MANIFEST_ENVIRONMENT_HEADER,
   CLIENT_MANIFEST_STALE_CODE,
   findRequestRule,
   encryptBodyWithRule,
@@ -172,16 +169,7 @@ export async function encryptionRequestInterceptor(
     return config;
   }
 
-  // Stamp the manifest version on every mutating request, multipart included, so the
-  // encryption service can reject writes made against another manifest (409).
   const manifest = getClientManifest();
-  if (manifest) {
-    config.headers[CLIENT_MANIFEST_VERSION_HEADER] = String(manifest.version);
-    config.headers[CLIENT_MANIFEST_TAG_HEADER] = manifest.tag;
-    // Which lane's rules this write was encrypted with, so the server can compare it with
-    // the request's own lane after a prod <-> pre-prod move.
-    config.headers[CLIENT_MANIFEST_ENVIRONMENT_HEADER] = manifest.environment;
-  }
 
   // Only encrypt request bodies for POST, PUT and PATCH
   if (method === 'delete') {
