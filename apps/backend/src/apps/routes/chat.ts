@@ -10,8 +10,8 @@ const chatController = new ChatController();
 
 // postMessage also accepts a user id as `channelId` — it then posts into the
 // bot's DM with that user, matching the Slack adapter's chat.postMessage.
-// encryptedRoute: fields the ingress gateway encrypted become workspace-DEK ciphertext (and the
-// reply goes back encrypted to the gateway); a no-op unless API client encryption is on.
+// encryptedRoute: fields the transit proxy encrypted become workspace-DEK ciphertext (and the
+// reply goes back encrypted to the proxy); a no-op unless API client encryption is on.
 const encryptedPostMessage = encryptedRoute(appsChatPostMessageClient, {
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
 });

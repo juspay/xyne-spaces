@@ -50,7 +50,7 @@ export type EncryptedRouteOptions = {
 const WORKSPACE_ENTITY_TYPE = 'WORKSPACE';
 
 function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): void {
-  if (config.enc.enableDbEncryption && config.enc.apiClientEncryptionEnabled && (req.user?.sid || req.appsClient)) {
+  if (config.enc.enableDbEncryption && config.enc.apiClientEncryptionEnabled && (req.user?.sid || req.proxyClient)) {
     runWithDekPassthrough(() => next());
     return;
   }
@@ -214,7 +214,7 @@ async function transformRequestBody(
  */
 function transformResponse(req: Request, res: Response, next: NextFunction): void {
   const caller = transitCaller(req);
-  if (!isDekPassthrough() || !(req.user?.sid || req.appsClient) || !hasTransitCaller(caller)) {
+  if (!isDekPassthrough() || !(req.user?.sid || req.proxyClient) || !hasTransitCaller(caller)) {
     return next();
   }
 

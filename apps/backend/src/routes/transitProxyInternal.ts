@@ -1,18 +1,18 @@
 import { Router, type Request, type Response } from 'express';
 import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
-import { APPS_CLIENT_HEADER, authenticateApp, parseAppsClientHeader } from '@/apps/middelware/authenticator';
+import { TRANSIT_PROXY_HEADER, authenticateApp, parseTransitProxyHeader } from '@/apps/middelware/authenticator';
 import { logger } from '@/utils/logger';
 
 /**
- * Internal routes for the Xyne Apps gateways only. Nothing here checks who the caller is:
- * infra allows only the gateways' service accounts to reach /api/internal/apps (Istio
+ * Internal routes for the Xyne transit proxy only. Nothing here checks who the caller is:
+ * infra allows only the proxies' service accounts to reach /api/internal/transit-proxy (Istio
  * AuthorizationPolicy), so these must never be routed from the edge.
  */
 const router = Router();
 
 /**
- * POST /api/internal/apps/verify-token: the gateway's pre-check, before it encrypts anything.
+ * POST /api/internal/transit-proxy/verify-token: the proxy's pre-check, before it encrypts anything.
  * The bot's own `Authorization: Bearer <app JWT>` is forwarded unchanged and verified by the
  * same authenticateApp every app route uses. 200 with who the token is for, or 401.
  */
@@ -28,16 +28,16 @@ router.post('/verify-token', authenticateApp, (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/internal/apps/client-manifest?tag=&environment=: the manifest for a gateway,
- * encrypted by the encryption service to the gateway key named by `x-xyne-apps-client`.
+ * GET /api/internal/transit-proxy/client-manifest?tag=&environment=: the manifest for a proxy,
+ * encrypted by the encryption service to the proxy key named by `x-xyne-transit-proxy`.
  * The backend relays ciphertext it cannot read or change.
  */
 router.get('/client-manifest', async (req: Request, res: Response) => {
-  const appsClient = parseAppsClientHeader(req.headers[APPS_CLIENT_HEADER]);
+  const proxyClient = parseTransitProxyHeader(req.headers[TRANSIT_PROXY_HEADER]);
   const tag = typeof req.query.tag === 'string' ? req.query.tag : '';
   const environment = typeof req.query.environment === 'string' ? req.query.environment : '';
-  if (!appsClient || !tag || !environment) {
-    res.status(400).json({ error: 'Bad request', message: `${APPS_CLIENT_HEADER}, tag and environment are required` });
+  if (!proxyClient || !tag || !environment) {
+    res.status(400).json({ error: 'Bad request', message: `${TRANSIT_PROXY_HEADER}, tag and environment are required` });
     return;
   }
   if (!config.enc.apiClientEncryptionEnabled) {
@@ -45,7 +45,7 @@ router.get('/client-manifest', async (req: Request, res: Response) => {
     return;
   }
   try {
-    const result = await getEncryptionProvider().getTransitClientManifest({ tag, environment, appsClient });
+    const result = await getEncryptionProvider().getTransitClientManifest({ tag, environment, proxyClient });
     if (!result) {
       res.status(404).json({ error: 'Not found', message: 'No client encryption manifest for this tag and environment' });
       return;
@@ -53,7 +53,7 @@ router.get('/client-manifest', async (req: Request, res: Response) => {
     res.set('Cache-Control', 'no-store');
     res.json({ clientManifest: result.clientManifest });
   } catch (err) {
-    logger.error('[apps-gateway] failed to fetch client manifest', {
+    logger.error('[transit-proxy] failed to fetch client manifest', {
       tag,
       environment,
       error: err instanceof Error ? err.message : String(err),

@@ -138,11 +138,11 @@ export async function authenticateApp(
       orgRole: orgMember?.role ?? 'MEMBER',
     };
 
-    // Only after the JWT verified: which Xyne Apps gateway relayed the request. Infra lets only
-    // the gateways reach /api/apps, and the gateways drop this header from bot requests.
-    const appsClient = parseAppsClientHeader(req.headers[APPS_CLIENT_HEADER]);
-    if (appsClient) {
-      req.appsClient = appsClient;
+    // Only after the JWT verified: which Xyne transit proxy relayed the request. Infra lets only
+    // the proxies reach /api/apps, and the proxies drop this header from bot requests.
+    const proxyClient = parseTransitProxyHeader(req.headers[TRANSIT_PROXY_HEADER]);
+    if (proxyClient) {
+      req.proxyClient = proxyClient;
     }
 
     next();
@@ -152,10 +152,10 @@ export async function authenticateApp(
   }
 }
 
-export const APPS_CLIENT_HEADER = 'x-xyne-apps-client';
+export const TRANSIT_PROXY_HEADER = 'x-xyne-transit-proxy';
 
 /** `ingress;<version>` or `egress;<version>`; anything else is ignored. */
-export function parseAppsClientHeader(value: string | string[] | undefined): Request['appsClient'] {
+export function parseTransitProxyHeader(value: string | string[] | undefined): Request['proxyClient'] {
   const raw = Array.isArray(value) ? value[0] : value;
   const match = raw?.trim().match(/^(ingress|egress);([1-9]\d{0,8})$/);
   if (!match) return undefined;

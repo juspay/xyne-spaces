@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { defineRequestContract, type RequestOf } from '../define.js';
 
 /**
- * Xyne Apps `POST /apps/chat/postMessage`, sent by bots through the ingress gateway, which
+ * Xyne Apps `POST /apps/chat/postMessage`, sent by bots through the transit proxy, which
  * encrypts `markdownText` under the apps transit keys; the handler stores the workspace-DEK
  * ciphertext as-is. `text` stays plaintext for now: the handler resolves Slack mentions and
  * parses BlockKit in it, which cannot run on ciphertext until that processing moves into the
@@ -26,7 +26,7 @@ export type AppsChatPostMessageRequest = RequestOf<typeof appsChatPostMessageCli
 
 /**
  * Xyne Apps `POST /apps/chat/updateMessage`: same treatment as postMessage. The ingress
- * gateway encrypts `markdownText`; the handler stores the workspace-DEK ciphertext as-is.
+ * proxy encrypts `markdownText`; the handler stores the workspace-DEK ciphertext as-is.
  * `text` and `flowJSON` stay plaintext (mentions, BlockKit and flow HTML are built from them).
  */
 export const appsChatUpdateMessageClient = defineRequestContract({
