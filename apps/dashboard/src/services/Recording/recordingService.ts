@@ -423,7 +423,7 @@ class RecordingService {
   }
 
   async updateRecording(callId: string, update: RecordingUpdate): Promise<void> {
-    await apiInstance.patch(`/calls/recordings/${callId}`, update);
+    await apiInstance.post(`/calls/recordings/${callId}/update`, update);
   }
 
   async regenerateSummary(
