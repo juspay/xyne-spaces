@@ -4,13 +4,26 @@
  * form_entity_values row per channel per field. A Channels desk copies them onto the tickets it opens.
  */
 import { Prisma } from '@prisma/client';
-import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  type FormEntityValueRead,
+} from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { normalizeCustomFieldValue } from '@/apps/controllers/ticketController.helpers';
+import {
+  createFormEntityValues,
+  findFormEntityValues,
+  upsertFormEntityValue,
+} from '@/database/repositories/formEntityValueRepository';
 import { resolveFormFieldDefinitionsForForm, type ResolvedFormFieldDefinition } from '@/utils/fieldDefinition';
 
-type Client = Pick<Prisma.TransactionClient, 'formContextMapping' | 'formFields' | 'formEntityValues'>;
+type Client = Pick<
+  Prisma.TransactionClient,
+  'formContextMapping' | 'formFields' | 'formEntityValues' | 'formEntityValueItems'
+>;
 
 export class ChannelFieldError extends Error {
   constructor(
@@ -23,8 +36,8 @@ export class ChannelFieldError extends Error {
 
 interface ChannelFieldValue {
   fieldId: string;
-  fieldValue: string;
-  actualFieldValue: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  fieldType: string;
+  value: Prisma.InputJsonValue | null;
 }
 
 /** The workspace's channel form and its fields, or null if none is set up. */
@@ -69,11 +82,14 @@ export async function prepareChannelFields(
     const raw = input[name];
     // null, "" or [] clears the field, as clearing it in the UI does.
     if (raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)) {
-      return { fieldId: field.id, fieldValue: '', actualFieldValue: Prisma.DbNull };
+      return { fieldId: field.id, fieldType: field.fieldType, value: null };
     }
     try {
-      // The value lives in actualFieldValue only, as the UI writes it, so clearing it there leaves no old value behind.
-      return { fieldId: field.id, fieldValue: '', actualFieldValue: normalizeCustomFieldValue(field, raw).actualFieldValue };
+      return {
+        fieldId: field.id,
+        fieldType: field.fieldType,
+        value: normalizeCustomFieldValue(field, raw).value,
+      };
     } catch (err) {
       throw new ChannelFieldError('INVALID_VALUE', err instanceof Error ? err.message : `Invalid value for "${name}"`);
     }
@@ -87,22 +103,18 @@ export async function writeChannelFields(
   channelId: string,
   { formId, values }: PreparedChannelFields,
 ): Promise<void> {
-  for (const value of values) {
+  for (const { fieldId, fieldType, value } of values) {
     // version 1, as the UI writes it: a null version never clashes in the unique key, so two writes at once
     // would each add a row. With it, the database keeps one row per field and the later write wins.
-    const key = { entityId: channelId, entityType: FormEntityType.CHANNEL, fieldId: value.fieldId, contextId: workspaceId, version: 1 };
-    await db.formEntityValues.upsert({
-      where: { entityId_entityType_fieldId_contextId_version: key },
-      create: { workspaceId, formId, ...key, ...value },
-      update: { fieldValue: value.fieldValue, actualFieldValue: value.actualFieldValue },
-    });
+    const key = { entityId: channelId, entityType: FormEntityType.CHANNEL, fieldId, contextId: workspaceId, version: 1 };
+    await upsertFormEntityValue(db, { workspaceId, formId, ...key, fieldType, value });
   }
 }
 
 // An option value must be one of its field's own options, which another field may not have; so these only copy onto the same definition.
 const OPTION_TYPES = new Set<string>([FormFieldType.SINGLE_SELECT, FormFieldType.MULTI_SELECT]);
 
-function isEmptyValue(value: Prisma.JsonValue): boolean {
+function isEmptyValue(value: FormEntityValueRead): boolean {
   return value === null || value === '' || (Array.isArray(value) && value.length === 0);
 }
 
@@ -116,9 +128,8 @@ export async function copyChannelFieldsToTicket(
   client: Client,
   args: { workspaceId: string; channelId: string; ticketId: string; boardId: string },
 ): Promise<void> {
-  const values = await client.formEntityValues.findMany({
+  const values = await findFormEntityValues(client, {
     where: { entityType: FormEntityType.CHANNEL, entityId: args.channelId },
-    select: { fieldId: true, fieldValue: true, actualFieldValue: true },
   });
   if (values.length === 0) return;
   const boardMapping = await client.formContextMapping.findFirst({
@@ -137,7 +148,7 @@ export async function copyChannelFieldsToTicket(
   const skipped: string[] = [];
   const copied = new Set<string>();
   const rows = values.flatMap((value) => {
-    const current = value.actualFieldValue;
+    const current = value.value;
     if (current === null || isEmptyValue(current)) return [];
     // Only the current channel form's fields; values left from a replaced form aren't the channel's any more.
     const source = channelFieldOf.get(value.fieldId);
@@ -155,6 +166,8 @@ export async function copyChannelFieldsToTicket(
     copied.add(target.id);
     return [
       {
+        fieldType: target.fieldType,
+        value: current,
         workspaceId: args.workspaceId,
         entityType: FormEntityType.TICKET,
         entityId: args.ticketId,
@@ -162,8 +175,6 @@ export async function copyChannelFieldsToTicket(
         fieldId: target.id,
         contextId: args.boardId,
         version: 1,
-        fieldValue: '',
-        actualFieldValue: current,
       },
     ];
   });
@@ -175,5 +186,7 @@ export async function copyChannelFieldsToTicket(
       fields: skipped,
     });
   }
-  if (rows.length > 0) await client.formEntityValues.createMany({ data: rows, skipDuplicates: true });
+  if (rows.length > 0) {
+    await createFormEntityValues(client, rows, { skipDuplicates: true });
+  }
 }

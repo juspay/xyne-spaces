@@ -90,6 +90,8 @@ const unreadCountsFiltersSchema = z
         z.object({
           fieldId: z.string(),
           values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+          fieldType: z.string().optional(),
+          dateRange: z.object({ start: z.number().optional(), end: z.number().optional() }).optional(),
         }),
       )
       .optional(),

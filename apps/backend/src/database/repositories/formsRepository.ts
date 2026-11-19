@@ -1,6 +1,5 @@
-import { randomUUID } from 'crypto';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
-import { FormContextType, FormEntityType, FormFieldType,  resolveParentOption, } from '@xyne/shared';
+import { FormContextType, FormEntityType, FormFieldType, resolveParentOption } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Form, FormFields, Prisma, PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
@@ -15,6 +14,12 @@ import {
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 import { parseGlobalFieldEnum } from '@/utils/globalFieldEnum';
 import { createWithFieldsTx } from '@/bypassAcl/transactions/formsRepository';
+import {
+  createFormEntityValues,
+  findFormEntityValueKeys,
+  findFormEntityValues,
+  upsertFormEntityValue,
+} from '@/database/repositories/formEntityValueRepository';
 import { updateWithFieldsTx } from '@/bypassAcl/transactions/formsRepository';
 
 export interface UpsertTicketFormFieldsResult {
@@ -329,15 +334,17 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       fieldId: string;
       contextId?: string | null;
       fieldValue?: string;
-      actualFieldValue: Prisma.InputJsonValue;
+      value: Prisma.InputJsonValue;
     }>,
     tx?: Prisma.TransactionClient
   ): Promise<{ count: number }> {
     const client = tx || this.db;
     if (data.length === 0) return { count: 0 };
     const workspaceId = await resolveWorkspaceIdFromModel(client, 'form', { id: data[0].formId });
-    return await client.formEntityValues.createMany({
-      data: data.map((item) => ({
+    const definitions = await resolveFieldDefinitionsByIds(client, data.map((item) => item.fieldId));
+    return createFormEntityValues(
+      client,
+      data.map((item) => ({
         formId: item.formId,
         entityId: item.entityId,
         entityType: item.entityType,
@@ -347,12 +354,12 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         // pass contextId=releaseTicketId so the same change-type row can hold
         // values across multiple releases without colliding on the
         // (entityId, entityType, fieldId, contextId) unique key.
-        ...(item.contextId !== undefined && { contextId: item.contextId }),
-        fieldValue: item.fieldValue || '',
-        actualFieldValue: item.actualFieldValue as Prisma.InputJsonValue,
+        contextId: item.contextId,
+        fieldType: definitions.get(item.fieldId)?.fieldType,
+        value: item.value,
       })),
-      skipDuplicates: true,
-    });
+      { skipDuplicates: true },
+    );
   }
 
   async upsertTicketFormFields(
@@ -384,9 +391,8 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     // Compute the max in code (NULL = version 1): the version column is nullable with no DB
     // default, and ORDER BY version DESC would sort NULLs first in Postgres — a legacy NULL
     // row would masquerade as the latest version.
-    const existingValues = await this.db.formEntityValues.findMany({
+    const existingValues = await findFormEntityValueKeys(this.db, {
       where: { entityId: ticketId, entityType: 'TICKET', contextId: boardId },
-      select: { version: true },
     });
     const currentVersion = existingValues.reduce((max, v) => Math.max(max, v.version ?? 1), 1);
 
@@ -409,33 +415,18 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       }
 
       const isMulti = field.fieldType === FormFieldType.MULTI_SELECT || field.fieldType === FormFieldType.USER;
-      const actualFieldValue = isMulti ? [valueStr] : valueStr;
-
-      await this.db.formEntityValues.upsert({
-        where: {
-          entityId_entityType_fieldId_contextId_version: {
-            entityId: ticketId,
-            entityType: 'TICKET',
-            fieldId: field.id,
-            contextId: boardId,
-            version: currentVersion,
-          },
-        },
-        create: {
-          id: randomUUID(),
-          formId: formMapping.formId,
-          workspaceId: ticketWorkspaceId,
-          entityId: ticketId,
-          entityType: 'TICKET',
-          fieldId: field.id,
-          contextId: boardId,
-          version: currentVersion,
-          fieldValue: valueStr,
-          actualFieldValue,
-          createdAt: now,
-          updatedAt: now,
-        },
-        update: { fieldValue: valueStr, actualFieldValue, updatedAt: now },
+      await upsertFormEntityValue(this.db, {
+        formId: formMapping.formId,
+        workspaceId: ticketWorkspaceId,
+        entityId: ticketId,
+        entityType: 'TICKET',
+        fieldId: field.id,
+        contextId: boardId,
+        version: currentVersion,
+        fieldType: field.fieldType,
+        value: isMulti ? [valueStr] : valueStr,
+        createdAt: now,
+        updatedAt: now,
       });
       updatedFields.push(fieldName);
     }
@@ -447,7 +438,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     entityId: string,
     entityType: string
   ): Promise<Record<string, any>> {
-    const values = await this.db.formEntityValues.findMany({
+    const values = await findFormEntityValues(this.db, {
       where: {
         entityId,
         entityType,
@@ -464,7 +455,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
     for (const v of values) {
       const field = definitions.get(v.fieldId);
       if (field) {
-        result[field.fieldName] = v.actualFieldValue ?? v.fieldValue;
+        result[field.fieldName] = v.value;
       }
     }
 
@@ -497,7 +488,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
       return null;
     }
 
-    const currentVersionRow = await this.db.formEntityValues.findFirst({
+    const [currentVersionRow] = await findFormEntityValueKeys(this.db, {
       where: {
         entityId: ticketId,
         entityType: 'TICKET',
@@ -505,13 +496,13 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         contextId: boardId,
       },
       orderBy: { version: 'desc' },
-      select: { version: true },
+      take: 1,
     });
     const currentVersion = currentVersionRow?.version ?? 1;
 
     const [resolvedFormFields, formValues] = await Promise.all([
       this.resolveFormFieldsForFormId(form.id),
-      this.db.formEntityValues.findMany({
+      findFormEntityValues(this.db, {
         where: {
           entityId: ticketId,
           entityType: 'TICKET',
@@ -559,7 +550,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
 
     const fields: TicketCustomFormFieldValue[] = resolvedFormFields.map((field) => {
       const savedValue = validValueByFieldId.get(field.id);
-      const value = (savedValue?.actualFieldValue as Prisma.JsonValue | null | undefined) ?? null;
+      const value = savedValue?.value ?? null;
 
       return {
         fieldId: field.id,

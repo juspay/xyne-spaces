@@ -31,6 +31,7 @@ import { moveJiraProjectChannelTx } from '@/bypassAcl/transactions/jiraMigration
 import { runPurgeJobTx } from '@/bypassAcl/transactions/jiraMigrationController';
 import { createMigrationReportCanvasTx } from '@/bypassAcl/transactions/jiraMigrationController';
 import { postMigrationReportTx } from '@/bypassAcl/transactions/jiraMigrationController';
+import { deleteFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 
 export const db = DatabaseClient.getInstance();
 
@@ -929,6 +930,8 @@ export class JiraMigrationController {
         const chunk = ticketChunks[index];
         if (chunk.length === 0) continue;
 
+        // Values (and their items) first: the batch below can't call the repository.
+        await deleteFormEntityValues(db, { entityId: { in: chunk }, entityType: 'TICKET' });
         const ticketTxnResults = await db.$transaction([
           db.ticketReferenceMapping.deleteMany({
             where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
@@ -942,7 +945,6 @@ export class JiraMigrationController {
           db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.subTicket.updateMany({ where: { mappedTicketId: { in: chunk } }, data: { mappedTicketId: null } }),
-          db.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } }),
           db.emailRead.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.workflow.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticket.deleteMany({ where: { id: { in: chunk } } }),

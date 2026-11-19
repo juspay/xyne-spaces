@@ -91,6 +91,7 @@ export { FormContextMappingsACL } from './form-context-mappings-acl';
 export { FormFieldsACL } from './form-fields-acl';
 export { GlobalFieldsACL } from './global-fields-acl';
 export { FormEntityValuesACL } from './form-entity-values-acl';
+export { FormEntityValueItemsACL } from './form-entity-value-items-acl';
 export { DelayedMessagesACL } from './delayed-messages-acl';
 export { AgentToolsMappingsACL } from './agent-tools-mappings-acl';
 export { AgentsACL } from './agents-acl';

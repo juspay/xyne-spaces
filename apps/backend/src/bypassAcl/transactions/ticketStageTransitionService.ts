@@ -2,7 +2,7 @@ import { transaction } from '../base';
 import { resolveStepEstimate, evaluateEta, isTerminalStatus, buildEtaActivityIntents, writeEtaActivitiesPrisma } from '@/services/etaManagement';
 import { loadBoardEtaContext } from '@/bypassAcl/transactions/prismaContext';
 import { prisma } from '@/services/stageTransition/ticketStageTransitionService';
-import { foldFormRowsToValues, decideVisitVersion } from '@/services/stageTransition/visitVersioning';
+import { decideVisitVersion } from '@/services/stageTransition/visitVersioning';
 import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { Prisma } from '@prisma/client';
@@ -10,6 +10,10 @@ import { ReenterMode, BoardType, parseTicketEtaManagement, mergeTicketEtaManagem
 import { logger } from '@/utils/logger';
 import { formService } from '@/services/formService';
 import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
+import {
+  findFormEntityValues,
+  upsertFormEntityValue,
+} from '@/database/repositories/formEntityValueRepository';
 
 
 export function transitionTicketTx(currentStage: any, ticketId: string, userId: string, targetStage: any, transition: any, ticket: any, formValues: Record<string, any> | undefined, toStageName: string, systemActorId: string) {
@@ -75,7 +79,7 @@ export function transitionTicketTx(currentStage: any, ticketId: string, userId: 
         // safe default. submittedValues comes straight from TransitionOptions.formValues
         // (fieldName → value), as the UI/automation sends it.
         if (transition?.formId) {
-          const priorRows = await tx.formEntityValues.findMany({
+          const priorRows = await findFormEntityValues(tx, {
             where: { entityId: ticketId, contextId: targetStage.id },
           });
           const formFieldsForVersioning = await tx.formFields.findMany({
@@ -93,7 +97,12 @@ export function transitionTicketTx(currentStage: any, ticketId: string, userId: 
           );
           // latestValues = the prior visit's submission, at version === maxVisitIndex.
           const atMax = priorRows.filter(r => (r.version ?? 1) === maxVisitIndex);
-          latestValues = foldFormRowsToValues(atMax, fieldIdToName);
+          const folded: Record<string, unknown> = {};
+          for (const row of atMax) {
+            const name = fieldIdToName.get(row.fieldId);
+            if (row.value !== null && name) folded[name] = row.value;
+          }
+          latestValues = folded;
           submittedValues = formValues ?? {};
         }
       }
@@ -268,29 +277,14 @@ export async function saveFormValues(tx: Prisma.TransactionClient, formId: strin
         contextId: stageId,
         workspaceId,
         version,
-        fieldValue: '',
-        actualFieldValue: value as Prisma.InputJsonValue,
+        fieldType: field.fieldType,
+        value,
       });
     }
 
     // Upsert each entry so that CONTINUE-mode revisits (same version) overwrite stale values
     // rather than silently skipping via skipDuplicates.
     for (const entry of entries) {
-      await tx.formEntityValues.upsert({
-        where: {
-          entityId_entityType_fieldId_contextId_version: {
-            entityId: entry.entityId,
-            entityType: entry.entityType,
-            fieldId: entry.fieldId,
-            contextId: entry.contextId,
-            version: entry.version,
-          },
-        },
-        create: entry,
-        update: {
-          actualFieldValue: entry.actualFieldValue,
-          fieldValue: entry.fieldValue,
-        },
-      });
+      await upsertFormEntityValue(tx, entry);
     }
   }

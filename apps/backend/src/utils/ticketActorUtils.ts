@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 
 /**
  * Fetch additional actor user IDs from board form fields of type USER.
@@ -51,31 +52,18 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
     const fieldIds = userFields.map(f => f.id);
 
     // Get form entity values for this ticket where field is USER type
-    const formValues = await db.formEntityValues.findMany({
+    const formValues = await findFormEntityValues(db, {
       where: {
         entityId: ticketId,
         entityType: 'TICKET',
         fieldId: { in: fieldIds },
       },
-      select: { fieldValue: true, actualFieldValue: true },
     });
 
     const userIds: string[] = [];
 
-    for (const value of formValues) {
-      // Try actualFieldValue first (structured JSON), fall back to fieldValue
-      if (value.actualFieldValue) {
-        const parsed = value.actualFieldValue as any;
-        if (Array.isArray(parsed)) {
-          userIds.push(...parsed.filter((id): id is string => typeof id === 'string'));
-        } else if (typeof parsed === 'string') {
-          userIds.push(parsed);
-        }
-      } else if (value.fieldValue) {
-        // fieldValue might be a comma-separated list or single ID
-        const parts = value.fieldValue.split(',').map(s => s.trim()).filter(Boolean);
-        userIds.push(...parts);
-      }
+    for (const { value } of formValues) {
+      if (Array.isArray(value)) userIds.push(...value);
     }
 
     return [...new Set(userIds)];

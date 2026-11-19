@@ -14,6 +14,8 @@ import {
   FormEntityType,
   ReleaseTrackingMode,
   isReleaseTicket, PRStatus, TicketStatusV2 } from '@xyne/shared';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
+import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
 import { cleanupStaleVersionReleaseMappingsTx } from '@/bypassAcl/transactions/versionReleaseMappingService';
 
 export const prisma = DatabaseClient.getInstance();
@@ -534,19 +536,21 @@ class VersionReleaseMappingService {
 
     // Match in the DB — form_entity_values grows with total ticket count, so
     // loading every versioned ticket's row to compare in JS scans the whole
-    // table on each version edit. JSON equality is the same pattern
-    // genericQueryBuilder uses for this column; unlike the old JS filter it
-    // won't match values stored with stray whitespace, which input
-    // normalization should prevent at write time.
-    const values = await prisma.formEntityValues.findMany({
+    // table on each version edit. The field is STRING (textHash, which is
+    // case/whitespace-insensitive) or SINGLE_SELECT (plainValue); the exact
+    // comparison below keeps the match case-sensitive.
+    const values = await findFormEntityValues(prisma, {
       where: {
         entityType: FormEntityType.TICKET,
         fieldId: { in: releaseVersionFieldIds },
-        actualFieldValue: { equals: releaseVersion },
+        OR: [{ textHash: formEntityValueTextHash(releaseVersion) }, { plainValue: releaseVersion }],
       },
-      select: { entityId: true },
     });
-    return Array.from(new Set(values.map(value => value.entityId)));
+    return Array.from(
+      new Set(
+        values.filter(value => value.value === releaseVersion).map(value => value.entityId),
+      ),
+    );
   }
 
   private async getTicketReleaseVersion(ticketId: string): Promise<string | null> {
@@ -564,19 +568,18 @@ class VersionReleaseMappingService {
     const releaseVersionFieldIds = await this.getReleaseVersionFieldIds();
     if (releaseVersionFieldIds.length === 0) return versions;
 
-    const values = await prisma.formEntityValues.findMany({
+    const values = await findFormEntityValues(prisma, {
       where: {
         entityId: { in: ticketIds },
         entityType: FormEntityType.TICKET,
         fieldId: { in: releaseVersionFieldIds },
       },
-      select: { entityId: true, actualFieldValue: true, updatedAt: true },
       orderBy: { updatedAt: 'desc' },
     });
 
     for (const value of values) {
       if (versions.get(value.entityId)) continue; // newest non-empty value wins
-      const normalized = this.normalizeVersion(value.actualFieldValue);
+      const normalized = this.normalizeVersion(value.value);
       if (normalized) versions.set(value.entityId, normalized);
     }
     return versions;

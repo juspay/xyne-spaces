@@ -18,6 +18,7 @@ import {
   SummaryTemplateVisibility,
 } from './schema.js';
 import { z } from 'zod';
+import { applyTypedDynamicFieldFilter } from './dynamicFieldFilterConditions.js';
 import {
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
@@ -187,21 +188,25 @@ export const parseAssigneeFilter = (values: readonly string[]): ParsedAssigneeFi
   };
 };
 
-const toActualFieldValueQueryValue = (
-  value: string | number | boolean,
-): string | number | boolean =>
-  typeof value === 'string' ? JSON.stringify(value) : value;
-
 const supportDynamicFieldFiltersSchema = z
   .array(
     z.object({
       fieldId: z.string(),
       values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+      // When set, values match on the typed columns for this type; when omitted, the field only has to be set.
+      fieldType: z.string().optional(),
+      dateRange: z.object({ start: z.number().optional(), end: z.number().optional() }).optional(),
     }),
   )
   .optional();
 
 type SupportDynamicFieldFilters = z.infer<typeof supportDynamicFieldFiltersSchema>;
+
+// Old clients filter on actualFieldValue, which every write still fills (dual write).
+const toActualFieldValueQueryValue = (
+  value: string | number | boolean,
+): string | number | boolean =>
+  typeof value === 'string' ? JSON.stringify(value) : value;
 
 const applySupportDynamicFieldFilters = (
   query: any,
@@ -209,19 +214,20 @@ const applySupportDynamicFieldFilters = (
 ) => {
   if (!dynamicFieldFilters?.length) return query;
   for (const fieldFilter of dynamicFieldFilters) {
-    const { fieldId, values } = fieldFilter;
+    const { fieldId, fieldType, values } = fieldFilter;
     query = query.whereExists('formEntityValues', (formEntityValue: any) => {
-      let fevQuery = formEntityValue.where('entityType', 'TICKET').where('fieldId', fieldId);
-      if (values && values.length > 0) {
-        fevQuery = fevQuery.where((helpers: any) =>
-          helpers.or(
-            ...values.map((value: string | number | boolean) =>
-              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
-            ),
-          ),
-        );
+      const fevQuery = formEntityValue.where('entityType', 'TICKET').where('fieldId', fieldId);
+      if (fieldType) {
+        return applyTypedDynamicFieldFilter(fevQuery, { ...fieldFilter, fieldType }, null);
       }
-      return fevQuery;
+      if (!values || values.length === 0) return fevQuery;
+      return fevQuery.where((helpers: any) =>
+        helpers.or(
+          ...values.map((value: string | number | boolean) =>
+            helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
+          ),
+        ),
+      );
     });
   }
   return query;
@@ -239,8 +245,8 @@ const relateSupportDynamicFieldValues = (
     ]),
   ];
   return fieldIds.length > 0
-    ? fev.where('entityType', 'TICKET').where('fieldId', 'IN', fieldIds)
-    : fev.where('fieldId', '__no_dynamic_field_filters__');
+    ? fev.where('entityType', 'TICKET').where('fieldId', 'IN', fieldIds).related('items')
+    : fev.where('fieldId', '__no_dynamic_field_filters__').related('items');
 };
 
 const supportTicketFilterArgsSchema = z.object({
@@ -707,7 +713,7 @@ const buildKanbanTicketsPageV3Query = (
 
   if (args.formEntityValueFieldIds?.length) {
     finalQuery = finalQuery.related('formEntityValues', (fev: typeof zql.form_entity_values) =>
-      fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField'),
+      fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField').related('items'),
     );
   }
 
@@ -749,7 +755,8 @@ const buildTableTicketsPageQuery = (
       fev
         .where('fieldId', 'IN', args.formEntityValueFieldIds ?? [])
         .related('formField')
-        .related('globalField'),
+        .related('globalField')
+        .related('items'),
     );
   }
 
@@ -1554,7 +1561,7 @@ export const queries = defineQueries({
       // All dynamic field filtering is done client-side via applyTicketFilters
       if (formEntityValueFieldIds && formEntityValueFieldIds.length > 0) {
         finalQuery = finalQuery.related('formEntityValues', fev =>
-          fev.where('fieldId', 'IN', formEntityValueFieldIds).related('formField').related('globalField'),
+          fev.where('fieldId', 'IN', formEntityValueFieldIds).related('formField').related('globalField').related('items'),
         );
       }
 
@@ -1581,7 +1588,7 @@ export const queries = defineQueries({
 
       if (args.formEntityValueFieldIds?.length) {
         finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
-          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField'),
+          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField').related('items'),
         );
       }
 
@@ -5261,6 +5268,7 @@ export const queries = defineQueries({
         .related('formField', q => q.related('globalField'))
         .related('globalField')
         .related('attachments')
+        .related('items')
         .orderBy('createdAt', 'asc');
     },
   ),
@@ -5419,7 +5427,7 @@ export const queries = defineQueries({
             // relation from hydrating a ticket's full PR history.
             .related('pullRequests', pullRequests => pullRequests.orderBy('date', 'desc').limit(1));
           if (includeColumnData) {
-            devTicket = devTicket.related('workflows').related('tags').related('formEntityValues');
+            devTicket = devTicket.related('workflows').related('tags').related('formEntityValues', fev => fev.related('items'));
           }
           return devTicket;
         })
@@ -5504,7 +5512,8 @@ export const queries = defineQueries({
           ),
         )
         .related('formField')
-        .related('globalField');
+        .related('globalField')
+        .related('items');
     },
   ),
 
@@ -5528,7 +5537,8 @@ export const queries = defineQueries({
           ),
         )
         .related('formField')
-        .related('globalField');
+        .related('globalField')
+        .related('items');
     },
   ),
 
