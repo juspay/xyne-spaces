@@ -138,11 +138,28 @@ export async function authenticateApp(
       orgRole: orgMember?.role ?? 'MEMBER',
     };
 
+    // Only after the JWT verified: which Xyne Apps gateway relayed the request. Infra lets only
+    // the gateways reach /api/apps, and the gateways drop this header from bot requests.
+    const appsClient = parseAppsClientHeader(req.headers[APPS_CLIENT_HEADER]);
+    if (appsClient) {
+      req.appsClient = appsClient;
+    }
+
     next();
   } catch (error) {
     logger.error('[APP-AUTH] Unexpected error:', error);
     sendError(res, 500);
   }
+}
+
+export const APPS_CLIENT_HEADER = 'x-xyne-apps-client';
+
+/** `ingress;<version>` or `egress;<version>`; anything else is ignored. */
+export function parseAppsClientHeader(value: string | string[] | undefined): Request['appsClient'] {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const match = raw?.trim().match(/^(ingress|egress);([1-9]\d{0,8})$/);
+  if (!match) return undefined;
+  return { role: match[1] as 'ingress' | 'egress', version: Number(match[2]) };
 }
 
 function sendError(res: Response, status: number): void {

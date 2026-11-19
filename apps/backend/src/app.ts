@@ -222,6 +222,7 @@ import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
 import { appRoutes } from '@/apps';
+import appsGatewayInternalRoutes from '@/routes/appsGatewayInternal';
 import { ChatController } from '@/apps/controllers/chatController';
 import { ReactionController } from '@/controllers/reactionController';
 import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
@@ -553,6 +554,8 @@ export class App {
 
     // App routes
     this.app.use('/api/apps', appRoutes);
+    // Xyne Apps gateways only (token pre-check, manifest relay); infra restricts the callers.
+    this.app.use('/api/internal/apps', appsGatewayInternalRoutes);
 
     // Internal S2S endpoints (trusted service-to-service calls)
     const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {

@@ -2,13 +2,20 @@ import { Router } from 'express';
 import { ChatController } from '../controllers/chatController';
 import { validateChannelAccessForGet, validateChannelAccessForPost, validateChannelAccessForPostWithDm } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
+import { appsChatPostMessageClient } from '@xyne/shared';
+import { encryptedRoute } from '@/middleware/encryptedRoute';
 
 const router = Router();
 const chatController = new ChatController();
 
 // postMessage also accepts a user id as `channelId` — it then posts into the
 // bot's DM with that user, matching the Slack adapter's chat.postMessage.
-router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPostWithDm, chatController.postMessage);
+// encryptedRoute: fields the ingress gateway encrypted become workspace-DEK ciphertext (and the
+// reply goes back encrypted to the gateway); a no-op unless API client encryption is on.
+const encryptedPostMessage = encryptedRoute(appsChatPostMessageClient, {
+  resolveWorkspaceId: async (req) => req.user!.workspaceId,
+});
+router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPostWithDm, ...encryptedPostMessage, chatController.postMessage);
 router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
 router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, chatController.updateMessage);
 router.post('/deleteMessage', requirePermission('chat:delete'), validateChannelAccessForPost, chatController.deleteMessage);

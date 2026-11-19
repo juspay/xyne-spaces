@@ -70,6 +70,12 @@ declare global {
        * transit key (transitCaller).
        */
       authToken?: string;
+      /**
+       * Set by authenticateApp when the request was relayed by a Xyne Apps gateway
+       * (`x-xyne-apps-client: <role>;<version>`). The encryption service then encrypts to the
+       * gateway key pinned for that role and version, never to a key the request names.
+       */
+      appsClient?: { role: 'ingress' | 'egress'; version: number };
     }
   }
 }

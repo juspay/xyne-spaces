@@ -67,6 +67,12 @@ export type StorageObjectKey = {
  * (the public key the request itself carried) applies when that session registered none.
  */
 export type TransitCaller = {
+  /**
+   * Xyne Apps traffic relayed by the ingress or egress gateway. The encryption service then
+   * uses its apps server keys and the gateway key pinned for this role and version, and
+   * refuses `clientKey` / `authToken` alongside it.
+   */
+  appsClient?: { role: 'ingress' | 'egress'; version: number };
   clientKey?: string;
   authToken?: string;
   /**
