@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../config.js';
+import { getTransitPlatform } from './transit-platform.js';
 import { Event } from '../logger/events.js';
 import type { ClientEncryptionManifest } from '../enc-contracts/manifest.js';
 import { getCryptoLogger } from './crypto-logger.js';
@@ -80,9 +80,7 @@ export function refreshClientManifest(): Promise<ClientEncryptionManifest | null
 
   inFlight = (async () => {
     // Encrypted for the transit key registered for this session, which the server looks up.
-    const response = await fetch(`${API_BASE_URL}/encryption-manifest`, {
-      credentials: 'include',
-    });
+    const response = await getTransitPlatform().http.request('/encryption-manifest');
 
     if (response.status === 404) {
       currentManifest = null;

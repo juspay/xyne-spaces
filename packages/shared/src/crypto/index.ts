@@ -1,4 +1,5 @@
 export { encryptField, decryptField, isEncryptedField } from './field-decrypt.js';
+export { decryptTransitFields } from './decrypt-transit-fields.js';
 export { decryptionCache } from './decryption-cache.js';
 export { getCryptoLogger, setCryptoLogger } from './crypto-logger.js';
 export {
@@ -48,3 +49,7 @@ export {
   encryptFormDataWithRule,
 } from './manifest-encrypt.js';
 export type { FieldEncryptor } from './manifest-encrypt.js';
+export { webCryptoTransitCrypto } from './transit-crypto.js';
+export type { TransitCrypto, TransitAesKey } from './transit-crypto.js';
+export { setTransitPlatform, getTransitPlatform } from './transit-platform.js';
+export type { TransitPlatform, TransitHttp, TransitResponse } from './transit-platform.js';

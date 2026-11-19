@@ -1,9 +1,7 @@
 import { InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import {
   encryptField,
-  decryptField,
-  isEncryptedField,
-  decryptionCache,
+  decryptTransitFields,
   getClientManifest,
   refetchClientManifest,
   CLIENT_MANIFEST_STALE_CODE,
@@ -56,44 +54,9 @@ async function encryptObject(obj: unknown): Promise<unknown> {
   return encrypted;
 }
 
-/**
- * Recursively decrypt all encrypted fields in a response.
- * Uses decryptionCache for performance.
- */
 async function decryptObject(obj: unknown): Promise<unknown> {
-  if (!isEncryptionReady()) {
-    return obj;
-  }
-
-  // Check if this is an encrypted field value
-  if (typeof obj === 'string' && isEncryptedField(obj)) {
-    const cached = decryptionCache.get(obj);
-    if (cached !== undefined) {
-      return cached;
-    }
-
-    const keyring = getEncryptionState().keyring!;
-    const decrypted = await decryptField(obj, keyring);
-    decryptionCache.set(obj, decrypted);
-    return decrypted;
-  }
-
-  if (obj === null || typeof obj !== 'object') {
-    return obj;
-  }
-
-  if (Array.isArray(obj)) {
-    return Promise.all(obj.map(item => decryptObject(item)));
-  }
-
-  const record = obj as Record<string, unknown>;
-  const decrypted: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(record)) {
-    decrypted[key] = await decryptObject(value);
-  }
-
-  return decrypted;
+  if (!isEncryptionReady()) return obj;
+  return decryptTransitFields(obj, getEncryptionState().keyring!);
 }
 
 // Routes whose unknown body keys have already been logged, so each warns once.
