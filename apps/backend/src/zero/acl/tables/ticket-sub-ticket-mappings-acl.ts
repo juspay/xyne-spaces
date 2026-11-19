@@ -25,6 +25,10 @@ export class TicketSubTicketMappingsACL extends BaseACL<'ticket_sub_ticket_mappi
       if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
         throw new MutationACLError('Ticket sub-ticket mapping insert failed: guest does not have access to the parent ticket', 'ticket_sub_ticket_mappings');
       }
+      const guestSubTicket = await tx.run(zql.tickets.where('id', args.subTicketId).one());
+      if (!guestSubTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestSubTicket))) {
+        throw new MutationACLError('Ticket sub-ticket mapping insert failed: guest does not have access to the sub-ticket', 'ticket_sub_ticket_mappings');
+      }
       return;
     }
     const ticket = await tx.run(zql.tickets
@@ -74,6 +78,12 @@ export class TicketSubTicketMappingsACL extends BaseACL<'ticket_sub_ticket_mappi
       const guestTicket = await tx.run(zql.tickets.where('id', mapping.ticketId).one());
       if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
         throw new MutationACLError('Ticket sub-ticket mapping update failed: guest does not have access to the parent ticket', 'ticket_sub_ticket_mappings');
+      }
+      if (args.subTicketId && args.subTicketId !== mapping.subTicketId) {
+        const guestSubTicket = await tx.run(zql.tickets.where('id', args.subTicketId).one());
+        if (!guestSubTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestSubTicket))) {
+          throw new MutationACLError('Ticket sub-ticket mapping update failed: guest does not have access to the sub-ticket', 'ticket_sub_ticket_mappings');
+        }
       }
       return;
     }
