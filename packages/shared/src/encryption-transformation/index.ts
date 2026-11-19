@@ -4,6 +4,9 @@ import { extractMentions } from './mentions.js';
 import { extractLinks } from './links.js';
 import { extractCommand } from './command.js';
 import { extractText } from './text.js';
+import { extractForwardedRefs } from './forwarded.js';
+import { extractFlowJsonPresent } from './flow.js';
+import { extractFileExtension, extractIsHeic } from './files.js';
 
 export { extractMentions, extractSpecialMentionFlags } from './mentions.js';
 export {
@@ -26,9 +29,16 @@ export {
 } from './command.js';
 export type { ParsedBotCommandText } from './command.js';
 export { extractText } from './text.js';
+export { extractForwardedRefs } from './forwarded.js';
+export type { ForwardedRefs } from './forwarded.js';
+export { extractFlowJsonPresent } from './flow.js';
+export { extractFileExtension, extractIsHeic } from './files.js';
 
-/** The four parsers, each run at most once per text however many facts are asked of it. */
-type Groups = { [G in keyof ExtractorGroups]: () => ExtractorGroups[G] };
+/**
+ * The parsers the facts come from, each run at most once per text however many of its facts
+ * are asked for, plus the raw text for single-step facts.
+ */
+type Groups = { [G in keyof ExtractorGroups]: () => ExtractorGroups[G] } & { readonly raw: string };
 
 function groupsFor(text: string): Groups {
   const memo: Partial<ExtractorGroups> = {};
@@ -37,6 +47,8 @@ function groupsFor(text: string): Groups {
     links: () => (memo.links ??= extractLinks(text)),
     command: () => (memo.command === undefined ? (memo.command = extractCommand(text)) : memo.command),
     text: () => (memo.text ??= extractText(text)),
+    forwarded: () => (memo.forwarded ??= extractForwardedRefs(text)),
+    raw: text,
   };
 }
 
@@ -59,6 +71,13 @@ const EXTRACTOR_FNS: { [K in ExtractorName]: (g: Groups) => ExtractorOutput[K] }
   commandArgs: g => g.command()?.args ?? null,
   textLength: g => g.text().length,
   textIsEmpty: g => g.text().isEmpty,
+  flowJsonPresent: g => extractFlowJsonPresent(g.raw),
+  forwardedMessageId: g => g.forwarded().messageId,
+  forwardedConversationId: g => g.forwarded().conversationId,
+  forwardedChannelId: g => g.forwarded().channelId,
+  forwardedSenderId: g => g.forwarded().senderId,
+  fileExtension: g => extractFileExtension(g.raw),
+  isHeic: g => extractIsHeic(g.raw),
 };
 
 /**

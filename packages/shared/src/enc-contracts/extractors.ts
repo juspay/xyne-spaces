@@ -20,6 +20,13 @@ export const EXTRACTORS = [
   'commandArgs',
   'textLength',
   'textIsEmpty',
+  'flowJsonPresent',
+  'forwardedMessageId',
+  'forwardedConversationId',
+  'forwardedChannelId',
+  'forwardedSenderId',
+  'fileExtension',
+  'isHeic',
 ] as const;
 export type ExtractorName = (typeof EXTRACTORS)[number];
 
@@ -57,6 +64,20 @@ export interface ExtractorOutput {
   textLength: number;
   /** The text is blank once trimmed. */
   textIsEmpty: boolean;
+  /** The message carries FlowJSON (a card, a plan, a slash-command artifact). */
+  flowJsonPresent: boolean;
+  /** Forwarded message: the original message id; null when the content is not a forward. */
+  forwardedMessageId: string | null;
+  /** Forwarded message: the original conversation id; null when not a forward. */
+  forwardedConversationId: string | null;
+  /** Forwarded message: the original channel id; null when not a forward or it had none. */
+  forwardedChannelId: string | null;
+  /** Forwarded message: the original sender id; null when not a forward. */
+  forwardedSenderId: string | null;
+  /** File name source: the lowercase extension without the dot; null when there is none. */
+  fileExtension: string | null;
+  /** File name source: a HEIC/HEIF image by its extension. */
+  isHeic: boolean;
 }
 
 /**
@@ -68,6 +89,7 @@ export interface ExtractorGroups {
   links: { all: string[]; first: string | null; pr: string[]; meet: string[] };
   command: { isBot: boolean; name: string | null; args: string | null } | null;
   text: { length: number; isEmpty: boolean };
+  forwarded: { messageId: string | null; conversationId: string | null; channelId: string | null; senderId: string | null };
 }
 
 /** A typed handle on one fact, for a contract's `sourceToDerived`: `derive.userIds`. */
@@ -109,6 +131,13 @@ export const fieldFactsSchema: z.ZodType<FieldFacts> = z.object({
   commandArgs: z.string().nullable().optional(),
   textLength: z.number().int().nonnegative().optional(),
   textIsEmpty: z.boolean().optional(),
+  flowJsonPresent: z.boolean().optional(),
+  forwardedMessageId: z.string().nullable().optional(),
+  forwardedConversationId: z.string().nullable().optional(),
+  forwardedChannelId: z.string().nullable().optional(),
+  forwardedSenderId: z.string().nullable().optional(),
+  fileExtension: z.string().nullable().optional(),
+  isHeic: z.boolean().optional(),
 });
 
 export const derivedFactsSchema: z.ZodType<DerivedFacts> = z.object({
