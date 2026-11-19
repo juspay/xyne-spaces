@@ -1,10 +1,6 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
-import {
-  CLIENT_MANIFEST_MUTATION_ARG,
-  conversationsSendClient,
-  derivedContentFactsSchema,
-} from '@xyne/shared';
+import { conversationsSendClient, derivedContentFactsSchema } from '@xyne/shared';
 import type { DerivedContentFacts, RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
@@ -13,10 +9,9 @@ import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 
 /**
- * The Zero-mutation counterpart of middleware/encryptedRoute.ts. A mutation the client
- * encrypted by its manifest rule carries the manifest it used in CLIENT_MANIFEST_MUTATION_ARG
- * (zero-cache, not the browser, makes the push call, so there are no client headers). Its
- * args go to the encryption service, which picks the MUTATOR rule by name, runs every check,
+ * The Zero-mutation counterpart of middleware/encryptedRoute.ts. Every mutation the
+ * encryption service has a MUTATOR rule for is sent to it; it picks the rule by name, checks
+ * the args against it (409 when they follow another manifest), runs every check,
  * turns transit ciphertext into workspace-DEK ciphertext and extracts facts; the mutator then
  * runs with DEK passthrough on and reads those facts from getMutationDerived().
  *
@@ -58,7 +53,7 @@ export class MutationEncryptionError extends Error {
 }
 
 /**
- * Transforms `args` (one rule-encrypted mutation, CLIENT_MANIFEST_MUTATION_ARG included) by
+ * Transforms `args` (one mutation with a MUTATOR rule) by
  * its manifest rule. Throws when it cannot be transformed: the fields are transit ciphertext
  * from here on, so the mutation is never run (and stored) as sent.
  */
@@ -68,7 +63,6 @@ async function transformMutationArgs(
   enc: MutationEncryptionContext | undefined,
   workspaceId: string,
 ): Promise<{ body: Record<string, unknown>; derived?: DerivedContentFacts }> {
-  const { [CLIENT_MANIFEST_MUTATION_ARG]: client, ...body } = args;
   if (!config.enc.apiClientEncryptionEnabled || !config.enc.enableDbEncryption) {
     throw new MutationEncryptionError(
       'ENC_NOT_CONFIGURED',
@@ -84,16 +78,11 @@ async function transformMutationArgs(
   let transformed: { body: unknown; derived?: unknown };
   try {
     transformed = await getEncryptionProvider().transformRequest({
-      body,
+      body: args,
       ...(enc.authToken ? { authToken: enc.authToken } : {}),
       ...(enc.clientKey ? { clientKey: enc.clientKey } : {}),
       mutator: mutatorName,
       environment: enc.environment,
-      client: (client && typeof client === 'object' ? client : {}) as {
-        tag?: string;
-        version?: number;
-        environment?: string;
-      },
       ...(contract
         ? {
             contractFields: Object.keys(contract.schema.shape),
@@ -150,6 +139,7 @@ export async function prepareEncryptedMutations(
   const prepared: PreparedMutations = new Map();
   const mutations = (body as { mutations?: unknown } | null)?.mutations;
   if (!Array.isArray(mutations)) return prepared;
+  const ruled = new Set(await getEncryptionProvider().getClientEncryptedMutators());
 
   await Promise.all(
     mutations.map(async (mutation) => {
@@ -161,7 +151,7 @@ export async function prepareEncryptedMutations(
         if (wrapped) (m!.args as unknown[])[0] = next;
         else m!.args = next;
       };
-      if (!(CLIENT_MANIFEST_MUTATION_ARG in args)) {
+      if (!ruled.has(String(m?.name))) {
         // PREPARED_ARG is set here only; one the client sent is dropped.
         if (PREPARED_ARG in args) {
           const { [PREPARED_ARG]: _forged, ...rest } = args as Record<string, unknown>;
@@ -183,8 +173,7 @@ export async function prepareEncryptedMutations(
         next = { ...transformed, [PREPARED_ARG]: key };
       } catch (error) {
         prepared.set(key, { error: error instanceof Error ? error : new Error(String(error)) });
-        const { [CLIENT_MANIFEST_MUTATION_ARG]: _manifest, ...rest } = args as Record<string, unknown>;
-        next = { ...rest, [PREPARED_ARG]: key };
+        next = { ...(args as Record<string, unknown>), [PREPARED_ARG]: key };
       }
       set(next);
     }),
@@ -204,12 +193,7 @@ export async function runEncryptedMutation<T>(
 ): Promise<T> {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return run(args, undefined);
   const record = args as Record<string, unknown>;
-  if (!(PREPARED_ARG in record)) {
-    if (CLIENT_MANIFEST_MUTATION_ARG in record) {
-      throw new MutationEncryptionError('ENC_NOT_PREPARED', 'Client-encrypted mutation was not transformed');
-    }
-    return run(args, undefined);
-  }
+  if (!(PREPARED_ARG in record)) return run(args, undefined);
   const { [PREPARED_ARG]: key, ...body } = record;
   const outcome = prepared.get(String(key));
   if (!outcome) {

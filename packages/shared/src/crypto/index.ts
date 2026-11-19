@@ -22,11 +22,7 @@ export {
   clearClientManifest,
   setAllowedManifestEnvironments,
   setClientManifestKeyring,
-  CLIENT_MANIFEST_VERSION_HEADER,
-  CLIENT_MANIFEST_ENVIRONMENT_HEADER,
-  CLIENT_MANIFEST_MUTATION_ARG,
   refetchClientManifest,
-  CLIENT_MANIFEST_TAG_HEADER,
   CLIENT_MANIFEST_STALE_CODE,
 } from './client-manifest.js';
 export type {

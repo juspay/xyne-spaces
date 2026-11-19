@@ -15,7 +15,6 @@ import { Event } from '../logger/events.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
 import { encryptField, decryptField, isEncryptedField } from '../crypto/field-decrypt.js';
 import {
-  CLIENT_MANIFEST_MUTATION_ARG,
   CLIENT_MANIFEST_STALE_CODE,
   getClientManifest,
   refetchClientManifest,
@@ -287,11 +286,6 @@ export function useZero(): Zero {
                     args[field] = await encryptField(value, keyring);
                   }
                 }
-                args[CLIENT_MANIFEST_MUTATION_ARG] = {
-                  tag: manifest.tag,
-                  version: manifest.version,
-                  environment: manifest.environment,
-                };
               }
               return target.mutate({
                 ...mutationRequest,

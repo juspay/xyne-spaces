@@ -87,8 +87,6 @@ export type TransformRequestInput<T> = TransitCaller & {
   mutator?: string;
   /** The request's manifest lane (manifestEnvironmentForRequest). */
   environment: string;
-  /** The client's manifest headers as sent; the encryption service checks them. */
-  client: { tag?: string; version?: number; environment?: string };
   /**
    * The route's request contract, compared with the rule: its field names, which of them
    * the client encrypts, and the extractors its handler reads.
@@ -117,6 +115,8 @@ export type TransitEncryptResult<T> = {
 export interface EncryptionProvider {
   getClientConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
+  /** Zero mutators with a manifest rule: each one is sent to the encryption service to be checked. */
+  getClientEncryptedMutators(): Promise<string[]>;
   /** The encryption service's public keys; the client derives its transit keys from them. */
   getTransitServerKeys(): Promise<TransitServerKeys>;
   /**
