@@ -485,6 +485,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'externalSource':
       return new BaseQueryACL(ctx, prisma)
+    case 'deskCallSettings':
+      return new BaseQueryACL(ctx, prisma)
     case 'installedAppCommand':
       return new BaseQueryACL(ctx, prisma)
     case 'installedAppPermission':
