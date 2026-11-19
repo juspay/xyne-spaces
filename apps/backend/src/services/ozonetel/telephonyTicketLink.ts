@@ -12,10 +12,13 @@ export interface LinkedTicketTarget {
 /** The ticket POST /link-call tied this call to. externalId is monitorUCID ?? ucid, and both are stored. */
 export async function resolveLinkedTicketTarget(
   event: TelephonyEvent,
+  connectionId: string,
 ): Promise<LinkedTicketTarget | null> {
   let ticketId: string | null;
   try {
-    ticketId = await redisService.getOzonetelCallTicket(event.workspaceId, event.externalId);
+    ticketId =
+      (await redisService.getCallTicketLink(connectionId, event.externalId)) ??
+      (await redisService.getOzonetelCallTicket(event.workspaceId, event.externalId));
   } catch (error) {
     logger.warn('[telephony] call_ticket_lookup_failed', {
       workspaceId: event.workspaceId,

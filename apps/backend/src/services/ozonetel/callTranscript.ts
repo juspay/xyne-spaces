@@ -5,6 +5,8 @@
  * shared by the API (controller), the worker (processor) and the email service.
  */
 
+import { isCallProviderSourceType } from '../telephony/callProviderIds';
+
 export type TelephonyTranscriptionStatus = 'queued' | 'processing' | 'done' | 'failed';
 
 /** Stored under the `transcription` key of the call email's JSON body. */
@@ -64,7 +66,7 @@ export function cleanCallSummary(markdown: string): string {
 /**
  * Return a copy of a telephony email body with the `transcription` key replaced.
  * Non-lossy: every other key in the stored JSON is preserved verbatim.
- * Passing `null` removes the key. Returns null if the body is not an Ozonetel payload.
+ * Passing `null` removes the key. Returns null if the body is not a call-provider payload.
  */
 export function withTranscriptionState(body: string, state: TelephonyTranscriptionState | null): string | null {
   let payload: Record<string, unknown>;
@@ -73,7 +75,7 @@ export function withTranscriptionState(body: string, state: TelephonyTranscripti
   } catch {
     return null;
   }
-  if (!payload || typeof payload !== 'object' || payload.provider !== 'ozonetel') return null;
+  if (!payload || typeof payload !== 'object' || !isCallProviderSourceType(payload.provider)) return null;
   if (state) {
     payload.transcription = state;
   } else {

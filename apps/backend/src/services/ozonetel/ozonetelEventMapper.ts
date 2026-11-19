@@ -295,6 +295,7 @@ export function mapOzonetelWebhookEvent(
   const { fromNumber, toNumber } = mapPhoneNumbers(body, direction);
 
   return {
+    provider: 'ozonetel',
     externalId,
     status,
     workspaceId,
@@ -427,6 +428,7 @@ export function mapOzonetelSubscribeCallEvent(
       : String(data.caller_id ?? '').trim() || undefined;
 
   return {
+    provider: 'ozonetel',
     externalId,
     status,
     workspaceId,
