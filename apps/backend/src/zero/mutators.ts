@@ -133,8 +133,8 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
-import { isEncryptedField } from '@xyne/shared';
-import type { DerivedContentFacts } from '@xyne/shared';
+import type { ExtractorOutput } from '@xyne/shared';
+import { conversationsSendClient } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
@@ -176,7 +176,7 @@ import {
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
-import { getMutationDerived } from './encryptedMutation';
+import { requireMutationFacts } from './encryptedMutation';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
@@ -616,16 +616,16 @@ async function assertGuestMentionsWithin(
   tx: Transaction<Schema>,
   role: string | undefined,
   channelId: string,
-  derived: DerivedContentFacts,
+  mentions: Pick<ExtractorOutput, 'userIds' | 'groupIds' | 'handles'> | undefined,
 ): Promise<void> {
-  if (role !== WorkspaceRole.GUEST || !derived.mentions) return;
-  if (derived.mentions.groupIds.length > 0 || derived.mentions.handles.length > 0) {
+  if (role !== WorkspaceRole.GUEST || !mentions) return;
+  if (mentions.groupIds.length > 0 || mentions.handles.length > 0) {
     throw new Error('Guests can only mention members of this channel');
   }
-  if (derived.mentions.userIds.length === 0) return;
+  if (mentions.userIds.length === 0) return;
   const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
   const allowed = new Set(participants.map(participant => participant.userId));
-  if (derived.mentions.userIds.some(userId => !allowed.has(userId))) {
+  if (mentions.userIds.some(userId => !allowed.has(userId))) {
     throw new Error('Guests can only mention members of this channel');
   }
 }
@@ -2866,14 +2866,11 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
-          // Under its manifest rule `content` arrives as workspace-DEK ciphertext; the facts the
-          // mutator needs come from the encryption service instead of parsing it.
-          const derived = isEncryptedField(content) ? getMutationDerived() : undefined;
-          if (derived) {
-            await assertGuestMentionsWithin(tx, authData.role, channelId, derived);
-          } else {
-            content = await guestSafeContent(tx, authData.role, channelId, content);
-          }
+          // `content` is opaque here: workspace-DEK ciphertext under its manifest rule, or plaintext
+          // the mutator still never parses. Every fact comes from the contract's picks, extracted by
+          // the encryption service for ciphertext and locally for plaintext (encryptedMutation.ts).
+          const facts = requireMutationFacts(conversationsSendClient, 'content');
+          await assertGuestMentionsWithin(tx, authData.role, channelId, facts);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3145,7 +3142,7 @@ export function createMutators(
               asyncTasks.push(async () => {
                 try {
                   await processMeetLinksFromChatMessage(
-                    derived?.links ? derived.links.meet.join(' ') : message.content,
+                    facts.meetLinks.join(' '),
                     authData.workspaceId,
                     conversationId,
                     message.messageId,
@@ -3187,9 +3184,7 @@ export function createMutators(
           });
 
           // Add mentioned users as MENTIONED participants within Zero transaction
-          const mentions = derived?.mentions
-            ? { userIds: derived.mentions.userIds, groupIds: derived.mentions.groupIds }
-            : extractAllMentions(content);
+          const mentions = { userIds: facts.userIds, groupIds: facts.groupIds };
           logger.info('[MENTION]:', mentions.userIds.length, mentions.groupIds.length, messageId);
           const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
             tx,
@@ -3245,11 +3240,9 @@ export function createMutators(
                     // Execute bot - this creates the bot response message
                     const result = await executionOrchestrator.execute({
                       botId: botDefinition.id,
-                      message: derived?.command
-                        ? derived.command.name
-                          ? `/${derived.command.name} ${derived.command.args ?? ''}`
-                          : '/'
-                        : content,
+                      // The bot gets the command rebuilt from the facts, or `/` when the message was
+                      // not a command: the content itself is opaque here, free text never reaches it.
+                      message: facts.commandName ? `/${facts.commandName} ${facts.commandArgs ?? ''}` : '/',
                       channelId: channel.id,
                       conversationId,
                       userMessageId: message.messageId,

@@ -36,7 +36,7 @@ import type { AuditJobsAccumulator } from './audit';
 import { decryptQueryResult } from './encryption-interceptor';
 import { executeFlatCatalogQuery, NOT_FLAT } from './flat-catalog-query';
 import { prepareEncryptedMutations, runEncryptedMutation, type MutationEncryptionContext } from './encryptedMutation';
-import type { DerivedContentFacts } from '@xyne/shared';
+import type { DerivedFacts } from '@xyne/shared';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -218,7 +218,7 @@ function getMutationErrors(result: unknown): Record<string, unknown>[] {
 function attachDerivedToMessageJobs(
   jobs: SideEffectJobsAccumulator,
   args: unknown,
-  derived: DerivedContentFacts | undefined,
+  derived: DerivedFacts | undefined,
 ): void {
   const messageId = (args as { messageId?: unknown } | undefined)?.messageId;
   if (!derived || typeof messageId !== 'string') return;

@@ -30,8 +30,6 @@ export type {
   ClientManifestRule,
   ClientManifestFieldRule,
   ClientManifestTransform,
-  PersistPolicy,
-  ExtractionPolicy,
 } from './client-manifest.js';
 export {
   findRequestRule,

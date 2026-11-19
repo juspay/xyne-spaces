@@ -1,7 +1,16 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
-import type { DerivedContentFacts } from '@xyne/shared';
+import type { DerivedFacts, RequestDerived } from '@xyne/shared';
+import type { conversationsSendClient } from '@xyne/shared';
+
+/** The content facts a message insert job carries, as the message contract picks them. */
+type MessageContentFacts = NonNullable<RequestDerived<typeof conversationsSendClient>['fields']['content']>;
+
+/** The message content facts on a job, typed by the message contract. */
+function messageContentFacts(derived: DerivedFacts | undefined): MessageContentFacts | undefined {
+  return derived?.fields.content as MessageContentFacts | undefined;
+}
 import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { config } from '@/config/env';
@@ -169,6 +178,7 @@ export function formatDmChannelName(names: string[], maxVisible: number = 2): st
 export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId, derived } = job;
+    const contentFacts = messageContentFacts(derived);
 
     logger.info('[SIDE-EFFECT] Message insert side effect triggered', { messageId });
 
@@ -224,7 +234,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
     // With derived facts (encrypted content) the preview resolves from the extracted first URL.
-    const linkPreviewSource = derived?.links ? derived.links.first : message.content;
+    const linkPreviewSource = contentFacts ? contentFacts.firstUrl : message.content;
     if (linkPreviewSource && message.msgType === MessageType.USER) {
       this.resolveLinkPreview(message.messageId, message.conversationId, linkPreviewSource).catch(error => {
         logger.error('[MessagesSideEffect] Failed to resolve link preview:', {
@@ -338,7 +348,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       sender.userType !== UserType.APP &&
       sender.userType !== UserType.AGENT &&
       channel?.scopeType === ChannelScopeType.DEFAULT &&
-      (derived?.links ? derived.links.pr.length > 0 : content?.includes('/pull-requests/'))
+      (contentFacts ? contentFacts.prLinks.length > 0 : content?.includes('/pull-requests/'))
     ) {
       prCheckApprovalService
         .postApprovalButtonForPrLinkMessage({
@@ -347,7 +357,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           channelId,
           senderId,
           // Extracted PR URLs stand in for the encrypted content; the host check still runs.
-          content: derived?.links ? derived.links.pr.join(' ') : content,
+          content: contentFacts ? contentFacts.prLinks.join(' ') : content,
           workspaceId: this.ctx.workspaceId,
         })
         .catch(error => {
@@ -395,8 +405,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     const allowBroadcastExpansion =
       artifactBroadcastsToChannel || !isReply || allowThreadBroadcastMentions;
     const specialMentions = allowBroadcastExpansion
-      ? derived?.mentions
-        ? { hasChannel: derived.mentions.channel, hasHere: derived.mentions.here }
+      ? contentFacts
+        ? { hasChannel: contentFacts.mentionsChannel, hasHere: contentFacts.mentionsHere }
         : extractSpecialMentions(contentForMentions)
       : { hasChannel: false, hasHere: false };
     // Reuses the @channel pipeline wholesale: mention-tier notification
@@ -1495,7 +1505,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     scopeType: ChannelScopeType,
     hasAttachment: boolean,
     prefetchedData?: PrefetchedFilterData,
-    derived?: DerivedContentFacts,
+    derived?: DerivedFacts,
   ): Promise<void> {
     const isReply = !!(initialMessageId && initialMessageId !== messageId);
     if (mentionType) {
@@ -1946,7 +1956,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     htmlContent: string,
     channelParticipants: Array<{ userId: string }>,
     senderId: string,
-    derived?: DerivedContentFacts,
+    derived?: DerivedFacts,
   ): Promise<string[]> {
     // No channelId: @channel/@here expansion isn't needed here.
     const mentioned = await this.resolveMentionedUsers(
@@ -1969,10 +1979,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     workspaceId: string,
     channelId: string | undefined,
     forceChannelMention: boolean | undefined,
-    derived: DerivedContentFacts | undefined,
+    derived: DerivedFacts | undefined,
   ) {
-    return derived?.mentions
-      ? extractAllUsersForNotificationFromDerived(derived.mentions, workspaceId, channelId, forceChannelMention)
+    const facts = messageContentFacts(derived);
+    return facts
+      ? extractAllUsersForNotificationFromDerived(facts, workspaceId, channelId, forceChannelMention)
       : extractAllUsersForNotification(contentForMentions, workspaceId, channelId, forceChannelMention);
   }
 
