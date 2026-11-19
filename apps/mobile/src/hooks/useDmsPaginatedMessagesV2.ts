@@ -75,7 +75,9 @@ const areDmRowsEquivalent = (a: DmStatsPageResult, b: DmStatsPageResult): boolea
       row.channel?.name === other.channel?.name &&
       conversation?.conversationId === otherConversation?.conversationId &&
       conversation?.initialMessageId === otherConversation?.initialMessageId &&
-      conversation?.lastActivityAt === otherConversation?.lastActivityAt
+      conversation?.lastActivityAt === otherConversation?.lastActivityAt &&
+      // The preview can change with no new activity (decrypted after the transit key arrives).
+      conversation?.initial_message_md === otherConversation?.initial_message_md
     );
   });
 };
