@@ -108,12 +108,16 @@ export class NotificationProducer {
   async acknowledgeNotification(eventId: string, userId: string): Promise<boolean> {
     try {
       const notificationId = eventId;
-      
-      await repositories.notifications.updateStatus(
+      const updated = await repositories.notifications.updateStatusForUser(
         notificationId,
+        userId,
         NotificationStatus.DELIVERED
       );
-      
+      if (updated === 0) {
+        this.logger.warn('Acknowledgement for a notification the user does not own', { notificationId, userId });
+        return false;
+      }
+
       this.logger.info('Notification acknowledged', { notificationId, userId });
       return true;
     } catch (error) {
@@ -132,8 +136,6 @@ export class NotificationProducer {
         channel: DeliveryChannel.MOBILE_PUSH,
         userId,
         sessionId: session.id,
-        token: session.token,
-        voipToken: session.voipToken,
         platform: session.platform,
         appVersion: session.appVersion,
         payload,

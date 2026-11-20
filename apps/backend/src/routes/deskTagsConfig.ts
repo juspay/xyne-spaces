@@ -7,11 +7,10 @@ const controller = new DeskTagsConfigController();
 
 router.get('/', authMiddleware.authenticate, controller.getConfig);
 router.patch('/', authMiddleware.authenticate, controller.updateConfig);
-// Disabled (LLM)
-// router.post('/preview', authMiddleware.authenticate, controller.previewTagGeneration);
-// router.get('/generated-tag-categories', authMiddleware.authenticate, controller.getGeneratedTagCategories);
-// router.get('/generated-tags/:tagCategory', authMiddleware.authenticate, controller.getGeneratedTagsByCategory);
-// router.get('/conversations-by-tags', authMiddleware.authenticate, controller.filterConversationsByTags);
-// router.get('/generated-tags-by-conversation', authMiddleware.authenticate, controller.getGeneratedTagsByConversation);
+router.post('/preview', authMiddleware.authenticate, controller.previewTagGeneration);
+router.get('/generated-tag-categories', authMiddleware.authenticate, controller.getGeneratedTagCategories);
+router.get('/generated-tags/:tagCategory', authMiddleware.authenticate, controller.getGeneratedTagsByCategory);
+router.get('/conversations-by-tags', authMiddleware.authenticate, controller.filterConversationsByTags);
+router.get('/generated-tags-by-conversation', authMiddleware.authenticate, controller.getGeneratedTagsByConversation);
 
 export default router;

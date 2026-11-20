@@ -18,6 +18,22 @@ export type ApnsPayload = {
 
 const isProduction = config.env === 'production';
 
+export function apnsProxyFromUrl(raw: string): { host: string; port: number } | undefined {
+  if (!raw) return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    logger.warn('APNS proxy ignored: HTTPS_PROXY is not a valid URL');
+    return undefined;
+  }
+  if (url.protocol !== 'http:') {
+    logger.warn('APNS proxy ignored: only http:// proxies are supported', { protocol: url.protocol });
+    return undefined;
+  }
+  return { host: url.hostname, port: Number(url.port) || 80 };
+}
+
 class ApnsService {
   private provider?: apn.Provider;
   private bundleId?: string;
@@ -33,16 +49,20 @@ class ApnsService {
           teamId: config.apns.teamId,
         };
 
+        const proxy = apnsProxyFromUrl(config.ssrf.egressProxyUrl);
         this.provider = new apn.Provider({
           token: tokenConfig,
           production: isProduction,
           requestTimeout: 10000,
+          ...(proxy ? { proxy } : {}),
           // @ts-ignore - needed when network has broken IPv6 then then fall back to IPv4
           family: 4,
         });
 
         this.bundleId = config.apns.bundleId;
-        this.logger.info('APNS VoIP and Standard services initialized using split providers');
+        this.logger.info('APNS VoIP and Standard services initialized using split providers', {
+          proxy: proxy ? `${proxy.host}:${proxy.port}` : 'none',
+        });
       } catch (error) {
         this.logger.error('Failed to initialize APNS service', error);
       }

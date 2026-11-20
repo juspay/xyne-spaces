@@ -44,7 +44,7 @@ class RecordingStitchQueue {
           delay: 10000,
         },
         removeOnComplete: true,
-        removeOnFail: false,
+        removeOnFail: 500,
       },
     });
     this.queue.on('error', (error) => {

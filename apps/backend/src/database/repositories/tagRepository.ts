@@ -48,9 +48,9 @@ export class TagRepository {
 
   // ─── TagsConfig ─────────────────────────────────────────────────────────────
 
-  async getActiveConfigByKey(configKey: string, tx?: TxClient): Promise<TagsConfig | null> {
+  async getActiveConfigByKey(configKey: string, tx?: TxClient, workspaceId?: string): Promise<TagsConfig | null> {
     return this.client(tx).tagsConfig.findFirst({
-      where: { configKey, isDeleted: false },
+      where: { configKey, isDeleted: false, ...(workspaceId ? { workspaceId } : {}) },
       orderBy: { createdAt: 'desc' },
     });
   }

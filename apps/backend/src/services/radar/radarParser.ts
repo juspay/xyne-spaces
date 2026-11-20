@@ -1,4 +1,5 @@
 import { config } from '@/config/env';
+import { isAllowedLiteLLMBaseUrl } from '@/services/orgLLMCredentialService';
 import { logger } from '@/utils/logger';
 import { logLLMCallStart } from '@/agents/agentLogger';
 import { formatErrors, validate } from '@/services/entityExtraction/pipeline';
@@ -256,6 +257,9 @@ async function callLiteLLM(
   model: string,
   messages: Array<{ role: string; content: string }>,
 ): Promise<string> {
+  if (!isAllowedLiteLLMBaseUrl(auth.baseUrl)) {
+    throw new Error('[RadarParser] LiteLLM base URL is not the configured endpoint');
+  }
   const url = `${auth.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const supportsThinkingToggle = /glm/i.test(model);
 

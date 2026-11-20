@@ -14,6 +14,7 @@ import { initializeYSweetDoc } from '@/utils/ysweetUtils';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { isCanvasFile, type SlackFile } from './channelFiles';
 import type { MigrationTarget } from './migrationTarget';
+import { isSlackFileUrl } from './slackFileUrl';
 
 export interface ChannelCanvas { slackFileId: string; title: string; slackUserId?: string; html: string; createdTs?: number; updatedTs?: number }
 
@@ -23,7 +24,7 @@ const attachmentRepo = new MessageAttachmentRepository();
 /** files.info → { downloadUrl, name, mimetype } for a Slack file. */
 async function slackFileInfo(token: string, fileId: string): Promise<{ url?: string; name?: string; mimetype?: string } | undefined> {
   try {
-    const resp = await fetch('https://slack.com/api/files.info?file=' + fileId, { headers: { Authorization: `Bearer ${token}` } });
+    const resp = await fetch('https://slack.com/api/files.info?file=' + encodeURIComponent(fileId), { headers: { Authorization: `Bearer ${token}` } });
     const j = (await resp.json()) as { ok?: boolean; file?: { url_private_download?: string; url_private?: string; name?: string; mimetype?: string } };
     if (!j.ok || !j.file) return undefined;
     return { url: j.file.url_private_download || j.file.url_private, name: j.file.name, mimetype: j.file.mimetype };
@@ -54,7 +55,7 @@ async function rehostCanvasImages(html: string, canvasId: string, createdBy: str
     if (!fileId) continue;
     try {
       const info = await slackFileInfo(token, fileId);
-      if (!info?.url) continue;
+      if (!info?.url || !isSlackFileUrl(info.url)) continue;
       const resp = await fetch(info.url, { headers: { Authorization: `Bearer ${token}` } });
       if (!resp.ok) continue;
       const buffer = Buffer.from(await resp.arrayBuffer());
@@ -130,7 +131,7 @@ async function resolveMentions(blocks: BlockNoteBlock[], target: MigrationTarget
 }
 
 async function fetchFileText(token: string, url?: string): Promise<string | undefined> {
-  if (!url) return undefined;
+  if (!url || !isSlackFileUrl(url)) return undefined;
   try {
     const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     return resp.ok ? await resp.text() : undefined;
@@ -142,7 +143,7 @@ async function fetchFileText(token: string, url?: string): Promise<string | unde
 
 async function fileDownloadUrl(token: string, fileId: string): Promise<string | undefined> {
   try {
-    const resp = await fetch('https://slack.com/api/files.info?file=' + fileId, { headers: { Authorization: `Bearer ${token}` } });
+    const resp = await fetch('https://slack.com/api/files.info?file=' + encodeURIComponent(fileId), { headers: { Authorization: `Bearer ${token}` } });
     const j = (await resp.json()) as { ok?: boolean; file?: { url_private_download?: string; url_private?: string } };
     return j.ok ? (j.file?.url_private_download || j.file?.url_private) : undefined;
   } catch (e) {

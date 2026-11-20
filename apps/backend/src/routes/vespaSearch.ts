@@ -2,21 +2,14 @@ import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
 import { validate, validateQuery, validateSearchFilters } from '../middleware/validation';
 import { discussionTitleLimiter, relatedContextLimiter } from '../middleware/rateLimiters';
-// Disabled (LLM)
-// import {
-//   vespaSearchQuerySchema,
-//   vespaSchemaQuerySchema,
-//   queryIntentQuerySchema,
-//   relatedContextBodySchema,
-// } from '../validators/vespaSearchValidator';
 import {
   vespaSearchQuerySchema,
   vespaSchemaQuerySchema,
+  queryIntentQuerySchema,
   relatedContextBodySchema,
 } from '../validators/vespaSearchValidator';
 import { schemaHandler } from '../services/vespaSearch/schemaHandler';
-// Disabled (LLM)
-// import { queryIntentHandler } from '../services/queryIntent/handler';
+import { queryIntentHandler } from '../services/queryIntent/handler';
 import { relatedContextHandler } from '../services/relatedContext/handler';
 import { discussionTitleHandler } from '../services/discussionTitle/handler';
 
@@ -82,8 +75,7 @@ router.get('/schema', validateQuery(vespaSchemaQuerySchema), schemaHandler);
  * @access Private
  * @param {string} q - The query text (required)
  */
-// Disabled (LLM)
-// router.get('/intent', validateQuery(queryIntentQuerySchema), queryIntentHandler);
+router.get('/intent', validateQuery(queryIntentQuerySchema), queryIntentHandler);
 
 /**
  * @route POST /api/vespaSearch/related

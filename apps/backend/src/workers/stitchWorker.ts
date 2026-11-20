@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import { logger } from '@/utils/logger';
 import { recordingStitchQueue } from '@/queues/recordingStitchQueue';
 
@@ -33,6 +34,10 @@ export class StitchWorker {
     }
 
     logger.info('[StitchWorker] Starting worker');
+    const probe = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore', timeout: 10_000 });
+    if (probe.error || probe.status !== 0) {
+      throw new Error('[StitchWorker] ffmpeg is not available in this image; refusing to start');
+    }
     recordingStitchQueue.startConsumer();
     this.started = true;
     logger.info('[StitchWorker] Worker started successfully');

@@ -13,12 +13,12 @@ export const classifierTarget = (engine: ClassifierEngine): ClassifierTarget =>
   engine === 'xor' ? xorTarget() : envConfig.jev;
 
 /**
- * Whether `engine` can answer. With `customerContent`, it must also be the deployer's own: XOR or
- * Jev pointed at explicitly (never the public default endpoint), or their own LiteLLM.
+ * Whether `engine` can answer. Every decision carries customer content, so by default it must also be
+ * the deployer's own: XOR or Jev pointed at explicitly (never the public default endpoint), or their own LiteLLM.
  */
 export const isEngineConfigured = (
   engine: DecisionEngine,
-  { customerContent = false }: { customerContent?: boolean } = {}
+  { customerContent = true }: { customerContent?: boolean } = {}
 ): boolean => {
   if (engine === 'llm') return isLlmDecisionConfigured();
   if (engine === 'xor' && envConfig.xor.url) return Boolean(envConfig.xor.apiKey);

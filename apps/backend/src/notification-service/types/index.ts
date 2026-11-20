@@ -54,7 +54,8 @@ export interface MobilePushJobData {
   channel: DeliveryChannel.MOBILE_PUSH;
   userId: string;
   sessionId: string;
-  token: string;
+  /** Unused by the consumer, which reads the token from the session row; kept optional for jobs already queued. */
+  token?: string;
   voipToken?: string;
   platform: string;
   appVersion?: string;

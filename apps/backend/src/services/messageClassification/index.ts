@@ -13,6 +13,7 @@ import { logger } from '@/utils/logger';
 import { logLLMCallStart, logLLMError, logLLMSuccess } from '@/agents/agentLogger';
 import {
   orgLLMCredentialService,
+  isAllowedLiteLLMBaseUrl,
   type OrgLLMCredential,
 } from '@/services/orgLLMCredentialService';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -459,6 +460,9 @@ async function callLiteLLM(
   model: string,
   messages: Array<{ role: string; content: string }>,
 ): Promise<string> {
+  if (!isAllowedLiteLLMBaseUrl(credential.baseUrl)) {
+    throw new Error(`${TAG} LiteLLM base URL is not the configured endpoint`);
+  }
   const url = `${credential.baseUrl.replace(/\/$/, '')}/chat/completions`;
 
   // Disabling glm's <think> trace took entity extraction 45s -> 7.7s. Gated on the model:

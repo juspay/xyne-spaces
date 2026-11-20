@@ -27,7 +27,10 @@ export class DeskReportWorker {
   async processCleanupJob(job: Bull.Job<{ retentionDays?: number }>): Promise<{ deletedRows: number; deletedFiles: number }> {
     logger.info(`[DESK_REPORT_WORKER] Processing cleanup job ${job.id || 'manual'}...`);
     try {
-      const retentionDays = job.data?.retentionDays || config.deskReportScheduler.retentionDays;
+      const retentionDays = Math.max(1, Math.floor(Number(config.deskReportScheduler.retentionDays)));
+      if (job.data?.retentionDays !== undefined && job.data.retentionDays !== retentionDays) {
+        logger.warn(`[DESK_REPORT_WORKER] Ignoring retentionDays=${String(job.data.retentionDays)} from job; using configured ${retentionDays}`);
+      }
       return await deskReportGenerationService.cleanupOldReports(retentionDays);
     } catch (error) {
       logger.error('[DESK_REPORT_WORKER] Cleanup job failed:', error);

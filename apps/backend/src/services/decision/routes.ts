@@ -1,5 +1,6 @@
 import type { AgentsConfig } from '@/agents/config';
 import { configuredEngine } from './targets';
+import { isLlmDecisionConfigured } from './llmDecision';
 import type { DecisionEngine, TaskFeature } from './types';
 
 /**
@@ -13,4 +14,4 @@ const ENGINE_SWITCHES: Record<TaskFeature, (config: AgentsConfig) => boolean> = 
 
 /** The engine that answers `feature` live; the LLM takes over when it gives no answer. */
 export const primaryEngine = (feature: TaskFeature, agentsConfig: AgentsConfig): DecisionEngine =>
-  ENGINE_SWITCHES[feature](agentsConfig) ? configuredEngine() : 'llm';
+  ENGINE_SWITCHES[feature](agentsConfig) || !isLlmDecisionConfigured() ? configuredEngine() : 'llm';

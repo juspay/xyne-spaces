@@ -36,8 +36,7 @@ import * as dailyBriefController from '@/controllers/dailyBriefController';
 import { customEmojiController } from '@/controllers/customEmojiController';
 import { CanvasController } from '@/controllers/canvasController';
 import { deskMetricsController } from '@/controllers/deskMetricsController';
-// Disabled (LLM)
-// import { deskReportPanelController } from '@/controllers/deskReportPanelController';
+import { deskReportPanelController } from '@/controllers/deskReportPanelController';
 import { workspaceScopedRoute } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories/index';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -953,29 +952,28 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/desk-metrics/desks',
     controller: deskMetricsController.listDesks,
   },
-  // Disabled (LLM)
-  // {
-  //   method: 'get',
-  //   path: '/desk-report/:channelId/latest',
-  //   controller: deskReportPanelController.getLatest,
-  //   unwrap: unwrapDeskReportLatest,
-  // },
-  // {
-  //   // HTML, not JSON: the controller sets a text/html Content-Type, so the
-  //   // router passes the body through untouched (see createDirectRouter).
-  //   method: 'get',
-  //   path: '/desk-report/:channelId/view',
-  //   controller: deskReportPanelController.serveReport,
-  //   // The controller reads `download === '1'`; anything else is inline.
-  //   query: z.object({ download: z.enum(['0', '1']).optional() }),
-  // },
-  // {
-  //   // Starts an agent run; owner / channel admin only, checked by the controller.
-  //   method: 'post',
-  //   path: '/desk-report/:channelId/generate',
-  //   controller: deskReportPanelController.generateNow,
-  //   unwrap: unwrapDeskReportGenerate,
-  // },
+  {
+    method: 'get',
+    path: '/desk-report/:channelId/latest',
+    controller: deskReportPanelController.getLatest,
+    unwrap: unwrapDeskReportLatest,
+  },
+  {
+    // HTML, not JSON: the controller sets a text/html Content-Type, so the
+    // router passes the body through untouched (see createDirectRouter).
+    method: 'get',
+    path: '/desk-report/:channelId/view',
+    controller: deskReportPanelController.serveReport,
+    // The controller reads `download === '1'`; anything else is inline.
+    query: z.object({ download: z.enum(['0', '1']).optional() }),
+  },
+  {
+    // Starts an agent run; owner / channel admin only, checked by the controller.
+    method: 'post',
+    path: '/desk-report/:channelId/generate',
+    controller: deskReportPanelController.generateNow,
+    unwrap: unwrapDeskReportGenerate,
+  },
 
   /*
    * The agent-facing desk metrics surface (the product's
@@ -1376,28 +1374,26 @@ function unwrapEnvelope(raw: unknown): unknown {
  * `{ report, canGenerate }`, keeping the flag `unwrapEnvelope` would drop.
  * `report` is null when the desk has never had one.
  */
-// Disabled (LLM)
-// function unwrapDeskReportLatest(raw: unknown): unknown {
-//   const body = raw as { success?: boolean; data?: unknown; canGenerate?: unknown; error?: string } | undefined;
-//   if (body?.success === false) {
-//     throw new SdkApiError('internal', body.error ?? 'The request failed.');
-//   }
-//   return { report: body?.data ?? null, canGenerate: body?.canGenerate === true };
-// }
+function unwrapDeskReportLatest(raw: unknown): unknown {
+  const body = raw as { success?: boolean; data?: unknown; canGenerate?: unknown; error?: string } | undefined;
+  if (body?.success === false) {
+    throw new SdkApiError('internal', body.error ?? 'The request failed.');
+  }
+  return { report: body?.data ?? null, canGenerate: body?.canGenerate === true };
+}
 
 /**
  * "Generate now" reports a refusal — no desk owner, a run already in flight, the
  * agent not installed — as HTTP 200 with `success: false`. Each is a business
  * rule the caller can act on, so it is a 400 carrying the controller's message.
  */
-// Disabled (LLM)
-// function unwrapDeskReportGenerate(raw: unknown): unknown {
-//   const body = raw as { success?: boolean; error?: string } | undefined;
-//   if (body?.success !== true) {
-//     throw new SdkApiError('validation_failed', body?.error ?? 'The desk report could not be started.');
-//   }
-//   return { started: true };
-// }
+function unwrapDeskReportGenerate(raw: unknown): unknown {
+  const body = raw as { success?: boolean; error?: string } | undefined;
+  if (body?.success !== true) {
+    throw new SdkApiError('validation_failed', body?.error ?? 'The desk report could not be started.');
+  }
+  return { started: true };
+}
 
 function controllerError(status: number, body: unknown): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;

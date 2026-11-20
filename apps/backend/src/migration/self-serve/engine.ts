@@ -32,6 +32,7 @@ import { postMessage } from '@/migration/slack/utils/postMessage';
 import { getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
 import { runWithSlackOfflineReference, type SlackOfflineReference } from '@/integrations/adapters/slack-webhook-tickets/utils/slackOfflineReference';
 import { listChannelFiles } from '@/migration/slack/channelFiles';
+import { isSlackFileUrl } from '@/migration/slack/slackFileUrl';
 import { fetchChannelLinks, ingestChannelLinks, type ChannelLink } from '@/migration/slack/channelLinks';
 import { fetchChannelCanvases, ingestChannelCanvases, type ChannelCanvas } from '@/migration/slack/channelCanvases';
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
@@ -521,6 +522,10 @@ export class SlackMigrationEngine {
     const uploaded = await this.uploadedFileSet(gcsPrefix);
     if (uploaded.has(dest)) return this.storage.buildStorageUri(dest);
     const url = file.url_private_download || file.url_private;
+    if (!isSlackFileUrl(url)) {
+      logger.warn('[MIGRATION] Skipping file whose download URL is not on slack.com', { fileId: file.id });
+      return undefined;
+    }
 
     // Retry transient failures (429 / 5xx / timeout / network). The token is only held during collection, so a file
     // not captured here can't be recovered at ingest. Permanent errors (403/404) skip without retry.

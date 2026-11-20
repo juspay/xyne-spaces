@@ -25,7 +25,7 @@ export async function askDecision(
   { role = 'live', ...options }: AskDecisionOptions = {}
 ): Promise<Record<string, DecisionAnswer> | null> {
   const engine = configuredEngine();
-  if (!isEngineConfigured(engine)) return null;
+  if (!isEngineConfigured(engine, { customerContent: true })) return null;
 
   const run = await askEngine(engine, feature, state, questions, timeoutMs, signal, options);
   // Cancelled by the caller: says nothing about the engine.

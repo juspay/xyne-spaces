@@ -160,6 +160,8 @@ async function writeFailureMarker(
  * logic instead of erroring. A missing original (attachment deleted while the
  * job waited in the queue) is a no-op.
  */
+const MAX_HEIC_SOURCE_BYTES = 60 * 1024 * 1024
+
 export async function generateHeicRenditions(
     storage: typeof storageService,
     storagePath: string,
@@ -172,6 +174,19 @@ export async function generateHeicRenditions(
         kinds.map(kind => readGcsCache(storage, `${base}/${kind}.webp`)),
     )
     if (cached.every(entry => entry !== null)) return
+
+    const info = await storage.headObject(storagePath).catch(() => null)
+    if (!info) return
+    if ((info.size ?? 0) > MAX_HEIC_SOURCE_BYTES) {
+        logger.warn("[HeicRendition] Original too large for rendition; writing failure markers", {
+            storagePath,
+            size: info.size,
+        })
+        await Promise.all(
+            kinds.map(kind => writeFailureMarker(storage, `${base}/${kind}.failed`, "TOO_LARGE")),
+        )
+        return
+    }
 
     let buffer: Buffer
     try {

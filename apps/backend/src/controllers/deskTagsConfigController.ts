@@ -11,6 +11,9 @@ import { canViewDeskInsights } from '@/utils/channelMembership';
 import { EmailClassificationRepository } from '@/database/repositories/emailClassificationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
+import { generateJevTags } from '@/tags/generators/xorShadow';
+import { isLlmDecisionConfigured } from '@/services/decision/llmDecision';
+import { isPrivateDecisionEngineConfigured } from '@/services/decision/targets';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { syncTicketTagsFromEmail } from '@/tags/deskTicket';
 import { addDeskEmailTagTx } from '@/bypassAcl/transactions/deskTagsConfigController';
@@ -131,7 +134,7 @@ export class DeskTagsConfigController {
       await tagService.upsertConfig(configKey, DESK_EMAIL_SOURCE_TYPE, workspaceId, shape, userId);
       // Evict the worker-side Redis cache so the pipeline picks up the new config
       // on the very next job rather than waiting for the TTL to expire.
-      await invalidateTagConfigCache(configKey);
+      await invalidateTagConfigCache(configKey, workspaceId);
       res.status(200).json({ categories: shape.categories });
     } catch (error) {
       logger.error('[DESK-TAGS-CONFIG] Failed to update config', { channelId, error });
@@ -184,8 +187,17 @@ export class DeskTagsConfigController {
 
       const context = `Subject: ${subject.trim()}\n\n${body.trim()}`;
 
-      const tags = await generateLlmTags(context, llmCategories, workspaceId);
-      res.status(200).json({ tags });
+      if (isLlmDecisionConfigured()) {
+        const tags = await generateLlmTags(context, llmCategories, workspaceId);
+        res.status(200).json({ tags });
+        return;
+      }
+      if (!isPrivateDecisionEngineConfigured()) {
+        res.status(503).json({ error: 'Tag generation is not configured' });
+        return;
+      }
+      const tags = await generateJevTags(context, llmCategories);
+      res.status(200).json({ tags: tags ?? [] });
     } catch (error) {
       logger.error('[DESK-TAGS-CONFIG] previewTagGeneration failed', { channelId, error });
       res.status(500).json({ error: 'Tag generation preview failed' });

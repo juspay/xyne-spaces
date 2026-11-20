@@ -97,16 +97,21 @@ export class EmailClassificationWorker {
         `[EMAIL-CLASSIFICATION-WORKER] Group ${job.data.groupId} on job ${job.id} is not in workspace ${workspaceId} — ignoring it`,
       );
     }
+    const owner = await prisma.ticket.findFirst({
+      where: { id: ticketId, workspaceId },
+      select: { channelId: true },
+    });
+    if (!owner || (owner.channelId && owner.channelId !== channelId)) {
+      logger.warn(
+        `[EMAIL-CLASSIFICATION-WORKER] Ticket ${ticketId} on job ${job.id} is not in channel ${channelId} of workspace ${workspaceId} — skipping`,
+      );
+      return;
+    }
     const systemActorId = await getAutomationsBotUserId(workspaceId);
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
-    // const runClassification = job.data.runClassification ?? true;
-    const runClassification = false; // Disabled (LLM) --- IGNORE ---
-    // const runPriority = job.data.runPriority ?? true;
-    const runPriority = false; // Disabled (LLM) --- IGNORE ---
-    // Classification and priority are disabled above, so for flag-less jobs from normal
-    // ingestion the only meaningful task left is assignment — default it to true so new
-    // tickets get auto-assigned (the sweep passes explicit flags anyway).
-    const runAssignment = job.data.runAssignment ?? true;
+    const runClassification = job.data.runClassification ?? true;
+    const runPriority = job.data.runPriority ?? true;
+    const runAssignment = job.data.runAssignment ?? false;
 
     logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority} runAssignment=${runAssignment}`);
 
@@ -117,7 +122,7 @@ export class EmailClassificationWorker {
 
     const fetchEmailRecord = () => prisma.email.findUnique({
       where: { id: emailId },
-      select: { subject: true, body: true, from: true, to: true, cc: true, bcc: true, replyTo: true, createdAt: true, type: true },
+      select: { subject: true, body: true, from: true, to: true, cc: true, bcc: true, replyTo: true, createdAt: true, type: true, workspaceId: true },
     });
     let emailRecord = await fetchEmailRecord();
     for (let retry = 0; !emailRecord && retry < EMAIL_FETCH_MAX_RETRIES; retry++) {
@@ -126,6 +131,10 @@ export class EmailClassificationWorker {
     }
     if (!emailRecord) {
       logger.warn(`[EMAIL-CLASSIFICATION-WORKER] Email ${emailId} not found, skipping classification for ticket ${ticketId}`);
+      return;
+    }
+    if (emailRecord.workspaceId !== workspaceId) {
+      logger.warn(`[EMAIL-CLASSIFICATION-WORKER] Email ${emailId} on job ${job.id} is not in workspace ${workspaceId} — skipping`);
       return;
     }
 

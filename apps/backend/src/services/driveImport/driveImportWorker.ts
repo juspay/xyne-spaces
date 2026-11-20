@@ -16,6 +16,9 @@ import {
 } from '@/services/collectionIngestionNotifier';
 import { config } from '@/config/env';
 import { runDriveImportJob } from '@/bypassAcl/collectionServices';
+import { db } from '@/database/client';
+
+const DRIVE_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Background worker for Google Drive imports. The API request only lists the folder
@@ -172,6 +175,20 @@ function generateUniqueName(filename: string, existingNames: string[]): string {
 export async function processDriveImportJob(data: DriveImportJobData): Promise<void> {
   const { collectionId, baseParentFolderId, files, userId, workspaceId, sessionId, duplicateStrategy } =
     data;
+
+  const collection = await repo.findCollectionById(collectionId);
+  if (!collection || collection.workspaceId !== workspaceId) {
+    throw new Error(`[DRIVE_IMPORT] collection ${collectionId} is not in workspace ${workspaceId}`);
+  }
+  const member = await db.user.findFirst({ where: { id: userId, workspaceId }, select: { id: true } });
+  if (!member) {
+    throw new Error(`[DRIVE_IMPORT] user ${userId} is not a member of workspace ${workspaceId}`);
+  }
+  for (const f of files) {
+    if (!DRIVE_ID.test(f.id)) {
+      throw new Error('[DRIVE_IMPORT] invalid Drive file id in job');
+    }
+  }
 
   const progress: DriveImportProgress = {
     collectionId,

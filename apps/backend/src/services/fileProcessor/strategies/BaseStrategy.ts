@@ -46,14 +46,10 @@ export abstract class BaseStrategy {
             return undefined
         }
 
-        // Disabled (LLM)
-        // const credential = await orgLLMCredentialService.getCredentialByVespaDocId(
-        //     vespaDocId,
-        //     OrgLLMServiceAccountPurpose.DEFAULT,
-        // )
-        const credential = (false as boolean)
-            ? await orgLLMCredentialService.getCredentialByVespaDocId(vespaDocId, OrgLLMServiceAccountPurpose.DEFAULT)
-            : null
+        const credential = await orgLLMCredentialService.getCredentialByVespaDocId(
+            vespaDocId,
+            OrgLLMServiceAccountPurpose.DEFAULT,
+        )
 
         if (!credential) {
             logger.debug('[BaseStrategy] No org LiteLLM credential configured, skipping outline generation')

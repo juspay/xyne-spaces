@@ -31,6 +31,27 @@ export interface OrgLLMCredential {
   purpose: OrgLLMServiceAccountPurpose;
 }
 
+/**
+ * Org credentials are provisioned against LITELLM_BASE_URL, so a stored URL must be that endpoint:
+ * same scheme, host and port, no userinfo. Anything else (a tampered or stale row) is never called.
+ */
+export function isAllowedLiteLLMBaseUrl(url: string | null | undefined): boolean {
+  const configured = config.litellm.baseUrl;
+  if (!url || !configured) return false;
+  try {
+    const candidate = new URL(url);
+    const expected = new URL(configured);
+    return (
+      (candidate.protocol === 'https:' || candidate.protocol === 'http:') &&
+      !candidate.username &&
+      !candidate.password &&
+      candidate.origin === expected.origin
+    );
+  } catch {
+    return false;
+  }
+}
+
 class OrgLLMCredentialService {
   private prisma = DatabaseClient.getInstance();
   private cache = new Map<string, CachedCredential>();
@@ -260,6 +281,17 @@ class OrgLLMCredentialService {
     try {
       const parsed = JSON.parse(decrypt(row.credentials)) as StoredOrgLLMCredentials;
       if (!parsed.key || !parsed.providerUrl) {
+        this.cache.set(key, {
+          value: null,
+          expiresAt: now + NEGATIVE_CACHE_TTL_MS,
+        });
+        return null;
+      }
+      if (!isAllowedLiteLLMBaseUrl(parsed.providerUrl)) {
+        logger.warn('[OrgLLMCredentialService] Ignoring org credential whose providerUrl is not LITELLM_BASE_URL', {
+          orgId,
+          purpose,
+        });
         this.cache.set(key, {
           value: null,
           expiresAt: now + NEGATIVE_CACHE_TTL_MS,
