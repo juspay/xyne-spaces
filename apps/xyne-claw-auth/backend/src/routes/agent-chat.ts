@@ -1,4 +1,5 @@
 import { callerService, serviceAuthHeaders } from "../lib/service-assertion.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
@@ -3327,7 +3328,7 @@ router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Re
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...serviceAuthHeaders("xyne-claw-auth", "POST", cancelUrl),
+        ...selfAuthHeaders("POST", cancelUrl, { userId: run.userId, sessionId }),
       },
     }).catch(() => null);
     res.json({ success: true, data: { cancelled: cancelRes?.ok ?? false } });

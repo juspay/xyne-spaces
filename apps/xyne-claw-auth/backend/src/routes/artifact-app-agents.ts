@@ -44,6 +44,7 @@ import { resolveFastMode } from "../lib/fast-mode.js";
 import { agentRunRepository, chatMessageRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { createLogger } from "../logger.js";
 import { serviceAuthHeaders } from "../lib/service-assertion.js";
+import { selfAuthHeaders } from "../lib/internal-call.js";
 
 const log = createLogger("artifact-app-agents");
 export const artifactAppAgentsRouter: Router = Router();
@@ -726,13 +727,15 @@ artifactAppAgentsRouter.post("/runs/:id/cancel", async (req: Request<{ id: strin
   }
 
   // Ownership is checked above (row.userId === requesterId); the internal cancel
-  // is a claw-auth self-call authenticated by its service assertion.
+  // is a claw-auth self-call carrying a run token for the run's stored owner —
+  // forwardRunControl needs a named user, and the pod compares x-user-id
+  // against the id the run was dispatched with.
   const cancelUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(row.sessionId)}/cancel`;
   const clawRes = await fetch(cancelUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...serviceAuthHeaders("xyne-claw-auth", "POST", cancelUrl),
+      ...selfAuthHeaders("POST", cancelUrl, { userId: row.userId, sessionId: row.sessionId }),
     },
   }).catch(() => null);
 
