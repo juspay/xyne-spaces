@@ -1,5 +1,6 @@
 import Joi from 'joi';
 import { RELATED_CONTEXT_MAX_DRAFT_CHARS } from '@xyne/shared';
+import { MATCH_TARGETS } from '@/vespa/src/utils/YqlBuilder';
 
 /**
  * Validation schema for Vespa search queries
@@ -46,12 +47,12 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Frontend-compatible filters (includes subApp types: canvas, transcript, rca)
   // Supports comma-separated values: messages,files or canvas,transcript
-  // Special type 'ticket_tags' is used for tag search aggregation
+  // Special type 'ticket_tags' is used for tag search aggregation, 'match_ids' for partial-match doc ids (MATCH_TARGETS)
   type: Joi.string()
-    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags))*$/)
+    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags|match_ids)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags|match_ids))*$/)
     .optional()
     .messages({
-      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, ticket_tags'
+      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, ticket_tags, match_ids'
     }),
 
   from: Joi.alternatives()
@@ -218,6 +219,21 @@ export const vespaSearchQuerySchema = Joi.object({
   // New ticket filters
   board: Joi.string().optional().messages({
     'string.base': 'Board must be a string'
+  }),
+
+  // type=match_ids: the field to match, the key of a keyed target, ticket types to keep / drop
+  target: Joi.string().valid(...Object.keys(MATCH_TARGETS)).when('type', { is: 'match_ids', then: Joi.required() }).messages({
+    'any.required': 'target is required for type=match_ids',
+    'any.only': `target must be one of: ${Object.keys(MATCH_TARGETS).join(', ')}`
+  }),
+  fieldKey: Joi.string().optional().messages({
+    'string.base': 'fieldKey must be a string'
+  }),
+  ticketType: Joi.string().optional().messages({
+    'string.base': 'ticketType must be a comma-separated string'
+  }),
+  excludeTicketType: Joi.string().optional().messages({
+    'string.base': 'excludeTicketType must be a comma-separated string'
   }),
 
   tags: Joi.string().optional().messages({

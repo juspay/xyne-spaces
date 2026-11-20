@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { TICKET_PICKER_FILTERS, useVespaMatchIds } from '../../../hooks/useVespaMatchIds';
 import { queries } from '../../../zero/queries';
 import { Dialog } from '../../ui/Dialog';
 import type { CanvasTicketAnchor } from '../useCanvasTicketEditorBridge';
@@ -28,10 +29,18 @@ export function CanvasTicketLinkFlow({
     if (!anchor) setSearch('');
   }, [anchor]);
 
+  const titleMatchIds = useVespaMatchIds({
+    target: 'ticketTitle',
+    search: debouncedSearch,
+    filters: TICKET_PICKER_FILTERS.work,
+    limit: TICKET_SEARCH_LIMIT,
+    enabled: !!anchor,
+  });
   const [tickets] = useCachedQuery(
     queries.ticketsSearch({
       search: debouncedSearch.trim() || undefined,
       limit: TICKET_SEARCH_LIMIT,
+      titleMatchIds,
     }),
     { enabled: !!anchor },
   );

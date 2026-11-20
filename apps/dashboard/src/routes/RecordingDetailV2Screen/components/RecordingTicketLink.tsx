@@ -7,6 +7,7 @@ import type { SelectorOption } from '../../../components/ui/EntitySelector/Entit
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { TICKET_PICKER_FILTERS, useVespaMatchIds } from '../../../hooks/useVespaMatchIds';
 import { queries } from '../../../zero/queries';
 
 export interface RecordingTicketLinkProps {
@@ -36,9 +37,9 @@ const CHIP_CLASS_NAME =
  * Links a recording to exactly one ticket. `EntitySelector`'s `selectedValue` is a
  * single id, so "only one" is a contract rather than a convention.
  *
- * Candidates come from `ticketsSearch`, not Vespa: it is live, matches xyneId and
- * title, and is already scoped by `TicketsACL`, so the picker cannot surface a
- * ticket the viewer has no access to.
+ * Candidates come from `ticketsSearch`: it is live, matches xyneId, and is already
+ * scoped by `TicketsACL`, so the picker cannot surface a ticket the viewer has no
+ * access to. Title matches come from Vespa as ids (`useVespaMatchIds`).
  */
 export function RecordingTicketLink({
   linkedTicketId,
@@ -52,10 +53,18 @@ export function RecordingTicketLink({
 
   // Only while the picker is open — an unopened dropdown shouldn't hold a live
   // query over the workspace's tickets.
+  const titleMatchIds = useVespaMatchIds({
+    target: 'ticketTitle',
+    search: debouncedSearch,
+    filters: TICKET_PICKER_FILTERS.work,
+    limit: TICKET_SEARCH_LIMIT,
+    enabled: canEdit && isOpen,
+  });
   const [searchResults] = useCachedQuery(
     queries.ticketsSearch({
       search: debouncedSearch.trim() || undefined,
       limit: TICKET_SEARCH_LIMIT,
+      titleMatchIds,
     }),
     { enabled: canEdit && isOpen },
   );

@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { TICKET_PICKER_FILTERS, useVespaMatchIds } from '../../../hooks/useVespaMatchIds';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -78,19 +79,33 @@ export const ReleaseMappingForm = ({
     { enabled: !!selectedReleaseId },
   );
 
+  const releaseTitleMatchIds = useVespaMatchIds({
+    target: 'ticketTitle',
+    search: debouncedReleaseSearch,
+    filters: TICKET_PICKER_FILTERS.release,
+    limit: 10,
+  });
   const [releaseTicketsData] = useCachedQuery(
     queries.releaseTicketsSearch({
       search: debouncedReleaseSearch.trim() ? debouncedReleaseSearch.trim() : undefined,
       limit: 10,
+      titleMatchIds: releaseTitleMatchIds,
     }),
   );
 
+  const rootCauseTitleMatchIds = useVespaMatchIds({
+    target: 'ticketTitle',
+    search: debouncedRootCauseTicketSearch,
+    filters: TICKET_PICKER_FILTERS.work,
+    limit: 10,
+  });
   const [rootCauseTicketsData] = useCachedQuery(
     queries.ticketsSearch({
       search: debouncedRootCauseTicketSearch.trim()
         ? debouncedRootCauseTicketSearch.trim()
         : undefined,
       limit: 10,
+      titleMatchIds: rootCauseTitleMatchIds,
     }),
   );
 
