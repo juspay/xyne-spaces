@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
-import { AccessType } from '@xyne/shared';
+import { AccessType, WorkspaceRole } from '@xyne/shared';
 import { usePermissions } from './usePermissions';
 import { useAuth } from './useAuth';
 import { useUserGroups } from './useUserGroup';
 import {
+  GUEST_HIDDEN_PATHS,
   NAVIGATION_ITEMS,
   filterNavItemsByPermission,
   type NavigationItem,
@@ -27,6 +28,7 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
   // scrollbar. Hidden rather than adapted: a single column is the app it
   // already has, and the feature's whole proposition is the things beside it.
   const { isMobile } = usePlatform();
+  const isGuest = user?.role === WorkspaceRole.GUEST;
 
   return useMemo(() => {
     const visibleItems = filterNavItemsByPermission(
@@ -50,7 +52,9 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
       );
     return withStreams.filter(
       item =>
-        !disabledToolbarPaths.has(item.path) && !(item.path === '/migrations' && migrationsEmpty),
+        !disabledToolbarPaths.has(item.path) &&
+        !(item.path === '/migrations' && migrationsEmpty) &&
+        !(isGuest && GUEST_HIDDEN_PATHS.has(item.path)),
     );
-  }, [permissions, canManageOwnUserGroups, showStreams, isMobile, disabledToolbarPaths]);
+  }, [permissions, canManageOwnUserGroups, showStreams, isMobile, disabledToolbarPaths, isGuest]);
 };

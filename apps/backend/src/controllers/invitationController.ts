@@ -15,6 +15,7 @@ import {
   deleteInvitationOrgWide,
   countActiveUsersByEmail,
   generateOrgMemberPasswordOrgWide,
+  getInviterNameOrgWide,
 } from '@/bypassAcl/invitationApprovalServices';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
@@ -160,12 +161,12 @@ export class InvitationController {
 
       // Only generate a temp password for brand-new invitees with no existing workspace access.
       // Existing users may have already set their own password; overwriting it would be destructive.
-      const existingWorkspaceUsers = await DatabaseClient.getInstance().user.count({
-        where: { email: normalizedEmail, leftAt: null },
-      });
+      // Counted across every workspace — a workspace-scoped count would miss the
+      // invitee's accounts elsewhere and overwrite a password they set themselves.
+      const existingWorkspaceUsers = await countActiveUsersByEmail(normalizedEmail);
 
       let tempPassword: string | null = null;
-      if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
+      if (existingWorkspaceUsers === 0) {
         tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
       }
 
@@ -682,7 +683,8 @@ export class InvitationController {
       }
 
       // Org-wide read: the invite may live in any workspace of the org.
-      const { invitations, inviterById } = await listPendingApprovalInvitations(orgId);
+      const { invitations, inviterById, entityTitleById } =
+        await listPendingApprovalInvitations(orgId);
 
       res.json({
         invitations: invitations.map(invitation => ({
@@ -696,6 +698,8 @@ export class InvitationController {
           invitedByEmail: inviterById.get(invitation.invitedBy)?.email ?? null,
           isOrgApproved: invitation.isOrgApproved,
           inviteEmailSentAt: invitation.inviteEmailSentAt,
+          entityType: invitation.entityType,
+          entityTitle: invitation.entityId ? entityTitleById.get(invitation.entityId) ?? null : null,
         })),
       });
     } catch (error) {
@@ -764,7 +768,7 @@ export class InvitationController {
       } else {
         let tempPassword: string | null = null;
         const existingWorkspaceUsers = await countActiveUsersByEmail(invitation.email);
-        if (existingWorkspaceUsers === 0 && invitation.role !== 'GUEST') {
+        if (existingWorkspaceUsers === 0) {
           tempPassword = await generateOrgMemberPasswordOrgWide(invitation.email);
         }
 
@@ -774,9 +778,11 @@ export class InvitationController {
           invitationId: invitation.invitationId || invitation.id,
         });
 
+        // The email reads "<inviter> has invited you", so name who sent the invite, not the approver.
+        const inviterName = await getInviterNameOrgWide(invitation.invitedBy);
         const emailResult = await invitationService.sendInvitationEmail({
           to: invitation.email,
-          inviterName: req.user?.name || 'A team member',
+          inviterName: inviterName || req.user?.name || 'A team member',
           workspaceName: invitation.workspace?.name || 'the workspace',
           invitationLink,
           invitationId: invitation.invitationId || invitation.id,

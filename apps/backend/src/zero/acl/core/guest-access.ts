@@ -124,3 +124,46 @@ export function assertGuestWriteBlocked(
     );
   }
 }
+
+/**
+ * Whether a guest can see `userId`: themselves, or someone who shares a channel or canvas
+ * with them (mirrors guestVisibleUserWhere and getGuestVisibleUserIds). Guests may only
+ * DM or share with these people.
+ */
+export async function isGuestVisibleUser(
+  ctx: QueryContext,
+  tx: Transaction<Schema>,
+  userId: string,
+): Promise<boolean> {
+  if (userId === ctx.userID) return true;
+
+  const [grants, myChannels, myCanvases] = await Promise.all([
+    tx.run(zql.guest_access.where('workspaceId', '=', ctx.workspaceId).where('userId', '=', ctx.userID)),
+    tx.run(zql.channel_participants.where('userId', '=', ctx.userID)),
+    tx.run(zql.canvas_participants.where('userId', '=', ctx.userID)),
+  ]);
+  const channelIds = [
+    ...grants.filter(g => g.accessibleEntityType === GuestEntity.CHANNEL).map(g => g.accessibleEntityId),
+    ...myChannels.map(cp => cp.channelId),
+  ];
+  if (channelIds.length > 0) {
+    const sharedChannel = await tx.run(
+      zql.channel_participants.where('userId', '=', userId).where('channelId', 'IN', channelIds).one(),
+    );
+    if (sharedChannel) return true;
+  }
+
+  const channelCanvases = channelIds.length
+    ? await tx.run(zql.canvas_participants.where('channelId', 'IN', channelIds))
+    : [];
+  const canvasIds = [
+    ...grants.filter(g => g.accessibleEntityType === GuestEntity.CANVAS).map(g => g.accessibleEntityId),
+    ...myCanvases.map(cp => cp.canvasId),
+    ...channelCanvases.map(cp => cp.canvasId),
+  ];
+  if (canvasIds.length === 0) return false;
+  const sharedCanvas = await tx.run(
+    zql.canvas_participants.where('userId', '=', userId).where('canvasId', 'IN', canvasIds).one(),
+  );
+  return Boolean(sharedCanvas);
+}

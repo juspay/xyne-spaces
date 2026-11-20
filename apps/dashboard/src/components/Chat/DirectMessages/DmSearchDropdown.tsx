@@ -4,6 +4,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { cn } from '../../../utils/classNames';
 import Avatar from '../../ui/Avatar/Avatar';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { GuestLabel } from '../../ui/GuestLabel';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -59,6 +60,7 @@ const DmUserSearchResultItem = ({
         {getUserDisplayName(user)}
         {isCurrentUser ? ' (you)' : ''}
       </span>
+      <GuestLabel role={user.role} />
       {(user.activityStatus || user.statusEmoji || user.statusContent) && (
         <StatusIndicator
           statusEmoji={user.statusEmoji}

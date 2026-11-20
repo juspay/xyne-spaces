@@ -1,5 +1,6 @@
 import { type Call, type Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { getContextOrNull } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { isRecording, shareEntityTypeFor } from '@/utils/callTypeUtils';
 import {
@@ -88,7 +89,10 @@ export class CallShareService {
     if (isRecording(call)) {
       // A public link is view-only by design: it never confers edit rights and
       // never share management, however the viewer arrived at the recording.
-      if (call.visibility === CallVisibility.PUBLIC) levels.push('view');
+      // Guests never get it: public means workspace-wide, which is wider than a guest's reach.
+      if (call.visibility === CallVisibility.PUBLIC && getContextOrNull()?.role !== 'GUEST') {
+        levels.push('view');
+      }
     } else if (await this.isCallAudience(call, userId)) {
       // Regular calls are readable by the people who were in them; recordings
       // are not, so this route is deliberately not offered to a recording.

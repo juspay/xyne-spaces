@@ -13,6 +13,7 @@ import {
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
 import { StatusIndicator } from '../StatusIndicator';
+import { GuestLabel } from '../GuestLabel';
 
 export interface ChannelOption {
   id: string;
@@ -291,6 +292,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
 
             {isCurrentUser ? ' (you)' : ''}
           </span>
+          <GuestLabel role={user.role} />
           {deactivated && (
             <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
               Deactivated

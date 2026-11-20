@@ -17,6 +17,12 @@ import {
 import { isRecording, shareEntityTypeFor } from '@/utils/callTypeUtils';
 import { logger } from '@/utils/logger';
 import { queueRecordingTranscriptRefresh } from '@/services/callVespaQueue';
+import { db } from '@/database/client';
+import { getContextOrNull } from '@/database/tenant/context';
+import {
+  getGuestAccessibleChannelIds,
+  getGuestVisibleUserIds,
+} from '@/database/acl/tables/channel-access-helper';
 import {
   recordingSharingNotificationService,
   
@@ -166,11 +172,48 @@ export class RecordingSharingService {
     return result;
   }
 
+  /**
+   * Sharing runs in ACL-free transactions, so a guest's reach is checked here: a guest may
+   * share only with people they can already see (who share a channel or canvas with them) or
+   * a channel they are in, never with a user group, and may not make a recording public.
+   */
+  private async assertGuestMayShare(
+    actor: RecordingSharingActor,
+    command: RecordingSharingCommand,
+  ): Promise<void> {
+    const ctx = getContextOrNull();
+    if (ctx?.role !== 'GUEST' || ctx.actor !== 'user') return;
+
+    if (command.action === 'set_visibility' && command.visibility === CallVisibility.PUBLIC) {
+      throw new RecordingSharingError('Guests cannot make a recording public', 403);
+    }
+    if (command.action !== 'grant') return;
+
+    const [visibleUserIds, channelIds] = await Promise.all([
+      getGuestVisibleUserIds(db, actor.workspaceId, actor.userId),
+      getGuestAccessibleChannelIds(db, actor.workspaceId, actor.userId),
+    ]);
+    const visible = new Set(visibleUserIds);
+    const channels = new Set(channelIds);
+    const allowed = command.targets.every(target =>
+      target.type === 'user'
+        ? visible.has(target.id)
+        : target.type === 'channel' && channels.has(target.id),
+    );
+    if (!allowed) {
+      throw new RecordingSharingError(
+        'Guests can only share with people they share a channel or canvas with',
+        403,
+      );
+    }
+  }
+
   private async run(
     callId: string,
     actor: RecordingSharingActor,
     command: RecordingSharingCommand,
   ): Promise<RecordingSharingResult> {
+    await this.assertGuestMayShare(actor, command);
     switch (command.action) {
       case 'grant':
         return this.grant(

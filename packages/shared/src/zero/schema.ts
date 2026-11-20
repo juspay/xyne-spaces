@@ -3169,6 +3169,11 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ['userId'],
     destSchema: guestAccessTable,
   }),
+  canvasParticipations: many({
+    sourceField: ['id'],
+    destField: ['userId'],
+    destSchema: canvasParticipantTable,
+  }),
   createdCanvasCommentThreads: many({
     sourceField: ['id'],
     destField: ['createdBy'],

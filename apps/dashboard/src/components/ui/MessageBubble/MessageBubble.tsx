@@ -89,6 +89,7 @@ import { getBaseRoute } from '../../../hooks/useRouteContext';
 import { useStableRouter } from '../../../hooks/useStableRouter';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../StatusIndicator';
+import { GuestLabel } from '../GuestLabel';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { RecordingBubble } from './RecordingBubble';
@@ -1184,6 +1185,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       size='sm'
                       showOnHover={true}
                     />
+                    <GuestLabel role={sender.role} />
                   </span>
                 ) : (
                   <span className='flex items-center gap-1'>
@@ -1211,6 +1213,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       size='sm'
                       showOnHover={true}
                     />
+                    <GuestLabel role={sender.role} />
                   </span>
                 )
               ) : (

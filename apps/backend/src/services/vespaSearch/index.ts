@@ -7,6 +7,7 @@ import {
   type TransformedSearchResult,
 } from './resultTransform';
 import { db } from '@/database/client';
+import { WorkspaceRole } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
@@ -973,6 +974,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // My-channels toggle: when true, scope chat results to channels the user is a
     // member of (drop the public-non-member access branch in YqlBuilder).
     options.slack.onlyMyChannels = String(onlyMyChannels) === 'true';
+
+    // A guest searches only the channels/canvases they belong to, never public ones they aren't in.
+    if ((req as any).user?.role === WorkspaceRole.GUEST) {
+      options.slack.onlyMyChannels = true;
+      options.file.onlyExplicitAccess = true;
+    }
 
     // Sort by timestamp: force flat (ungrouped) results so ORDER BY applies cleanly.
     if (orderBy === 'newest' || orderBy === 'oldest') {
