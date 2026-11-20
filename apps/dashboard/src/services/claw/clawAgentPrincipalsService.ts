@@ -6,11 +6,15 @@ export interface ClawAgentPrincipal {
   clawAgentId: string;
   name: string;
   botUserId: string;
-  status: 'ACTIVE' | 'DISABLED' | string;
+  /** Free-text column (`status TEXT NOT NULL DEFAULT 'ACTIVE'`); the literals
+   *  are the known values, the `string & {}` keeps any other one assignable. */
+  status: 'ACTIVE' | 'DISABLED' | (string & {});
 }
 
 /** Claw agents added to the current workspace (Spaces decides; one request for the whole list). */
 export async function listWorkspaceClawAgents(): Promise<ClawAgentPrincipal[]> {
-  const res = await apiInstance.get<{ success: boolean; principals: ClawAgentPrincipal[] }>('/claw-agents/principals');
+  const res = await apiInstance.get<{ success: boolean; principals: ClawAgentPrincipal[] }>(
+    '/claw-agents/principals',
+  );
   return res.data.principals ?? [];
 }

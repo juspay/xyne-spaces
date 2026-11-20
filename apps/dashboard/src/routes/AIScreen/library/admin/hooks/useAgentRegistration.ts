@@ -60,10 +60,16 @@ export function useAgentRegistration(onChanged: () => void): AgentRegistration {
     staleTime: 30_000,
   });
   const registeredIds = useMemo(
-    () => new Set((workspaceAgents.data ?? []).filter(p => p.status === 'ACTIVE').map(p => p.clawAgentId)),
+    () =>
+      new Set(
+        (workspaceAgents.data ?? []).filter(p => p.status === 'ACTIVE').map(p => p.clawAgentId),
+      ),
     [workspaceAgents.data],
   );
-  const isRegistered = useCallback((agentId: string): boolean => registeredIds.has(agentId), [registeredIds]);
+  const isRegistered = useCallback(
+    (agentId: string): boolean => registeredIds.has(agentId),
+    [registeredIds],
+  );
 
   const start = useCallback(
     (agent: Agent): void => {
