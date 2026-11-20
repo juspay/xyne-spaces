@@ -15,7 +15,7 @@
 
 import { CONFIG } from "../../config.js";
 import { errMsg } from "../../lib/errors.js";
-import { callVespa, esc } from "../../mcp/servers/vespa-direct.js";
+import { callVespa, esc } from "xyne-claw-mcp-common/vespa-direct";
 import { createLogger, createTraceId } from "../../logger.js";
 
 const logger = createLogger("entity-channel-source", createTraceId());

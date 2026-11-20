@@ -20,7 +20,7 @@
 import JSZip from "jszip";
 import { errMsg } from "./errors.js";
 import type { ExperimentFinding, ExperimentRun } from "@prisma/client";
-import { interact, spacesFetchBuffer, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, spacesFetchBuffer, type SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("experiment-bundle");

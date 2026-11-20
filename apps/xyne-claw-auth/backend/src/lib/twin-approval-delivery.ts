@@ -1,6 +1,6 @@
 import { CONFIG } from "../config.js";
 import { errMsg } from "./errors.js";
-import { expandSpacesMentions, resolveUnboundMentions } from "./mention-transform.js";
+import { expandSpacesMentions, resolveUnboundMentions } from "xyne-claw-mcp-common/mention-transform";
 import { buildSpacesMentionLookupsDb } from "./mention-lookups.js";
 import { createLogger } from "../logger.js";
 import { resolveTwinReplyTarget } from "./twin-reply-target.js";

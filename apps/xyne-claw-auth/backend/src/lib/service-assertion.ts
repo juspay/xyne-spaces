@@ -20,7 +20,7 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("service-assertion");
 
-export type ServiceName = "xyne-spaces" | "xyne-claw-auth" | "xyne-claw";
+export type ServiceName = "xyne-spaces" | "xyne-claw-auth" | "xyne-claw" | "xyne-claw-mcp";
 export const SELF: ServiceName = "xyne-claw-auth";
 export const SERVICE_ASSERTION_HEADER = "x-service-assertion";
 export const SERVICE_ASSERTION_TYP = "xyne-service+jwt";
@@ -69,8 +69,16 @@ export function serviceSigningConfigured(): boolean {
   return signingKey() !== null;
 }
 
-/** One-shot assertion from claw-auth to `aud` for `method path` (query string ignored). */
-export function signServiceAssertion(aud: ServiceName, method: string, path: string): string {
+/**
+ * One-shot assertion from claw-auth to `aud` for `method path` (query string ignored).
+ * `extra` adds claims, e.g. `bh` (request body hash) for the MCP service.
+ */
+export function signServiceAssertion(
+  aud: ServiceName,
+  method: string,
+  path: string,
+  extra: Record<string, string> = {},
+): string {
   const key = signingKey();
   if (!key) throw new ServiceAuthNotConfiguredError();
   const now = Math.floor(Date.now() / 1000);
@@ -83,6 +91,7 @@ export function signServiceAssertion(aud: ServiceName, method: string, path: str
     jti: randomUUID(),
     htm: method.toUpperCase(),
     htu: path.split("?")[0],
+    ...extra,
   };
   const input = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
   return `${input}.${b64url(sign("sha256", Buffer.from(input), { key, dsaEncoding: "ieee-p1363" }))}`;
@@ -121,6 +130,7 @@ function issuerKey(iss: ServiceName, kid: string): KeyObject | null {
     const pem = CONFIG.clawRuntimePublicKeys[kid];
     return pem ? toPublicKey(pem) : null;
   }
+  if (iss === "xyne-claw-mcp") return null;
   // claw-auth calling itself (callbacks it hands to the runtime come back elsewhere).
   const own = signingKey();
   return own && kid === CONFIG.clawServiceKeyId ? createPublicKey(own) : null;

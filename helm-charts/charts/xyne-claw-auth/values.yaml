@@ -50,6 +50,7 @@ env:
   AUTH_SERVICE_URL: http://localhost:3003
   AUTH_SERVICE_INTERNAL_URL: http://xyne-claw-auth:3003
   XYNE_CLAW_URL: http://xyne-claw:8081
+  CLAW_MCP_URL: http://xyne-claw-mcp-service:3010
   SPACES_BACKEND_URL: http://xyne-backend
   XYNE_SPACES_CALLBACK_URL: http://xyne-backend/api/agent/result
   REDIS_HOST: redis

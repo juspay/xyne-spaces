@@ -19,7 +19,7 @@ import type { Citation } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
-import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
+import { spacesFetchBuffer, search as spacesVespaSearch } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { resolveAgentSpacesAuth, agentSpacesAuthContext } from "../surfaces/spaces/user-auth.js";
 import { createLogger } from "../logger.js";
 import { extractXlsxText, isXlsxFile } from "./kb-xlsx.js";

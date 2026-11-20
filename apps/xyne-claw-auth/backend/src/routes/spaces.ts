@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, spacesFetch, type SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { spacesAppFetchGet } from "../lib/spaces-api.js";
 import { getAgentBotAuth, type BotRef } from "../lib/spaces-bot.js";
 import { prisma } from "../db.js";

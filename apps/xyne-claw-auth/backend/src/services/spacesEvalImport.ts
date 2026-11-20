@@ -9,7 +9,7 @@
  * Output: a list of "threads", each a `{ externalId, title, kind, messages }`
  * where messages is `[{ id, role, text }]` — exactly what /eval-extract eats.
  */
-import { interact, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, type SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 
 export type TurnRole = "customer" | "human-agent" | "bot" | "other";
 

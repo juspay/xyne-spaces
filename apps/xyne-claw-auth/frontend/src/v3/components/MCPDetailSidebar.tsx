@@ -100,7 +100,6 @@ const SERVER_AUTHOR_MAP: Record<string, string> = {
   slack:          "Slack",
   figma:          "Figma",
   notion:         "Notion",
-  salesforce:     "Salesforce",
   stripe:         "Stripe",
   bitbucket:      "Atlassian",
   "xyne-spaces":  "Xyne",

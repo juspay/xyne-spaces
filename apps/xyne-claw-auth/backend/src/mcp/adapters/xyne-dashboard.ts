@@ -1,11 +1,5 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
-
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/xyne-dashboard-server.ts",
-);
 
 /**
  * Dedicated MCP server for the dashboard-ai agent's dynamic-dashboard tools.
@@ -34,8 +28,8 @@ export const xyneDashboardAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const url = String(credentials["url"] ?? "").replace(/\/+$/, "");
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["xyne-dashboard-server"],
       env: {
         XYNE_SPACES_URL: url,
         // Agent token (the run's agent acting for its user) is the only credential when present.

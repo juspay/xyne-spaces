@@ -21,7 +21,7 @@ export async function bootstrapCustomTools(): Promise<void> {
     const { getAllCustomTools } = await import("xyne-claw-shared");
     // google/microsoft are NOT in-process custom tools anymore — they run as
     // per-user OAuth MCP connectors (type "google"/"microsoft"; see
-    // mcp/servers/google-server.ts). Their tool defs still live in the shared
+    // apps/xyne-claw-mcp-service/src/servers/google-server.ts). Their tool defs still live in the shared
     // registry (the MCP server reuses them), but they must NOT be seeded into
     // the `tool` catalog as `custom:*` or the agent-config UI lists them under
     // "custom tools" instead of under connectors. tool-sync surfaces them as

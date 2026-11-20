@@ -16,7 +16,7 @@ export const neo4jAuraAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     return {
       cmd: "uvx",
-      args: ["mcp-neo4j-aura-manager@0.4.8"],
+      args: ["mcp-neo4j-aura-manager==0.4.8"],
       env: {
         NEO4J_AURA_CLIENT_ID: credentials["clientId"] as string,
         NEO4J_AURA_CLIENT_SECRET: credentials["clientSecret"] as string,

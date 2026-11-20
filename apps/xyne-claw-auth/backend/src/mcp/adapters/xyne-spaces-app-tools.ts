@@ -1,11 +1,5 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
-
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/xyne-spaces-app-tools-server.ts",
-);
 
 /**
  * Adapter for the Xyne Spaces App Tools MCP server.
@@ -33,8 +27,8 @@ export const xyneSpacesAppToolsAdapter: StdioMcpAdapter = {
     const workspaceId = (credentials["workspaceId"] as string | undefined) ?? "";
     const userId = (credentials["userId"] as string | undefined) ?? "";
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["xyne-spaces-app-tools-server"],
       env: {
         XYNE_SPACES_APP_TOKEN: appToken,
         XYNE_SPACES_URL: spacesUrl,

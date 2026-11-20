@@ -1,4 +1,4 @@
-import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, spacesFetch, type SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";

@@ -14,7 +14,7 @@ vi.mock("../config.js", () => ({ CONFIG: { spacesInternalUrl: "http://spaces.tes
 vi.mock("../logger.js", () => ({
   createLogger: () => ({ info: mocks.info, warn: mocks.warn, error: mocks.error }),
 }));
-vi.mock("./mention-transform.js", () => ({
+vi.mock("xyne-claw-mcp-common/mention-transform", () => ({
   resolveUnboundMentions: mocks.resolveUnboundMentions,
   expandSpacesMentions: mocks.expandSpacesMentions,
 }));

@@ -9,7 +9,7 @@ import { createLogger } from "../../logger.js";
 import { spacesDbAvailable } from "../../lib/spaces-db.js";
 import { renderAttachmentsToPdf } from "../../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../../lib/result-html.js";
-import { expandSpacesMentions, resolveUnboundMentions } from "../../lib/mention-transform.js";
+import { expandSpacesMentions, resolveUnboundMentions } from "xyne-claw-mcp-common/mention-transform";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../../lib/mention-lookups.js";
 
 const log = createLogger("spaces-attachments");

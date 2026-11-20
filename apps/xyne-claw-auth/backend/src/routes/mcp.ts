@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from "express";
+import { EXTRA_CONNECTORS } from "../mcp/extra-connectors.js";
 import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
 import { errMsg } from "../lib/errors.js";
 import { sdlcRunChannelId, withSdlcRunTools } from "../lib/sdlc-run-tools.js";
@@ -15,7 +16,7 @@ import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/g
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import { SDLC_TOOL_NAMES, type Citation } from "xyne-claw-shared";
-import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
+import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack-tools.js";
 import {
   channelAgentTools,
   findNotifyTarget,
@@ -1204,35 +1205,13 @@ async function buildMcpResolutionEntries(args: {
       log.info(`[mcp/tools] added virtual xyne-spaces-app-tools entry for userId=${userId}`);
     }
   }
-  // Virtual research-agent-mcp entry: global stdio proxy configured by env.
-  // No user connection row is needed; credentials-loader sources the API key
-  // from RESEARCH_AGENT_MCP_API_KEY for every agent/user.
-  const hasResearchAgentMcpEntry = entries.some((e) => e.serverType === "research-agent-mcp");
-  if (!hasResearchAgentMcpEntry && CONFIG.researchAgentMcpApiKey) {
-    const researchAgentMcpServer = await prisma.mcpServer.findUnique({
-      where: { type: "research-agent-mcp" },
-    });
-    if (researchAgentMcpServer) {
-      entries.push({
-        type: "global",
-        serverType: "research-agent-mcp",
-        serverName: researchAgentMcpServer.name,
-        enforcementType: "virtual",
-      });
-      log.info(`[mcp/tools] added virtual research-agent-mcp entry for userId=${userId}`);
-    }
-  }
-  // Virtual Heisenberg entry: the internal pipeline service has no user
-  // credentials. Its reviewed static adapter uses the deployment-wide
-  // HEISENBERG_BASE_URL (with a code default), so every agent can select it
-  // without creating a user_mcp_connections row.
-  const hasHeisenbergEntry = entries.some((e) => e.serverType === "heisenberg");
-  if (!hasHeisenbergEntry) {
-    const heisenbergServer = await prisma.mcpServer.findUnique({ where: { type: "heisenberg" } });
-    if (heisenbergServer?.enabled) {
-      entries.push({ type: "global", serverType: "heisenberg", serverName: heisenbergServer.name, enforcementType: "virtual" });
-      log.info(`[mcp/tools] added virtual heisenberg entry for userId=${userId}`);
-    }
+  // Add the global connectors from mcp/extra-connectors.ts that are enabled and available.
+  for (const global of EXTRA_CONNECTORS.globalConnectors) {
+    if (entries.some((e) => e.serverType === global.serverType) || !global.available()) continue;
+    const server = await prisma.mcpServer.findUnique({ where: { type: global.serverType } });
+    if (!server?.enabled) continue;
+    entries.push({ type: "global", serverType: global.serverType, serverName: server.name, enforcementType: "virtual" });
+    log.info(`[mcp/tools] added virtual ${global.serverType} entry for userId=${userId}`);
   }
 
   // Slack-surface runs do not require a separately configured MCP

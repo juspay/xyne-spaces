@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
-import { expandSpacesMentions } from "../lib/mention-transform.js";
+import { expandSpacesMentions } from "xyne-claw-mcp-common/mention-transform";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { agentRunRepository } from "../repositories/index.js";
 

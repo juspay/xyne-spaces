@@ -198,8 +198,6 @@ const MCP_TYPE_TO_CATEGORY: Readonly<Record<string, AgentCategoryId>> = {
   asana: "tools-communication",
   notion: "tools-communication",
   hubspot: "tools-communication",
-  intercom: "tools-communication",
-  salesforce: "tools-communication",
   calendly: "tools-communication",
 
   // Code — repos, CI
@@ -226,7 +224,6 @@ const MCP_TYPE_TO_CATEGORY: Readonly<Record<string, AgentCategoryId>> = {
   stripe: "other",
   shopify: "other",
   sequentialthinking: "other",
-  "juspay-internal-tools": "other",
   "xyne-spaces": "other",
 };
 

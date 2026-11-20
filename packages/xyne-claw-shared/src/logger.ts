@@ -138,10 +138,13 @@ const devFormat = winston.format.combine(
 
 const isDev = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 
+// LOG_STREAM=stderr writes every level to stderr instead of stdout.
+const consoleOptions = process.env.LOG_STREAM === "stderr" ? { stderrLevels: Object.keys(winston.config.npm.levels) } : {};
+
 export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
   format: isDev ? devFormat : productionFormat,
-  transports: [new winston.transports.Console()],
+  transports: [new winston.transports.Console(consoleOptions)],
   exitOnError: false,
   defaultMeta: {
     version: "1.0",

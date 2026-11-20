@@ -1,17 +1,7 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
 
-// In-tree TS server. The runner spawns this with
-//   node --import tsx/esm <SERVER_PATH>
-// because the parent backend itself runs under tsx/ESM (see main.ts and
-// runner.ts — the runner substitutes the bare 'tsx/esm' specifier with an
-// absolute file:// URL because the child is spawned with cwd=/tmp). SERVER_PATH
-// is resolved to an absolute path here so it survives that cwd=/tmp launch.
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/neo4j-http-server.ts",
-);
+// Runs as `xyne-mcp-server neo4j-http-server`.
 
 // Talks to Neo4j over the HTTP Query API v2 (443) instead of Bolt (7687).
 // Use this when the Bolt port is not reachable from the pod but the HTTP
@@ -69,8 +59,8 @@ export const neo4jHttpAdapter: StdioMcpAdapter = {
     // Default to read-only unless explicitly set to "false".
     const readOnly = String(credentials["readOnly"] ?? "true").trim().toLowerCase() !== "false";
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["neo4j-http-server"],
       env: {
         NEO4J_HTTP_URL: url,
         NEO4J_DATABASE: database,

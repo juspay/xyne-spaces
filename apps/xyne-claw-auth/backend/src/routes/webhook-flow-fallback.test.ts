@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFlowSchemaRejection, SpacesApiError } from "../mcp/servers/xyne-spaces-client.js";
+import { isFlowSchemaRejection, SpacesApiError } from "xyne-claw-mcp-common/xyne-spaces-client";
 
 /**
  * The ticket approval card uses the rich `ticket` FlowUI component, which older

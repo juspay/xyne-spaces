@@ -1,19 +1,7 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
 
-// In-tree TS server (no external npx package). The runner spawns this with
-//   node --import tsx/esm <SERVER_PATH>
-// because the parent backend itself runs under tsx/ESM.
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/reddit-server.ts",
-);
-
-// Reddit MCP server — read-only, UNAUTHENTICATED (public .json endpoints).
-// No Reddit account / app / client id required. Exposes search_reddit and
-// get_subreddit_posts only. Note: Reddit throttles anonymous requests from
-// server IPs (429/403); for reliable access switch to an approved OAuth app.
+// Runs as `xyne-mcp-server reddit-server`.
 export const redditAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "reddit",
@@ -28,8 +16,8 @@ export const redditAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const userAgent = (credentials["userAgent"] as string | undefined) ?? "";
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["reddit-server"],
       env: {
         ...(userAgent ? { REDDIT_USER_AGENT: userAgent } : {}),
       },

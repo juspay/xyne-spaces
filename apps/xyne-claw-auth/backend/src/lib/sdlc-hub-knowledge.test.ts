@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../config.js", () => ({ CONFIG: {} }));
 vi.mock("../db.js", () => ({ prisma: {} }));
 vi.mock("./spaces-db.js", () => ({}));
-vi.mock("../mcp/servers/xyne-spaces-client.js", () => ({}));
+vi.mock("xyne-claw-mcp-common/xyne-spaces-client", () => ({}));
 
 const { hubRunSkillWhere, renderSdlcHubKnowledge } = await import("./sdlc-repository-context.js");
 

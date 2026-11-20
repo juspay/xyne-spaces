@@ -6,7 +6,6 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     python3 \
     curl \
-    && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
     && rm -rf /var/lib/apt/lists/*
 
 # pnpm workspace build (same pattern as apps/xyne-claw/Dockerfile): the build
@@ -23,6 +22,7 @@ COPY packages/icons/package.json              packages/icons/
 COPY packages/storage/package.json            packages/storage/
 COPY packages/shared/package.json             packages/shared/
 COPY packages/xyne-claw-shared/package.json   packages/xyne-claw-shared/
+COPY packages/xyne-claw-mcp-common/package.json packages/xyne-claw-mcp-common/
 COPY apps/xyne-claw-auth/backend/package.json apps/xyne-claw-auth/backend/
 
 # `...` pulls the workspace deps in automatically. --ignore-scripts: only the
@@ -35,6 +35,7 @@ COPY packages/icons            packages/icons
 COPY packages/storage          packages/storage
 COPY packages/shared           packages/shared
 COPY packages/xyne-claw-shared packages/xyne-claw-shared
+COPY packages/xyne-claw-mcp-common packages/xyne-claw-mcp-common
 COPY apps/xyne-claw-auth/backend/prisma        apps/xyne-claw-auth/backend/prisma
 COPY apps/xyne-claw-auth/backend/tsconfig.json apps/xyne-claw-auth/backend/
 COPY apps/xyne-claw-auth/backend/src           apps/xyne-claw-auth/backend/src
@@ -64,17 +65,6 @@ RUN groupadd --system --gid 1001 nodejs && \
 COPY --from=builder --chown=clawauth:nodejs /repo /repo
 
 USER clawauth
-
-# Isolated MCP server store (see src/mcp/provision.ts). Pinned explicitly so the
-# build-time prewarm below and the runtime provisioner agree on one path,
-# independent of $HOME. clawauth owns its home, so this is writable at runtime.
-ENV MCP_STORE_ROOT=/home/clawauth/.mcp-store
-
-# Prewarm the store: bake the built-in npx MCP servers into an immutable image
-# layer so they launch as `node <entrypoint>` with no request-time npx install
-# and no shared-cache corruption. Best-effort — a flaky registry never fails the
-# build; the runtime provisioner installs on demand and self-heals.
-RUN node --import tsx/esm scripts/prewarm-mcp.ts || true
 
 EXPOSE 3003
 

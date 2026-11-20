@@ -1,11 +1,5 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
-
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/xyne-spaces-server.ts",
-);
 
 export const xyneSpacesAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -37,8 +31,8 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
     // user. When present it is the child's only Spaces credential.
     const agentToken = (credentials["agentToken"] as string | undefined) ?? "";
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["xyne-spaces-server"],
       env: {
         XYNE_SPACES_URL: url,
         XYNE_SPACES_TOKEN: agentToken ? "" : token,

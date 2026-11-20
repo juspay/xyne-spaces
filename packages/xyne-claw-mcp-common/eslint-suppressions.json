@@ -1,0 +1,17 @@
+{
+  "src/vespa-direct.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/vespa-schema-profiles.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/xyne-spaces-client.ts": {
+    "no-restricted-globals": {
+      "count": 5
+    }
+  }
+}

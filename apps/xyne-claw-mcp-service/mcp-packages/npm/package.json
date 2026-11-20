@@ -1,0 +1,22 @@
+{
+  "name": "xyne-claw-mcp-npm-servers",
+  "version": "0.0.0",
+  "private": true,
+  "description": "npm MCP servers installed in the xyne-claw-mcp-service image",
+  "dependencies": {
+    "@ergut/mcp-bigquery-server": "1.0.4",
+    "@hubspot/mcp-server": "0.4.0",
+    "@mercuryml/mcp-mixpanel": "1.0.9",
+    "@modelcontextprotocol/server-sequential-thinking": "2025.12.18",
+    "@mondaydotcomorg/monday-api-mcp": "3.3.1",
+    "@nexus2520/bitbucket-mcp-server": "2.2.0",
+    "@notionhq/notion-mcp-server": "2.2.1",
+    "@roychri/mcp-server-asana": "1.8.0",
+    "@scofieldfree/excalidraw-mcp": "0.1.1",
+    "@sentry/mcp-server": "0.36.0",
+    "amplitude-mcp-server": "1.0.2",
+    "figma-developer-mcp": "0.13.2",
+    "mongodb-mcp-server": "1.12.0",
+    "shopify-mcp": "1.0.8"
+  }
+}

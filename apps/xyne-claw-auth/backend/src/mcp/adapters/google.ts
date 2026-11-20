@@ -1,12 +1,6 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import { getAllCustomTools } from "xyne-claw-shared";
 import type { StdioMcpAdapter } from "../types.js";
-
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/google-server.ts",
-);
 
 // Write tools are derived from the shared defs' `isWriteTool` flag, so the HITL
 // approval gate stays in lockstep with the tool implementations — no hand-kept
@@ -28,8 +22,8 @@ export const googleAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const token = credentials["accessToken"] as string;
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["google-server"],
       env: {
         GOOGLE_ACCESS_TOKEN: token,
       },

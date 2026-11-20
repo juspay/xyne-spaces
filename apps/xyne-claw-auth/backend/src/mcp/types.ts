@@ -79,6 +79,12 @@ export interface StdioLaunchConfig {
   readonly cmd: string;
   readonly args: readonly string[];
   readonly env: Record<string, string>;
+  /**
+   * Files the server needs on disk (name → content), e.g. a key file. Written
+   * 0600 into a per-session temp dir where the server runs; `{{file:<name>}}`
+   * in args or env is replaced with the file's path. Removed with the session.
+   */
+  readonly files?: Record<string, string>;
 }
 
 export interface HttpLaunchConfig {
@@ -105,7 +111,12 @@ export interface StdioMcpAdapter {
    */
   readonly staticTools?: readonly string[];
   readonly forwardFiles?: boolean;
-  buildCommand(credentials: Record<string, unknown>): { cmd: string; args: string[]; env: Record<string, string> };
+  buildCommand(credentials: Record<string, unknown>): {
+    cmd: string;
+    args: string[];
+    env: Record<string, string>;
+    files?: Record<string, string>;
+  };
 }
 
 /**

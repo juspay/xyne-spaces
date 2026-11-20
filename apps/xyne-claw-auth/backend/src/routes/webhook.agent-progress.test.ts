@@ -109,7 +109,6 @@ describe("notice copy", () => {
    * feature rather than tidy a string.
    */
   const EMOJI_IS_DATA = [
-    "mcp/servers/xyne-spaces-tools.ts", // renders users' reactions back as text
     "surfaces/messaging/ack.ts",        // the ack reaction chosen per message
     "surfaces/messaging/const.ts",      // the default ack reaction
   ];

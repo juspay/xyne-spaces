@@ -1,33 +1,4 @@
-import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import type { StdioMcpAdapter } from "../types.js";
-
-// Track temp dirs so we can best-effort clean them up on process shutdown.
-// Each entry is a directory under os.tmpdir() that contains a service-account
-// key written for a spawned BigQuery MCP server.
-const TEMP_KEY_DIRS = new Set<string>();
-let cleanupHandlersRegistered = false;
-
-function registerCleanupHandlers(): void {
-  if (cleanupHandlersRegistered) return;
-  cleanupHandlersRegistered = true;
-
-  const cleanupAll = (): void => {
-    for (const dir of TEMP_KEY_DIRS) {
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best-effort
-      }
-    }
-    TEMP_KEY_DIRS.clear();
-  };
-
-  process.once("exit", cleanupAll);
-  process.once("SIGINT", () => { cleanupAll(); process.exit(130); });
-  process.once("SIGTERM", () => { cleanupAll(); process.exit(143); });
-}
 
 function validateServiceAccountJson(raw: string): Record<string, unknown> {
   let parsed: unknown;
@@ -71,20 +42,10 @@ export const bigqueryAdapter: StdioMcpAdapter = {
 
     validateServiceAccountJson(keyJson);
 
-    // The upstream MCP server (@ergut/mcp-bigquery-server) only accepts a file
-    // path via --key-file, so the pasted JSON has to be materialised on disk
-    // before spawn. We write it with mode 0600 to a fresh temp dir and rely on
-    // the process-shutdown handlers below for best-effort cleanup. The OS will
-    // also reclaim it when /tmp is purged.
-    registerCleanupHandlers();
-    const tmpDir = mkdtempSync(join(tmpdir(), "bq-mcp-"));
-    const keyPath = join(tmpDir, "sa-key.json");
-    writeFileSync(keyPath, keyJson, { mode: 0o600 });
-    TEMP_KEY_DIRS.add(tmpDir);
-
-    const args = ["-y", "@ergut/mcp-bigquery-server@1.0.4", "--project-id", projectId, "--key-file", keyPath];
+    // The key is passed as a launch file; --key-file gets its path.
+    const args = ["-y", "@ergut/mcp-bigquery-server@1.0.4", "--project-id", projectId, "--key-file", "{{file:sa-key.json}}"];
     if (location) args.push("--location", location);
 
-    return { cmd: "npx", args, env: {} };
+    return { cmd: "npx", args, env: {}, files: { "sa-key.json": keyJson } };
   },
 };

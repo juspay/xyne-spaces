@@ -7,7 +7,7 @@
  * the vocabulary those renderers share: how a timestamp reads, how a user is
  * labelled, how a page announces that more results exist.
  *
- * Ported from `apps/xyne-claw-auth/backend/src/mcp/servers/xyne-spaces-tools.ts`,
+ * Ported from `packages/xyne-claw-mcp-common/src/xyne-spaces-tools.ts`,
  * which is the production-tested version of these conventions.
  */
 

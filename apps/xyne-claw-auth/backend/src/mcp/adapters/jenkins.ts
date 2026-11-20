@@ -1,11 +1,5 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
-
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/jenkins-server.ts",
-);
 
 /**
  * Jenkins CI connector. Replaces the former built-in `custom:jenkins` tool
@@ -47,8 +41,8 @@ export const jenkinsAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const baseUrl = String(credentials["baseUrl"] ?? "").replace(/\/+$/, "");
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["jenkins-server"],
       env: {
         JENKINS_BASE_URL: baseUrl,
         JENKINS_JOB_PATH: String(credentials["jobPath"] ?? ""),

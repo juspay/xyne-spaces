@@ -302,29 +302,6 @@ const SERVERS = [
     writeToolPolicy: { mode: "allowlist", tools: ["create_cluster", "terminate_cluster", "start_cluster", "run_job", "create_job", "create_notebook", "upload_file_to_volume", "upload_file_to_dbfs"] },
   },
   {
-    type: "slack",
-    name: "Slack",
-    url: "",
-    description: "Slack workspace — search messages, list channels, read conversations, post messages",
-    transport: "stdio",
-    credentialForm: {
-      fields: [
-        { name: "botToken", label: "Slack Bot Token", type: "password", placeholder: "xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx" },
-        { name: "teamId", label: "Slack Team ID", type: "text", placeholder: "T01234567" },
-      ],
-    },
-    launchConfigTemplate: {
-      cmd: "npx",
-      args: ["-y", "@modelcontextprotocol/server-slack"],
-      env: {
-        SLACK_BOT_TOKEN: "{{botToken}}",
-        SLACK_TEAM_ID: "{{teamId}}",
-      },
-    },
-    healthcheckSpec: { name: "slack_list_channels", params: {} },
-    writeToolPolicy: { mode: "allowlist", tools: ["slack_post_message", "slack_reply_to_thread", "slack_add_reaction"] },
-  },
-  {
     type: "shopify",
     name: "Shopify",
     url: "",
@@ -343,25 +320,6 @@ const SERVERS = [
     },
     healthcheckSpec: { name: "get-products", params: { limit: 1 } },
     writeToolPolicy: { mode: "allowlist", tools: ["create-product", "update-product", "delete-product", "manage-product-variants", "delete-product-variants", "manage-product-options", "create-order", "update-order", "cancel-order", "create-customer", "update-customer", "create-discount", "update-discount"] },
-  },
-  {
-    type: "intercom",
-    name: "Intercom",
-    url: "",
-    description: "Intercom — search contacts, read conversations, list companies via official MCP",
-    transport: "stdio",
-    credentialForm: {
-      fields: [
-        { name: "accessToken", label: "Intercom Access Token", type: "password", placeholder: "your-intercom-access-token" },
-      ],
-    },
-    launchConfigTemplate: {
-      cmd: "npx",
-      args: ["-y", "mcp-remote", "https://mcp.intercom.com/mcp", "--header", "Authorization:Bearer {{accessToken}}"],
-      env: {},
-    },
-    healthcheckSpec: { name: "ic_list_conversations", params: {} },
-    writeToolPolicy: { mode: "allowlist", tools: [] },
   },
   {
     type: "asana",
@@ -383,48 +341,6 @@ const SERVERS = [
     },
     healthcheckSpec: { name: "asana_list_workspaces", params: {} },
     writeToolPolicy: { mode: "allowlist", tools: ["asana_create_task", "asana_update_task", "asana_delete_task", "asana_create_project", "asana_update_project", "asana_delete_project", "asana_add_task_to_project", "asana_remove_task_from_project", "asana_create_section", "asana_update_section", "asana_delete_section", "asana_add_task_comment"] },
-  },
-  {
-    type: "salesforce",
-    name: "Salesforce",
-    url: "",
-    description: "Salesforce CRM — SOQL, objects, DML, metadata and Apex via acquis-salesforce-mcp (username + password + security token)",
-    transport: "stdio",
-    credentialForm: {
-      fields: [
-        { name: "username", label: "Salesforce Username", type: "text", placeholder: "user@yourcompany.com" },
-        { name: "password", label: "Salesforce Password", type: "password", placeholder: "your-password" },
-        { name: "securityToken", label: "Security Token", type: "password", placeholder: "your-security-token" },
-        { name: "instanceUrl", label: "Instance URL", type: "text", placeholder: "https://login.salesforce.com", optional: true },
-      ],
-    },
-    // Launch is implemented in static-adapters salesforceAdapter (default instance URL when omitted).
-    launchConfigTemplate: {
-      cmd: "npx",
-      args: ["-y", "@acquis-consulting/acquis-salesforce-mcp"],
-      env: {
-        SALESFORCE_CONNECTION_TYPE: "username_password",
-        SALESFORCE_USERNAME: "{{username}}",
-        SALESFORCE_PASSWORD: "{{password}}",
-        SALESFORCE_TOKEN: "{{securityToken}}",
-        SALESFORCE_INSTANCE_URL: "{{instanceUrl}}",
-      },
-    },
-    healthcheckSpec: { name: "salesforce_search_objects", params: { searchPattern: "Account" } },
-    writeToolPolicy: {
-      mode: "allowlist",
-      tools: [
-        "salesforce_dml",
-        "salesforce_manage_object",
-        "salesforce_manage_field",
-        "salesforce_manage_field_permissions",
-        "salesforce_write_apex_class",
-        "salesforce_write_apex_trigger",
-        "salesforce_execute_anonymous_apex",
-        "salesforce_write_metadata",
-        "salesforce_metadata_import",
-      ],
-    },
   },
   {
     type: "rapidapi-linkedin",
@@ -460,7 +376,7 @@ const SERVERS = [
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
   {
-    // In-tree stdio server (src/mcp/servers/twitter-server.ts) — no
+    // In-tree stdio server (apps/xyne-claw-mcp-service/src/servers/twitter-server.ts) — no
     // launchConfigTemplate: stdio types resolve via the code-reviewed static
     // adapter, the DB launch config is inert. Read-only.
     type: "twitter",
@@ -480,7 +396,7 @@ const SERVERS = [
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
   {
-    // In-tree stdio server (src/mcp/servers/reddit-server.ts). Read-only;
+    // In-tree stdio server (apps/xyne-claw-mcp-service/src/servers/reddit-server.ts). Read-only;
     // app-only OAuth (client_credentials), no Reddit username/password.
     type: "reddit",
     name: "Reddit",
@@ -498,7 +414,7 @@ const SERVERS = [
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
   {
-    // In-tree stdio server (src/mcp/servers/x-news-server.ts). Reads public X
+    // In-tree stdio server (apps/xyne-claw-mcp-service/src/servers/x-news-server.ts). Reads public X
     // posts via the TwitterAPI.io third-party data API — no X account / app,
     // just a TwitterAPI.io key. Read-only.
     type: "x-news",
@@ -513,17 +429,6 @@ const SERVERS = [
     },
     healthcheckSpec: { name: "get_user_tweets", params: { username: "OpenAI", count: 1 } },
     writeToolPolicy: { mode: "allowlist", tools: [] },
-  },
-  {
-    type: "heisenberg",
-    name: "Heisenberg Pipeline",
-    // stdio transport — the endpoint comes from HEISENBERG_BASE_URL at runtime.
-    url: "",
-    description: "Global MCP proxy for Heisenberg pipeline runs, status, coverage, test failures, and logs.",
-    transport: "stdio",
-    credentialForm: { fields: [] },
-    healthcheckSpec: { name: "heisenberg_health", params: {} },
-    writeToolPolicy: { mode: "allowlist", tools: ["heisenberg_start_pipeline", "heisenberg_index_logs"] },
   },
 ] as const;
 

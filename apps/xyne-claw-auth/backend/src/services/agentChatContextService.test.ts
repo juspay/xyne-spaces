@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const interact = vi.fn();
-vi.mock("../mcp/servers/xyne-spaces-client.js", () => ({
+vi.mock("xyne-claw-mcp-common/xyne-spaces-client", () => ({
   interact: (...args: unknown[]) => interact(...args),
   spacesFetch: vi.fn(),
   spacesFetchText: vi.fn(),

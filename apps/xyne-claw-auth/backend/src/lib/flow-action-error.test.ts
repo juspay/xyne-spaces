@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SpacesApiError } from "../mcp/servers/xyne-spaces-client.js";
+import { SpacesApiError } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { classifyToolError, extractErrorStatus, extractUpstreamMessage, flowActionError } from "./flow-action-error.js";
 
 describe("classifyToolError (XYNE-66467)", () => {

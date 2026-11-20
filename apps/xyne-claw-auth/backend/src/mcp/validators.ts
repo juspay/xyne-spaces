@@ -1,7 +1,7 @@
 import { createLogger } from "../logger.js";
 import { errMsg } from "../lib/errors.js";
-import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
-import { MAX_BULK_TICKETS } from "./servers/bulk-tickets.js";
+import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
+import { MAX_BULK_TICKETS } from "xyne-claw-mcp-common/bulk-tickets";
 import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 import { spacesConversationExists } from "../lib/spaces-post-target.js";
 const log = createLogger("validators");

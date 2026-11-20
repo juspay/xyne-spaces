@@ -20,6 +20,7 @@
  * Every failure is `{ success:false, code, error }` so Spaces can map `code`
  * onto its SDK error envelope without parsing prose.
  */
+import { EXTRA_CONNECTORS } from "../mcp/extra-connectors.js";
 import { createHash } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
@@ -44,14 +45,13 @@ const log = createLogger("app-connectors-internal");
  *    session — exposing them would give an app a second, ungated route into
  *    Spaces that bypasses the /api/sdk gateway;
  *  - xyne-spaces-app-tools: an agent's bot app token;
- *  - heisenberg / research-agent-mcp: claw-auth's own environment keys.
+ *  - the platform-internal types in mcp/extra-connectors.ts.
  */
 const PLATFORM_INTERNAL_TYPES = new Set<string>([
   "xyne-spaces",
   "xyne-dashboard",
   "xyne-spaces-app-tools",
-  "heisenberg",
-  "research-agent-mcp",
+  ...EXTRA_CONNECTORS.platformInternalTypes,
 ]);
 
 const serverType = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);

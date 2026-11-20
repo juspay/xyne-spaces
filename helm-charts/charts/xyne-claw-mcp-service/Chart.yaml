@@ -1,0 +1,17 @@
+apiVersion: v2
+name: xyne-claw-mcp-service
+description: Xyne Claw MCP service - runs MCP servers for claw-auth over signed HTTP
+type: application
+version: 0.1.0
+appVersion: "1.349.0"
+keywords:
+  - xyne
+  - claw
+  - mcp
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces/tree/main/apps/xyne-claw-mcp-service
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common

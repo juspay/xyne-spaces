@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const interactMock = vi.hoisted(() => vi.fn());
-vi.mock("../mcp/servers/xyne-spaces-client.js", () => ({ interact: interactMock }));
+vi.mock("xyne-claw-mcp-common/xyne-spaces-client", () => ({ interact: interactMock }));
 
 const { boundedInteract, pageBounded, UnboundedQueryError, SPACES_MAX_TAKE } = await import("./spaces-read.js");
 

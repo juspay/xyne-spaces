@@ -17,7 +17,7 @@ import { DIGITAL_TWIN_BANK_ID, getMemoryProvider } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
-import { interact } from "../mcp/servers/xyne-spaces-client.js";
+import { interact } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
 import { recordGateEvent } from "./digitalTwinPipelineEvents.js";

@@ -5,9 +5,9 @@
  * shows up in the eval UI's "Rank profile" dropdown immediately.
  */
 import { Router, type Request, type Response } from "express";
-import { resolveArea } from "../../mcp/servers/vespa-search-areas.js";
-import { TYPE_TO_AREA, ALL_AREAS } from "../../mcp/servers/search-eval-vespa.js";
-import { getSchemaRankProfiles, getCommonRankProfiles } from "../../mcp/servers/vespa-schema-profiles.js";
+import { resolveArea } from "xyne-claw-mcp-common/vespa-search-areas";
+import { TYPE_TO_AREA, ALL_AREAS } from "xyne-claw-mcp-common/search-eval-vespa";
+import { getSchemaRankProfiles, getCommonRankProfiles } from "xyne-claw-mcp-common/vespa-schema-profiles";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("search-evals/rank-profiles");

@@ -4,7 +4,7 @@
  */
 
 import { CONFIG } from "../config.js";
-import { SpacesApiError } from "../mcp/servers/xyne-spaces-client.js";
+import { SpacesApiError } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { botBearer, spacesBotUrl, type BotRef } from "./spaces-bot.js";
 
 // Re-export so callers of these helpers can branch on `err.status` without

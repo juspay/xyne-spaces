@@ -13,6 +13,7 @@ TRANSCRIPTION_AGENT_IMAGE_NAME ?= xyne-spaces-transcription-agent
 CLAW_IMAGE_NAME ?= xyne-spaces-claw
 CLAW_AUTH_BACKEND_IMAGE_NAME ?= xyne-spaces-claw-auth-backend
 CLAW_AUTH_FRONTEND_IMAGE_NAME ?= xyne-spaces-claw-auth-frontend
+CLAW_MCP_SERVICE_IMAGE_NAME ?= xyne-spaces-claw-mcp-service
 SOURCE_COMMIT := $(or $(SOURCE_COMMIT),$(shell git rev-parse HEAD))
 SOURCE_SHORT_COMMIT := $(or $(SOURCE_SHORT_COMMIT),$(shell git rev-parse --short=10 HEAD))
 
@@ -210,6 +211,21 @@ clean-claw-auth-frontend:
 	docker rmi $(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 	docker rmi $(NS)/$(CLAW_AUTH_FRONTEND_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
 
+# Claw MCP service targets
+build-claw-mcp-service:
+	$(info Building $(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) / git-head: $(SOURCE_COMMIT))
+	$(info Local image: $(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f apps/xyne-claw-mcp-service/Dockerfile -t $(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --load .
+
+push-claw-mcp-service:
+	$(info Pushing to registry: $(NS)/$(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+	docker buildx build -f apps/xyne-claw-mcp-service/Dockerfile -t $(NS)/$(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) --push .
+	$(info Successfully pushed: $(NS)/$(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT))
+
+clean-claw-mcp-service:
+	docker rmi $(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+	docker rmi $(NS)/$(CLAW_MCP_SERVICE_IMAGE_NAME):$(SOURCE_SHORT_COMMIT) || true
+
 # push-built-* : push an image that the matching build-* target already built into this
 # machine's Docker daemon (retag that image to the registry ref and push it). Used by CI
 # so the EXACT image Trivy scanned is what gets pushed - no rebuild, no registry round-trip.
@@ -257,11 +273,11 @@ run-pr-police:
 		sh -c 'cat > /tmp/gcp-creds.json && export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-creds.json && pnpm run yama review -- --workspace XYNE --repository xyne-spaces --branch $(BRANCH_NAME)'
 
 # Combined claw targets
-build-claw-all: build-claw build-claw-auth-backend build-claw-auth-frontend
+build-claw-all: build-claw build-claw-auth-backend build-claw-auth-frontend build-claw-mcp-service
 
-push-claw-all: push-claw push-claw-auth-backend push-claw-auth-frontend
+push-claw-all: push-claw push-claw-auth-backend push-claw-auth-frontend push-claw-mcp-service
 
-clean-claw-all: clean-claw clean-claw-auth-backend clean-claw-auth-frontend
+clean-claw-all: clean-claw clean-claw-auth-backend clean-claw-auth-frontend clean-claw-mcp-service
 
 # Combined targets
 build-all: build-backend build-runner build-dashboard build-external-dashboard build-lighton-ocr-wrapper build-tei-batch-proxy build-transcription-agent build-claw-all
@@ -283,4 +299,4 @@ configure-docker:
 revoke-sa:
 	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
 
-.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-tei-batch-proxy push-tei-batch-proxy clean-tei-batch-proxy build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
+.PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-tei-batch-proxy push-tei-batch-proxy clean-tei-batch-proxy build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-mcp-service push-claw-mcp-service clean-claw-mcp-service build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa

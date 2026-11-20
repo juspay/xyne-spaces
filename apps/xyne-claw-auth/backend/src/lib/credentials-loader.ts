@@ -30,6 +30,7 @@
  * a new token, and these are typically API keys / static secrets anyway.
  */
 
+import { EXTRA_CONNECTORS } from "../mcp/extra-connectors.js";
 import { prisma } from "../db.js";
 import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
@@ -462,36 +463,15 @@ export async function loadEffectiveCredentials(
     return null;
   }
 
-  // heisenberg: shared/global stdio proxy with no per-user secret. The base
-  // URL comes from deployment config (HEISENBERG_BASE_URL or a code default).
-  if (serverType === "heisenberg") {
-    log.info(`[creds-loader] heisenberg userId=${userId} → global env/default URL`);
-    return {
-      source: "global",
-      connectionId: "env:heisenberg",
-      credentials: { baseUrl: CONFIG.heisenbergBaseUrl },
-      isUserOwned: false,
-    };
-  }
-
-  // research-agent-mcp: shared/global stdio proxy configured entirely by
-  // environment. There is no user OAuth/login flow and no per-user secret; the
-  // spawned MCP child receives RESEARCH_AGENT_MCP_API_KEY from CONFIG.
-  if (serverType === "research-agent-mcp") {
-    if (!CONFIG.researchAgentMcpApiKey) {
-      log.info(`[creds-loader] research-agent-mcp userId=${userId} → RESEARCH_AGENT_MCP_API_KEY not set`);
+  // Connectors whose credentials come from deployment env (mcp/extra-connectors.ts).
+  const envCreds = EXTRA_CONNECTORS.envCredentials(serverType);
+  if (envCreds !== undefined) {
+    if (!envCreds) {
+      log.info(`[creds-loader] ${serverType} userId=${userId} → not configured in this deployment`);
       return null;
     }
-    log.info(`[creds-loader] research-agent-mcp userId=${userId} → env hit`);
-    return {
-      source: "global",
-      connectionId: "env:research-agent-mcp",
-      credentials: {
-        apiKey: CONFIG.researchAgentMcpApiKey,
-        serverUrl: CONFIG.researchAgentBaseUrl,
-      },
-      isUserOwned: false,
-    };
+    log.info(`[creds-loader] ${serverType} userId=${userId} → global env`);
+    return { source: "global", connectionId: envCreds.connectionId, credentials: envCreds.credentials, isUserOwned: false };
   }
 
   const userConn = await prisma.userMcpConnection.findFirst({

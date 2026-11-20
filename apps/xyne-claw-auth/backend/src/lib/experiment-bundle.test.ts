@@ -3,7 +3,7 @@ import JSZip from "jszip";
 
 const interact = vi.fn();
 const spacesFetchBuffer = vi.fn();
-vi.mock("../mcp/servers/xyne-spaces-client.js", () => ({
+vi.mock("xyne-claw-mcp-common/xyne-spaces-client", () => ({
   interact: (...a: unknown[]) => interact(...a),
   spacesFetchBuffer: (...a: unknown[]) => spacesFetchBuffer(...a),
 }));

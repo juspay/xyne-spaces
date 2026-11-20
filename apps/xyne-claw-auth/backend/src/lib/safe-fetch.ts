@@ -337,6 +337,7 @@ export function configOrigins(): string[] {
     CONFIG.xyneClawUrl,
     CONFIG.spacesInternalUrl,
     CONFIG.spacesBackendUrl,
+    CONFIG.clawMcpUrl,
     ...extra,
   ]
     .map(toOrigin)

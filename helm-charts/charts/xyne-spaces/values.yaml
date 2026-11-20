@@ -61,6 +61,9 @@ xyne-claw-auth:
 xyne-claw-auth-frontend:
   enabled: false
 
+xyne-claw-mcp-service:
+  enabled: false
+
 xyne-transcription-agent:
   enabled: false
 

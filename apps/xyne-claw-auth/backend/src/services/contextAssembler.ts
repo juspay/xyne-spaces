@@ -29,11 +29,11 @@
 
 import type { UserMemoryChannelType, UserMemoryRecord, UserMemoryThreadContext } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
-import { interact } from "../mcp/servers/xyne-spaces-client.js";
+import { interact } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
-import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
-import { buildYqlFromParams } from "../mcp/servers/vespa-search-areas.js";
-import { queryDirect } from "../mcp/servers/vespa-direct.js";
+import type { SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
+import { buildYqlFromParams } from "xyne-claw-mcp-common/vespa-search-areas";
+import { queryDirect } from "xyne-claw-mcp-common/vespa-direct";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { CONFIG } from "../config.js";

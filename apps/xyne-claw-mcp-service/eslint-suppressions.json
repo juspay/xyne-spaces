@@ -1,0 +1,42 @@
+{
+  "src/servers/jenkins-tools.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/servers/linkedin-rapidapi-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/servers/neo4j-http-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/servers/reddit-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/servers/twitter-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/servers/x-news-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/servers/xyne-spaces-app-tools-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/servers/xyne-spaces-tools.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  }
+}

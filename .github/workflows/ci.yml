@@ -226,11 +226,14 @@ jobs:
             apps/xyne-claw-auth/
             packages/xyne-claw-shared/
             packages/xyne-claw-mcp/
+            packages/xyne-claw-mcp-common/
+            apps/xyne-claw-mcp-service/
             packages/xyne-claw-pi-plugin/
             claw-deployments/
             helm-charts/charts/xyne-claw/
             helm-charts/charts/xyne-claw-auth/
             helm-charts/charts/xyne-claw-auth-frontend/
+            helm-charts/charts/xyne-claw-mcp-service/
 
       - uses: actions/setup-node@v5
         if: steps.affected.outputs.run == 'true'

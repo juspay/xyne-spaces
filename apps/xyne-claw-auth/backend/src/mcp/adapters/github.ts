@@ -18,12 +18,9 @@ export const githubAdapter: StdioMcpAdapter = {
     const token = credentials["token"] as string;
 
     return {
-      cmd: "npx",
-      args: ["-y", "@modelcontextprotocol/server-github@2025.4.8"],
-      env: {
-        GITHUB_TOKEN: token,
-        GITHUB_PERSONAL_ACCESS_TOKEN: token,
-      },
+      cmd: "github-mcp-server",
+      args: ["stdio"],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: token },
     };
   },
 };

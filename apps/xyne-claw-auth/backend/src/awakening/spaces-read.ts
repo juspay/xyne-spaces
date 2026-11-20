@@ -13,7 +13,7 @@
  * becoming a table scan in prod.
  */
 
-import { interact, type QueryAST, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, type QueryAST, type SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("awakening-spaces-read");

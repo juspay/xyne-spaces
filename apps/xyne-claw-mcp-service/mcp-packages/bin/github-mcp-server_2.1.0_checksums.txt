@@ -1,0 +1,2 @@
+34d5a268f65cd1e9b7107fa976f3571ccd575f9df00cec489fec79a039923a22  github-mcp-server_Linux_arm64.tar.gz
+a442f9db287cea01008bcb55fe6bc0292270301046c3edbd1a8b22d6e4157b2b  github-mcp-server_Linux_x86_64.tar.gz
