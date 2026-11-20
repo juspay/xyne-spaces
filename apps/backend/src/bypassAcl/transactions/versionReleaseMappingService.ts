@@ -1,6 +1,7 @@
 import { transaction } from '../base';
 import { StaleVersionReleaseMapping, prisma } from '@/services/release/versionReleaseMappingService';
 import { FormEntityType } from '@xyne/shared';
+import { deleteFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 
 
 export function cleanupStaleVersionReleaseMappingsTx(staleMappings: StaleVersionReleaseMapping[]) {
@@ -35,15 +36,13 @@ export function cleanupStaleVersionReleaseMappingsTx(staleMappings: StaleVersion
       // FormEntityValues has no foreign key to ReleaseChangeType. Delete the
       // value bags first so changing a version does not leave orphaned
       // migration or environment data visible on the old release.
-      const formValuesResult = await tx.formEntityValues.deleteMany({
-        where: {
-          entityId: { in: releaseChangeIds },
-          entityType: {
-            in: [
-              FormEntityType.RELEASE_ENV_FORM,
-              FormEntityType.RELEASE_MIGRATION_FORM,
-            ],
-          },
+      const formValuesResult = await deleteFormEntityValues(tx, {
+        entityId: { in: releaseChangeIds },
+        entityType: {
+          in: [
+            FormEntityType.RELEASE_ENV_FORM,
+            FormEntityType.RELEASE_MIGRATION_FORM,
+          ],
         },
       });
       formValuesDeleted = formValuesResult.count;

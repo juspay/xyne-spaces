@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { UserResponsibility } from '@xyne/shared';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 
 export type KanbanCountsSnapshot = {
   id: string;
@@ -72,14 +73,10 @@ export const buildKanbanCountsSnapshot = async (
       where: { ticketId },
       select: { userId: true, roleId: true, userResponsibility: true },
     }),
-    db.formEntityValues.findMany({
+    findFormEntityValues(db, {
       where: {
         entityId: ticketId,
         entityType: 'TICKET',
-      },
-      select: {
-        fieldId: true,
-        actualFieldValue: true,
       },
     }),
   ]);
@@ -110,7 +107,7 @@ export const buildKanbanCountsSnapshot = async (
 
   const formFieldValues: Record<string, unknown> = {};
   for (const value of formValues) {
-    formFieldValues[value.fieldId] = value.actualFieldValue;
+    formFieldValues[value.fieldId] = value.value;
   }
 
   return {

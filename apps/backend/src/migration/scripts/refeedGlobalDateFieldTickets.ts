@@ -25,6 +25,7 @@ import { db } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { FormFieldType, FormEntityType } from '@xyne/shared';
+import { findFormEntityValueKeys } from '@/database/repositories/formEntityValueRepository';
 
 const LOG_PREFIX = '[RefeedGlobalDateFieldTickets]';
 
@@ -40,12 +41,11 @@ const run = async (): Promise<void> => {
     return;
   }
 
-  const rows = await db.formEntityValues.findMany({
+  const rows = await findFormEntityValueKeys(db, {
     where: {
       entityType: FormEntityType.TICKET,
       fieldId: { in: globalDateFields.map(field => field.id) },
     },
-    select: { entityId: true },
     distinct: ['entityId'],
   });
   const ticketIds = rows.map(row => row.entityId);

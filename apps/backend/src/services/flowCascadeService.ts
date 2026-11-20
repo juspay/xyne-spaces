@@ -16,6 +16,7 @@ import {
   type FlowRunNodeSnapshot,
 } from '@xyne/shared';
 import { db } from '@/database/client';
+import { findFormEntityValue } from '@/database/repositories/formEntityValueRepository';
 import { createFlowSubTicketMappings } from '@/services/subTicketService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
@@ -793,7 +794,7 @@ async function evaluateReadyDecisions(
     const storedFieldIds = [decision.fieldId, fieldMembership?.globalFieldId].filter(
       (fieldId): fieldId is string => !!fieldId
     );
-    const formValue = await db.formEntityValues.findFirst({
+    const formValue = await findFormEntityValue(db, {
       where: {
         entityId: source.ticketId,
         formId: sourceFormId,
@@ -801,9 +802,8 @@ async function evaluateReadyDecisions(
         fieldId: { in: storedFieldIds },
       },
       orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
-      select: { actualFieldValue: true, fieldValue: true },
     });
-    const rawValue = formValue?.actualFieldValue ?? formValue?.fieldValue;
+    const rawValue = formValue?.value ?? null;
     const outcomeKey = flowDecisionOutcomeKey(decision, rawValue);
     const selectedRoute = outcomeKey ? model.routeForOutcome(decision.id, outcomeKey) : undefined;
     if (!outcomeKey || !selectedRoute) {

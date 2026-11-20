@@ -1,6 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { parseAssigneeFilter } from '@xyne/shared/zero/queries';
 import { db } from '@/database/client';
+import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
+import { typedDynamicFieldWhere } from '@/utils/formEntityValueFilters';
+import { findFormEntityValueKeys } from '@/database/repositories/formEntityValueRepository';
 
 /**
  * Desk-list filter payload. Field names mirror supportTicketsPageV4
@@ -25,6 +28,8 @@ export interface LabelUnreadFilters {
   dynamicFieldFilters?: Array<{
     fieldId: string;
     values?: Array<string | number | boolean>;
+    fieldType?: string;
+    dateRange?: { start?: number; end?: number };
   }>;
 }
 
@@ -105,8 +110,7 @@ const DYNAMIC_FIELD_ID_CHUNK = 10_000;
 /**
  * Mirrors applySupportDynamicFieldFilters (src/zero/queries.ts): each entry must match
  * (AND across entries); an entry's values are OR'd; an entry with no values matches on
- * field presence alone. Json `equals` compares against the JSON-encoded value
- * ("x" / 5 / true), which is how actualFieldValue is stored.
+ * field presence alone. Values match on the field type's typed column.
  *
  * form_entity_values has no Prisma relation to tickets (entityId is polymorphic), so this
  * can't be a relation filter. Instead of loading every workspace ticket that carries the
@@ -120,22 +124,40 @@ async function narrowByDynamicFields(
   dynamicFieldFilters: NonNullable<LabelUnreadFilters['dynamicFieldFilters']>,
 ): Promise<string[]> {
   let remaining = candidateTicketIds;
+  const definitions = await resolveFieldDefinitionsByIds(
+    db,
+    dynamicFieldFilters.map(fieldFilter => fieldFilter.fieldId),
+  );
   for (const fieldFilter of dynamicFieldFilters) {
+    const valueWhere = fieldFilter.values?.length
+      ? typedDynamicFieldWhere(
+          fieldFilter.fieldType ?? definitions.get(fieldFilter.fieldId)?.fieldType,
+          fieldFilter.values,
+        )
+      : {};
+    const { start, end } = fieldFilter.dateRange ?? {};
+    const dateWhere =
+      start !== undefined || end !== undefined
+        ? {
+            dateValue: {
+              ...(start !== undefined && { gte: new Date(start) }),
+              ...(end !== undefined && { lte: new Date(end) }),
+            },
+          }
+        : {};
     if (remaining.length === 0) break;
     const matched = new Set<string>();
     for (let offset = 0; offset < remaining.length; offset += DYNAMIC_FIELD_ID_CHUNK) {
-      const rows = await db.formEntityValues.findMany({
+      const rows = await findFormEntityValueKeys(db, {
         where: {
           workspaceId: auth.workspaceId,
           entityType: 'TICKET',
           entityId: { in: remaining.slice(offset, offset + DYNAMIC_FIELD_ID_CHUNK) },
           fieldId: fieldFilter.fieldId,
-          ...(fieldFilter.values?.length
-            ? { OR: fieldFilter.values.map(value => ({ actualFieldValue: { equals: value } })) }
-            : {}),
+          // AND, not spread: a DATE filter can set dateValue in both, and a spread would drop one.
+          AND: [valueWhere, dateWhere],
         },
         distinct: ['entityId'],
-        select: { entityId: true },
       });
       for (const row of rows) matched.add(row.entityId);
     }

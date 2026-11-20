@@ -31,6 +31,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { cacheManager } from '../utils/cacheManager';
 import { pipeline } from 'node:stream/promises';
+import { findFormEntityValue } from '@/database/repositories/formEntityValueRepository';
 
 const db = DatabaseClient.getInstance();
 
@@ -739,7 +740,7 @@ export class AttachmentController {
    * to surfaces that have explicitly opted in (currently IMPACT and
    * FORM_ENTITY_VALUE for stage-form DOC fields). The response includes the
    * created attachment IDs so callers can wire them into subsequent mutations
-   * (e.g. FormEntityValues.actualFieldValue).
+   * (e.g. a DOC field's FormEntityValues.plainValue).
    */
   uploadAttachments = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -854,7 +855,7 @@ export class AttachmentController {
           ? callerWorkspaceId
           : entityType === AttachmentEntityType.IMPACT
             ? (await db.impact.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId
-            : (await db.formEntityValues.findUnique({ where: { id: entityId }, select: { workspaceId: true } }))?.workspaceId;
+            : (await findFormEntityValue(db, { where: { id: entityId } }))?.workspaceId;
       if (!entityWorkspaceId) {
         // FORM_ENTITY_VALUE ids are minted client-side before the row exists; upload runs first,
         // then createV2 creates/verifies the row, so a missing row is legitimate and must not 404.

@@ -19,6 +19,18 @@ import {
 import { logger } from '@/utils/logger';
 import { rawQuery } from './base';
 import type { TableName } from './base';
+import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
+
+/**
+ * Text form of a form_entity_values row's non-text scalar column: option/ticket/doc ids as
+ * stored, numbers and booleans as JSON text, dates as ISO (what the old JSON column held).
+ */
+const scalarFieldValueSql = Prisma.sql`COALESCE(
+  fev."plainValue",
+  fev."numberValue"::text,
+  fev."boolValue"::text,
+  to_char(fev."dateValue", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+)`;
 
 /** Every table the raw window/aggregate SQL in this file reads, across all metric kinds. */
 const DESK_METRICS_TABLES: TableName[] = [
@@ -236,21 +248,21 @@ export class DeskMetricsRepository {
         const hasValues = kf?.values && kf.values.length > 0;
         const hasTerms = kf?.textTerms && kf.textTerms.length > 0;
         const fieldNameMatch = Prisma.sql`COALESCE(gf."fieldName", ff."fieldName") = ${key}`;
-        const fieldCol = Prisma.sql`COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", ''))`;
         let valueCondition: Prisma.Sql | undefined;
         if (hasTerms) {
-          valueCondition = kf!
-            .textTerms!.map((t) => Prisma.sql`${fieldCol} ILIKE ${'%' + t + '%'}`)
-            .reduce((or, c, i) => (i === 0 ? c : Prisma.sql`${or} OR ${c}`));
+          // Text fields match a whole value, ignoring case and surrounding spaces, through
+          // textHash — the same rule the ticket list filters with.
+          const hashes = [...new Set(kf!.textTerms!.map((term) => formEntityValueTextHash(term)))];
+          valueCondition = Prisma.sql`fev."textHash" IN (${Prisma.join(hashes)})`;
         } else if (hasValues) {
+          const values = kf!.values!;
+          const hashes = [...new Set(values.map((value) => formEntityValueTextHash(value)))];
           valueCondition = Prisma.sql`(
-            ${fieldCol} IN (${Prisma.join(kf!.values!)})
-            OR (
-              jsonb_typeof(fev."actualFieldValue") = 'array'
-              AND jsonb_exists_any(
-                fev."actualFieldValue",
-                ARRAY[${Prisma.join(kf!.values!)}]::text[]
-              )
+            ${scalarFieldValueSql} IN (${Prisma.join(values)})
+            OR fev."textHash" IN (${Prisma.join(hashes)})
+            OR EXISTS (
+              SELECT 1 FROM "public"."form_entity_value_items" fevi
+              WHERE fevi."valueId" = fev.id AND fevi.item IN (${Prisma.join(values)})
             )
           )`;
         }
@@ -698,15 +710,14 @@ export class DeskMetricsRepository {
    * Text form of a custom field value.
    */
   private customFieldValueSql(): Prisma.Sql {
-    return Prisma.sql`(
-      CASE WHEN jsonb_typeof(fev."actualFieldValue") = 'array'
-        THEN (
-          SELECT string_agg(av.value, ', ' ORDER BY av.ord)
-          FROM jsonb_array_elements_text(fev."actualFieldValue")
-            WITH ORDINALITY AS av(value, ord)
-        )
-        ELSE COALESCE(fev."actualFieldValue"#>>'{}', NULLIF(fev."fieldValue", ''))
-      END
+    return Prisma.sql`COALESCE(
+      fev."textValue",
+      ${scalarFieldValueSql},
+      (
+        SELECT string_agg(fevi.item, ', ' ORDER BY fevi."createdAt", fevi.id)
+        FROM "public"."form_entity_value_items" fevi
+        WHERE fevi."valueId" = fev.id
+      )
     )`;
   }
 
@@ -722,7 +733,10 @@ export class DeskMetricsRepository {
         SELECT DISTINCT ON (fev."entityId", COALESCE(gf."fieldName", ff."fieldName"))
           fev."entityId" AS ticket_id,
           COALESCE(gf."fieldName", ff."fieldName") AS field_name,
-          fev."actualFieldValue" AS raw_value,
+          fev.id AS value_id,
+          EXISTS (
+            SELECT 1 FROM "public"."form_entity_value_items" fevi WHERE fevi."valueId" = fev.id
+          ) AS multi_value,
           ${this.customFieldValueSql()} AS field_value
         FROM "public"."form_entity_values" fev
         LEFT JOIN "public"."global_fields" gf ON gf.id = fev."fieldId"
@@ -745,16 +759,11 @@ export class DeskMetricsRepository {
         SELECT
           d.ticket_id,
           d.field_name,
-          jsonb_typeof(d.raw_value) = 'array' AS multi_value,
-          CASE WHEN jsonb_typeof(d.raw_value) = 'array' THEN el.value ELSE d.field_value END
-            AS value
+          d.multi_value,
+          CASE WHEN d.multi_value THEN el.item ELSE d.field_value END AS value
         FROM deduped_cf d
-        -- Coerce non-arrays to '[]' so the set-returning function is never
-        -- handed a scalar; the LEFT JOIN then yields one NULL row and the CASE
-        -- above falls back to the plain value.
-        LEFT JOIN LATERAL jsonb_array_elements_text(
-          CASE WHEN jsonb_typeof(d.raw_value) = 'array' THEN d.raw_value ELSE '[]'::jsonb END
-        ) AS el(value) ON true
+        LEFT JOIN "public"."form_entity_value_items" el
+          ON d.multi_value AND el."valueId" = d.value_id
       )`;
   }
 

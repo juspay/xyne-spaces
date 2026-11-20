@@ -204,7 +204,7 @@ export class ReleaseRepository {
 					fieldId: field.id,
 					contextId: releaseContext.releaseId,
 					fieldValue: '',
-					actualFieldValue: formValuesRecord[field.fieldName] as Prisma.InputJsonValue,
+					value: formValuesRecord[field.fieldName] as Prisma.InputJsonValue,
 				}));
 
 			if (formEntityValuesData.length === 0) return;

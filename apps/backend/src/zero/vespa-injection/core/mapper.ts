@@ -24,6 +24,7 @@ import { repositories } from '@/database/repositories';
 import { expandSharePrincipals } from '@/utils/sharePrincipals';
 import { shareEntityTypeFor } from '@/utils/callTypeUtils';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import {
   Channel,
   Message,
@@ -82,18 +83,18 @@ type TranscriptsSchema = Schema['tables']['calls'];
 type MessageAttachmentsSchema = Schema['tables']['message_attachments'];
 
 const loadTicketFormFields = async (ticketId: string) => {
-  const formEntityValues = await db.formEntityValues.findMany({
+  const rows = await findFormEntityValues(db, {
     where: {
       entityId: ticketId,
       entityType: 'TICKET',
     },
-    select: {
-      fieldId: true,
-      actualFieldValue: true,
-      version: true,
-      updatedAt: true,
-    },
-  }) as TicketDynamicFieldRow[];
+  });
+  const formEntityValues: TicketDynamicFieldRow[] = rows.map(row => ({
+    fieldId: row.fieldId,
+    value: row.value,
+    version: row.version,
+    updatedAt: row.updatedAt,
+  }));
 
   // FormEntityValues.fieldId holds the GlobalField id for global-backed fields and
   // the FormFields id only for legacy ones (resolveFormFieldDefinitionsForForm

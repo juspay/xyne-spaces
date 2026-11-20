@@ -177,6 +177,8 @@ import {
   writeFormEntityValueCreate,
   writeFormEntityValueUpdate,
   type FormEntityValueWrite,
+  deleteFormEntityValue,
+  moveFormEntityValue,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
@@ -13306,7 +13308,7 @@ export function createMutators(
                   zql.form_entity_values.where('formId', formId).where('fieldId', row.id),
                 );
                 for (const value of legacyValues) {
-                  await tx.mutate.form_entity_values.update({
+                  await moveFormEntityValue(tx, {
                     id: value.id,
                     fieldId: definitionId,
                     updatedAt: now,
@@ -14794,7 +14796,8 @@ export function createMutators(
               const allFormValuesForVersioning = await tx.run(
                 zql.form_entity_values
                   .where('entityId', ticket.id)
-                  .where('contextId', stage.id),
+                  .where('contextId', stage.id)
+                  .related('items'),
               );
               // submittedValues = the frontend's guessed submission (version > maxVisitIndex).
               const guessedRows = allFormValuesForVersioning.filter(
@@ -14903,15 +14906,15 @@ export function createMutators(
                     // guessed row at its own version). REUSE: the occupant is the identical
                     // prior-visit row — delete the redundant guess and bump the survivor.
                     if (!isNewVersion) {
-                      await tx.mutate.form_entity_values.delete({ id: fv.id });
-                      await tx.mutate.form_entity_values.update({
+                      await deleteFormEntityValue(tx, fv.id);
+                      await moveFormEntityValue(tx, {
                         id: existingAtTarget.id,
                         updatedAt: now,
                       });
                     }
                     continue;
                   }
-                  await tx.mutate.form_entity_values.update({
+                  await moveFormEntityValue(tx, {
                     id: fv.id,
                     version: newVisitIndex,
                     updatedAt: now,
@@ -18930,7 +18933,8 @@ export function createMutators(
             const priorRows = await tx.run(
               zql.form_entity_values
                 .where('entityId', ticketId)
-                .where('contextId', targetStage.id),
+                .where('contextId', targetStage.id)
+                .related('items'),
             );
             const rowsAtMaxVersion = priorRows.filter(r => (r.version ?? 1) === maxVersion);
             latestValues = foldFormRowsToValues(rowsAtMaxVersion, fieldIdToName);

@@ -113,6 +113,7 @@ import {
   upsertManyFormEntityValuesArgs,
   writeFormEntityValueCreate,
   writeFormEntityValueUpdate,
+  moveFormEntityValue,
 } from './formsMutatorHelpers.js';
 import type { MessageType as MessageTypeEnum } from './schema.js';
 import { extractAllMentions } from '../utils/mentionParser.js';
@@ -9549,7 +9550,7 @@ export const mutators = defineMutators({
                 zql.form_entity_values.where('formId', formId).where('fieldId', row.id),
               );
               for (const value of legacyValues) {
-                await tx.mutate.form_entity_values.update({
+                await moveFormEntityValue(tx, {
                   id: value.id,
                   fieldId: definitionId,
                   updatedAt: now,

@@ -42,6 +42,7 @@ import {
   ExternalStepResponsesACL,
   FormContextMappingsACL,
   FormEntityValuesACL,
+  FormEntityValueItemsACL,
   FormFieldsACL,
   FormsACL,
   GlobalFieldsACL,
@@ -257,6 +258,8 @@ export class ACLFactory {
       return new FormContextMappingsACL(ctx, prisma)
     case 'formEntityValues':
       return new FormEntityValuesACL(ctx, prisma)
+    case 'formEntityValueItems':
+      return new FormEntityValueItemsACL(ctx, prisma)
     case 'formFields':
       return new FormFieldsACL(ctx, prisma)
     case 'globalField':

@@ -11,6 +11,7 @@ import {
   BoardConfigCopyFieldRepoint,
 } from '@/queues/boardConfigCopyQueue';
 import { applyStageRemapTx } from '@/bypassAcl/transactions/boardConfigCopyService';
+import { updateFormEntityValuePlacement } from '@/database/repositories/formEntityValueRepository';
 
 const TAG = '[BoardConfigCopy]';
 
@@ -1023,15 +1024,16 @@ export class BoardConfigCopyService {
 
     for (const { oldFieldId, newFieldId } of fieldRepoints) {
       try {
-        const { count } = await db.formEntityValues.updateMany({
-          where: {
+        const { count } = await updateFormEntityValuePlacement(
+          db,
+          {
             fieldId: oldFieldId,
             formId: targetOldFormId,
             entityType: FormEntityType.TICKET,
             contextId: targetBoardId,
           },
-          data: { fieldId: newFieldId, formId: clonedFormId, updatedAt: new Date() },
-        });
+          { fieldId: newFieldId, formId: clonedFormId, updatedAt: new Date() },
+        );
         repointed += count;
       } catch (error) {
         logger.error(`${TAG} Failed to repoint ticket values for field ${oldFieldId} -> ${newFieldId}`, error);
