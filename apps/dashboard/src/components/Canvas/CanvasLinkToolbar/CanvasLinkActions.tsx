@@ -5,9 +5,11 @@ import {
   useBlockNoteEditor,
   useComponentsContext,
 } from '@blocknote/react';
-import { ExternalLink, LayoutTemplate, Pencil, Unlink } from 'lucide-react';
+import { ArrowUpRight, ExternalLink, LayoutTemplate, Pencil, Unlink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { type FC, type ReactElement, type ReactNode, useEffect, useState } from 'react';
 import { editorView } from '../canvasEditorView';
+import { inAppPath } from '../canvasInAppLink';
 import { findLinkRange, insertEmbedBlock, replaceLinkWithEmbed } from '../canvasEmbedActions';
 import { CANVAS_LINK_ACTION_EVENT, LINK_SHORTCUTS, linkUnderMenu } from '../canvasLinkShortcuts';
 
@@ -44,7 +46,10 @@ const Row = ({
 export const CanvasLinkActions: FC<LinkToolbarProps> = (props): ReactElement | null => {
   const Components = useComponentsContext();
   const editor = useBlockNoteEditor();
+  const navigate = useNavigate();
   const [activeRow, setActiveRow] = useState(-1);
+  // Links to another canvas (or any page of this app) open in place; external links get a new tab.
+  const appPath = inAppPath(props.url);
 
   // The keys act on the link at the caret. Opened by hover the caret is usually
   // somewhere else entirely, so there is nothing for them to act on and showing
@@ -146,13 +151,14 @@ export const CanvasLinkActions: FC<LinkToolbarProps> = (props): ReactElement | n
         className='bn-button'
         isSelected={activeRow === 1}
         onClick={(): void => {
-          window.open(props.url, '_blank', 'noopener,noreferrer');
+          if (appPath) void navigate(appPath);
+          else window.open(props.url, '_blank', 'noopener,noreferrer');
           close();
         }}
       >
         <Row
-          icon={<ExternalLink size={14} />}
-          label='Open in new tab'
+          icon={appPath ? <ArrowUpRight size={14} /> : <ExternalLink size={14} />}
+          label={appPath ? 'Open' : 'Open in new tab'}
           shortcut={keyFor(LINK_SHORTCUTS.open)}
         />
       </Button>

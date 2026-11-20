@@ -39,6 +39,8 @@ import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
 import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
 import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
+import { inAppPath } from '../canvasInAppLink';
+import { useNavigate as useRouterNavigate } from 'react-router-dom';
 import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import {
   canvasSchema,
@@ -420,6 +422,28 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const [isSearchOpen, setIsSearchOpen] = useState(false);
 
     useCanvasTableFilters(containerRef);
+
+    // A link to another canvas opens in place, not in a new browser tab: the cases where the browser
+    // would follow it (read-only view, or Cmd/Ctrl-click while editing). External links are untouched.
+    const routerNavigate = useRouterNavigate();
+    useEffect(() => {
+      const root = containerRef.current;
+      if (!root) return undefined;
+      const onClick = (event: MouseEvent): void => {
+        if (event.button !== 0 || event.defaultPrevented) return;
+        const anchor = (event.target as HTMLElement | null)?.closest?.('a[href]');
+        if (!anchor || !root.contains(anchor)) return;
+        if (editable && !event.metaKey && !event.ctrlKey) return; // editing: a plain click opens the link menu
+        const path = inAppPath(anchor.getAttribute('href'));
+        if (!path) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void routerNavigate(path);
+      };
+      root.addEventListener('click', onClick, true);
+      return () => root.removeEventListener('click', onClick, true);
+    }, [editable, routerNavigate]);
+
     const getCanvasCommentEditor = useCallback(
       () => (editor ? asBlockNoteEditorForView(editor) : null),
       [editor],

@@ -8,7 +8,7 @@ import NotFoundScreen from '../NotFoundScreen/NotFoundScreen';
 import type { PikaIcon } from '../../components/AppSidebar/navigationConfig';
 
 interface MigrationTabDef {
-  key: 'jira' | 'whatsapp' | 'slack';
+  key: 'jira' | 'whatsapp' | 'slack' | 'notion';
   label: string;
   icon: PikaIcon;
   /** Jira and WhatsApp migration both sit behind TICKET-MIGRATION ADMIN, same as their
@@ -32,6 +32,12 @@ const TABS: MigrationTabDef[] = [
   {
     key: 'slack',
     label: 'Slack Migration',
+    icon: SwapArrowHorizontal,
+    requiresTicketMigration: false,
+  },
+  {
+    key: 'notion',
+    label: 'Notion Migration',
     icon: SwapArrowHorizontal,
     requiresTicketMigration: false,
   },
