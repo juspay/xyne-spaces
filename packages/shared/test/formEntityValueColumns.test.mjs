@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   formEntityValueItemId,
   normalizeTextForHash,
+  readFormEntityValue,
+  sameFormEntityValue,
   toTypedFormEntityValue,
 } from '../dist/utils/formEntityValueColumns.js';
 import { applyTypedDynamicFieldFilter } from '../dist/zero/dynamicFieldFilterConditions.js';
@@ -116,4 +118,21 @@ test('typed filters pick the column for the field type', () => {
   const bool = recorder();
   applyTypedDynamicFieldFilter(bool, { fieldType: 'BOOLEAN', values: ['true'] }, null);
   assert.deepEqual(bool.calls, [['where', ['or', ['cmp', 'boolValue', true]]]]);
+});
+
+test('readFormEntityValue returns items in one fixed (sorted) order', () => {
+  const row = { items: [{ item: 'UPI' }, { item: 'Cards' }] };
+  assert.deepEqual(readFormEntityValue(row), ['Cards', 'UPI']);
+  assert.deepEqual(readFormEntityValue({ items: [{ item: 'Cards' }, { item: 'UPI' }] }), ['Cards', 'UPI']);
+});
+
+test('sameFormEntityValue compares lists as sets and ignores surrounding spaces', () => {
+  assert.equal(sameFormEntityValue(['UPI', 'Cards'], ['Cards', 'UPI']), true);
+  assert.equal(sameFormEntityValue(['UPI', 'UPI'], ['UPI']), true);
+  assert.equal(sameFormEntityValue(['UPI'], ['UPI', 'Cards']), false);
+  assert.equal(sameFormEntityValue('Kalyan ', 'Kalyan'), true);
+  assert.equal(sameFormEntityValue('Kalyan', 'kalyan'), false);
+  assert.equal(sameFormEntityValue(42, '42'), true);
+  assert.equal(sameFormEntityValue(null, undefined), true);
+  assert.equal(sameFormEntityValue(null, ''), true);
 });

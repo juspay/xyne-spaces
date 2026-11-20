@@ -63,7 +63,9 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
     const userIds: string[] = [];
 
     for (const { value } of formValues) {
+      // Rows not yet backfilled can still hold a single user id instead of a list.
       if (Array.isArray(value)) userIds.push(...value);
+      else if (typeof value === 'string' && value.trim()) userIds.push(value.trim());
     }
 
     return [...new Set(userIds)];

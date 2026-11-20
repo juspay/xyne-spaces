@@ -3,7 +3,7 @@ import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { pushVespaJobForTicket } from '@/apps/core/ticketutils';
 import { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 import { logger } from '@/utils/logger';
-import { TicketPriority, serializeTicketMd, type TicketCardSummary, FormEntityType } from '@xyne/shared';
+import { assertFormFieldType, TicketPriority, serializeTicketMd, type TicketCardSummary, FormEntityType } from '@xyne/shared';
 import { PrismaClient } from '@prisma/client';
 import { generateTicketId } from '@/bypassAcl/transactions/ticketIdService';
 import { createFormEntityValues } from '@/database/repositories/formEntityValueRepository';
@@ -75,7 +75,7 @@ export function createTicketWithConversationTx(prisma: PrismaClient, projectId: 
           entityType: FormEntityType.TICKET,
           fieldId: fieldValue.fieldId,
           contextId: customFieldValues.contextId,
-          fieldType: definitions.get(fieldValue.fieldId)?.fieldType,
+          fieldType: assertFormFieldType(definitions.get(fieldValue.fieldId)?.fieldType, fieldValue.fieldId),
           value: fieldValue.value,
           workspaceId,
         })),

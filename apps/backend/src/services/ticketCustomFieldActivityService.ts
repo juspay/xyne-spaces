@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { ActivityType } from '@xyne/shared';
+import { ActivityType, sameFormEntityValue } from '@xyne/shared';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -39,7 +39,7 @@ export async function createTicketCustomFieldActivity(params: {
   const normalizedOldValue = formatCustomFieldValue(oldValue);
   const normalizedNewValue = formatCustomFieldValue(newValue);
 
-  if (normalizedOldValue === normalizedNewValue) {
+  if (normalizedOldValue === normalizedNewValue || sameFormEntityValue(oldValue, newValue)) {
     return;
   }
 

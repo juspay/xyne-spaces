@@ -24,6 +24,7 @@ import {
   TicketPriority,
   TicketReferenceRelation,
   TicketStatusV2,
+  assertFormFieldType,
 } from '@xyne/shared';
 import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
 import { JiraMigrationClient } from '@/services/jira/client';
@@ -3587,7 +3588,7 @@ export class JiraMigrationImportService {
 
             if (currentFormId) {
               formEntityValuesData.push({
-                fieldType: mapping.fieldType,
+                fieldType: assertFormFieldType(mapping.fieldType, mapping.fieldId),
                 value,
                 formId: currentFormId,
                 entityId: ticketId,

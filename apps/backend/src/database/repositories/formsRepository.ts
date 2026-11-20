@@ -1,5 +1,5 @@
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
-import { FormContextType, FormEntityType, FormFieldType, resolveParentOption } from '@xyne/shared';
+import { assertFormFieldType, FormContextType, FormEntityType, FormFieldType, resolveParentOption } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Form, FormFields, Prisma, PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
@@ -355,7 +355,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         // values across multiple releases without colliding on the
         // (entityId, entityType, fieldId, contextId) unique key.
         contextId: item.contextId,
-        fieldType: definitions.get(item.fieldId)?.fieldType,
+        fieldType: assertFormFieldType(definitions.get(item.fieldId)?.fieldType, item.fieldId),
         value: item.value,
       })),
       { skipDuplicates: true },

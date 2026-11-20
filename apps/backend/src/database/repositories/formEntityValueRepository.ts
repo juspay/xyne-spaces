@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import {
   type FormEntityValueRead,
+  assertFormFieldType,
   type FormFieldType,
   formEntityValueItemId,
   readFormEntityValue,
@@ -19,8 +20,6 @@ import {
 import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
 
 type Client = Pick<Prisma.TransactionClient, 'formEntityValues' | 'formEntityValueItems'>;
-
-type FieldTypeInput = FormFieldType | string | null | undefined;
 
 export type FormEntityValueKey = {
   entityId: string;
@@ -34,7 +33,7 @@ export type NewFormEntityValue = FormEntityValueKey & {
   id?: string;
   workspaceId: string;
   formId: string;
-  fieldType: FieldTypeInput;
+  fieldType: FormFieldType;
   value: unknown;
   createdAt?: Date;
   updatedAt?: Date;
@@ -72,7 +71,7 @@ const RECORD_SELECT = {
   boolValue: true,
   plainValue: true,
   actualFieldValue: true,
-  items: { select: { item: true }, orderBy: { createdAt: 'asc' } },
+  items: { select: { item: true }, orderBy: { item: 'asc' } },
 } satisfies Prisma.FormEntityValuesSelect;
 
 type SelectedRow = Prisma.FormEntityValuesGetPayload<{ select: typeof RECORD_SELECT }>;
@@ -107,8 +106,8 @@ const toRecord = (row: SelectedRow): FormEntityValueRecord => ({
   value: readFormEntityValue(row),
 });
 
-function storedColumns(fieldType: FieldTypeInput, value: unknown) {
-  const typed = toTypedFormEntityValue(fieldType, value);
+function storedColumns(fieldType: FormFieldType, value: unknown, fieldId: string) {
+  const typed = toTypedFormEntityValue(assertFormFieldType(fieldType, fieldId), value);
   const { dateValue, ...columns } = typed.columns;
   return {
     data: {
@@ -123,37 +122,55 @@ function storedColumns(fieldType: FieldTypeInput, value: unknown) {
   };
 }
 
-async function replaceItems(
+type Operation = Prisma.PrismaPromise<unknown>;
+
+// A value's row and its items change together. The array form of $transaction keeps every
+// statement inside the tenant ACL extension (the callback form is reserved for bypassAcl/);
+// inside a caller's transaction the statements simply run in order.
+async function runTogether(client: Client, operations: Operation[]): Promise<void> {
+  const withTransaction = client as Client & { $transaction?: (batch: Operation[]) => Promise<unknown[]> };
+  if (typeof withTransaction.$transaction === 'function') {
+    await withTransaction.$transaction([...operations]);
+    return;
+  }
+  for (const operation of operations) await operation;
+}
+
+// Statements that make the value's items exactly `items`. Item ids are derived from the value
+// and the item, so items that are already there are skipped rather than duplicated.
+function itemOperations(
   client: Client,
   value: { id: string; workspaceId: string },
   items: readonly string[],
-): Promise<void> {
-  const wanted = new Set(items);
-  const existing = await client.formEntityValueItems.findMany({
-    where: { valueId: value.id },
-    select: { id: true, item: true },
-  });
-  const stale = existing.filter(row => !wanted.has(row.item)).map(row => row.id);
-  if (stale.length > 0) {
-    await client.formEntityValueItems.deleteMany({ where: { id: { in: stale } } });
+  isNewRow = false
+): Operation[] {
+  const wanted = [...new Set(items)];
+  const operations: Operation[] = [];
+  if (!isNewRow) {
+    operations.push(
+      client.formEntityValueItems.deleteMany({
+        where: { valueId: value.id, ...(wanted.length > 0 && { item: { notIn: wanted } }) },
+      })
+    );
   }
-  const existingItems = new Set(existing.map(row => row.item));
-  const missing = [...wanted].filter(item => !existingItems.has(item));
-  if (missing.length > 0) {
-    await client.formEntityValueItems.createMany({
-      data: missing.map(item => ({
-        id: formEntityValueItemId(value.id, item),
-        workspaceId: value.workspaceId,
-        valueId: value.id,
-        item,
-      })),
-      skipDuplicates: true,
-    });
+  if (wanted.length > 0) {
+    operations.push(
+      client.formEntityValueItems.createMany({
+        data: wanted.map((item) => ({
+          id: formEntityValueItemId(value.id, item),
+          workspaceId: value.workspaceId,
+          valueId: value.id,
+          item,
+        })),
+        skipDuplicates: true,
+      })
+    );
   }
+  return operations;
 }
 
 const newRowData = (input: NewFormEntityValue, id: string) => {
-  const stored = storedColumns(input.fieldType, input.value);
+  const stored = storedColumns(input.fieldType, input.value, input.fieldId);
   return {
     stored,
     data: {
@@ -173,15 +190,20 @@ const newRowData = (input: NewFormEntityValue, id: string) => {
   };
 };
 
+export type WrittenFormEntityValue = { id: string; workspaceId: string };
+
 /** Inserts one value. */
 export async function createFormEntityValue(
   client: Client,
-  input: NewFormEntityValue,
-): Promise<FormEntityValueRecord> {
+  input: NewFormEntityValue
+): Promise<WrittenFormEntityValue> {
   const { stored, data } = newRowData(input, input.id ?? randomUUID());
-  const row = await client.formEntityValues.create({ data, select: { id: true, workspaceId: true } });
-  await replaceItems(client, row, stored.items);
-  return (await findFormEntityValue(client, { where: { id: row.id } }))!;
+  const row = { id: data.id, workspaceId: data.workspaceId };
+  await runTogether(client, [
+    client.formEntityValues.create({ data, select: { id: true } }),
+    ...itemOperations(client, row, stored.items, true),
+  ]);
+  return row;
 }
 
 /**
@@ -191,24 +213,25 @@ export async function createFormEntityValue(
 export async function createFormEntityValues(
   client: Client,
   inputs: readonly NewFormEntityValue[],
-  options: { skipDuplicates?: boolean } = {},
+  options: { skipDuplicates?: boolean } = {}
 ): Promise<{ count: number }> {
   if (inputs.length === 0) return { count: 0 };
-  const rows = inputs.map(input => newRowData(input, input.id ?? randomUUID()));
+  const rows = inputs.map((input) => newRowData(input, input.id ?? randomUUID()));
   const result = await client.formEntityValues.createMany({
-    data: rows.map(row => row.data),
+    data: rows.map((row) => row.data),
     ...(options.skipDuplicates && { skipDuplicates: true }),
   });
-  const withItems = rows.filter(row => row.stored.items.length > 0);
+  const withItems = rows.filter((row) => row.stored.items.length > 0);
   if (withItems.length > 0) {
     const created = await client.formEntityValues.findMany({
-      where: { id: { in: withItems.map(row => row.data.id) } },
+      where: { id: { in: withItems.map((row) => row.data.id) } },
       select: { id: true },
     });
-    const createdIds = new Set(created.map(row => row.id));
-    for (const row of withItems) {
-      if (createdIds.has(row.data.id)) await replaceItems(client, row.data, row.stored.items);
-    }
+    const createdIds = new Set(created.map((row) => row.id));
+    const operations = withItems
+      .filter((row) => createdIds.has(row.data.id))
+      .flatMap((row) => itemOperations(client, row.data, row.stored.items, true));
+    if (operations.length > 0) await runTogether(client, operations);
   }
   return result;
 }
@@ -219,10 +242,9 @@ export async function createFormEntityValues(
  */
 export async function upsertFormEntityValue(
   client: Client,
-  input: NewFormEntityValue & { contextId: string; version: number },
-): Promise<FormEntityValueRecord> {
-  const { stored, data } = newRowData(input, input.id ?? randomUUID());
-  const row = await client.formEntityValues.upsert({
+  input: NewFormEntityValue & { contextId: string; version: number }
+): Promise<WrittenFormEntityValue> {
+  const existing = await client.formEntityValues.findUnique({
     where: {
       entityId_entityType_fieldId_contextId_version: {
         entityId: input.entityId,
@@ -232,35 +254,48 @@ export async function upsertFormEntityValue(
         version: input.version,
       },
     },
-    create: data,
-    update: { ...stored.data, ...(input.updatedAt && { updatedAt: input.updatedAt }) },
     select: { id: true, workspaceId: true },
   });
-  await replaceItems(client, row, stored.items);
-  return (await findFormEntityValue(client, { where: { id: row.id } }))!;
+  if (!existing) return createFormEntityValue(client, input);
+  const stored = storedColumns(input.fieldType, input.value, input.fieldId);
+  await runTogether(client, [
+    client.formEntityValues.update({
+      where: { id: existing.id },
+      data: { ...stored.data, ...(input.updatedAt && { updatedAt: input.updatedAt }) },
+      select: { id: true },
+    }),
+    ...itemOperations(client, existing, stored.items),
+  ]);
+  return existing;
 }
 
 /** Replaces the value of an existing row. */
 export async function updateFormEntityValue(
   client: Client,
   id: string,
-  input: { fieldType: FieldTypeInput; value: unknown; updatedAt?: Date },
-): Promise<FormEntityValueRecord> {
-  const stored = storedColumns(input.fieldType, input.value);
-  const row = await client.formEntityValues.update({
+  input: { fieldType: FormFieldType; value: unknown; updatedAt?: Date }
+): Promise<WrittenFormEntityValue> {
+  const stored = storedColumns(input.fieldType, input.value, id);
+  const row = await client.formEntityValues.findUniqueOrThrow({
     where: { id },
-    data: { ...stored.data, ...(input.updatedAt && { updatedAt: input.updatedAt }) },
     select: { id: true, workspaceId: true },
   });
-  await replaceItems(client, row, stored.items);
-  return (await findFormEntityValue(client, { where: { id: row.id } }))!;
+  await runTogether(client, [
+    client.formEntityValues.update({
+      where: { id },
+      data: { ...stored.data, ...(input.updatedAt && { updatedAt: input.updatedAt }) },
+      select: { id: true },
+    }),
+    ...itemOperations(client, row, stored.items),
+  ]);
+  return row;
 }
 
 /** Moves rows to another field, form or version without touching their values. */
 export async function updateFormEntityValuePlacement(
   client: Client,
   where: Prisma.FormEntityValuesWhereInput,
-  data: { fieldId?: string; formId?: string; version?: number; updatedAt?: Date },
+  data: { fieldId?: string; formId?: string; version?: number; updatedAt?: Date }
 ): Promise<{ count: number }> {
   return client.formEntityValues.updateMany({ where, data });
 }
@@ -268,30 +303,38 @@ export async function updateFormEntityValuePlacement(
 /** Deletes rows and their items. */
 export async function deleteFormEntityValues(
   client: Client,
-  where: Prisma.FormEntityValuesWhereInput,
+  where: Prisma.FormEntityValuesWhereInput
 ): Promise<{ count: number }> {
   const rows = await client.formEntityValues.findMany({ where, select: { id: true } });
   if (rows.length === 0) return { count: 0 };
-  const ids = rows.map(row => row.id);
+  const ids = rows.map((row) => row.id);
   await client.formEntityValueItems.deleteMany({ where: { valueId: { in: ids } } });
   return client.formEntityValues.deleteMany({ where: { id: { in: ids } } });
 }
 
 type FindArgs = {
   where: Prisma.FormEntityValuesWhereInput;
-  orderBy?: Prisma.FormEntityValuesOrderByWithRelationInput | Prisma.FormEntityValuesOrderByWithRelationInput[];
+  orderBy?:
+    | Prisma.FormEntityValuesOrderByWithRelationInput
+    | Prisma.FormEntityValuesOrderByWithRelationInput[];
   take?: number;
   skip?: number;
   distinct?: Prisma.FormEntityValuesScalarFieldEnum[];
 };
 
 /** Reads values; each record carries `value` in the shape callers work with. */
-export async function findFormEntityValues(client: Client, args: FindArgs): Promise<FormEntityValueRecord[]> {
+export async function findFormEntityValues(
+  client: Client,
+  args: FindArgs
+): Promise<FormEntityValueRecord[]> {
   const rows = await client.formEntityValues.findMany({ ...args, select: RECORD_SELECT });
   return rows.map(toRecord);
 }
 
-export async function findFormEntityValue(client: Client, args: FindArgs): Promise<FormEntityValueRecord | null> {
+export async function findFormEntityValue(
+  client: Client,
+  args: FindArgs
+): Promise<FormEntityValueRecord | null> {
   const row = await client.formEntityValues.findFirst({ ...args, select: RECORD_SELECT });
   return row ? toRecord(row) : null;
 }
@@ -299,7 +342,7 @@ export async function findFormEntityValue(client: Client, args: FindArgs): Promi
 /** Counts rows; no values are read. */
 export async function countFormEntityValues(
   client: Client,
-  where: Prisma.FormEntityValuesWhereInput,
+  where: Prisma.FormEntityValuesWhereInput
 ): Promise<number> {
   return client.formEntityValues.count({ where });
 }
@@ -307,7 +350,7 @@ export async function countFormEntityValues(
 /** Reads rows without their values, for callers that only need ids, entity ids or versions. */
 export async function findFormEntityValueKeys(
   client: Client,
-  args: FindArgs,
+  args: FindArgs
 ): Promise<FormEntityValueKeyRecord[]> {
   return client.formEntityValues.findMany({ ...args, select: KEY_SELECT });
 }
@@ -320,7 +363,7 @@ export async function findFormEntityValueKeys(
 export async function countFormEntityValuesByValue(
   client: Client,
   where: Prisma.FormEntityValuesWhereInput,
-  groupLimit: number,
+  groupLimit: number
 ): Promise<Array<{ value: string; count: number }>> {
   const [scalarGroups, textGroups, itemGroups] = await Promise.all([
     client.formEntityValues.groupBy({
@@ -346,7 +389,7 @@ export async function countFormEntityValuesByValue(
     }),
   ]);
 
-  const hashes = textGroups.flatMap(group => (group.textHash ? [group.textHash] : []));
+  const hashes = textGroups.flatMap((group) => (group.textHash ? [group.textHash] : []));
   const textByHash = new Map<string, string>();
   if (hashes.length > 0) {
     const samples = await client.formEntityValues.findMany({
@@ -355,14 +398,16 @@ export async function countFormEntityValuesByValue(
       select: { textHash: true, textValue: true },
     });
     for (const sample of samples) {
-      if (sample.textHash && sample.textValue !== null) textByHash.set(sample.textHash, sample.textValue);
+      if (sample.textHash && sample.textValue !== null)
+        textByHash.set(sample.textHash, sample.textValue);
     }
   }
 
   const counts: Array<{ value: string; count: number }> = [];
   for (const group of scalarGroups) {
     const value = readFormEntityValue({ ...group, items: [] });
-    if (value !== null && !Array.isArray(value)) counts.push({ value: String(value), count: group._count.id });
+    if (value !== null && !Array.isArray(value))
+      counts.push({ value: String(value), count: group._count.id });
   }
   for (const group of textGroups) {
     const value = group.textHash ? textByHash.get(group.textHash) : undefined;
@@ -401,8 +446,16 @@ const toBackfillWhere: Prisma.FormEntityValuesWhereInput = {
  */
 export async function findFormEntityValuesToBackfill(
   client: Client,
-  args: { afterId: string | null; take: number },
-): Promise<Array<{ id: string; workspaceId: string; fieldId: string; updatedAt: Date; actualFieldValue: Prisma.JsonValue }>> {
+  args: { afterId: string | null; take: number }
+): Promise<
+  Array<{
+    id: string;
+    workspaceId: string;
+    fieldId: string;
+    updatedAt: Date;
+    actualFieldValue: Prisma.JsonValue;
+  }>
+> {
   return client.formEntityValues.findMany({
     where: { ...toBackfillWhere, ...(args.afterId ? { id: { gt: args.afterId } } : {}) },
     select: { id: true, workspaceId: true, fieldId: true, updatedAt: true, actualFieldValue: true },
@@ -414,7 +467,7 @@ export async function findFormEntityValuesToBackfill(
 /** How many rows the typed-column backfill still has to look at, optionally after `afterId`. */
 export async function countFormEntityValuesToBackfill(
   client: Client,
-  afterId: string | null = null,
+  afterId: string | null = null
 ): Promise<number> {
   return client.formEntityValues.count({
     where: { ...toBackfillWhere, ...(afterId ? { id: { gt: afterId } } : {}) },

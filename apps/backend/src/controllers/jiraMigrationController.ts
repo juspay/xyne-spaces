@@ -930,8 +930,6 @@ export class JiraMigrationController {
         const chunk = ticketChunks[index];
         if (chunk.length === 0) continue;
 
-        // Values (and their items) first: the batch below can't call the repository.
-        await deleteFormEntityValues(db, { entityId: { in: chunk }, entityType: 'TICKET' });
         const ticketTxnResults = await db.$transaction([
           db.ticketReferenceMapping.deleteMany({
             where: { OR: [{ sourceTicketId: { in: chunk } }, { targetTicketId: { in: chunk } }] },
@@ -951,6 +949,9 @@ export class JiraMigrationController {
         ]);
         const ticketDeleteResult = ticketTxnResults[ticketTxnResults.length - 1];
         deletedTickets += ticketDeleteResult.count;
+        // After the tickets are gone, so a failed batch leaves tickets and their values intact.
+        // Values have no foreign key to tickets, and the batch above can't call the repository.
+        await deleteFormEntityValues(db, { entityId: { in: chunk }, entityType: 'TICKET' });
 
         // Best-effort: remove tickets from Vespa search index so UI/search doesn't show stale results.
         for (const ticketId of chunk) {

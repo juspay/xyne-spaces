@@ -154,8 +154,8 @@ async function narrowByDynamicFields(
           entityType: 'TICKET',
           entityId: { in: remaining.slice(offset, offset + DYNAMIC_FIELD_ID_CHUNK) },
           fieldId: fieldFilter.fieldId,
-          ...valueWhere,
-          ...dateWhere,
+          // AND, not spread: a DATE filter can set dateValue in both, and a spread would drop one.
+          AND: [valueWhere, dateWhere],
         },
         distinct: ['entityId'],
       });

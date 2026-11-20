@@ -12,7 +12,7 @@ import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { FormFieldType, ActivityType } from '@xyne/shared';
+import { FormFieldType, ActivityType, sameFormEntityValue } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { resolveFieldDefinitionById } from '@/utils/fieldDefinition';
 import {
@@ -268,7 +268,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         : null;
 
       // Skip emit if value didn't actually change (no-op re-save)
-      if (operation === 'update' && prevFormValue === fieldValue) return;
+      if (operation === 'update' && sameFormEntityValue(prevFormValue, fieldValue)) return;
       const toTicketChangeValue = (v: unknown): string | number | null => {
         if (typeof v === 'string' || typeof v === 'number') return v;
         if (v === null || v === undefined) return null;

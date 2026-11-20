@@ -4,6 +4,7 @@ import { AttachmentEntityType, FormEntityType, FormFieldType, type FormFieldValu
 import { stringFromFormValue } from '../tickets/utils.js';
 import { resolveParentOption } from '../utils/formFieldOptions.js';
 import {
+  assertFormFieldType,
   formEntityValueItemId,
   readFormEntityValue,
   toTypedFormEntityValue,
@@ -273,7 +274,7 @@ export async function writeFormEntityValueCreate(
     fieldId: resolvedFieldId,
     contextId,
     version: version ?? 1,
-    fieldType,
+    fieldType: assertFormFieldType(fieldType, resolvedFieldId),
     value: actualFieldValue,
     timestamp,
   });
@@ -365,7 +366,7 @@ export async function writeFormEntityValueUpdate(
   await updateFormEntityValue(tx, {
     id: formEntityValueId,
     workspaceId: formEntityValue.workspaceId,
-    fieldType,
+    fieldType: assertFormFieldType(fieldType, formEntityValue.fieldId),
     value: valueToStore,
     updatedAt,
   });
@@ -506,8 +507,6 @@ export async function upsertManyFormEntityValues(
   return writes;
 }
 
-type FieldTypeInput = FormFieldType | string | null | undefined;
-
 // Dual write: clients that still read actualFieldValue keep seeing current values.
 const legacyJsonValue = (value: unknown): FormFieldValue => {
   if (value === null || value === undefined) return null;
@@ -517,8 +516,8 @@ const legacyJsonValue = (value: unknown): FormFieldValue => {
 
 // textHash needs the backend's key: the optimistic client write leaves it null and the
 // server's write fills it.
-const storedFormEntityValueFields = (fieldType: FieldTypeInput, value: unknown) => {
-  const typed = toTypedFormEntityValue(fieldType, value);
+const storedFormEntityValueFields = (fieldType: FormFieldType, value: unknown, fieldId: string) => {
+  const typed = toTypedFormEntityValue(assertFormFieldType(fieldType, fieldId), value);
   return { fields: { ...typed.columns, textHash: null, actualFieldValue: legacyJsonValue(value) }, items: typed.items };
 };
 
@@ -564,12 +563,12 @@ export async function insertFormEntityValue(
     fieldId: string;
     contextId?: string | undefined;
     version: number;
-    fieldType: FieldTypeInput;
+    fieldType: FormFieldType;
     value: unknown;
     timestamp: number;
   },
 ): Promise<void> {
-  const stored = storedFormEntityValueFields(input.fieldType, input.value);
+  const stored = storedFormEntityValueFields(input.fieldType, input.value, input.id);
   await tx.mutate.form_entity_values.insert({
     workspaceId: input.workspaceId,
     id: input.id,
@@ -589,9 +588,9 @@ export async function insertFormEntityValue(
 
 export async function updateFormEntityValue(
   tx: Transaction<Schema>,
-  input: { id: string; workspaceId: string; fieldType: FieldTypeInput; value: unknown; updatedAt: number },
+  input: { id: string; workspaceId: string; fieldType: FormFieldType; value: unknown; updatedAt: number },
 ): Promise<void> {
-  const stored = storedFormEntityValueFields(input.fieldType, input.value);
+  const stored = storedFormEntityValueFields(input.fieldType, input.value, input.id);
   await tx.mutate.form_entity_values.update({ id: input.id, ...stored.fields, updatedAt: input.updatedAt });
   await replaceFormEntityValueItems(tx, input, stored.items, input.updatedAt);
 }

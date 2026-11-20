@@ -6,6 +6,7 @@ import {
   FormContextType,
   FormEntityType,
   FormFieldType,
+  assertFormFieldType,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { resolveFieldDefinitionsByIds, resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
@@ -692,7 +693,7 @@ export const syncCustomFieldValues = async (
         fieldId: fieldValue.fieldId,
         contextId: customFieldValues.contextId,
         version: currentVersion,
-        fieldType: definitions.get(fieldValue.fieldId)?.fieldType,
+        fieldType: assertFormFieldType(definitions.get(fieldValue.fieldId)?.fieldType, fieldValue.fieldId),
         value: fieldValue.value,
         updatedAt: new Date(),
       });

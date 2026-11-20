@@ -9,6 +9,7 @@ import {
   FormEntityType,
   FormFieldType,
   type FormEntityValueRead,
+  assertFormFieldType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -107,7 +108,7 @@ export async function writeChannelFields(
     // version 1, as the UI writes it: a null version never clashes in the unique key, so two writes at once
     // would each add a row. With it, the database keeps one row per field and the later write wins.
     const key = { entityId: channelId, entityType: FormEntityType.CHANNEL, fieldId, contextId: workspaceId, version: 1 };
-    await upsertFormEntityValue(db, { workspaceId, formId, ...key, fieldType, value });
+    await upsertFormEntityValue(db, { workspaceId, formId, ...key, fieldType: assertFormFieldType(fieldType, fieldId), value });
   }
 }
 

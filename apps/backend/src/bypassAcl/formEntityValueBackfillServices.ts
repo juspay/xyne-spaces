@@ -61,7 +61,7 @@ function isEmptyValue(value: Prisma.JsonValue | null): boolean {
  */
 export function runFormEntityValueBackfill(options: FormEntityValueBackfillOptions) {
   return asSystem(TABLES, REASON, async () => {
-    const batches: Array<{ batch: number; scanned: number; written: number; remaining: number }> = [];
+    const batches: Array<{ batch: number; scanned: number; written: number }> = [];
     const unconvertible = new Map<string, UnconvertibleField>();
     const totals = { scanned: 0, written: 0, emptyValues: 0, unknownField: 0, unconvertible: 0 };
     let cursor = options.cursor;
@@ -114,22 +114,25 @@ export function runFormEntityValueBackfill(options: FormEntityValueBackfillOptio
 
       totals.scanned += rows.length;
       totals.written += written;
-      const remaining = await countFormEntityValuesToBackfill(db, cursor);
-      batches.push({ batch: batchNumber, scanned: rows.length, written, remaining });
-      logger.info(`${TAG} batch #${batchNumber}`, { scanned: rows.length, written, remaining, dryRun: options.dryRun });
+      batches.push({ batch: batchNumber, scanned: rows.length, written });
+      logger.info(`${TAG} batch #${batchNumber}`, { scanned: rows.length, written, dryRun: options.dryRun });
 
-      if (rows.length < options.batchSize || remaining === 0) {
+      // A short page means the end of the table: no need to count what's left after every batch.
+      if (rows.length < options.batchSize) {
         done = true;
         break;
       }
       if (options.delayMs > 0) await sleep(options.delayMs);
     }
 
-    logger.info(`${TAG} finished`, { ...totals, done, nextCursor: cursor, dryRun: options.dryRun });
+    // Counted once per request: rows still to convert after this run's cursor.
+    const remaining = done ? 0 : await countFormEntityValuesToBackfill(db, cursor);
+    logger.info(`${TAG} finished`, { ...totals, done, remaining, nextCursor: cursor, dryRun: options.dryRun });
     return {
       success: true,
       dryRun: options.dryRun,
       done,
+      remaining,
       nextCursor: cursor,
       totals,
       batches,
