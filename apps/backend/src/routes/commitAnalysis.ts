@@ -95,7 +95,7 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
           Object.entries(range).map(([name, value]) => ({
             fieldId: name,
             fieldName: name,
-            actualFieldValue: String(value ?? '').trim(),
+            value: String(value ?? '').trim(),
           })),
         ),
         performedBy: { id: userId },
