@@ -163,10 +163,16 @@ export class YSweetHttpError extends Error {
   }
 }
 
+// Server-side calls use the token within milliseconds. syncToYSweet reuses one, so never a ticket.
+const SERVER_TOKEN_VALID_SECONDS = 60;
+
 export interface YSweetAuthRequest {
   authorization: 'full' | 'read-only';
   userId: string;
   validForSeconds?: number;
+  ticket?: boolean;
+  /** Base64 SHA-256 of the browser's WebSocket handshake frame. Binds the ticket to it. */
+  wsHandshakeHash?: string;
 }
 
 function withDocId(base: string, path: string, docId: string): string {
@@ -265,6 +271,7 @@ export async function initializeYSweetDoc(
     const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
       userId,
+      validForSeconds: SERVER_TOKEN_VALID_SECONDS,
     });
     logger.debug(`[YSweetUtils] Created/retrieved Y-Sweet document for canvas ${canvasId}`);
 
@@ -318,6 +325,7 @@ export async function syncToYSweet(canvasId: string, blocks: BlockNoteBlock[], u
     const clientToken = await ysweetGetOrCreateDocAndToken(canvasId, {
       authorization: 'full',
       userId,
+      validForSeconds: SERVER_TOKEN_VALID_SECONDS,
     });
 
     // Override URLs before both read and write so backend uses the internal Y-Sweet service.
@@ -399,6 +407,7 @@ export async function readFromYSweetStrict(
   const clientToken = await ysweetGetClientToken(canvasId, {
     authorization: 'read-only',
     userId,
+    validForSeconds: SERVER_TOKEN_VALID_SECONDS,
   });
 
   // Override URLs to use direct Y-Sweet URL instead of proxy URL

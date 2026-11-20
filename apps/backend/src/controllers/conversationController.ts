@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import type { replyToConversationClient } from '@xyne/shared';
 import type { ContractRequest } from '@/types/express';
 import { isEncryptedField } from '@xyne/shared';
+import type { FieldFacts } from '@xyne/shared';
 import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
   ConversationRepository,
@@ -1059,23 +1060,26 @@ export class ConversationController {
       // Content that arrived as workspace-DEK ciphertext is opaque here; the encryption
       // service's extracted command (req.derived) stands in for parsing it.
       const derived = req.derived;
+      // The reply route runs unencrypted today (contract `sourceToDerived: {}`), so no facts
+      // arrive; once `content` is listed in its contract they appear under `fields.content`.
+      const facts: FieldFacts | undefined = (derived?.fields as Record<string, FieldFacts> | undefined)?.content;
       // Encrypted content is stored only with the visible length the encryption service measured;
       // a rule whose extraction policy leaves out `text` cannot be accepted (policy lives in the
       // encryption service's database, so this is a configuration error, not a client one).
-      if (content && isEncryptedField(content) && derived?.text?.length === undefined) {
+      if (content && isEncryptedField(content) && facts?.textLength === undefined) {
         res.status(400).json({
           error: 'Encrypted content arrived without its derived length',
           code: 'ENC_DERIVED_INVALID',
         });
         return;
       }
-      const isBotCommand = derived?.command
-        ? derived.command.isBot
+      const isBotCommand = facts?.isBotCommand !== undefined
+        ? facts.isBotCommand
         : Boolean(content && content.trim() && BotCommandParser.isBotCommand(content.trim()));
       if (isBotCommand) {
-        const commandText = derived?.command
-          ? derived.command.name
-            ? `/${derived.command.name} ${derived.command.args ?? ''}`
+        const commandText = facts?.isBotCommand !== undefined
+          ? facts.commandName
+            ? `/${facts.commandName} ${facts.commandArgs ?? ''}`
             : '/'
           : undefined;
         await this.handleBotCommand((content ?? '').trim(), conversationId, userId, res, { commandText });
@@ -1095,7 +1099,7 @@ export class ConversationController {
         showInChannel: showInChannel,
         childConversationId: childConversationId,
         visibleTo: visibleTo ?? null,
-        contentLength: req.derived?.text?.length,
+        contentLength: facts?.textLength,
       };
 
       const message = await this.messageRepository.create(messageData);
@@ -1169,7 +1173,7 @@ export class ConversationController {
       ) {
         void processMeetLinksFromChatMessage(
           // Extracted Meet links stand in for encrypted content.
-          derived?.links ? derived.links.meet.join(' ') : message.content,
+          facts?.meetLinks ? facts.meetLinks.join(' ') : message.content,
           req.user.workspaceId,
           conversationId,
           message.messageId,

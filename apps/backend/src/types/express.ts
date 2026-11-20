@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { DerivedContentFacts, RequestContract, RequestOf } from '@xyne/shared';
+import type { DerivedFacts, RequestContract, RequestOf } from '@xyne/shared';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -63,7 +63,7 @@ declare global {
     interface Request {
       user?: AuthenticatedUser;
       /** Facts the encryption service extracted from this request's encrypted fields. */
-      derived?: DerivedContentFacts;
+      derived?: DerivedFacts;
       /**
        * The verified access token the request authenticated with (authMiddleware): forwarded
        * to the encryption service, which reads its `sid` and uses the session's registered

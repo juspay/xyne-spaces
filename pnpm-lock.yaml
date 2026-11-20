@@ -970,7 +970,7 @@ importers:
         specifier: 1.3.69
         version: 1.3.69(4d9fd395b1b5cadf82354a7faefc9766)
       '@y-sweet/client':
-        specifier: ^0.9.1
+        specifier: 0.9.1
         version: 0.9.1(yjs@13.6.31)
       ag-grid-community:
         specifier: ^35.0.0

@@ -45,7 +45,8 @@ export const TopAppsCard = ({ apps, days }: { apps: TopApp[]; days: number }): R
     { field: 'versions', header: 'Versions', renderCell: count, ...numeric },
     { field: 'agentRuns', header: 'Agent runs', renderCell: count, ...numeric },
     { field: 'failedRuns', header: 'Failed runs', renderCell: count, ...numeric },
-    { field: 'storageRecords', header: 'Stored records', renderCell: count, ...numeric },
+    // Disabled (Storage SDK)
+    // { field: 'storageRecords', header: 'Stored records', renderCell: count, ...numeric },
   ];
 
   return (

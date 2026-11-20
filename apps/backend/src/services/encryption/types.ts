@@ -1,5 +1,5 @@
 import type {
-  DerivedContentFacts,
+  DerivedFacts,
   EncryptedTableConfig,
 } from '@xyne/shared';
 
@@ -93,7 +93,8 @@ export type TransformRequestInput<T> = TransitCaller & {
    */
   contractFields?: string[];
   contractEncrypted?: string[];
-  contractDerived?: string[];
+  /** `{ <field>: [<fact names>] }` from the contract's sourceToDerived. */
+  contractDerived?: Record<string, string[]>;
   /** Owner of the row the request writes: the workspace whose DEK its fields go under. */
   entityId?: string;
   entityType?: string;
@@ -102,10 +103,11 @@ export type TransformRequestInput<T> = TransitCaller & {
 export type TransformRequestResult<T> = {
   body: T;
   /**
-   * Facts the encryption service extracted from the plaintext of the rule's encrypted
-   * fields (rule extractionPolicy), so the backend can act on them without the plaintext.
+   * Facts extracted from the plaintext of the contract's source fields, per field, as the
+   * contract's `sourceToDerived` asks (`contractDerived`), so the backend acts on them without
+   * the plaintext.
    */
-  derived?: DerivedContentFacts;
+  derived?: DerivedFacts;
 };
 
 export type TransitEncryptResult<T> = {

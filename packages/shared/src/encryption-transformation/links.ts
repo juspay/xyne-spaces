@@ -1,4 +1,4 @@
-import type { ExtractorOutput } from '../enc-contracts/extractors.js';
+import type { ExtractorGroups } from '../enc-contracts/extractors.js';
 
 const TOP_TLDS = [
   // global / generic
@@ -122,7 +122,7 @@ export const GOOGLE_MEET_REGEX = /(?:https?:\/\/)?meet\.google\.com\/([a-z]+(?:-
 /** Mention spans are dropped before URL detection, as the link-preview path does. */
 const MENTION_SPAN_REGEX = /<span[^>]*class="[^"]*chat-input-mention[^"]*"[^>]*>@[^<]+<\/span>/g;
 
-export function extractLinks(text: string): ExtractorOutput['links'] {
+export function extractLinks(text: string): ExtractorGroups['links'] {
   const contentWithoutMentions = text.replace(MENTION_SPAN_REGEX, '');
   const all = extractUrls(contentWithoutMentions);
 
