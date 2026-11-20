@@ -21,7 +21,7 @@ type TicketInfoDependencies<TTicket extends TicketInfoRecord, TCustomFormData, T
 export const normalizeCustomFieldValue = (
   field: CustomFieldDefinition,
   rawValue: unknown,
-): { actualFieldValue: Prisma.InputJsonValue; fieldValue: string } => {
+): { value: Prisma.InputJsonValue; fieldValue: string } => {
   switch (field.fieldType) {
     case FormFieldType.STRING: {
       if (typeof rawValue !== 'string' || rawValue.trim().length === 0) {
@@ -29,7 +29,7 @@ export const normalizeCustomFieldValue = (
       }
 
       const value = rawValue.trim();
-      return { actualFieldValue: value, fieldValue: value };
+      return { value: value, fieldValue: value };
     }
 
     case FormFieldType.USER: {
@@ -46,7 +46,7 @@ export const normalizeCustomFieldValue = (
       }
 
       const dedupedValues = Array.from(new Set(normalizedValues));
-      return { actualFieldValue: dedupedValues, fieldValue: dedupedValues.join(',') };
+      return { value: dedupedValues, fieldValue: dedupedValues.join(',') };
     }
 
     case FormFieldType.NUMBER: {
@@ -61,19 +61,19 @@ export const normalizeCustomFieldValue = (
         throw new Error(`Field "${field.fieldName}" must be a valid number`);
       }
 
-      return { actualFieldValue: numericValue, fieldValue: String(numericValue) };
+      return { value: numericValue, fieldValue: String(numericValue) };
     }
 
     case FormFieldType.BOOLEAN: {
       if (typeof rawValue === 'boolean') {
-        return { actualFieldValue: rawValue, fieldValue: String(rawValue) };
+        return { value: rawValue, fieldValue: String(rawValue) };
       }
 
       if (typeof rawValue === 'string') {
         const normalized = rawValue.trim().toLowerCase();
         if (normalized === 'true' || normalized === 'false') {
           const boolValue = normalized === 'true';
-          return { actualFieldValue: boolValue, fieldValue: String(boolValue) };
+          return { value: boolValue, fieldValue: String(boolValue) };
         }
       }
 
@@ -93,7 +93,7 @@ export const normalizeCustomFieldValue = (
       }
 
       const isoValue = dateValue.toISOString();
-      return { actualFieldValue: isoValue, fieldValue: isoValue };
+      return { value: isoValue, fieldValue: isoValue };
     }
 
     case FormFieldType.SINGLE_SELECT: {
@@ -107,7 +107,7 @@ export const normalizeCustomFieldValue = (
         throw new Error(`Field "${field.fieldName}" must be one of: ${options.join(', ')}`);
       }
 
-      return { actualFieldValue: value, fieldValue: value };
+      return { value: value, fieldValue: value };
     }
 
     case FormFieldType.MULTI_SELECT: {
@@ -132,7 +132,7 @@ export const normalizeCustomFieldValue = (
       }
 
       const dedupedValues = Array.from(new Set(normalizedValues));
-      return { actualFieldValue: dedupedValues, fieldValue: dedupedValues.join(',') };
+      return { value: dedupedValues, fieldValue: dedupedValues.join(',') };
     }
 
     default:

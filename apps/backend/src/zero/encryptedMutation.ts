@@ -1,7 +1,13 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
-import { conversationsSendClient, derivedContentFactsSchema } from '@xyne/shared';
-import type { DerivedContentFacts, RequestContract } from '@xyne/shared';
+import {
+  conversationsSendClient,
+  deriveFactsFromPlaintext,
+  derivedFactsSchema,
+  derivedNames,
+  sourceFieldNames,
+} from '@xyne/shared';
+import type { DerivedFacts, FieldDerived, RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
@@ -18,6 +24,14 @@ import { logger } from '@/utils/logger';
  * Two steps, so no encryption-service call is made while a database transaction holds a
  * connection: prepareEncryptedMutations transforms a push's rule-encrypted mutations before
  * Zero opens any transaction, and runEncryptedMutation, inside it, only looks the result up.
+ *
+ * A contracted mutator whose args arrived as plaintext (the client had no manifest: client
+ * encryption off, or the encryption service unavailable to it) still gets its facts: the same
+ * extractors run here, over the contract's source fields, projected to the picked keys, so the
+ * mutator reads the same typed facts in both cases and never parses content itself. That run
+ * stays outside the DEK passthrough, so the Prisma extension encrypts the plaintext at rest as
+ * before. Args that carry a manifest can only be transformed by the service (they are transit
+ * ciphertext), so a service outage refuses them rather than falling back.
  */
 
 /** Set on prepared args (server-side only): the key of the mutation's outcome. */
@@ -31,14 +45,67 @@ const MUTATION_CONTRACTS: Record<string, RequestContract> = {
 /** Who is mutating, for the encryption service: the transit caller (transitCaller) and the request's manifest lane. */
 export type MutationEncryptionContext = TransitCaller & { environment: string };
 
-/** Each prepared mutation's outcome: the facts to run with, or why it is refused. */
-export type PreparedMutations = Map<string, { derived?: DerivedContentFacts; error?: Error }>;
+/**
+ * Each prepared mutation's outcome: the facts to run with and whether its fields are now
+ * workspace-DEK ciphertext (run under DEK passthrough), or why it is refused.
+ */
+export type PreparedMutations = Map<string, { derived?: DerivedFacts; dekPassthrough?: boolean; error?: Error }>;
 
-const mutationDerivedContext = new AsyncLocalStorage<DerivedContentFacts | undefined>();
+/**
+ * Facts for a contracted mutator's plaintext args, extracted here instead of by the
+ * encryption service, from the same contract (`sourceToDerived`). Undefined when the mutator
+ * has no contract or none of its source fields holds plaintext.
+ */
+function deriveLocally(mutatorName: string, args: Record<string, unknown>): DerivedFacts | undefined {
+  const contract = MUTATION_CONTRACTS[mutatorName];
+  if (!contract) return undefined;
+  const derived = deriveFactsFromPlaintext(args, derivedNames(contract));
+  if (derived) {
+    getCryptoOperations().add(1, { operation: 'derive_mutation_local', status: 'ok' });
+  }
+  return derived;
+}
+
+const mutationDerivedContext = new AsyncLocalStorage<DerivedFacts | undefined>();
+
+/** Logs that a mutation got its derived facts and where they came from. */
+function logDerivedFacts(mutatorName: string, source: 'local' | 'encryption-service', derived: DerivedFacts | undefined): void {
+  logger.info(`[encryptedMutation] ${mutatorName}: ${derived ? 'derived facts extracted' : 'no derived facts'} via ${source}`);
+}
 
 /** Facts the encryption service extracted from this mutation's encrypted args, if any. */
-export function getMutationDerived(): DerivedContentFacts | undefined {
+export function getMutationDerived(): DerivedFacts | undefined {
   return mutationDerivedContext.getStore();
+}
+
+/**
+ * The facts of one source field of a contracted mutator, typed by its contract entry: exactly
+ * the extractors and keys listed under that field in `sourceToDerived`. Undefined when the
+ * field carried no text (empty, null, not sent).
+ */
+export function getMutationFacts<C extends RequestContract, F extends Extract<keyof C['sourceToDerived'], string>>(
+  _contract: C,
+  field: F,
+): FieldDerived<C['sourceToDerived'], F> | undefined {
+  return mutationDerivedContext.getStore()?.fields[field] as FieldDerived<C['sourceToDerived'], F> | undefined;
+}
+
+/**
+ * getMutationFacts for a field the mutator knows held text. Facts exist whenever the
+ * encryption service transformed the field, so their absence means the mutator is not in
+ * MUTATION_CONTRACTS or the service returned none: a wiring bug, not a case to parse the
+ * ciphertext for.
+ */
+export function requireMutationFacts<C extends RequestContract, F extends Extract<keyof C['sourceToDerived'], string>>(
+  contract: C,
+  field: F,
+): FieldDerived<C['sourceToDerived'], F> {
+  const facts = getMutationFacts(contract, field);
+  if (!facts) {
+    const name = Object.entries(MUTATION_CONTRACTS).find(([, c]) => c === contract)?.[0] ?? 'a contracted mutator';
+    throw new MutationEncryptionError('ENC_DERIVED_MISSING', `${name} ran without derived facts for "${field}"`);
+  }
+  return facts;
 }
 
 /** An encryption-service verdict on the mutation (stale manifest, rule violation, drift). */
@@ -62,7 +129,7 @@ async function transformMutationArgs(
   args: Record<string, unknown>,
   enc: MutationEncryptionContext | undefined,
   workspaceId: string,
-): Promise<{ body: Record<string, unknown>; derived?: DerivedContentFacts }> {
+): Promise<{ body: Record<string, unknown>; derived?: DerivedFacts }> {
   if (!config.enc.apiClientEncryptionEnabled || !config.enc.enableDbEncryption) {
     throw new MutationEncryptionError(
       'ENC_NOT_CONFIGURED',
@@ -86,8 +153,8 @@ async function transformMutationArgs(
       ...(contract
         ? {
             contractFields: Object.keys(contract.schema.shape),
-            contractEncrypted: [...contract.encrypted],
-            contractDerived: [...contract.derived],
+            contractEncrypted: sourceFieldNames(contract),
+            contractDerived: derivedNames(contract),
           }
         : {}),
       entityId: workspaceId,
@@ -110,9 +177,9 @@ async function transformMutationArgs(
     throw new Error('Failed to transform encrypted mutation');
   }
 
-  let derived: DerivedContentFacts | undefined;
+  let derived: DerivedFacts | undefined;
   if (transformed.derived !== undefined) {
-    const parsed = derivedContentFactsSchema.safeParse(transformed.derived);
+    const parsed = derivedFactsSchema.safeParse(transformed.derived);
     if (!parsed.success) {
       logger.error('[encryptedMutation] encryption service returned invalid derived facts', {
         mutator: mutatorName,
@@ -153,9 +220,16 @@ export async function prepareEncryptedMutations(
       };
       if (!ruled.has(String(m?.name))) {
         // PREPARED_ARG is set here only; one the client sent is dropped.
-        if (PREPARED_ARG in args) {
-          const { [PREPARED_ARG]: _forged, ...rest } = args as Record<string, unknown>;
-          set(rest);
+        const { [PREPARED_ARG]: _forged, ...plain } = args as Record<string, unknown>;
+        // Plaintext args of a contracted mutator: extract the facts here, no passthrough.
+        const derived = deriveLocally(String(m!.name), plain);
+        if (derived) {
+          logDerivedFacts(String(m!.name), 'local', derived);
+          const key = randomUUID();
+          prepared.set(key, { derived, dekPassthrough: false });
+          set({ ...plain, [PREPARED_ARG]: key });
+        } else if (PREPARED_ARG in args) {
+          set(plain);
         }
         return;
       }
@@ -169,7 +243,8 @@ export async function prepareEncryptedMutations(
           enc,
           workspaceId,
         );
-        prepared.set(key, { derived });
+        logDerivedFacts(String(m!.name), 'encryption-service', derived);
+        prepared.set(key, { derived, dekPassthrough: true });
         next = { ...transformed, [PREPARED_ARG]: key };
       } catch (error) {
         prepared.set(key, { error: error instanceof Error ? error : new Error(String(error)) });
@@ -183,13 +258,14 @@ export async function prepareEncryptedMutations(
 
 /**
  * Inside the mutation's transaction: runs `run` with the args prepareEncryptedMutations
- * transformed and their derived facts (DEK passthrough on), or throws its refusal. Args that
- * were never encrypted by a rule run as sent.
+ * transformed and their derived facts (DEK passthrough on), or with plaintext args and the
+ * facts extracted locally (passthrough off), or throws its refusal. Args of a mutator without
+ * a contract run as sent.
  */
 export async function runEncryptedMutation<T>(
   args: unknown,
   prepared: PreparedMutations,
-  run: (args: unknown, derived: DerivedContentFacts | undefined) => Promise<T>,
+  run: (args: unknown, derived: DerivedFacts | undefined) => Promise<T>,
 ): Promise<T> {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return run(args, undefined);
   const record = args as Record<string, unknown>;
@@ -201,5 +277,6 @@ export async function runEncryptedMutation<T>(
   }
   if (outcome.error) throw outcome.error;
   const derived = outcome.derived;
-  return runWithDekPassthrough(() => mutationDerivedContext.run(derived, () => run(body, derived)));
+  const withDerived = () => mutationDerivedContext.run(derived, () => run(body, derived));
+  return outcome.dekPassthrough ? runWithDekPassthrough(withDerived) : withDerived();
 }

@@ -31,6 +31,7 @@ import { moveJiraProjectChannelTx } from '@/bypassAcl/transactions/jiraMigration
 import { runPurgeJobTx } from '@/bypassAcl/transactions/jiraMigrationController';
 import { createMigrationReportCanvasTx } from '@/bypassAcl/transactions/jiraMigrationController';
 import { postMigrationReportTx } from '@/bypassAcl/transactions/jiraMigrationController';
+import { deleteFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 
 export const db = DatabaseClient.getInstance();
 
@@ -942,13 +943,15 @@ export class JiraMigrationController {
           db.ticketStageRequest.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticketSubTicketMapping.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.subTicket.updateMany({ where: { mappedTicketId: { in: chunk } }, data: { mappedTicketId: null } }),
-          db.formEntityValues.deleteMany({ where: { entityId: { in: chunk }, entityType: 'TICKET' } }),
           db.emailRead.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.workflow.deleteMany({ where: { ticketId: { in: chunk } } }),
           db.ticket.deleteMany({ where: { id: { in: chunk } } }),
         ]);
         const ticketDeleteResult = ticketTxnResults[ticketTxnResults.length - 1];
         deletedTickets += ticketDeleteResult.count;
+        // After the tickets are gone, so a failed batch leaves tickets and their values intact.
+        // Values have no foreign key to tickets, and the batch above can't call the repository.
+        await deleteFormEntityValues(db, { entityId: { in: chunk }, entityType: 'TICKET' });
 
         // Best-effort: remove tickets from Vespa search index so UI/search doesn't show stale results.
         for (const ticketId of chunk) {

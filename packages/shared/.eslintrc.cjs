@@ -14,5 +14,8 @@ module.exports = {
   rules: {
     'no-console': 'error',
     'local-rules/require-is-deleted-filter': 'error',
+    'local-rules/form-entity-values-through-repository': ['error', {
+      allowedFiles: ['src/zero/formsMutatorHelpers.ts'],
+    }],
   },
 };

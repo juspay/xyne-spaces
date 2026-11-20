@@ -133,8 +133,8 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
-import { isEncryptedField } from '@xyne/shared';
-import type { DerivedContentFacts } from '@xyne/shared';
+import type { ExtractorOutput } from '@xyne/shared';
+import { conversationsSendClient } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
@@ -163,7 +163,6 @@ import {
   serializeFlowPlan,
   validateFlowPlan,
 } from '@xyne/shared';
-import { stringFromFormValue } from '@xyne/shared/zero';
 import {
   ATTACHMENT_STILL_UPLOADING,
   isAttachmentUploaded,
@@ -172,11 +171,18 @@ import {
 import {
   validateFieldBranches,
   validateUniqueFieldNames,
-  assertFieldIsCurrentlyActive,
+  assertFormEntityValueWrites,
+  upsertManyFormEntityValues,
+  upsertManyFormEntityValuesArgs,
+  writeFormEntityValueCreate,
+  writeFormEntityValueUpdate,
+  type FormEntityValueWrite,
+  deleteFormEntityValue,
+  moveFormEntityValue,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
-import { getMutationDerived } from './encryptedMutation';
+import { requireMutationFacts } from './encryptedMutation';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
@@ -478,9 +484,6 @@ async function assertCanReviewStageRequest(
   throw new Error('You are not authorized to approve or reject this stage request');
 }
 
-const FORM_VALUE_CHANGED_MESSAGE =
-  'Form value changed. Review the latest form changes before saving.';
-
 async function getConversationSeenCutoffAt(
   tx: Transaction<Schema>,
   channelId: string,
@@ -616,16 +619,16 @@ async function assertGuestMentionsWithin(
   tx: Transaction<Schema>,
   role: string | undefined,
   channelId: string,
-  derived: DerivedContentFacts,
+  mentions: Pick<ExtractorOutput, 'userIds' | 'groupIds' | 'handles'> | undefined,
 ): Promise<void> {
-  if (role !== WorkspaceRole.GUEST || !derived.mentions) return;
-  if (derived.mentions.groupIds.length > 0 || derived.mentions.handles.length > 0) {
+  if (role !== WorkspaceRole.GUEST || !mentions) return;
+  if (mentions.groupIds.length > 0 || mentions.handles.length > 0) {
     throw new Error('Guests can only mention members of this channel');
   }
-  if (derived.mentions.userIds.length === 0) return;
+  if (mentions.userIds.length === 0) return;
   const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
   const allowed = new Set(participants.map(participant => participant.userId));
-  if (derived.mentions.userIds.some(userId => !allowed.has(userId))) {
+  if (mentions.userIds.some(userId => !allowed.has(userId))) {
     throw new Error('Guests can only mention members of this channel');
   }
 }
@@ -1166,6 +1169,25 @@ export function createMutators(
     ) {
       throw new Error('This endpoint requires administrator or owner privileges');
     }
+  };
+
+  // A ticket's releaseVersion form value drives its release mapping; resync once per ticket
+  // after the form write commits.
+  const queueReleaseMappingSyncForFormWrites = (writes: readonly FormEntityValueWrite[]): void => {
+    const ticketIds = new Set(
+      writes
+        .filter(write => write.entityType === FormEntityType.TICKET && write.fieldName === 'releaseVersion')
+        .map(write => write.entityId),
+    );
+    ticketIds.forEach(entityId => {
+      asyncTasks.push(async () => {
+        try {
+          await versionReleaseMappingService.syncTicketById(entityId);
+        } catch (error) {
+          logger.error('release_mapping_sync_failed', { entityId, error });
+        }
+      });
+    });
   };
 
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
@@ -2866,14 +2888,11 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
-          // Under its manifest rule `content` arrives as workspace-DEK ciphertext; the facts the
-          // mutator needs come from the encryption service instead of parsing it.
-          const derived = isEncryptedField(content) ? getMutationDerived() : undefined;
-          if (derived) {
-            await assertGuestMentionsWithin(tx, authData.role, channelId, derived);
-          } else {
-            content = await guestSafeContent(tx, authData.role, channelId, content);
-          }
+          // `content` is opaque here: workspace-DEK ciphertext under its manifest rule, or plaintext
+          // the mutator still never parses. Every fact comes from the contract's picks, extracted by
+          // the encryption service for ciphertext and locally for plaintext (encryptedMutation.ts).
+          const facts = requireMutationFacts(conversationsSendClient, 'content');
+          await assertGuestMentionsWithin(tx, authData.role, channelId, facts);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3145,7 +3164,7 @@ export function createMutators(
               asyncTasks.push(async () => {
                 try {
                   await processMeetLinksFromChatMessage(
-                    derived?.links ? derived.links.meet.join(' ') : message.content,
+                    facts.meetLinks.join(' '),
                     authData.workspaceId,
                     conversationId,
                     message.messageId,
@@ -3187,9 +3206,7 @@ export function createMutators(
           });
 
           // Add mentioned users as MENTIONED participants within Zero transaction
-          const mentions = derived?.mentions
-            ? { userIds: derived.mentions.userIds, groupIds: derived.mentions.groupIds }
-            : extractAllMentions(content);
+          const mentions = { userIds: facts.userIds, groupIds: facts.groupIds };
           logger.info('[MENTION]:', mentions.userIds.length, mentions.groupIds.length, messageId);
           const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
             tx,
@@ -3245,11 +3262,9 @@ export function createMutators(
                     // Execute bot - this creates the bot response message
                     const result = await executionOrchestrator.execute({
                       botId: botDefinition.id,
-                      message: derived?.command
-                        ? derived.command.name
-                          ? `/${derived.command.name} ${derived.command.args ?? ''}`
-                          : '/'
-                        : content,
+                      // The bot gets the command rebuilt from the facts, or `/` when the message was
+                      // not a command: the content itself is opaque here, free text never reaches it.
+                      message: facts.commandName ? `/${facts.commandName} ${facts.commandArgs ?? ''}` : '/',
                       channelId: channel.id,
                       conversationId,
                       userMessageId: message.messageId,
@@ -13286,7 +13301,7 @@ export function createMutators(
                   zql.form_entity_values.where('formId', formId).where('fieldId', row.id),
                 );
                 for (const value of legacyValues) {
-                  await tx.mutate.form_entity_values.update({
+                  await moveFormEntityValue(tx, {
                     id: value.id,
                     fieldId: definitionId,
                     updatedAt: now,
@@ -13374,93 +13389,20 @@ export function createMutators(
           contextId: z.string().optional(),
           version: z.number().optional(),
         }),
-        async ({
-          tx,
-          args: {
-            id,
-            entityId,
-            entityType,
-            fieldId,
-            newValue,
-            timestamp,
-            contextId,
-            version,
-          },
-        }) => {
-          // Legacy create path: older clients only know form_fields ids, so resolve
-          // formId from the legacy row. global fields must use createV2.
-          const legacyField = await tx.run(
-            zql.form_fields.where('id', fieldId).related('globalField').one(),
-          );
-          const resolvedFieldId = legacyField?.globalFieldId ?? legacyField?.id;
-          const fieldType = legacyField?.globalField?.fieldType ?? legacyField?.fieldType;
-          if (!legacyField || !resolvedFieldId || !fieldType) {
+        async ({ tx, args }) => {
+          // Legacy create path: older clients only know form_fields ids, so resolve formId from the
+          // legacy row. Global fields must use createV2.
+          const legacyField = await tx.run(zql.form_fields.where('id', args.fieldId).one());
+          if (!legacyField) {
             throw new Error('Form field not found, cannot make an entry');
           }
-          const formId = legacyField.formId;
-          const fieldName = legacyField.globalField?.fieldName ?? legacyField.fieldName ?? 'Field';
-
-          await assertFieldIsCurrentlyActive(
-            tx,
-            {
-              id: resolvedFieldId,
-              formId,
-              fieldName,
-              parentOptionId: legacyField.parentOptionId,
-            },
-            entityId,
-            entityType,
-          );
-
-          // Determine actualFieldValue based on field type
-          const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
-          const actualFieldValue = isMultiValue ? newValue : newValue[0] || null;
-
-          // DOC fields no longer require a claim here — the upload pipeline
-          // (POST /attachments/upload from StageFormModal.handleSubmit) writes
-          // the MessageAttachment row directly with entityType=FORM_ENTITY_VALUE
-          // and entityId = this row's id (pre-allocated client-side). So by the
-          // time we insert the form value row, the attachment is already
-          // pointing at it correctly.
-
-          // Upsert the form entity value
-          await tx.mutate.form_entity_values.insert({
+          const write = await writeFormEntityValueCreate(tx, {
+            ...args,
+            formId: legacyField.formId,
             workspaceId: authData.workspaceId,
-            id,
-            formId,
-            entityId,
-            entityType,
-            fieldId: resolvedFieldId,
-            ...(contextId && { contextId }),
-            version: version ?? 1,
-            fieldValue: '',
-            actualFieldValue,
-            createdAt: timestamp,
-            updatedAt: timestamp,
           });
-
-          const nextAttachmentId =
-            fieldType === FormFieldType.DOC ? stringFromFormValue(actualFieldValue) : null;
-          if (entityType === FormEntityType.TICKET && fieldType === FormFieldType.DOC && nextAttachmentId) {
-            const nextAttachment = await tx.run(zql.message_attachments.where('id', nextAttachmentId).one());
-            if (
-              nextAttachment &&
-              (nextAttachment.entityId !== id ||
-                nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
-            ) {
-              throw new Error('Attachment is not bound to this form value');
-            }
-          }
-
-          if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
-            asyncTasks.push(async () => {
-              try {
-                await versionReleaseMappingService.syncTicketById(entityId);
-              } catch (error) {
-                logger.error('release_mapping_sync_failed', { entityId, error });
-              }
-            });
-          }
+          await assertFormEntityValueWrites(tx, [write]);
+          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       createV2: defineMutator(
@@ -13475,111 +13417,10 @@ export function createMutators(
           contextId: z.string().optional(),
           version: z.number().optional(),
         }),
-        async ({
-          tx,
-          args: {
-            id,
-            entityId,
-            entityType,
-            fieldId,
-            formId,
-            newValue,
-            timestamp,
-            contextId,
-            version,
-          },
-        }) => {
-          // Resolve the field definition. fieldId may reference a new global_fields
-          // definition or a legacy form_fields row.
-          const globalField = await tx.run(zql.global_fields.where('id', fieldId).one());
-          const legacyField = globalField
-            ? null
-            : await tx.run(zql.form_fields.where('id', fieldId).related('globalField').one());
-
-          const resolvedFieldId = globalField?.id ?? legacyField?.globalFieldId ?? legacyField?.id;
-          const fieldType = globalField?.fieldType ?? legacyField?.globalField?.fieldType ?? legacyField?.fieldType;
-          if (!resolvedFieldId || !fieldType) {
-            throw new Error('Form field not found');
-          }
-          let membership: any = null;
-          if (globalField) {
-            membership = await tx.run(
-              zql.form_fields
-                .where('formId', formId)
-                .where('globalFieldId', globalField.id)
-                .related('globalField')
-                .one(),
-            );
-            if (!membership) {
-              throw new Error('Form field not found in this form');
-            }
-          } else if (legacyField?.formId !== formId) {
-            throw new Error('Form field not found in this form');
-          } else {
-            membership = legacyField;
-          }
-          const fieldName = globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName;
-          await assertFieldIsCurrentlyActive(
-            tx,
-            {
-              id: resolvedFieldId,
-              formId,
-              fieldName: fieldName ?? 'Field',
-              parentOptionId: membership?.parentOptionId,
-            },
-            entityId,
-            entityType,
-          );
-
-          // Determine actualFieldValue based on field type
-          const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
-          const actualFieldValue = isMultiValue ? newValue : newValue[0] || null;
-
-          // DOC fields no longer require a claim here — the upload pipeline
-          // (POST /attachments/upload from StageFormModal.handleSubmit) writes
-          // the MessageAttachment row directly with entityType=FORM_ENTITY_VALUE
-          // and entityId = this row's id (pre-allocated client-side). So by the
-          // time we insert the form value row, the attachment is already
-          // pointing at it correctly.
-
-          // Upsert the form entity value
-          await tx.mutate.form_entity_values.insert({
-            workspaceId: authData.workspaceId,
-            id,
-            formId,
-            entityId,
-            entityType,
-            fieldId: resolvedFieldId,
-            ...(contextId && { contextId }),
-            version: version ?? 1,
-            fieldValue: '',
-            actualFieldValue,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          });
-
-          const nextAttachmentId =
-            fieldType === FormFieldType.DOC ? stringFromFormValue(actualFieldValue) : null;
-          if (entityType === FormEntityType.TICKET && fieldType === FormFieldType.DOC && nextAttachmentId) {
-            const nextAttachment = await tx.run(zql.message_attachments.where('id', nextAttachmentId).one());
-            if (
-              nextAttachment &&
-              (nextAttachment.entityId !== id ||
-                nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
-            ) {
-              throw new Error('Attachment is not bound to this form value');
-            }
-          }
-
-          if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
-            asyncTasks.push(async () => {
-              try {
-                await versionReleaseMappingService.syncTicketById(entityId);
-              } catch (error) {
-                logger.error('release_mapping_sync_failed', { entityId, error });
-              }
-            });
-          }
+        async ({ tx, args }) => {
+          const write = await writeFormEntityValueCreate(tx, { ...args, workspaceId: authData.workspaceId });
+          await assertFormEntityValueWrites(tx, [write]);
+          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       update: defineMutator(
@@ -13589,111 +13430,19 @@ export function createMutators(
           updatedAt: z.number(),
           expectedValueUpdatedAt: z.number().nullable().optional(),
         }),
-        async ({
-          tx,
-          args: {
-            formEntityValueId,
-            newValue,
-            updatedAt,
-            expectedValueUpdatedAt,
-          },
-        }) => {
-          // Validate form entity value exists and get formField relation
-          const formEntityValue = await tx.run(
-            zql.form_entity_values
-              .where('id', formEntityValueId)
-              .related('formField')
-              .related('globalField')
-              .one(),
-          );
-
-          if (!formEntityValue) {
-            throw new Error('Form entity value not found');
-          }
-
-          if (
-            expectedValueUpdatedAt !== undefined &&
-            (formEntityValue.updatedAt ?? null) !== expectedValueUpdatedAt
-          ) {
-            throw new Error(FORM_VALUE_CHANGED_MESSAGE);
-          }
-
-          const fieldType = formEntityValue.globalField?.fieldType ?? formEntityValue.formField?.fieldType;
-          const resolvedFieldName =
-            formEntityValue.globalField?.fieldName ?? formEntityValue.formField?.fieldName;
-          const membership = formEntityValue.formField
-            ?? (formEntityValue.globalField
-              ? await tx.run(
-                zql.form_fields
-                  .where('formId', formEntityValue.formId)
-                  .where('globalFieldId', formEntityValue.globalField.id)
-                  .related('globalField')
-                  .one(),
-              )
-              : null);
-          if (membership) {
-            await assertFieldIsCurrentlyActive(
-              tx,
-              {
-                id: membership.globalFieldId ?? membership.id,
-                formId: membership.formId,
-                fieldName:
-                  (membership as { globalField?: { fieldName?: string | null } }).globalField?.fieldName
-                  ?? membership.fieldName
-                  ?? resolvedFieldName
-                  ?? 'Field',
-                parentOptionId: membership.parentOptionId,
-              },
-              formEntityValue.entityId,
-              formEntityValue.entityType,
-            );
-          }
-
-          // Determine what to store based on field type
-          const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
-          const valueToStore = isMultiValue
-            ? newValue              // Store array for MULTI_SELECT/USER (including empty arrays)
-            : newValue[0] || null;  // Store first element or null for other types
-
-          const nextDocAttachmentId =
-            fieldType === FormFieldType.DOC ? stringFromFormValue(valueToStore) : null;
-          if (
-            formEntityValue.entityType === FormEntityType.TICKET &&
-            fieldType === FormFieldType.DOC &&
-            nextDocAttachmentId
-          ) {
-            const nextAttachment = await tx.run(
-              zql.message_attachments.where('id', nextDocAttachmentId).one(),
-            );
-            if (
-              nextAttachment &&
-              (nextAttachment.entityId !== formEntityValueId ||
-                nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
-            ) {
-              throw new Error('Attachment is not bound to this form value');
-            }
-          }
-
-          await tx.mutate.form_entity_values.update({
-            id: formEntityValueId,
-            actualFieldValue: valueToStore,
-            updatedAt,
-          });
-
-          if (
-            formEntityValue.entityType === FormEntityType.TICKET &&
-            resolvedFieldName === 'releaseVersion'
-          ) {
-            asyncTasks.push(async () => {
-              try {
-                await versionReleaseMappingService.syncTicketById(formEntityValue.entityId);
-              } catch (error) {
-                logger.error('release_mapping_sync_failed', { entityId: formEntityValue.entityId, error });
-              }
-            });
-          }
+        async ({ tx, args }) => {
+          const write = await writeFormEntityValueUpdate(tx, args);
+          await assertFormEntityValueWrites(tx, [write]);
+          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
+      // Saves a whole form (e.g. a stage form) in one transaction. Use this instead of one
+      // createV2/update per field whenever several values change together: branch fields are
+      // validated after every value is written, so their order doesn't matter.
+      upsertMany: defineMutator(upsertManyFormEntityValuesArgs, async ({ tx, args }) => {
+        const writes = await upsertManyFormEntityValues(tx, authData.workspaceId, args);
+        queueReleaseMappingSyncForFormWrites(writes);
+      }),
     },
     dashboard: {
       upsert: defineMutator(
@@ -15040,7 +14789,8 @@ export function createMutators(
               const allFormValuesForVersioning = await tx.run(
                 zql.form_entity_values
                   .where('entityId', ticket.id)
-                  .where('contextId', stage.id),
+                  .where('contextId', stage.id)
+                  .related('items'),
               );
               // submittedValues = the frontend's guessed submission (version > maxVisitIndex).
               const guessedRows = allFormValuesForVersioning.filter(
@@ -15149,15 +14899,15 @@ export function createMutators(
                     // guessed row at its own version). REUSE: the occupant is the identical
                     // prior-visit row — delete the redundant guess and bump the survivor.
                     if (!isNewVersion) {
-                      await tx.mutate.form_entity_values.delete({ id: fv.id });
-                      await tx.mutate.form_entity_values.update({
+                      await deleteFormEntityValue(tx, fv.id);
+                      await moveFormEntityValue(tx, {
                         id: existingAtTarget.id,
                         updatedAt: now,
                       });
                     }
                     continue;
                   }
-                  await tx.mutate.form_entity_values.update({
+                  await moveFormEntityValue(tx, {
                     id: fv.id,
                     version: newVisitIndex,
                     updatedAt: now,
@@ -19176,7 +18926,8 @@ export function createMutators(
             const priorRows = await tx.run(
               zql.form_entity_values
                 .where('entityId', ticketId)
-                .where('contextId', targetStage.id),
+                .where('contextId', targetStage.id)
+                .related('items'),
             );
             const rowsAtMaxVersion = priorRows.filter(r => (r.version ?? 1) === maxVersion);
             latestValues = foldFormRowsToValues(rowsAtMaxVersion, fieldIdToName);

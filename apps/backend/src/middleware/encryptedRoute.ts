@@ -2,7 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
-import { derivedContentFactsSchema } from '@xyne/shared';
+import {
+  derivedFactsSchema,
+  derivedNames,
+  sourceFieldNames,
+} from '@xyne/shared';
 import type { RequestContract } from '@xyne/shared';
 import { config } from '@/config/env';
 import {
@@ -62,8 +66,8 @@ function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): 
  */
 function transformRequest(options: EncryptedRouteOptions) {
   const contractFields = Object.keys(options.contract.schema.shape);
-  const contractEncrypted = [...options.contract.encrypted];
-  const contractDerived = [...options.contract.derived];
+  const contractEncrypted = sourceFieldNames(options.contract);
+  const contractDerived = derivedNames(options.contract);
   return async function transformRequestMiddleware(
     req: Request,
     res: Response,
@@ -120,7 +124,7 @@ async function transformRequestBody(
   next: NextFunction,
   options: EncryptedRouteOptions,
   caller: TransitCaller,
-  contract: { contractFields: string[]; contractEncrypted: string[]; contractDerived: string[] },
+  contract: { contractFields: string[]; contractEncrypted: string[]; contractDerived: Record<string, string[]> },
 ): Promise<void> {
   try {
     if (!req.body || typeof req.body !== 'object') {
@@ -142,7 +146,7 @@ async function transformRequestBody(
     // Facts the encryption service extracted from the plaintext; validated before any
     // consumer trusts them in place of parsing `content`.
     if (derived !== undefined) {
-      const parsedDerived = derivedContentFactsSchema.safeParse(derived);
+      const parsedDerived = derivedFactsSchema.safeParse(derived);
       if (!parsedDerived.success) {
         logger.error('[encryptedRoute] encryption service returned invalid derived facts', {
           method: sanitizeForLog(req.method),

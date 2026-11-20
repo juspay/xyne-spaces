@@ -1,4 +1,4 @@
-import type { ExtractorOutput } from '../enc-contracts/extractors.js';
+import type { ExtractorGroups } from '../enc-contracts/extractors.js';
 import { stripCodeRegions } from '../utils/mentionParser.js';
 
 const ZWSP = '\u200B';
@@ -9,7 +9,7 @@ const ZWSP = '\u200B';
  * the ZWSP `@name` tokens, which the backend resolves as user names and group
  * aliases/names exactly as it does today.
  */
-export function extractMentions(text: string): ExtractorOutput['mentions'] {
+export function extractMentions(text: string): ExtractorGroups['mentions'] {
   // A mention inside <pre>/<code> is a false positive and must not notify.
   const content = stripCodeRegions(text);
   const userIds = new Set<string>();

@@ -50,6 +50,7 @@ import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-han
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
+import { createFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -889,12 +890,12 @@ export class TicketController {
           .map((f: any) => ({
             fieldId: f.id,
             fieldName: f.fieldName,
-            actualFieldValue: dynamicFields[f.fieldName],
+            value: dynamicFields[f.fieldName],
           }));
         if (fieldsWithValues.length > 0) {
           formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
           // Disabled (LLM)
-          // duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }));
+          // duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.value }));
         }
       }
 
@@ -993,25 +994,19 @@ export class TicketController {
           // Create FormEntityValues for each dynamic field
           const formEntityValuesData = formFields
             .filter((field: any) => dynamicFields[field.fieldName] !== undefined)
-            .map((field: any) => {
-              const value = dynamicFields[field.fieldName];
-              // Provide both fields for backward compatibility
-              return {
-                formId: formMapping.formId,
-                entityId: ticket.id,
-                entityType: FormEntityType.TICKET,
-                fieldId: field.id,
-                contextId: boardId,
-                workspaceId: ticket.workspaceId,
-                fieldValue: '', // Empty string for backward compatibility (not used anymore)
-                actualFieldValue: value, // Actual value stored in JSON field
-              };
-            });
+            .map((field: any) => ({
+              fieldType: field.fieldType,
+              value: dynamicFields[field.fieldName],
+              formId: formMapping.formId,
+              entityId: ticket.id,
+              entityType: FormEntityType.TICKET,
+              fieldId: field.id,
+              contextId: boardId,
+              workspaceId: ticket.workspaceId,
+            }));
 
           if (formEntityValuesData.length > 0) {
-            await prisma.formEntityValues.createMany({
-              data: formEntityValuesData,
-            });
+            await createFormEntityValues(prisma, formEntityValuesData);
             logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
             if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
                 versionReleaseMappingService.syncTicketById(ticket.id).catch(error => {

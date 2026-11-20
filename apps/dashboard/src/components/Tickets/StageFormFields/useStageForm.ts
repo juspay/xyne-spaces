@@ -28,6 +28,28 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 export type PersistMode = 'save' | 'submit' | 'move' | 'review';
 
+/** One entry of a formEntityValue.upsertMany batch. */
+type FormEntityValueUpsert =
+  | { op: 'create'; id: string; fieldId: string; newValue: string[] }
+  | {
+      op: 'update';
+      formEntityValueId: string;
+      newValue: string[];
+      expectedValueUpdatedAt: number | null;
+    };
+
+const throwIfMutationError = (result: unknown): void => {
+  if (
+    typeof result === 'object' &&
+    result !== null &&
+    'type' in result &&
+    (result as { type?: string }).type === 'error'
+  ) {
+    const message = (result as { error?: { message?: string } }).error?.message;
+    throw new Error(message ?? 'Failed to save form');
+  }
+};
+
 export type StageVisitEta = {
   readonly id: string;
   readonly stageId: string;
@@ -519,7 +541,14 @@ export const useStageForm = ({
         const getFieldEffectiveValue = (fieldId: string): string | undefined =>
           effectiveFormData[fieldId]?.[0];
 
-        const mutationPromises: Promise<unknown>[] = [];
+        // Every changed value goes in one upsertMany so the form saves in a single transaction:
+        // branch fields are validated against their parent's new value regardless of field
+        // order, and a failure leaves no partially saved form behind.
+        const valueWrites: FormEntityValueUpsert[] = [];
+        // Row ids this save writes, adopted into draftValueIdsRef only once the server accepts
+        // the batch. A rejected batch rolls back every create, so remembering their ids would
+        // turn the next save into updates of rows that don't exist.
+        const pendingDraftValueIds = new Map<string, string>();
         fields.forEach(field => {
           if (!isFieldActive(field, fields, getFieldEffectiveValue)) return;
           const fieldValue = effectiveFormData[field.id] ?? [];
@@ -533,17 +562,13 @@ export const useStageForm = ({
           }
 
           if (existingValueId) {
-            draftValueIdsRef.current.set(field.id, existingValueId);
-            const mutationResult = zero.mutate(
-              mutators.formEntityValue.update({
-                formEntityValueId: existingValueId,
-                newValue: fieldValue,
-                updatedAt: timestamp,
-                expectedValueUpdatedAt:
-                  values.find(v => v.id === existingValueId)?.updatedAt ?? null,
-              }),
-            );
-            mutationPromises.push(mutationResult.server);
+            pendingDraftValueIds.set(field.id, existingValueId);
+            valueWrites.push({
+              op: 'update',
+              formEntityValueId: existingValueId,
+              newValue: fieldValue,
+              expectedValueUpdatedAt: values.find(v => v.id === existingValueId)?.updatedAt ?? null,
+            });
           } else {
             // Safety net: if a row already exists at this visit version (e.g. wrong create
             // path after reusable-field prefill), update it instead of colliding on unique key.
@@ -557,38 +582,47 @@ export const useStageForm = ({
                 !value.id.startsWith('prefill-'),
             );
             if (existingAtVersion) {
-              draftValueIdsRef.current.set(field.id, existingAtVersion.id);
-              const mutationResult = zero.mutate(
-                mutators.formEntityValue.update({
-                  formEntityValueId: existingAtVersion.id,
-                  newValue: fieldValue,
-                  updatedAt: timestamp,
-                  expectedValueUpdatedAt: existingAtVersion.updatedAt ?? null,
-                }),
-              );
-              mutationPromises.push(mutationResult.server);
+              pendingDraftValueIds.set(field.id, existingAtVersion.id);
+              valueWrites.push({
+                op: 'update',
+                formEntityValueId: existingAtVersion.id,
+                newValue: fieldValue,
+                expectedValueUpdatedAt: existingAtVersion.updatedAt ?? null,
+              });
             } else {
               const formEntityValueId =
                 docUploadsByField.get(field.id)?.formEntityValueId ?? uuidv4();
-              draftValueIdsRef.current.set(field.id, formEntityValueId);
-              const mutationResult = zero.mutate(
-                mutators.formEntityValue.createV2({
-                  id: formEntityValueId,
-                  entityId: ticket.id,
-                  entityType: FormEntityType.TICKET,
-                  fieldId: field.id,
-                  formId,
-                  newValue: fieldValue,
-                  timestamp,
-                  contextId: targetStage.id,
-                  version: draftVersionRef.current,
-                }),
-              );
-              mutationPromises.push(mutationResult.server);
+              pendingDraftValueIds.set(field.id, formEntityValueId);
+              valueWrites.push({
+                op: 'create',
+                id: formEntityValueId,
+                fieldId: field.id,
+                newValue: fieldValue,
+              });
             }
           }
         });
 
+        if (valueWrites.length > 0) {
+          const valuesResult = await zero.mutate(
+            mutators.formEntityValue.upsertMany({
+              entityId: ticket.id,
+              entityType: FormEntityType.TICKET,
+              formId,
+              timestamp,
+              contextId: targetStage.id,
+              version: draftVersionRef.current,
+              values: valueWrites,
+            }),
+          ).server;
+          // Don't submit the stage request for a form whose values were rejected.
+          throwIfMutationError(valuesResult);
+          pendingDraftValueIds.forEach((valueId, fieldId) => {
+            draftValueIdsRef.current.set(fieldId, valueId);
+          });
+        }
+
+        const mutationPromises: Promise<unknown>[] = [];
         if (hasApprovers && mode !== 'review') {
           const requestStatus =
             mode === 'submit' ? TicketStageRequestStatus.SUBMITTED : TicketStageRequestStatus.DRAFT;
@@ -612,16 +646,7 @@ export const useStageForm = ({
         }
 
         const mutationResults = await Promise.all(mutationPromises);
-        const errorResult = mutationResults.find(
-          (result): result is { type: 'error'; error?: { message?: string } } =>
-            typeof result === 'object' &&
-            result !== null &&
-            'type' in result &&
-            (result as { type?: string }).type === 'error',
-        );
-        if (errorResult) {
-          throw new Error(errorResult.error?.message ?? 'Failed to save form');
-        }
+        mutationResults.forEach(throwIfMutationError);
 
         const signature = serializeFormData(effectiveFormData);
         lastPersistedFormDataRef.current = effectiveFormData;

@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import { FormEntityType, ReleaseEventType } from '@xyne/shared';
 
 
-export function saveReleaseFormValuesTx(formEntityValuesData: { formId: string; entityId: string; entityType: FormEntityType; fieldId: string; contextId: string; fieldValue: string; actualFieldValue: Prisma.InputJsonValue; }[], self: ReleaseRepository, releaseContext: ReleaseEventContext, message: string | undefined, payload: Record<string, unknown> | undefined, formValues: Record<string, unknown>) {
+export function saveReleaseFormValuesTx(formEntityValuesData: { formId: string; entityId: string; entityType: FormEntityType; fieldId: string; contextId: string; fieldValue: string; value: Prisma.InputJsonValue; }[], self: ReleaseRepository, releaseContext: ReleaseEventContext, message: string | undefined, payload: Record<string, unknown> | undefined, formValues: Record<string, unknown>) {
   return transaction(['Channel', 'Form', 'FormEntityValues', 'ReleaseEvent'], 'saveReleaseFormValues: form value creates and release audit event must commit atomically; tx is not ACL-wrapped', prisma, async tx => {
   				await formsRepository.createManyFormEntityValues(formEntityValuesData, tx);
   				await self.createReleaseEvent(

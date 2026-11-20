@@ -998,7 +998,7 @@ export class AppDeskRefetch extends BaseRefetch {
       customFieldValues && customFieldValues.fieldValues.length > 0
         ? customFieldValues.fieldValues.map(fv => ({
             fieldId: fv.fieldId,
-            value: fv.actualFieldValue,
+            value: fv.value,
           }))
         : undefined;
     return { customFieldValues, scopeFieldValues, validationErrors };

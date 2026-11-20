@@ -498,6 +498,9 @@ const envSchema = Joi.object({
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   ENCRYPTION_KEY: Joi.string().allow('').default(''),
+  // 32 random bytes as 64 hex characters. HMAC key for form_entity_values.textHash, which text
+  // custom-field filters match on. Changing it means recomputing every stored textHash.
+  FORM_FIELD_TEXT_HASH_KEY: Joi.string().hex().length(64).required(),
   ZERO_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   API_CLIENT_ENCRYPTION_ENABLED: Joi.boolean().default(false),
   ENABLE_DB_ENCRYPTION: Joi.boolean().default(false),
@@ -1410,6 +1413,7 @@ export const config = {
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,
   },
   encryptionKey: envVars.ENCRYPTION_KEY as string,
+  formFieldTextHashKey: envVars.FORM_FIELD_TEXT_HASH_KEY as string,
   secretsVault: {
     cacheTtlMs: envVars.SECRETS_VAULT_CACHE_TTL_MS as number,
   },

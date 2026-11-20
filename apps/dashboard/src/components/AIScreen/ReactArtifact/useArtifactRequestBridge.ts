@@ -41,7 +41,11 @@ const FORWARDABLE_HEADERS = ['content-type', 'accept', 'x-route-env'];
  * here only after deciding it is safe to run as arbitrary app code. Requests are
  * resolved same-origin below, so an absolute URL to another host can never match.
  */
-const ALLOWED_PREFIXES = ['/api/sdk/', STORAGE_PREFIX];
+const ALLOWED_PREFIXES = [
+  '/api/sdk/',
+  // Disabled (Storage SDK)
+  // STORAGE_PREFIX,
+];
 
 /**
  * Runs an app's backend `fetch` calls as the current viewer.

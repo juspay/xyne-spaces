@@ -83,6 +83,9 @@ secretEnv:
   ENCRYPTION_KEY:
     name: xyne-backend-secrets
     key: ENCRYPTION_KEY
+  FORM_FIELD_TEXT_HASH_KEY:
+    name: xyne-backend-secrets
+    key: FORM_FIELD_TEXT_HASH_KEY
   INTERNAL_S2S_KEY:
     name: xyne-backend-secrets
     key: INTERNAL_S2S_KEY

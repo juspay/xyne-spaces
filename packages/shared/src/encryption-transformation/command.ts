@@ -1,4 +1,4 @@
-import type { ExtractorOutput } from '../enc-contracts/extractors.js';
+import type { ExtractorGroups } from '../enc-contracts/extractors.js';
 
 /** `/<bot-name> <params…>` once HTML tags are stripped. */
 export const BOT_COMMAND_REGEX = /\/([a-zA-Z-]+)\s+(.*)/;
@@ -39,7 +39,7 @@ export function parseBotCommandText(content: string): ParsedBotCommandText | nul
   return { botName, parameters, rawCommand: strippedContent, paramString };
 }
 
-export function extractCommand(text: string): ExtractorOutput['command'] {
+export function extractCommand(text: string): ExtractorGroups['command'] {
   const parsed = parseBotCommandText(text);
   return {
     isBot: isBotCommandContent(text),

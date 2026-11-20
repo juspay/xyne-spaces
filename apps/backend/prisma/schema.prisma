@@ -4030,17 +4030,46 @@ model FormEntityValues {
   contextId       String?  // Context ID (e.g., stageId) for scoping values per context
   version         Int?     // NULL treated as version 1 in code
   fieldValue      String   // Value stored as String (backward compatibility)
-  actualFieldValue Json?   // Value stored as Json for structured data (parse based on fieldType)
+  actualFieldValue Json?   // Old JSON value; still written next to the typed columns until every client reads those
+  // Typed values: only the column matching the field's type is filled.
+  textValue       String?  // STRING; the text as entered (filter on textHash, not this)
+  textHash        String?  // STRING; HMAC-SHA256 of lower(trim(value)), used for exact-match filters
+  numberValue     Float?   // NUMBER
+  dateValue       DateTime? // DATE
+  boolValue       Boolean? // BOOLEAN
+  plainValue      String?  // SINGLE_SELECT option, TICKET id, DOC attachment id
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  items FormEntityValueItems[] // MULTI_SELECT options and USER ids
 
   @@index([entityId, entityType])
   @@index([fieldId])
   // Speeds up releaseChangeFormValuesByReleaseId, which filters on contextId
   // (= releaseId) over this large table.
   @@index([contextId])
+  @@index([fieldId, textHash])
+  @@index([fieldId, numberValue])
+  @@index([fieldId, dateValue])
+  @@index([fieldId, plainValue])
   @@unique([entityId, entityType, fieldId, contextId, version])
   @@map("form_entity_values")
+  @@schema("public")
+}
+
+// One row per selected option (MULTI_SELECT) or user (USER) of a form_entity_values row.
+model FormEntityValueItems {
+  workspaceId String // denormalized tenant key (stamped on insert)
+  id          String   @id @default(cuid())
+  valueId     String
+  item        String
+  createdAt   DateTime @default(now())
+
+  value FormEntityValues @relation(fields: [valueId], references: [id], onDelete: Cascade)
+
+  @@unique([valueId, item])
+  @@index([item])
+  @@map("form_entity_value_items")
   @@schema("public")
 }
 

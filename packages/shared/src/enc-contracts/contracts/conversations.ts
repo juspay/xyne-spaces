@@ -1,18 +1,17 @@
 import { z } from 'zod';
 import { MessageType } from '../../zero/types.js';
 import { defineRequestContract, type RequestOf } from '../define.js';
+import { derive } from '../extractors.js';
 
 /**
  * Conversation reply API; attached to its route in the backend's routes/conversations.ts.
- * `encrypted` names the fields the client sends as ciphertext; `derived` the facts the
- * handler reads instead of that plaintext (mentions to notify, links for previews, the bot
- * command, the plaintext length). Runs unencrypted for now (`encrypted: []`, manifest rule
- * revision 2): clients without transit encryption still post here. To re-enable, list
- * `content` here and ship a rule revision with `content.client = true`.
+ * Runs unencrypted for now (`sourceToDerived: {}`, manifest rule revision 2): clients without
+ * transit encryption still post here, and the handler parses the plaintext. To re-enable,
+ * list `content` here with the facts the handler reads and ship a rule revision with
+ * `content.client = true`.
  */
 export const replyToConversationClient = defineRequestContract({
-  encrypted: [],
-  derived: ['mentions', 'links', 'command', 'text'],
+  sourceToDerived: {},
   schema: z.object({
     content: z.string().optional(),
     msgType: z.enum([MessageType.USER, MessageType.BOT]).optional(),
@@ -28,12 +27,26 @@ export type ReplyToConversationRequest = RequestOf<typeof replyToConversationCli
 
 /**
  * Zero mutator `conversations.send` (start a conversation); its args are this body. The
- * client encrypts `content` under its transit ticket; the mutator gets workspace-DEK
- * ciphertext and reads mentions, links, the bot command and the length from `derived`.
+ * client encrypts `content`; the mutator gets workspace-DEK ciphertext and reads these facts
+ * from `derived.fields.content`: mentions for the guest check and participants, Meet links,
+ * the bot command. `mentionsChannel` / `mentionsHere`, `firstUrl` and `prLinks` are for the
+ * message side effects (notifications, previews, PR approval button).
  */
 export const conversationsSendClient = defineRequestContract({
-  encrypted: ['content'],
-  derived: ['mentions', 'links', 'command', 'text'],
+  sourceToDerived: {
+    content: {
+      userIds: derive.userIds,
+      groupIds: derive.groupIds,
+      handles: derive.handles,
+      mentionsChannel: derive.mentionsChannel,
+      mentionsHere: derive.mentionsHere,
+      firstUrl: derive.firstUrl,
+      prLinks: derive.prLinks,
+      meetLinks: derive.meetLinks,
+      commandName: derive.commandName,
+      commandArgs: derive.commandArgs,
+    },
+  },
   schema: z.object({
     channelId: z.string(),
     content: z.string(),

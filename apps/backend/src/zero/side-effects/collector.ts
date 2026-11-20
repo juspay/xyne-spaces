@@ -1,4 +1,4 @@
-import type { Schema } from '@xyne/shared';
+import { readFormEntityValue, type Schema } from '@xyne/shared';
 import type { TableName } from '../acl/core/types';
 import {
   SIDE_EFFECT_OPERATION_CONFIG,
@@ -151,14 +151,13 @@ export async function collectSideEffectJobs(
   }
 
   if ((operation === 'update' || operation === 'delete') && table === 'form_entity_values') {
-    const entity = await tx.run(zql.form_entity_values.where('id', entityId).one());
+    const entity = await tx.run(zql.form_entity_values.where('id', entityId).related('items').one());
     if (entity) {
       previousValue = {
         entityId: entity.entityId,
         fieldId: entity.fieldId,
         entityType: entity.entityType,
-        fieldValue: entity.fieldValue,
-        actualFieldValue: entity.actualFieldValue,
+        value: readFormEntityValue(entity),
       };
     }
   }

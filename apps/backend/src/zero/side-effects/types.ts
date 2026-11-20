@@ -1,5 +1,5 @@
 import type { TableName } from '../acl/core/types';
-import type { DerivedContentFacts } from '@xyne/shared';
+import type { DerivedFacts } from '@xyne/shared';
 export type SideEffectOperation = 'insert' | 'update' | 'delete' | 'upsert';
 
 export interface ConversationPreviousValue {
@@ -55,8 +55,7 @@ export interface FormEntityValuePreviousValue {
   entityId: string;
   fieldId: string;
   entityType: string;
-  fieldValue: string;
-  actualFieldValue: unknown;
+  value: unknown;
 }
 
 export interface DelayedMessagePreviousValue {
@@ -158,7 +157,7 @@ export interface SideEffectJobConfig {
    * reply route under the client manifest). When present, consumers use these instead of
    * parsing `content`, which is ciphertext.
    */
-  derived?: DerivedContentFacts;
+  derived?: DerivedFacts;
 }
 
 export type SideEffectJobsAccumulator = SideEffectJobConfig[];

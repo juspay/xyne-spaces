@@ -57,17 +57,19 @@ export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
     badge: 'Inside Spaces',
     npmPackage: '@xyne/spaces-cli',
   },
-  {
-    id: 'storage',
-    name: 'Storage SDK',
-    tagline: 'Save preferences, drafts and shared state from apps built with the Spaces CLI.',
-    summary:
-      'Key-value storage for artifact apps, already wired into every app the Spaces CLI ' +
-      'scaffolds. Keep records private to each person, or share one record with everyone who ' +
-      'uses the app — no database or backend to run.',
-    badge: 'Comes with the CLI',
-    npmPackage: '@xyne/xyne-storage-sdk',
-  },
+  // Disabled (Storage SDK): hides its card and its /developers/storage page.
+  // StorageDoc and the 'storage' id stay in place for when it comes back.
+  // {
+  //   id: 'storage',
+  //   name: 'Storage SDK',
+  //   tagline: 'Save preferences, drafts and shared state from apps built with the Spaces CLI.',
+  //   summary:
+  //     'Key-value storage for artifact apps, already wired into every app the Spaces CLI ' +
+  //     'scaffolds. Keep records private to each person, or share one record with everyone who ' +
+  //     'uses the app — no database or backend to run.',
+  //   badge: 'Comes with the CLI',
+  //   npmPackage: '@xyne/xyne-storage-sdk',
+  // },
 ];
 
 export function findDeveloperTool(id: string | undefined): DeveloperTool | undefined {

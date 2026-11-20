@@ -37,7 +37,7 @@ export class FormService {
       fieldId: string;
       contextId?: string | null;
       fieldValue?: string;
-      actualFieldValue: Prisma.InputJsonValue;
+      value: Prisma.InputJsonValue;
     }>,
     tx?: Prisma.TransactionClient
   ) {
