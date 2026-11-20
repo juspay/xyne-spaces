@@ -44,6 +44,21 @@ export const assertFormFieldType = (fieldType: unknown, fieldId: string): FormFi
   return fieldType as FormFieldType;
 };
 
+/**
+ * A saved field keeps its type: its stored values sit in the typed column for that type, so
+ * changing it would hide them. Definitions with no stored type (legacy rows linked to a global
+ * field) are not checked.
+ */
+export const assertFieldTypeUnchanged = (
+  savedType: string | null | undefined,
+  nextType: string,
+  fieldName: string,
+): void => {
+  if (savedType && savedType !== nextType) {
+    throw new Error(`The type of "${fieldName}" can't be changed once it's saved. Create a new field instead.`);
+  }
+};
+
 /** Lowercased and trimmed, so "Kalyan" and "kalyan " hash the same. */
 export const normalizeTextForHash = (value: string): string => value.trim().toLowerCase();
 

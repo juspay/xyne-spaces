@@ -116,6 +116,7 @@ import {
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
   resolveTicketDescription,
+  assertFieldTypeUnchanged,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -13110,6 +13111,7 @@ export function createMutators(
                   .one(),
               );
               if (found) {
+                assertFieldTypeUnchanged(found.fieldType, fieldType, fieldName);
                 await tx.mutate.form_fields.update({
                   id: found.id,
                   globalFieldId: null,
@@ -13177,6 +13179,7 @@ export function createMutators(
 
                 const legacyRow = existingById.get(legacyFieldId);
                 if (legacyRow && !legacyRow.globalFieldId) {
+                  assertFieldTypeUnchanged(legacyRow.fieldType, field.fieldType, fieldName);
                   await tx.mutate.form_fields.update({
                     id: legacyRow.id,
                     fieldName,
@@ -13197,6 +13200,7 @@ export function createMutators(
               if (definitionId) {
                 const existingGlobal = await tx.run(zql.global_fields.where('id', definitionId).one());
                 if (existingGlobal) {
+                  assertFieldTypeUnchanged(existingGlobal.fieldType, field.fieldType, fieldName);
                   if (scopedProjectId && existingGlobal.projectId !== scopedProjectId) {
                     throw new Error(`Field ${field.id} does not belong to this form`);
                   }

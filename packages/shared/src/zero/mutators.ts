@@ -105,6 +105,7 @@ import {
 import { isSdlcTreeItemType } from '../sdlcFolderAncestry.js';
 import { refileSdlcFolderEdges } from './sdlcFolderAncestry.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
+import { assertFieldTypeUnchanged } from '../utils/formEntityValueColumns.js';
 import {
   validateFieldBranches,
   validateUniqueFieldNames,
@@ -9359,6 +9360,7 @@ export const mutators = defineMutators({
                 .one(),
             );
             if (found) {
+              assertFieldTypeUnchanged(found.fieldType, fieldType, fieldName);
               await tx.mutate.form_fields.update({
                 id: found.id,
                 globalFieldId: null,
@@ -9426,6 +9428,7 @@ export const mutators = defineMutators({
 
               const legacyRow = existingById.get(legacyFieldId);
               if (legacyRow && !legacyRow.globalFieldId) {
+                assertFieldTypeUnchanged(legacyRow.fieldType, field.fieldType, fieldName);
                 await tx.mutate.form_fields.update({
                   id: legacyRow.id,
                   fieldName,
@@ -9446,6 +9449,7 @@ export const mutators = defineMutators({
             if (definitionId) {
               const existingGlobal = await tx.run(zql.global_fields.where('id', definitionId).one());
               if (existingGlobal) {
+                assertFieldTypeUnchanged(existingGlobal.fieldType, field.fieldType, fieldName);
                 if (scopedProjectId && existingGlobal.projectId !== scopedProjectId) {
                   throw new Error(`Field ${field.id} does not belong to this form`);
                 }
