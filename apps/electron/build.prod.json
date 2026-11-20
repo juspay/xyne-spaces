@@ -22,11 +22,16 @@
     "assets",
     "certs",
     "ui-active",
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "native/transit-key/transit-key",
+    "native/transit-key/transit-key.exe"
   ],
   "asarUnpack": [
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "native/transit-key/transit-key",
+    "native/transit-key/transit-key.exe"
   ],
+  "beforePack": "scripts/before-pack.js",
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
 
   "mac": {

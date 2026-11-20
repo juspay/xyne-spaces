@@ -1,9 +1,14 @@
-/** The client's P-256 key pair. The private key is a WebCrypto handle, never raw bytes. */
+import type { TransitAesKey } from './transit-crypto.js';
+import { getTransitPlatform } from './transit-platform.js';
+/**
+ * The client's P-256 key pair. The private key never leaves its store (WebCrypto, Secure
+ * Enclave, TPM, ...); only the result of ECDH with a server public key does.
+ */
 export interface TransitKeyPair {
-  /** ECDH P-256, `deriveBits` only. */
-  privateKey: CryptoKey;
   /** Base64 uncompressed point: what the register route stores for the session. */
   publicKey: string;
+  /** ECDH with a server's raw uncompressed public point → the 32-byte shared secret. */
+  deriveSharedSecret(serverPoint: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer>;
 }
 
 export interface TransitServerKey {
@@ -52,13 +57,22 @@ export function fromBase64(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+/** A pair whose private key is a WebCrypto handle (`deriveBits` only), never raw bytes. */
+export function webCryptoTransitKeyPair(privateKey: CryptoKey, publicKey: string): TransitKeyPair {
+  return {
+    publicKey,
+    async deriveSharedSecret(serverPoint) {
+      const serverKey = await crypto.subtle.importKey('raw', serverPoint, ECDH, false, []);
+      return crypto.subtle.deriveBits({ name: 'ECDH', public: serverKey }, privateKey, 256);
+    },
+  };
+}
+
 /** A fresh non-extractable ECDH pair; the default store keeps it for the page's lifetime. */
 export async function generateTransitKeyPair(): Promise<TransitKeyPair> {
   const pair = await crypto.subtle.generateKey(ECDH, false, ['deriveBits']);
-  return {
-    privateKey: pair.privateKey,
-    publicKey: toBase64(await crypto.subtle.exportKey('raw', pair.publicKey)),
-  };
+  const publicKey = toBase64(await crypto.subtle.exportKey('raw', pair.publicKey));
+  return webCryptoTransitKeyPair(pair.privateKey, publicKey);
 }
 
 /**
@@ -69,26 +83,14 @@ export async function generateTransitKeyPair(): Promise<TransitKeyPair> {
 export async function deriveTransitKey(
   pair: TransitKeyPair,
   serverPublicKey: string,
-): Promise<CryptoKey> {
+): Promise<TransitAesKey> {
   const clientPoint = fromBase64(pair.publicKey);
   const serverPoint = fromBase64(serverPublicKey);
-  const serverKey = await crypto.subtle.importKey('raw', serverPoint, ECDH, false, []);
-  const shared = await crypto.subtle.deriveBits(
-    { name: 'ECDH', public: serverKey },
-    pair.privateKey,
-    256,
-  );
-  const hkdfKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  const shared = await pair.deriveSharedSecret(serverPoint);
   const salt = new Uint8Array(clientPoint.length + serverPoint.length);
   salt.set(clientPoint, 0);
   salt.set(serverPoint, clientPoint.length);
-  return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(DERIVE_INFO) },
-    hkdfKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  );
+  return getTransitPlatform().crypto.deriveKey(shared, salt, new TextEncoder().encode(DERIVE_INFO));
 }
 
 /**
@@ -98,7 +100,7 @@ export async function deriveTransitKey(
  * server keys. Keys never leave memory.
  */
 export class TransitKeyring {
-  private readonly derived = new Map<number, Promise<CryptoKey>>();
+  private readonly derived = new Map<number, Promise<TransitAesKey>>();
   private serverKeys: TransitServerKeys;
   private refetching: Promise<TransitServerKeys> | null = null;
 
@@ -115,12 +117,12 @@ export class TransitKeyring {
     return this.pair.publicKey;
   }
 
-  async current(): Promise<{ key: CryptoKey; keyId: string }> {
+  async current(): Promise<{ key: TransitAesKey; keyId: string }> {
     const version = this.serverKeys.current;
     return { key: await this.forVersion(version), keyId: transitKeyId(version) };
   }
 
-  async forKeyId(keyId: string): Promise<CryptoKey> {
+  async forKeyId(keyId: string): Promise<TransitAesKey> {
     const version = parseTransitKeyId(keyId);
     if (version === null) throw new Error(`Not a transit key id: ${keyId}`);
     if (!this.has(version)) {
@@ -139,7 +141,7 @@ export class TransitKeyring {
     return this.serverKeys.keys.some(k => k.version === version);
   }
 
-  private forVersion(version: number): Promise<CryptoKey> {
+  private forVersion(version: number): Promise<TransitAesKey> {
     let pending = this.derived.get(version);
     if (!pending) {
       const server = this.serverKeys.keys.find(k => k.version === version);
