@@ -127,13 +127,14 @@ type Operation = Prisma.PrismaPromise<unknown>;
 // A value's row and its items change together. The array form of $transaction keeps every
 // statement inside the tenant ACL extension (the callback form is reserved for bypassAcl/);
 // inside a caller's transaction the statements simply run in order.
-async function runTogether(client: Client, operations: Operation[]): Promise<void> {
+async function runTogether(client: Client, operations: Operation[]): Promise<unknown[]> {
   const withTransaction = client as Client & { $transaction?: (batch: Operation[]) => Promise<unknown[]> };
   if (typeof withTransaction.$transaction === 'function') {
-    await withTransaction.$transaction([...operations]);
-    return;
+    return withTransaction.$transaction([...operations]);
   }
-  for (const operation of operations) await operation;
+  const results: unknown[] = [];
+  for (const operation of operations) results.push(await operation);
+  return results;
 }
 
 // Statements that make the value's items exactly `items`. Item ids are derived from the value
@@ -206,9 +207,53 @@ export async function createFormEntityValue(
   return row;
 }
 
+type NewRow = ReturnType<typeof newRowData>;
+
+// The unique key only clashes when contextId and version are both set: Postgres treats NULLs
+// as distinct.
+const uniqueKeyOf = (row: Required<{ [K in keyof FormEntityValueKey]: NonNullable<FormEntityValueKey[K]> | null }>): string | null =>
+  row.contextId !== null && row.version !== null
+    ? JSON.stringify([row.entityId, row.entityType, row.fieldId, row.contextId, row.version])
+    : null;
+
+// The rows createMany's skipDuplicates would insert: those whose id or unique key is neither
+// already stored nor used by an earlier row of the same batch.
+async function rowsNotYetStored(client: Client, rows: NewRow[]): Promise<NewRow[]> {
+  const keyed = rows.filter((row) => uniqueKeyOf(row.data) !== null);
+  const existing = await client.formEntityValues.findMany({
+    where: {
+      OR: [
+        { id: { in: rows.map((row) => row.data.id) } },
+        ...(keyed.length > 0
+          ? [
+              {
+                entityId: { in: [...new Set(keyed.map((row) => row.data.entityId))] },
+                fieldId: { in: [...new Set(keyed.map((row) => row.data.fieldId))] },
+                contextId: { not: null },
+                version: { not: null },
+              },
+            ]
+          : []),
+      ],
+    },
+    select: { id: true, entityId: true, entityType: true, fieldId: true, contextId: true, version: true },
+  });
+  const takenIds = new Set(existing.map((row) => row.id));
+  const takenKeys = new Set(
+    existing.map(uniqueKeyOf).filter((key) => key !== null)
+  );
+  return rows.filter((row) => {
+    const key = uniqueKeyOf(row.data);
+    if (takenIds.has(row.data.id) || (key !== null && takenKeys.has(key))) return false;
+    takenIds.add(row.data.id);
+    if (key !== null) takenKeys.add(key);
+    return true;
+  });
+}
+
 /**
- * Inserts many values. With skipDuplicates, rows that clash on the unique key are left as
- * they are (and keep their items); only the rows actually inserted get items.
+ * Inserts many values, each row together with its items. With skipDuplicates, rows that clash
+ * on the id or unique key are left as they are (and keep their items).
  */
 export async function createFormEntityValues(
   client: Client,
@@ -216,23 +261,16 @@ export async function createFormEntityValues(
   options: { skipDuplicates?: boolean } = {}
 ): Promise<{ count: number }> {
   if (inputs.length === 0) return { count: 0 };
-  const rows = inputs.map((input) => newRowData(input, input.id ?? randomUUID()));
-  const result = await client.formEntityValues.createMany({
-    data: rows.map((row) => row.data),
-    ...(options.skipDuplicates && { skipDuplicates: true }),
-  });
-  const withItems = rows.filter((row) => row.stored.items.length > 0);
-  if (withItems.length > 0) {
-    const created = await client.formEntityValues.findMany({
-      where: { id: { in: withItems.map((row) => row.data.id) } },
-      select: { id: true },
-    });
-    const createdIds = new Set(created.map((row) => row.id));
-    const operations = withItems
-      .filter((row) => createdIds.has(row.data.id))
-      .flatMap((row) => itemOperations(client, row.data, row.stored.items, true));
-    if (operations.length > 0) await runTogether(client, operations);
-  }
+  const allRows = inputs.map((input) => newRowData(input, input.id ?? randomUUID()));
+  const rows = options.skipDuplicates ? await rowsNotYetStored(client, allRows) : allRows;
+  if (rows.length === 0) return { count: 0 };
+  const [result] = (await runTogether(client, [
+    client.formEntityValues.createMany({
+      data: rows.map((row) => row.data),
+      ...(options.skipDuplicates && { skipDuplicates: true }),
+    }),
+    ...rows.flatMap((row) => itemOperations(client, row.data, row.stored.items, true)),
+  ])) as [{ count: number }];
   return result;
 }
 
@@ -308,8 +346,11 @@ export async function deleteFormEntityValues(
   const rows = await client.formEntityValues.findMany({ where, select: { id: true } });
   if (rows.length === 0) return { count: 0 };
   const ids = rows.map((row) => row.id);
-  await client.formEntityValueItems.deleteMany({ where: { valueId: { in: ids } } });
-  return client.formEntityValues.deleteMany({ where: { id: { in: ids } } });
+  const [, result] = (await runTogether(client, [
+    client.formEntityValueItems.deleteMany({ where: { valueId: { in: ids } } }),
+    client.formEntityValues.deleteMany({ where: { id: { in: ids } } }),
+  ])) as [unknown, { count: number }];
+  return result;
 }
 
 type FindArgs = {
