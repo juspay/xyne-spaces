@@ -2,15 +2,9 @@ import { z } from 'zod';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 
 /**
- * mirrors of the schemas the Automations engine declares on zod v4.
- *
- * The SDK turns a trigger's schemas into JSON Schema with a v3-only converter, so the
- * ones handed to it cannot be v4 — and the Automations originals are not ours to move.
- * Keep each mirror field-for-field with its original:
- * - TicketContextSchema
- *   → automations/triggers/ticket-context.ts
+ * The ticket a trigger exposes as `trigger.ticket.*`. Mirrors `TicketSchema` in
+ * automations/triggers/ticket-context.ts, field for field.
  */
-
 const TicketSchema = z.object({
   id: z.string(),
   url: z.string().url().nullable(),
@@ -44,48 +38,6 @@ const TicketSchema = z.object({
   updatedAt: z.coerce.date().nullable(),
 });
 
-const BoardSchema = z.object({
-  id: z.string(),
-  name: z.string().nullable(),
-  createdBy: z.string().nullable(),
-});
-
-const ProjectSchema = z.object({
-  id: z.string(),
-  name: z.string().nullable(),
-  code: z.string().nullable(),
-});
-
-const ChannelSchema = z.object({
-  id: z.string(),
-  name: z.string().nullable(),
-  type: z.string().nullable(),
-});
-
-const UserSummarySchema = z.object({
-  id: z.string(),
-  name: z.string().nullable(),
-  email: z.string().nullable(),
-});
-
-const UserGroupSchema = z.object({
-  id: z.string(),
-  name: z.string().nullable(),
-});
-
-const LastEmailsSchema = z.object({
-  lastReplyAt: z.coerce.date().nullable(),
-  lastAgentReplyAt: z.coerce.date().nullable(),
-  lastCustomerReplyAt: z.coerce.date().nullable(),
-});
-
 export const TicketContextSchema = z.object({
   ticket: TicketSchema,
-  board: BoardSchema.nullable(),
-  project: ProjectSchema.nullable(),
-  channel: ChannelSchema.nullable(),
-  assignee: UserSummarySchema.nullable(),
-  creator: UserSummarySchema.nullable(),
-  group: UserGroupSchema.nullable(),
-  lastEmails: LastEmailsSchema,
 });

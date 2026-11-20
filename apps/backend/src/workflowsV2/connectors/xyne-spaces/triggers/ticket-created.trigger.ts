@@ -87,11 +87,4 @@ export class TicketCreatedTrigger extends EventTrigger<
     const hydrated = await hydrateTicketBoundPayload(event.payload);
     return { kind: 'payload', payload: hydrated as unknown as TicketCreatedPayload };
   }
-
-  /** One ticket, one read — however many workflows are bound to this event. */
-  override hydrationKey(
-    event: TriggerEvent<TicketCreatedEventPayload & Record<string, unknown>>,
-  ): string | undefined {
-    return event.payload.ticketId;
-  }
 }

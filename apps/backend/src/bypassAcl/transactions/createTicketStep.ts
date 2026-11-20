@@ -9,26 +9,23 @@ export interface CreateChildTicketInput {
   boardId: string;
   title: string;
   description: string;
-  stageName?: string;
   priority?: string;
-  assignedTo?: string;
   createdBy: string;
 }
 
 /** A ticket created as a sub-ticket: it lives in the parent's conversation, like release service tickets. */
 export function createChildTicketTx(input: CreateChildTicketInput) {
-  const { parent, projectId, boardId, title, description, stageName, priority, assignedTo, createdBy } = input;
+  const { parent, projectId, boardId, title, description, priority, createdBy } = input;
   return transaction(
     ['Project', 'Stage', 'Ticket', 'SubTicket', 'TicketSubTicketMapping', 'TicketActivity'],
     'createTicketStep: the ticket, its sub-ticket row, the parent mapping and the activity plus id allocation must commit together; tx is not ACL-wrapped',
     db,
     async (tx) => {
       const stage = await tx.stage.findFirst({
-        where: { boardId, ...(stageName ? { name: stageName } : {}) },
+        where: { boardId },
         orderBy: { sequenceNumber: 'asc' },
         select: { name: true, defaultTicketStatusV2: true },
       });
-      if (stageName && !stage) throw new Error(`Stage "${stageName}" is not on board ${boardId}`);
 
       const xyneId = await generateTicketId(tx, projectId);
       const ticket = await tx.ticket.create({
@@ -46,7 +43,6 @@ export function createChildTicketTx(input: CreateChildTicketInput) {
           statusV2: stage?.defaultTicketStatusV2 ?? TicketStatusV2.TODO,
           stageName: stage?.name ?? 'Backlog',
           ...(priority ? { priority } : {}),
-          ...(assignedTo ? { assignedTo } : {}),
           lastEmailAt: new Date(),
         },
       });
@@ -59,7 +55,6 @@ export function createChildTicketTx(input: CreateChildTicketInput) {
           updatedBy: createdBy,
           conversationId: parent.conversationId,
           mappedTicketId: ticket.id,
-          assignedTo: assignedTo ?? null,
           workspaceId: parent.workspaceId,
         },
       });

@@ -1,4 +1,4 @@
-import { ChannelScopeType, ChannelVisibility, ProjectType, UserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility, UserStatus } from '@xyne/shared';
 import type { FieldOption, FieldOptionsContext, FieldOptionsPage } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import type { XyneCtx } from '../../types';
@@ -98,11 +98,7 @@ function page<T extends { id: string; name: string }>(
  * the automations picker hid them too — and a private channel the caller is not
  * in must not even be named back to them.
  */
-export async function channelOptions(
-  q: OptionsQuery,
-  projectIds?: readonly string[] | undefined,
-): Promise<FieldOptionsPage> {
-  const narrowed = (projectIds ?? []).filter((id) => !!id?.trim());
+export async function channelOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
   const visible = {
     workspaceId: q.workspaceId,
     // Matches automations' picker, which hid DMs and group DMs and nothing else.
@@ -116,8 +112,6 @@ export async function channelOptions(
       { visibility: ChannelVisibility.PUBLIC },
       { participants: { some: { userId: q.callerUserId } } },
     ],
-    // Automations narrowed the channel list by the trigger's selected projects.
-    ...(narrowed.length > 0 ? { projectId: { in: [...narrowed] } } : {}),
   };
   const select = { id: true, name: true, visibility: true };
   const label = (r: { id: string; name: string; visibility: string }): FieldOption => ({
@@ -144,44 +138,7 @@ export async function channelOptions(
   return page(rows, label);
 }
 
-export async function projectOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
-  // A DM is stored as a project; `getAllProjectsList` excludes them and so must
-  // this, or every direct message shows up as a pickable "project".
-  const real = { workspaceId: q.workspaceId, type: { not: ProjectType.DM } };
-  const select = { id: true, name: true };
-  const label = (r: { id: string; name: string }): FieldOption => ({
-    value: r.id,
-    label: r.name,
-    icon: 'folder',
-  });
-
-  if (q.values?.length) {
-    const rows = await db.project.findMany({
-      where: { AND: [real, { id: { in: [...q.values] } }] },
-      select,
-      orderBy: BY_NAME,
-    });
-    return { items: rows.map(label) };
-  }
-  const rows = await db.project.findMany({
-    where: { AND: [real, nameLike(q.search), after(q.cursor)] },
-    select,
-    orderBy: BY_NAME,
-    take: PAGE + 1,
-  });
-  return page(rows, label);
-}
-
-/**
- * Boards, narrowed to the projects already chosen when there are any — the one
- * question only `literal` can answer, and why the caller passes it.
- */
-export async function boardOptions(
-  q: OptionsQuery,
-  projectIds?: readonly string[] | undefined,
-): Promise<FieldOptionsPage> {
-  const narrowed = (projectIds ?? []).filter((id) => !!id?.trim());
-  const inProjects = narrowed.length > 0 ? { projectId: { in: [...narrowed] } } : {};
+export async function boardOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
   const select = { id: true, name: true };
   const label = (r: { id: string; name: string }): FieldOption => ({
     value: r.id,
@@ -199,15 +156,13 @@ export async function boardOptions(
   }
   const rows = await db.board.findMany({
     where: {
-      AND: [{ workspaceId: q.workspaceId }, inProjects, nameLike(q.search), after(q.cursor)],
+      AND: [{ workspaceId: q.workspaceId }, nameLike(q.search), after(q.cursor)],
     },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,
   });
-  return rows.length === 0 && narrowed.length > 0
-    ? { items: [], notice: 'No boards in the selected project.' }
-    : page(rows, label);
+  return page(rows, label);
 }
 
 /**
@@ -282,32 +237,6 @@ export async function userOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
     : {};
   const rows = await db.user.findMany({
     where: { AND: [active, matches, after(q.cursor)] },
-    select,
-    orderBy: BY_NAME,
-    take: PAGE + 1,
-  });
-  return page(rows, label);
-}
-
-export async function userGroupOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
-  const select = { id: true, name: true, alias: true };
-  const label = (r: { id: string; name: string; alias: string | null }): FieldOption => ({
-    value: r.id,
-    label: r.name,
-    ...(r.alias ? { description: `@${r.alias}` } : {}),
-    icon: 'users',
-  });
-
-  if (q.values?.length) {
-    const rows = await db.userGroup.findMany({
-      where: { AND: [{ workspaceId: q.workspaceId }, { id: { in: [...q.values] } }] },
-      select,
-      orderBy: BY_NAME,
-    });
-    return { items: rows.map(label) };
-  }
-  const rows = await db.userGroup.findMany({
-    where: { AND: [{ workspaceId: q.workspaceId }, nameLike(q.search), after(q.cursor)] },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,

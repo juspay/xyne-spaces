@@ -1,11 +1,9 @@
 import type { FieldOptionsContext, FieldOptionsPage } from '@xyne/workflow-sdk';
 import { BaseActionStep, variableRef, withOptions } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
-import { VCSProviderType } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
 import type { XyneCtx } from '@/workflowsV2/types';
-import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
 import { boardOptions, noOptions, optionsQuery } from '../../xyne-spaces/options';
 import { workspaceOf } from '../../xyne-spaces/context';
 
@@ -20,18 +18,13 @@ const ReleaseServiceSchema = z.object({
   regex: z.string().describe('Matches the file paths that belong to the service'),
   envPaths: z.array(z.string()).describe('Environment file paths, matched against changed files'),
   migrationPaths: z.array(z.string()).describe('Migration file paths, matched against changed files'),
-  channelId: z.string().nullable(),
 });
 
 const GetReleaseConfigurationOutputSchema = z.object({
-  boardId: z.string(),
-  name: z.string(),
   trackingMode: z.string().nullable().describe('COMMIT_RANGE or VERSION'),
   vcsProvider: z.string().nullable().describe('GITHUB or BITBUCKET_SERVER'),
   repoUrl: z.string(),
   ticketPrefix: z.string().describe("Prefix of the ticket IDs in pull request titles: the board's project code"),
-  owner: z.string().nullable().describe('GitHub owner, or Bitbucket project key'),
-  repo: z.string().nullable().describe('GitHub repository, or Bitbucket repository slug'),
   services: z.array(ReleaseServiceSchema),
 });
 
@@ -64,7 +57,6 @@ export class GetReleaseConfigurationStep extends BaseActionStep<
     const board = await db.board.findFirst({
       where: { id: boardId, workspaceId: workspaceOf(ctx, this.type) },
       select: {
-        id: true,
         name: true,
         vcsProvider: true,
         releaseTrackingMode: true,
@@ -78,7 +70,6 @@ export class GetReleaseConfigurationStep extends BaseActionStep<
             repo: { select: { url: true, canonicalUrl: true } },
             envPaths: true,
             migrationPaths: true,
-            channelId: true,
           },
           orderBy: { name: 'asc' },
         },
@@ -102,26 +93,18 @@ export class GetReleaseConfigurationStep extends BaseActionStep<
       throw new Error(`Services on board ${board.name} do not share one repository URL: ${repoUrls.join(', ')}`);
     }
 
-    const github = board.vcsProvider === VCSProviderType.GITHUB ? parseGitHubRepoUrl(repoUrl) : null;
-    const bitbucket = board.vcsProvider === VCSProviderType.BITBUCKET_SERVER ? parseBitbucketRepoUrl(repoUrl) : null;
-
     return {
-      boardId: board.id,
-      name: board.name,
       trackingMode: board.releaseTrackingMode,
       vcsProvider: board.vcsProvider,
       repoUrl,
       ticketPrefix: board.project.code,
-      owner: github?.owner ?? bitbucket?.projectKey ?? null,
-      repo: github?.repo ?? bitbucket?.repoSlug ?? null,
-      services: services.map(({ id, name, boardId, regex, envPaths, migrationPaths, channelId }) => ({
+      services: services.map(({ id, name, boardId, regex, envPaths, migrationPaths }) => ({
         id,
         name,
         boardId,
         regex,
         envPaths,
         migrationPaths,
-        channelId,
       })),
     };
   }

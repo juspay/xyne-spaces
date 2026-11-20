@@ -15,12 +15,8 @@ const LinkReleaseNotesConfigSchema = z.object({
 type LinkReleaseNotesConfig = z.infer<typeof LinkReleaseNotesConfigSchema>;
 
 const LinkReleaseNotesOutputSchema = z.object({
-  status: z
-    .enum(['created', 'unchanged', 'replaced'])
-    .describe('replaced: the release linked other release notes before, now this canvas'),
   canvasId: z.string(),
   canvasUrl: z.string(),
-  previousCanvasUrl: z.string().nullable(),
 });
 type LinkReleaseNotesOutput = z.infer<typeof LinkReleaseNotesOutputSchema>;
 
@@ -40,7 +36,7 @@ export class LinkReleaseNotesStep extends BaseActionStep<typeof LinkReleaseNotes
 
     const release = await db.ticket.findFirst({
       where: { workspaceId, OR: [{ id: identifier }, { xyneId: identifier }] },
-      select: { id: true, xyneId: true, ticketType: true, conversationId: true, metadata: true },
+      select: { id: true, xyneId: true, ticketType: true, conversationId: true },
     });
     if (!release) throw new Error(`Release ticket ${identifier} not found`);
     if (!isReleaseTicket(release.ticketType as BaseTicketType)) {
@@ -50,12 +46,6 @@ export class LinkReleaseNotesStep extends BaseActionStep<typeof LinkReleaseNotes
     if (!canvas) throw new Error(`Canvas ${canvasId} not found`);
 
     const canvasUrl = buildWorkspaceCanvasUrl(workspaceId, canvas.id);
-    const previous = (release.metadata as Record<string, unknown> | null)?.['releaseNotesCanvasUrl'];
-    const previousCanvasUrl = typeof previous === 'string' && previous ? previous : null;
-    if (previousCanvasUrl?.endsWith(`/canvas/${canvas.id}`)) {
-      return { status: 'unchanged', canvasId: canvas.id, canvasUrl: previousCanvasUrl, previousCanvasUrl };
-    }
-
     const now = new Date();
     await db.canvas.update({
       where: { id: canvas.id },
@@ -76,6 +66,6 @@ export class LinkReleaseNotesStep extends BaseActionStep<typeof LinkReleaseNotes
       isGeneratingReleaseNotes: false,
     });
 
-    return { status: previousCanvasUrl ? 'replaced' : 'created', canvasId: canvas.id, canvasUrl, previousCanvasUrl };
+    return { canvasId: canvas.id, canvasUrl };
   }
 }
