@@ -1218,16 +1218,11 @@ export class ChannelController {
           });
 
           if (callConnectionId) {
-            await deskCallSettingsService.save(
-              req.user!.workspaceId!,
-              channel.id,
-              {
-                connectionId: callConnectionId,
-                routingKeys: callRoutingKeys ?? [],
-                isDefault: callIsDefault === true,
-              },
-              userId,
-            );
+            await deskCallSettingsService.save(req.user!.workspaceId!, channel.id, {
+              connectionId: callConnectionId,
+              routingKeys: callRoutingKeys ?? [],
+              isDefault: callIsDefault === true,
+            });
           }
         } catch (error) {
           logger.error('Failed to create call desk resources, rolling back channel', error);

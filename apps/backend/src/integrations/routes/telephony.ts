@@ -288,10 +288,11 @@ router.put(
     const parsed = deskSettingsSchema.safeParse(req.body);
     if (!parsed.success) return invalidRequest(res, parsed.error);
     if (!(await authorizeAppDeskManager(channelId, req.user!.id, workspaceId, res))) return;
-    const settings = await deskCallSettingsService.save(workspaceId, channelId, parsed.data, req.user!.id);
+    const settings = await deskCallSettingsService.save(workspaceId, channelId, parsed.data);
     logger.info('[telephony] desk_call_settings_saved', {
       workspaceId,
       channelId,
+      userId: req.user!.id,
       connectionId: settings.connectionId,
       isDefault: settings.isDefault,
       routingKeys: settings.routingKeys.length,
@@ -306,7 +307,7 @@ router.delete(
     const channelId = String(req.params.channelId);
     if (!(await authorizeAppDeskManager(channelId, req.user!.id, workspaceId, res))) return;
     await deskCallSettingsService.remove(workspaceId, channelId);
-    logger.info('[telephony] desk_call_settings_removed', { workspaceId, channelId });
+    logger.info('[telephony] desk_call_settings_removed', { workspaceId, channelId, userId: req.user!.id });
     res.json({ ok: true });
   }),
 );

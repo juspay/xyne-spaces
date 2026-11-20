@@ -98,7 +98,6 @@ export interface DeskCallTicketRules {
 export interface DeskCallSettings {
   channelId: string;
   connectionId: string;
-  provider: string;
   isDefault: boolean;
   routingKeys: string[];
   ticketRules: DeskCallTicketRules;
