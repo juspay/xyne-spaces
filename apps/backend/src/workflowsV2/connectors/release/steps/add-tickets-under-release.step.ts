@@ -14,8 +14,6 @@ type AddTicketsUnderReleaseConfig = z.infer<typeof AddTicketsUnderReleaseConfigS
 
 const AddTicketsUnderReleaseOutputSchema = z.object({
   added: z.array(z.string()),
-  alreadyLinked: z.array(z.string()),
-  notFound: z.array(z.string()).describe('IDs with no ticket in this workspace'),
 });
 type AddTicketsUnderReleaseOutput = z.infer<typeof AddTicketsUnderReleaseOutputSchema>;
 
@@ -50,8 +48,6 @@ export class AddTicketsUnderReleaseStep extends BaseActionStep<
       where: { workspaceId, xyneId: { in: xyneIds } },
       select: { id: true, xyneId: true },
     });
-    const foundXyneIds = new Set(tickets.map((ticket) => ticket.xyneId));
-    const notFound = xyneIds.filter((id) => !foundXyneIds.has(id));
 
     // A release's service ticket sits on a service board, as a sub-ticket of a ticket on that
     // service's main release board. Its dev tickets live in application_release_tickets.
@@ -85,8 +81,6 @@ export class AddTicketsUnderReleaseStep extends BaseActionStep<
     );
     return {
       added: toAdd.map((ticket) => ticket.xyneId),
-      alreadyLinked: tickets.filter((ticket) => linkedIds.has(ticket.id)).map((ticket) => ticket.xyneId),
-      notFound,
     };
   }
 }
