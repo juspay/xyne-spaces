@@ -2,7 +2,7 @@ import { loopFromPayload, loopModeLog, resolveLoop, withLoopKind, type LoopKey }
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Router, type Response } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { advertiseRunOwner, currentOwnerPod, isFencedSession, withdrawRunOwner } from "../run-ownership.js";
 import {
   decideRunControl,
@@ -95,6 +95,28 @@ import {
   type InternalRunPayload,
   type RunExecutionState,
 } from "../run-execution.js";
+import { reportUndeclaredBodyKeys, validate } from "./schema/common.js";
+import {
+  chainJudgeSchema,
+  clearSessionSchema,
+  cloneSessionSchema,
+  generateOutputFormatSchema,
+  generatePromptSchema,
+  generateRoutingCardSchema,
+  internalRunPayloadSchema,
+  providerProbeSchema,
+  runSessionParamsSchema,
+  suggestToolsSchema,
+  type ChainJudgeBody,
+  type ClearSessionBody,
+  type CloneSessionBody,
+  type GenerateOutputFormatBody,
+  type GeneratePromptBody,
+  type GenerateRoutingCardBody,
+  type ProviderProbeBody,
+  type RunSessionParams,
+  type SuggestToolsBody,
+} from "./schema/run.js";
 import {
   buildVerifiedResponseTool,
   SUBMIT_RESPONSE_SYSTEM_INSTRUCTION,
@@ -109,7 +131,7 @@ import {
   type StructuredOutputRef,
 } from "../agent-model-settings.js";
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
-import { generateRoutingCard, type RoutingCardInput } from "../routing-card.js";
+import { generateRoutingCard } from "../routing-card.js";
 import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
@@ -172,7 +194,8 @@ import {
   type SetupStep,
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
-import { judgeChainContinuation } from "../chain-judge.js";
+import { judgeChainContinuation, type ChainJudgeToolInvocation } from "../chain-judge.js";
+import type { ProbeProviderConfig } from "../provider-probe.js";
 import { buildTaxonomyInjection, listSubsystemTaxonomy } from "../twin-memory-taxonomy.js";
 import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
@@ -550,11 +573,28 @@ function toWorkspaceContextPath(input: string): string {
   return cleaned.join("/");
 }
 
-router.post("/run", requireClawAuthService, async (req, res: Response) => {
+/**
+ * What internalRunPayloadSchema guarantees once validate() has run: the same
+ * payload, with the four fields the schema requires narrowed to present. Kept
+ * in InternalRunPayload's dialect rather than z.infer's, because zod renders
+ * optionals as `T | undefined` which exactOptionalPropertyTypes rejects.
+ */
+type ValidatedRunPayload = InternalRunPayload &
+  Required<Pick<InternalRunPayload, "userId" | "task" | "sessionId" | "sessionToken">>;
+
+/**
+ * 503 before any parsing, so a draining pod stays retryable rather than
+ * answering 400 to a body it was never going to run.
+ */
+function refuseWhileDraining(_req: Request, res: Response, next: NextFunction): void {
   if (isDraining()) {
     res.status(503).json({ success: false, error: "xyne-claw is draining" });
     return;
   }
+  next();
+}
+
+router.post("/run", requireClawAuthService, refuseWhileDraining, reportUndeclaredBodyKeys(internalRunPayloadSchema, "run"), validate({ body: internalRunPayloadSchema }), async (req, res: Response) => {
 
   const {
     userId,
@@ -610,7 +650,7 @@ router.post("/run", requireClawAuthService, async (req, res: Response) => {
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
     agentHandoff,
-  } = req.body as InternalRunPayload;
+  } = req.body as ValidatedRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
   beginJudgeRun();
@@ -621,93 +661,16 @@ router.post("/run", requireClawAuthService, async (req, res: Response) => {
   // (claw-auth mints a fresh UUID, so this won't be the `<exec>:step_0` id).
   clog.info(`[run] AUTODBG /run received: eventType=${eventType} sessionId=${providedSessionId} agent=${agentSlug} hasCallbackUrl=${!!callbackUrl} hasProviderConfigs=${!!providerConfigs} conv=${conversationId ?? ""}`);
 
-  if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
-    res.status(400).json({ success: false, error: "userId is required" });
-    return;
-  }
-
-  if (!task || typeof task !== "string" || task.trim().length === 0) {
-    res
-      .status(400)
-      .json({
-        success: false,
-        error: "task is required and must be a non-empty string",
-      });
-    return;
-  }
-
   // A task command is already an explicit execution contract. Do not route it
   // through the generic plan-mode approval turn, which would replace the
   // original `/command ...` task with an "Execute this approved plan" prompt.
   const effectiveMode = resolveTaskCommandMode(task, mode);
 
-  if (
-    !providedSessionId ||
-    typeof providedSessionId !== "string" ||
-    providedSessionId.trim().length === 0
-  ) {
-    res
-      .status(400)
-      .json({
-        success: false,
-        error: "sessionId is required (must be minted by claw-auth)",
-      });
-    return;
-  }
-  if (
-    !sessionToken ||
-    typeof sessionToken !== "string" ||
-    sessionToken.trim().length === 0
-  ) {
-    res
-      .status(400)
-      .json({
-        success: false,
-        error: "sessionToken is required (must be minted by claw-auth)",
-      });
-    return;
-  }
+  // sessionId, conversationId, agentSlug and idempotencyKey are charset-guarded
+  // by `safeId` in internalRunPayloadSchema, which delegates to the same
+  // isSafeId used here before.
+  const sessionId = providedSessionId;
 
-  const sessionId = providedSessionId.trim();
-
-  // These three flow into path.join(...) for workspaces/sessions (and rm -rf
-  // on cleanup) plus the result-callback URL path — reject anything that
-  // isn't a plain opaque id before any of that machinery sees it.
-  if (!isSafeId(sessionId)) {
-    res
-      .status(400)
-      .json({ success: false, error: "sessionId has invalid format" });
-    return;
-  }
-  if (
-    conversationId !== undefined &&
-    (typeof conversationId !== "string" || !isSafeId(conversationId))
-  ) {
-    res
-      .status(400)
-      .json({ success: false, error: "conversationId has invalid format" });
-    return;
-  }
-  if (
-    agentSlug !== undefined &&
-    (typeof agentSlug !== "string" || !isSafeId(agentSlug))
-  ) {
-    res
-      .status(400)
-      .json({ success: false, error: "agentSlug has invalid format" });
-    return;
-  }
-  // idempotencyKey becomes a GCS object name (claw-results/<key>.json) — same
-  // charset guard as the other ids.
-  if (
-    idempotencyKey !== undefined &&
-    (typeof idempotencyKey !== "string" || !isSafeId(idempotencyKey))
-  ) {
-    res
-      .status(400)
-      .json({ success: false, error: "idempotencyKey has invalid format" });
-    return;
-  }
   // cwd becomes the agent working dir and the attachment write root — never
   // accept a path outside the workspaces root / configured allowlist
   // (XYNE_CLAW_ALLOWED_CWD_ROOTS). See isAllowedCwd in workspace.ts.
@@ -1219,17 +1182,15 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
 // resume: `buildSandboxStoreKey(userId, conversationId, agentSlug)` →
 // `<conversationId>_<agentSlug>`. S2S-only; claw-auth calls this when a user
 // types `/clear`. Idempotent — deleting a non-existent session is a no-op.
-router.post("/clear-session", requireClawAuthService, async (req, res: Response) => {
-  const { userId, conversationId, agentSlug } = (req.body ?? {}) as {
-    userId?: string;
-    conversationId?: string;
-    agentSlug?: string;
-  };
-  if (!conversationId || typeof conversationId !== "string") {
-    res.status(400).json({ success: false, error: "conversationId is required" });
-    return;
-  }
+router.post("/clear-session", requireClawAuthService, reportUndeclaredBodyKeys(clearSessionSchema, "clear-session"), validate({ body: clearSessionSchema }), async (req, res: Response) => {
+  const { userId, conversationId, agentSlug } = req.body as ClearSessionBody;
   const sessionKey = buildSandboxStoreKey(userId, conversationId, agentSlug) ?? conversationId;
+  // NOT redundant with clearSessionSchema, and must not be removed: this guards
+  // the DERIVED key, which is what reaches path.join and then a recursive rm in
+  // deleteSession. The schema cannot stand in for it — isSafeId's 128-char cap
+  // applies to the composite, and buildSandboxStoreKey trims and sanitizes its
+  // inputs, so checking the fields would be both looser and stricter than this
+  // in ways that break callers. See routes/schema/run.ts.
   if (!isSafeId(sessionKey)) {
     res.status(400).json({ success: false, error: "resolved session key has invalid format" });
     return;
@@ -1244,12 +1205,8 @@ router.post("/clear-session", requireClawAuthService, async (req, res: Response)
   }
 });
 
-router.post("/run/:sessionId/interrupt-with-reply", requireClawAuthService, async (req, res: Response) => {
-  const { sessionId } = req.params as { sessionId?: string };
-  if (!sessionId) {
-    res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
+router.post("/run/:sessionId/interrupt-with-reply", requireClawAuthService, validate({ params: runSessionParamsSchema }), async (req, res: Response) => {
+  const { sessionId } = req.params as RunSessionParams;
 
   const callerUserId = req.headers["x-user-id"];
   const active = activeRuns.get(sessionId);
@@ -1315,12 +1272,8 @@ function applyGracefulInterrupt(sessionId: string, active: ActiveRunControl): vo
   });
 }
 
-router.post("/run/:sessionId/cancel", requireClawAuthService, async (req, res: Response) => {
-  const { sessionId } = req.params as { sessionId?: string };
-  if (!sessionId) {
-    res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
+router.post("/run/:sessionId/cancel", requireClawAuthService, validate({ params: runSessionParamsSchema }), async (req, res: Response) => {
+  const { sessionId } = req.params as RunSessionParams;
 
   const active = activeRuns.get(sessionId);
   if (!active) {
@@ -1400,30 +1353,15 @@ registerRunControlApplier((msg: RunControlMessage): boolean => {
 // Body: { sourceConversationId, targetConversationId, branchMode? }
 //   branchMode = "lastUser"       → regenerate (default)
 //   branchMode = "beforeLastUser" → edit-user
-router.post("/clone-session", requireClawAuthService, async (req, res: Response) => {
-  const { sourceConversationId, targetConversationId } = req.body as {
-    sourceConversationId?: string;
-    targetConversationId?: string;
-    branchMode?: "lastUser" | "beforeLastUser" | "full";
-  };
-  const branchMode = (req.body as { branchMode?: "lastUser" | "beforeLastUser" | "full" }).branchMode ?? "lastUser";
-
-  if (!sourceConversationId || typeof sourceConversationId !== "string") {
-    res.status(400).json({ success: false, error: "sourceConversationId is required" });
-    return;
-  }
-  if (!targetConversationId || typeof targetConversationId !== "string") {
-    res.status(400).json({ success: false, error: "targetConversationId is required" });
-    return;
-  }
-  if (!isSafeId(sourceConversationId)) {
-    res.status(400).json({ success: false, error: "sourceConversationId has invalid format" });
-    return;
-  }
-  if (!isSafeId(targetConversationId)) {
-    res.status(400).json({ success: false, error: "targetConversationId has invalid format" });
-    return;
-  }
+// Both ids go straight into sessionDir() → path.join(sessionsRoot(), id), and
+// from there into cp(sourceDir, targetDir, { recursive: true }) and
+// rename(). branchSession has no containment check of its own (unlike
+// sessionExistsAnywhere), so `safeId` in cloneSessionSchema — no dots, no
+// separators — is what keeps both paths inside the sessions root.
+router.post("/clone-session", requireClawAuthService, reportUndeclaredBodyKeys(cloneSessionSchema, "clone-session"), validate({ body: cloneSessionSchema }), async (req, res: Response) => {
+  const { sourceConversationId, targetConversationId, branchMode: requestedBranchMode } =
+    req.body as CloneSessionBody;
+  const branchMode = requestedBranchMode ?? "lastUser";
 
   try {
     const targetExisted = branchMode === "full" && (await sessionExistsAnywhere(targetConversationId));
@@ -5628,7 +5566,7 @@ export async function sendCallback(
 
 // ── Chain judge endpoint (called by xyne-claw-auth webhook) ──────────────
 
-router.post("/chain-judge", requireClawAuthService, async (req, res: Response) => {
+router.post("/chain-judge", requireClawAuthService, reportUndeclaredBodyKeys(chainJudgeSchema, "chain-judge"), validate({ body: chainJudgeSchema }), async (req, res: Response) => {
   const {
     agentResult,
     sourceAgent,
@@ -5637,25 +5575,7 @@ router.post("/chain-judge", requireClawAuthService, async (req, res: Response) =
     userQuery,
     judgeContext,
     toolInvocations,
-  } = req.body as {
-    agentResult?: string;
-    sourceAgent?: string;
-    targetAgent?: string;
-    taskTemplate?: string;
-    userQuery?: string;
-    judgeContext?: string;
-    toolInvocations?: Array<{ toolName?: string; command?: string; isError?: boolean }>;
-  };
-
-  if (!agentResult || !sourceAgent || !targetAgent) {
-    res
-      .status(400)
-      .json({
-        success: false,
-        error: "agentResult, sourceAgent, targetAgent required",
-      });
-    return;
-  }
+  } = req.body as ChainJudgeBody;
 
   const decision = await judgeChainContinuation(
     agentResult,
@@ -5664,7 +5584,9 @@ router.post("/chain-judge", requireClawAuthService, async (req, res: Response) =
     taskTemplate,
     userQuery,
     judgeContext,
-    Array.isArray(toolInvocations) ? toolInvocations : undefined,
+    // Same values, two dialects: zod renders optionals as `T | undefined`,
+    // which exactOptionalPropertyTypes refuses against ChainJudgeToolInvocation.
+    toolInvocations as ChainJudgeToolInvocation[] | undefined,
   );
   res.json({ success: true, data: decision });
 });
@@ -5676,22 +5598,16 @@ router.post("/chain-judge", requireClawAuthService, async (req, res: Response) =
 // body), so the probe must run claw-side. Returns state=available|capacity|
 // permanent; claw-auth re-dispatches on available, backs off on capacity, and
 // stops on permanent.
-router.post("/internal/provider-probe", requireClawAuthService, async (req, res: Response) => {
-  const { provider, model, providerConfig, automation } = req.body as {
-    provider?: string;
-    model?: string;
-    providerConfig?: { apiKey: string; model: string; baseUrl?: string; authType?: string };
-    automation?: boolean;
-  };
-  if (!provider || typeof provider !== "string") {
-    res.status(400).json({ success: false, error: "provider is required" });
-    return;
-  }
+router.post("/internal/provider-probe", requireClawAuthService, reportUndeclaredBodyKeys(providerProbeSchema, "provider-probe"), validate({ body: providerProbeSchema }), async (req, res: Response) => {
+  const { provider, model, providerConfig, automation } = req.body as ProviderProbeBody;
   const { probeProvider } = await import("../provider-probe.js");
   const result = await probeProvider({
     provider,
     ...(typeof model === "string" ? { model } : {}),
-    ...(providerConfig ? { providerConfig } : {}),
+    // ProbeProviderConfig declares `model` required, but resolveTarget's gate
+    // is `baseUrl || model`, so the schema leaves it optional to keep an
+    // {apiKey, baseUrl} config working. Same validated value, two dialects.
+    ...(providerConfig ? { providerConfig: providerConfig as ProbeProviderConfig } : {}),
     ...(automation === true ? { automation: true } : {}),
   });
   res.json({ success: true, data: result });
@@ -5699,17 +5615,8 @@ router.post("/internal/provider-probe", requireClawAuthService, async (req, res:
 
 // ── Generate agent prompt (called by xyne-claw-auth) ──────────────────────
 
-router.post("/generate-prompt", requireClawAuthService, async (req, res: Response) => {
-  const { intent, agentName, existingPrompt } = req.body as {
-    intent?: string;
-    agentName?: string;
-    existingPrompt?: string;
-  };
-
-  if (!intent || typeof intent !== "string") {
-    res.status(400).json({ success: false, error: "intent is required" });
-    return;
-  }
+router.post("/generate-prompt", requireClawAuthService, reportUndeclaredBodyKeys(generatePromptSchema, "generate-prompt"), validate({ body: generatePromptSchema }), async (req, res: Response) => {
+  const { intent, agentName, existingPrompt } = req.body as GeneratePromptBody;
 
   const isUpdate =
     existingPrompt &&
@@ -5769,12 +5676,8 @@ router.post("/generate-prompt", requireClawAuthService, async (req, res: Respons
 
 // ── Routing card for agent proactivity (called by xyne-claw-auth) ────────
 
-router.post("/generate-routing-card", requireClawAuthService, async (req, res: Response) => {
-  const { name, description, systemPrompt, tools, skills, asked } = req.body as Partial<RoutingCardInput>;
-  if (typeof name !== "string" || typeof systemPrompt !== "string" || !systemPrompt.trim()) {
-    res.status(400).json({ success: false, error: "name and systemPrompt are required" });
-    return;
-  }
+router.post("/generate-routing-card", requireClawAuthService, reportUndeclaredBodyKeys(generateRoutingCardSchema, "generate-routing-card"), validate({ body: generateRoutingCardSchema }), async (req, res: Response) => {
+  const { name, description, systemPrompt, tools, skills, asked } = req.body as GenerateRoutingCardBody;
   try {
     const card = await generateRoutingCard({
       name,
@@ -5892,26 +5795,12 @@ function templatePlaceholders(template: string): string[] {
 router.post(
   "/generate-output-format",
   requireClawAuthService,
+  reportUndeclaredBodyKeys(generateOutputFormatSchema, "generate-output-format"),
+  validate({ body: generateOutputFormatSchema }),
   async (req, res: Response) => {
     const { description, format, existingSchema, existingTemplate, agentName } =
-      req.body as {
-        description?: string;
-        format?: "json" | "markdown";
-        existingSchema?: string;
-        existingTemplate?: string;
-        agentName?: string;
-      };
+      req.body as GenerateOutputFormatBody;
 
-    if (
-      !description ||
-      typeof description !== "string" ||
-      !description.trim()
-    ) {
-      res
-        .status(400)
-        .json({ success: false, error: "description is required" });
-      return;
-    }
     const wantMarkdownOnly = format === "markdown";
 
     const refining = Boolean(
@@ -6062,41 +5951,18 @@ router.post(
 // set. The endpoint is intentionally side-effect-free: it just returns a
 // proposal and the UI renders it as a diff for the user to accept.
 
-router.post("/suggest-tools", requireClawAuthService, async (req, res: Response) => {
-  const { intent, catalog } = req.body as {
-    intent?: string;
-    catalog?: {
-      subagents: Array<{ name: string; description: string }>;
-      integrations: Array<{
-        slug: string;
-        label: string;
-        readTools: Array<{
-          name: string;
-          description: string;
-          riskLevel: string;
-        }>;
-        writeTools: Array<{
-          name: string;
-          description: string;
-          riskLevel: string;
-        }>;
-      }>;
-    };
-  };
-
-  if (!intent || typeof intent !== "string" || intent.trim().length === 0) {
-    res.status(400).json({ success: false, error: "intent is required" });
-    return;
-  }
-  if (!catalog || typeof catalog !== "object") {
-    res.status(400).json({ success: false, error: "catalog is required" });
-    return;
-  }
+router.post("/suggest-tools", requireClawAuthService, reportUndeclaredBodyKeys(suggestToolsSchema, "suggest-tools"), validate({ body: suggestToolsSchema }), async (req, res: Response) => {
+  const { intent, catalog } = req.body as SuggestToolsBody;
 
   // Compress the catalog into a token-cheap form. Tool descriptions are
   // truncated; an LLM doesn't need 500 chars per tool to recognise intent.
-  const truncate = (s: string, n: number) => {
-    const trimmed = (s ?? "").trim();
+  // `unknown` + String(): the schema leaves catalog scalars untyped, and the
+  // `?? ""` guard only covered null/undefined — a numeric description reached
+  // `.trim()` and threw here, in a block that runs OUTSIDE the try below, so
+  // the request hung instead of failing. Coercing matches what the surrounding
+  // `${t.name}` / `${t.riskLevel}` interpolations already do.
+  const truncate = (s: unknown, n: number) => {
+    const trimmed = String(s ?? "").trim();
     return trimmed.length <= n ? trimmed : trimmed.slice(0, n - 1) + "…";
   };
 
