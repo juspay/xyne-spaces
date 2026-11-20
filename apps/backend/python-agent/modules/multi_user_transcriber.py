@@ -45,6 +45,7 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from events import EventBus
 from config import get_logger
+from config.google_credentials import google_stt_available, load_google_key
 from modules.stt_eval import ShadowTranscriber, SttEvalCollector, find_microphone_track
 
 logger = get_logger(__name__)
@@ -433,7 +434,7 @@ class MultiUserTranscriber:
             azure_api_version: Azure OpenAI API version
             azure_deployment: Azure OpenAI Whisper deployment name
             stt_model: STT provider to use ('google', 'azure', or 'deepgram', default: 'google')
-            google_voice_credentials_json: Google service account credentials JSON (for validation/logging only, actual credentials loaded from GOOGLE_APPLICATION_CREDENTIALS env var)
+            google_voice_credentials_json: Google service account key JSON. Optional: without it, Google STT uses Application Default Credentials (Workload Identity on GKE)
             google_stt_model: Google STT model name (e.g., long, latest_long, short)
             google_stt_language: Language code (e.g., en-US)
             deepgram_api_key: Deepgram API key
@@ -547,16 +548,13 @@ class MultiUserTranscriber:
     def _create_google_stt_instance(self) -> google.STT:
         """
         Helper to create Google STT instance.
-        
-        Credentials file path is read from GOOGLE_APPLICATION_CREDENTIALS
-        environment variable (secure temp file created in main.py at startup).
+
+        Uses the configured service-account key if there is one. Otherwise the plugin uses
+        Application Default Credentials: on GKE, the pod's Workload Identity.
         """
         language_codes = [lang.strip() for lang in self._google_stt_language.split(',')]
-        
-        # Get credentials file path from environment
-        credentials_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        if not credentials_file:
-            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set")
+
+        google_key = load_google_key(self._google_voice_credentials_json)
 
         # Define domain-specific hot words to bias the STT engine
         hot_words = [
@@ -578,7 +576,7 @@ class MultiUserTranscriber:
         return google.STT(
             model=self._google_stt_model,
             languages=language_codes,
-            credentials_file=credentials_file,
+            credentials_info=google_key if google_key is not None else NOT_GIVEN,
             location="us",
             detect_language=multi_language,
             enable_word_confidence=False,
@@ -685,7 +683,7 @@ class MultiUserTranscriber:
                     self._shared_stt = resilient_stt
                     
             # Use Google STT
-            elif selected_model == "google" and os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+            elif selected_model == "google" and google_stt_available(self._google_voice_credentials_json):
                 logger.info("[STT] Using Google Cloud Speech-to-Text")
                 inner_stt = self._create_google_stt_instance()
                 resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
@@ -1315,7 +1313,7 @@ class MultiUserTranscriber:
         if model == "deepgram":
             return bool(self._deepgram_api_key)
         if model == "google":
-            return bool(os.getenv('GOOGLE_APPLICATION_CREDENTIALS'))
+            return google_stt_available(self._google_voice_credentials_json)
         if model == "azure":
             return bool(self._azure_endpoint and self._azure_api_key)
         return False

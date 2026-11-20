@@ -128,7 +128,8 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"[Google STT] Failed to setup credentials: {e}")
     else:
-        logger.warning("[Google STT] Credentials not provided")
+        # No key: Google STT uses Application Default Credentials (Workload Identity on GKE).
+        logger.info("[Google STT] No key configured; using Application Default Credentials if available")
     
     # Get the room name (call_id) for file storage
     call_id = ctx.room.name
