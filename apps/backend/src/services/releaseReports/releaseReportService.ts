@@ -8,6 +8,7 @@ import {
   MessageType,
   UserType,
 } from '@xyne/shared';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import { db } from '@/database/client';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
@@ -77,7 +78,7 @@ export class ReleaseReportService {
     }
 
     const [releaseFormValues, artRows, releaseChanges] = await Promise.all([
-      db.formEntityValues.findMany({
+      findFormEntityValues(db, {
         where: { entityId: ticketId, entityType: 'TICKET' },
       }),
       db.applicationReleaseTicket.findMany({
@@ -101,7 +102,7 @@ export class ReleaseReportService {
         where: { id: { in: applicationIds } },
         include: { repo: { select: { url: true, canonicalUrl: true } } },
       }),
-      db.formEntityValues.findMany({
+      findFormEntityValues(db, {
         where: {
           contextId: ticketId,
           entityId: { in: changeIds },
@@ -147,9 +148,7 @@ export class ReleaseReportService {
       (value) => releaseFieldNames.get(value.fieldId) === 'releaseVersion'
     );
     const releaseVersion = releaseVersionValue
-      ? displayValue(
-          releaseVersionValue.actualFieldValue ?? releaseVersionValue.fieldValue
-        ).trim() || null
+      ? displayValue(releaseVersionValue.value).trim() || null
       : null;
 
     const fieldNames = new Map(changeFields.map((field) => [field.id, field.fieldName]));
@@ -158,7 +157,7 @@ export class ReleaseReportService {
       const fieldName = fieldNames.get(value.fieldId);
       if (!fieldName) continue;
       const values = valuesByChangeId.get(value.entityId) ?? {};
-      values[fieldName] = displayValue(value.actualFieldValue ?? value.fieldValue);
+      values[fieldName] = displayValue(value.value);
       valuesByChangeId.set(value.entityId, values);
     }
 

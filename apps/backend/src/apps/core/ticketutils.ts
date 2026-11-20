@@ -49,7 +49,7 @@ const CreateTicketParamsSchema = z.object({
       fieldId: z.string().min(1, 'Field ID is required').trim(),
       fieldName: z.string().trim().optional(),
       fieldValue: z.string(),
-      actualFieldValue: z.custom<Prisma.InputJsonValue>(() => true),
+      value: z.custom<Prisma.InputJsonValue>(() => true),
     })),
   }).optional(),
 });
@@ -179,7 +179,7 @@ export async function createTicketWithConversation(
             customFieldValues.fieldValues.map(fv => ({
               fieldId: fv.fieldId,
               fieldName: 'fieldName' in fv && typeof fv.fieldName === 'string' ? fv.fieldName : fv.fieldId,
-              actualFieldValue: fv.actualFieldValue,
+              value: fv.value,
             })),
           )
         : undefined;

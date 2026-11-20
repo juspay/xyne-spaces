@@ -3,12 +3,14 @@ import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { pushVespaJobForTicket } from '@/apps/core/ticketutils';
 import { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 import { logger } from '@/utils/logger';
-import { TicketPriority, serializeTicketMd, type TicketCardSummary, FormEntityType } from '@xyne/shared';
+import { assertFormFieldType, TicketPriority, serializeTicketMd, type TicketCardSummary, FormEntityType } from '@xyne/shared';
 import { PrismaClient } from '@prisma/client';
 import { generateTicketId } from '@/bypassAcl/transactions/ticketIdService';
+import { createFormEntityValues } from '@/database/repositories/formEntityValueRepository';
+import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 
 
-export function createTicketWithConversationTx(prisma: PrismaClient, projectId: string, ticketRepository: TicketRepository, title: string, description: string, userId: string, assignedTo: string | undefined, userGroupId: string | undefined, finalConversationId: string, channelId: string, workspaceId: string, boardId: string, priority: TicketPriority | undefined, stageName: string | undefined, eta: Date | undefined, ticketType: string | undefined, formFieldChanges: FormFieldChanges | undefined, customFieldValues: { formId: string; contextId: string; fieldValues: { fieldId: string; fieldValue: string; fieldName?: string | undefined; actualFieldValue?: any; }[]; } | undefined) {
+export function createTicketWithConversationTx(prisma: PrismaClient, projectId: string, ticketRepository: TicketRepository, title: string, description: string, userId: string, assignedTo: string | undefined, userGroupId: string | undefined, finalConversationId: string, channelId: string, workspaceId: string, boardId: string, priority: TicketPriority | undefined, stageName: string | undefined, eta: Date | undefined, ticketType: string | undefined, formFieldChanges: FormFieldChanges | undefined, customFieldValues: { formId: string; contextId: string; fieldValues: { fieldId: string; fieldValue: string; fieldName?: string | undefined; value?: any; }[]; } | undefined) {
   return transaction(['Board', 'Conversation', 'FormEntityValues', 'Project', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketDescription', 'TicketStageEta', 'TicketTag'], 'createTicketWithConversation: ticket creation with sequence allocation, conversation link, and custom fields must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     // Generate xyneId using project-scoped format
     const xyneId = await generateTicketId(tx, projectId);
@@ -61,18 +63,23 @@ export function createTicketWithConversationTx(prisma: PrismaClient, projectId: 
      });
 
     if (customFieldValues && customFieldValues.fieldValues.length > 0) {
-      await tx.formEntityValues.createMany({
-        data: customFieldValues.fieldValues.map(fieldValue => ({
+      const definitions = await resolveFieldDefinitionsByIds(
+        tx,
+        customFieldValues.fieldValues.map(fieldValue => fieldValue.fieldId),
+      );
+      await createFormEntityValues(
+        tx,
+        customFieldValues.fieldValues.map(fieldValue => ({
           formId: customFieldValues.formId,
           entityId: createdTicket.id,
           entityType: FormEntityType.TICKET,
           fieldId: fieldValue.fieldId,
           contextId: customFieldValues.contextId,
-          fieldValue: fieldValue.fieldValue,
-          actualFieldValue: fieldValue.actualFieldValue,
+          fieldType: assertFormFieldType(definitions.get(fieldValue.fieldId)?.fieldType, fieldValue.fieldId),
+          value: fieldValue.value,
           workspaceId,
         })),
-      });
+      );
     }
 
     return createdTicket;

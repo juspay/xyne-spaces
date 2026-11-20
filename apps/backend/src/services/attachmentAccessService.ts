@@ -5,6 +5,7 @@ import { repositories } from '../database/repositories';
 import { canvasAuthService } from './canvasAuthService';
 import { callShareService } from './callShareService';
 import { logger } from '../utils/logger';
+import { findFormEntityValueKeys } from '@/database/repositories/formEntityValueRepository';
 
 export type AttachmentAccessResult =
   | { ok: true }
@@ -28,10 +29,7 @@ async function resolveTicketIdForAttachmentEntity(
     return impact?.ticketId ?? null;
   }
   // FORM_ENTITY_VALUE — only ticket-scoped values map to a channel.
-  const formValue = await db.formEntityValues.findUnique({
-    where: { id: entityId },
-    select: { entityId: true, entityType: true },
-  });
+  const [formValue] = await findFormEntityValueKeys(db, { where: { id: entityId } });
   if (formValue && formValue.entityType === 'TICKET') {
     return formValue.entityId;
   }

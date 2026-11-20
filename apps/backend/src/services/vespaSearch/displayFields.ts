@@ -1,5 +1,6 @@
 import { AttachmentEntityType, ChannelScopeType } from '@xyne/shared';
 import { db } from '@/database/client';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 import { chunkPlainText, extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { getFlowJsonContentForNotification } from '@/utils/flowJson';
@@ -63,15 +64,15 @@ async function threadSenders(conversationIds: string[]): Promise<Map<string, str
 async function ticketFormFields(ticketIds: string[]): Promise<Map<string, ReturnType<typeof buildFormFields>>> {
   const out = new Map<string, ReturnType<typeof buildFormFields>>();
   if (ticketIds.length === 0) return out;
-  const values = await db.formEntityValues.findMany({
+  const values = await findFormEntityValues(db, {
     where: { entityId: { in: ticketIds }, entityType: 'TICKET' },
-    select: { entityId: true, fieldId: true, actualFieldValue: true },
   });
   const definitions = await resolveFieldDefinitionsByIds(db, ids(values.map((v) => v.fieldId)));
   const fieldTypeByFieldId = new Map([...definitions].map(([fieldId, d]) => [fieldId, d.fieldType]));
   const byTicket = new Map<string, TicketDynamicFieldValue[]>();
-  for (const { entityId, fieldId, actualFieldValue } of values) {
-    byTicket.set(entityId, [...(byTicket.get(entityId) ?? []), { fieldId, actualFieldValue } as TicketDynamicFieldValue]);
+  for (const value of values) {
+    const entry: TicketDynamicFieldValue = { fieldId: value.fieldId, value: value.value };
+    byTicket.set(value.entityId, [...(byTicket.get(value.entityId) ?? []), entry]);
   }
   for (const id of ticketIds) out.set(id, buildFormFields(byTicket.get(id) ?? [], fieldTypeByFieldId));
   return out;

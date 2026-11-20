@@ -152,7 +152,7 @@ export interface CreateConversationWithEmailParams {
   clientVersionName?: string;
   clientVersionCode?: string;
   // Scope-field values for per-channel duplicate detection: the caller's raw
-  // custom-field write payload entries (fieldId + actualFieldValue), normalized and
+  // custom-field write payload entries (fieldId + raw value), normalized and
   // expanded inside ticketDuplicateService. Undefined (or a missing configured value)
   // → the duplicate check is skipped, never widened to project-wide.
   scopeFieldValues?: DuplicateScopeFieldValue[];

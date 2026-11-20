@@ -1,8 +1,14 @@
 import { Transaction } from '@rocicorp/zero';
 import { z } from 'zod';
-import { AttachmentEntityType, FormEntityType, FormFieldType, Schema } from './schema.js';
+import { AttachmentEntityType, FormEntityType, FormFieldType, type FormFieldValue, Schema } from './schema.js';
 import { stringFromFormValue } from '../tickets/utils.js';
 import { resolveParentOption } from '../utils/formFieldOptions.js';
+import {
+  assertFormFieldType,
+  formEntityValueItemId,
+  readFormEntityValue,
+  toTypedFormEntityValue,
+} from '../utils/formEntityValueColumns.js';
 import { zql } from './builder.js';
 
 export type BranchableMutatorField = {
@@ -105,9 +111,10 @@ export async function assertFieldIsCurrentlyActive(
       .where('entityType', entityType)
       .where('fieldId', resolved.parentField.id)
       .orderBy('updatedAt', 'desc')
-      .limit(1),
+      .limit(1)
+      .related('items'),
   );
-  const parentRaw = parentValues[0]?.actualFieldValue ?? parentValues[0]?.fieldValue;
+  const parentRaw = readFormEntityValue(parentValues[0]);
   const parentEffectiveValue = typeof parentRaw === 'string' ? parentRaw : null;
 
   if (resolved.option.value !== parentEffectiveValue) {
@@ -258,19 +265,18 @@ export async function writeFormEntityValueCreate(
     globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName ?? null;
 
   const actualFieldValue = toStoredFormValue(fieldType, newValue);
-  await tx.mutate.form_entity_values.insert({
-    workspaceId,
+  await insertFormEntityValue(tx, {
     id,
+    workspaceId,
+    formId,
     entityId,
     entityType,
     fieldId: resolvedFieldId,
-    formId,
-    ...(contextId && { contextId }),
+    contextId,
     version: version ?? 1,
-    fieldValue: '',
-    actualFieldValue,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    fieldType: assertFormFieldType(fieldType, resolvedFieldId),
+    value: actualFieldValue,
+    timestamp,
   });
 
   return {
@@ -357,9 +363,11 @@ export async function writeFormEntityValueUpdate(
       )
       : null);
   const valueToStore = toStoredFormValue(fieldType, newValue);
-  await tx.mutate.form_entity_values.update({
+  await updateFormEntityValue(tx, {
     id: formEntityValueId,
-    actualFieldValue: valueToStore,
+    workspaceId: formEntityValue.workspaceId,
+    fieldType: assertFormFieldType(fieldType, formEntityValue.fieldId),
+    value: valueToStore,
     updatedAt,
   });
 
@@ -497,4 +505,112 @@ export async function upsertManyFormEntityValues(
 
   await assertFormEntityValueWrites(tx, writes);
   return writes;
+}
+
+// Dual write: clients that still read actualFieldValue keep seeing current values.
+const legacyJsonValue = (value: unknown): FormFieldValue => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || Array.isArray(value)) return value as FormFieldValue;
+  return String(value);
+};
+
+// textHash needs the backend's key: the optimistic client write leaves it null and the
+// server's write fills it.
+const storedFormEntityValueFields = (fieldType: FormFieldType, value: unknown, fieldId: string) => {
+  const typed = toTypedFormEntityValue(assertFormFieldType(fieldType, fieldId), value);
+  return { fields: { ...typed.columns, textHash: null, actualFieldValue: legacyJsonValue(value) }, items: typed.items };
+};
+
+// Makes the value's form_entity_value_items rows exactly `items`. Item ids are derived, so
+// re-adding an item keeps its row and the client's optimistic rows match the server's.
+async function replaceFormEntityValueItems(
+  tx: Transaction<Schema>,
+  value: { id: string; workspaceId: string },
+  items: readonly string[],
+  createdAt: number,
+): Promise<void> {
+  const wanted = new Set(items);
+  const existing = await tx.run(zql.form_entity_value_items.where('valueId', value.id));
+  const existingItems = new Set(existing.map(row => row.item));
+  for (const row of existing) {
+    if (!wanted.has(row.item)) await tx.mutate.form_entity_value_items.delete({ id: row.id });
+  }
+  for (const item of wanted) {
+    if (existingItems.has(item)) continue;
+    await tx.mutate.form_entity_value_items.insert({
+      id: formEntityValueItemId(value.id, item),
+      workspaceId: value.workspaceId,
+      valueId: value.id,
+      item,
+      createdAt,
+    });
+  }
+}
+
+/**
+ * The only Zero writes of form_entity_values and its items: callers pass the field's type
+ * and value, and the storage (typed columns, textHash, item rows) stays here. The
+ * local-rules/form-entity-values-through-repository lint rule enforces it.
+ */
+export async function insertFormEntityValue(
+  tx: Transaction<Schema>,
+  input: {
+    id: string;
+    workspaceId: string;
+    formId: string;
+    entityId: string;
+    entityType: string;
+    fieldId: string;
+    contextId?: string | undefined;
+    version: number;
+    fieldType: FormFieldType;
+    value: unknown;
+    timestamp: number;
+  },
+): Promise<void> {
+  const stored = storedFormEntityValueFields(input.fieldType, input.value, input.id);
+  await tx.mutate.form_entity_values.insert({
+    workspaceId: input.workspaceId,
+    id: input.id,
+    formId: input.formId,
+    entityId: input.entityId,
+    entityType: input.entityType,
+    fieldId: input.fieldId,
+    ...(input.contextId && { contextId: input.contextId }),
+    version: input.version,
+    fieldValue: '',
+    ...stored.fields,
+    createdAt: input.timestamp,
+    updatedAt: input.timestamp,
+  });
+  await replaceFormEntityValueItems(tx, input, stored.items, input.timestamp);
+}
+
+export async function updateFormEntityValue(
+  tx: Transaction<Schema>,
+  input: { id: string; workspaceId: string; fieldType: FormFieldType; value: unknown; updatedAt: number },
+): Promise<void> {
+  const stored = storedFormEntityValueFields(input.fieldType, input.value, input.id);
+  await tx.mutate.form_entity_values.update({ id: input.id, ...stored.fields, updatedAt: input.updatedAt });
+  await replaceFormEntityValueItems(tx, input, stored.items, input.updatedAt);
+}
+
+/** Moves a row to another field or version without touching its value. */
+export async function moveFormEntityValue(
+  tx: Transaction<Schema>,
+  input: { id: string; fieldId?: string; version?: number; updatedAt: number },
+): Promise<void> {
+  await tx.mutate.form_entity_values.update({
+    id: input.id,
+    ...(input.fieldId !== undefined && { fieldId: input.fieldId }),
+    ...(input.version !== undefined && { version: input.version }),
+    updatedAt: input.updatedAt,
+  });
+}
+
+// Zero deletes do not cascade (relationMode = "prisma"), so items are removed explicitly.
+export async function deleteFormEntityValue(tx: Transaction<Schema>, id: string): Promise<void> {
+  const items = await tx.run(zql.form_entity_value_items.where('valueId', id));
+  for (const row of items) await tx.mutate.form_entity_value_items.delete({ id: row.id });
+  await tx.mutate.form_entity_values.delete({ id });
 }

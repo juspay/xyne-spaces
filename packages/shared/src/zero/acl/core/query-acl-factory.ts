@@ -81,6 +81,7 @@ import {
   FormFieldsACL,
   GlobalFieldsACL,
   FormEntityValuesACL,
+  FormEntityValueItemsACL,
   EmailsACL,
   EmailDraftsACL,
   ConversationLabelsACL,
@@ -392,6 +393,8 @@ export class QueryACLFactory {
         return new FormsACL(ctx) as BaseQueryACL<TTable>;
       case 'form_entity_values':
         return new FormEntityValuesACL(ctx) as BaseQueryACL<TTable>;
+      case 'form_entity_value_items':
+        return new FormEntityValueItemsACL(ctx) as BaseQueryACL<TTable>;
       case 'form_fields':
         return new FormFieldsACL(ctx) as BaseQueryACL<TTable>;
       case 'global_fields':
