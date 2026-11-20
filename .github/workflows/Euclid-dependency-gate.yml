@@ -1,0 +1,52 @@
+
+name: Euclid dependency gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  euclid-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Euclid dependency gate
+        env:
+          EUCLID_URL: "https://euclid-ci.internal.svc.k8s.office.mum.juspay.net"
+          EUCLID_CI_TOKEN: ${{ secrets.EUCLID_CI_TOKEN }}
+
+        run: |
+          set -euo pipefail
+
+          d="$(mktemp -d)"
+          trap 'rm -rf "$d"' EXIT
+
+          printf 'header = "Authorization: Bearer %s"\n' "$EUCLID_CI_TOKEN" \
+            | curl -fsS --compressed --retry 3 -K - \
+                -D "$d/headers" \
+                -o "$d/talos" \
+                "$EUCLID_URL/api/v1/ci-gate/talos/linux-amd64"
+
+          want="$(
+            tr '[:upper:]' '[:lower:]' < "$d/headers" \
+              | sed -n 's/^x-content-sha256:[[:space:]]*//p' \
+              | tail -n 1 \
+              | tr -d '\r'
+          )"
+
+          actual="$(sha256sum "$d/talos" | cut -d' ' -f1)"
+
+          if [ "$actual" != "${want:-none}" ]; then
+            echo "Talos download failed: checksum mismatch or missing checksum header." >&2
+            echo "Check EUCLID_URL and ensure CI can reach Euclid." >&2
+            exit 1
+          fi
+
+          chmod +x "$d/talos"
+
+          "$d/talos" gate --server "$EUCLID_URL" --fail-on high
