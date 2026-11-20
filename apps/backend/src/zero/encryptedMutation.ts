@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import { defineMutator } from '@rocicorp/zero';
-import type { DefaultContext, DefaultSchema, DefaultWrappedTransaction, ReadonlyJSONValue, Transaction } from '@rocicorp/zero';
+import type { DefaultContext, DefaultWrappedTransaction, MutatorDefinition, ReadonlyJSONValue } from '@rocicorp/zero';
 import type { z } from 'zod';
 import {
   conversationsSendClient,
@@ -17,6 +17,7 @@ import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encrypt
 import type { TransitCaller } from '@/services/encryption';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
+import { type UnreadableTransaction, unreadableTransaction } from './unreadableTransaction';
 
 /**
  * The Zero-mutation counterpart of middleware/encryptedRoute.ts. Every mutation the
@@ -112,12 +113,25 @@ export function requireMutationFacts<C extends RequestContract, F extends Extrac
   return facts;
 }
 
+type ContractMutatorFn<TArgs> = (options: {
+  tx: UnreadableTransaction;
+  ctx: DefaultContext;
+  args: TArgs;
+}) => Promise<void>;
+
 /**
- * `defineMutator` for a mutator with a request contract: the one place a contracted mutator's
- * args are made unreadable. The mutator body gets the contract's `unreadableString()` fields
- * as `UnreadableString` and never holds them as plain values; it reads one only through
- * reveal(). The wrapping happens here, after Zero has validated the args against `validator`,
- * because a mutator's validated args must be JSON and an `UnreadableString` is not.
+ * `defineMutator` with unreadable values: the one place a mutator's args and reads are made
+ * unreadable.
+ *
+ * - Args: with a contract, the contract's `unreadableString()` fields come in as
+ *   `UnreadableString`, every other field as validated. Without one, the args pass through.
+ *   The wrapping happens after Zero has validated the args against `validator`, because a
+ *   mutator's validated args must be JSON and an `UnreadableString` is not.
+ * - Reads: `tx.run` returns the columns in UNREADABLE_COLUMNS as `UnreadableString`, every
+ *   other column as stored; `tx.read(query, facts)` also returns the facts asked for from
+ *   those columns (see unreadableTransaction).
+ *
+ * The body reads an unreadable value only through reveal().
  */
 export function defineContractMutator<
   C extends RequestContract,
@@ -126,14 +140,28 @@ export function defineContractMutator<
 >(
   contract: C,
   validator: z.ZodType<TOutput, TInput>,
-  mutator: (options: {
-    tx: Transaction<DefaultSchema, DefaultWrappedTransaction>;
-    ctx: DefaultContext;
-    args: UnreadableBody<C, TOutput>;
-  }) => Promise<void>,
+  mutator: ContractMutatorFn<UnreadableBody<C, TOutput>>,
+): MutatorDefinition<TInput, TOutput, DefaultContext, DefaultWrappedTransaction>;
+export function defineContractMutator<
+  TInput extends ReadonlyJSONValue | undefined,
+  TOutput extends ReadonlyJSONValue | undefined,
+>(
+  validator: z.ZodType<TOutput, TInput>,
+  mutator: ContractMutatorFn<TOutput>,
+): MutatorDefinition<TInput, TOutput, DefaultContext, DefaultWrappedTransaction>;
+export function defineContractMutator(
+  ...params:
+    | [RequestContract, z.ZodType<ReadonlyJSONValue, ReadonlyJSONValue>, ContractMutatorFn<never>]
+    | [z.ZodType<ReadonlyJSONValue, ReadonlyJSONValue>, ContractMutatorFn<never>]
 ) {
-  return defineMutator<TInput, TOutput>(validator, ({ tx, ctx, args }) =>
-    mutator({ tx, ctx, args: makeUnreadable(contract, args) }),
+  const [contract, validator, mutator] = params.length === 3 ? params : [undefined, ...params];
+  return defineMutator(validator, ({ tx, ctx, args }) =>
+    mutator({
+      tx: unreadableTransaction(tx, ctx.workspaceId),
+      ctx,
+      // The overloads tie the args type to the contract; here it is the value either way.
+      args: (contract ? makeUnreadable(contract, args as object) : args) as never,
+    }),
   );
 }
 
