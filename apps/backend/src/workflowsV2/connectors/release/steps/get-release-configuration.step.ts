@@ -1,7 +1,7 @@
 import type { FieldOptionsContext, FieldOptionsPage } from '@xyne/workflow-sdk';
 import { BaseActionStep, variableRef, withOptions } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { db } from '@/database/client';
 import type { XyneCtx } from '@/workflowsV2/types';
 import { boardOptions, noOptions, optionsQuery } from '../../xyne-spaces/options';

@@ -1,7 +1,7 @@
 import type { FieldOptionsContext, FieldOptionsPage } from '@xyne/workflow-sdk';
 import { boardOptions, noOptions, optionsQuery } from '../options';
 import type { XyneCtx } from '@/workflowsV2/types';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { EventTrigger, TriggerCategory, withOptions } from '@xyne/workflow-sdk';
 import type { HydrateResult, TriggerEvent } from '@xyne/workflow-sdk';
 import {

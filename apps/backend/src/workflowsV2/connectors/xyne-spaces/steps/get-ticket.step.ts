@@ -1,6 +1,6 @@
 import { BaseActionStep, variableRef } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { db } from '@/database/client';
 import { workspaceOf } from '../context';
 

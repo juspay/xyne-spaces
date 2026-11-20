@@ -1,7 +1,7 @@
 import { BaseActionStep, variableRef } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
 import { BaseTicketType } from '@xyne/shared';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { db } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { workspaceOf } from '../../xyne-spaces/context';

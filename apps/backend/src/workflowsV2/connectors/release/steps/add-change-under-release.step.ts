@@ -1,7 +1,7 @@
 import { BaseActionStep, variableRef } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
 import { FormContextType, FormEntityType } from '@xyne/shared';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { db } from '@/database/client';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { DiffParser, FileChangeType } from '@/services/release/core';

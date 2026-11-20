@@ -3,7 +3,7 @@ import { BaseActionStep, variableRef, withOptions } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { db } from '@/database/client';
 import { buildWorkspaceCanvasUrl, convertMarkdownToBlockNote } from '@/services/canvasService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
