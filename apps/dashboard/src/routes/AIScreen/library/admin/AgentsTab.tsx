@@ -354,9 +354,7 @@ export function AgentsTab({
             className='text-muted-foreground hover:text-foreground focus-visible:bg-muted focus-visible:ring-0'
           >
             <PluginAddonDefault className='size-4 text-current' />
-            <span className='text-current'>
-              Add surface
-            </span>
+            <span className='text-current'>Add surface</span>
             <ChevronDown className='size-4 text-current' />
           </Button>
         </DropdownMenuTrigger>
