@@ -1,3 +1,5 @@
+import { AppError } from '@/middleware/errorHandler';
+
 export type CallProviderCredentials = Record<string, unknown>;
 
 /** A credential the connection form collects. Secret values are never sent back to the browser. */
@@ -16,14 +18,14 @@ export interface CallProviderOption {
   label: string;
 }
 
-/** A rejected telephony request; `status` is the HTTP status the routes answer with. */
-export class CallConfigError extends Error {
+/** A rejected telephony request, with per-field messages for the form. */
+export class CallConfigError extends AppError {
   constructor(
     message: string,
-    readonly status: number = 400,
+    statusCode = 400,
     readonly fieldErrors?: Record<string, string[]>,
   ) {
-    super(message);
+    super(message, statusCode);
     this.name = 'CallConfigError';
   }
 }

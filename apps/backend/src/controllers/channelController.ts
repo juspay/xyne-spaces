@@ -930,9 +930,25 @@ export class ChannelController {
             res.status(400).json({ error: 'Invalid call connection settings' });
             return;
           }
-          if (!(await callConnectionService.get(req.user!.workspaceId!, callConnectionId))) {
+          const callConnection = await callConnectionService.get(req.user!.workspaceId!, callConnectionId);
+          if (!callConnection) {
             res.status(400).json({ error: 'Call connection not found' });
             return;
+          }
+          // A taken campaign or default is rejected before the desk is created.
+          try {
+            await deskCallSettingsService.assertNewDeskRoutingFree(
+              req.user!.workspaceId!,
+              callConnection.id,
+              { routingKeys: callRoutingKeys ?? [], isDefault: callIsDefault === true },
+              callConnection.provider.routingKeyLabel,
+            );
+          } catch (error) {
+            if (error instanceof CallConfigError) {
+              res.status(error.statusCode).json({ error: error.message });
+              return;
+            }
+            throw error;
           }
         }
       }
@@ -1232,7 +1248,7 @@ export class ChannelController {
           });
           // e.g. a campaign another desk already routes: tell the user why.
           if (error instanceof CallConfigError) {
-            res.status(error.status).json({ error: error.message });
+            res.status(error.statusCode).json({ error: error.message });
             return;
           }
           res.status(500).json({ error: 'Failed to create call desk' });

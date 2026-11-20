@@ -6,11 +6,11 @@ import { PhoneDefault } from '@xyne/icons';
 import {
   deleteCallConnection,
   getCallProviders,
-  getTelephonyErrorMessage,
   listCallConnections,
   TELEPHONY_QUERY_KEYS,
   type CallConnectionSummary,
 } from '../../../services/clients/telephonyApi';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { CallConnectionDialog } from './CallConnectionDialog';
@@ -47,12 +47,12 @@ export const WorkspaceTelephonyCard = (): ReactElement => {
     mutationFn: deleteCallConnection,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: TELEPHONY_QUERY_KEYS.connections });
-      void queryClient.invalidateQueries({ queryKey: ['call-softphone'] });
+      void queryClient.invalidateQueries({ queryKey: TELEPHONY_QUERY_KEYS.softphoneAll });
       toast.success('Connection removed');
     },
     onError: error => {
       toast.error('Could not remove the connection', {
-        description: getTelephonyErrorMessage(error),
+        description: getApiErrorMessage(error),
       });
     },
   });
