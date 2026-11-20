@@ -1,5 +1,5 @@
-import { Prisma, type DeskCallSettings } from '@prisma/client';
-import { ChannelType } from '@xyne/shared';
+import { Prisma } from '@prisma/client';
+import { ChannelType, deskTypeForChannelType, EmailMergeMode } from '@xyne/shared';
 import { findWorkspaceDeskIds } from '@/bypassAcl/callConnectionServices';
 import { db } from '@/database/client';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
@@ -19,7 +19,6 @@ export type DeskCallTicketRules = {
 export interface DeskCallSettingsView {
   channelId: string;
   connectionId: string;
-  provider: string;
   isDefault: boolean;
   routingKeys: string[];
   ticketRules: DeskCallTicketRules;
@@ -34,7 +33,38 @@ export interface DeskCallSettingsInput {
   phoneFieldNames?: string[];
 }
 
+/** Workspace-wide routing from before desk settings, as it lands on one desk. */
+export interface LegacyDeskCallSettings {
+  channelId: string;
+  channelType: string;
+  isDefault?: boolean;
+  routingKeys?: string[];
+  ticketRules?: DeskCallTicketRules;
+  phoneFieldNames?: string[];
+}
+
 const MAX_SUBJECT_TEMPLATE_LENGTH = 300;
+
+/** The desk's email_channel_preferences columns that hold its call settings. */
+const CALL_SETTINGS_SELECT = {
+  channelId: true,
+  callConnectionId: true,
+  callIsDefault: true,
+  callRoutingKeys: true,
+  callTicketRules: true,
+  callPhoneFieldNames: true,
+} satisfies Prisma.EmailChannelPreferenceSelect;
+
+type CallSettingsRow = Prisma.EmailChannelPreferenceGetPayload<{ select: typeof CALL_SETTINGS_SELECT }>;
+type ConfiguredRow = CallSettingsRow & { callConnectionId: string };
+
+const NO_CALL_SETTINGS = {
+  callConnectionId: null,
+  callIsDefault: false,
+  callRoutingKeys: [],
+  callTicketRules: Prisma.DbNull,
+  callPhoneFieldNames: [],
+} satisfies Prisma.EmailChannelPreferenceUpdateManyMutationInput;
 
 function uniqueTrimmed(values: readonly unknown[]): string[] {
   const trimmed = values
@@ -75,19 +105,33 @@ function normalizeTicketRules(
   };
 }
 
-function toView(row: DeskCallSettings): DeskCallSettingsView {
+function isConfigured(row: CallSettingsRow): row is ConfiguredRow {
+  return row.callConnectionId !== null;
+}
+
+function toView(row: ConfiguredRow): DeskCallSettingsView {
   return {
     channelId: row.channelId,
-    connectionId: row.connectionId,
-    provider: row.provider,
-    isDefault: row.isDefault,
-    routingKeys: row.routingKeys ?? [],
-    ticketRules: parseTicketRules(row.ticketRules),
-    phoneFieldNames: row.phoneFieldNames ?? [],
+    connectionId: row.callConnectionId,
+    isDefault: row.callIsDefault,
+    routingKeys: row.callRoutingKeys ?? [],
+    ticketRules: parseTicketRules(row.callTicketRules),
+    phoneFieldNames: row.callPhoneFieldNames ?? [],
   };
 }
 
-/** Rejects routing another desk on the same connection already holds; drops rows of deleted desks. */
+/** Desks get their preferences row when created; this covers an older desk without one. */
+function newPreferenceRow(workspaceId: string, channelId: string, channelType: string) {
+  return {
+    channelId,
+    workspaceId,
+    deskType: deskTypeForChannelType(channelType),
+    // As desk creation sets it for call and app desks.
+    emailMergeMode: EmailMergeMode.DISABLED,
+  };
+}
+
+/** Rejects routing another desk on the same connection already holds; clears it from deleted desks. */
 async function assertRoutingFree(params: {
   workspaceId: string;
   channelId: string;
@@ -99,12 +143,13 @@ async function assertRoutingFree(params: {
   const { workspaceId, channelId, connectionId, routingKeys, isDefault, routingKeyLabel } = params;
   if (routingKeys.length === 0 && !isDefault) return;
 
-  const others = await db.deskCallSettings.findMany({
-    where: { workspaceId, connectionId, NOT: { channelId } },
+  const others = await db.emailChannelPreference.findMany({
+    where: { workspaceId, callConnectionId: connectionId, NOT: { channelId } },
+    select: CALL_SETTINGS_SELECT,
   });
   const wanted = new Set(routingKeys);
   const contenders = others.filter(
-    other => (isDefault && other.isDefault) || other.routingKeys.some(key => wanted.has(key)),
+    other => (isDefault && other.callIsDefault) || other.callRoutingKeys.some(key => wanted.has(key)),
   );
   if (contenders.length === 0) return;
 
@@ -121,14 +166,17 @@ async function assertRoutingFree(params: {
   const names = new Map(visibleDesks.map(desk => [desk.id, desk.name]));
   const stale = contenderIds.filter(id => !existing.has(id));
   if (stale.length > 0) {
-    await db.deskCallSettings.deleteMany({ where: { workspaceId, channelId: { in: stale } } });
+    await db.emailChannelPreference.updateMany({
+      where: { workspaceId, channelId: { in: stale } },
+      data: NO_CALL_SETTINGS,
+    });
   }
 
   for (const other of contenders) {
     if (!existing.has(other.channelId)) continue;
     const name = names.get(other.channelId);
     const deskName = name ? `"${name}"` : 'another desk';
-    const clash = other.routingKeys.find(key => wanted.has(key));
+    const clash = other.callRoutingKeys.find(key => wanted.has(key));
     if (clash) {
       throw new CallConfigError(`${routingKeyLabel} "${clash}" already routes to ${deskName}`, 409, {
         routingKeys: [`"${clash}" already routes to ${deskName}`],
@@ -140,20 +188,30 @@ async function assertRoutingFree(params: {
   }
 }
 
+/** A desk's call settings live on its email_channel_preferences row (the call* columns). */
 export const deskCallSettingsService = {
   async get(workspaceId: string, channelId: string): Promise<DeskCallSettingsView | null> {
-    const row = await db.deskCallSettings.findFirst({ where: { workspaceId, channelId } });
-    return row ? toView(row) : null;
+    const row = await db.emailChannelPreference.findFirst({
+      where: { workspaceId, channelId },
+      select: CALL_SETTINGS_SELECT,
+    });
+    return row && isConfigured(row) ? toView(row) : null;
   },
 
   async listForConnection(workspaceId: string, connectionId: string): Promise<DeskCallSettingsView[]> {
-    const rows = await db.deskCallSettings.findMany({ where: { workspaceId, connectionId } });
-    return rows.map(toView);
+    const rows = await db.emailChannelPreference.findMany({
+      where: { workspaceId, callConnectionId: connectionId },
+      select: CALL_SETTINGS_SELECT,
+    });
+    return rows.filter(isConfigured).map(toView);
   },
 
   async listForWorkspace(workspaceId: string): Promise<DeskCallSettingsView[]> {
-    const rows = await db.deskCallSettings.findMany({ where: { workspaceId } });
-    return rows.map(toView);
+    const rows = await db.emailChannelPreference.findMany({
+      where: { workspaceId, callConnectionId: { not: null } },
+      select: CALL_SETTINGS_SELECT,
+    });
+    return rows.filter(isConfigured).map(toView);
   },
 
   /** The desk a call goes to: the one routing its key, else the connection's default desk. */
@@ -173,7 +231,6 @@ export const deskCallSettingsService = {
     workspaceId: string,
     channelId: string,
     input: DeskCallSettingsInput,
-    updatedBy: string,
   ): Promise<DeskCallSettingsView> {
     const [channel, connection] = await Promise.all([
       db.channel.findFirst({ where: { id: channelId, workspaceId }, select: { type: true } }),
@@ -215,24 +272,23 @@ export const deskCallSettingsService = {
     }
 
     const data = {
-      connectionId: connection.id,
-      provider: provider.id,
-      isDefault,
-      routingKeys,
-      ticketRules: isCallDesk ? normalizeTicketRules(input.ticketRules, provider) : Prisma.DbNull,
-      phoneFieldNames: isCallDesk ? [] : uniqueTrimmed(input.phoneFieldNames ?? []),
-      updatedBy,
+      callConnectionId: connection.id,
+      callIsDefault: isDefault,
+      callRoutingKeys: routingKeys,
+      callTicketRules: isCallDesk ? normalizeTicketRules(input.ticketRules, provider) : Prisma.DbNull,
+      callPhoneFieldNames: isCallDesk ? [] : uniqueTrimmed(input.phoneFieldNames ?? []),
     };
     try {
-      const row = await db.deskCallSettings.upsert({
+      const row = await db.emailChannelPreference.upsert({
         where: { channelId },
-        create: { channelId, workspaceId, ...data },
+        create: { ...newPreferenceRow(workspaceId, channelId, channel.type), ...data },
         update: data,
+        select: CALL_SETTINGS_SELECT,
       });
-      return toView(row);
+      return toView({ ...row, callConnectionId: connection.id });
     } catch (error) {
-      // desk_call_settings_one_default: another desk became the default after the check above.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      // email_channel_preferences_one_default_call_desk: another desk became the default after the check above.
+      if (isDefault && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new CallConfigError('Another desk is already the default desk for this connection', 409);
       }
       throw error;
@@ -240,6 +296,45 @@ export const deskCallSettingsService = {
   },
 
   async remove(workspaceId: string, channelId: string): Promise<void> {
-    await db.deskCallSettings.deleteMany({ where: { workspaceId, channelId } });
+    await db.emailChannelPreference.updateMany({
+      where: { workspaceId, channelId },
+      data: NO_CALL_SETTINGS,
+    });
+  },
+
+  /** Gives old workspace routing to desks with no call connection yet; desks set up since keep theirs. */
+  async adoptLegacyRouting(
+    workspaceId: string,
+    connectionId: string,
+    desks: LegacyDeskCallSettings[],
+  ): Promise<void> {
+    if (desks.length === 0) return;
+    // One default per connection: skipped if a desk already holds it.
+    const hasDefault =
+      (await db.emailChannelPreference.count({
+        where: { workspaceId, callConnectionId: connectionId, callIsDefault: true },
+      })) > 0;
+
+    await Promise.all(
+      desks.map(async desk => {
+        const data = {
+          callConnectionId: connectionId,
+          callIsDefault: !hasDefault && desk.isDefault === true,
+          callRoutingKeys: desk.routingKeys ?? [],
+          callTicketRules: desk.ticketRules ?? Prisma.DbNull,
+          callPhoneFieldNames: desk.phoneFieldNames ?? [],
+        };
+        const { count } = await db.emailChannelPreference.updateMany({
+          where: { workspaceId, channelId: desk.channelId, callConnectionId: null },
+          data,
+        });
+        if (count > 0) return;
+        // No row yet. An existing row here is a desk set up since, which createMany skips.
+        await db.emailChannelPreference.createMany({
+          data: [{ ...newPreferenceRow(workspaceId, desk.channelId, desk.channelType), ...data }],
+          skipDuplicates: true,
+        });
+      }),
+    );
   },
 };

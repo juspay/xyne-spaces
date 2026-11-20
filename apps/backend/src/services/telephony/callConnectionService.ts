@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { ExternalSource, Prisma } from '@prisma/client';
+import type { ExternalSource } from '@prisma/client';
 import { ChannelType } from '@xyne/shared';
 import { findWorkspaceDeskIds } from '@/bypassAcl/callConnectionServices';
 import { config } from '@/config/env';
@@ -10,7 +10,7 @@ import { logger } from '@/utils/logger';
 import { CallConfigError, type CallProvider, type CallProviderCredentials } from './callProvider';
 import { CALL_PROVIDER_IDS } from './callProviderIds';
 import { getCallProvider } from './callProviderRegistry';
-import type { DeskCallTicketRules } from './deskCallSettingsService';
+import { deskCallSettingsService, type DeskCallTicketRules } from './deskCallSettingsService';
 
 const TAG = '[CallConnection]';
 const MAX_NAME_LENGTH = 80;
@@ -31,7 +31,7 @@ export interface CallConnection {
   credentials: CallProviderCredentials;
 }
 
-/** Workspace-wide routing saved before desk settings existed; moved to desk_call_settings on first read. */
+/** Workspace-wide routing saved before desk settings existed; moved onto the desks on first read. */
 interface LegacyTicketRules {
   defaultChannelId?: string;
   campaignRouting?: Record<string, string>;
@@ -159,21 +159,16 @@ async function migrateLegacyTicketRules(
   ]);
 
   const phoneFieldNames = uniqueTrimmed([...(rules.phoneFieldNames ?? []), rules.customerPhoneFieldName]);
-  const base = { workspaceId: source.workspaceId, connectionId: source.id, provider: provider.id };
-  const rows: Prisma.DeskCallSettingsCreateManyInput[] = [
+  await deskCallSettingsService.adoptLegacyRouting(source.workspaceId, source.id, [
     ...validCallDesks.map(id => ({
-      ...base,
       channelId: id,
+      channelType: ChannelType.CALL,
       isDefault: callDesks.get(id)?.isDefault ?? false,
       routingKeys: uniqueTrimmed(callDesks.get(id)?.routingKeys ?? []),
       ticketRules,
     })),
-    ...appDesks.map(id => ({ ...base, channelId: id, phoneFieldNames })),
-  ];
-  if (rows.length > 0) {
-    // Desks configured since keep their settings.
-    await db.deskCallSettings.createMany({ data: rows, skipDuplicates: true });
-  }
+    ...appDesks.map(id => ({ channelId: id, channelType: ChannelType.APP, phoneFieldNames })),
+  ]);
 
   const rest: StoredCredentials = { ...stored };
   delete rest.ticketRules;
@@ -358,7 +353,9 @@ export const callConnectionService = {
   async remove(workspaceId: string, connectionId: string): Promise<void> {
     const existing = await this.get(workspaceId, connectionId);
     if (!existing) throw new CallConfigError('Call connection not found', 404);
-    const desks = await db.deskCallSettings.count({ where: { workspaceId, connectionId } });
+    const desks = await db.emailChannelPreference.count({
+      where: { workspaceId, callConnectionId: connectionId },
+    });
     if (desks > 0) {
       throw new CallConfigError(
         `${desks} desk${desks === 1 ? ' uses' : 's use'} this connection. Move ${desks === 1 ? 'it' : 'them'} to another connection first.`,
