@@ -7,7 +7,6 @@ import {
   getCallProviders,
   getCallRoutingKeys,
   getDeskCallSettings,
-  getTelephonyErrorMessage,
   getTelephonyFieldErrors,
   listCallConnections,
   saveDeskCallSettings,
@@ -16,6 +15,7 @@ import {
   type DeskCallSettings,
   type DeskCallSettingsInput,
 } from '../../../../services/clients/telephonyApi';
+import { getApiErrorMessage } from '../../../../utils/apiError';
 import { useConfirmDialog } from '../../../../hooks/useConfirmDialog';
 import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelector';
 import type { SelectorOption } from '../../../ui/EntitySelector/EntitySelector.types';
@@ -83,7 +83,7 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
   const { confirm, ConfirmDialog } = useConfirmDialog();
   const enabled = canManage && !!channelId;
 
-  const { data: providers = [] } = useQuery({
+  const { data: providers = [], isLoading: loadingProviders } = useQuery({
     queryKey: TELEPHONY_QUERY_KEYS.providers,
     queryFn: getCallProviders,
     enabled,
@@ -127,7 +127,7 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
   const refresh = (next: DeskCallSettings | null): void => {
     queryClient.setQueryData(TELEPHONY_QUERY_KEYS.deskSettings(channelId ?? ''), next);
     void queryClient.invalidateQueries({ queryKey: TELEPHONY_QUERY_KEYS.connections });
-    void queryClient.invalidateQueries({ queryKey: ['call-softphone'] });
+    void queryClient.invalidateQueries({ queryKey: TELEPHONY_QUERY_KEYS.softphoneAll });
   };
 
   const saveMutation = useMutation({
@@ -139,7 +139,7 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
     onError: error => {
       setFieldErrors(getTelephonyFieldErrors(error));
       toast.error('Could not save telephony settings', {
-        description: getTelephonyErrorMessage(error),
+        description: getApiErrorMessage(error),
       });
     },
   });
@@ -152,7 +152,7 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
     },
     onError: error => {
       toast.error('Could not remove the call connection', {
-        description: getTelephonyErrorMessage(error),
+        description: getApiErrorMessage(error),
       });
     },
   });
@@ -165,7 +165,7 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
       </p>
     );
   }
-  if (loadingConnections || loadingSettings) {
+  if (loadingProviders || loadingConnections || loadingSettings) {
     return <p className='text-desk-helper'>Loading telephony settings…</p>;
   }
 
@@ -179,7 +179,8 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
             routingKeys: draft.routingKeys,
             ticketRules: {
               createTicketOnEvent: draft.createTicketOnEvent,
-              callTypes: selectedCallTypes,
+              // Untouched on a new desk: left out so the server enables every call type.
+              ...(draft.callTypes !== null ? { callTypes: draft.callTypes } : {}),
               ...(draft.subjectTemplate.trim()
                 ? { subjectTemplate: draft.subjectTemplate.trim() }
                 : {}),

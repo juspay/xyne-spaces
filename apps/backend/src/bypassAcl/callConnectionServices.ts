@@ -8,7 +8,7 @@ import { asService } from './base';
  */
 export function findWorkspaceDeskIds(
   workspaceId: string,
-  filter: { type?: string; ids?: string[] },
+  filter: { type?: string; ids?: string[]; excludeArchived?: boolean },
 ): Promise<string[]> {
   return asService(
     ['Channel'],
@@ -21,6 +21,7 @@ export function findWorkspaceDeskIds(
           workspaceId,
           ...(filter.type ? { type: filter.type } : {}),
           ...(filter.ids ? { id: { in: filter.ids } } : {}),
+          ...(filter.excludeArchived ? { isArchived: false } : {}),
         },
         select: { id: true },
       });

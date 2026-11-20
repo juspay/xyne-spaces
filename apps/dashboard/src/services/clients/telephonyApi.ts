@@ -1,5 +1,4 @@
 import { apiInstance } from './apiClient';
-import { getApiErrorMessage } from '../../utils/apiError';
 
 const BASE = '/integrations/telephony';
 
@@ -16,6 +15,8 @@ export const TELEPHONY_QUERY_KEYS = {
   connection: (id: string) => ['call-connection', id] as const,
   routingKeys: (connectionId: string) => ['call-routing-keys', connectionId] as const,
   deskSettings: (channelId: string) => ['desk-call-settings', channelId] as const,
+  /** Prefix of every softphone query, for invalidation. */
+  softphoneAll: ['call-softphone'] as const,
   softphone: (channelId: string | null | undefined) =>
     ['call-softphone', channelId ?? null] as const,
 };
@@ -108,7 +109,8 @@ export interface DeskCallSettingsInput {
   connectionId: string;
   isDefault?: boolean;
   routingKeys?: string[];
-  ticketRules?: DeskCallTicketRules;
+  /** callTypes left out: the server enables every call type the provider has. */
+  ticketRules?: Partial<DeskCallTicketRules>;
   phoneFieldNames?: string[];
 }
 
@@ -125,15 +127,6 @@ export interface SoftphoneInfo {
   /** The desk's own connection, when it has one. */
   deskConnectionId: string | null;
   phoneFieldNames: string[];
-}
-
-/** The backend's `{ error }` message, else the generic API error message. */
-export function getTelephonyErrorMessage(err: unknown, fallback = 'Please try again.'): string {
-  const apiError = (err as { response?: { data?: { error?: unknown } } } | null)?.response?.data
-    ?.error;
-  return typeof apiError === 'string' && apiError.trim().length > 0
-    ? apiError
-    : getApiErrorMessage(err, fallback);
 }
 
 /** Per-field messages from a rejected save, keyed like the request body. */
