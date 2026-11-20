@@ -185,6 +185,7 @@ import {
   SOCIAL_MEDIA_SOURCE_TYPE,
   TicketPriority,
   parseFieldOptionValues,
+  readFormEntityValue,
 } from '@xyne/shared';
 import type { Ticket, FormFields, EmailChannelPreference } from '@xyne/shared';
 import { useShortcut, invokeShortcut } from '../../shortcuts';
@@ -5349,7 +5350,7 @@ export const SupportTicketDetail = ({
     const names = new Set(phoneFieldNames);
     return (ticketFormValues ?? [])
       .filter(entry => names.has(entry.globalField?.fieldName ?? entry.formField?.fieldName ?? ''))
-      .map(entry => entry.actualFieldValue ?? entry.fieldValue)
+      .map(entry => readFormEntityValue(entry))
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
       .map(value => value.trim());
   }, [ticketFormValues, phoneFieldNames]);

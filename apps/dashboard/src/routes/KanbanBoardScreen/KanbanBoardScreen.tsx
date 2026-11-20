@@ -105,7 +105,6 @@ import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { apiInstance } from '../../services/clients/apiClient';
 import type {
   Ticket,
-  FormEntityValues,
   TicketStageRequest,
   TicketAssignment,
   BoardMetadata,
@@ -180,6 +179,7 @@ import {
   extractBoardFormFields,
   extractGroupableFormFields,
   ticketsHaveSameBoardSnapshot,
+  type TicketFormEntityValue,
 } from './KanbanBoardScreen.utils';
 import { TableGroupSection } from './TableGroupSection';
 import {
@@ -404,7 +404,7 @@ type KanbanLocalTicket = Ticket & {
   tagMappings?: Array<{ id: string; tagId: string; tagName: string; ticketId: string }>;
   tags?: Array<{ id: string; name: string; ticketId?: string }>;
   formEntityValues?: Array<
-    FormEntityValues & {
+    TicketFormEntityValue & {
       formField?: { fieldType: FormFieldType; fieldEnum?: unknown; fieldOptions?: unknown } | null;
     }
   >;
@@ -1663,13 +1663,11 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
     const result = Array.from(tokens).sort();
     return result;
   }, [filters.dynamicFields]);
-  // A STRING value is matched case-insensitively everywhere it is counted or fetched (the
-  // Vespa token is an uncased attribute match, and the counts service folds case to agree
-  // with it). Zero cannot express that: its only comparison against the jsonb
-  // `actualFieldValue` is case-exact, so a column page built from it would leave out every
-  // ticket spelled differently from the picked value. Naming the field here keeps its value
-  // out of the Zero query and routes the column through the page that loads form values,
-  // where the shared matcher applies the same case-insensitive rule.
+  // A STRING value is matched case-insensitively everywhere it is counted or fetched. In Zero
+  // that match runs on textHash, which only the server can compute (the hash key never
+  // reaches the browser), so the client-side query cannot narrow a STRING filter itself.
+  // Naming the field here routes the column through the page that loads form values, where
+  // the shared matcher applies the same case-insensitive rule in the browser.
   const zeroOnlyDynamicFieldIds = useMemo<string[]>(() => {
     if (!filters.dynamicFields) return EMPTY_FIELD_IDS;
     const fieldIds = Object.entries(filters.dynamicFields)
@@ -2391,7 +2389,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
   //   formValuesByTicketId: ticketId → FEV rows
   //   formFieldsById: fieldId → { fieldType, fieldEnum }
   const { formValuesByTicketId, formFieldsById } = useMemo(() => {
-    const valuesMap = new Map<string, FormEntityValues[]>();
+    const valuesMap = new Map<string, TicketFormEntityValue[]>();
     const fieldsMap = new Map<
       string,
       { fieldType: FormFieldType; fieldEnum?: FieldEnumOption[] | null }

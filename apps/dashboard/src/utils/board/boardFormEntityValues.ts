@@ -3,10 +3,12 @@ import {
   FormFieldType,
   type FormEntityValues,
   type FormFields,
+  type TypedFormEntityValueRow,
 } from '@xyne/shared';
 import { resolveDisplayFormFields } from './resolveDisplayFormFields';
 
 type FormEntityValueRow = FormEntityValues & {
+  items: TypedFormEntityValueRow['items'];
   formField?: FormFields | null | undefined;
   globalField?:
     | {
@@ -37,11 +39,11 @@ const isBoardContextValue = (
 };
 
 /** Latest row per fieldId across all forms/contexts for the entity values already loaded. */
-export const buildLatestEntityWideValueByField = (
-  values: readonly FormEntityValueRow[],
+export const buildLatestEntityWideValueByField = <T extends FormEntityValueRow>(
+  values: readonly T[],
   fieldIds: ReadonlySet<string>,
-): Map<string, FormEntityValueRow> => {
-  const map = new Map<string, FormEntityValueRow>();
+): Map<string, T> => {
+  const map = new Map<string, T>();
   values
     .filter(value => fieldIds.has(value.fieldId))
     .forEach(value => {
@@ -158,6 +160,7 @@ export const resolveBoardAdditionalFields = ({
       dateValue: null,
       boolValue: null,
       plainValue: null,
+      items: [],
       version: 1,
       createdAt: Date.now(),
       updatedAt: Date.now(),
