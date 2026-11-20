@@ -18,7 +18,7 @@ import { buildVcsClient } from '@/services/release/buildVcsClient';
 import { ReleaseTrackingMode, VCSProviderType, MessageType } from '@xyne/shared';
 
 // Shared HTML for the release and parent-ticket analysis summary cards.
-export function buildAnalysisSummaryHtml(opts: {
+function buildAnalysisSummaryHtml(opts: {
   header: string;
   // already-escaped extra line after the header (e.g. the sub-ticket link)
   prefaceHtml?: string;
@@ -98,7 +98,7 @@ const ANALYSIS_MESSAGE_SUBTYPES = [
   'commit_analysis_error',
 ];
 
-export async function postLoadingMessage(conversationId: string, userId: string): Promise<string> {
+async function postLoadingMessage(conversationId: string, userId: string): Promise<string> {
   const loadingContent = `<p><strong>Analyzing commits...</strong></p><p><em>Please wait while we analyze the commits and detect affected applications.</em></p>`;
   const loadingMeta = { messageSubtype: 'commit_analysis_loading', isLoading: true };
 

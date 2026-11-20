@@ -1,9 +1,8 @@
-// @xyne/workflow-sdk builds its schemas with zod/v3 from the repo's zod; use that same copy.
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 
 /**
- * zod/v3 mirrors of the schemas the Automations engine declares on zod v4.
+ * mirrors of the schemas the Automations engine declares on zod v4.
  *
  * The SDK turns a trigger's schemas into JSON Schema with a v3-only converter, so the
  * ones handed to it cannot be v4 — and the Automations originals are not ours to move.

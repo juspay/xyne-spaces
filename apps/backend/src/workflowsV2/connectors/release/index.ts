@@ -4,8 +4,7 @@ import { GetReleaseConfigurationStep } from './steps/get-release-configuration.s
 import { AddTicketsUnderReleaseStep } from './steps/add-tickets-under-release.step';
 import { AddChangeUnderReleaseStep } from './steps/add-change-under-release.step';
 import { UpdateDeployedCommitStep } from './steps/update-deployed-commit.step';
-import { AnalyzeCommitRangeStep } from './steps/analyze-commit-range.step';
-import { PublishCommitAnalysisStep } from './steps/publish-commit-analysis.step';
+import { LinkReleaseNotesStep } from './steps/link-release-notes.step';
 
 export class ReleaseConnector extends BaseConnector {
   readonly id = 'release';
@@ -21,7 +20,6 @@ export class ReleaseConnector extends BaseConnector {
     new AddTicketsUnderReleaseStep(),
     new AddChangeUnderReleaseStep(),
     new UpdateDeployedCommitStep(),
-    new AnalyzeCommitRangeStep(),
-    new PublishCommitAnalysisStep(),
+    new LinkReleaseNotesStep(),
   ];
 }

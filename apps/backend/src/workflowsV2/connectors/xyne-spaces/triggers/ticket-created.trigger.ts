@@ -1,8 +1,7 @@
 import type { FieldOptionsContext, FieldOptionsPage } from '@xyne/workflow-sdk';
 import { boardOptions, noOptions, optionsQuery } from '../options';
 import type { XyneCtx } from '@/workflowsV2/types';
-// @xyne/workflow-sdk builds its schemas with zod/v3 from the repo's zod; use that same copy.
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { EventTrigger, TriggerCategory, withOptions } from '@xyne/workflow-sdk';
 import type { HydrateResult, TriggerEvent } from '@xyne/workflow-sdk';
 import {
@@ -33,6 +32,16 @@ const TicketCreatedConfigSchema = z
   });
 
 const TicketCreatedOutputSchema = TicketContextSchema.extend({
+  /** The form fields the ticket was created with, by field name, id and lowercase name. */
+  formFieldChanges: z
+    .record(
+      z.string(),
+      z.object({
+        previousValue: z.union([z.string(), z.number(), z.null()]).optional(),
+        newValue: z.union([z.string(), z.number(), z.null()]).optional(),
+      }),
+    )
+    .optional(),
   performedBy: z
     .object({
       id: z.string().nullable(),

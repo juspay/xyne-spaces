@@ -32,6 +32,7 @@ import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
 import { workflowStorage } from './adapters/storage';
+import { HttpSandboxAdapter } from './adapters/sandbox';
 import { XyneWorkflowAuthorizer } from './authorizer';
 import { DEFAULT_CRON_TIMEZONE } from './constants';
 import type { XyneCtx, XyneFilter } from './types';
@@ -132,6 +133,9 @@ const APPROVAL_POLICY = {
   triggers: {},
 } as const satisfies ApprovalConfig;
 
+const sandbox = config.sandbox.url ? new HttpSandboxAdapter(config.sandbox.url) : undefined;
+if (!sandbox) logger.warn('[workflows] SANDBOX_URL not set — CODE steps will fail');
+
 const executor = new WorkflowExecutor(persistence, connectors, services, {
   eventBus,
   baseUrl: BASE_URL,
@@ -139,6 +143,7 @@ const executor = new WorkflowExecutor(persistence, connectors, services, {
   egressProxyUrl: config.ssrf.egressProxyUrl,
   storage,
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
 });
 
 export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, XyneCtx, XyneFilter>({
@@ -152,6 +157,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
   eventBus,
   authorizer: new XyneWorkflowAuthorizer(),
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
   config: {
     baseUrl: BASE_URL,
     defaultCronTimezone: DEFAULT_CRON_TIMEZONE,

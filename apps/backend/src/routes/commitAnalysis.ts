@@ -20,6 +20,7 @@ import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanva
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { FormsRepository } from '@/database/repositories/formsRepository';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
+import { buildCreationFormFieldChanges } from '@/services/ticketCustomFieldService';
 
 const router = Router();
 const commitAnalysisController = new CommitAnalysisController();
@@ -66,8 +67,11 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
     const deployedCommitId = String(formValues['deployedCommitId'] ?? '').trim();
     const newCommitId = String(formValues['newCommitId'] ?? '').trim();
 
-    const repoCount = await db.releaseRepository.count({ where: { releaseId: ticketId } });
-    if (repoCount === 0 && (!deployedCommitId || !newCommitId)) {
+    const repos = await db.releaseRepository.findMany({
+      where: { releaseId: ticketId },
+      select: { branch: true, deployedCommit: true, newCommit: true },
+    });
+    if (repos.length === 0 && (!deployedCommitId || !newCommitId)) {
       res.status(400).json({
         error:
           'This release ticket is missing deployedCommitId or newCommitId form fields — re-run is only supported for COMMIT_RANGE releases.',
@@ -75,13 +79,25 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
       return;
     }
 
-    // The release workflow does the analysis: hand it the release as a fresh TICKET_CREATED event.
+    // The release workflow does the analysis: hand it the release as a fresh TICKET_CREATED event,
+    // with the commit range as the form field values a new release carries.
+    const [repo] = repos;
+    const range = repo
+      ? { branch: repo.branch, deployedCommitId: repo.deployedCommit, newCommitId: repo.newCommit }
+      : { branch: formValues['branch'], deployedCommitId, newCommitId };
     const { workflowRuntime } = await import('@/workflowsV2/runtime');
     await workflowRuntime.dispatchEvent({
       type: TICKET_CREATED_EVENT,
       payload: {
         ticketId: ticket.id,
         scope: { boardId: ticket.boardId, projectId: ticket.projectId, channelId: ticket.channelId },
+        formFieldChanges: buildCreationFormFieldChanges(
+          Object.entries(range).map(([name, value]) => ({
+            fieldId: name,
+            fieldName: name,
+            actualFieldValue: String(value ?? '').trim(),
+          })),
+        ),
         performedBy: { id: userId },
       },
       metadata: { workspaceId: ticket.workspaceId },

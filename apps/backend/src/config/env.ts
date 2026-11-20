@@ -551,6 +551,8 @@ const envSchema = Joi.object({
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(false),
+  // Code sandbox for workflow CODE steps; CODE steps fail when unset
+  SANDBOX_URL: Joi.string().uri().allow('').default(''),
   // XYNE Claw Integration (Ask AI v2)
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
@@ -1436,6 +1438,9 @@ export const config = {
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
     clientStateBackfillEnabled: envVars.MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED as boolean,
+  },
+  sandbox: {
+    url: envVars.SANDBOX_URL as string,
   },
   xyneClaw: {
     url: envVars.XYNE_CLAW_URL as string,

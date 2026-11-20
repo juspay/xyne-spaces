@@ -1,7 +1,6 @@
 import { BaseActionStep, variableRef } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
-// @xyne/workflow-sdk builds its schemas with zod/v3 from the repo's zod; use that same copy.
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import { db } from '@/database/client';
 import { workspaceOf } from '../../xyne-spaces/context';
 
