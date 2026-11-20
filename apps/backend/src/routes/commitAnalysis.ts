@@ -11,7 +11,7 @@ import {
 // import { suggestReleaseServices } from '@/agents/release-service-suggest/index.js';
 // Disabled (LLM)
 // import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
-import { AccessType, BaseTicketType, FormEntityType } from '@xyne/shared';
+import { AccessType, FormEntityType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 // Disabled (LLM)
 // import { config } from '@/config/env';
@@ -19,7 +19,7 @@ import { db } from '@/database/client';
 import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { FormsRepository } from '@/database/repositories/formsRepository';
-import { unifiedBotUserService } from '@/bots/unified/index.js';
+import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
 
 const router = Router();
 const commitAnalysisController = new CommitAnalysisController();
@@ -47,18 +47,13 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
       where: { id: ticketId },
       select: {
         id: true,
-        xyneId: true,
-        ticketType: true,
-        conversationId: true,
         channelId: true,
         workspaceId: true,
+        boardId: true,
+        projectId: true,
       },
     });
-    if (!ticket) {
-      res.status(404).json({ error: `Ticket ${ticketId} not found` });
-      return;
-    }
-    if (ticket.workspaceId !== req.user?.workspaceId) {
+    if (!ticket || ticket.workspaceId !== req.user?.workspaceId) {
       res.status(404).json({ error: `Ticket ${ticketId} not found` });
       return;
     }
@@ -70,7 +65,6 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
     // Trim — same defense as the create path in TicketController.
     const deployedCommitId = String(formValues['deployedCommitId'] ?? '').trim();
     const newCommitId = String(formValues['newCommitId'] ?? '').trim();
-    const branch = String(formValues['branch'] ?? '').trim() || 'main';
 
     const repoCount = await db.releaseRepository.count({ where: { releaseId: ticketId } });
     if (repoCount === 0 && (!deployedCommitId || !newCommitId)) {
@@ -81,27 +75,18 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
       return;
     }
 
-    const xyneReleaseBot = await unifiedBotUserService.getBotByBotId(
-      'xyne-release-bot',
-      ticket.workspaceId,
-    );
-
-    const result = await commitAnalysisController.analyzeCommits({
-      conversationId: ticket.conversationId,
-      userId: xyneReleaseBot?.id || userId,
-      channelId: ticket.channelId || undefined,
-      newCommitId,
-      deployedCommitId,
-      branch,
-      currentTicketId: ticket.id,
-      userName: req.user?.name,
-      workspaceId: ticket.workspaceId,
-      // keep Hotfix-type re-runs flagging ART rows as hotfix (matches create path)
-      isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
-      isReRun: true,
+    // The release workflow does the analysis: hand it the release as a fresh TICKET_CREATED event.
+    const { workflowRuntime } = await import('@/workflowsV2/runtime');
+    await workflowRuntime.dispatchEvent({
+      type: TICKET_CREATED_EVENT,
+      payload: {
+        ticketId: ticket.id,
+        scope: { boardId: ticket.boardId, projectId: ticket.projectId, channelId: ticket.channelId },
+        performedBy: { id: userId },
+      },
+      metadata: { workspaceId: ticket.workspaceId },
     });
-
-    res.json({ success: result.success, canvasUrl: result.canvasUrl, error: result.error });
+    res.json({ success: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logger.error('[CommitAnalysis] re-run failed', { ticketId, error: msg });

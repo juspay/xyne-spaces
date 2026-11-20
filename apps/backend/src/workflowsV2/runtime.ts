@@ -18,6 +18,10 @@ import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { conversationalFlowQueue } from '@/queues/conversationalFlowQueue';
+import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
+import { GitHubConnector } from '@xyne/connector-sdk/github';
+import { XyneSpacesConnector } from './connectors/xyne-spaces';
+import { ReleaseConnector } from './connectors/release';
 // Disabled (Claw)
 // import { ClawAgentProvider } from './agents/claw-provider';
 // import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
@@ -48,6 +52,10 @@ const storage = workflowStorage;
 const services = new ServiceRegistry();
 
 const connectors = new ConnectorRegistry();
+connectors.register(new XyneSpacesConnector());
+connectors.register(new ReleaseConnector());
+connectors.register(new GitHubConnector());
+connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
