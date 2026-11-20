@@ -17,10 +17,10 @@
     "agent"
   ],
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.80.3",
-    "@earendil-works/pi-coding-agent": "^0.80.3",
-    "@types/node": "^22",
-    "typescript": "^5.8"
+    "@earendil-works/pi-ai": "0.80.7",
+    "@earendil-works/pi-coding-agent": "0.80.7",
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
   },
   "overrides": {
     "undici": "8.12.2"

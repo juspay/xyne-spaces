@@ -39,27 +39,28 @@
     "test:integrity": "pnpm --filter xyne-automation run test:integrity",
     "test:push": "./tools/xyne-automation/scripts/push-report-branch.sh",
     "test:enum": "bash scripts/validate-no-new-enums.sh",
-    "test:raw-sql": "bash scripts/validate-no-raw-sql.sh"
+    "test:raw-sql": "bash scripts/validate-no-raw-sql.sh",
+    "test:exact-versions": "node scripts/validate-exact-dependency-versions.mjs --ci"
   },
   "devDependencies": {
-    "@clack/prompts": "^1.7.0",
-    "@commitlint/cli": "^20.1.0",
-    "@commitlint/config-conventional": "^20.0.0",
-    "@semantic-release/changelog": "^6.0.1",
-    "@semantic-release/commit-analyzer": "^9.0.2",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/npm": "^11.0.0",
-    "@semantic-release/release-notes-generator": "^10.0.3",
-    "commitizen": "^4.3.1",
-    "concurrently": "^9.2.4",
-    "cz-conventional-changelog": "^3.3.0",
-    "husky": "^9.0.11",
-    "mprocs": "^0.9.6",
-    "semantic-release": "^22.0.5"
+    "@clack/prompts": "1.7.0",
+    "@commitlint/cli": "20.5.3",
+    "@commitlint/config-conventional": "20.5.3",
+    "@semantic-release/changelog": "6.0.3",
+    "@semantic-release/commit-analyzer": "9.0.2",
+    "@semantic-release/git": "10.0.1",
+    "@semantic-release/npm": "11.0.3",
+    "@semantic-release/release-notes-generator": "10.0.3",
+    "commitizen": "4.3.2",
+    "concurrently": "9.2.4",
+    "cz-conventional-changelog": "3.3.0",
+    "husky": "9.1.7",
+    "mprocs": "0.9.6",
+    "semantic-release": "22.0.12"
   },
   "dependencies": {
-    "@juspay/yama": "^2.2.0",
-    "html-to-text": "^9.0.5"
+    "@juspay/yama": "2.7.2",
+    "html-to-text": "9.0.5"
   },
   "release": {
     "branches": [

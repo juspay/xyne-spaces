@@ -135,5 +135,15 @@ npm run test:enum || exit 1
 echo "Running raw SQL guard..."
 bash scripts/validate-no-raw-sql.sh || exit 1
 
+# Exact-version guard: dependencies in package.json must be pinned, no ^ ~ ranges
+# or "latest". Checks the staged package.json files only.
+PACKAGE_JSON_CHANGED=$(echo "$CHANGED_FILES" | grep -E '(^|/)package\.json$' || true)
+if [ -n "$PACKAGE_JSON_CHANGED" ]; then
+  echo "Running exact-version guard..."
+  node scripts/validate-exact-dependency-versions.mjs || exit 1
+else
+  echo "⏭️  Skipping exact-version guard (no package.json files changed)"
+fi
+
 echo ""
 echo "✅ All pre-commit checks passed!"

@@ -28,7 +28,7 @@
     "undici": "6.27.0"
   },
   "devDependencies": {
-    "@types/node": "^20.19.0",
-    "typescript": "^5.7.0"
+    "@types/node": "20.19.43",
+    "typescript": "5.9.3"
   }
 }

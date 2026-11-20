@@ -105,12 +105,12 @@
   },
   "dependencies": {
     "@rocicorp/zero": "1.9.0",
-    "@standard-schema/spec": "^1.1.0",
-    "fast-xml-parser": "^5.10.1",
-    "fuse.js": "^7.4.0",
-    "uuid": "^8.3.2",
-    "xstate": "^5.24.0",
-    "zod": "^4.3.6"
+    "@standard-schema/spec": "1.1.0",
+    "fast-xml-parser": "5.10.1",
+    "fuse.js": "7.5.0",
+    "uuid": "11.1.1",
+    "xstate": "5.32.5",
+    "zod": "4.6.6"
   },
   "peerDependencies": {
     "@tanstack/react-query": ">=5.0.0",
@@ -129,16 +129,16 @@
     }
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "@tanstack/react-query": "^5.96.0",
-    "@types/node": "^22.15.3",
-    "@types/react": "^19.0.0",
-    "@types/uuid": "^8.3.4",
-    "@xstate/react": "^6.1.0",
-    "eslint": "^8.57.0",
-    "eslint-plugin-local-rules": "^3.0.2",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "typescript": "^5.3.3"
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "@tanstack/react-query": "5.101.4",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "@types/uuid": "8.3.4",
+    "@xstate/react": "6.1.0",
+    "eslint": "8.57.1",
+    "eslint-plugin-local-rules": "3.0.2",
+    "eslint-plugin-react-hooks": "4.6.2",
+    "typescript": "5.9.3"
   }
 }
