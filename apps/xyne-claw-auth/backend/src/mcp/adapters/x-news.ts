@@ -1,15 +1,9 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
 
 // In-tree TS server (no external npx package). Reads public X posts via the
 // TwitterAPI.io third-party data API — no X account, no X developer app, just a
 // TwitterAPI.io key. Read-only.
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/x-news-server.ts",
-);
-
 export const xNewsAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "x-news",
@@ -22,8 +16,8 @@ export const xNewsAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const apiKey = credentials["apiKey"] as string;
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["x-news-server"],
       env: {
         TWITTERAPI_IO_KEY: apiKey,
       },

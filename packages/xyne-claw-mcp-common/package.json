@@ -1,0 +1,27 @@
+{
+  "name": "xyne-claw-mcp-common",
+  "license": "Apache-2.0",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP service protocol, client and launch policy; Spaces client and Vespa helpers",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "xyne-claw-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.39.4",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.62.0",
+    "vitest": "^3.2.6"
+  }
+}

@@ -3,7 +3,7 @@ import { createLogger } from "../logger.js";
 import { buildAgentUpdateCardFlow } from "./agent-update-card.js";
 import { errMsg } from "./errors.js";
 import { postFlowCard, type XyneAiCardTarget } from "./flow-card-delivery.js";
-import { mentionShorthandToText } from "./mention-transform.js";
+import { mentionShorthandToText } from "xyne-claw-mcp-common/mention-transform";
 import { looksLikeMemberIdList } from "./spaces-post-target.js";
 
 const log = createLogger("write-card");

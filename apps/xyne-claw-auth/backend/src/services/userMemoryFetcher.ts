@@ -34,7 +34,7 @@ import {
   search,
   spacesFetchText,
   type SpacesAuthContext,
-} from "../mcp/servers/xyne-spaces-client.js";
+} from "xyne-claw-mcp-common/xyne-spaces-client";
 import { loadEffectiveCredentials } from "../lib/credentials-loader.js";
 import { createLogger, createTraceId } from "../logger.js";
 

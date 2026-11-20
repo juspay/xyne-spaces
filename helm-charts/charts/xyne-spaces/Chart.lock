@@ -20,6 +20,9 @@ dependencies:
 - name: xyne-zero
   repository: file://../xyne-zero
   version: 0.1.0
+- name: xyne-sync
+  repository: file://../xyne-sync
+  version: 0.1.0
 - name: xyne-ysweet
   repository: file://../xyne-ysweet
   version: 0.1.0
@@ -31,6 +34,9 @@ dependencies:
   version: 0.1.0
 - name: xyne-claw-auth-frontend
   repository: file://../xyne-claw-auth-frontend
+  version: 0.1.0
+- name: xyne-claw-mcp-service
+  repository: file://../xyne-claw-mcp-service
   version: 0.1.0
 - name: xyne-transcription-agent
   repository: file://../xyne-transcription-agent
@@ -65,5 +71,5 @@ dependencies:
 - name: xyne-egress-proxy
   repository: file://../xyne-egress-proxy
   version: 0.1.0
-digest: sha256:7121b1fe3cbeeefd4590ee42ef47c332c37e3d9ce978e803fd46febab32ec86c
-generated: "2026-09-22T13:09:29.276131+05:30"
+digest: sha256:c5f7af03c511ee98a901e929c34a63c8843dacb93bf7b82c3902bd79832f31e9
+generated: "2026-11-20T19:23:15.161864918Z"

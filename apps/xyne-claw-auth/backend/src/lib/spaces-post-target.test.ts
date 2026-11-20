@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const interact = vi.fn();
-vi.mock("../mcp/servers/xyne-spaces-client.js", () => ({ interact: (...args: unknown[]) => interact(...args) }));
+vi.mock("xyne-claw-mcp-common/xyne-spaces-client", () => ({ interact: (...args: unknown[]) => interact(...args) }));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) }));
 
 const { getSpacesPostTarget, spacesConversationExists, directMessageMemberIds, looksLikeMemberIdList } = await import("./spaces-post-target.js");

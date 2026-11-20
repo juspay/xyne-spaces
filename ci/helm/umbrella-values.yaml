@@ -22,6 +22,8 @@ xyne-claw-auth:
   enabled: true
 xyne-claw-auth-frontend:
   enabled: true
+xyne-claw-mcp-service:
+  enabled: true
 xyne-transcription-agent:
   enabled: true
 xyne-lighton-ocr:

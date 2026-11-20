@@ -1,12 +1,6 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import { getAllCustomTools } from "xyne-claw-shared";
 import type { StdioMcpAdapter } from "../types.js";
-
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/microsoft-server.ts",
-);
 
 // Write tools derived from the shared defs' `isWriteTool` flag (Outlook draft/
 // trash, Calendar create/delete, Tasks create/update/delete, Teams send, …).
@@ -25,8 +19,8 @@ export const microsoftAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const token = credentials["accessToken"] as string;
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["microsoft-server"],
       env: {
         MICROSOFT_ACCESS_TOKEN: token,
       },

@@ -1,7 +1,7 @@
 /**
  * One-time migration: agent.config.tools custom → MCP connector, for the
  * google/microsoft move from in-process custom tools to claw-auth-hosted stdio
- * MCP connectors (see mcp/servers/google-server.ts, mcp/adapters/google.ts).
+ * MCP connectors (see apps/xyne-claw-mcp-service/src/servers/google-server.ts, mcp/adapters/google.ts).
  *
  * Rules (faithful — preserves each agent's exact tool surface):
  *   • Move every `google-*` / `microsoft-*` slug from tools.custom[] into

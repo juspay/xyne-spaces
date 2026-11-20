@@ -2,15 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tools as spacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mcpSrc = readFileSync(resolve(here, "./mcp.ts"), "utf8");
 const webhookSrc = readFileSync(resolve(here, "./webhook.ts"), "utf8");
-const serverSrc = readFileSync(
-  resolve(here, "../mcp/servers/xyne-spaces-app-tools-server.ts"),
-  "utf8",
-);
 
 // The automation app-mode swap is decided at ENTRY BUILD (which servers get
 // listed), not by splicing the finished listing. These tests pin the load-
@@ -91,33 +86,5 @@ describe("non-automation runs", () => {
   });
 });
 
-describe("userOnly tools in app mode", () => {
-  it("marks the tools whose handlers require a human session", () => {
-    const userOnly = spacesTools.filter((t) => t.userOnly).map((t) => t.name).sort();
-    expect(userOnly).toEqual([
-      ...["agents", "create", "get", "run", "runs", "schema", "submit", "update", "validate", "variables", "versions", "webhook", "webhook-issue"].map(
-        (t) => `spaces-automation-${t}`,
-      ),
-      // Sends as the desk on a human's behalf through a user-session-only
-      // Spaces route, so an automation run cannot reach it.
-      "spaces-send-ticket-email",
-      "spaces-update-bulk-tickets",
-      "spaces-update-ticket",
-      "spaces-upload-to-kb",
-      "user-send-message",
-    ]);
-  });
-
-  it("hides them from the app-tools listing and rejects calls", () => {
-    // The server always runs in app mode; a listed userOnly tool could only
-    // 401. Both the listing filter and the dispatch guard must exist.
-    expect(serverSrc).toContain(".filter((t) => !t.userOnly)");
-    expect(serverSrc).toContain("if (registryTool.userOnly)");
-  });
-
-  it("keeps every appHandler-bearing tool available in app mode", () => {
-    for (const t of spacesTools.filter((t) => t.appHandler)) {
-      expect(t.userOnly).toBeUndefined();
-    }
-  });
-});
+// Which Spaces tools are userOnly / app-capable is checked next to the tools,
+// in xyne-claw-mcp-service (src/servers/xyne-spaces-app-tools-server.test.ts).

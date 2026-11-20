@@ -5,10 +5,10 @@
  * Used by:
  *   - routes/knowledge-base.ts  → frontend KB picker
  *   - routes/agents.ts          → validation on POST/PATCH knowledgeBase[]
- *   - mcp/servers/xyne-spaces-tools.ts → runtime access checks in KB tools
+ *   - apps/xyne-claw-mcp-service/src/servers/xyne-spaces-tools.ts → runtime access checks in KB tools
  */
 
-import { spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { spacesFetch, type SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { errMsg } from "./errors.js";
 import { resolveSpacesAccess, type SpacesAccess } from "../surfaces/spaces/user-auth.js";
 import { createLogger } from "../logger.js";

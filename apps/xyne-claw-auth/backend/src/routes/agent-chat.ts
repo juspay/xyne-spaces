@@ -82,7 +82,7 @@ import {
   MANUAL_CHAT_TITLE_MAX_CHARS,
 } from "../services/chatTitleClient.js";
 import { gcsService } from "../services/storageService.js";
-import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import type { SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import {
   buildAttachedContextPayload,
   normalizeAttachedContext,

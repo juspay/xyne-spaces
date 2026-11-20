@@ -177,7 +177,7 @@ export function loadCustomTools(
   const forcedCustom = new Set(forcedCustomSlugs);
   // Google + Microsoft are no longer loaded as in-process custom tools — they
   // run as claw-auth-hosted stdio MCP connectors (type "google"/"microsoft"),
-  // resolved through the normal MCP credential path. See mcp/servers/google-server.ts
+  // resolved through the normal MCP credential path. See apps/xyne-claw-mcp-service/src/servers/google-server.ts
   // and mcp/adapters/google.ts in xyne-claw-auth. The custom:google/custom:microsoft
   // defs are filtered out below.
   const hasResearchAgentSelected = [...selectedCustom].some((s) =>

@@ -1,20 +1,7 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
 
-// In-tree TS server (no external npx package). The runner spawns this with
-//   node --import tsx/esm <SERVER_PATH>
-// because the parent backend itself runs under tsx/ESM (see runner.ts — it
-// substitutes the bare 'tsx/esm' specifier with an absolute file:// URL since
-// the child is spawned with cwd=/tmp).
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/twitter-server.ts",
-);
-
-// Twitter / X MCP server. Read-only: exposes `search_tweets`. Auth is OAuth
-// 1.0a user context — all four consumer + access keys from the Twitter
-// Developer Portal are required.
+// Runs as `xyne-mcp-server twitter-server`.
 export const twitterAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "twitter",
@@ -35,8 +22,8 @@ export const twitterAdapter: StdioMcpAdapter = {
     const accessTokenSecret = credentials["accessTokenSecret"] as string;
 
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["twitter-server"],
       env: {
         API_KEY: apiKey,
         API_SECRET_KEY: apiSecretKey,

@@ -183,7 +183,7 @@ export async function executeWriteAction(
       }
     }
 
-    // 2c. MCP-based adapters (xyne-spaces, bitbucket, ardra-finops, github, ...)
+    // 2c. MCP-based adapters (xyne-spaces, bitbucket, github, ...)
     // Also covers dynamic DB-stored connectors (e.g. cloudinary, airtable)
     const { callTool } = await import("../mcp/runner.js");
     const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");

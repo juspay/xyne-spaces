@@ -28,7 +28,7 @@ vi.mock("xyne-claw-shared", async (importOriginal) => ({
   ...(await importOriginal<typeof import("xyne-claw-shared")>()),
   getMemoryProvider: () => ({ recall: mocks.recall }),
 }));
-vi.mock("../mcp/servers/xyne-spaces-client.js", () => ({ interact: mocks.interact }));
+vi.mock("xyne-claw-mcp-common/xyne-spaces-client", () => ({ interact: mocks.interact }));
 vi.mock("./userMemoryFetcher.js", () => ({ resolveAuthForUser: mocks.resolveAuthForUser }));
 vi.mock("./digitalTwinPipelineEvents.js", () => ({ recordGateEvent: mocks.recordGateEvent }));
 vi.mock("../config.js", () => ({ CONFIG: mocks.config }));

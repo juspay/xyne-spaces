@@ -16,6 +16,7 @@ packages:
   - apps/xyne-claw
   - apps/xyne-claw-auth/backend
   - apps/xyne-claw-auth/frontend
+  - apps/xyne-claw-mcp-service
 
   - packages/shared
   - packages/storage
@@ -27,6 +28,7 @@ packages:
   - packages/cache
   - packages/xyne-claw-shared
   - packages/xyne-claw-mcp
+  - packages/xyne-claw-mcp-common
   - packages/xyne-claw-pi-plugin
   - packages/xyne-spaces-mcp
 

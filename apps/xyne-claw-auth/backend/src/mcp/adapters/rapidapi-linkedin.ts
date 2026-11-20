@@ -1,17 +1,7 @@
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "node:path";
+import { BUILTIN_SERVER_CMD } from "xyne-claw-mcp-common/protocol";
 import type { StdioMcpAdapter } from "../types.js";
 
-// In-tree TS server. The runner spawns this with
-//   node --import tsx/esm <SERVER_PATH>
-// because the parent backend itself runs under tsx/ESM (see main.ts and
-// runner.ts:14 — the runner substitutes the bare 'tsx/esm' specifier with an
-// absolute file:// URL because the child is spawned with cwd=/tmp).
-const SERVER_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../servers/linkedin-rapidapi-server.ts",
-);
-
+// Runs as `xyne-mcp-server linkedin-rapidapi-server`.
 export const rapidApiLinkedInAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "rapidapi-linkedin",
@@ -31,8 +21,8 @@ export const rapidApiLinkedInAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const apiKey = credentials["apiKey"] as string;
     return {
-      cmd: "node",
-      args: ["--import", "tsx/esm", SERVER_PATH],
+      cmd: BUILTIN_SERVER_CMD,
+      args: ["linkedin-rapidapi-server"],
       env: {
         RAPIDAPI_KEY: apiKey,
       },

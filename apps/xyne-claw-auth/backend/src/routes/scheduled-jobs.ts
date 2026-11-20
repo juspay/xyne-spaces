@@ -23,7 +23,7 @@ import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { callerService, requireRuntime } from "../lib/service-assertion.js";
 import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
-import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
+import { expandSpacesMentions, resolveUnboundMentions } from "xyne-claw-mcp-common/mention-transform";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import {
   enqueueDelayedJob,

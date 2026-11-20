@@ -25,7 +25,7 @@ import {
 import { storeForSession as storeAttachedContextForSession } from "../mcp/attached-context-injector.js";
 import { storeRunScalars } from "../mcp/run-scalars.js";
 import { parseSdlcAgentRunContext } from "../mcp/sdlc-agent-run-context.js";
-import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import type { SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { resolveCustomSubagentsForRun } from "./subagent-resolver.js";
 import {
   resolveCallableAgentsForRun,

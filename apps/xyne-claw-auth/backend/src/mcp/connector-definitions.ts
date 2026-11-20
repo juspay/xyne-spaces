@@ -173,7 +173,7 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
     buildStdioCommand(credentials): StdioLaunchConfig {
       if (adapter.transport !== "stdio") return { cmd: "", args: [], env: {} };
       const cmd = adapter.buildCommand(credentials);
-      return { cmd: cmd.cmd, args: cmd.args, env: cmd.env };
+      return { cmd: cmd.cmd, args: cmd.args, env: cmd.env, ...(cmd.files ? { files: cmd.files } : {}) };
     },
     buildHttpConfig(credentials): HttpLaunchConfig {
       if (adapter.transport !== "http") return { url: "", headers: {} };

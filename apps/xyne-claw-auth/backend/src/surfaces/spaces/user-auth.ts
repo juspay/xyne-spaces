@@ -1,7 +1,7 @@
 import { getWorkspaceIdForUser, type SpacesAuthCaller } from "../../lib/spaces-db.js";
 import { getSpacesAuthForAgent, type SpacesAgentAuth } from "../../lib/spaces-agent-client.js";
 import { spacesUserIdForClawUser } from "../../lib/users-jit.js";
-import type { SpacesAuthContext } from "../../mcp/servers/xyne-spaces-client.js";
+import type { SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { CONFIG } from "../../config.js";
 import { prisma } from "../../db.js";
 import { createLogger } from "../../logger.js";

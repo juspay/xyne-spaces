@@ -9,42 +9,30 @@ const state = vi.hoisted(() => ({
   listError: "",
 }));
 
-vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
-  Client: class {
-    constructor() {
-      state.spawns += 1;
-    }
-    async connect() {}
-    async listTools() {
-      state.listCalls += 1;
-      if (state.listGate) await state.listGate;
-      if (state.listError) throw new Error(state.listError);
-      return { tools: state.tools };
-    }
-    async callTool() {
-      throw new Error(state.callError);
-    }
-    async close() {}
-  },
-}));
-vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
-  StdioClientTransport: class {
-    onclose?: () => void;
-    async close() {}
-  },
-}));
-vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
-  StreamableHTTPClientTransport: class {
-    async close() {}
-  },
-}));
-vi.mock("@modelcontextprotocol/sdk/validation/ajv", () => ({
-  AjvJsonSchemaValidator: class {
-    getValidator() {
-      return () => ({ valid: true, data: undefined, errorMessage: undefined });
-    }
-  },
-}));
+const FakeClient = vi.hoisted(() => class {
+  constructor() {
+    state.spawns += 1;
+  }
+  async connect() {}
+  getServerCapabilities() {
+    return {};
+  }
+  async listTools() {
+    state.listCalls += 1;
+    if (state.listGate) await state.listGate;
+    if (state.listError) throw new Error(state.listError);
+    return { tools: state.tools };
+  }
+  async callTool() {
+    throw new Error(state.callError);
+  }
+  async close() {}
+});
+vi.mock("./executor.js", async () => {
+  const { createFakeMcpService } = await import("./fake-mcp-service.testkit.js");
+  const service = createFakeMcpService(async () => new FakeClient());
+  return { mcpExecutor: () => service, mcpServiceConfigured: () => true };
+});
 vi.mock("../lib/mcp-tool-name-index.js", () => ({
   recordKnownMcpTools: vi.fn(async () => undefined),
 }));
@@ -54,9 +42,6 @@ vi.mock("./connector-definitions.js", () => ({
     writeTools: [],
     buildStdioCommand: () => ({ cmd: "node", args: [], env: {} }),
   })),
-}));
-vi.mock("./provision.js", () => ({
-  provisionStdioCommand: vi.fn(async (command: string, args: string[]) => ({ command, args })),
 }));
 vi.mock("./static-adapters.js", () => ({ STATIC_ADAPTERS: {} }));
 vi.mock("../lib/spaces-db.js", () => ({
@@ -95,7 +80,7 @@ describe("listToolsForUser shared tool-list cache", () => {
   it("serves every user from one listing for a shared-list server", async () => {
     const results = [];
     for (const name of ["u1", "u2", "u3"]) {
-      results.push(await listToolsForUser(user(name), "heisenberg", "Heisenberg", {}));
+      results.push(await listToolsForUser(user(name), "jenkins", "Jenkins", {}));
     }
     expect(state.spawns).toBe(1);
     expect(state.listCalls).toBe(1);
@@ -111,7 +96,7 @@ describe("listToolsForUser shared tool-list cache", () => {
 
   it("coalesces concurrent first listings onto one spawn", async () => {
     await Promise.all(
-      ["u1", "u2", "u3", "u4"].map((name) => listToolsForUser(user(name), "research-agent-mcp", "Research", {})),
+      ["u1", "u2", "u3", "u4"].map((name) => listToolsForUser(user(name), "reddit", "Reddit", {})),
     );
     expect(state.spawns).toBe(1);
     expect(state.listCalls).toBe(1);
@@ -148,17 +133,17 @@ describe("listToolsForUser shared tool-list cache", () => {
   });
 
   it("bypasses the cache when fresh is requested", async () => {
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
-    await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, { fresh: true });
+    await listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
+    await listToolsForUser(user("u2"), "jenkins", "Jenkins", {}, undefined, { fresh: true });
     expect(state.spawns).toBe(2);
     expect(state.listCalls).toBe(2);
   });
 
   it("does not cache an empty listing", async () => {
     state.tools = [];
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
     state.tools = [{ name: "t2", description: "", inputSchema: {} }];
-    const second = await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    const second = await listToolsForUser(user("u2"), "jenkins", "Jenkins", {});
     expect(second.tools.map((t) => t.name)).toEqual(["t2"]);
     expect(state.listCalls).toBe(2);
   });
@@ -166,10 +151,10 @@ describe("listToolsForUser shared tool-list cache", () => {
   it("keeps the shared listing for the life of the pod", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-25T00:00:00Z"));
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
     state.tools = [{ name: "t2", description: "", inputSchema: {} }];
     vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
-    const later = await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    const later = await listToolsForUser(user("u2"), "jenkins", "Jenkins", {});
     expect(later.tools.map((t) => t.name)).toEqual(["t1"]);
     expect(state.listCalls).toBe(1);
   });
@@ -183,12 +168,12 @@ describe("listToolsForUser shared tool-list cache", () => {
   });
 
   it("restart drops every tool list and closes every session", async () => {
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
     const result = await restartMcpServers();
     expect(result.toolLists).toBe(2);
     state.tools = [{ name: "t2", description: "", inputSchema: {} }];
-    const shared = await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    const shared = await listToolsForUser(user("u2"), "jenkins", "Jenkins", {});
     const own = await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
     expect(shared.tools.map((t) => t.name)).toEqual(["t2"]);
     expect(own.tools.map((t) => t.name)).toEqual(["t2"]);
@@ -196,22 +181,22 @@ describe("listToolsForUser shared tool-list cache", () => {
   });
 
   it("restart of one server type leaves the others cached", async () => {
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
     await restartMcpServers("bitbucket");
-    await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u2"), "jenkins", "Jenkins", {});
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
     expect(state.listCalls).toBe(3);
   });
 
   it("drops cached listings when a call names a tool the server no longer has", async () => {
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
     state.callError = "MCP error -32602: Tool old_tool not found";
     await expect(callTool(user("u1"), "bitbucket", {}, "old_tool", {})).rejects.toThrow(/not found/);
-    await expect(callTool(user("u1"), "heisenberg", {}, "old_tool", {})).rejects.toThrow(/not found/);
+    await expect(callTool(user("u1"), "jenkins", {}, "old_tool", {})).rejects.toThrow(/not found/);
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {});
-    await listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    await listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
     expect(state.listCalls).toBe(4);
   });
 
@@ -243,14 +228,14 @@ describe("listToolsForUser cutoff for slow or failing servers", () => {
     vi.useFakeTimers();
     let release!: () => void;
     state.listGate = new Promise<void>((resolve) => { release = resolve; });
-    const first = listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {}, undefined, CUT);
+    const first = listToolsForUser(user("u1"), "jenkins", "Jenkins", {}, undefined, CUT);
     const firstResult = expect(first).rejects.toThrow(/exceeded 1000ms/);
     await vi.advanceTimersByTimeAsync(1_000);
     await firstResult;
-    await expect(listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, CUT)).rejects.toThrow(/skipped/);
+    await expect(listToolsForUser(user("u2"), "jenkins", "Jenkins", {}, undefined, CUT)).rejects.toThrow(/skipped/);
     release();
     await vi.advanceTimersByTimeAsync(0);
-    const late = await listToolsForUser(user("u3"), "heisenberg", "Heisenberg", {}, undefined, CUT);
+    const late = await listToolsForUser(user("u3"), "jenkins", "Jenkins", {}, undefined, CUT);
     expect(late.tools.map((t) => t.name)).toEqual(["t1"]);
     expect(state.listCalls).toBe(1);
   });
@@ -271,12 +256,12 @@ describe("listToolsForUser cutoff for slow or failing servers", () => {
   it("retries right away after the user reconnects or an admin restarts the server", async () => {
     state.listError = "401 bad credentials";
     await expect(listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT)).rejects.toThrow(/401/);
-    await expect(listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, CUT)).rejects.toThrow(/401/);
+    await expect(listToolsForUser(user("u2"), "jenkins", "Jenkins", {}, undefined, CUT)).rejects.toThrow(/401/);
     state.listError = "";
     await evictAllSessionsForUser(user("u1"));
-    await restartMcpServers("heisenberg");
+    await restartMcpServers("jenkins");
     await listToolsForUser(user("u1"), "bitbucket", "Bitbucket", {}, undefined, CUT);
-    await listToolsForUser(user("u2"), "heisenberg", "Heisenberg", {}, undefined, CUT);
+    await listToolsForUser(user("u2"), "jenkins", "Jenkins", {}, undefined, CUT);
     expect(state.listCalls).toBe(4);
   });
 
@@ -292,7 +277,7 @@ describe("listToolsForUser cutoff for slow or failing servers", () => {
     vi.useFakeTimers();
     let release!: () => void;
     state.listGate = new Promise<void>((resolve) => { release = resolve; });
-    const pending = listToolsForUser(user("u1"), "heisenberg", "Heisenberg", {});
+    const pending = listToolsForUser(user("u1"), "jenkins", "Jenkins", {});
     await vi.advanceTimersByTimeAsync(20_000);
     release();
     expect((await pending).tools).toHaveLength(1);

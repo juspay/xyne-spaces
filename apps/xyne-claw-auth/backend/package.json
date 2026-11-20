@@ -19,7 +19,6 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28.0",
     "@mozilla/readability": "^0.6.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-metrics-otlp-http": "0.209.0",
@@ -53,6 +52,7 @@
     "tsx": "^4.19.0",
     "turndown": "^7.2.4",
     "undici": "^7.28.0",
+    "xyne-claw-mcp-common": "workspace:*",
     "xyne-claw-shared": "workspace:*",
     "yaml": "^2.8.3",
     "zod": "4.3.6"

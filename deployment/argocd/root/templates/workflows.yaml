@@ -17,7 +17,7 @@
 {{- include "xyne-root.application" (dict "root" $ "name" "argo-workflows" "namespace" $w.namespace "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://argoproj.github.io/argo-helm" "chart" "argo-workflows" "targetRevision" $w.version "releaseName" "argo-workflows" "values" $awValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
 {{- $apps := list }}
 {{- $migrating := list }}
-{{- range $name := list "xyne-zero-replication" "xyne-backend" "xyne-dashboard" "xyne-dashboard-external" "xyne-dashboard-edge" "xyne-ysweet" "xyne-claw" "xyne-claw-auth" "xyne-claw-auth-frontend" "xyne-transcription-agent" "xyne-lighton-ocr" "xyne-lighton-model" "xyne-zero" }}
+{{- range $name := list "xyne-zero-replication" "xyne-backend" "xyne-dashboard" "xyne-dashboard-external" "xyne-dashboard-edge" "xyne-ysweet" "xyne-claw" "xyne-claw-auth" "xyne-claw-auth-frontend" "xyne-claw-mcp-service" "xyne-transcription-agent" "xyne-lighton-ocr" "xyne-lighton-model" "xyne-zero" }}
 {{- if (index $.Values.apps $name | default dict).enabled }}
 {{- $apps = append $apps $name }}
 {{- if has $name (list "xyne-backend" "xyne-claw-auth") }}

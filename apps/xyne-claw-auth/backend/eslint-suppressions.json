@@ -159,7 +159,7 @@
       "count": 1
     }
   },
-  "src/mcp/adapters/slack.ts": {
+  "src/mcp/adapters/slack-tools.ts": {
     "no-restricted-globals": {
       "count": 1
     }
@@ -172,81 +172,6 @@
   "src/mcp/bitbucket-throttle.ts": {
     "no-restricted-globals": {
       "count": 1
-    }
-  },
-  "src/mcp/servers/bitbot-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/heisenberg-tools.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/jenkins-tools.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/linkedin-rapidapi-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/neo4j-http-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/query-routing-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/reddit-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/research-agent-mcp-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/twitter-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/vespa-direct.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/vespa-schema-profiles.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/x-news-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/xyne-spaces-app-tools-server.ts": {
-    "no-restricted-globals": {
-      "count": 1
-    }
-  },
-  "src/mcp/servers/xyne-spaces-client.ts": {
-    "no-restricted-globals": {
-      "count": 5
-    }
-  },
-  "src/mcp/servers/xyne-spaces-tools.ts": {
-    "no-restricted-globals": {
-      "count": 3
     }
   },
   "src/mcpgateway/services/http-client.ts": {

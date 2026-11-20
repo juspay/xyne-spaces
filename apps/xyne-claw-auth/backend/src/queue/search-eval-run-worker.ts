@@ -18,7 +18,7 @@ import { CONFIG } from "../config.js";
 import { searchEvalRepository, computeSearchEvalSummary, type SearchEvalTopResult } from "../repositories/index.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
-import { searchEvalVespa } from "../mcp/servers/search-eval-vespa.js";
+import { searchEvalVespa } from "xyne-claw-mcp-common/search-eval-vespa";
 import type { SearchEvalRunJobData, SearchEvalRunProgress } from "./search-eval-run-queue.js";
 
 import { createLogger } from "../logger.js";

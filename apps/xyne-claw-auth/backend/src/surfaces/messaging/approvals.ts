@@ -21,7 +21,7 @@ import { enqueueOutbound } from "./delivery.js";
 import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
 import { getSpacesPostTarget, looksLikeMemberIdList, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
-import { mentionShorthandToText } from "../../lib/mention-transform.js";
+import { mentionShorthandToText } from "xyne-claw-mcp-common/mention-transform";
 import { resolveAgentSpacesAuth, agentSpacesAuthContext } from "../spaces/user-auth.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 

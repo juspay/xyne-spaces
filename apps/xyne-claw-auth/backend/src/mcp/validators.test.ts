@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const interact = vi.fn();
 const appFetch = vi.fn();
 const spacesFetch = vi.fn();
-vi.mock("./servers/xyne-spaces-client.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./servers/xyne-spaces-client.js")>();
+vi.mock("xyne-claw-mcp-common/xyne-spaces-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("xyne-claw-mcp-common/xyne-spaces-client")>();
   return {
     ...actual, // keep the real SpacesApiError so `instanceof` matches in validators.ts
     interact: (...args: unknown[]) => interact(...args),
@@ -22,7 +22,7 @@ vi.mock("../lib/spaces-post-target.js", () => ({
 }));
 
 const { validateWriteAction } = await import("./validators.js");
-const { SpacesApiError } = await import("./servers/xyne-spaces-client.js");
+const { SpacesApiError } = await import("xyne-claw-mcp-common/xyne-spaces-client");
 
 const CREDS = { token: "app.jwt.token", url: "https://spaces.example" };
 const ticketParams = {

@@ -1,8 +1,8 @@
 import { sdlcAgentToolProfile, withSdlcToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
+import { spacesMcpToolNames } from "xyne-claw-mcp-common/spaces-tool-names";
 import { redisService } from "../redis.js";
 
-export const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(xyneSpacesTools.map((tool) => tool.name));
+export const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(spacesMcpToolNames());
 
 const SDLC_RUN_TTL_SECONDS = 86400;
 const sdlcRunKey = (sessionId: string) => `sdlc-run:${sessionId}`;

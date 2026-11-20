@@ -9,7 +9,7 @@ import { CONFIG } from "../../config.js";
 import { errMsg } from "../../lib/errors.js";
 import { decrypt } from "../../crypto.js";
 import { createLogger } from "../../logger.js";
-import { SpacesApiError, isFlowSchemaRejection } from "../../mcp/servers/xyne-spaces-client.js";
+import { SpacesApiError, isFlowSchemaRejection } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { botBearer, spacesBotUrl, type BotRef } from "../../lib/spaces-bot.js";
 
 // Re-export so callers (webhook.ts) can branch on `err.status` / detect a

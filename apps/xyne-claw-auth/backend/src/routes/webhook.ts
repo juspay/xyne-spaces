@@ -39,7 +39,7 @@ import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, 
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { dispatchLocalHarnessRun, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
-import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
+import { expandSpacesMentions, resolveUnboundMentions } from "xyne-claw-mcp-common/mention-transform";
 import { type RunDispatchResult } from "../lib/dispatch-run.js";
 import { startRun } from "../lib/start-run.js";
 import { runAttachmentRefsEnabled, uploadRunAttachment } from "../lib/run-attachment-store.js";

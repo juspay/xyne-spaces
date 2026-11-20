@@ -373,6 +373,9 @@ apps:
   xyne-claw-auth-frontend:
     enabled: false
     values: {}
+  xyne-claw-mcp-service:
+    enabled: false
+    values: {}
   xyne-transcription-agent:
     enabled: false
     values: {}

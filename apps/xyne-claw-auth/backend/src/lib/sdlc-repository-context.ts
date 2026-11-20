@@ -6,7 +6,7 @@ import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import { resolveSpacesAccess, type SpacesAccess } from "../surfaces/spaces/user-auth.js";
 import { spacesUserIdForClawUser } from "./users-jit.js";
-import { SpacesApiError, spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
+import { SpacesApiError, spacesFetch } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { agentRequestRepository } from "../repositories/index.js";
 import { writeAuditLog } from "./audit.js";
 import { serviceAuthHeaders, serviceSigningConfigured } from "./service-assertion.js";

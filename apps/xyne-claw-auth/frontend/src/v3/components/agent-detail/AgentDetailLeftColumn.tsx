@@ -991,7 +991,6 @@ const SUBAGENT_CATEGORY_MAP: Record<string, string> = {
   "figma":             "Design",
   "excalidraw":        "Design",
   "hubspot":           "Sales & CRM",
-  "salesforce":        "Sales & CRM",
   "zoho":              "Sales & CRM",
 };
 

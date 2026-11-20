@@ -60,6 +60,10 @@ dependencies:
     version: 0.1.0
     repository: file://../xyne-claw-auth-frontend
     condition: xyne-claw-auth-frontend.enabled
+  - name: xyne-claw-mcp-service
+    version: 0.1.0
+    repository: file://../xyne-claw-mcp-service
+    condition: xyne-claw-mcp-service.enabled
   - name: xyne-transcription-agent
     version: 0.1.0
     repository: file://../xyne-transcription-agent

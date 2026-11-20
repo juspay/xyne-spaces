@@ -85,6 +85,8 @@ export const CONFIG = {
    */
   clawServicePrivateKey: (process.env["CLAW_SERVICE_PRIVATE_KEY"] ?? "").replace(/\\n/g, "\n").trim(),
   clawServiceKeyId: process.env["CLAW_SERVICE_KEY_ID"] ?? "claw-1",
+  /** Base URL of the MCP service, e.g. http://xyne-claw-mcp-service:3010. */
+  clawMcpUrl: (process.env["CLAW_MCP_URL"] ?? "").trim().replace(/\/+$/, ""),
   // The xyne-claw runtime's public keys ({"<kid>": "<SPKI PEM>"}): verify its service assertions.
   clawRuntimePublicKeys: parseDelegationPublicKeys(process.env["CLAW_RUNTIME_PUBLIC_KEYS"]),
   /**
@@ -388,38 +390,12 @@ export const CONFIG = {
         "are external ecosystem entities. Juspay itself is the operator, NOT an external " +
         "organisation — never classify Juspay (or its own products/teams) as ORGANISATION.",
   },
-  /**
-   * BITBOT — Juspay PR-analysis service. The MCP adapter spawns a stdio
-   * child (servers/bitbot-server.ts) that POSTs to {bitbotBaseUrl}/api/prs/bulk
-   * to fetch PRs across Bitbucket repos. Access is gated by NAT-IP allowlist
-   * on the pr-analysis side, so no token is required.
-   *
-   * Default is the externally-resolvable AWS-ALB-fronted hostname so the
-   * service works from anywhere with allowlisted egress. Override
-   * BITBOT_BASE_URL to point at a proxy / staging / in-cluster DNS.
-   *
-   * Trailing slashes stripped so endpoint joining stays trivial.
-   */
-  bitbotBaseUrl: (
-    process.env["BITBOT_BASE_URL"] ??
-    "<research-agent-url>"
-  ).replace(/\/+$/, ""),
-
   researchAgentBaseUrl: (
     process.env["RESEARCH_AGENT_BASE_URL"] ??
     "<research-agent-url>"
   ).replace(/\/+$/, ""),
   /** API key for Research Agent */
   researchAgentApiKey: process.env["RESEARCH_AGENT_API_KEY"] ?? "",
-  /** API key used by the global research-agent-mcp stdio proxy. */
-  researchAgentMcpApiKey: process.env["RESEARCH_AGENT_MCP_API_KEY"]
-    ?? process.env["research_agent_mcp_api_key"]
-    ?? "",
-  /** Global, credentialless Heisenberg pipeline REST API proxied by its MCP server. */
-  heisenbergBaseUrl: (
-    process.env["HEISENBERG_BASE_URL"] ??
-    "<heisenberg-url>"
-  ).replace(/\/+$/, ""),
 } as const;
 
 // Prod safety gate: the claw-auth → session-MCP relay and the run callbacks

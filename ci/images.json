@@ -49,6 +49,13 @@
     "charts": ["xyne-claw-auth-frontend"]
   },
   {
+    "name": "claw-mcp-service",
+    "image": "xyne-spaces-claw-mcp-service",
+    "dockerfile": "apps/xyne-claw-mcp-service/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-claw-mcp-service"]
+  },
+  {
     "name": "transcription-agent",
     "image": "xyne-spaces-transcription-agent",
     "dockerfile": "apps/backend/python-agent/Dockerfile",

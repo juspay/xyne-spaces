@@ -1,11 +1,5 @@
-import path from "node:path";
 import { errMsg } from "../lib/errors.js";
-import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import type { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
@@ -13,32 +7,23 @@ import { resolveConnectorDefinition, effectiveWriteTools } from "./connector-def
 import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
-import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
-
 import { createLogger } from "../logger.js";
 import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
-import { PER_CALL_AUTH_SERVER_TYPES, spacesCallAuthMeta } from "./spaces-call-auth.js";
+import { PER_CALL_AUTH_SERVER_TYPES, spacesCallAuthMeta } from "xyne-claw-mcp-common/spaces-call-auth";
 import { getAgentBotAuth, type AgentBotAuth } from "../lib/spaces-bot.js";
-const log = createLogger("runner");
+import { EXTRA_CONNECTORS } from "./extra-connectors.js";
+import { mcpExecutor, mcpServiceConfigured, type McpCallRaw, type McpSessionRef } from "./executor.js";
+import type { LaunchSpec } from "xyne-claw-mcp-common/protocol";
 
-/**
- * No-op validator for MCP tool output schemas.
- *
- * Client.listTools() → cacheToolMetadata() calls getValidator() for every tool
- * with an outputSchema, synchronously, on every list. With Ajv that compiled a
- * validator per tool each time (CPU that scales with schema size) and retained
- * each one in the shared Ajv instance, so the heap grew without bound
- * (XYNE-65482). claw-auth never reads `structuredContent` — callTool forwards
- * only `result.content` text/binaries — so output validation protects nothing
- * here. A pass-through also covers non-self-contained schemas (e.g. Google
- * Stitch `$ref: "#/$defs/..."`) that used to throw MissingRefError.
+/*
+ * Builds session keys, credential fingerprints and launch specs, keeps tool-list
+ * caches and post-processes results. MCP calls go through mcp/executor.ts.
  */
-const passThroughSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
-  getValidator: () => (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined }),
-};
+
+const log = createLogger("runner");
 
 /**
  * Bot token for a run whose user is the agent's own bot (no person behind it):
@@ -71,115 +56,10 @@ async function resolveBotTokenForAgentUser(
   }
 }
 
-// Resolved once at module load — process.cwd() here is the running backend's
-// dir. Logged so prod tells us if the path lands somewhere without
-// node_modules/tsx (which is the failure mode we just fixed).
-const TSX_ESM_PATH = path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs");
-const TSX_ESM_URL = `file://${TSX_ESM_PATH}`;
-log.info(
-  `[mcp/runner] tsx loader path=${TSX_ESM_PATH} exists=${existsSync(TSX_ESM_PATH)} cwd=${process.cwd()}`,
-);
-
-interface McpSession {
-  client: Client;
-  transport: StdioClientTransport | StreamableHTTPClientTransport;
-  /** Token the child process was spawned with. Tracked so we can detect
-   *  drift between the freshly-resolved DB token and what's actually inside
-   *  the cached child's env, and evict on mismatch. xyne-spaces uses this
-   *  on every call; other server types currently only spawn once. */
-  spawnedToken?: string;
-  spawnedIdentity?: string;
-  /** Wall-clock ms of the last getOrCreateSession() hit. Drives idle eviction
-   *  so the cache (and its spawned child processes) doesn't grow unbounded —
-   *  the leak that OOM'd claw-auth. Stamped on every create AND reuse. */
-  lastUsedAt: number;
-}
-
-/**
- * Parent environment variables an MCP child may inherit: process plumbing,
- * locale, proxy/CA settings (egress goes through the proxy) and package-manager
- * caches. Everything secret-bearing stays in claw-auth. A server that needs
- * more gets it explicitly from its adapter's buildCommand env.
- */
-const CHILD_ENV_ALLOWLIST = [
-  "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "TZ", "TMPDIR", "NODE_ENV",
-  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NODE_USE_ENV_PROXY",
-  "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
-  "XDG_CACHE_HOME", "npm_config_cache", "UV_CACHE_DIR", "PIP_CACHE_DIR",
-  "SPACES_BACKEND_URL", "LOG_LEVEL",
-] as const;
-
-export function childBaseEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const name of CHILD_ENV_ALLOWLIST) {
-    const v = source[name];
-    if (typeof v === "string") out[name] = v;
-  }
-  return out;
-}
-
-const sessions = new Map<string, McpSession>();
-
-// In-flight spawns, keyed like `sessions`. Coalesces concurrent first-time
-// getOrCreateSession calls for the same key onto ONE spawn — without this, two
-// concurrent callers each spawn a child process and the second `sessions.set`
-// overwrites the first, ORPHANING its child (a leaked `node` MCP server). That
-// plus un-cleaned-up failed connects grew claw-auth to ~100 node children /
-// 44 GiB → kubelet eviction (2026-06-14).
-const inflight = new Map<string, Promise<Client>>();
-
-interface ResolvedSession {
-  client: Client;
-  credentials: Record<string, unknown>;
-}
-
 function spawnIdentity(credentials: Record<string, unknown>): string {
   const { sessionId: _sessionId, ...rest } = credentials;
   return credentialFingerprint(rest);
 }
-
-/**
- * Global per-call timeout for MCP requests (10 minutes). Applied around
- * `client.callTool()` and `client.listTools()`. Without this, a slow MCP
- * effectively gets the `@modelcontextprotocol/sdk` default (~60s), which
- * was biting operators on slow integrations (knowledge-base queries,
- * batched external APIs).
- *
- * Set globally rather than per-integration because (a) we couldn't reproduce
- * the original "30s" complaint as a real claw-auth-side cutoff, and (b) the
- * heterogeneous-MCP case ("Slack should fail fast, KB should be lenient")
- * never came up in practice. If it does, layer a per-integration override
- * via httpConfigTemplate.timeoutMs at that point.
- *
- * Initial `client.connect()` and stdio child startup keep SDK defaults —
- * different failure mode, separate concern.
- */
-const MCP_REQUEST_TIMEOUT_MS = 600_000;
-
-/**
- * Timeout for the `initialize` handshake inside `client.connect()`. The SDK
- * applies DEFAULT_REQUEST_TIMEOUT_MSEC (60s) to every request that does not
- * pass one, and connect was the single call site still inheriting it — so a
- * server that needed >60s to come up failed the handshake while the generous
- * per-call ceiling above never got a chance to apply.
- *
- * 60s is not enough for a cold stdio server: the child may still be fetching
- * its package (npx/uvx) or minting a first token. Sessions are evicted after
- * SESSION_IDLE_TTL_MS, so this is paid on the first call after any idle gap,
- * which is why the failures looked intermittent.
- *
- * Kept well under a typical caller-side budget (Birbal cuts off at 200s) so a
- * genuinely stuck server surfaces OUR error, not theirs.
- */
-const MCP_CONNECT_TIMEOUT_MS = Number(process.env["MCP_CONNECT_TIMEOUT_MS"] ?? 180_000);
-
-// Idle eviction. A cached session pins a child process (stdio) or an HTTP
-// client plus its buffers in claw-auth's heap. Previously sessions were only
-// dropped on token rotation / OAuth events / transport close — never on idle —
-// so every (user × server) that ever ran a tool leaked forever. We now sweep
-// idle sessions periodically; the next call simply respawns on demand.
-const SESSION_IDLE_TTL_MS = Number(process.env["MCP_SESSION_IDLE_TTL_MS"] ?? 20 * 60 * 1000);
-const SESSION_SWEEP_INTERVAL_MS = Number(process.env["MCP_SESSION_SWEEP_INTERVAL_MS"] ?? 5 * 60 * 1000);
 
 /**
  * Server types whose spawned MCP server runs with credentials bound to a
@@ -257,34 +137,14 @@ function sessionKey(
   return `${userId}:${serverType}${instanceSegment}${wsSegment}${principalSegment}${suffix}`;
 }
 
-/** Close + drop sessions idle longer than the TTL. Best-effort; never throws. */
-function sweepIdleSessions(): void {
-  const now = Date.now();
-  let evicted = 0;
-  for (const [key, session] of sessions) {
-    if (now - session.lastUsedAt <= SESSION_IDLE_TTL_MS) continue;
-    sessions.delete(key);
-    evicted++;
-    // close() ends the child / HTTP client and reaps its memory. Its onclose
-    // also calls sessions.delete(key) — harmless double-delete.
-    session.transport.close().catch(() => {});
-  }
-  if (evicted > 0) {
-    log.info(`[mcp/runner] idle sweep: evicted ${evicted} session(s) (${sessions.size} cached)`);
-  }
-}
-
-const idleSweepTimer = setInterval(sweepIdleSessions, SESSION_SWEEP_INTERVAL_MS);
-idleSweepTimer.unref(); // don't keep the process alive for the sweep
-
-async function getOrCreateSession(
+async function resolveSession(
   userId: string,
   serverType: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
   lane?: SessionLane,
   instance?: string,
-): Promise<ResolvedSession> {
+): Promise<{ ref: McpSessionRef; credentials: Record<string, unknown> }> {
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
@@ -395,144 +255,42 @@ async function getOrCreateSession(
           ? (credentials["apiKey"] as string)
           : undefined;
 
+  // Fingerprint of the session's credentials: the Spaces identity for per-call
+  // auth servers, a hash of the rotating token for others, else empty.
   const perCallAuth = PER_CALL_AUTH_SERVER_TYPES.has(serverType);
-  const identity = perCallAuth ? spawnIdentity(credentials) : undefined;
-  const existing = sessions.get(key);
-  if (existing) {
-    // For xyne-spaces, the token rotates frequently (refresh-flow) so the
-    // child must be respawned with the new env every time the token changes.
-    // For other server types, creds rarely change between calls — but if they
-    // do (e.g. user re-enters Bitbucket token), the same eviction kicks in.
-    const stale = perCallAuth
-      ? existing.spawnedIdentity !== identity
-      : Boolean(incomingToken && existing.spawnedToken && existing.spawnedToken !== incomingToken);
-    if (stale) {
-      log.info(`[mcp/runner] evicting stale cached session for ${key} (${perCallAuth ? "identity changed" : "token rotated"})`);
-      sessions.delete(key);
-      await existing.transport.close().catch(() => {});
-    } else {
-      log.info(`[mcp/runner] reusing cached session for ${key}`);
-      existing.lastUsedAt = Date.now(); // keep alive — only idle sessions are swept
-      return { client: existing.client, credentials };
-    }
-  }
+  const fingerprint = perCallAuth
+    ? `id:${spawnIdentity(credentials)}`
+    : incomingToken
+      ? `tok:${createHash("sha256").update(incomingToken).digest("hex").slice(0, 32)}`
+      : "";
 
-  // Coalesce concurrent first-time spawns for this key onto one in-flight
-  // promise so we never spawn (and then orphan) duplicate child processes.
-  const pending = inflight.get(key);
-  if (pending) {
-    log.info(`[mcp/runner] awaiting in-flight spawn for ${key}`);
-    return { client: await pending, credentials };
-  }
-
-  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken, identity)
-    .finally(() => inflight.delete(key));
-  inflight.set(key, spawnPromise);
-  return { client: await spawnPromise, credentials };
+  const launchCredentials = credentials;
+  return {
+    ref: { key, serverType, fingerprint, launch: () => buildLaunchSpec(serverType, launchCredentials) },
+    credentials,
+  };
 }
 
-/** Spawn + connect a fresh MCP session. Always reaps the child on connect
- *  failure (close() does SIGTERM→SIGKILL) so a failed/slow connect can't leak
- *  an orphaned MCP server process. */
-async function spawnSession(
-  key: string,
-  serverType: string,
-  credentials: Record<string, unknown>,
-  incomingToken: string | undefined,
-  identity: string | undefined,
-): Promise<Client> {
+/** Launch spec for a session: the command or URL plus the user's credentials. */
+async function buildLaunchSpec(serverType: string, credentials: Record<string, unknown>): Promise<LaunchSpec> {
   const definition = await resolveConnectorDefinition(serverType);
   if (!definition) {
     throw new Error(`No connector definition for server type: ${serverType}`);
   }
-
-  let transport: StdioClientTransport | StreamableHTTPClientTransport;
-
   if (definition.transport === "http") {
-    // Remote MCP server — connect over Streamable HTTP
     const { url, headers } = definition.buildHttpConfig(credentials);
     if (!url) throw new Error(`Missing HTTP URL in connector definition for ${serverType}`);
-    transport = new StreamableHTTPClientTransport(new URL(url), {
-      requestInit: {
-        headers,
-      },
-    });
-    log.info(`[mcp/runner] spawning HTTP session for ${key} url=${url}`);
-  } else {
-    // Local MCP server — spawn child process over stdio
-    const { cmd, args, env } = definition.buildStdioCommand(credentials);
-    if (!cmd) throw new Error(`Missing stdio command in connector definition for ${serverType}`);
-    // Diagnostic: which auth-related env vars made it into the child? Just keys,
-    // never values. Helps pinpoint stale-env vs missing-cred at runtime.
-    // The child runs with cwd=/tmp (bb01cf92e6 — fixes permission-denied
-    // attempts to write into the app dir). For TS-source MCPs (xyne-spaces,
-    // juspay-internal-tools, query-routing) the launch is
-    // `node --import tsx/esm <server.ts>`. Node's ESM resolver walks up from
-    // cwd to find `node_modules/tsx`, which from /tmp/ never resolves and
-    // the child crashes with `Cannot find package 'tsx' imported from /tmp/`.
-    // NODE_PATH does NOT help here — Node ignores it for ESM resolution.
-    // The fix is to substitute the bare `tsx/esm` specifier with an absolute
-    // file:// URL pointing at the actual entry inside the parent's
-    // node_modules. process.cwd() at this point is the running backend dir.
-    const resolvedArgs = args.map((a) => (a === "tsx/esm" ? TSX_ESM_URL : a));
-    // npx servers are routed through the hardened provisioner: installed once
-    // into an isolated, atomically-published store and launched as
-    // `node <entrypoint>` — never `npx` at spawn time. This removes the shared
-    // mutable `~/.npm/_npx/<hash>` cache that races and rots into
-    // `ERR_MODULE_NOT_FOUND` → `MCP error -32000: Connection closed`. Non-npx
-    // commands pass through untouched; failures fall back to the original npx.
-    const launch = await provisionStdioCommand(cmd, resolvedArgs);
-    transport = new StdioClientTransport({
-      command: launch.command,
-      args: launch.args,
-      // Only harmless parent variables, then the server's own. Never the whole
-      // process.env: that would hand every MCP server (incl. third-party npm/uvx
-      // packages) ENCRYPTION_KEY, the S2S keys, DB URLs and the service key.
-      env: { ...childBaseEnv(), ...env } as Record<string, string>,
-      cwd: "/tmp",
-    });
+    return { transport: "http", url, headers };
   }
-
-  const client = new Client(
-    { name: "xyne-claw-auth", version: "0.1.0" },
-    {
-      jsonSchemaValidator: passThroughSchemaValidator,
-      capabilities: { tasks: {} },
-    },
-  );
-  try {
-    await client.connect(transport as Parameters<typeof client.connect>[0], {
-      timeout: MCP_CONNECT_TIMEOUT_MS,
-    });
-  } catch (err) {
-    // Connect failed (timeout, server crash on startup, bad creds). The child
-    // process is already spawned — reap it (close() does SIGTERM→SIGKILL) so a
-    // failed connect can't leak an orphaned MCP server. This was the dominant
-    // leak: every "Some servers failed to list tools" left a live `node` child.
-    await transport.close().catch(() => {});
-    throw err;
-  }
-
-  transport.onclose = () => {
-    sessions.delete(key);
-  };
-
-  sessions.set(key, {
-    client,
-    transport,
-    lastUsedAt: Date.now(),
-    ...(incomingToken ? { spawnedToken: incomingToken } : {}),
-    ...(identity !== undefined ? { spawnedIdentity: identity } : {}),
-  });
-  return client;
+  const { cmd, args, env, files } = definition.buildStdioCommand(credentials);
+  if (!cmd) throw new Error(`Missing stdio command in connector definition for ${serverType}`);
+  return { transport: "stdio", cmd, args: [...args], env, ...(files ? { files } : {}) };
 }
 
 const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
   "xyne-spaces",
   "xyne-spaces-app-tools",
   "xyne-dashboard",
-  "heisenberg",
-  "research-agent-mcp",
   "google",
   "microsoft",
   "jenkins",
@@ -540,8 +298,7 @@ const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
   "twitter",
   "x-news",
   "linkedin-rapidapi",
-  "bitbot",
-  "query-routing",
+  ...EXTRA_CONNECTORS.sharedToolListTypes,
 ]);
 const toolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
 const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
@@ -705,22 +462,8 @@ async function fetchToolsFromServer(
   agentSlug?: string,
   lane?: SessionLane,
 ): Promise<McpToolInfo[]> {
-  const { client } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
-  // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
-  // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
-  // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
-  // `timeout`, the SDK's 60s default wins the race and aborts the request
-  // before our AbortSignal fires. The signal is kept as belt-and-suspenders.
-  const result = await client.listTools(undefined, {
-    timeout: MCP_REQUEST_TIMEOUT_MS,
-    signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
-  });
-
-  return result.tools.map((t) => ({
-    name: t.name,
-    description: t.description ?? "",
-    inputSchema: t.inputSchema as Record<string, unknown>,
-  }));
+  const { ref } = await resolveSession(userId, serverType, credentials, agentSlug, lane);
+  return mcpExecutor().listTools(ref);
 }
 
 // Servers whose tools' binary output should be forwarded to the user as a file
@@ -824,38 +567,6 @@ function extractAttachments(
   return out;
 }
 
-type McpToolCallResult = Awaited<ReturnType<Client["callTool"]>>;
-
-async function invokeToolCall(
-  client: Client,
-  serverType: string,
-  args: Parameters<Client["callTool"]>[0],
-): Promise<McpToolCallResult> {
-  const options = { timeout: MCP_REQUEST_TIMEOUT_MS, signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS) };
-  const serverTasks = Boolean(client.getServerCapabilities()?.tasks?.requests?.tools?.call);
-  if (!serverTasks) return client.callTool(args, undefined, options);
-
-  let taskId: string | undefined;
-  try {
-    for await (const message of client.experimental.tasks.callToolStream(args, undefined, options)) {
-      if (message.type === "taskCreated") {
-        taskId = message.task.taskId;
-        log.info(`[mcp/task] server=${serverType} tool=${args.name} created task=${taskId} status=${message.task.status}`);
-      } else if (message.type === "taskStatus") {
-        log.info(`[mcp/task] server=${serverType} tool=${args.name} task=${message.task.taskId} status=${message.task.status}`);
-      } else if (message.type === "result") {
-        return message.result;
-      } else if (message.type === "error") {
-        throw message.error;
-      }
-    }
-    throw new Error(`MCP task for ${serverType}/${args.name} ended without a result`);
-  } catch (err) {
-    if (taskId) await client.experimental.tasks.cancelTask(taskId).catch(() => undefined);
-    throw err;
-  }
-}
-
 export async function callTool(
   userId: string,
   serverType: string,
@@ -866,16 +577,11 @@ export async function callTool(
   lane?: SessionLane,
   instance?: string,
 ): Promise<McpCallResult> {
-  const { client, credentials: resolved } = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  const { ref, credentials: resolved } = await resolveSession(userId, serverType, credentials, agentSlug, lane, instance);
   const callMeta = PER_CALL_AUTH_SERVER_TYPES.has(serverType) ? spacesCallAuthMeta(resolved) : undefined;
 
-  // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
-  // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
-  const result = await invokeToolCall(
-    client,
-    serverType,
-    { name: tool, arguments: params, ...(callMeta ? { _meta: callMeta } : {}) },
-  )
+  const result: McpCallRaw = await mcpExecutor()
+    .callTool(ref, tool, params, callMeta)
     .catch((err: unknown) => {
       if (MISSING_TOOL_ERROR.test(err instanceof Error ? err.message : String(err))) {
         forgetToolList(userId, serverType, agentSlug, credentials, lane);
@@ -969,32 +675,16 @@ export async function evictSessionLocal(userId: string, serverType: string, agen
   // Match the base key AND every scoping suffix — ":ws:…" (Spaces workspace),
   // ":team:…" (Slack), "::app" (app lane) and their combinations — because a
   // reconnect / disconnect / OAuth event must not outlive the credential ANY
-  // scoped session was built on. `${key}:` covers all of them ("::app" is a
-  // suffix of the same form: key + ':' + ':app'); nested server types cannot
-  // false-match since the character after the type in the prefix is ':'.
-  const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:`));
+  // scoped session was built on. The pool matches `key` and `${key}:…`.
   dropUserToolLists((candidate) => candidate.startsWith(`${key}#`) || candidate.startsWith(`${key}:`));
-  for (const candidate of keys) {
-    const scopedSession = sessions.get(candidate);
-    if (!scopedSession) continue;
-    log.info(`[mcp/runner] evicting cached session for ${candidate}`);
-    sessions.delete(candidate);
-    await scopedSession.transport.close().catch(() => {});
-  }
-  if (keys.length === 0) log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
+  log.info(`[mcp/runner] evicting sessions for ${key}`);
+  if (mcpServiceConfigured()) await mcpExecutor().evict({ scopedKeys: [key] });
 }
 
 export async function evictAllSessionsForUser(userId: string): Promise<void> {
   const prefix = `${userId}:`;
   dropUserToolLists((candidate) => candidate.startsWith(prefix));
-  const evictions: Promise<void>[] = [];
-  for (const [key, session] of sessions) {
-    if (key.startsWith(prefix)) {
-      sessions.delete(key);
-      evictions.push(session.transport.close().catch(() => {}));
-    }
-  }
-  await Promise.all(evictions);
+  if (mcpServiceConfigured()) await mcpExecutor().evict({ prefixes: [prefix] });
 }
 
 function sessionServerType(key: string): string {
@@ -1015,15 +705,9 @@ export async function restartMcpServers(serverType?: string): Promise<{ sessions
   if (serverType) toolListSkipUntil.delete(serverType);
   else toolListSkipUntil.clear();
   if (!serverType) toolListInflight.clear();
-  const closing: Promise<void>[] = [];
-  for (const [key, session] of sessions) {
-    if (!matches(key)) continue;
-    sessions.delete(key);
-    closing.push(session.transport.close().catch(() => {}));
-  }
-  await Promise.all(closing);
-  log.info(`[mcp/runner] restart ${serverType ?? "all servers"}: closed ${closing.length} session(s), dropped ${toolLists} tool list(s)`);
-  return { sessions: closing.length, toolLists };
+  const sessions = mcpServiceConfigured() ? await mcpExecutor().restart(serverType) : 0;
+  log.info(`[mcp/runner] restart ${serverType ?? "all servers"}: closed ${sessions} session(s), dropped ${toolLists} tool list(s)`);
+  return { sessions, toolLists };
 }
 
 export function hasAdapter(serverType: string): boolean {

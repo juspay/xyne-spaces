@@ -558,12 +558,24 @@ pdb:
 {{- $env = mergeOverwrite $env (include "xyne-root.redisEnv" (dict "root" $root) | fromYaml) }}
 {{- $env = mergeOverwrite $env (include "xyne-root.storageEnv" (dict "root" $root "mainBucket" "claw") | fromYaml) }}
 {{- $env = mergeOverwrite $env (include "xyne-root.otelEnv" (dict "root" $root) | fromYaml) }}
+{{- if (index $root.Values.apps "xyne-claw-mcp-service").enabled }}
+{{- $_ := set $env "CLAW_MCP_URL" "http://xyne-claw-mcp-service:3010" }}
+{{- end }}
 {{- $_ := set $v "env" $env }}
 {{- toYaml $v }}
 {{- end }}
 
 {{- define "xyne-root.appValues.xyne-claw-auth-frontend" -}}
 {{- include "xyne-root.appBase" (dict "root" .root "xyneImage" true "pool" "general") }}
+{{- end }}
+
+{{- define "xyne-root.appValues.xyne-claw-mcp-service" -}}
+{{- $root := .root }}
+{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" true "pool" "general") | fromYaml }}
+{{- $env := dict "SPACES_BACKEND_URL" "http://xyne-backend" }}
+{{- $env = mergeOverwrite $env (include "xyne-root.otelEnv" (dict "root" $root) | fromYaml) }}
+{{- $_ := set $v "env" $env }}
+{{- toYaml $v }}
 {{- end }}
 
 {{- define "xyne-root.appValues.xyne-transcription-agent" -}}

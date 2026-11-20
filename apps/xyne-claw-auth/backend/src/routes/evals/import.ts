@@ -6,7 +6,7 @@ import { Router, type Request, type Response } from "express";
 import { evalRepository } from "../../repositories/index.js";
 import { getRequesterId } from "../../middleware/agent-acl.js";
 import { requestWorkspaceHint } from "../../lib/spaces-db.js";
-import type { SpacesAuthContext } from "../../mcp/servers/xyne-spaces-client.js";
+import type { SpacesAuthContext } from "xyne-claw-mcp-common/xyne-spaces-client";
 import { CONFIG } from "../../config.js";
 import { listSpacesChannels, type ImportKind } from "../../services/spacesEvalImport.js";
 import {

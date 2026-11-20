@@ -8,7 +8,7 @@
  * the resolver treats it as ambiguous (no rewrite, no false pings).
  */
 
-import type { MentionLookups } from "./mention-transform.js";
+import type { MentionLookups } from "xyne-claw-mcp-common/mention-transform";
 import {
   getSpacesGroupByAlias,
   getSpacesUsersByName,
