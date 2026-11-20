@@ -206,12 +206,21 @@ export const deskCallSettingsService = {
     return rows.filter(isConfigured).map(toView);
   },
 
+  /** Live desks on any connection; archived or deleted desks are left out, as they don't block removal. */
   async listForWorkspace(workspaceId: string): Promise<DeskCallSettingsView[]> {
     const rows = await db.emailChannelPreference.findMany({
       where: { workspaceId, callConnectionId: { not: null } },
       select: CALL_SETTINGS_SELECT,
     });
-    return rows.filter(isConfigured).map(toView);
+    const views = rows.filter(isConfigured).map(toView);
+    if (views.length === 0) return views;
+    const live = new Set(
+      await findWorkspaceDeskIds(workspaceId, {
+        ids: views.map(view => view.channelId),
+        excludeArchived: true,
+      }),
+    );
+    return views.filter(view => live.has(view.channelId));
   },
 
   /** The desk a call goes to: the one routing its key, else the connection's default desk. */
@@ -295,9 +304,34 @@ export const deskCallSettingsService = {
     }
   },
 
+  /** For a desk about to be created: the routing clash save() would reject, before anything exists. */
+  async assertNewDeskRoutingFree(
+    workspaceId: string,
+    connectionId: string,
+    input: { routingKeys?: string[]; isDefault?: boolean },
+    routingKeyLabel = 'Routing key',
+  ): Promise<void> {
+    await assertRoutingFree({
+      workspaceId,
+      channelId: '', // no desk yet
+      connectionId,
+      routingKeys: uniqueTrimmed(input.routingKeys ?? []),
+      isDefault: input.isDefault === true,
+      routingKeyLabel,
+    });
+  },
+
   async remove(workspaceId: string, channelId: string): Promise<void> {
     await db.emailChannelPreference.updateMany({
       where: { workspaceId, channelId },
+      data: NO_CALL_SETTINGS,
+    });
+  },
+
+  /** Unbinds every desk still on the connection, e.g. archived desks when it is removed. */
+  async removeForConnection(workspaceId: string, connectionId: string): Promise<void> {
+    await db.emailChannelPreference.updateMany({
+      where: { workspaceId, callConnectionId: connectionId },
       data: NO_CALL_SETTINGS,
     });
   },

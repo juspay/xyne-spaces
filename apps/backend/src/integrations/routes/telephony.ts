@@ -75,7 +75,7 @@ function handle(fn: Handler) {
     }
     fn(req, res, workspaceId).catch(error => {
       if (error instanceof CallConfigError) {
-        res.status(error.status).json({
+        res.status(error.statusCode).json({
           error: error.message,
           ...(error.fieldErrors ? { fieldErrors: error.fieldErrors } : {}),
         });
@@ -277,6 +277,8 @@ router.get(
   handle(async (req, res, workspaceId) => {
     const channelId = String(req.params.channelId);
     if (!(await authorizeAppDeskManager(channelId, req.user!.id, workspaceId, res))) return;
+    // Right after deploy, old workspace routing may not be on the desks yet.
+    await callConnectionService.moveLegacyRouting(workspaceId);
     res.json({ settings: await deskCallSettingsService.get(workspaceId, channelId) });
   }),
 );
@@ -288,6 +290,8 @@ router.put(
     const parsed = deskSettingsSchema.safeParse(req.body);
     if (!parsed.success) return invalidRequest(res, parsed.error);
     if (!(await authorizeAppDeskManager(channelId, req.user!.id, workspaceId, res))) return;
+    // So a save can't pre-empt the move and have this desk's old routing skipped later.
+    await callConnectionService.moveLegacyRouting(workspaceId);
     const settings = await deskCallSettingsService.save(workspaceId, channelId, parsed.data);
     logger.info('[telephony] desk_call_settings_saved', {
       workspaceId,

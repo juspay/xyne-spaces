@@ -248,6 +248,11 @@ export const callConnectionService = {
     return connections.filter((connection): connection is CallConnection => connection !== null);
   },
 
+  /** Moves any pre-desk-settings routing onto the desks (no-op once done); run before reading desk settings. */
+  async moveLegacyRouting(workspaceId: string): Promise<void> {
+    await this.list(workspaceId);
+  },
+
   /** Names must be unique, and one provider account backs at most one connection. */
   async assertUnique(
     workspaceId: string,
@@ -349,19 +354,28 @@ export const callConnectionService = {
     return { ...existing, name, credentials, agentMapping };
   },
 
-  /** Deactivates the connection; refused while a desk still uses it. */
+  /** Deactivates the connection; refused while a live desk still uses it. */
   async remove(workspaceId: string, connectionId: string): Promise<void> {
     const existing = await this.get(workspaceId, connectionId);
     if (!existing) throw new CallConfigError('Call connection not found', 404);
-    const desks = await db.emailChannelPreference.count({
-      where: { workspaceId, callConnectionId: connectionId },
-    });
+    const bound = await deskCallSettingsService.listForConnection(workspaceId, connectionId);
+    // Archived or deleted desks can't be unbound from the UI, so only live desks block removal.
+    const desks =
+      bound.length > 0
+        ? (
+            await findWorkspaceDeskIds(workspaceId, {
+              ids: bound.map(desk => desk.channelId),
+              excludeArchived: true,
+            })
+          ).length
+        : 0;
     if (desks > 0) {
       throw new CallConfigError(
         `${desks} desk${desks === 1 ? ' uses' : 's use'} this connection. Move ${desks === 1 ? 'it' : 'them'} to another connection first.`,
         409,
       );
     }
+    await deskCallSettingsService.removeForConnection(workspaceId, connectionId);
     await db.externalSource.update({ where: { id: existing.id }, data: { isActive: false } });
     logger.info(`${TAG} removed`, { workspaceId, connectionId });
   },

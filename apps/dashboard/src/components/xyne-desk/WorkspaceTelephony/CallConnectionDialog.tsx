@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import {
   createCallConnection,
   getCallConnection,
-  getTelephonyErrorMessage,
   getTelephonyFieldErrors,
   subscribeCallConnection,
   TELEPHONY_QUERY_KEYS,
@@ -15,6 +14,7 @@ import {
   type CallConnectionMutationResult,
   type CallProviderInfo,
 } from '../../../services/clients/telephonyApi';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { Dialog } from '../../ui/Dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 
@@ -126,13 +126,13 @@ export const CallConnectionDialog = ({
         result.connection,
       );
       void queryClient.invalidateQueries({ queryKey: TELEPHONY_QUERY_KEYS.connections });
-      void queryClient.invalidateQueries({ queryKey: ['call-softphone'] });
+      void queryClient.invalidateQueries({ queryKey: TELEPHONY_QUERY_KEYS.softphoneAll });
       reportSaved(result);
       onOpenChange(false);
     },
     onError: error => {
       setFieldErrors(getTelephonyFieldErrors(error));
-      setSaveError(getTelephonyErrorMessage(error, 'Please check the settings and try again.'));
+      setSaveError(getApiErrorMessage(error, 'Please check the settings and try again.'));
     },
   });
 
@@ -143,7 +143,7 @@ export const CallConnectionDialog = ({
     },
     onError: error => {
       toast.error('Failed to subscribe live call events', {
-        description: getTelephonyErrorMessage(error),
+        description: getApiErrorMessage(error),
       });
     },
   });
