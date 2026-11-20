@@ -32,11 +32,11 @@ export type PersistMode = 'save' | 'submit' | 'move' | 'review';
 type FormEntityValueUpsert =
   | { op: 'create'; id: string; fieldId: string; newValue: string[] }
   | {
-    op: 'update';
-    formEntityValueId: string;
-    newValue: string[];
-    expectedValueUpdatedAt: number | null;
-  };
+      op: 'update';
+      formEntityValueId: string;
+      newValue: string[];
+      expectedValueUpdatedAt: number | null;
+    };
 
 const throwIfMutationError = (result: unknown): void => {
   if (
@@ -563,8 +563,7 @@ export const useStageForm = ({
               op: 'update',
               formEntityValueId: existingValueId,
               newValue: fieldValue,
-              expectedValueUpdatedAt:
-                values.find(v => v.id === existingValueId)?.updatedAt ?? null,
+              expectedValueUpdatedAt: values.find(v => v.id === existingValueId)?.updatedAt ?? null,
             });
           } else {
             // Safety net: if a row already exists at this visit version (e.g. wrong create
