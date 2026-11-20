@@ -176,7 +176,7 @@ import {
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
-import { defineContractMutator, requireMutationFacts } from './encryptedMutation';
+import { defineContractMutator, getMutationFacts } from './encryptedMutation';
 import type { AnyTransaction } from './unreadableTransaction';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
@@ -2864,13 +2864,14 @@ export function createMutators(
             entityLinkContext,
           },
         }) => {
-          if (reveal(content) === '') {
-            throw new Error('Message content or files are required to start a conversation');
-          }
           // `content` is opaque here: workspace-DEK ciphertext under its manifest rule, or plaintext
           // the mutator still never parses. Every fact comes from the contract's picks, extracted by
           // the encryption service for ciphertext and locally for plaintext (encryptedMutation.ts).
-          const facts = requireMutationFacts(conversationsSendClient, 'content');
+          // No facts means there was no text to derive them from: the content is empty.
+          const facts = getMutationFacts(conversationsSendClient, 'content');
+          if (!facts) {
+            throw new Error('Message content or files are required to start a conversation');
+          }
           await assertGuestMentionsWithin(tx, authData.role, channelId, facts);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
