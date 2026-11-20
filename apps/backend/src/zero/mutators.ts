@@ -163,7 +163,6 @@ import {
   serializeFlowPlan,
   validateFlowPlan,
 } from '@xyne/shared';
-import { stringFromFormValue } from '@xyne/shared/zero';
 import {
   ATTACHMENT_STILL_UPLOADING,
   isAttachmentUploaded,
@@ -172,8 +171,7 @@ import {
 import {
   validateFieldBranches,
   validateUniqueFieldNames,
-  assertFieldIsCurrentlyActive,
-  assertFormEntityValueWritesActive,
+  assertFormEntityValueWrites,
   upsertManyFormEntityValues,
   upsertManyFormEntityValuesArgs,
   writeFormEntityValueCreate,
@@ -13389,93 +13387,20 @@ export function createMutators(
           contextId: z.string().optional(),
           version: z.number().optional(),
         }),
-        async ({
-          tx,
-          args: {
-            id,
-            entityId,
-            entityType,
-            fieldId,
-            newValue,
-            timestamp,
-            contextId,
-            version,
-          },
-        }) => {
-          // Legacy create path: older clients only know form_fields ids, so resolve
-          // formId from the legacy row. global fields must use createV2.
-          const legacyField = await tx.run(
-            zql.form_fields.where('id', fieldId).related('globalField').one(),
-          );
-          const resolvedFieldId = legacyField?.globalFieldId ?? legacyField?.id;
-          const fieldType = legacyField?.globalField?.fieldType ?? legacyField?.fieldType;
-          if (!legacyField || !resolvedFieldId || !fieldType) {
+        async ({ tx, args }) => {
+          // Legacy create path: older clients only know form_fields ids, so resolve formId from the
+          // legacy row. Global fields must use createV2.
+          const legacyField = await tx.run(zql.form_fields.where('id', args.fieldId).one());
+          if (!legacyField) {
             throw new Error('Form field not found, cannot make an entry');
           }
-          const formId = legacyField.formId;
-          const fieldName = legacyField.globalField?.fieldName ?? legacyField.fieldName ?? 'Field';
-
-          await assertFieldIsCurrentlyActive(
-            tx,
-            {
-              id: resolvedFieldId,
-              formId,
-              fieldName,
-              parentOptionId: legacyField.parentOptionId,
-            },
-            entityId,
-            entityType,
-          );
-
-          // Determine actualFieldValue based on field type
-          const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
-          const actualFieldValue = isMultiValue ? newValue : newValue[0] || null;
-
-          // DOC fields no longer require a claim here — the upload pipeline
-          // (POST /attachments/upload from StageFormModal.handleSubmit) writes
-          // the MessageAttachment row directly with entityType=FORM_ENTITY_VALUE
-          // and entityId = this row's id (pre-allocated client-side). So by the
-          // time we insert the form value row, the attachment is already
-          // pointing at it correctly.
-
-          // Upsert the form entity value
-          await tx.mutate.form_entity_values.insert({
+          const write = await writeFormEntityValueCreate(tx, {
+            ...args,
+            formId: legacyField.formId,
             workspaceId: authData.workspaceId,
-            id,
-            formId,
-            entityId,
-            entityType,
-            fieldId: resolvedFieldId,
-            ...(contextId && { contextId }),
-            version: version ?? 1,
-            fieldValue: '',
-            actualFieldValue,
-            createdAt: timestamp,
-            updatedAt: timestamp,
           });
-
-          const nextAttachmentId =
-            fieldType === FormFieldType.DOC ? stringFromFormValue(actualFieldValue) : null;
-          if (entityType === FormEntityType.TICKET && fieldType === FormFieldType.DOC && nextAttachmentId) {
-            const nextAttachment = await tx.run(zql.message_attachments.where('id', nextAttachmentId).one());
-            if (
-              nextAttachment &&
-              (nextAttachment.entityId !== id ||
-                nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
-            ) {
-              throw new Error('Attachment is not bound to this form value');
-            }
-          }
-
-          if (entityType === FormEntityType.TICKET && fieldName === 'releaseVersion') {
-            asyncTasks.push(async () => {
-              try {
-                await versionReleaseMappingService.syncTicketById(entityId);
-              } catch (error) {
-                logger.error('release_mapping_sync_failed', { entityId, error });
-              }
-            });
-          }
+          await assertFormEntityValueWrites(tx, [write]);
+          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       createV2: defineMutator(
@@ -13492,7 +13417,7 @@ export function createMutators(
         }),
         async ({ tx, args }) => {
           const write = await writeFormEntityValueCreate(tx, { ...args, workspaceId: authData.workspaceId });
-          await assertFormEntityValueWritesActive(tx, [write]);
+          await assertFormEntityValueWrites(tx, [write]);
           queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
@@ -13505,7 +13430,7 @@ export function createMutators(
         }),
         async ({ tx, args }) => {
           const write = await writeFormEntityValueUpdate(tx, args);
-          await assertFormEntityValueWritesActive(tx, [write]);
+          await assertFormEntityValueWrites(tx, [write]);
           queueReleaseMappingSyncForFormWrites([write]);
         },
       ),

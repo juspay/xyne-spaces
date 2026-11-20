@@ -108,8 +108,7 @@ import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOpti
 import {
   validateFieldBranches,
   validateUniqueFieldNames,
-  assertFieldIsCurrentlyActive,
-  assertFormEntityValueWritesActive,
+  assertFormEntityValueWrites,
   upsertManyFormEntityValues,
   upsertManyFormEntityValuesArgs,
   writeFormEntityValueCreate,
@@ -316,7 +315,6 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '../utils/slashCommandArtifact.js';
-import { stringFromFormValue } from '../tickets/utils.js';
 
 async function getConversationSeenCutoffAt(
   tx: Transaction<Schema>,
@@ -9639,78 +9637,19 @@ export const mutators = defineMutators({
         contextId: z.string().optional(),
         version: z.number().optional(),
       }),
-      async ({
-        tx,
-        ctx,
-        args: {
-          id,
-          entityId,
-          entityType,
-          fieldId,
-          newValue,
-          timestamp,
-          contextId,
-          version,
-        },
-      }) => {
-        // Legacy create path: older clients only know form_fields ids, so resolve
-        // formId from the legacy row. global fields must use createV2.
-        const legacyField = await tx.run(
-          zql.form_fields.where('id', fieldId).related('globalField').one(),
-        );
-        const resolvedFieldId = legacyField?.globalFieldId ?? legacyField?.id;
-        const fieldType = legacyField?.globalField?.fieldType ?? legacyField?.fieldType;
-        if (!legacyField || !resolvedFieldId || !fieldType) {
+      async ({ tx, ctx, args }) => {
+        // Legacy create path: older clients only know form_fields ids, so resolve formId from the
+        // legacy row. Global fields must use createV2.
+        const legacyField = await tx.run(zql.form_fields.where('id', args.fieldId).one());
+        if (!legacyField) {
           throw new Error('Form field not found, cannot make an entry');
         }
-        const formId = legacyField.formId;
-        const fieldName = legacyField.globalField?.fieldName ?? legacyField.fieldName ?? 'Field';
-
-        await assertFieldIsCurrentlyActive(
-          tx,
-          {
-            id: resolvedFieldId,
-            formId,
-            fieldName,
-            parentOptionId: legacyField.parentOptionId,
-          },
-          entityId,
-          entityType,
-        );
-
-        // Determine actualFieldValue based on field type
-        const isMultiValue =
-          fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
-        const actualFieldValue = isMultiValue ? newValue : newValue[0] || null;
-
-        // Upsert the form entity value
-        await tx.mutate.form_entity_values.insert({
+        const write = await writeFormEntityValueCreate(tx, {
+          ...args,
+          formId: legacyField.formId,
           workspaceId: ctx.workspaceId,
-          id,
-          entityId,
-          entityType,
-          fieldId: resolvedFieldId,
-          formId,
-          ...(contextId && { contextId }),
-          version: version ?? 1,
-          fieldValue: '',
-          actualFieldValue,
-          createdAt: timestamp,
-          updatedAt: timestamp,
         });
-
-        const nextAttachmentId =
-          fieldType === FormFieldType.DOC ? stringFromFormValue(actualFieldValue) : null;
-        if (entityType === FormEntityType.TICKET && fieldType === FormFieldType.DOC && nextAttachmentId) {
-          const nextAttachment = await tx.run(zql.message_attachments.where('id', nextAttachmentId).one());
-          if (
-            nextAttachment &&
-            (nextAttachment.entityId !== id ||
-              nextAttachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
-          ) {
-            throw new Error('Attachment is not bound to this form value');
-          }
-        }
+        await assertFormEntityValueWrites(tx, [write]);
       },
     ),
     createV2: defineMutator(
@@ -9727,7 +9666,7 @@ export const mutators = defineMutators({
       }),
       async ({ tx, ctx, args }) => {
         const write = await writeFormEntityValueCreate(tx, { ...args, workspaceId: ctx.workspaceId });
-        await assertFormEntityValueWritesActive(tx, [write]);
+        await assertFormEntityValueWrites(tx, [write]);
       },
     ),
     update: defineMutator(
@@ -9739,7 +9678,7 @@ export const mutators = defineMutators({
       }),
       async ({ tx, args }) => {
         const write = await writeFormEntityValueUpdate(tx, args);
-        await assertFormEntityValueWritesActive(tx, [write]);
+        await assertFormEntityValueWrites(tx, [write]);
       },
     ),
     // Saves a whole form (e.g. a stage form) in one transaction. Use this instead of one

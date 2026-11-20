@@ -132,38 +132,77 @@ type ActiveCheckField = {
   parentOptionId?: string | null;
 };
 
-// A form value that has been written but whose branch activity is not yet checked. The check
-// is deferred so a batch can write a parent and its branch children before validating either.
+type DocAttachmentCheck = {
+  entityType: string;
+  fieldType: FormFieldType;
+  storedValue: string[] | string | null;
+  formEntityValueId: string;
+};
+
+// A form value that has been written but not yet validated. Validation is deferred to
+// assertFormEntityValueWrites so a batch can write a parent and its branch children before
+// checking either.
 export type FormEntityValueWrite = {
+  formEntityValueId: string;
+  fieldId: string;
   entityId: string;
   entityType: string;
   fieldName: string | null;
   activeCheckField: ActiveCheckField | null;
+  docCheck: DocAttachmentCheck | null;
 };
 
-const toStoredFormValue = (fieldType: FormFieldType, newValue: string[]): string[] | string | null => {
+// Membership row of a field in a form, either a global field's row or a legacy definition row.
+type FormFieldMembership = {
+  id: string;
+  formId: string;
+  globalFieldId?: string | null;
+  fieldName?: string | null;
+  parentOptionId?: string | null;
+  globalField?: { fieldName?: string | null } | null;
+};
+
+const toStoredFormValue = (fieldType: FormFieldType | null | undefined, newValue: string[]): string[] | string | null => {
   const isMultiValue = fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
   // MULTI_SELECT/USER keep the array (including empty); everything else stores its first element.
   return isMultiValue ? newValue : newValue[0] || null;
 };
 
-// DOC values point at an attachment the upload pipeline already bound to this form value row
-// (entityType=FORM_ENTITY_VALUE, entityId = the row id pre-allocated client-side).
-async function assertDocAttachmentBound(
-  tx: Transaction<Schema>,
+const toActiveCheckField = (
+  membership: FormFieldMembership,
+  fallbackFieldName: string | null,
+): ActiveCheckField => ({
+  id: membership.globalFieldId ?? membership.id,
+  formId: membership.formId,
+  fieldName: membership.globalField?.fieldName ?? membership.fieldName ?? fallbackFieldName ?? 'Field',
+  parentOptionId: membership.parentOptionId,
+});
+
+const toDocCheck = (
   entityType: string,
-  fieldType: FormFieldType,
+  fieldType: FormFieldType | null | undefined,
   storedValue: string[] | string | null,
   formEntityValueId: string,
+): DocAttachmentCheck | null =>
+  fieldType === FormFieldType.DOC
+    ? { entityType, fieldType, storedValue, formEntityValueId }
+    : null;
+
+// DOC values point at an attachment the upload pipeline already bound to this form value row
+// (POST /attachments/upload writes it with entityType=FORM_ENTITY_VALUE and entityId = the row
+// id pre-allocated client-side), so no claim happens here — only a check that it matches.
+async function assertDocAttachmentBound(
+  tx: Transaction<Schema>,
+  check: DocAttachmentCheck,
 ): Promise<void> {
-  if (entityType !== FormEntityType.TICKET || fieldType !== FormFieldType.DOC) return;
-  const attachmentId = stringFromFormValue(storedValue);
+  if (check.entityType !== FormEntityType.TICKET || check.fieldType !== FormFieldType.DOC) return;
+  const attachmentId = stringFromFormValue(check.storedValue);
   if (!attachmentId) return;
 
   const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
   if (
     attachment &&
-    (attachment.entityId !== formEntityValueId ||
+    (attachment.entityId !== check.formEntityValueId ||
       attachment.entityType !== AttachmentEntityType.FORM_ENTITY_VALUE)
   ) {
     throw new Error('Attachment is not bound to this form value');
@@ -183,8 +222,8 @@ export type CreateFormEntityValueInput = {
   version?: number;
 };
 
-// Inserts a form value. Does not run the branch-activity check — callers must pass the result
-// to assertFormEntityValueWritesActive once every write in the transaction is done.
+// Inserts a form value. Validation is left to assertFormEntityValueWrites, which callers must
+// run once every write in the transaction is done.
 export async function writeFormEntityValueCreate(
   tx: Transaction<Schema>,
   input: CreateFormEntityValueInput,
@@ -203,7 +242,7 @@ export async function writeFormEntityValueCreate(
     throw new Error('Form field not found');
   }
 
-  let membership: { parentOptionId?: string | null } | null | undefined;
+  let membership: FormFieldMembership | undefined;
   if (globalField) {
     membership = await tx.run(
       zql.form_fields
@@ -215,7 +254,7 @@ export async function writeFormEntityValueCreate(
     if (!membership) {
       throw new Error('Form field not found in this form');
     }
-  } else if (legacyField?.formId !== formId) {
+  } else if (!legacyField || legacyField.formId !== formId) {
     throw new Error('Form field not found in this form');
   } else {
     membership = legacyField;
@@ -224,14 +263,6 @@ export async function writeFormEntityValueCreate(
     globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName ?? null;
 
   const actualFieldValue = toStoredFormValue(fieldType, newValue);
-  // DOC fields no longer require a claim here — the upload pipeline
-  // (POST /attachments/upload from StageFormModal.handleSubmit) writes
-  // the MessageAttachment row directly with entityType=FORM_ENTITY_VALUE
-  // and entityId = this row's id (pre-allocated client-side). So by the
-  // time we insert the form value row, the attachment is already
-  // pointing at it correctly.
-
-  // Upsert the form entity value
   await tx.mutate.form_entity_values.insert({
     workspaceId,
     id,
@@ -247,18 +278,14 @@ export async function writeFormEntityValueCreate(
     updatedAt: timestamp,
   });
 
-  await assertDocAttachmentBound(tx, entityType, fieldType, actualFieldValue, id);
-
   return {
+    formEntityValueId: id,
+    fieldId: resolvedFieldId,
     entityId,
     entityType,
     fieldName,
-    activeCheckField: {
-      id: resolvedFieldId,
-      formId,
-      fieldName: fieldName ?? 'Field',
-      parentOptionId: membership?.parentOptionId,
-    },
+    activeCheckField: toActiveCheckField(membership, fieldName),
+    docCheck: toDocCheck(entityType, fieldType, actualFieldValue, id),
   };
 }
 
@@ -269,13 +296,22 @@ export type UpdateFormEntityValueInput = {
   expectedValueUpdatedAt?: number | null;
 };
 
-// Updates a form value. Same contract as writeFormEntityValueCreate: the branch-activity check
-// is left to assertFormEntityValueWritesActive. When `expectedEntity` is given, the row must
-// belong to that entity (batch callers name one entity for every value they write).
+// The form a batch is saving: every value it updates must belong to this entity, this form
+// and this context.
+export type FormEntityValueBatchScope = {
+  entityId: string;
+  entityType: string;
+  formId: string;
+  contextId?: string;
+};
+
+// Updates a form value. Same contract as writeFormEntityValueCreate. With `scope` (batch
+// saves), the row must belong to that entity and context and its field to that form; the
+// branch check then uses the field's placement in that form.
 export async function writeFormEntityValueUpdate(
   tx: Transaction<Schema>,
   input: UpdateFormEntityValueInput,
-  expectedEntity?: { entityId: string; entityType: string },
+  scope?: FormEntityValueBatchScope,
 ): Promise<FormEntityValueWrite> {
   const { formEntityValueId, newValue, updatedAt, expectedValueUpdatedAt } = input;
 
@@ -289,13 +325,22 @@ export async function writeFormEntityValueUpdate(
   if (!formEntityValue) {
     throw new Error('Form entity value not found');
   }
-  if (
-    expectedEntity &&
-    (formEntityValue.entityId !== expectedEntity.entityId ||
-      formEntityValue.entityType !== expectedEntity.entityType)
-  ) {
-    throw new Error('Form entity value does not belong to this entity');
+
+  if (scope) {
+    if (
+      formEntityValue.entityId !== scope.entityId ||
+      formEntityValue.entityType !== scope.entityType
+    ) {
+      throw new Error('Form entity value does not belong to this entity');
+    }
+    if ((formEntityValue.contextId ?? null) !== (scope.contextId ?? null)) {
+      throw new Error('Form entity value does not belong to this form context');
+    }
+    if (formEntityValue.formId !== scope.formId) {
+      throw new Error('Form entity value does not belong to this form');
+    }
   }
+
   if (
     expectedValueUpdatedAt !== undefined &&
     (formEntityValue.updatedAt ?? null) !== expectedValueUpdatedAt
@@ -316,20 +361,7 @@ export async function writeFormEntityValueUpdate(
           .one(),
       )
       : null);
-
-  const valueToStore = fieldType
-    ? toStoredFormValue(fieldType, newValue)
-    : newValue[0] || null;
-  if (fieldType) {
-    await assertDocAttachmentBound(
-      tx,
-      formEntityValue.entityType,
-      fieldType,
-      valueToStore,
-      formEntityValueId,
-    );
-  }
-
+  const valueToStore = toStoredFormValue(fieldType, newValue);
   await tx.mutate.form_entity_values.update({
     id: formEntityValueId,
     actualFieldValue: valueToStore,
@@ -337,103 +369,137 @@ export async function writeFormEntityValueUpdate(
   });
 
   return {
+    formEntityValueId,
+    fieldId: formEntityValue.fieldId,
     entityId: formEntityValue.entityId,
     entityType: formEntityValue.entityType,
     fieldName: resolvedFieldName,
-    activeCheckField: membership
-      ? {
-        id: membership.globalFieldId ?? membership.id,
-        formId: membership.formId,
-        fieldName:
-          (membership as { globalField?: { fieldName?: string | null } }).globalField?.fieldName
-          ?? membership.fieldName
-          ?? resolvedFieldName
-          ?? 'Field',
-        parentOptionId: membership.parentOptionId,
-      }
-      : null,
+    activeCheckField: membership ? toActiveCheckField(membership, resolvedFieldName) : null,
+    docCheck: toDocCheck(formEntityValue.entityType, fieldType, valueToStore, formEntityValueId),
   };
 }
 
-// Runs the branch-activity check for every write, against the transaction's final state.
-export async function assertFormEntityValueWritesActive(
+// Validates writes against the transaction's final state: every branch-activity check first,
+// then every DOC attachment check (the same error precedence the single-value mutators had).
+export async function assertFormEntityValueWrites(
   tx: Transaction<Schema>,
   writes: readonly FormEntityValueWrite[],
 ): Promise<void> {
   for (const write of writes) {
     if (!write.activeCheckField) continue;
-    await assertFieldIsCurrentlyActive(tx, write.activeCheckField, write.entityId, write.entityType);
+    await assertFieldIsCurrentlyActive(
+      tx,
+      write.activeCheckField,
+      write.entityId,
+      write.entityType,
+    );
+  }
+  for (const write of writes) {
+    if (write.docCheck) await assertDocAttachmentBound(tx, write.docCheck);
   }
 }
 
-export const upsertManyFormEntityValuesArgs = z.object({
-  entityId: z.string(),
-  entityType: z.nativeEnum(FormEntityType),
-  formId: z.string(),
-  timestamp: z.number(),
-  contextId: z.string().optional(),
-  version: z.number().optional(),
-  values: z
-    .array(
-      z.discriminatedUnion('op', [
-        z.object({
-          op: z.literal('create'),
-          id: z.string(),
-          fieldId: z.string(),
-          newValue: z.array(z.string()),
-        }),
-        z.object({
-          op: z.literal('update'),
-          formEntityValueId: z.string(),
-          newValue: z.array(z.string()),
-          expectedValueUpdatedAt: z.number().nullable().optional(),
-        }),
-      ]),
-    )
-    .min(1),
-});
+export const upsertManyFormEntityValuesArgs = z
+  .object({
+    entityId: z.string(),
+    entityType: z.nativeEnum(FormEntityType),
+    formId: z.string(),
+    timestamp: z.number(),
+    contextId: z.string().optional(),
+    version: z.number().optional(),
+    values: z
+      .array(
+        z.discriminatedUnion('op', [
+          z.object({
+            op: z.literal('create'),
+            id: z.string(),
+            fieldId: z.string(),
+            newValue: z.array(z.string()),
+          }),
+          z.object({
+            op: z.literal('update'),
+            formEntityValueId: z.string(),
+            newValue: z.array(z.string()),
+            expectedValueUpdatedAt: z.number().nullable().optional(),
+          }),
+        ]),
+      )
+      .min(1),
+  })
+  .superRefine(({ values }, ctx) => {
+    const seenValueIds = new Set<string>();
+    const seenCreateFieldIds = new Set<string>();
+    values.forEach((value, index) => {
+      const valueId = value.op === 'create' ? value.id : value.formEntityValueId;
+      if (seenValueIds.has(valueId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['values', index],
+          message: `Form value ${valueId} appears more than once in this save`,
+        });
+      }
+      seenValueIds.add(valueId);
+
+      if (value.op !== 'create') return;
+      if (seenCreateFieldIds.has(value.fieldId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['values', index],
+          message: `Field ${value.fieldId} appears more than once in this save`,
+        });
+      }
+      seenCreateFieldIds.add(value.fieldId);
+    });
+  });
 
 export type UpsertManyFormEntityValuesArgs = z.infer<typeof upsertManyFormEntityValuesArgs>;
 
-// Writes every value of one entity's form in a single transaction, then validates branch
-// activity against the result. A child field is checked against its parent's new value no
-// matter where either sits in `values`, and any failure rolls the whole form back.
+// Writes every value of one entity's form in a single transaction, then validates the result.
+// A child field is checked against its parent's new value no matter where either sits in
+// `values`, and any failure rolls the whole form back.
 export async function upsertManyFormEntityValues(
   tx: Transaction<Schema>,
   workspaceId: string,
   args: UpsertManyFormEntityValuesArgs,
 ): Promise<FormEntityValueWrite[]> {
   const { entityId, entityType, formId, timestamp, contextId, version, values } = args;
+  const scope: FormEntityValueBatchScope = { entityId, entityType, formId, contextId };
 
   const writes: FormEntityValueWrite[] = [];
+  const writtenFieldIds = new Set<string>();
   for (const value of values) {
-    writes.push(
-      value.op === 'create'
-        ? await writeFormEntityValueCreate(tx, {
-          workspaceId,
-          id: value.id,
-          entityId,
-          entityType,
-          fieldId: value.fieldId,
-          formId,
+    const write = value.op === 'create'
+      ? await writeFormEntityValueCreate(tx, {
+        workspaceId,
+        id: value.id,
+        entityId,
+        entityType,
+        fieldId: value.fieldId,
+        formId,
+        newValue: value.newValue,
+        timestamp,
+        contextId,
+        version,
+      })
+      : await writeFormEntityValueUpdate(
+        tx,
+        {
+          formEntityValueId: value.formEntityValueId,
           newValue: value.newValue,
-          timestamp,
-          contextId,
-          version,
-        })
-        : await writeFormEntityValueUpdate(
-          tx,
-          {
-            formEntityValueId: value.formEntityValueId,
-            newValue: value.newValue,
-            updatedAt: timestamp,
-            expectedValueUpdatedAt: value.expectedValueUpdatedAt,
-          },
-          { entityId, entityType },
-        ),
-    );
+          updatedAt: timestamp,
+          expectedValueUpdatedAt: value.expectedValueUpdatedAt,
+        },
+        scope,
+      );
+    // Catches what the schema can't see: two entries resolving to the same field (e.g. a
+    // create by global id and an update of that field's row).
+    if (writtenFieldIds.has(write.fieldId)) {
+      throw new Error(`Field "${write.fieldName ?? write.fieldId}" appears more than once in this save`);
+    }
+    writtenFieldIds.add(write.fieldId);
+    writes.push(write);
   }
 
-  await assertFormEntityValueWritesActive(tx, writes);
+  await assertFormEntityValueWrites(tx, writes);
   return writes;
 }
