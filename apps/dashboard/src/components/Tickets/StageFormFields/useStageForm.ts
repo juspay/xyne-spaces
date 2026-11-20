@@ -545,6 +545,10 @@ export const useStageForm = ({
         // branch fields are validated against their parent's new value regardless of field
         // order, and a failure leaves no partially saved form behind.
         const valueWrites: FormEntityValueUpsert[] = [];
+        // Row ids this save writes, adopted into draftValueIdsRef only once the server accepts
+        // the batch. A rejected batch rolls back every create, so remembering their ids would
+        // turn the next save into updates of rows that don't exist.
+        const pendingDraftValueIds = new Map<string, string>();
         fields.forEach(field => {
           if (!isFieldActive(field, fields, getFieldEffectiveValue)) return;
           const fieldValue = effectiveFormData[field.id] ?? [];
@@ -558,7 +562,7 @@ export const useStageForm = ({
           }
 
           if (existingValueId) {
-            draftValueIdsRef.current.set(field.id, existingValueId);
+            pendingDraftValueIds.set(field.id, existingValueId);
             valueWrites.push({
               op: 'update',
               formEntityValueId: existingValueId,
@@ -578,7 +582,7 @@ export const useStageForm = ({
                 !value.id.startsWith('prefill-'),
             );
             if (existingAtVersion) {
-              draftValueIdsRef.current.set(field.id, existingAtVersion.id);
+              pendingDraftValueIds.set(field.id, existingAtVersion.id);
               valueWrites.push({
                 op: 'update',
                 formEntityValueId: existingAtVersion.id,
@@ -588,7 +592,7 @@ export const useStageForm = ({
             } else {
               const formEntityValueId =
                 docUploadsByField.get(field.id)?.formEntityValueId ?? uuidv4();
-              draftValueIdsRef.current.set(field.id, formEntityValueId);
+              pendingDraftValueIds.set(field.id, formEntityValueId);
               valueWrites.push({
                 op: 'create',
                 id: formEntityValueId,
@@ -613,6 +617,9 @@ export const useStageForm = ({
           ).server;
           // Don't submit the stage request for a form whose values were rejected.
           throwIfMutationError(valuesResult);
+          pendingDraftValueIds.forEach((valueId, fieldId) => {
+            draftValueIdsRef.current.set(fieldId, valueId);
+          });
         }
 
         const mutationPromises: Promise<unknown>[] = [];
