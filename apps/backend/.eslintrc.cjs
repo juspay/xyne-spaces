@@ -72,8 +72,6 @@ module.exports = {
         'src/zero/formsMutatorHelpers.ts',
         // Checks the parent row exists for the items table's own access rule.
         'src/database/acl/tables/form-entity-value-items-acl.ts',
-        // One-shot copy into the typed columns; it has to find rows by their old actualFieldValue.
-        'src/migration/scripts/backfillTypedFormEntityValues.ts',
       ],
     }],
   },

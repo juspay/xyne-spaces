@@ -373,3 +373,50 @@ export async function countFormEntityValuesByValue(
   }
   return counts.sort((left, right) => right.count - left.count);
 }
+
+/**
+ * Rows written before the typed columns existed: no typed value, no items, and a non-empty
+ * actualFieldValue. Empty values ("", [], JSON null) have nothing to copy, so they are left out.
+ */
+const toBackfillWhere: Prisma.FormEntityValuesWhereInput = {
+  textValue: null,
+  textHash: null,
+  numberValue: null,
+  dateValue: null,
+  boolValue: null,
+  plainValue: null,
+  actualFieldValue: { not: Prisma.DbNull },
+  NOT: [
+    { actualFieldValue: { equals: Prisma.JsonNull } },
+    { actualFieldValue: { equals: '' } },
+    { actualFieldValue: { equals: [] } },
+  ],
+  items: { none: {} },
+};
+
+/**
+ * The next page of rows the typed-column backfill still has to convert, after `afterId`.
+ * Rows it cannot convert stay in this set, so callers page by id rather than re-reading
+ * from the start.
+ */
+export async function findFormEntityValuesToBackfill(
+  client: Client,
+  args: { afterId: string | null; take: number },
+): Promise<Array<{ id: string; workspaceId: string; fieldId: string; updatedAt: Date; actualFieldValue: Prisma.JsonValue }>> {
+  return client.formEntityValues.findMany({
+    where: { ...toBackfillWhere, ...(args.afterId ? { id: { gt: args.afterId } } : {}) },
+    select: { id: true, workspaceId: true, fieldId: true, updatedAt: true, actualFieldValue: true },
+    orderBy: { id: 'asc' },
+    take: args.take,
+  });
+}
+
+/** How many rows the typed-column backfill still has to look at, optionally after `afterId`. */
+export async function countFormEntityValuesToBackfill(
+  client: Client,
+  afterId: string | null = null,
+): Promise<number> {
+  return client.formEntityValues.count({
+    where: { ...toBackfillWhere, ...(afterId ? { id: { gt: afterId } } : {}) },
+  });
+}
