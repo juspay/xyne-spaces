@@ -1,3 +1,48 @@
+// Direct GCS access goes through the storage abstraction.
+const GCS_IMPORT_PATHS = [
+  {
+    name: '@/services/gcsService',
+    message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
+  },
+  {
+    name: '../services/gcsService',
+    message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
+  },
+  {
+    name: './gcsService',
+    message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
+  },
+  {
+    name: '@/services/gcsServiceFactory',
+    message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
+  },
+  {
+    name: '../services/gcsServiceFactory',
+    message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
+  },
+  {
+    name: './gcsServiceFactory',
+    message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
+  },
+];
+const GCS_IMPORT_PATTERNS = [
+  {
+    group: ['**/gcsService', '**/gcsService.js'],
+    message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
+  },
+  {
+    group: ['**/gcsServiceFactory', '**/gcsServiceFactory.js'],
+    message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
+  },
+];
+
+// reveal() reads an UnreadableString. Only the files allowed below may import it (see overrides):
+// everywhere else an unreadable value is carried, written through tx.mutate, or decided on facts.
+const REVEAL_MESSAGE =
+  'reveal() reads an unreadable value. Decide on derived facts (tx.read / getMutationFacts) and write it through tx.mutate instead.';
+const REVEAL_IMPORT_PATHS = [{ name: '@xyne/shared', importNames: ['reveal'], message: REVEAL_MESSAGE }];
+const REVEAL_IMPORT_PATTERNS = [{ group: ['**/enc-contracts/unreadable-string', '**/enc-contracts/unreadable-string.js'], message: REVEAL_MESSAGE }];
+
 module.exports = {
   parser: '@typescript-eslint/parser',
   parserOptions: {
@@ -27,42 +72,8 @@ module.exports = {
     'no-case-declarations': 'off',
     'no-console': 'error',
     'no-restricted-imports': ['error', {
-      paths: [
-        {
-          name: '@/services/gcsService',
-          message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
-        },
-        {
-          name: '../services/gcsService',
-          message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
-        },
-        {
-          name: './gcsService',
-          message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
-        },
-        {
-          name: '@/services/gcsServiceFactory',
-          message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
-        },
-        {
-          name: '../services/gcsServiceFactory',
-          message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
-        },
-        {
-          name: './gcsServiceFactory',
-          message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
-        },
-      ],
-      patterns: [
-        {
-          group: ['**/gcsService', '**/gcsService.js'],
-          message: 'Use getStorageService() from @/services/storage instead of direct GCS access.',
-        },
-        {
-          group: ['**/gcsServiceFactory', '**/gcsServiceFactory.js'],
-          message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
-        },
-      ],
+      paths: [...GCS_IMPORT_PATHS, ...REVEAL_IMPORT_PATHS],
+      patterns: [...GCS_IMPORT_PATTERNS, ...REVEAL_IMPORT_PATTERNS],
     }],
     'local-rules/no-rocicorp-define-query': 'error',
     'local-rules/require-is-deleted-filter': 'error',
@@ -83,6 +94,15 @@ module.exports = {
       ],
       rules: {
         'no-restricted-imports': 'off',
+      },
+    },
+    {
+      // The files allowed to reveal an UnreadableString: the Zero transaction wrapper, which
+      // unwraps right before the database write, and the REST reply handler, which still reads
+      // the text until its route has a write/read wrapper of its own.
+      files: ['src/zero/unreadableTransaction.ts', 'src/controllers/conversationController.ts'],
+      rules: {
+        'no-restricted-imports': ['error', { paths: GCS_IMPORT_PATHS, patterns: GCS_IMPORT_PATTERNS }],
       },
     },
   ],

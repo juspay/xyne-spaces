@@ -1,12 +1,16 @@
 import type {
   DefaultSchema,
   DefaultWrappedTransaction,
+  DeleteID,
   HumanReadable,
+  InsertValue,
   Query,
   RunOptions,
   Transaction,
+  UpdateValue,
+  UpsertValue,
 } from '@rocicorp/zero';
-import { UnreadableString, runExtractors } from '@xyne/shared';
+import { UnreadableString, reveal, runExtractors } from '@xyne/shared';
 import type { DerivedSpec, ExtractorName, FieldDerived, FieldFacts } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
@@ -50,6 +54,19 @@ export type ReadResult<T, R, S> = R extends undefined
     ? RowWithFacts<T, E, S>[]
     : RowWithFacts<T, R, S>;
 
+/** A write's value for table `T`: its unreadable columns also take `UnreadableString`. */
+type AcceptUnreadable<T, V> = { [K in keyof V]: K extends UnreadableColumn<T> ? V[K] | UnreadableString : V[K] };
+
+/** `tx.mutate` where the unreadable columns can be written as they were read or received. */
+type UnreadableMutate = {
+  [T in TableName]: {
+    insert(value: AcceptUnreadable<T, InsertValue<DefaultSchema['tables'][T]>>): Promise<void>;
+    upsert(value: AcceptUnreadable<T, UpsertValue<DefaultSchema['tables'][T]>>): Promise<void>;
+    update(value: AcceptUnreadable<T, UpdateValue<DefaultSchema['tables'][T]>>): Promise<void>;
+    delete(id: DeleteID<DefaultSchema['tables'][T]>): Promise<void>;
+  };
+};
+
 /**
  * The transaction a mutator defined with defineContractMutator gets: the same as Zero's,
  * except
@@ -57,13 +74,15 @@ export type ReadResult<T, R, S> = R extends undefined
  * - `run` returns the table's unreadable columns (UNREADABLE_COLUMNS) as `UnreadableString`;
  * - `read(query, facts)` does the same and also returns the facts asked for from those
  *   columns, so the body decides on facts instead of the text;
+ * - `mutate` takes an `UnreadableString` for those columns and stores the value it holds;
  * - the deprecated `tx.query`, which would read them plainly, is not there.
  *
  * Rows loaded through `.related()` are not wrapped yet.
  */
 export type UnreadableTransaction = Tx extends infer X
   ? X extends unknown
-    ? Omit<X, 'run' | 'query'> & {
+    ? Omit<X, 'run' | 'query' | 'mutate'> & {
+        mutate: UnreadableMutate;
         run<TTable extends TableName, TReturn>(
           query: Query<TTable, DefaultSchema, TReturn>,
           options?: RunOptions,
@@ -102,6 +121,46 @@ function wrapRow(table: string, columns: readonly string[], row: unknown): unkno
 /** Logs that a read got its derived facts and where they came from. */
 function logDerivedFacts(table: string, source: 'local' | 'encryption-service'): void {
   logger.info(`[unreadableTransaction] ${table}: derived facts extracted via ${source}`);
+}
+
+/**
+ * A write's value with each `UnreadableString` replaced by the value it holds, right before it
+ * goes to the database. This module is the one place that unwraps one. An `UnreadableString`
+ * in a column that is not unreadable would store the value where it is not expected: refused.
+ */
+function unwrapForWrite(table: string, value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const columns = unreadableColumnsOf(table);
+  let unwrapped: Record<string, unknown> | undefined;
+  for (const [column, field] of Object.entries(value as Record<string, unknown>)) {
+    if (!(field instanceof UnreadableString)) continue;
+    if (!columns.includes(column)) {
+      throw new Error(`${table}.${column} is not an unreadable column; it cannot be written from an UnreadableString`);
+    }
+    unwrapped ??= { ...(value as Record<string, unknown>) };
+    unwrapped[column] = reveal(field);
+  }
+  return unwrapped ?? value;
+}
+
+/** `tx.mutate` that unwraps unreadable values on insert / upsert / update (see unwrapForWrite). */
+function unreadableMutate(mutate: Tx['mutate']): UnreadableMutate {
+  return new Proxy(mutate, {
+    get(target, table, receiver) {
+      const ops = Reflect.get(target, table, receiver) as Record<string, unknown> | undefined;
+      if (typeof table !== 'string' || !ops || typeof ops !== 'object') return ops;
+      return new Proxy(ops, {
+        get(opsTarget, op, opsReceiver) {
+          const fn = Reflect.get(opsTarget, op, opsReceiver);
+          if (typeof fn !== 'function') return fn;
+          if (op === 'insert' || op === 'upsert' || op === 'update') {
+            return (value: unknown) => fn.call(opsTarget, unwrapForWrite(table, value));
+          }
+          return fn.bind(opsTarget);
+        },
+      });
+    },
+  }) as unknown as UnreadableMutate;
 }
 
 /**
@@ -186,6 +245,9 @@ export function unreadableTransaction(tx: Tx, workspaceId: string): UnreadableTr
           const read = rows.map((row, index) => ({ row: wrapRow(table, columns, row), facts: facts[index] }));
           return Array.isArray(result) ? read : read[0];
         };
+      }
+      if (prop === 'mutate') {
+        return unreadableMutate(target.mutate);
       }
       if (prop === 'query') {
         throw new Error('tx.query is not available here; use tx.run(zql.<table>...)');

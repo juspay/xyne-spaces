@@ -11,6 +11,7 @@ type ColumnOf<T extends keyof Tables> = Extract<keyof Tables[T]['columns'], stri
 export const UNREADABLE_COLUMNS = {
   draft_messages: ['content'],
   message_attachments: ['originalFilename'],
+  messages: ['content'],
 } as const satisfies { readonly [T in keyof Tables]?: readonly ColumnOf<T>[] };
 
 /** The unreadable columns of table `T`; `never` for a table with none. */
