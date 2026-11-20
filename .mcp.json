@@ -1,24 +1,48 @@
 {
-  "mcpServers": {
-    "xyne-genius-rca": {
-      "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/genius/mcp"
-    },
-    "xyne-grafana-logs": {
-      "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/logs/mcp"
-    },
-    "xyne-victoria-metrics": {
-      "type": "http",
-      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/metrics/mcp"
-    },
-    "xyne-spaces": {
-      "command": "node",
-      "args": ["packages/xyne-spaces-mcp/dist/index.js"]
-    },
-    "xyne-claw": {
-      "command": "node",
-      "args": ["packages/xyne-claw-mcp/dist/index.js"]
+    "mcpServers": {
+        "xyne-genius-rca": {
+            "type": "http",
+            "url": "http://localhost:3638/v1/mcp/fd30a5d9-9e63-41dd-ae9b-33c5ad75dbab/https/grafana.spaces.xyne.juspay.net/xyne-mcp/genius/mcp",
+            "headers": {
+                "X-MCP-Config-Path": "/Users/abhishek.verma/xyne-spaces/.mcp.json",
+                "X-MCP-Server-Name": "xyne-genius-rca"
+            }
+        },
+        "xyne-grafana-logs": {
+            "type": "http",
+            "url": "http://localhost:3638/v1/mcp/efe36a79-f2be-4cc5-8b9c-fd1727f5a7ac/https/grafana.spaces.xyne.juspay.net/xyne-mcp/logs/mcp",
+            "headers": {
+                "X-MCP-Config-Path": "/Users/abhishek.verma/xyne-spaces/.mcp.json",
+                "X-MCP-Server-Name": "xyne-grafana-logs"
+            }
+        },
+        "xyne-victoria-metrics": {
+            "type": "http",
+            "url": "http://localhost:3638/v1/mcp/b36a5166-db42-43d4-b5ad-550165df9f22/https/grafana.spaces.xyne.juspay.net/xyne-mcp/metrics/mcp",
+            "headers": {
+                "X-MCP-Config-Path": "/Users/abhishek.verma/xyne-spaces/.mcp.json",
+                "X-MCP-Server-Name": "xyne-victoria-metrics"
+            }
+        },
+        "xyne-spaces": {
+            "command": "/usr/local/bin/prompt_security/prompt_security_mcp",
+            "args": [
+                "/Users/abhishek.verma/xyne-spaces/.mcp.json",
+                "xyne-spaces",
+                "__args__",
+                "node",
+                "packages/xyne-spaces-mcp/dist/index.js"
+            ]
+        },
+        "xyne-claw": {
+            "command": "/usr/local/bin/prompt_security/prompt_security_mcp",
+            "args": [
+                "/Users/abhishek.verma/xyne-spaces/.mcp.json",
+                "xyne-claw",
+                "__args__",
+                "node",
+                "packages/xyne-claw-mcp/dist/index.js"
+            ]
+        }
     }
-  }
 }
