@@ -1,3 +1,29 @@
+import { createPreviewUrl } from '../../../services/clients/fileFetchService';
+
+const canvasAttachmentBlocks = new Set(['file', 'image', 'audio', 'video']);
+
+export function getCanvasAttachmentFile(html: string): Promise<File> | undefined {
+  if (!html) return;
+
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const blocks = template.content.querySelectorAll('[data-content-type]');
+  const block = blocks[0];
+  if (blocks.length !== 1 || !block) return;
+  const type = block.getAttribute('data-content-type');
+  if (!type || !canvasAttachmentBlocks.has(type)) return;
+
+  const id = block.getAttribute('data-url');
+  if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) return;
+  const name = block.getAttribute('data-name') || `canvas-${type}`;
+  return createPreviewUrl(`/attachments/${id}/download`).then(blob => {
+    if (type === 'image' && (!blob.size || !blob.type.startsWith('image/'))) {
+      throw new Error('Invalid image response');
+    }
+    return new File([blob], name, { type: blob.type });
+  });
+}
+
 export const TIMING_CONSTANTS = {
   SEARCH_DEBOUNCE_MS: 300,
   TYPING_DEBOUNCE_MS: 1000,
