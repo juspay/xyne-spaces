@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { hasResourceAdminAccess } from '../admin-access'
-import { denyGuestWhere, isGuestContext } from './channel-access-helper'
+import { getGuestAccessibleFormIds, isGuestContext } from './channel-access-helper'
 
 export class FormFieldsACL extends BaseQueryACL<
   Prisma.FormFieldsWhereInput,
@@ -14,7 +14,8 @@ export class FormFieldsACL extends BaseQueryACL<
   async getWhereClause(): Promise<Prisma.FormFieldsWhereInput> {
     const ctx = this.ctx
     if (isGuestContext(ctx)) {
-      return denyGuestWhere('id')
+      const formIds = await getGuestAccessibleFormIds(this.prisma, ctx.workspaceId, this.ctx.userId)
+      return { workspaceId: ctx.workspaceId, formId: { in: formIds } }
     }
 
       return { workspaceId: this.ctx.workspaceId }

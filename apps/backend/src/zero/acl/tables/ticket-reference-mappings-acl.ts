@@ -25,6 +25,10 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
       if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
         throw new MutationACLError('Ticket reference insert failed: guest does not have access to the parent ticket', 'ticket_reference_mappings');
       }
+      const guestTarget = await tx.run(zql.tickets.where('id', args.targetTicketId).one());
+      if (!guestTarget || !(await hasGuestTicketAccess(this.ctx, tx, guestTarget))) {
+        throw new MutationACLError('Ticket reference insert failed: guest does not have access to the target ticket', 'ticket_reference_mappings');
+      }
       return;
     }
     const ticket = await tx.run(zql.tickets
@@ -92,6 +96,12 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
       const guestTicket = await tx.run(zql.tickets.where('id', mapping.sourceTicketId).one());
       if (!guestTicket || !(await hasGuestTicketAccess(this.ctx, tx, guestTicket))) {
         throw new MutationACLError('Ticket reference update failed: guest does not have access to the parent ticket', 'ticket_reference_mappings');
+      }
+      if (args.targetTicketId && args.targetTicketId !== mapping.targetTicketId) {
+        const guestTarget = await tx.run(zql.tickets.where('id', args.targetTicketId).one());
+        if (!guestTarget || !(await hasGuestTicketAccess(this.ctx, tx, guestTarget))) {
+          throw new MutationACLError('Ticket reference update failed: guest does not have access to the target ticket', 'ticket_reference_mappings');
+        }
       }
       return;
     }

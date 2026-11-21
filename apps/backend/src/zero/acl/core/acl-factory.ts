@@ -176,6 +176,11 @@ const GUEST_MUTATION_ALLOWLIST: readonly TableName[] = [
   'ticket_tag_mappings',
   // Custom field values on tickets; FormEntityValuesACL limits guests to their channels' tickets.
   'form_entity_values',
+  'ticket_descriptions',
+  'reaction_counts',
+  'ticket_sub_ticket_mappings',
+  'ticket_reference_mappings',
+  'ticket_stage_requests',
   'users',
 ];
 
