@@ -1,4 +1,4 @@
-import { ChannelScopeType, ChannelVisibility, UserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import type { FieldOption, FieldOptionsContext, FieldOptionsPage } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import type { XyneCtx } from '../../types';
@@ -19,9 +19,8 @@ import { decodeSeek, encodeSeek } from '../../utils';
  *   back a `nextCursor` if there is more. The picker's Load-more reads it.
  *
  * Each loader is written out rather than sharing a "generic lookup", because
- * they are not the same shape: channels have a visibility rule, stages have no
- * ids at all, users match on two columns, boards narrow by project. Three small
- * helpers do the parts that genuinely repeat; the rest reads top to bottom.
+ * they are not the same shape: channels have a visibility rule, boards do not.
+ * Three small helpers do the parts that genuinely repeat.
  */
 
 const PAGE = 25;
@@ -158,85 +157,6 @@ export async function boardOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
     where: {
       AND: [{ workspaceId: q.workspaceId }, nameLike(q.search), after(q.cursor)],
     },
-    select,
-    orderBy: BY_NAME,
-    take: PAGE + 1,
-  });
-  return page(rows, label);
-}
-
-/**
- * Stage names for the chosen boards.
- *
- * The odd one out: `stageName` stores the name, not an id, so the value IS the
- * label and there is nothing to page by. The same name can exist on several
- * boards, so they are de-duplicated, and they are ordered by the board's own
- * sequence rather than alphabetically because that is the order authors think in.
- */
-export async function stageOptions(
-  q: OptionsQuery,
-  boardIds: readonly string[] | undefined,
-): Promise<FieldOptionsPage> {
-  const narrowed = (boardIds ?? []).filter((id) => !!id?.trim());
-  if (narrowed.length === 0 && !q.values?.length) {
-    // Not "there are none" — "not answerable yet", which the editor says out loud.
-    return { items: [], notice: 'Choose a board first — stages are defined per board.' };
-  }
-
-  const rows = await db.stage.findMany({
-    where: {
-      workspaceId: q.workspaceId,
-      ...(narrowed.length > 0 ? { boardId: { in: [...narrowed] } } : {}),
-      ...(q.values?.length ? { name: { in: [...q.values] } } : nameLike(q.search)),
-    },
-    select: { name: true, sequenceNumber: true },
-    orderBy: [{ sequenceNumber: 'asc' }, { name: 'asc' }],
-    take: PAGE,
-  });
-
-  const seen = new Set<string>();
-  const items: FieldOption[] = [];
-  for (const row of rows) {
-    if (seen.has(row.name)) continue;
-    seen.add(row.name);
-    items.push({ value: row.name, label: row.name, icon: 'flag' });
-  }
-  return { items };
-}
-
-/** People. Matched on name or address, since an author knows one or the other. */
-export async function userOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
-  // `useActiveUsers` — deactivated people must not appear in assignment pickers.
-  const active = { workspaceId: q.workspaceId, status: UserStatus.ACTIVE };
-  const select = { id: true, name: true, email: true };
-  const label = (r: { id: string; name: string; email: string }): FieldOption => ({
-    value: r.id,
-    label: r.name,
-    description: r.email,
-    icon: 'user',
-  });
-
-  if (q.values?.length) {
-    const rows = await db.user.findMany({
-      where: { AND: [active, { id: { in: [...q.values] } }] },
-      select,
-      orderBy: BY_NAME,
-    });
-    return { items: rows.map(label) };
-  }
-  const search = q.search?.trim();
-  // A person is found by name or by address, so this fragment is its own `OR` —
-  // which is exactly why it is AND-ed with the seek rather than spread beside it.
-  const matches = search
-    ? {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' as const } },
-          { email: { contains: search, mode: 'insensitive' as const } },
-        ],
-      }
-    : {};
-  const rows = await db.user.findMany({
-    where: { AND: [active, matches, after(q.cursor)] },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,
