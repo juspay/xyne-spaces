@@ -134,7 +134,7 @@ import {
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
-import { conversationsSendClient } from '@xyne/shared';
+import { conversationsSendClient, derive } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
@@ -182,7 +182,8 @@ import {
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
-import { requireMutationFacts } from './encryptedMutation';
+import { defineContractMutator, getMutationFacts } from './encryptedMutation';
+import type { AnyTransaction } from './unreadableTransaction';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
@@ -195,7 +196,6 @@ import { userAssignmentStateService } from '@/services/userAssignmentStateServic
 import { notificationService } from '@/services/notificationService';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
-import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
@@ -485,7 +485,7 @@ async function assertCanReviewStageRequest(
 }
 
 async function getConversationSeenCutoffAt(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   channelId: string,
   fallbackTimestamp: number,
 ): Promise<number> {
@@ -527,7 +527,7 @@ async function decrementSurfaceNudgeCountRow(
 }
 
 async function reopenClosedDmParticipants(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   channelId: string,
   scopeType: string,
   timestamp: number
@@ -616,7 +616,7 @@ async function guestSafeContent(
  * cannot be limited to channel members through them.
  */
 async function assertGuestMentionsWithin(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   role: string | undefined,
   channelId: string,
   mentions: Pick<ExtractorOutput, 'userIds' | 'groupIds' | 'handles'> | undefined,
@@ -634,7 +634,7 @@ async function assertGuestMentionsWithin(
 }
 
 async function resolveMentionParticipantUserIds(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   mentionedUserIds: string[],
   mentionedGroupIds: string[],
 ): Promise<string[]> {
@@ -654,7 +654,7 @@ async function resolveMentionParticipantUserIds(
 }
 
 async function addMentionedConversationParticipants(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   workspaceId: string,
   conversationId: string,
   channelId: string | null | undefined,
@@ -959,7 +959,7 @@ const formatTicketReferenceRelationLabel = (relationType: TicketReferenceRelatio
  * This ensures the system messages are synced to all clients via Zero replication
  */
 async function createNonParticipantSystemMessages(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   mentionedUserIds: string[],
   mentionedGroupIds: string[],
   channelId: string,
@@ -2861,7 +2861,8 @@ export function createMutators(
       ),
     },
     conversations: {
-      send: defineMutator(
+      send: defineContractMutator(
+        conversationsSendClient,
         z.object({
           channelId: z.string(),
           content: z.string(),
@@ -2885,13 +2886,14 @@ export function createMutators(
             entityLinkContext,
           },
         }) => {
-          if (content === '') {
-            throw new Error('Message content or files are required to start a conversation');
-          }
           // `content` is opaque here: workspace-DEK ciphertext under its manifest rule, or plaintext
           // the mutator still never parses. Every fact comes from the contract's picks, extracted by
           // the encryption service for ciphertext and locally for plaintext (encryptedMutation.ts).
-          const facts = requireMutationFacts(conversationsSendClient, 'content');
+          // No facts means there was no text to derive them from: the content is empty.
+          const facts = getMutationFacts(conversationsSendClient, 'content');
+          if (!facts) {
+            throw new Error('Message content or files are required to start a conversation');
+          }
           await assertGuestMentionsWithin(tx, authData.role, channelId, facts);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
@@ -3051,7 +3053,7 @@ export function createMutators(
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            content: content.trim(),
+            content,
             msgType: type,
             hasAttachment: false,
             edited: false,
@@ -4918,16 +4920,20 @@ export function createMutators(
       ),
     },
     messageAttachment: {
-      delete: defineMutator(
+      delete: defineContractMutator(
         z.object({ attachmentId: z.string() }),
         async ({ tx, args: { attachmentId } }) => {
-          const attachment = await tx.run(zql.message_attachments
-            .where('id', attachmentId)
-            .one());
+          const read = await tx.read(
+            zql.message_attachments.where('id', attachmentId).one(),
+            { originalFilename: { isHeic: derive.isHeic } },
+          );
 
-          if (!attachment) {
+          if (!read) {
             throw new Error("Attachment doesn't exist");
           }
+          const attachment = read.row;
+          // isHeicAttachment's rule: the MIME type, else the file name's extension (the fact).
+          const isHeic = isHeicAttachment(attachment.mimetype, '') || (read.facts.originalFilename?.isHeic ?? false);
 
           if (
             attachment.entityType !== AttachmentEntityType.DRAFT &&
@@ -4941,7 +4947,7 @@ export function createMutators(
                   if (attachment.thumbnailUrl) {
                     await storageService.deleteFile(attachment.thumbnailUrl);
                   }
-                  if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                  if (isHeic) {
                     await deleteHeicRenditions(attachment.url);
                   }
                   if (isVideoMimetype(attachment.mimetype)) {
@@ -4974,26 +4980,10 @@ export function createMutators(
               isDeleted: true,
             });
 
-            // Check if there are any remaining non-deleted attachments for this message
-            const remainingAttachments = await tx.run(zql.message_attachments
-              .where('entityId', message.messageId)
-              .where('isDeleted', false));
-
-            // Only update hasAttachment flag if no non-deleted attachments remain
-            if (remainingAttachments.length === 0) {
-              const plainText = convert(message.content, {
-                wordwrap: false,
-                preserveNewlines: false
-              }).trim()
-
-              if (plainText === '') {
-                // All attachments are soft-deleted and message body is empty.
-                // Keep the message so tombstones ("This file was deleted.") remain visible.
-                // Do NOT delete the message.
-              }
-              // Note: we intentionally do NOT set hasAttachment: false — the soft-deleted
-              // attachments still need to appear as tombstones in the UI.
-            }
+            // The message is kept even when no attachment is left and its body is empty, so
+            // tombstones ("This file was deleted.") remain visible. Note: we intentionally do NOT
+            // set hasAttachment: false — the soft-deleted attachments still need to appear as
+            // tombstones in the UI.
           } else {
             await tx.mutate.message_attachments.delete({ id: attachmentId });
 
@@ -5019,7 +5009,7 @@ export function createMutators(
                 if (attachment.thumbnailUrl) {
                   await storageService.deleteFile(attachment.thumbnailUrl);
                 }
-                if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                if (isHeic) {
                   await deleteHeicRenditions(attachment.url);
                 }
                 if (isVideoMimetype(attachment.mimetype)) {
@@ -18197,19 +18187,21 @@ export function createMutators(
       ),
 
       /** Send a draft message immediately (converts to sent message) */
-      send: defineMutator(
+      send: defineContractMutator(
         z.object({
           id: z.string(),
           timestamp: z.number(),
         }),
         async ({ tx, ctx, args: { id, timestamp } }) => {
-          const draft = await tx.run(
-            zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
+          const read = await tx.read(
+            zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one(),
+            { content: { textIsEmpty: derive.textIsEmpty } },
           );
-          if (!draft) {
+          if (!read) {
             throw new Error('Draft not found');
           }
-          if (draft.content.trim() === '') {
+          const draft = read.row;
+          if (read.facts.content?.textIsEmpty ?? true) {
             const draftAtts = await tx.run(
               zql.message_attachments
                 .where('entityId', id)

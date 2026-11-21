@@ -1,6 +1,8 @@
+import type { FieldFacts } from '@xyne/shared';
 import { config } from '@/config/env';
 import type {
   ClientEncryptionConfig,
+  DeriveFactsInput,
   EncryptBatchItem,
   EncryptedFieldConfig,
   EncryptionProvider,
@@ -77,6 +79,10 @@ const provider: EncryptionProvider = {
   async transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>> {
     if (!config.enc.apiClientEncryptionEnabled) return { body: input.body };
     return unsupported('transformRequest');
+  },
+
+  async deriveFacts(_input: DeriveFactsInput): Promise<FieldFacts[]> {
+    return unsupported('deriveFacts');
   },
 
   async transformResponse<T>(body: T, _caller: TransitCaller): Promise<TransitEncryptResult<T>> {

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { MessageType } from '../../zero/types.js';
 import { defineRequestContract, type RequestOf } from '../define.js';
 import { derive } from '../extractors.js';
+import { unreadableString } from '../unreadable-string.js';
 
 /**
  * Conversation reply API; attached to its route in the backend's routes/conversations.ts.
@@ -13,7 +14,7 @@ import { derive } from '../extractors.js';
 export const replyToConversationClient = defineRequestContract({
   sourceToDerived: {},
   schema: z.object({
-    content: z.string().optional(),
+    content: unreadableString().optional(),
     msgType: z.enum([MessageType.USER, MessageType.BOT]).optional(),
     visibleTo: z.string().nullable().optional(),
     fileMetadata: z.string().optional(),
@@ -49,7 +50,7 @@ export const conversationsSendClient = defineRequestContract({
   },
   schema: z.object({
     channelId: z.string(),
-    content: z.string(),
+    content: unreadableString(),
     conversationId: z.string(),
     messageId: z.string(),
     timestamp: z.number(),
