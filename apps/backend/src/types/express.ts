@@ -70,6 +70,12 @@ declare global {
        * transit key (transitCaller).
        */
       authToken?: string;
+      /**
+       * Set by authenticateApp when the request was relayed by a Xyne transit proxy
+       * (`x-xyne-transit-proxy: <role>;<version>`). The encryption service then encrypts to the
+       * proxy key pinned for that role and version, never to a key the request names.
+       */
+      proxyClient?: { role: 'ingress' | 'egress'; version: number };
     }
   }
 }

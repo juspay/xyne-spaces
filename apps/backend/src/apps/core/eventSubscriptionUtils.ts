@@ -2,6 +2,8 @@ import { InstalledAppsRepository } from '@/database/repositories/installedAppsRe
 import { isValidUrl } from '@/utils/urlUtils';
 import { BaseAppEvent } from '@/apps/types';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
+import { getEncryptionProvider } from '@/services/encryption';
 import { decrypt } from '@/services/encryptionService';
 import { prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
@@ -31,6 +33,13 @@ export async function sendWebhookNotification(
         'X-Xyne-Signature': signature,
         'X-Source': 'XyneSpaces',
     });
+
+    // External bots get their events from the egress transit proxy: the encryption service
+    // signs and seals the event to the proxy's key, so only the proxy can read it or see
+    // where it goes. Internal targets (trusted in-cluster pods) stay direct.
+    if (config.internal.transitProxyEgressUrl && !isInternal) {
+        return deliverViaEgressProxy(url, payload, signingSecret, event);
+    }
 
     try {
         const init: RequestInit = {
@@ -64,6 +73,50 @@ export async function sendWebhookNotification(
     } catch (error) {
         throw error;
     }
+}
+
+/**
+ * Deliver one event through the egress transit proxy (`POST <egress>/deliver { sealed }`).
+ * The proxy answers `{ status, body }` with the bot's own reply; a non-2xx from the bot fails
+ * the delivery the same way a direct fetch does.
+ */
+async function deliverViaEgressProxy(
+    webhookUrl: string,
+    payload: string,
+    signingSecret: string,
+    event: BaseAppEvent,
+): Promise<{ status: number; body: unknown }> {
+    const { sealed } = await getEncryptionProvider().sealEvent({
+        event: payload,
+        webhookUrl,
+        signingSecret,
+        proxyClient: { role: 'egress', version: config.internal.transitProxyEgressKeyVersion },
+    });
+    const response = await fetch(`${config.internal.transitProxyEgressUrl}/deliver`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sealed }),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(config.internal.transitProxyEgressTimeoutMs),
+    });
+    const text = await response.text().catch(() => '');
+    if (!response.ok) {
+        throw new Error(`Egress transit proxy refused the delivery with status ${response.status}: ${text || 'no body'}`);
+    }
+    const result = (JSON.parse(text) as { status?: unknown; body?: unknown });
+    const status = typeof result.status === 'number' ? result.status : 0;
+    if (status < 200 || status >= 300) {
+        throw new Error(`Webhook request failed with status ${status}: ${typeof result.body === 'string' ? result.body : 'Unable to read error response'}`);
+    }
+    logger.info('[handleAppMentionEvents] Delivered webhook through the egress transit proxy', {
+        eventType: event.eventType,
+        status,
+    });
+    let body: unknown = result.body;
+    if (typeof body === 'string') {
+        try { body = body ? JSON.parse(body) : undefined; } catch { /* keep raw text */ }
+    }
+    return { status, body };
 }
 
 export async function handleEventSubscriptionsForUsers(
