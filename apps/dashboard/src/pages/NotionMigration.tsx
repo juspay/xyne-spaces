@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Check, Globe, KeyRound, Lock, TriangleAlert } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 import {
   notionMigrationApi,
   type NotionCoverage,
@@ -10,82 +9,56 @@ import {
   type NotionSection,
   type NotionSectionChoice,
 } from '../api/notionMigrationApi';
-import Button from '../components/ui/Button';
-import { inAppPath } from '../components/Canvas/canvasInAppLink';
-import { openLink } from '../utils/openLink';
-import Input from '../components/ui/Input';
 import AppNavigator from '../components/AppNavigator/AppNavigator';
+import { inAppPath } from '../components/Canvas/canvasInAppLink';
+import Badge from '../components/ui/Badge';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
 import { cn } from '../utils/classNames';
+import { openLink } from '../utils/openLink';
 
 const POLL_MS = 2000;
 const CONSENT_WAIT_MS = 10 * 60 * 1000;
+const TOKEN_PATTERN = /^(ntn_|secret_).{4,}/;
 
-const STATUS_LABEL: Record<NotionImportJob['status'], { label: string; className: string }> = {
-  collecting: { label: 'Reading from Notion', className: 'bg-blue-500/10 text-blue-600' },
-  awaiting_review: { label: 'Awaiting review', className: 'bg-amber-500/10 text-amber-600' },
-  ingesting: { label: 'Creating canvases', className: 'bg-violet-500/10 text-violet-600' },
-  completed: { label: 'Completed', className: 'bg-green-500/10 text-green-600' },
-  failed: { label: 'Failed', className: 'bg-destructive/10 text-destructive' },
+const STATUS: Record<
+  NotionImportJob['status'],
+  { label: string; variant: 'success' | 'secondary' | 'destructive' | 'outline' }
+> = {
+  collecting: { label: 'Reading Notion', variant: 'secondary' },
+  awaiting_review: { label: 'Needs review', variant: 'outline' },
+  ingesting: { label: 'Creating', variant: 'secondary' },
+  completed: { label: 'Completed', variant: 'success' },
+  failed: { label: 'Failed', variant: 'destructive' },
 };
 
-function Steps({ items }: { items: React.ReactNode[] }): React.JSX.Element {
-  return (
-    <ol className='space-y-2.5'>
-      {items.map((item, i) => (
-        <li key={i} className='flex gap-2.5 text-sm leading-relaxed text-muted-foreground'>
-          <span className='mt-px flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold tabular-nums text-foreground'>
-            {i + 1}
-          </span>
-          <span>{item}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
+const TOKEN_STEPS: Array<{ text: string; note: string }> = [
+  { text: 'Settings → Connections → Develop → New connection', note: ' · API token, read-only' },
+  { text: 'Enable “Read user information including emails”', note: ' · sets page owners' },
+  {
+    text: 'Content access → add pages to migrate',
+    note: ' · sub-pages included; Enterprise: use Content search for private pages',
+  },
+  { text: 'Share the token (starts with ntn_) securely', note: '' },
+];
 
-function GuideRail(): React.JSX.Element {
-  return (
-    <div className='rounded-xl border border-border bg-card p-4 shadow-xs'>
-      <div className='mb-3 flex items-center gap-2 text-sm font-semibold text-foreground'>
-        <KeyRound className='size-4' />
-        Get the Notion token
-      </div>
-      <p className='mb-3 text-sm leading-relaxed text-muted-foreground'>
-        Send these steps to the merchant’s <b className='text-foreground'>Notion workspace owner</b>
-        :
-      </p>
-      <Steps
-        items={[
-          <>
-            In Notion: <b className='text-foreground'>Settings → Connections → Develop</b> →{' '}
-            <b className='text-foreground'>New connection</b>, type{' '}
-            <b className='text-foreground'>API token</b>, read-only.
-          </>,
-          <>
-            Turn on <b className='text-foreground'>Read user information including emails</b> — it’s
-            how each page gets its right owner here.
-          </>,
-          <>
-            On its <b className='text-foreground'>Content access</b> tab, add the pages to migrate.
-            Sub-pages and databases come along. On Enterprise, first use{' '}
-            <b className='text-foreground'>Content search</b> to grant yourself members’ private
-            pages, then add those too.
-          </>,
-          <>
-            Share the token (starts with <code className='rounded bg-muted px-1'>ntn_</code>)
-            securely.
-          </>,
-        ]}
-      />
-      <div className='mt-4 space-y-2 border-t border-border pt-4 text-sm leading-relaxed text-muted-foreground'>
-        <p>Read-only: nothing changes in Notion.</p>
-        <p>The token is used once to read the pages, then dropped — never stored.</p>
-        <p>Members don’t need to do anything. Safe to run again: canvases update in place.</p>
-      </div>
-    </div>
-  );
-}
+const errorMessage = (e: unknown, fallback: string): string =>
+  (e as { response?: { data?: { message?: string } } }).response?.data?.message ??
+  (e instanceof Error ? e.message : fallback);
 
+const formatDate = (ms: number): string => {
+  const d = new Date(ms);
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+};
+
+const shortName = (email: string): string => email.split('@')[0] ?? email;
+
+const isRunning = (job: NotionImportJob): boolean =>
+  job.status === 'collecting' || job.status === 'ingesting';
+
+// ---------------------------------------------------------------------------------------------
+// Admin review (a token import waits here before anything is created)
+// ---------------------------------------------------------------------------------------------
 const CHOICE_LABEL: Record<NotionSectionChoice, string> = {
   'private-owner': 'Private to its owner',
   public: 'Public in channel',
@@ -108,9 +81,6 @@ function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const publicCount = Object.values(choices).filter(c => c === 'public').length;
 
-  const setAll = (choice: NotionSectionChoice): void =>
-    setChoices(Object.fromEntries(sections.map(s => [s.key, choice])));
-
   const approve = async (): Promise<void> => {
     setBusy(true);
     setError(null);
@@ -121,32 +91,28 @@ function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
       });
       await queryClient.invalidateQueries({ queryKey: ['notion-migration', 'mine'] });
     } catch (e) {
-      setError(
-        (e as { response?: { data?: { message?: string } } }).response?.data?.message ??
-          (e instanceof Error ? e.message : 'Approval failed'),
-      );
+      setError(errorMessage(e, 'Approval failed'));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className='mt-4 space-y-3'>
-      <p className='text-sm leading-relaxed text-muted-foreground'>
-        Choose who can see each top-level page in Spaces. Everything under a page follows it.
-        Private pages go to their owner’s Personal section — only they can see them.
+    <div className='flex flex-col gap-3 px-[14px] py-3 pl-[46px]'>
+      <p className='text-[13px] text-muted-foreground'>
+        Choose who can see each top-level page. Everything under a page follows it.
       </p>
       <div className='flex flex-wrap gap-2 text-xs'>
         <button
-          className='rounded-md border border-border px-2 py-1 hover:bg-muted'
-          onClick={() => setAll('public')}
+          className='rounded-md border border-border px-2 py-1 hover:bg-accent'
+          onClick={() => setChoices(Object.fromEntries(sections.map(s => [s.key, 'public'])))}
           data-track-category='NOTION_MIGRATION'
           data-track-name='REVIEW_ALL_PUBLIC'
         >
           Make all public
         </button>
         <button
-          className='rounded-md border border-border px-2 py-1 hover:bg-muted'
+          className='rounded-md border border-border px-2 py-1 hover:bg-accent'
           onClick={() =>
             setChoices(Object.fromEntries(sections.map(s => [s.key, defaultChoice(s)])))
           }
@@ -156,70 +122,56 @@ function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
           Make all private to owner
         </button>
       </div>
-      <div className='overflow-x-auto rounded-lg border border-border'>
-        <table className='w-full text-sm'>
-          <thead className='bg-muted/50 text-left text-xs text-muted-foreground'>
-            <tr>
-              <th className='px-3 py-2 font-medium'>Notion page</th>
-              <th className='px-3 py-2 font-medium'>Owner → Spaces user</th>
-              <th className='px-3 py-2 font-medium'>Access in Spaces</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sections.map(s => (
-              <tr key={s.key} className='border-t border-border'>
-                <td className='px-3 py-2'>
-                  <div className='font-medium text-foreground'>{s.title}</div>
-                  <div className='text-xs text-muted-foreground'>
-                    {s.pages} page{s.pages === 1 ? '' : 's'}
-                    {s.databases ? ` · ${s.databases} database${s.databases === 1 ? '' : 's'}` : ''}
-                  </div>
-                </td>
-                <td className='px-3 py-2 text-xs'>
-                  <div className='text-foreground'>{s.notionOwner?.name ?? 'Unknown'}</div>
-                  {s.spacesOwner ? (
-                    <div className='text-green-600'>→ {s.spacesOwner.email}</div>
-                  ) : (
-                    <div className='text-amber-600'>
-                      No Spaces account{s.notionOwner?.email ? ` (${s.notionOwner.email})` : ''}
-                    </div>
-                  )}
-                </td>
-                <td className='px-3 py-2'>
-                  <select
-                    className='w-full rounded-md border border-border bg-background px-2 py-1 text-sm'
-                    data-track-category='NOTION_MIGRATION'
-                    data-track-name='REVIEW_SECTION_ACCESS'
-                    value={choices[s.key]}
-                    onChange={e =>
-                      setChoices({ ...choices, [s.key]: e.target.value as NotionSectionChoice })
-                    }
-                  >
-                    {(Object.keys(CHOICE_LABEL) as NotionSectionChoice[])
-                      .filter(c => c !== 'private-owner' || s.spacesOwner)
-                      // Someone else's page can't be taken as "private to me".
-                      .filter(
-                        c =>
-                          c !== 'private-me' || !s.spacesOwner || s.spacesOwner.id === job.userId,
-                      )
-                      .map(c => (
-                        <option key={c} value={c}>
-                          {CHOICE_LABEL[c]}
-                        </option>
-                      ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className='overflow-hidden rounded-[10px] border border-border text-[13px]'>
+        <div className='grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_180px] gap-3 bg-muted/50 px-[14px] py-2 text-xs font-medium text-muted-foreground'>
+          <span>Page</span>
+          <span>Owner</span>
+          <span>Access</span>
+        </div>
+        {sections.map(s => (
+          <div
+            key={s.key}
+            className='grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_180px] items-center gap-3 border-t border-border px-[14px] py-2'
+          >
+            <span className='min-w-0'>
+              <span className='block truncate font-medium'>{s.title}</span>
+              <span className='block text-xs text-muted-foreground'>
+                {s.pages} page{s.pages === 1 ? '' : 's'}
+                {s.databases ? ` · ${s.databases} database${s.databases === 1 ? '' : 's'}` : ''}
+              </span>
+            </span>
+            <span className='min-w-0 truncate text-muted-foreground'>
+              {s.spacesOwner
+                ? s.spacesOwner.email
+                : `${s.notionOwner?.name ?? 'Unknown'} · no Spaces account`}
+            </span>
+            <select
+              className='w-full rounded-md border border-border bg-background px-2 py-1 text-[13px]'
+              data-track-category='NOTION_MIGRATION'
+              data-track-name='REVIEW_SECTION_ACCESS'
+              value={choices[s.key]}
+              onChange={e =>
+                setChoices({ ...choices, [s.key]: e.target.value as NotionSectionChoice })
+              }
+            >
+              {(Object.keys(CHOICE_LABEL) as NotionSectionChoice[])
+                .filter(c => c !== 'private-owner' || s.spacesOwner)
+                // Someone else's page can't be taken as "private to me".
+                .filter(
+                  c => c !== 'private-me' || !s.spacesOwner || s.spacesOwner.id === job.userId,
+                )
+                .map(c => (
+                  <option key={c} value={c}>
+                    {CHOICE_LABEL[c]}
+                  </option>
+                ))}
+            </select>
+          </div>
+        ))}
       </div>
       {publicCount > 0 && (
-        <div>
-          <label
-            htmlFor={`notion-review-channel-${job.id}`}
-            className='mb-1.5 block text-sm font-medium text-foreground'
-          >
+        <div className='flex flex-col gap-2'>
+          <label htmlFor={`notion-review-channel-${job.id}`} className='text-[13px] font-medium'>
             Channel for the {publicCount} public page{publicCount === 1 ? '' : 's'}
           </label>
           <Input
@@ -230,117 +182,295 @@ function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
           />
         </div>
       )}
-      {error && <p className='text-sm text-destructive'>{error}</p>}
-      <Button
-        disabled={busy}
-        loading={busy}
-        trackId='notion_migration_approve'
-        onClick={() => void approve()}
-        data-track-category='NOTION_MIGRATION'
-        data-track-name='APPROVE_IMPORT'
-      >
-        Approve and import
-      </Button>
+      {error && <p className='text-[13px] text-destructive'>{error}</p>}
+      <div>
+        <Button
+          disabled={busy}
+          loading={busy}
+          trackId='notion_migration_approve'
+          onClick={() => void approve()}
+          data-track-category='NOTION_MIGRATION'
+          data-track-name='APPROVE_IMPORT'
+        >
+          Approve and import
+        </Button>
+      </div>
     </div>
   );
 }
 
-function JobCard({ job }: { job: NotionImportJob }): React.JSX.Element {
-  const status = STATUS_LABEL[job.status];
-  const running = job.status === 'collecting' || job.status === 'ingesting';
-  const lastLog = job.log[job.log.length - 1];
+// ---------------------------------------------------------------------------------------------
+// Workspace import (admin)
+// ---------------------------------------------------------------------------------------------
+function WorkspaceImportCard({
+  coverage,
+  onStarted,
+}: {
+  coverage: NotionCoverage | undefined;
+  onStarted: () => Promise<void>;
+}): React.JSX.Element {
+  const [token, setToken] = useState('');
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stepsOpen, setStepsOpen] = useState(false);
+
+  const people = coverage?.people ?? [];
+  const doneCount = people.filter(p => p.imported).length;
+  const progress = people.length ? `${(doneCount / people.length) * 100}%` : '0%';
+  const workspaceName =
+    coverage?.source === 'notion'
+      ? (coverage.notionWorkspace ?? 'Notion workspace')
+      : 'Spaces members';
+
+  const start = async (): Promise<void> => {
+    setError(null);
+    setStarting(true);
+    try {
+      await notionMigrationApi.startWithToken(token.trim());
+      setToken('');
+      await onStarted();
+    } catch (e) {
+      setError(errorMessage(e, 'Could not start the import'));
+    } finally {
+      setStarting(false);
+    }
+  };
+
   return (
-    <div className='rounded-xl border border-border bg-card p-4 shadow-xs'>
-      <div className='flex flex-wrap items-center gap-2'>
-        {job.kind === 'member' ? (
-          <Lock className='size-4 text-muted-foreground' />
-        ) : (
-          <Building2 className='size-4 text-muted-foreground' />
-        )}
-        <span className='text-sm font-medium text-foreground'>
-          {job.kind === 'member' ? 'My Notion' : 'Workspace import'}
-          {job.notionWorkspace ? ` · ${job.notionWorkspace}` : ''}
-        </span>
-        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', status.className)}>
-          {status.label}
-        </span>
-        <span className='ml-auto text-xs text-muted-foreground'>
-          {new Date(job.startedAt).toLocaleString()}
-        </span>
+    <section className='flex flex-col gap-4 rounded-xl border border-border bg-card p-5'>
+      <div className='flex items-center gap-2'>
+        <div className='text-sm font-semibold'>Workspace import</div>
+        <Badge variant='secondary'>Admin</Badge>
       </div>
 
-      {running && lastLog && (
-        <p className='mt-2 truncate text-xs text-muted-foreground'>{lastLog}</p>
-      )}
+      <div className='flex flex-col gap-2'>
+        <div className='flex items-baseline justify-between gap-3 text-[13px]'>
+          <span className='font-medium'>{workspaceName}</span>
+          <span className='tabular-nums text-muted-foreground'>
+            {doneCount} of {people.length} members imported
+          </span>
+        </div>
+        <div className='h-1 rounded-sm bg-muted'>
+          <div className='h-1 rounded-sm bg-primary' style={{ width: progress }} />
+        </div>
+      </div>
 
-      {job.error && (
-        <div className='mt-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive'>
-          <TriangleAlert className='mt-0.5 size-4 shrink-0' />
-          <span className='break-words'>{job.error}</span>
+      {people.length > 0 && (
+        <div className='overflow-hidden rounded-[10px] border border-border text-[13px]'>
+          <div className='grid grid-cols-[minmax(0,1fr)_120px] gap-3 bg-muted/50 px-[14px] py-2 text-xs font-medium text-muted-foreground'>
+            <span>Member</span>
+            <span>Status</span>
+          </div>
+          {people.map(p => {
+            const status = p.imported ? 'Imported' : p.hasSpacesAccount ? 'Pending' : 'No account';
+            return (
+              <div
+                key={p.email ?? p.name}
+                className='grid grid-cols-[minmax(0,1fr)_120px] items-center gap-3 border-t border-border px-[14px] py-[9px]'
+              >
+                <span className='truncate'>{p.email ?? p.name}</span>
+                <span
+                  className={cn(
+                    'flex items-center gap-1.5',
+                    p.imported ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'size-1.5 rounded-full',
+                      p.imported ? 'bg-[hsl(142_60%_40%)]' : 'bg-border',
+                    )}
+                  />
+                  {status}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
+      <div className='text-xs text-muted-foreground'>
+        Shared and teamspace pages reach members only after they import.
+      </div>
 
-      {job.status === 'awaiting_review' && <ReviewPanel job={job} />}
+      <div className='flex flex-col gap-2 pt-1'>
+        <label htmlFor='notion-token' className='text-[13px] font-medium'>
+          Integration token
+        </label>
+        <div className='flex flex-wrap gap-2'>
+          <div className='min-w-0 flex-[1_1_280px]'>
+            <Input
+              id='notion-token'
+              type='password'
+              placeholder='ntn_…'
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              className='font-mono'
+            />
+          </div>
+          <Button
+            disabled={starting || !TOKEN_PATTERN.test(token.trim())}
+            loading={starting}
+            trackId='notion_migration_start'
+            onClick={() => void start()}
+            data-track-category='NOTION_MIGRATION'
+            data-track-name='START_WITH_TOKEN'
+          >
+            Start import
+          </Button>
+        </div>
+        {error && <div className='text-xs text-destructive'>{error}</div>}
+        <div className='text-xs text-muted-foreground'>
+          You’ll review page access before anything is created. Token is used once, never stored.
+        </div>
+      </div>
 
-      {job.summary && (
-        <div className='mt-3'>
-          <p className='text-sm text-muted-foreground'>
-            {job.summary.created} created · {job.summary.updated} updated
-            {job.summary.joined ? ` · ${job.summary.joined} already in Spaces` : ''}
-            {job.summary.skipped ? ` · ${job.summary.skipped} skipped` : ''} ·{' '}
-            {job.summary.attachments} files · {job.summary.comments} comments
-          </p>
-          <ul className='mt-2 space-y-1'>
-            {job.summary.canvases.map(c => (
-              <li key={c.url} className='flex items-center gap-2 text-sm'>
-                <Check className='size-3.5 shrink-0 text-green-600' />
-                {c.access === 'public' ? (
-                  <Globe className='size-3.5 shrink-0 text-muted-foreground' />
-                ) : (
-                  <Lock className='size-3.5 shrink-0 text-muted-foreground' />
-                )}
-                <Link
-                  to={inAppPath(c.url) ?? c.url}
-                  className='truncate text-foreground hover:underline'
-                >
-                  {c.title}
-                </Link>
-                {c.ownerEmail && (
-                  <span className='truncate text-xs text-muted-foreground'>
-                    · owner {c.ownerEmail}
-                  </span>
-                )}
-                {c.sharedWith && c.sharedWith.length > 0 && (
-                  <span
-                    className='truncate text-xs text-muted-foreground'
-                    title={c.sharedWith.join(', ')}
-                  >
-                    · access: {c.sharedWith.map(e => e.split('@')[0]).join(', ')}
-                  </span>
-                )}
-              </li>
+      <div className='flex flex-col gap-2.5 border-t border-border pt-3'>
+        <button
+          className='flex w-fit select-none items-center gap-1.5 text-[13px] font-medium'
+          onClick={() => setStepsOpen(open => !open)}
+          aria-expanded={stepsOpen}
+          data-track-category='NOTION_MIGRATION'
+          data-track-name='TOGGLE_TOKEN_STEPS'
+        >
+          <span className='inline-block w-3 text-muted-foreground'>{stepsOpen ? '▾' : '▸'}</span>
+          How to get a token
+        </button>
+        {stepsOpen && (
+          <div className='flex flex-col gap-0.5 text-[13px]'>
+            <div className='pb-1.5 pl-[18px] text-xs text-muted-foreground'>
+              Send to the Notion workspace owner
+            </div>
+            {TOKEN_STEPS.map((s, i) => (
+              <div
+                key={s.text}
+                className='grid grid-cols-[18px_minmax(0,1fr)] items-baseline gap-2.5 py-1.5 pl-[18px]'
+              >
+                <span className='font-mono text-xs text-muted-foreground'>{i + 1}</span>
+                <span>
+                  {s.text}
+                  <span className='text-muted-foreground'>{s.note}</span>
+                </span>
+              </div>
             ))}
-          </ul>
-          {job.summary.accessRemoved?.length > 0 && (
-            <p className='mt-2 text-xs text-muted-foreground'>
-              Access removed (no longer visible to you in Notion):{' '}
-              {job.summary.accessRemoved.join(', ')}
-            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------------------------
+const HISTORY_COLS = 'grid-cols-[20px_minmax(0,1fr)_100px_64px_64px_150px]';
+const PAGE_COLS = 'grid-cols-[20px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.2fr)]';
+
+function HistoryRow({
+  job,
+  open,
+  onToggle,
+}: {
+  job: NotionImportJob;
+  open: boolean;
+  onToggle: () => void;
+}): React.JSX.Element {
+  const status = STATUS[job.status];
+  const name = `${job.kind === 'member' ? 'My Notion' : 'Workspace import'}${job.notionWorkspace ? ` · ${job.notionWorkspace}` : ''}`;
+  const summary = job.summary;
+  const notes = [
+    summary?.comments ? `${summary.comments} comment${summary.comments === 1 ? '' : 's'}` : '',
+    summary?.joined ? `${summary.joined} already in Spaces` : '',
+    summary?.skipped ? `${summary.skipped} skipped` : '',
+    summary?.accessRemoved?.length ? `access removed: ${summary.accessRemoved.join(', ')}` : '',
+    summary?.unresolvedUsers.length
+      ? `no Spaces account: ${summary.unresolvedUsers.map(u => u.email ?? u.name).join(', ')}`
+      : '',
+  ].filter(Boolean);
+
+  return (
+    <>
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        className={cn(
+          'grid w-full items-center gap-3 border-t border-border px-[14px] py-[11px] text-left hover:bg-accent',
+          HISTORY_COLS,
+        )}
+        data-track-category='NOTION_MIGRATION'
+        data-track-name='TOGGLE_HISTORY_ROW'
+      >
+        <span className='text-[11px] text-muted-foreground'>{open ? '▾' : '▸'}</span>
+        <span className='truncate font-medium'>{name}</span>
+        <span>
+          <Badge variant={status.variant}>{status.label}</Badge>
+        </span>
+        <span className='text-right tabular-nums'>{summary?.created ?? '—'}</span>
+        <span className='text-right tabular-nums'>{summary?.updated ?? '—'}</span>
+        <span className='text-right tabular-nums text-muted-foreground'>
+          {formatDate(job.startedAt)}
+        </span>
+      </button>
+
+      {open && (
+        <div className='border-t border-border bg-background'>
+          {isRunning(job) && (
+            <div className='truncate px-[14px] py-2.5 pl-[46px] text-xs text-muted-foreground'>
+              {job.log[job.log.length - 1] ?? 'Starting…'}
+            </div>
           )}
-          {job.summary.unresolvedUsers.length > 0 && (
-            <p className='mt-2 text-xs text-amber-600'>
-              No Spaces account for:{' '}
-              {job.summary.unresolvedUsers.map(u => u.email ?? u.name).join(', ')} — their pages are
-              owned by you instead.
-            </p>
+          {job.error && (
+            <div className='flex items-start gap-2 px-[14px] py-2.5 pl-[46px] text-[13px] text-destructive'>
+              <TriangleAlert className='mt-0.5 size-4 shrink-0' />
+              <span className='break-words'>{job.error}</span>
+            </div>
           )}
-          {job.summary.warnings.length > 0 && (
-            <details className='mt-3 text-sm'>
+          {job.status === 'awaiting_review' && <ReviewPanel job={job} />}
+
+          {summary && summary.canvases.length > 0 && (
+            <>
+              <div
+                className={cn(
+                  'grid gap-3 px-[14px] py-2 pl-[46px] text-xs font-medium text-muted-foreground',
+                  PAGE_COLS,
+                )}
+              >
+                <span />
+                <span>Page</span>
+                <span>Owner</span>
+                <span>Access</span>
+              </div>
+              {summary.canvases.map(c => (
+                <div
+                  key={c.url}
+                  className={cn(
+                    'grid items-center gap-3 border-t border-border/60 px-[14px] py-[7px] pl-[46px]',
+                    PAGE_COLS,
+                  )}
+                >
+                  <span className='text-[hsl(142_60%_40%)]'>✓</span>
+                  <Link to={inAppPath(c.url) ?? c.url} className='truncate hover:underline'>
+                    {c.title}
+                  </Link>
+                  <span className='truncate text-muted-foreground'>{c.ownerEmail ?? '—'}</span>
+                  <span className='truncate text-muted-foreground'>
+                    {(c.sharedWith ?? []).map(shortName).join(', ') || '—'}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+          {notes.length > 0 && (
+            <div className='border-t border-border/60 px-[14px] py-2 pl-[46px] text-xs text-muted-foreground'>
+              {notes.join(' · ')}
+            </div>
+          )}
+          {summary && summary.warnings.length > 0 && (
+            <details className='border-t border-border/60 px-[14px] py-2 pl-[46px] text-xs'>
               <summary className='cursor-pointer text-amber-600'>
-                {job.summary.warnings.length} warning{job.summary.warnings.length === 1 ? '' : 's'}
+                {summary.warnings.length} warning{summary.warnings.length === 1 ? '' : 's'}
               </summary>
               <ul className='mt-1 list-disc space-y-1 pl-5 text-muted-foreground'>
-                {job.summary.warnings.map(w => (
+                {summary.warnings.map(w => (
                   <li key={w} className='break-words'>
                     {w}
                   </li>
@@ -350,48 +480,24 @@ function JobCard({ job }: { job: NotionImportJob }): React.JSX.Element {
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-function CoverageLine({ coverage }: { coverage: NotionCoverage }): React.JSX.Element {
-  const label = (p: NotionCoverage['people'][number]): string => p.email ?? p.name;
-  const withAccount = coverage.people.filter(p => p.hasSpacesAccount);
-  const done = withAccount.filter(p => p.imported);
-  const pending = withAccount.filter(p => !p.imported);
-  const noAccount = coverage.people.filter(p => !p.hasSpacesAccount);
-  return (
-    <p className='mb-3 text-xs leading-relaxed text-muted-foreground'>
-      {coverage.source === 'notion' ? (
-        <>
-          Notion workspace <b className='text-foreground'>{coverage.notionWorkspace ?? ''}</b>:{' '}
-        </>
-      ) : (
-        <>No import yet, so showing Spaces people. </>
-      )}
-      <b className='text-foreground'>
-        {done.length} of {withAccount.length}
-      </b>{' '}
-      have imported their Notion. Shared and teamspace pages only reach people once they import.
-      {pending.length > 0 && <> Not yet: {pending.map(label).join(', ')}.</>}
-      {noAccount.length > 0 && (
-        <> No Spaces account (can’t get access yet): {noAccount.map(label).join(', ')}.</>
-      )}
-    </p>
-  );
-}
-
+// ---------------------------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------------------------
 const NotionMigration = (): React.JSX.Element => {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
-  const [token, setToken] = useState('');
-  const [starting, setStarting] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(searchParams.get('error'));
   // Set while the user is on Notion's consent screen in another tab / the system browser.
   const [waitingForNotion, setWaitingForNotion] = useState<{ since: number; url: string } | null>(
     null,
   );
+  // Expanded history rows; the newest import starts open.
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
 
   const connect = async (): Promise<void> => {
     setError(null);
@@ -403,10 +509,7 @@ const NotionMigration = (): React.JSX.Element => {
       openLink(url, null, { force: 'external' });
       setWaitingForNotion({ since: Date.now(), url });
     } catch (e) {
-      setError(
-        (e as { response?: { data?: { message?: string } } }).response?.data?.message ??
-          (e instanceof Error ? e.message : 'Could not start the Notion connection'),
-      );
+      setError(errorMessage(e, 'Could not start the Notion connection'));
     } finally {
       setConnecting(false);
     }
@@ -416,12 +519,11 @@ const NotionMigration = (): React.JSX.Element => {
     queryKey: ['notion-migration', 'mine'],
     queryFn: notionMigrationApi.listMine,
     refetchInterval: query =>
-      waitingForNotion ||
-      query.state.data?.jobs.some(j => j.status === 'collecting' || j.status === 'ingesting')
-        ? POLL_MS
-        : false,
+      waitingForNotion || query.state.data?.jobs.some(isRunning) ? POLL_MS : false,
   });
   const jobs = data?.jobs ?? [];
+  const isAdmin = data?.isAdmin ?? false;
+
   // Stop waiting once the import shows up (the user clicked Allow), or after 10 minutes.
   const notionJobArrived =
     waitingForNotion !== null && jobs.some(j => j.startedAt >= waitingForNotion.since - 5000);
@@ -437,29 +539,16 @@ const NotionMigration = (): React.JSX.Element => {
     );
     return () => clearTimeout(timer);
   }, [waitingForNotion, notionJobArrived]);
-  const isAdmin = data?.isAdmin ?? false;
+
   const { data: coverage } = useQuery({
     queryKey: ['notion-migration', 'coverage'],
     queryFn: notionMigrationApi.coverage,
     enabled: isAdmin,
+    refetchInterval: jobs.some(isRunning) ? POLL_MS * 5 : false,
   });
 
-  const start = async (): Promise<void> => {
-    setError(null);
-    setStarting(true);
-    try {
-      await notionMigrationApi.startWithToken(token.trim());
-      setToken('');
-      await queryClient.invalidateQueries({ queryKey: ['notion-migration', 'mine'] });
-    } catch (e) {
-      setError(
-        (e as { response?: { data?: { message?: string } } }).response?.data?.message ??
-          (e instanceof Error ? e.message : 'Could not start the import'),
-      );
-    } finally {
-      setStarting(false);
-    }
-  };
+  const newestId = jobs[0]?.id;
+  const isOpen = (id: string): boolean => openRows[id] ?? id === newestId;
 
   return (
     <div className='flex h-full w-full flex-col'>
@@ -467,118 +556,95 @@ const NotionMigration = (): React.JSX.Element => {
         <AppNavigator />
       </div>
       <div className='min-h-0 flex-1 overflow-y-auto border-t border-sidebar-border-muted'>
-        <div className='mx-auto max-w-6xl px-4 py-8 sm:px-6'>
-          <div className='lg:grid lg:grid-cols-[19rem_minmax(0,1fr)] lg:gap-10'>
-            <aside className='mb-8 lg:sticky lg:top-8 lg:mb-0 lg:self-start'>
-              <header className='mb-5'>
-                <h1 className='text-2xl font-semibold tracking-tight text-foreground'>
-                  Notion migration
-                </h1>
-                <p className='mt-1.5 text-sm leading-relaxed text-muted-foreground'>
-                  Bring a Notion workspace’s pages, sub-pages and databases into Spaces as canvases.
-                </p>
-              </header>
-              {isAdmin && <GuideRail />}
-            </aside>
-
-            <div className='min-w-0 space-y-8'>
-              {error && (
-                <div className='flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive'>
-                  <TriangleAlert className='mt-0.5 size-4 shrink-0' />
-                  <span className='break-words'>{error}</span>
-                </div>
-              )}
-
-              <div className='rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5'>
-                <div className='mb-1.5 flex items-center gap-2 text-sm font-medium text-foreground'>
-                  <Lock className='size-4' />
-                  Import my Notion
-                </div>
-                <p className='mb-3 text-sm leading-relaxed text-muted-foreground'>
-                  Bring over everything you can see in Notion. When Notion asks, use{' '}
-                  <b className='text-foreground'>select all</b> under Teamspaces, Shared and
-                  Private. Every page becomes a private canvas shared with exactly the people who
-                  can see it in Notion — as your teammates import too, they’re added to the same
-                  canvas.
-                </p>
-                <Button
-                  disabled={connecting}
-                  loading={connecting}
-                  trackId='notion_migration_connect'
-                  onClick={() => void connect()}
-                  data-track-category='NOTION_MIGRATION'
-                  data-track-name='CONNECT_MEMBER'
-                >
-                  Connect Notion
-                </Button>
-                {waitingForNotion && (
-                  <p className='mt-3 text-xs leading-relaxed text-muted-foreground'>
-                    Finish in the Notion window that just opened: pick your pages and click{' '}
-                    <b className='text-foreground'>Allow access</b>. This page updates by itself.
-                    Didn’t open?{' '}
-                    <button
-                      className='underline'
-                      onClick={() => openLink(waitingForNotion.url, null, { force: 'external' })}
-                      data-track-category='NOTION_MIGRATION'
-                      data-track-name='REOPEN_CONSENT'
-                    >
-                      Open Notion again
-                    </button>
-                  </p>
-                )}
-              </div>
-
-              {isAdmin && !isLoading && (
-                <div className='rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5'>
-                  <div className='mb-1.5 flex items-center gap-2 text-sm font-medium text-foreground'>
-                    <Building2 className='size-4' />
-                    Workspace import (admin)
-                  </div>
-                  {coverage && <CoverageLine coverage={coverage} />}
-                  <label
-                    htmlFor='notion-token'
-                    className='mb-1.5 block text-sm font-medium text-foreground'
-                  >
-                    Notion integration token
-                  </label>
-                  <div className='flex flex-col gap-2 sm:flex-row'>
-                    <Input
-                      id='notion-token'
-                      type='password'
-                      placeholder='ntn_…'
-                      value={token}
-                      onChange={e => setToken(e.target.value)}
-                      className='flex-1 font-mono'
-                    />
-                    <Button
-                      disabled={starting || !token.trim()}
-                      loading={starting}
-                      trackId='notion_migration_start'
-                      onClick={() => void start()}
-                      data-track-category='NOTION_MIGRATION'
-                      data-track-name='START_WITH_TOKEN'
-                    >
-                      Start import
-                    </Button>
-                  </div>
-                  <p className='mt-2 text-xs text-muted-foreground'>
-                    Reads every page shared with the integration, then asks you to review who can
-                    see each one before anything is created.
-                  </p>
-                </div>
-              )}
-
-              {jobs.length > 0 && (
-                <section className='space-y-3'>
-                  <h2 className='text-sm font-semibold text-foreground'>Notion imports</h2>
-                  {jobs.map(job => (
-                    <JobCard key={job.id} job={job} />
-                  ))}
-                </section>
-              )}
-            </div>
+        <main className='mx-auto box-border flex max-w-[880px] flex-col gap-8 px-6 pb-16 pt-8'>
+          <div className='flex flex-col gap-1'>
+            <h2 className='m-0 text-lg font-semibold'>Notion</h2>
+            <p className='m-0 text-[13px] text-muted-foreground'>
+              Import pages and databases as canvases. Read-only — nothing changes in Notion.
+            </p>
           </div>
-        </div>
+
+          {error && (
+            <div className='flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive'>
+              <TriangleAlert className='mt-0.5 size-4 shrink-0' />
+              <span className='break-words'>{error}</span>
+            </div>
+          )}
+
+          <section className='flex flex-col gap-3 rounded-xl border border-border bg-card px-5 py-4'>
+            <div className='flex flex-wrap items-center justify-between gap-4'>
+              <div className='flex min-w-0 flex-[1_1_320px] flex-col gap-1'>
+                <div className='text-sm font-semibold'>Import my Notion</div>
+                <div className='text-[13px] text-muted-foreground'>
+                  Choose <b className='font-medium text-foreground'>Select all</b> when Notion asks.
+                  Pages stay visible only to the people who can see them in Notion.
+                </div>
+              </div>
+              <Button
+                disabled={connecting}
+                loading={connecting}
+                trackId='notion_migration_connect'
+                onClick={() => void connect()}
+                data-track-category='NOTION_MIGRATION'
+                data-track-name='CONNECT_MEMBER'
+              >
+                Connect Notion
+              </Button>
+            </div>
+            {waitingForNotion && (
+              <div className='text-xs text-muted-foreground'>
+                Finish in the Notion window that just opened, then come back — this page updates by
+                itself. Didn’t open?{' '}
+                <button
+                  className='underline'
+                  onClick={() => openLink(waitingForNotion.url, null, { force: 'external' })}
+                  data-track-category='NOTION_MIGRATION'
+                  data-track-name='REOPEN_CONSENT'
+                >
+                  Open Notion again
+                </button>
+              </div>
+            )}
+          </section>
+
+          {isAdmin && !isLoading && (
+            <WorkspaceImportCard
+              coverage={coverage}
+              onStarted={() =>
+                queryClient.invalidateQueries({ queryKey: ['notion-migration', 'mine'] })
+              }
+            />
+          )}
+
+          {jobs.length > 0 && (
+            <section className='flex flex-col gap-3'>
+              <div className='text-sm font-semibold'>History</div>
+              <div className='overflow-hidden rounded-xl border border-border bg-card text-[13px]'>
+                <div
+                  className={cn(
+                    'grid gap-3 bg-muted/50 px-[14px] py-[9px] text-xs font-medium text-muted-foreground',
+                    HISTORY_COLS,
+                  )}
+                >
+                  <span />
+                  <span>Import</span>
+                  <span>Status</span>
+                  <span className='text-right'>Created</span>
+                  <span className='text-right'>Updated</span>
+                  <span className='text-right'>Date</span>
+                </div>
+                {jobs.map(job => (
+                  <HistoryRow
+                    key={job.id}
+                    job={job}
+                    open={isOpen(job.id)}
+                    onToggle={() => setOpenRows(rows => ({ ...rows, [job.id]: !isOpen(job.id) }))}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </main>
       </div>
     </div>
   );
