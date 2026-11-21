@@ -44,6 +44,7 @@ router.post('/recordings/:callId/sharing', recordingSharingController.manage);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.post('/recordings/:callId/participants', callController.manageRecordingParticipants);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
+router.post('/recordings/:callId/update', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 // Disabled (LLM)
 // router.get('/summary-templates', summaryTemplateController.list);
