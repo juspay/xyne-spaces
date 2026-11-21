@@ -11,7 +11,7 @@ import {
 // import { suggestReleaseServices } from '@/agents/release-service-suggest/index.js';
 // Disabled (LLM)
 // import { AccessType, BaseTicketType, FormEntityType, VCSProviderType } from '@xyne/shared';
-import { AccessType, BaseTicketType, FormEntityType } from '@xyne/shared';
+import { AccessType, FormEntityType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 // Disabled (LLM)
 // import { config } from '@/config/env';
@@ -19,7 +19,8 @@ import { db } from '@/database/client';
 import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { FormsRepository } from '@/database/repositories/formsRepository';
-import { unifiedBotUserService } from '@/bots/unified/index.js';
+import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
+import { buildCreationFormFieldChanges } from '@/services/ticketCustomFieldService';
 
 const router = Router();
 const commitAnalysisController = new CommitAnalysisController();
@@ -47,18 +48,13 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
       where: { id: ticketId },
       select: {
         id: true,
-        xyneId: true,
-        ticketType: true,
-        conversationId: true,
         channelId: true,
         workspaceId: true,
+        boardId: true,
+        projectId: true,
       },
     });
-    if (!ticket) {
-      res.status(404).json({ error: `Ticket ${ticketId} not found` });
-      return;
-    }
-    if (ticket.workspaceId !== req.user?.workspaceId) {
+    if (!ticket || ticket.workspaceId !== req.user?.workspaceId) {
       res.status(404).json({ error: `Ticket ${ticketId} not found` });
       return;
     }
@@ -70,10 +66,12 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
     // Trim — same defense as the create path in TicketController.
     const deployedCommitId = String(formValues['deployedCommitId'] ?? '').trim();
     const newCommitId = String(formValues['newCommitId'] ?? '').trim();
-    const branch = String(formValues['branch'] ?? '').trim() || 'main';
 
-    const repoCount = await db.releaseRepository.count({ where: { releaseId: ticketId } });
-    if (repoCount === 0 && (!deployedCommitId || !newCommitId)) {
+    const repos = await db.releaseRepository.findMany({
+      where: { releaseId: ticketId },
+      select: { branch: true, deployedCommit: true, newCommit: true },
+    });
+    if (repos.length === 0 && (!deployedCommitId || !newCommitId)) {
       res.status(400).json({
         error:
           'This release ticket is missing deployedCommitId or newCommitId form fields — re-run is only supported for COMMIT_RANGE releases.',
@@ -81,27 +79,30 @@ router.post('/re-run/:ticketId', authorizePrivilegedOrResource('RELEASE-MANAGER'
       return;
     }
 
-    const xyneReleaseBot = await unifiedBotUserService.getBotByBotId(
-      'xyne-release-bot',
-      ticket.workspaceId,
-    );
-
-    const result = await commitAnalysisController.analyzeCommits({
-      conversationId: ticket.conversationId,
-      userId: xyneReleaseBot?.id || userId,
-      channelId: ticket.channelId || undefined,
-      newCommitId,
-      deployedCommitId,
-      branch,
-      currentTicketId: ticket.id,
-      userName: req.user?.name,
-      workspaceId: ticket.workspaceId,
-      // keep Hotfix-type re-runs flagging ART rows as hotfix (matches create path)
-      isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
-      isReRun: true,
+    // The release workflow does the analysis: hand it the release as a fresh TICKET_CREATED event,
+    // with the commit range as the form field values a new release carries.
+    const [repo] = repos;
+    const range = repo
+      ? { branch: repo.branch, deployedCommitId: repo.deployedCommit, newCommitId: repo.newCommit }
+      : { branch: formValues['branch'], deployedCommitId, newCommitId };
+    const { workflowRuntime } = await import('@/workflowsV2/runtime');
+    await workflowRuntime.dispatchEvent({
+      type: TICKET_CREATED_EVENT,
+      payload: {
+        ticketId: ticket.id,
+        scope: { boardId: ticket.boardId, projectId: ticket.projectId, channelId: ticket.channelId },
+        formFieldChanges: buildCreationFormFieldChanges(
+          Object.entries(range).map(([name, value]) => ({
+            fieldId: name,
+            fieldName: name,
+            value: String(value ?? '').trim(),
+          })),
+        ),
+        performedBy: { id: userId },
+      },
+      metadata: { workspaceId: ticket.workspaceId },
     });
-
-    res.json({ success: result.success, canvasUrl: result.canvasUrl, error: result.error });
+    res.json({ success: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     logger.error('[CommitAnalysis] re-run failed', { ticketId, error: msg });

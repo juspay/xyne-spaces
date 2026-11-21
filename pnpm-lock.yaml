@@ -285,6 +285,9 @@ importers:
       '@xyne/cache':
         specifier: workspace:*
         version: link:../../packages/cache
+      '@xyne/connector-sdk':
+        specifier: 0.1.4
+        version: 0.1.4(@xyne/workflow-sdk@3.2.69(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(typebox@1.1.38))
       '@xyne/secrets-vault':
         specifier: workspace:*
         version: link:../../packages/secrets-vault
@@ -10061,6 +10064,12 @@ packages:
 
   '@xyflow/system@0.0.79':
     resolution: {integrity: sha512-czLyOh91NF0hIzbNzwi8I6GlqG23BHh2435OddfI6uiaLH3xdrdygO93gqgH1Bv9mhy8XPFQJOBn1FTq4LvEWA==}
+
+  '@xyne/connector-sdk@0.1.4':
+    resolution: {integrity: sha512-dMVQhuHv9L3egl3S2pa5Q0XwSvCQqwF9RJWZCCYpAwOkK7PcJ2gJA/7fw2/2LqJT6NzH8j/pTTIx16kMOuk+4g==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      '@xyne/workflow-sdk': 3.2.39
 
   '@xyne/spaces-sdk@0.2.0-next.0':
     resolution: {integrity: sha512-UncMUfpmczG5IqvQ5sH1mU5ynwewwIKebv+9eXzEbsM03q5nX5KNNL/zY6btBt12PejBegi/FKL9QX7Ns4hmvQ==}
@@ -19952,6 +19961,9 @@ packages:
     peerDependencies:
       zod: 4.6.6
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zod@4.6.6:
     resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
@@ -29448,6 +29460,11 @@ snapshots:
       d3-interpolate: 3.0.1
       d3-selection: 3.0.0
       d3-zoom: 3.0.0
+
+  '@xyne/connector-sdk@0.1.4(@xyne/workflow-sdk@3.2.69(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(typebox@1.1.38))':
+    dependencies:
+      '@xyne/workflow-sdk': 3.2.69(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(typebox@1.1.38)
+      zod: 3.25.76
 
   '@xyne/spaces-sdk@0.2.0-next.0': {}
 
@@ -41803,6 +41820,8 @@ snapshots:
   zod-validation-error@4.0.2(zod@4.6.6):
     dependencies:
       zod: 4.6.6
+
+  zod@3.25.76: {}
 
   zod@4.6.6: {}
 

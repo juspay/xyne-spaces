@@ -18,6 +18,10 @@ import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { conversationalFlowQueue } from '@/queues/conversationalFlowQueue';
+import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
+import { GitHubConnector } from '@xyne/connector-sdk/github';
+import { XyneSpacesConnector } from './connectors/xyne-spaces';
+import { ReleaseConnector } from './connectors/release';
 // Disabled (Claw)
 // import { ClawAgentProvider } from './agents/claw-provider';
 // import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
@@ -28,6 +32,7 @@ import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
 import { workflowStorage } from './adapters/storage';
+import { HttpSandboxAdapter } from './adapters/sandbox';
 import { XyneWorkflowAuthorizer } from './authorizer';
 import { DEFAULT_CRON_TIMEZONE } from './constants';
 import type { XyneCtx, XyneFilter } from './types';
@@ -48,6 +53,10 @@ const storage = workflowStorage;
 const services = new ServiceRegistry();
 
 const connectors = new ConnectorRegistry();
+connectors.register(new XyneSpacesConnector());
+connectors.register(new ReleaseConnector());
+connectors.register(new GitHubConnector());
+connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
@@ -124,6 +133,9 @@ const APPROVAL_POLICY = {
   triggers: {},
 } as const satisfies ApprovalConfig;
 
+const sandbox = config.sandbox.url ? new HttpSandboxAdapter(config.sandbox.url) : undefined;
+if (!sandbox) logger.warn('[workflows] SANDBOX_URL not set — CODE steps will fail');
+
 const executor = new WorkflowExecutor(persistence, connectors, services, {
   eventBus,
   baseUrl: BASE_URL,
@@ -131,6 +143,7 @@ const executor = new WorkflowExecutor(persistence, connectors, services, {
   egressProxyUrl: config.ssrf.egressProxyUrl,
   storage,
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
 });
 
 export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, XyneCtx, XyneFilter>({
@@ -144,6 +157,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
   eventBus,
   authorizer: new XyneWorkflowAuthorizer(),
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
   config: {
     baseUrl: BASE_URL,
     defaultCronTimezone: DEFAULT_CRON_TIMEZONE,
