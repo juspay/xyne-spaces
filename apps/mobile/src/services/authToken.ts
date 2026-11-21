@@ -4,7 +4,7 @@ import type { AuthJwtClaims } from './authJwtClaims';
 import { refreshAuthSession } from './AuthServices';
 import {
   getCookieValueFromJar,
-  GOOGLE_ACCESS_TOKEN_COOKIE,
+  workspaceTokenCookieName,
   XYNE_LAST_WORKSPACE_COOKIE,
 } from '@/src/utils/apiCookieHeader';
 import {
@@ -31,12 +31,7 @@ export { decodeAuthJwtClaims, isTokenExpiringSoon };
 export type { AuthJwtClaims };
 
 export type AccessTokenSource =
-  | 'workspace_cookie'
-  | 'last_workspace_cookie'
-  | 'legacy_google_cookie'
-  | 'secure_store'
-  | 'refresh_session'
-  | 'none';
+  'workspace_cookie' | 'last_workspace_cookie' | 'secure_store' | 'refresh_session' | 'none';
 
 export interface ResolvedAccessToken {
   token: string | null;
@@ -82,7 +77,7 @@ export async function readWorkspaceTokenFromCookieJar(
   if (!workspaceId) {
     return undefined;
   }
-  return getCookieValueFromJar(API_ORIGIN, `xyne_ws_${workspaceId}_token`);
+  return getCookieValueFromJar(API_ORIGIN, workspaceTokenCookieName(workspaceId));
 }
 
 async function readJwtFromCookieJar(preferredWorkspaceId?: string): Promise<{
@@ -111,14 +106,6 @@ async function readJwtFromCookieJar(preferredWorkspaceId?: string): Promise<{
         cookieWorkspaceId: lastWorkspaceId,
       };
     }
-  }
-
-  const legacyToken = await getCookieValueFromJar(API_ORIGIN, GOOGLE_ACCESS_TOKEN_COOKIE);
-  if (legacyToken) {
-    return {
-      token: legacyToken,
-      source: 'legacy_google_cookie',
-    };
   }
 
   return { source: 'none' };

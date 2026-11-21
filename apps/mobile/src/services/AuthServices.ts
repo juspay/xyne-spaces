@@ -1,18 +1,22 @@
-import CookieManager from '@react-native-cookies/cookies';
-import { Platform } from 'react-native';
 import { CryptoDigestAlgorithm, CryptoEncoding, digestStringAsync } from 'expo-crypto';
 import { apiGet, apiPost, isMtlsRequestError } from './apiClient';
+import {
+  setSessionEndedHandler,
+  setSessionRefresher,
+  type SessionRefreshOutcome,
+} from '@/src/utils/sessionRefreshOn401';
 import { API_BASE_URL, API_ORIGIN } from '../config';
-import { injectCookiesFromResponse } from '@/src/utils/cookie-injection';
+import { injectCookiesFromResponse, pointLastWorkspaceAt } from '@/src/utils/cookie-injection';
 import { getResponseJson, mtlsFetch, type MtlsResponse } from '../utils/mtlsHttpClient';
 import { isLikelyOfflineOrTransientNetworkError } from '@/src/utils/networkConnectivityErrors';
 import {
   getCookieValueFromJar,
-  GOOGLE_ACCESS_TOKEN_COOKIE,
-  getSessionIdFromJar,
+  REFRESH_SESSION_URL,
+  workspaceTokenCookieName,
   XYNE_LAST_WORKSPACE_COOKIE,
 } from '@/src/utils/apiCookieHeader';
 import { getActiveWorkspaceId } from '../utils/activeWorkspace';
+import { isSessionEndedRefusal } from './sessionTokenPolicy';
 import { CommunityJoinResultStatus } from './CommunityServices';
 import {
   classifyRemoteLogoutResponse,
@@ -21,7 +25,6 @@ import {
   type RemoteLogoutOutcome,
 } from './remoteLogoutOutcome';
 import {
-  enqueueAuthCookieMutation,
   getAuthOperation,
   getAuthSessionGeneration,
   isAuthScopeCurrent,
@@ -147,9 +150,12 @@ export interface CreateOrgRequest {
   workspaceName: string;
 }
 
-/** Response shape from `GET /v2/auth/refresh-session` (JWT only via Set-Cookie). */
+/** Response shape from `GET /api/auth/refresh-session` (JWT only via Set-Cookie). */
 export interface RefreshSessionResponse {
   success: boolean;
+  workspaceId?: string;
+  /** Epoch milliseconds. */
+  accessTokenExpiresAt?: number;
   message?: string;
 }
 
@@ -199,6 +205,8 @@ interface ExchangeMobileResponse {
     picture?: string;
   };
   userId?: string;
+  /** The auth session the backend created; only sent when it logged straight into a single workspace. */
+  sessionId?: string;
   email?: string;
   name?: string;
   picture?: string;
@@ -357,16 +365,28 @@ interface CreateWorkspaceResponse {
 }
 
 export type RefreshSessionResult =
-  | { ok: true; token: string }
+  | {
+      ok: true;
+      token: string;
+      /** The workspace the backend minted the JWT for (`data.workspaceId`). */
+      workspaceId?: string;
+    }
   | {
       ok: false;
+      /**
+       * `workspace_mismatch`: the backend refreshed a different workspace than the
+       * caller asked for; that workspace's token is never handed out as this one's.
+       */
       kind:
-        'no_session_cookie' | 'unauthorized' | 'invalid_body' | 'missing_jwt_cookie' | 'transient';
+        'unauthorized' | 'invalid_body' | 'missing_jwt_cookie' | 'workspace_mismatch' | 'transient';
     };
 
 async function readJwtFromJarAfterInjection(workspaceId?: string): Promise<string | undefined> {
   if (workspaceId) {
-    const workspaceToken = await getCookieValueFromJar(API_ORIGIN, `xyne_ws_${workspaceId}_token`);
+    const workspaceToken = await getCookieValueFromJar(
+      API_ORIGIN,
+      workspaceTokenCookieName(workspaceId),
+    );
     if (workspaceToken) {
       return workspaceToken;
     }
@@ -376,13 +396,13 @@ async function readJwtFromJarAfterInjection(workspaceId?: string): Promise<strin
   if (resolvedWorkspaceId) {
     const workspaceToken = await getCookieValueFromJar(
       API_ORIGIN,
-      `xyne_ws_${resolvedWorkspaceId}_token`,
+      workspaceTokenCookieName(resolvedWorkspaceId),
     );
     if (workspaceToken) {
       return workspaceToken;
     }
   }
-  return getCookieValueFromJar(API_ORIGIN, GOOGLE_ACCESS_TOKEN_COOKIE);
+  return undefined;
 }
 
 async function postAuthJson<T>(
@@ -411,46 +431,6 @@ async function postAuthJson<T>(
   }
 
   return { data, headers: response.headers };
-}
-
-async function clearCookieByName(
-  origin: string,
-  name: string,
-  isCurrent: () => boolean = () => true,
-  generation = getAuthSessionGeneration(),
-  operation = getAuthOperation(),
-): Promise<void> {
-  const scopeCurrent = (): boolean => isCurrent() && isAuthScopeCurrent(generation, operation);
-  return enqueueAuthCookieMutation(
-    generation,
-    async (): Promise<void> => {
-      if (!scopeCurrent()) {
-        return;
-      }
-      try {
-        await CookieManager.clearByName(origin, name);
-      } catch {
-        // Best-effort cleanup; callers still have session-cookie fallback.
-      }
-
-      if (Platform.OS === 'ios' && scopeCurrent()) {
-        try {
-          await CookieManager.clearByName(origin, name, true);
-        } catch {
-          // Ignore WebKit cookie-store misses.
-        }
-      }
-
-      if (Platform.OS === 'android' && scopeCurrent()) {
-        try {
-          await CookieManager.flush();
-        } catch {
-          // Ignore flush failures.
-        }
-      }
-    },
-    scopeCurrent,
-  );
 }
 
 export async function getUserById(_userId: string, token: string): Promise<GetUserResponse> {
@@ -607,7 +587,7 @@ async function resolveMobileAuthExchangeResult(
   }
 
   const hasResolvedUser = typeof data.user?.id === 'string' || typeof data.userId === 'string';
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
+  const sessionId = data.sessionId;
 
   if (!hasResolvedUser && !sessionId) {
     if (workspaces.length > 0) {
@@ -669,7 +649,7 @@ async function resolveMobileAuthExchangeResult(
     );
   } catch (err) {
     if (!hasResolvedUser) {
-      // Token present but /me returned 401 — likely a stale google_access_token from a
+      // Token present but /me returned 401 — likely a stale workspace token from a
       // previous session. Direct the user through workspace/org selection instead of
       // showing "Unable to resolve authenticated user profile".
       if (workspaces.length > 0) {
@@ -828,17 +808,6 @@ export async function authenticateWithEmail(
   }
 
   if (workspaces.length > 1) {
-    const sessionId = await getSessionIdFromJar(API_ORIGIN);
-    if (sessionId && isAuthScopeCurrent(generation, operation)) {
-      await clearCookieByName(
-        API_ORIGIN,
-        GOOGLE_ACCESS_TOKEN_COOKIE,
-        () => isAuthScopeCurrent(generation, operation),
-        generation,
-        operation,
-      );
-    }
-
     return {
       success: true,
       kind: 'workspace_selection_required',
@@ -876,7 +845,6 @@ export async function authenticateWithEmail(
     },
     data.user?.id,
   );
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
 
   return {
     success: true,
@@ -885,7 +853,6 @@ export async function authenticateWithEmail(
     user,
     workspaces,
     profile,
-    ...(sessionId ? { sessionId } : {}),
     ...(userExistsButRemoved ? { userExistsButRemoved } : {}),
   };
 }
@@ -965,7 +932,7 @@ export async function resendRegistrationCode(email: string): Promise<string> {
 /**
  * Completes registration with the emailed code.
  *
- * On success the backend sets the `google_access_token` pending-auth cookie — the same cookie the
+ * On success the backend sets the `xyne_pending_auth` pending-auth cookie — the same cookie the
  * OAuth callback issues — which is what lets `joinCommunityWorkspace()` authenticate immediately
  * afterwards without a separate sign-in. That cookie is short-lived (10 minutes, single-use), so
  * the caller should complete the join promptly.
@@ -1131,8 +1098,8 @@ export async function loginToWorkspace(
  * Joins a public community workspace.
  *
  * Identity comes from the cookie jar: the backend accepts either the short-lived
- * `google_access_token` pending-auth cookie (brand-new user, not yet in any workspace) or the
- * `user_session_id` session cookie (returning user). On success the response sets the same
+ * `xyne_pending_auth` pending-auth cookie (brand-new user, not yet in any workspace) or a
+ * workspace JWT cookie (returning user). On success the response sets the same
  * workspace cookies as `POST /auth/login-workspace`, so the token is resolved the same way.
  *
  * An empty body is sent deliberately, matching the dashboard, so the workspace's own
@@ -1196,7 +1163,7 @@ export async function joinCommunityWorkspace(workspaceId: string): Promise<Commu
  *
  * Same endpoint as a community join, but `workspaceType: 'ENTERPRISE'` makes the backend queue a
  * join request for admin review rather than granting membership. Identity comes from the
- * short-lived `google_access_token` pending-auth cookie already in the jar, so this must run while
+ * short-lived `xyne_pending_auth` pending-auth cookie already in the jar, so this must run while
  * that cookie is still valid (10 minutes from sign-in).
  */
 export async function requestEnterpriseWorkspaceJoin(
@@ -1275,6 +1242,8 @@ export async function createWorkspaceInExistingOrg(workspaceName: string): Promi
 export async function switchToWorkspace(
   workspaceId: string,
   token: string,
+  /** The workspace the caller is signed in to; its cookie authenticates the switch. */
+  currentWorkspaceId: string | undefined,
   generation = getAuthSessionGeneration(),
   operation = getAuthOperation(),
 ): Promise<AuthResponse> {
@@ -1287,6 +1256,7 @@ export async function switchToWorkspace(
       'X-Platform': 'mobile',
       'X-Requested-With': 'XMLHttpRequest',
       Authorization: `Bearer ${token}`,
+      ...(currentWorkspaceId ? { 'x-workspace-id': currentWorkspaceId } : {}),
     },
     body: JSON.stringify({ workspaceId }),
   });
@@ -1545,49 +1515,13 @@ function extractErrorMessage(response: MtlsResponse, statusCode: number): string
   return `Request failed: ${statusCode}`;
 }
 
+/** Goes through `refreshAuthSession` so it shares the in-flight request. */
 async function refreshTokenFromSessionCookie(
   generation = getAuthSessionGeneration(),
   operation = getAuthOperation(),
 ): Promise<string | undefined> {
-  return trackAuthSessionOperation(
-    generation,
-    performRefreshTokenFromSessionCookie(generation, operation),
-  );
-}
-
-async function performRefreshTokenFromSessionCookie(
-  generation: number,
-  operation: number,
-): Promise<string | undefined> {
-  if (!isAuthScopeCurrent(generation, operation)) {
-    return undefined;
-  }
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
-  if (!sessionId) {
-    return undefined;
-  }
-
-  const url = `${API_BASE_URL}/v2/auth/refresh-session`;
-  const response = await mtlsFetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (response.statusCode < 200 || response.statusCode >= 300) {
-    return undefined;
-  }
-
-  await injectCookiesFromResponse(API_ORIGIN, response.headers, {
-    waitForPropagation: true,
-    generation,
-    operation,
-  });
-  if (!isAuthScopeCurrent(generation, operation)) {
-    return undefined;
-  }
-  return readJwtFromJarAfterInjection();
+  const result = await refreshAuthSession(undefined, generation, operation);
+  return result.ok ? result.token : undefined;
 }
 
 export async function getWorkspaces(token: string): Promise<WorkspaceItem[]> {
@@ -1653,49 +1587,93 @@ export async function signOutUser(userId: string): Promise<RemoteLogoutOutcome> 
   }
 }
 
-const inFlightRefreshes = new Map<
-  string,
-  { generation: number; operation: number; promise: Promise<RefreshSessionResult> }
->();
+/**
+ * The one refresh on the wire. `xs` is a single token for the whole session, whatever
+ * workspace a caller wants, so there is exactly one of these, not one per workspace.
+ */
+let inFlightRefresh: {
+  generation: number;
+  operation: number;
+  promise: Promise<RefreshSessionResult>;
+} | null = null;
 
 /**
- * Refresh JWT using session + API cookies (same as dashboard: `Set-Cookie` for `google_access_token`).
+ * Refresh the workspace JWT using the `xs` refresh cookie (same endpoint as the dashboard).
  * Does not rely on JWT in the JSON body.
  *
- * Concurrent callers (proactive keep-alive, `needs-auth` recovery, access-token
- * resolution) share one in-flight request so they cannot rotate the session
- * cookie out from under each other.
+ * Every caller (keep-alive, Zero recovery, start-up check, 401 retry, token
+ * resolution) shares one in-flight request, whatever `workspaceId` it asks for, so a
+ * burst of callers costs one request. `workspaceId` only picks which workspace's
+ * JWT is read from the jar afterwards; the request itself is identical for everyone.
  */
 export function refreshAuthSession(
   workspaceId?: string,
   generation = getAuthSessionGeneration(),
   operation = getAuthOperation(),
 ): Promise<RefreshSessionResult> {
-  const key = workspaceId ?? '';
-  const inFlight = inFlightRefreshes.get(key);
-  if (inFlight && inFlight.generation === generation && inFlight.operation === operation) {
-    return inFlight.promise;
+  const shared = joinOrStartRefresh(generation, operation);
+  if (workspaceId === undefined) {
+    return shared;
+  }
+  return shared.then(async result => {
+    if (!result.ok) {
+      return result;
+    }
+    // Never hand out another workspace's token as this one's: its retry would carry
+    // `x-workspace-id` for this workspace, earn the same 401 and refresh
+    // again on every request.
+    if (result.workspaceId !== undefined) {
+      return result.workspaceId === workspaceId
+        ? result
+        : { ok: false, kind: 'workspace_mismatch' };
+    }
+    const token = await getCookieValueFromJar(API_ORIGIN, workspaceTokenCookieName(workspaceId));
+    if (!isAuthScopeCurrent(generation, operation)) {
+      return { ok: false, kind: 'transient' };
+    }
+    return token ? { ok: true, token, workspaceId } : { ok: false, kind: 'missing_jwt_cookie' };
+  });
+}
+
+function joinOrStartRefresh(generation: number, operation: number): Promise<RefreshSessionResult> {
+  const current = inFlightRefresh;
+  if (current && current.generation === generation && current.operation === operation) {
+    return current.promise;
   }
 
+  // A refresh from an older auth scope may still be on the wire with the same `xs`.
+  // Start after it settles rather than beside it, so requests never overlap.
+  const previous: Promise<unknown> = current
+    ? current.promise.catch(() => undefined)
+    : Promise.resolve();
   const request = trackAuthSessionOperation(
     generation,
-    performRefreshAuthSession(workspaceId, generation, operation),
+    previous
+      .then(() => performRefreshAuthSession(generation, operation))
+      .then(result => {
+        // Announced here, before any caller resumes, so whichever path triggered the
+        // refresh (keep-alive, Zero recovery, start-up check, 401 retry), the app keeps
+        // the new token and ends a dead session the same way, exactly once.
+        if (isAuthScopeCurrent(generation, operation)) {
+          if (result.ok) {
+            notifySessionRefreshed(result.token, generation, operation);
+          } else if (result.kind === 'unauthorized') {
+            notifySessionEnded();
+          }
+        }
+        return result;
+      }),
   );
   const entry = { generation, operation, promise: request };
-  inFlightRefreshes.set(key, entry);
-  void request.then(
-    () => {
-      if (inFlightRefreshes.get(key) === entry) inFlightRefreshes.delete(key);
-    },
-    () => {
-      if (inFlightRefreshes.get(key) === entry) inFlightRefreshes.delete(key);
-    },
-  );
+  inFlightRefresh = entry;
+  const clear = (): void => {
+    if (inFlightRefresh === entry) inFlightRefresh = null;
+  };
+  void request.then(clear, clear);
   return request;
 }
 
 async function performRefreshAuthSession(
-  workspaceId: string | undefined,
   generation: number,
   operation: number,
 ): Promise<RefreshSessionResult> {
@@ -1703,27 +1681,36 @@ async function performRefreshAuthSession(
     return { ok: false, kind: 'transient' };
   }
   const activeWorkspaceIdAtStart = getActiveWorkspaceId();
-  const sessionId = await getSessionIdFromJar(API_ORIGIN);
-  if (!sessionId || !isAuthScopeCurrent(generation, operation)) {
-    return { ok: false, kind: 'no_session_cookie' };
+
+  // The backend refreshes the workspace `xyne_last_workspace` names, not `x-workspace-id`.
+  // Make it name the workspace the app is in before asking.
+  const activeWorkspaceId = getActiveWorkspaceId();
+  if (activeWorkspaceId) {
+    await pointLastWorkspaceAt(API_ORIGIN, activeWorkspaceId, { generation, operation });
   }
 
-  const url = `${API_BASE_URL}/v2/auth/refresh-session`;
-
+  // No local check for the refresh cookie: `xs` is httpOnly and path-scoped, so only the
+  // backend can say whether it is there. A missing one comes back as 401 REFRESH_INVALID.
   try {
-    const response = await mtlsFetch(url, {
+    const response = await mtlsFetch(REFRESH_SESSION_URL, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
       },
+      skipSessionRefresh: true,
     });
 
     if (!isAuthScopeCurrent(generation, operation)) {
       return { ok: false, kind: 'transient' };
     }
 
+    // Only the backend's session-ended codes end the session. A bare 401/403 from a
+    // gateway, WAF or mTLS ingress, any 5xx and network errors
+    // keep it: the caller fails this attempt and tries later.
     if (response.statusCode === 401 || response.statusCode === 403) {
-      return { ok: false, kind: 'unauthorized' };
+      return isSessionEndedRefusal(response.statusCode, parseResponseJson<unknown>(response))
+        ? { ok: false, kind: 'unauthorized' }
+        : { ok: false, kind: 'transient' };
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -1754,13 +1741,21 @@ async function performRefreshAuthSession(
       return { ok: false, kind: 'invalid_body' };
     }
 
-    const token = await readJwtFromJarAfterInjection(workspaceId);
+    // Read the token of the workspace the backend says it refreshed, not whatever the
+    // jar falls back to, so callers can tell when that is not the one they wanted.
+    const mintedWorkspaceId =
+      typeof data.workspaceId === 'string' && data.workspaceId ? data.workspaceId : undefined;
+    const token = mintedWorkspaceId
+      ? await getCookieValueFromJar(API_ORIGIN, workspaceTokenCookieName(mintedWorkspaceId))
+      : await readJwtFromJarAfterInjection();
     if (
       isAuthScopeCurrent(generation, operation) &&
       typeof token === 'string' &&
       token.length > 0
     ) {
-      return { ok: true, token };
+      return mintedWorkspaceId
+        ? { ok: true, token, workspaceId: mintedWorkspaceId }
+        : { ok: true, token };
     }
 
     return { ok: false, kind: 'missing_jwt_cookie' };
@@ -1768,3 +1763,67 @@ async function performRefreshAuthSession(
     return { ok: false, kind: 'transient' };
   }
 }
+
+type SessionEndedListener = () => void;
+
+const sessionEndedListeners = new Set<SessionEndedListener>();
+
+/**
+ * Fires when any refresh is refused with a session-ended code (see
+ * `isSessionEndedRefusal`), or any API request with one (see `isSessionEndedAuthFailure`):
+ * the session is over and the user has to sign in again.
+ */
+export function subscribeToSessionEnded(listener: SessionEndedListener): () => void {
+  sessionEndedListeners.add(listener);
+  return (): void => {
+    sessionEndedListeners.delete(listener);
+  };
+}
+
+function notifySessionEnded(): void {
+  for (const listener of sessionEndedListeners) {
+    listener();
+  }
+}
+
+type SessionRefreshedListener = (token: string, generation: number, operation: number) => void;
+
+const sessionRefreshedListeners = new Set<SessionRefreshedListener>();
+
+/**
+ * Fires with the new JWT after every successful refresh, whoever triggered it, so the
+ * app's token and its stored copy never lag behind the cookie jar. Without this a 401
+ * retry renewed only the jar, and the keep-alive (still holding the expired token)
+ * refreshed again at once.
+ */
+export function subscribeToSessionRefreshed(listener: SessionRefreshedListener): () => void {
+  sessionRefreshedListeners.add(listener);
+  return (): void => {
+    sessionRefreshedListeners.delete(listener);
+  };
+}
+
+function notifySessionRefreshed(token: string, generation: number, operation: number): void {
+  for (const listener of sessionRefreshedListeners) {
+    listener(token, generation, operation);
+  }
+}
+
+// API calls that get a refreshable 401 renew the session here, then retry once.
+// refreshAuthSession is single-flight, so a burst of 401s shares one refresh, and it
+// announces a session-ended refusal itself.
+setSessionEndedHandler(notifySessionEnded);
+
+setSessionRefresher(async (generation, operation): Promise<SessionRefreshOutcome> => {
+  // Refreshed under the request's own auth scope, so a refresh for a session that has
+  // since been signed out or switched away from neither applies nor announces anything.
+  const result = await refreshAuthSession(
+    getActiveWorkspaceId() ?? undefined,
+    generation,
+    operation,
+  );
+  if (result.ok) {
+    return 'refreshed';
+  }
+  return result.kind === 'unauthorized' ? 'session-ended' : 'unavailable';
+});

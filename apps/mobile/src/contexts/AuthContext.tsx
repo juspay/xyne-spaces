@@ -3,6 +3,7 @@ import { NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import CookieManager from '@react-native-cookies/cookies';
 import { clearAllAuthCookies } from '@/src/utils/clearAllAuthCookies';
+import { isRestoredFromAnotherInstall } from '@/src/services/authDeviceId';
 import {
   runBestEffortCleanup,
   summarizeAuthCleanup,
@@ -23,6 +24,8 @@ import {
   requestEnterpriseWorkspaceJoin,
   resendRegistrationCode,
   signOutUser,
+  subscribeToSessionEnded,
+  subscribeToSessionRefreshed,
   switchToWorkspace,
   User,
   verifyEmailRegistration,
@@ -647,6 +650,16 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     try {
       logger.info(Event.LOTUS_AUTH_CHECK, { stage: 'initialization_start' });
 
+      // Restored from a backup or moved to a new phone: the cookie jar (and its `xs`)
+      // belongs to the original install's session. Refreshing it here would leave two
+      // phones sharing one session, so signing out on either would end it on both. Sign
+      // this copy out locally instead; the original phone keeps its session.
+      if (await isRestoredFromAnotherInstall()) {
+        logger.warn(Event.LOTUS_AUTH_CHECK, { stage: 'restored_install_session_discarded' });
+        await clearStoredAuth({ generation, operation, waitForOperations: false });
+        return;
+      }
+
       const verifyUserWithRefresh = async (
         userId: string,
         accessToken: string,
@@ -922,6 +935,9 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     queryClient.clear();
   };
 
+  const latestTokenRef = useRef(token);
+  latestTokenRef.current = token;
+
   const applyRefreshedToken = async (
     newToken: string,
     operationGeneration = getAuthSessionGeneration(),
@@ -930,6 +946,11 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     const generation = operationGeneration;
     if (!isAuthSessionCurrent(generation) || !isAuthOperationCurrent(operation)) {
       return false;
+    }
+    // Every refresh is announced to the listener below, and the keep-alive and Zero
+    // also apply what they asked for; the second arrival has nothing left to do.
+    if (newToken === latestTokenRef.current) {
+      return true;
     }
     const tokenWorkspaceId = decodeAuthJwtClaims(newToken)?.workspaceId;
     const activeWorkspaceId = getActiveWorkspaceId();
@@ -956,6 +977,43 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     user?.workspaceId ?? null,
     applyRefreshedToken,
   );
+
+  const clearStoredAuthRef = useRef(clearStoredAuth);
+  clearStoredAuthRef.current = clearStoredAuth;
+  const applyRefreshedTokenRef = useRef(applyRefreshedToken);
+  applyRefreshedTokenRef.current = applyRefreshedToken;
+  const isSignedIn = user !== null;
+
+  // Any refresh, including one a 401 triggered deep in an API call, hands its token to
+  // state and SecureStore here. Otherwise the keep-alive keeps the expired token and
+  // refreshes again at once, and a cold start reloads the expired one.
+  useEffect(() => {
+    if (!isSignedIn) {
+      return undefined;
+    }
+    return subscribeToSessionRefreshed((refreshedToken, generation, operation) => {
+      void applyRefreshedTokenRef.current(refreshedToken, generation, operation);
+    });
+  }, [isSignedIn]);
+
+  // The backend ended the session: it refused a refresh (session revoked, expired, or the
+  // user left the workspace), or refused an API request with a session-ended 401 code.
+  // Drop local auth and return to login. No remote logout; the session is already gone.
+  // Starting a new auth session makes a burst of these act only once.
+  useEffect(() => {
+    if (!isSignedIn) {
+      return undefined;
+    }
+    return subscribeToSessionEnded(() => {
+      logger.warn(Event.LOTUS_AUTH_CHECK, { stage: 'session_ended_after_refresh' });
+      const cleanupGeneration = beginAuthSession();
+      void clearStoredAuthRef.current({
+        generation: cleanupGeneration,
+        operation: getAuthOperation(),
+        waitForOperations: false,
+      });
+    });
+  }, [isSignedIn]);
 
   const applyAuthenticatedSession = async (
     nextUser: User,
@@ -1404,9 +1462,27 @@ export function AuthProvider({ children }: AuthProviderProps): React.JSX.Element
     const generation = getAuthSessionGeneration();
     const previousWorkspaceId = getActiveWorkspaceId();
     setIsLoading(true);
-    setActiveWorkspaceId(workspaceId);
+    // Cleared rather than set to the target: the backend authenticates the switch with the
+    // current workspace's cookie, and an active target would label the request with a
+    // workspace that has no token yet.
+    setActiveWorkspaceId(null);
+    // The workspace whose cookie authenticates the switch. `||`, not `??`: a fallback user
+    // carries `workspaceId: ''`, and an empty id would send no `x-workspace-id`, leaving
+    // the backend to pick from a possibly stale `xyne_last_workspace`. The current token's
+    // own claim names exactly the workspace the backend will check.
+    const currentWorkspaceId =
+      user?.workspaceId ||
+      decodeAuthJwtClaims(currentToken)?.workspaceId ||
+      previousWorkspaceId ||
+      undefined;
     try {
-      const response = await switchToWorkspace(workspaceId, currentToken, generation, operation);
+      const response = await switchToWorkspace(
+        workspaceId,
+        currentToken,
+        currentWorkspaceId,
+        generation,
+        operation,
+      );
       if (!isAuthSessionCurrent(generation) || !isAuthOperationCurrent(operation)) return;
       if (!response.success || !response.user || !response.token) {
         throw new Error('Workspace switch failed');
