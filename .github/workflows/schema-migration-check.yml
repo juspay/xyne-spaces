@@ -82,3 +82,20 @@ jobs:
         env:
           CHANGE_TARGET: ${{ github.base_ref }}
         run: bash scripts/validate-no-new-enums.sh --ci
+
+  # Dependencies in package.json must be pinned to an exact version: no ^ / ~
+  # ranges, no "latest". Stateless (checks every tracked package.json as it is
+  # now), so it needs no base branch and no full history. peerDependencies are
+  # exempt.
+  exact-versions-guard:
+    name: Exact dependency versions guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Exact dependency versions guard
+        run: node scripts/validate-exact-dependency-versions.mjs --ci
