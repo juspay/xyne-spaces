@@ -2535,12 +2535,12 @@ fn production_query_workload() {
         stats.disjuncts_registered, stats.conditions_indexed, stats.snapshots_shared
     );
 
-    let mut message = XY_CHANNELS * XY_CONVERSATIONS_PER_CHANNEL * XY_MESSAGES_PER_CONVERSATION;
     let mut inserts = Vec::with_capacity(XY_MESSAGE_INSERTS);
-    for _ in 0..XY_MESSAGE_INSERTS {
+    for message in (XY_CHANNELS * XY_CONVERSATIONS_PER_CHANNEL * XY_MESSAGES_PER_CONVERSATION..)
+        .take(XY_MESSAGE_INSERTS)
+    {
         let conversation = rng.below(XY_CHANNELS * XY_CONVERSATIONS_PER_CHANNEL);
         inserts.push(xy_message(&mut rng, message, conversation));
-        message += 1;
     }
     let mut churn = Vec::with_capacity(XY_MEMBERSHIP_CHURN);
     for step in 0..XY_MEMBERSHIP_CHURN {

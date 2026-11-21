@@ -87,7 +87,7 @@ pyroscope = { version = "2.1", default-features = false, features = ["backend-pp
 # on and turns its dumps into the pprof the Pyroscope agent sends.
 tikv-jemallocator = { version = "0.7", features = ["profiling"] }
 jemalloc_pprof = "0.9"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
 log = "0.4"
 
 # Limited debug info in the release binary, so a profile's frames name
