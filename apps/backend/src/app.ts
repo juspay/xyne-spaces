@@ -62,7 +62,7 @@ import workspaceDeskRoutes from '@/integrations/routes/workspace-desk';
 import slackDeskRoutes from '@/integrations/routes/slack-desk';
 import appDeskRoutes from '@/integrations/routes/app-desk';
 import socialMediaRoutes from './integrations/routes/social-media.js';
-import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
+import telephonyRoutes from '@/integrations/routes/telephony';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 // Disabled (all workers)
@@ -338,7 +338,7 @@ export class App {
     this.app.use('/api/integrations/slack-desk', slackDeskRoutes);
     this.app.use('/api/integrations/app-desk', appDeskRoutes);
     this.app.use('/api/integrations/social-media', socialMediaRoutes);
-    this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
+    this.app.use('/api/integrations/telephony', authMiddleware.authenticate, telephonyRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
     // Migration routes (body parsing handled in route file). Only mounted when

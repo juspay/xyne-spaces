@@ -1512,6 +1512,11 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: string().optional(),
     deskAppIds: string().optional(),
+    callConnectionId: string().optional(),
+    callIsDefault: boolean(),
+    callRoutingKeys: json<string[]>(),
+    callTicketRules: json().optional(),
+    callPhoneFieldNames: json<string[]>(),
   })
   .primaryKey("channelId");
 

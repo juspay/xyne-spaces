@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Phone, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { useMarkEmailRead } from '../../../hooks/useMarkEmailRead';
+import { isCallProviderId } from '../../../services/clients/telephonyApi';
 import { cn } from '../../../utils/classNames';
 import {
   CallTranscriptControls,
@@ -37,7 +38,7 @@ interface OzonetelSharedFields {
 }
 
 interface TelephonyMetadata extends OzonetelSharedFields {
-  provider: 'ozonetel';
+  provider: string;
   externalId: string;
   workspaceId: string;
   status: 'RINGING' | 'ANSWERED' | 'ENDED' | 'MISSED' | 'FAILED';
@@ -53,7 +54,7 @@ interface TelephonyMetadata extends OzonetelSharedFields {
 }
 
 interface TelephonyBodyPayload extends OzonetelSharedFields {
-  provider: 'ozonetel';
+  provider: string;
   from?: string;
   startTime?: string;
   endTime?: string;
@@ -132,14 +133,14 @@ function parseTelephonyMetadata(body: string): TelephonyMetadata | null {
   if (!body) return null;
   try {
     const payload = JSON.parse(body) as TelephonyBodyPayload;
-    if (payload.provider !== 'ozonetel') return null;
+    if (!isCallProviderId(payload.provider)) return null;
 
     const direction = inferTelephonyDirection(payload.callType);
     const talkTimeSec = parseTelephonyDuration(payload.duration);
     const transcription = parseCallTranscriptionState(payload.transcription);
 
     return {
-      provider: 'ozonetel',
+      provider: payload.provider,
       externalId: payload.monitorUcid ?? '',
       workspaceId: '',
       status: parseTelephonyStatus(payload.status) ?? 'RINGING',
