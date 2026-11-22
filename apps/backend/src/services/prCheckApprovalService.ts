@@ -5,6 +5,7 @@ import { config } from '@/config/env';
 import { randomUUID } from 'crypto';
 import { MessageType } from '@xyne/shared';
 import { parseBitbucketPrUrl } from '@/utils/repoUrlParser';
+import { prCheckActionableUrl } from '@/apps/core/prCheckAction';
 
 const VARYS_BOT_EMAIL = 'varys@app.xyne.ai';
 const PR_CHECK_MESSAGE_SUBTYPE = 'pr_check_approval';
@@ -68,7 +69,7 @@ function buildButtonContent(params: {
   conversationId?: string;
   channelId?: string;
 }): string {
-  const actionableUrl = `${config.backendUrl}/api/apps/pr-check/callback`;
+  const actionableUrl = prCheckActionableUrl();
   const actionId = randomUUID();
 
   const contextLines = [

@@ -20,7 +20,7 @@ class WebhookNotifier:
             logger.error("[WEBHOOK] API failed: backend URL or API key not configured")
             return False
 
-        url = f"{self.backend_url}/api/transcriptionAgent/{call_id}/transcript-ready"
+        url = f"{self.backend_url}/internal/transcription-agent/{call_id}/transcript-ready"
         headers = {
             "x-api-key": self.api_key,
             "Content-Type": "application/json",
@@ -64,7 +64,7 @@ class WebhookNotifier:
             logger.error("[VOICEPRINTS] backend URL or API key not configured")
             return []
 
-        url = f"{self.backend_url}/api/transcriptionAgent/voiceprints"
+        url = f"{self.backend_url}/internal/transcription-agent/voiceprints"
         headers = {
             "x-api-key": self.api_key,
             "Content-Type": "application/json",

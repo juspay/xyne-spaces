@@ -445,7 +445,7 @@ export class App {
     // CSAT satisfaction survey — PUBLIC, no auth middleware, but requires a signed per-ticket token
     this.app.use('/api/csat', csatRoutes);
 
-    this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
+    this.app.use('/internal/transcription-agent', verifyTranscriptionAgent, transcriptionAgentRoutes);
 
     this.app.use('/api/admin', backfillMountGuard);
     this.app.use('/migrate/api/admin', backfillMountGuard);
