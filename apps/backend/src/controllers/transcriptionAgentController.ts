@@ -1,16 +1,19 @@
 import { Request, Response } from 'express';
 import { CallStatus, CallType } from '@xyne/shared';
+// import { TicketStatusV2 } from '@xyne/shared';
 import { z } from 'zod';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { runWithContext } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
+// import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
 import { transcriptService } from '@/services/transcriptService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { callEncryptionService } from '@/services/callEncryptionService';
 import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
+// import { TicketController } from './ticketController';
 // import { CallController } from './callController';
 
 /**
@@ -42,9 +45,11 @@ const clampLimit = (value: unknown, fallback: number, max: number): number => {
 };
 
 class TranscriptionAgentController {
+  // private ticketController: TicketController;
   // private callController: CallController;
 
   constructor() {
+    // this.ticketController = new TicketController();
     // this.callController = new CallController();
   }
 
@@ -191,6 +196,133 @@ class TranscriptionAgentController {
       res.status(500).json({ success: false, error: 'Failed to open call session' });
     }
   };
+
+  // Disabled: no caller. The agent's create_ticket tool sends a CREATE_TICKET event to the
+  // frontend, which creates the ticket as the user.
+  // /**
+  //  * POST /internal/transcription-agent/:callId/ticket
+  //  * Create ticket from AI voice assistant during call
+  //  * Uses S2S authentication, posts ticket to call's conversation
+  //  */
+  // ticketTool = async (req: Request, res: Response): Promise<void> => {
+  //   const { callId } = req.params;
+  //   const { title, description, assignedTo, priority = 'MEDIUM', boardId: requestBoardId } = req.body;
+  //
+  //   try {
+  //     // Validate required fields
+  //     if (!callId) {
+  //       res.status(400).json({ success: false, error: 'callId is required' });
+  //       return;
+  //     }
+  //
+  //     if (!title || !description) {
+  //       res.status(400).json({ success: false, error: 'title and description are required' });
+  //       return;
+  //     }
+  //
+  //     logger.info(`[TicketTool] Creating ticket for call ${callId}: "${title}"`);
+  //
+  //     const db = DatabaseClient.getInstance();
+  //
+  //     // 1. Get call details
+  //     const call = await repositories.calls.findByExternalId(callId);
+  //     if (!call) {
+  //       logger.error(`[TicketTool] Call not found: ${callId}`);
+  //       res.status(404).json({ success: false, error: 'Call not found' });
+  //       return;
+  //     }
+  //
+  //     // 2. Get call message to find conversationId
+  //     const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
+  //
+  //     if (!callMessage) {
+  //       logger.error(`[TicketTool] Call message not found for call: ${callId}`);
+  //       res.status(404).json({ success: false, error: 'Call message not found' });
+  //       return;
+  //     }
+  //
+  //     const conversationId = callMessage.conversationId;
+  //
+  //     // 3. Get conversation and channel
+  //     const conversation = await db.conversation.findUnique({
+  //       where: { conversationId },
+  //     });
+  //
+  //     if (!conversation) {
+  //       logger.error(`[TicketTool] Conversation not found: ${conversationId}`);
+  //       res.status(404).json({ success: false, error: 'Conversation not found' });
+  //       return;
+  //     }
+  //
+  //     const channel = await repositories.channels.findById(conversation.channelId);
+  //     if (!channel) {
+  //       logger.error(`[TicketTool] Channel not found: ${conversation.channelId}`);
+  //       res.status(404).json({ success: false, error: 'Channel not found' });
+  //       return;
+  //     }
+  //
+  //     // 4. Determine boardId - use from request, or get default board for channel
+  //     let boardId = requestBoardId;
+  //     let boardProjectId: string | undefined;
+  //     if (!boardId) {
+  //       // Get default board via ChannelBoardMapping (isDefault, or oldest),
+  //       // falling back to legacy channel.projectId if no mapping exists.
+  //       const resolved = await resolveChannelDefaultBoard(db, channel.id);
+  //
+  //       if (!resolved) {
+  //         logger.error(`[TicketTool] No board found for channel: ${channel.id}`);
+  //         res.status(400).json({ success: false, error: 'No board found for channel' });
+  //         return;
+  //       }
+  //
+  //       boardId = resolved.boardId;
+  //       boardProjectId = resolved.projectId ?? undefined;
+  //       logger.info(`[TicketTool] Using default board: ${boardId}`);
+  //     } else {
+  //       const board = await db.board.findUnique({
+  //         where: { id: boardId },
+  //         select: { projectId: true },
+  //       });
+  //       if (!board) {
+  //         res.status(404).json({ success: false, error: 'Board not found' });
+  //         return;
+  //       }
+  //       boardProjectId = board.projectId ?? undefined;
+  //     }
+  //
+  //     // 5. Create ticket using shared method
+  //     const ticket = await this.ticketController.createTicketWithConversation({
+  //       title,
+  //       description,
+  //       createdBy: call.createdByUserId,
+  //       updatedBy: call.createdByUserId,
+  //       conversationId,
+  //       projectId: boardProjectId!,
+  //       boardId,
+  //       assignedTo: assignedTo || undefined,
+  //       priority: (priority.toUpperCase() as 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'),
+  //       statusV2: TicketStatusV2.TODO, // Default status for transcription agent tickets
+  //     });
+  //
+  //     logger.info(`[TicketTool] Ticket created: ${ticket.xyneId} (${ticket.id})`);
+  //
+  //     // Return success response
+  //     res.status(201).json({
+  //       success: true,
+  //       ticket: {
+  //         id: ticket.id,
+  //         xyneId: ticket.xyneId,
+  //         title: ticket.title,
+  //         description: ticket.description,
+  //         status: ticket.statusV2,
+  //         priority: ticket.priority,
+  //       },
+  //     });
+  //   } catch (error) {
+  //     logger.error(`[TicketTool] Failed to create ticket for call ${callId}:`, error);
+  //     res.status(500).json({ success: false, error: 'Failed to create ticket' });
+  //   }
+  // };
 
   /**
    * GET /internal/transcription-agent/:callId/my-tickets
