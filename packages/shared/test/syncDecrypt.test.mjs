@@ -145,3 +145,36 @@ test('rows of tables outside the allowlist stay encrypted (messages keep decrypt
   // Not held at all: delivered synchronously, untouched.
   assert.deepEqual(seen, [JSON.stringify(message)]);
 });
+
+test('a field whose first decrypt attempt fails is retried', async () => {
+  const ring = await keyring();
+  const textValue = await encryptField('Chennai', ring);
+  let calls = 0;
+  const flaky = { forKeyId: keyId => (calls++ === 0 ? Promise.reject(new Error('key fetch failed')) : ring.forKeyId(keyId)) };
+
+  const out = await decryptPokeMessage(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue } }] }], flaky);
+  assert.equal(out[1].rowsPatch[0].value.textValue, 'Chennai');
+  assert.equal(calls, 2);
+});
+
+test('a held message that fails to deliver does not block the ones behind it', async () => {
+  const ring = await keyring();
+  class FailsOnce extends FakeSocket {
+    dispatchEvent(event) {
+      if (event.type === 'message' && String(event.data).includes('"first"')) throw new Error('listener setup failed');
+      return super.dispatchEvent(event);
+    }
+  }
+  const Socket = createDecryptingWebSocket(FailsOnce, () => ring);
+  const ws = new Socket(SYNC_URL);
+  const seen = [];
+  ws.addEventListener('message', event => seen.push(JSON.parse(event.data)[1].rowsPatch[0].value.textValue));
+
+  const frame = async text => JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField(text, ring) } }] }]);
+  ws.receive(await frame('first'));
+  ws.receive(await frame('second'));
+  ws.receive(await frame('third'));
+  await settle();
+
+  assert.deepEqual(seen, ['second', 'third']);
+});

@@ -18,18 +18,27 @@ interface ZeroProviderProps {
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
   const { isReady: encryptionReady, keyring, config: encryptionConfig } = useEncryptionBootstrap();
-  // Zero filters its local store, so encrypted fields are decrypted as they arrive (the wire
-  // still carries ciphertext). Set before Zero connects; follows key and flag changes.
-  installSyncDecryption(() => (encryptionConfig?.clientEncryptionEnabled ? keyring : null));
   const isRefreshing = useRef(false);
   const isRecoveringRef = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
+  const zeroStartedRef = useRef(false);
+  const storeMayHoldCiphertextRef = useRef(false);
 
   const [zero, setZero] = useState<Zero | null>(null);
 
+  // Zero filters its local store, so encrypted fields are decrypted as they arrive (the wire
+  // still carries ciphertext). Declared before the effect that creates Zero, so it runs first.
+  useEffect(() => {
+    installSyncDecryption(() => (encryptionConfig?.clientEncryptionEnabled ? keyring : null));
+  }, [encryptionConfig, keyring]);
+
   useEffect(() => {
     if (!user || !encryptionReady) {
+      // A running Zero keeps syncing while the keys are re-established, with nothing to decrypt with.
+      if (!encryptionReady && zeroStartedRef.current) {
+        storeMayHoldCiphertextRef.current = true;
+      }
       return;
     }
 
@@ -62,13 +71,16 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
 
     const initZero = async (): Promise<void> => {
       // If workspaceId changed, drop all local databases to prevent stale cross-workspace cache
-      if (prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId) {
+      const workspaceChanged = prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId;
+      if (workspaceChanged || storeMayHoldCiphertextRef.current) {
+        storeMayHoldCiphertextRef.current = false;
         try {
           await dropAllDatabases();
         } catch {
           // Ignore errors during drop
         }
       }
+      zeroStartedRef.current = true;
 
       const zeroObj = new Zero({
         userID: user.id,

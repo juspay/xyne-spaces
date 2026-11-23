@@ -1,6 +1,5 @@
 import type { TransitKeyring } from './keyring.js';
 import { decryptField, isEncryptedField } from './field-decrypt.js';
-import { decryptionCache } from './decryption-cache.js';
 import { getCryptoLogger } from './crypto-logger.js';
 import { Event as LogEvent } from '../logger/events.js';
 
@@ -26,12 +25,13 @@ type KeyringSource = () => TransitKeyring | null;
  */
 export const SYNC_DECRYPTED_TABLES: readonly string[] = ['form_entity_values'];
 
+// Retried once: a failed field is stored as ciphertext and no local filter can match it.
 const decryptValue = async (ciphertext: string, keyring: TransitKeyring): Promise<string> => {
-  const cached = decryptionCache.get(ciphertext);
-  if (cached !== undefined) return cached;
-  const plaintext = await decryptField(ciphertext, keyring);
-  decryptionCache.set(ciphertext, plaintext);
-  return plaintext;
+  try {
+    return await decryptField(ciphertext, keyring);
+  } catch {
+    return decryptField(ciphertext, keyring);
+  }
 };
 
 /**
@@ -155,12 +155,21 @@ export function createDecryptingWebSocket(
 
     #deliverInOrder(build: () => Promise<Event>): void {
       this.#pending += 1;
-      this.#tail = this.#tail.then(async () => {
-        const next = await build();
-        this.#pending -= 1;
-        released.add(next);
-        this.dispatchEvent(next);
-      });
+      // A step that throws must not block the events queued behind it.
+      this.#tail = this.#tail
+        .then(async () => {
+          const next = await build().finally(() => {
+            this.#pending -= 1;
+          });
+          released.add(next);
+          this.dispatchEvent(next);
+        })
+        .catch(error => {
+          getCryptoLogger().warn(LogEvent.ENCRYPTION_WS_MESSAGE_DECRYPT, {
+            outcome: 'dropped',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
     }
   };
 }
