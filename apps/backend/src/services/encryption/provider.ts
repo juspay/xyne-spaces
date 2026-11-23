@@ -122,7 +122,7 @@ const provider: EncryptionProvider = {
   },
 
   async getTransitClientManifest(
-    _params: { tag: string; environment: string } & TransitCaller,
+    _params: { tag: string } & TransitCaller,
   ): Promise<{ clientManifest: string } | null> {
     if (!config.enc.apiClientEncryptionEnabled) return null;
     return unsupported('getTransitClientManifest');
