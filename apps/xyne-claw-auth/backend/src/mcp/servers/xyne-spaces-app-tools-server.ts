@@ -14,7 +14,11 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { errMsg } from "../../lib/errors.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { expandSpacesMentions, resolveUnboundMentions } from "../../lib/mention-transform.js";
+import {
+  countBracketedMentions,
+  expandSpacesMentions,
+  resolveUnboundMentions,
+} from "../../lib/mention-transform.js";
 import { buildSpacesMentionLookupsDb } from "../../lib/mention-lookups.js";
 import { spacesDbAvailable } from "../../lib/spaces-db.js";
 import { tools as spacesTools } from "./xyne-spaces-tools.js";
@@ -23,21 +27,6 @@ const APP_TOKEN = process.env["XYNE_SPACES_APP_TOKEN"] ?? "";
 const SPACES_URL = process.env["XYNE_SPACES_URL"] ?? "";
 const WORKSPACE_ID = process.env["XYNE_SPACES_WORKSPACE_ID"]?.trim() ?? "";
 const USER_ID = process.env["XYNE_USER_ID"] ?? "";
-
-const COUNT_USER_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]/g;
-const COUNT_GROUP_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]/g;
-
-function countBracketedMentions(input: string): number {
-  const parts = input.split(/(```[\s\S]*?```)/g);
-  let count = 0;
-  for (let i = 0; i < parts.length; i += 2) {
-    count += [...parts[i]!.matchAll(COUNT_USER_MENTION_RE)].length;
-    count += [...parts[i]!.matchAll(COUNT_GROUP_MENTION_RE)].length;
-  }
-  return count;
-}
 
 async function prepareMessageContent(rawContent: string): Promise<string> {
   let resolved = rawContent;

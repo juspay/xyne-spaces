@@ -23,11 +23,33 @@ import { errMsg } from "./errors.js";
 
 const log = createLogger("mention-transform");
 
-const USER_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]/g;
-const GROUP_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]/g;
-const SPECIAL_MENTION_RE = /(^|[^A-Za-z0-9_>])@(channel|here)\b/g;
+// What may come right before the `@`: the start, a non-word character, or a
+// bare opening or closing tag such as `<p>`, `<li>`, `</strong>` or `<br/>`,
+// since HTML bodies open with one. Any other `>` is refused: it ends the spans
+// written here (`class="…">@channel`), so excluding it keeps expansion
+// idempotent. Exported so the callers that count or detect mentions use the
+// same rule.
+const BARE_TAG = String.raw`<\/?[A-Za-z][A-Za-z0-9]*\s*\/?>`;
+export const MENTION_PREFIX = String.raw`(^|[^A-Za-z0-9_>]|${BARE_TAG})`;
+const PREFIX = MENTION_PREFIX;
+
+/**
+ * Code regions, kept verbatim: ``` fences, `<pre>` and `<code>`, any case.
+ * Capturing, so `split` keeps them at odd indexes. Matches the backend's
+ * `CODE_REGION_RE` (apps/backend/src/api/sdk/v1/mentions.ts), so text that
+ * shows a mention, such as `<code>@channel</code>`, never pings.
+ */
+const CODE_REGION_RE = /(```[\s\S]*?```|<pre\b[\s\S]*?<\/pre>|<code\b[\s\S]*?<\/code>)/gi;
+
+const USER_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]`,
+  "g",
+);
+const GROUP_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]`,
+  "g",
+);
+const SPECIAL_MENTION_RE = new RegExp(String.raw`${PREFIX}@(channel|here)\b`, "g");
 
 function escapeAttr(s: string): string {
   return s
@@ -71,6 +93,17 @@ function transformSegment(s: string): string {
   return out;
 }
 
+/** How many bracketed user and group mentions `input` holds outside code regions. */
+export function countBracketedMentions(input: string): number {
+  const parts = input.split(CODE_REGION_RE);
+  let count = 0;
+  for (let i = 0; i < parts.length; i += 2) {
+    count += [...parts[i]!.matchAll(USER_MENTION_RE)].length;
+    count += [...parts[i]!.matchAll(GROUP_MENTION_RE)].length;
+  }
+  return count;
+}
+
 export function mentionShorthandToText(input: string): string {
   return input
     .replace(GROUP_MENTION_RE, (_match, pre: string, alias: string) => `${pre}@${alias.trim()}`)
@@ -79,13 +112,14 @@ export function mentionShorthandToText(input: string): string {
 
 /**
  * Expand all mention shorthand in `input`. Idempotent — re-running on an
- * already-expanded string returns the same string. Code fences are not
- * transformed (so docs that show the literal shorthand don't get mangled).
+ * already-expanded string returns the same string. Code regions (```
+ * fences, `<pre>`, `<code>`) are not transformed, so docs that show the literal
+ * shorthand don't get mangled.
  */
 export function expandSpacesMentions(input: string | undefined | null): string {
   if (!input) return "";
-  // Split on triple-backtick fences. Odd-indexed parts are code blocks → leave alone.
-  const parts = input.split(/(```[\s\S]*?```)/g);
+  // Odd-indexed parts are code regions → leave alone.
+  const parts = input.split(CODE_REGION_RE);
   return parts.map((p, i) => (i % 2 === 0 ? transformSegment(p) : p)).join("");
 }
 
@@ -94,7 +128,11 @@ export function expandSpacesMentions(input: string | undefined | null): string {
 // by `.<alnum>` (that's a dotted handle like `@Deepak.Kushwaha` — handled by
 // the handle pattern below; without this guard we'd match just `@Deepak` and
 // could tag the wrong user), NOT a special mention (@channel/@here are
-// handled separately), and NOT inside an existing HTML span. We require
+// handled separately), and NOT inside an existing HTML span (the prefix refuses
+// the `>` that opens our span's text). The name is matched atomically
+// (`(?=(…))\2`), so a name that fails the checks is skipped, never shortened:
+// otherwise `@Prajwal Prasad[id]` or `@Prajwal Prasad</p>` backtracked to
+// `@Prajwal` and came out as `@Prajwal Prasad[id] Prasad`. We require
 // leading word-boundary or whitespace via the `pre` group, same pattern as
 // the bracketed regex above.
 // Each name word is `[A-Z][A-Za-z'\-]*` (note `*`, not `+`) so a single-letter
@@ -102,15 +140,19 @@ export function expandSpacesMentions(input: string | undefined | null): string {
 // initial (e.g. "M S Dhoni", "A R Rahman") would otherwise be skipped entirely.
 // Over-broad single-letter candidates (e.g. a stray "@I") are harmless: the
 // resolver only rewrites a name that resolves to EXACTLY ONE user.
-const UNBOUND_USER_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Z][A-Za-z'\-]*(?:\s[A-Z][A-Za-z'\-]*){0,2})(?!\[|<\/|\.[A-Za-z0-9])\b/g;
+const UNBOUND_USER_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@(?=([A-Z][A-Za-z'\-]*(?:\s[A-Z][A-Za-z'\-]*){0,2}))\2(?!\[|\.[A-Za-z0-9])\b`,
+  "g",
+);
 
 // `@<email>` shorthand — e.g. `@jone.doe@gmail.com`. Same anti-collision
 // rules as the name pattern: NOT followed by `[`, NOT inside an HTML span.
 // We deliberately keep this loose (matching common-form emails) rather than
 // the full RFC 5322 grammar; downstream lookup tolerates a miss.
-const UNBOUND_EMAIL_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})(?!\[|<\/)\b/g;
+const UNBOUND_EMAIL_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})(?!\[)\b`,
+  "g",
+);
 
 // Dotted handle shorthand — e.g. `@bowmitha.c`, `@utkarsh.kumar`,
 // `@deepak.kushwaha`. This is the username form agents copy out of
@@ -122,15 +164,19 @@ const UNBOUND_EMAIL_MENTION_RE =
 // (`@jone.doe@gmail.com`) never matches; trailing lookahead excludes bracketed
 // mentions, full emails, and partial backtracking inside longer handle/email
 // tokens.
-const UNBOUND_HANDLE_MENTION_RE =
-  /(^|[^A-Za-z0-9_>@.])@([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+)(?!\[|[A-Za-z0-9_.@_\-])/g;
+const UNBOUND_HANDLE_MENTION_RE = new RegExp(
+  String.raw`(^|[^A-Za-z0-9_>@.]|${BARE_TAG})@([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+)(?!\[|[A-Za-z0-9_.@_\-])`,
+  "g",
+);
 
 // Group alias shorthand — e.g. `@data-intelligence` or `@spaces`. User
 // handles use dots and display-name mentions are capitalised, so lowercase
 // aliases (hyphenated or one word) can be resolved without colliding with
 // existing user paths; a token is tagged only when exactly one group owns it.
-const UNBOUND_GROUP_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?!\[|<\/|\.[A-Za-z0-9]|@|[A-Za-z0-9_-])/g;
+const UNBOUND_GROUP_MENTION_RE = new RegExp(
+  String.raw`${PREFIX}@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?!\[|\.[A-Za-z0-9]|@|[A-Za-z0-9_-])`,
+  "g",
+);
 
 const SPECIAL_NAMES = new Set(["channel", "here"]);
 
@@ -175,7 +221,7 @@ export interface MentionLookups {
  *                                                     shows the name in the
  *                                                     chip)
  *
- * Skipped: `@channel` / `@here`, already-bracketed forms, fenced code blocks.
+ * Skipped: `@channel` / `@here`, already-bracketed forms, code regions.
  *
  * Why this lives in a separate function (instead of folding into
  * `expandSpacesMentions`): the static expander is sync + zero-dep, used in
@@ -191,13 +237,13 @@ export async function resolveUnboundMentions(
 
   // First pass: collect distinct names + emails that need lookup, across
   // all non-code segments. Same input appearing N times → 1 API call.
-  const parts = input.split(/(```[\s\S]*?```)/g);
+  const parts = input.split(CODE_REGION_RE);
   const namesToResolve = new Set<string>();
   const emailsToResolve = new Set<string>();
   const handlesToResolve = new Set<string>();
   const groupAliasesToResolve = new Set<string>();
   parts.forEach((p, i) => {
-    if (i % 2 !== 0) return; // code fence
+    if (i % 2 !== 0) return; // code region
     // Emails first — they're strictly more specific than the name pattern,
     // so if a token matches both we treat it as an email.
     for (const m of p.matchAll(UNBOUND_EMAIL_MENTION_RE)) {
