@@ -4,8 +4,9 @@ import type { ElectronAPI } from '../types/electron';
 /**
  * The desktop app's transit key. The private key stays in the main process (the Secure
  * Enclave on macOS); this page only receives the public key and ECDH results. Nothing is
- * stored in IndexedDB. Throws when the main process holds no platform key (or the API is
- * missing), so the chain falls back to the persisted IndexedDB pair.
+ * stored in IndexedDB. Rejects when the main process holds no platform key (every window then
+ * uses the persisted IndexedDB pair) or cannot reach its key right now (retried); see
+ * EncryptionBootstrapProvider.
  */
 
 /** The main process gives up on the Secure Enclave well before this; it is a backstop. */
