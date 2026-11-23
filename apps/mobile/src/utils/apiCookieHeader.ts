@@ -1,9 +1,21 @@
 import CookieManager from '@react-native-cookies/cookies';
 
-export const GOOGLE_ACCESS_TOKEN_COOKIE = 'google_access_token';
-export const USER_SESSION_ID_COOKIE = 'user_session_id';
-export const XYNE_SESSION_COOKIE = 'xyne_session';
+import { API_BASE_URL } from '../config';
+
+/** Short-lived (10 min) identity cookie set at sign-in, before a workspace is chosen. Not an access token. */
+export const PENDING_AUTH_COOKIE = 'xyne_pending_auth';
 export const XYNE_LAST_WORKSPACE_COOKIE = 'xyne_last_workspace';
+
+/**
+ * Root API path, never under `/v2`. The `xs` cookie is path-scoped to it, so reading
+ * `xs` from a cookie store has to ask for this URL, not just the origin.
+ */
+export const REFRESH_SESSION_URL = `${API_BASE_URL}/auth/refresh-session`;
+
+/** The cookie holding a workspace's access JWT. */
+export function workspaceTokenCookieName(workspaceId: string): string {
+  return `xyne_ws_${workspaceId}_token`;
+}
 
 function cookieEntryToValue(
   entry: string | { value: string } | undefined | null,
@@ -28,20 +40,13 @@ export async function getCookieValueFromJar(
   }
 }
 
-export async function getSessionIdFromJar(origin: string): Promise<string | undefined> {
-  const xyneSessionId = await getCookieValueFromJar(origin, XYNE_SESSION_COOKIE);
-  if (xyneSessionId) {
-    return xyneSessionId;
-  }
-  return getCookieValueFromJar(origin, USER_SESSION_ID_COOKIE);
-}
-
 /**
- * Serializes all cookies for `origin` into a single `Cookie` header value.
+ * Serializes the jar cookies that match `url` (origin or full URL, so path-scoped
+ * cookies are included) into a single `Cookie` header value.
  */
-export async function buildApiCookieHeader(origin: string): Promise<string | undefined> {
+export async function buildApiCookieHeader(url: string): Promise<string | undefined> {
   try {
-    const cookies = await CookieManager.get(origin);
+    const cookies = await CookieManager.get(url);
     const parts: string[] = [];
     for (const [name, raw] of Object.entries(cookies)) {
       const value = cookieEntryToValue(raw);

@@ -13,24 +13,26 @@ import {
   isAuthScopeCurrent,
 } from '@/src/services/authSessionLifecycle';
 import {
-  GOOGLE_ACCESS_TOKEN_COOKIE,
-  USER_SESSION_ID_COOKIE,
-  XYNE_SESSION_COOKIE,
+  PENDING_AUTH_COOKIE,
   XYNE_LAST_WORKSPACE_COOKIE,
+  REFRESH_SESSION_URL,
 } from '@/src/utils/apiCookieHeader';
+import {
+  DASHBOARD_REFRESH_COOKIE_NAME,
+  isDashboardSessionCookieName,
+} from '@/src/utils/dashboardWebViewCookiePolicy';
 
 const SPLIT_COOKIE_REGEX = /,\s*(?=[^;,]+=)/g;
 
 /**
- * The only cookies the WebView itself reads. Mirroring anything else into the
- * WKWebView store costs a main-thread round trip per cookie for no benefit.
+ * The only cookies the WebView itself reads: the dashboard's session (`xs`, the workspace
+ * JWTs, `xyne_last_workspace`) and the pending sign-in cookie for finishing onboarding.
+ * Mirroring anything else into the WKWebView store costs a main-thread round trip per
+ * cookie for no benefit.
  */
-const WEBVIEW_COOKIE_NAMES = new Set<string>([
-  GOOGLE_ACCESS_TOKEN_COOKIE,
-  USER_SESSION_ID_COOKIE,
-  XYNE_SESSION_COOKIE,
-  XYNE_LAST_WORKSPACE_COOKIE,
-]);
+function isWebViewCookieName(name: string): boolean {
+  return name === PENDING_AUTH_COOKIE || isDashboardSessionCookieName(name);
+}
 
 /**
  * Normalize Set-Cookie header for local dev (http, different ports).
@@ -155,11 +157,17 @@ async function injectCookiesFromResponseUnsafe(
   if (Platform.OS === 'ios') {
     const names = cookieHeaders
       .map(h => extractCookieName(h))
-      .filter((n): n is string => !!n && WEBVIEW_COOKIE_NAMES.has(n));
+      .filter((n): n is string => !!n && isWebViewCookieName(n));
 
     if (names.length > 0 && isCurrent()) {
       try {
-        const cookies = await CookieManager.get(origin);
+        // `xs` is path-scoped to the refresh endpoint, so the origin alone does not list it.
+        const cookies = {
+          ...(await CookieManager.get(origin)),
+          ...(names.includes(DASHBOARD_REFRESH_COOKIE_NAME)
+            ? await CookieManager.get(REFRESH_SESSION_URL)
+            : {}),
+        };
 
         for (const name of names) {
           if (!isCurrent()) return;
@@ -188,4 +196,45 @@ async function injectCookiesFromResponseUnsafe(
   if (waitForPropagation) {
     await new Promise<void>(r => setTimeout(r, __DEV__ ? 250 : 50));
   }
+}
+
+/**
+ * The backend's default lifetime for the pointer (`SESSION_EXPIRY_DAYS`, 180). It is
+ * configurable there, but the backend rewrites the cookie with its own value on every
+ * refresh, switch and login, so this only has to outlive the next one.
+ */
+const LAST_WORKSPACE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+
+/**
+ * Points the jar's `xyne_last_workspace` at `workspaceId` when it says otherwise. The
+ * refresh endpoint mints the JWT for the workspace this cookie names (it ignores
+ * `x-workspace-id`), so a pointer left on another workspace (a switch that succeeded on
+ * the server but was rolled back here) would refresh the wrong one forever. Written
+ * through the same path as a real `Set-Cookie`, with the attributes `setAccessCookies`
+ * gives it in production; on local http that path drops `Secure` as it does for the
+ * backend's own cookies.
+ */
+export async function pointLastWorkspaceAt(
+  origin: string,
+  workspaceId: string,
+  scope: { generation: number; operation: number },
+): Promise<void> {
+  let current: string | undefined;
+  try {
+    const cookies = await CookieManager.get(origin);
+    const entry = cookies[XYNE_LAST_WORKSPACE_COOKIE];
+    current = typeof entry === 'object' && entry !== null ? entry.value : undefined;
+  } catch {
+    return;
+  }
+  if (current === workspaceId) {
+    return;
+  }
+  await injectCookiesFromResponse(
+    origin,
+    {
+      'set-cookie': `${XYNE_LAST_WORKSPACE_COOKIE}=${workspaceId}; Path=/; Max-Age=${LAST_WORKSPACE_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=Strict`,
+    },
+    scope,
+  );
 }
