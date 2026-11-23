@@ -18,9 +18,7 @@
     "assets",
     "certs",
     "ui-active",
-    "native/mic-monitor/mic-monitor",
-    "native/transit-key/transit-key",
-    "native/transit-key/transit-key.exe"
+    "native/mic-monitor/mic-monitor"
   ],
 
   "asarUnpack": [
@@ -32,6 +30,7 @@
   "beforePack": "scripts/before-pack.js",
 
   "mac": {
+    "files": ["native/transit-key/transit-key"],
     "icon": "assets/images/xyne.png",
 
     "target": [
