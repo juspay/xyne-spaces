@@ -263,12 +263,7 @@ export type ChatThreadProps = {
   isTranscript?: boolean;
 };
 
-type EditingTarget = {
-  messageId: string;
-  conversationId: string;
-  channelId: string;
-  content: string;
-};
+type EditingTarget = ChatInputEditingMessage;
 
 type ThreadOpenMessageSource = 'none' | 'thread_cache' | 'mixed_zero_thread_cache' | 'zero';
 type ThreadLandingSnapshot = {
