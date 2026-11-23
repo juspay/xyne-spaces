@@ -24,6 +24,10 @@ class FakeSocket extends EventTarget {
   receive(data) {
     this.dispatchEvent(new MessageEvent('message', { data }));
   }
+  close() {
+    this.closed = (this.closed ?? 0) + 1;
+    this.dispatchEvent(Object.assign(new Event('close'), { code: 1000, reason: '', wasClean: true }));
+  }
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 20));
@@ -82,7 +86,7 @@ test('the sync socket hands listeners decrypted messages, in arrival order', asy
   assert.deepEqual(seen[1], ['pokeEnd', { pokeID: 'p1' }]);
 });
 
-test('other sockets, and the sync socket without a keyring, pass messages through untouched', async () => {
+test('other sockets pass messages through untouched', async () => {
   const ring = await keyring();
   const encrypted = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { a: await encryptField('x', ring) } }] }]);
 
@@ -92,13 +96,57 @@ test('other sockets, and the sync socket without a keyring, pass messages throug
   canvas.addEventListener('message', event => canvasSeen.push(event.data));
   canvas.receive(encrypted);
   assert.deepEqual(canvasSeen, [encrypted]);
+});
 
-  const NoKey = createDecryptingWebSocket(FakeSocket, () => null);
-  const sync = new NoKey(SYNC_URL);
-  const syncSeen = [];
-  sync.addEventListener('message', event => syncSeen.push(event.data));
-  sync.receive(encrypted);
-  assert.deepEqual(syncSeen, [encrypted]);
+test('a message that cannot be decrypted is not delivered: the socket closes so Zero resyncs', async () => {
+  const ring = await keyring();
+  const frame = async text => JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField(text, ring) } }] }]);
+  const bad = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: 'ENC:v1|tk-1|bm90LXJlYWwtY2lwaGVydGV4dC1ieXRlcw==' } }] }]);
+
+  for (const [label, source, data] of [['failed decrypt', () => ring, bad], ['no keyring', () => null, await frame('Chennai')]]) {
+    const Socket = createDecryptingWebSocket(FakeSocket, source);
+    const ws = new Socket(SYNC_URL);
+    const seen = [];
+    ws.addEventListener('message', event => seen.push(event.data));
+    ws.addEventListener('close', () => seen.push('close'));
+    ws.receive(data);
+    ws.receive(JSON.stringify(['pokeEnd', { pokeID: 'p1' }]));
+    await settle();
+    assert.deepEqual(seen, ['close'], label);
+    assert.equal(ws.closed, 1, label);
+  }
+});
+
+test('after three resyncs in a row the message is delivered as it is; a good one resets the count', async () => {
+  const ring = await keyring();
+  let source = () => null;
+  const Socket = createDecryptingWebSocket(FakeSocket, () => source());
+  const encrypted = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField('Chennai', ring) } }] }]);
+  const connect = async () => {
+    const ws = new Socket(SYNC_URL);
+    const seen = [];
+    ws.addEventListener('message', event => seen.push(event.data));
+    ws.receive(encrypted);
+    await settle();
+    return { ws, seen };
+  };
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { ws, seen } = await connect();
+    assert.deepEqual(seen, [], `attempt ${attempt}`);
+    assert.equal(ws.closed, 1, `attempt ${attempt}`);
+  }
+  const fourth = await connect();
+  assert.deepEqual(fourth.seen, [encrypted]);
+  assert.equal(fourth.ws.closed, undefined);
+
+  source = () => ring;
+  const good = await connect();
+  assert.equal(JSON.parse(good.seen[0])[1].rowsPatch[0].value.textValue, 'Chennai');
+  source = () => null;
+  const afterReset = await connect();
+  assert.deepEqual(afterReset.seen, []);
+  assert.equal(afterReset.ws.closed, 1);
 });
 
 test('a close that arrives behind a held message is delivered after it, with its code', async () => {
