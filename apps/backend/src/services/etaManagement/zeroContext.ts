@@ -1,10 +1,9 @@
-import type { Transaction } from '@rocicorp/zero';
-import type { Schema } from '@xyne/shared';
 import { parseTicketEtaManagement, type TicketEtaManagement } from '@xyne/shared';
 import { zql } from '@/zero/queries';
 import { resolveStepEstimate } from './estimateResolution';
 import type { ActiveVisitContext } from './index';
 import type { StageLike, TransitionLike } from './types';
+import type { AnyTransaction } from '@/zero/unreadableTransaction';
 
 export interface LoadedZeroEtaContext {
   stages: Array<Pick<StageLike, 'id' | 'sequenceNumber' | 'eta'>>;
@@ -28,7 +27,7 @@ export interface LoadedZeroEtaContext {
  * mutators need the ordered list for their own logic first).
  */
 export async function loadZeroEtaContext(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   input: {
     ticketId: string;
     boardId: string;

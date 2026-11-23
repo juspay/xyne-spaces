@@ -9,9 +9,33 @@ type ColumnOf<T extends keyof Tables> = Extract<keyof Tables[T]['columns'], stri
  * not in the Zero schema is a compile error here. Every other column passes through.
  */
 export const UNREADABLE_COLUMNS = {
+  canvas_comment_threads: ['anchorText'],
+  canvas_comments: ['body'],
+  canvases: ['title'],
+  channel_user_status: ['customRecapPrompt'],
+  channels: ['callSummaryPrompt'],
+  coes: ['action'],
+  collections: ['description'],
+  dashboards: ['description'],
+  delayed_messages: ['content'],
   draft_messages: ['content'],
+  email_drafts: ['subject', 'draftContent'],
+  email_channel_preferences: ['classificationPrompt', 'priorityClassificationPrompt'],
+  email_signatures: ['content'],
+  impacts: ['impact'],
+  links: ['description'],
+  message_artifacts: ['messagePreview'],
   message_attachments: ['originalFilename'],
   messages: ['content'],
+  rcas: ['title', 'summary', 'rootCause'],
+  roles: ['description'],
+  sdlc_tracks: ['description'],
+  sub_tickets: ['title', 'description'],
+  ticket_descriptions: ['description'],
+  tickets: ['description'],
+  user_presence: ['statusContent'],
+  users: ['statusContent'],
+  workspaces: ['description'],
 } as const satisfies { readonly [T in keyof Tables]?: readonly ColumnOf<T>[] };
 
 /** The unreadable columns of table `T`; `never` for a table with none. */

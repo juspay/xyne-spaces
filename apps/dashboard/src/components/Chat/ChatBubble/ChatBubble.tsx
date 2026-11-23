@@ -1376,6 +1376,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onEditComplete={finishEditing}
           onCancel={finishEditing}
           isForwardedContent={message.msgType === MessageType.FORWARDED}
+          editedMessageContent={message.content}
         />
       ) : (
         <>

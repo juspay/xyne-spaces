@@ -28,7 +28,7 @@ import { KeyboardController, KeyboardGestureArea } from 'react-native-keyboard-c
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
-import { MessageType, parseInitialMessageMd } from '@xyne/shared';
+import { MessageType, parseInitialMessageMd, buildMessageEditContent } from '@xyne/shared';
 
 import { MessageHighlight } from '@/src/components/chat/message-highlight';
 import { DatePillBadge, resolveTopIndex } from '@/src/components/chat/date-pill';
@@ -2121,7 +2121,8 @@ function ChatThreadInner({
           zero.mutate(
             mutators.messages.update({
               messageId: editingMessageId,
-              content: transformedHtml,
+              // A forward is re-sent as its whole XML (the server cannot rewrite encrypted content).
+              content: buildMessageEditContent(editingTarget.storedContent, transformedHtml),
             }),
           ),
           () => {

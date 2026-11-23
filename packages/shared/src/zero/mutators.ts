@@ -72,7 +72,7 @@ import {
   MessageArtifactStatus,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
-import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
+import { createForwardedMessageXml, isForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getNudgeActionBehavior } from '../nudges.js';
 import {
   parseTicketMd,
@@ -309,7 +309,7 @@ import {
 } from '../utils/ticketMetadata.js';
 import {
   parseSlashCommandArtifactMessage,
-  withSlashCommandArtifactClosed,
+  withSlashCommandArtifactClosedMetadata,
 } from '../utils/slashCommandArtifact.js';
 import { stringFromFormValue } from '../tickets/utils.js';
 
@@ -2203,6 +2203,8 @@ export const mutators = defineMutators({
       z.object({
         targetChannelId: z.string(),
         originalMessageId: z.string(),
+        // The forward's XML (buildForwardedMessageContent); the server stores this one.
+        content: z.string().optional(),
         optionalMessage: z.string().optional(),
         conversationId: z.string(),
         messageId: z.string(),
@@ -2216,6 +2218,7 @@ export const mutators = defineMutators({
           targetChannelId,
           originalMessageId,
           optionalMessage,
+          content,
           conversationId,
           messageId,
           timestamp,
@@ -2272,7 +2275,8 @@ export const mutators = defineMutators({
         const now = timestamp;
 
         // Create XML content for the forwarded message
-        const xmlContent = createForwardedMessageXml({
+        // The caller's XML when sent (what the server stores); the local build is for older callers.
+        const xmlContent = content ?? createForwardedMessageXml({
           originalMessageId,
           originalSenderId: originalMessage.senderId,
           originalSenderName: originalSender?.name || 'Unknown User',
@@ -2831,7 +2835,9 @@ export const mutators = defineMutators({
         }
 
         if (content !== undefined) {
-          if (isForwardedMessage) {
+          // Callers send a forward's whole XML (buildMessageEditContent); only a caller that
+          // still sends just the optional text falls through to the rebuild below.
+          if (isForwardedMessage && !isForwardedMessageXml(content)) {
             // For forwarded messages, parse XML, update optionalText, and re-serialize
             const parsedForwarded = parseForwardedMessageXml(message.content);
             if (parsedForwarded) {
@@ -2892,13 +2898,12 @@ export const mutators = defineMutators({
           throw new Error('This incident is already closed');
         }
 
-        const content = withSlashCommandArtifactClosed(message.content, {
+        // The close goes into metadata, not the FlowJSON: the server cannot rewrite content
+        // that may be encrypted (see SLASH_COMMAND_ARTIFACT_CLOSED_KEY).
+        const metadata = withSlashCommandArtifactClosedMetadata(message.metadata, {
           closedAt: timestamp,
           closedBy: ctx.userID,
         });
-        if (!content) {
-          throw new Error('Message is not a slash command artifact');
-        }
 
         if (artifact) {
           await tx.mutate.message_artifacts.update({
@@ -2909,8 +2914,8 @@ export const mutators = defineMutators({
         }
         // Deliberately not `edited: true` — closing is a lifecycle transition,
         // not an edit, and must not raise a "message edited" notification.
-        await tx.mutate.messages.update({ messageId, content });
-        await updateInitialMessageMdField(tx, { messageId }, { content });
+        await tx.mutate.messages.update({ messageId, metadata });
+        await updateInitialMessageMdField(tx, { messageId }, { metadata: JSON.stringify(metadata) });
       },
     ),
     updateShowInChannel: defineMutator(
@@ -8967,6 +8972,8 @@ export const mutators = defineMutators({
             favicon: z.string().optional(),
           })
           .optional(),
+        /** The link's description, top-level so the server can take it encrypted; `link.description` is the older place. */
+        linkDescription: z.string().trim().max(2000).optional(),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {
@@ -9017,7 +9024,7 @@ export const mutators = defineMutators({
             channelId: args.channelId,
             url: args.link.url,
             title: args.link.title,
-            description: args.link.description ?? null,
+            description: args.linkDescription ?? args.link.description ?? null,
             favicon: args.link.favicon ?? null,
             visibility: LinkVisibility.DEFAULT,
             createdBy: ctx.userID,
@@ -12226,15 +12233,23 @@ export const mutators = defineMutators({
       z.object({
         workspaceId: z.string(),
         timestamp: z.number(),
-        updates: z.object({
-          name: z.string().optional(),
-          description: z.string().optional(),
-        }),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        // Older clients send the fields nested here.
+        updates: z
+          .object({
+            name: z.string().optional(),
+            description: z.string().optional(),
+          })
+          .optional(),
       }),
-      async ({ tx, args: { workspaceId, timestamp, updates } }) => {
+      async ({ tx, args: { workspaceId, timestamp, name, description, updates } }) => {
+        const nextName = name ?? updates?.name;
+        const nextDescription = description ?? updates?.description;
         await tx.mutate.workspaces.update({
           id: workspaceId,
-          ...updates,
+          ...(nextName !== undefined && { name: nextName }),
+          ...(nextDescription !== undefined && { description: nextDescription }),
           updatedAt: timestamp,
         });
       },

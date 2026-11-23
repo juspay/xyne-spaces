@@ -16,6 +16,7 @@ import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';
 import { type UnreadableColumn, unreadableColumnsOf } from './unreadableColumns';
+import { recordFactsDerived, recordFactsError, recordUnreadableWrapped } from './zeroMetrics';
 
 type Tx = Transaction<DefaultSchema, DefaultWrappedTransaction>;
 type TableName = keyof DefaultSchema['tables'] & string;
@@ -75,9 +76,9 @@ type UnreadableMutate = {
  * - `read(query, facts)` does the same and also returns the facts asked for from those
  *   columns, so the body decides on facts instead of the text;
  * - `mutate` takes an `UnreadableString` for those columns and stores the value it holds;
- * - the deprecated `tx.query`, which would read them plainly, is not there.
- *
- * Rows loaded through `.related()` are not wrapped yet.
+ * - the deprecated `tx.query`, which would read them plainly, is not there;
+ * - a query whose `.related()` reaches a table with unreadable columns is refused: those
+ *   nested rows would come back plain. Read that table with its own `tx.read` / `tx.run`.
  */
 export type UnreadableTransaction = Tx extends infer X
   ? X extends unknown
@@ -99,7 +100,8 @@ export type UnreadableTransaction = Tx extends infer X
 /** A helper that both defineContractMutator and plain mutators call takes either transaction. */
 export type AnyTransaction = Tx | UnreadableTransaction;
 
-function wrapRow(table: string, columns: readonly string[], row: unknown): unknown {
+/** Wraps `row`'s unreadable columns; adds each column it wrapped to `wrappedColumns`. */
+function wrapRow(table: string, columns: readonly string[], row: unknown, wrappedColumns: string[]): unknown {
   if (!row || typeof row !== 'object') return row;
   const record = row as Record<string, unknown>;
   for (const [column, value] of Object.entries(record)) {
@@ -113,27 +115,65 @@ function wrapRow(table: string, columns: readonly string[], row: unknown): unkno
   const wrapped = { ...record };
   for (const column of columns) {
     const value = wrapped[column];
-    if (value !== undefined && value !== null) wrapped[column] = UnreadableString.make(value as string);
+    if (value !== undefined && value !== null) {
+      wrapped[column] = UnreadableString.make(value as string);
+      wrappedColumns.push(column);
+    }
   }
   return wrapped;
 }
 
+type QueryAst = { table: string; related?: readonly { subquery: QueryAst }[] };
+
+/** Throws if `.related()` anywhere in the query reaches a table with unreadable columns. */
+function assertNoUnreadableRelated(ast: QueryAst): void {
+  for (const { subquery } of ast.related ?? []) {
+    if (unreadableColumnsOf(subquery.table).length > 0) {
+      throw new Error(
+        `${ast.table}.related(...) reaches ${subquery.table}, which has unreadable columns; ` +
+          `read ${subquery.table} with its own tx.read / tx.run instead`,
+      );
+    }
+    assertNoUnreadableRelated(subquery);
+  }
+}
+
 /** Logs that a read got its derived facts and where they came from. */
-function logDerivedFacts(table: string, source: 'local' | 'encryption-service'): void {
+type FactsSource = 'local' | 'encryption-service';
+
+function logDerivedFacts(table: string, source: FactsSource): void {
   logger.info(`[unreadableTransaction] ${table}: derived facts extracted via ${source}`);
 }
 
 /**
  * A write's value with each `UnreadableString` replaced by the value it holds, right before it
  * goes to the database. This module is the one place that unwraps one. An `UnreadableString`
- * in a column that is not unreadable would store the value where it is not expected: refused.
+ * in a column that is not unreadable, or nested inside any value (a JSON column), would store
+ * the value where it is not expected: refused.
  */
+/** Where inside `value` (a nested object or array) an `UnreadableString` sits, if anywhere. */
+function nestedUnreadablePath(value: unknown, path: string, seen = new Set<object>()): string | undefined {
+  if (!value || typeof value !== 'object' || seen.has(value)) return undefined;
+  if (value instanceof UnreadableString) return path;
+  seen.add(value);
+  for (const [key, child] of Object.entries(value)) {
+    const found = nestedUnreadablePath(child, `${path}.${key}`, seen);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 function unwrapForWrite(table: string, value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
   const columns = unreadableColumnsOf(table);
   let unwrapped: Record<string, unknown> | undefined;
   for (const [column, field] of Object.entries(value as Record<string, unknown>)) {
-    if (!(field instanceof UnreadableString)) continue;
+    if (!(field instanceof UnreadableString)) {
+      // Inside a JSON column it would be stored as its toJSON ("<redacted>"), silently.
+      const nested = nestedUnreadablePath(field, `${table}.${column}`);
+      if (nested) throw new Error(`${nested} is an UnreadableString inside a value; it cannot be stored there`);
+      continue;
+    }
     if (!columns.includes(column)) {
       throw new Error(`${table}.${column} is not an unreadable column; it cannot be written from an UnreadableString`);
     }
@@ -194,40 +234,57 @@ async function deriveRowFacts(
   if (items.length === 0) return facts;
 
   let results: FieldFacts[];
-  if (config.enc.enableDbEncryption) {
-    results = await getEncryptionProvider().deriveFacts({
-      items: items.map(({ value, derive }) => ({ value, derive })),
-      entityId: workspaceId,
-      entityType: 'WORKSPACE',
-    });
-    if (results.length !== items.length) {
-      throw new Error('tx.read: the encryption service returned facts for a different number of values');
+  const source: FactsSource = config.enc.enableDbEncryption ? 'encryption-service' : 'local';
+  const metricSource = source === 'local' ? 'local' : 'enc-rust';
+  try {
+    if (source === 'encryption-service') {
+      results = await getEncryptionProvider().deriveFacts({
+        items: items.map(({ value, derive }) => ({ value, derive })),
+        entityId: workspaceId,
+        entityType: 'WORKSPACE',
+      });
+      if (results.length !== items.length) {
+        throw new Error('tx.read: the encryption service returned facts for a different number of values');
+      }
+    } else {
+      results = items.map(({ column, value, derive }) => {
+        if (value.startsWith('ENC:')) throw new Error(`tx.read: ${table}.${column} is ciphertext and DB encryption is off`);
+        return runExtractors(value, derive);
+      });
     }
-    logDerivedFacts(table, 'encryption-service');
-  } else {
-    results = items.map(({ column, value, derive }) => {
-      if (value.startsWith('ENC:')) throw new Error(`tx.read: ${table}.${column} is ciphertext and DB encryption is off`);
-      return runExtractors(value, derive);
-    });
-    logDerivedFacts(table, 'local');
+  } catch (error) {
+    recordFactsError({ side: 'db_read', source: metricSource });
+    throw error;
   }
+  logDerivedFacts(table, source);
+
   items.forEach(({ row, column }, index) => {
     facts[row][column] = results[index];
   });
+  recordFactsDerived({ side: 'db_read', source: metricSource, table, columns: items.map(({ column }) => column) });
   return facts;
 }
 
 /** `tx` with unreadable reads: see `UnreadableTransaction`. `workspaceId` owns the rows read. */
 export function unreadableTransaction(tx: Tx, workspaceId: string): UnreadableTransaction {
-  const tableOf = (query: unknown) => (query as { ast: { table: string } }).ast.table;
+  const tableOf = (query: unknown) => {
+    const { ast } = query as { ast: QueryAst };
+    assertNoUnreadableRelated(ast);
+    return ast.table;
+  };
   return new Proxy(tx, {
     get(target, prop, receiver) {
       if (prop === 'run') {
         return async (query: Query<TableName, DefaultSchema, unknown>, options?: RunOptions) => {
-          const result: unknown = await target.run(query, options);
           const table = tableOf(query);
+          const result: unknown = await target.run(query, options);
           const columns = unreadableColumnsOf(table);
-          return Array.isArray(result) ? result.map(row => wrapRow(table, columns, row)) : wrapRow(table, columns, result);
+          const wrappedColumns: string[] = [];
+          const wrapped = Array.isArray(result)
+            ? result.map(row => wrapRow(table, columns, row, wrappedColumns))
+            : wrapRow(table, columns, result, wrappedColumns);
+          recordUnreadableWrapped({ side: 'db_read', table, columns: wrappedColumns });
+          return wrapped;
         };
       }
       if (prop === 'read') {
@@ -236,13 +293,15 @@ export function unreadableTransaction(tx: Tx, workspaceId: string): UnreadableTr
           spec: Record<string, DerivedSpec | undefined>,
           options?: RunOptions,
         ) => {
+          const table = tableOf(query);
           const result: unknown = await target.run(query, options);
           if (result === undefined) return undefined;
-          const table = tableOf(query);
           const columns = unreadableColumnsOf(table);
           const rows = Array.isArray(result) ? result : [result];
           const facts = await deriveRowFacts(table, rows, spec, workspaceId);
-          const read = rows.map((row, index) => ({ row: wrapRow(table, columns, row), facts: facts[index] }));
+          const wrappedColumns: string[] = [];
+          const read = rows.map((row, index) => ({ row: wrapRow(table, columns, row, wrappedColumns), facts: facts[index] }));
+          recordUnreadableWrapped({ side: 'db_read', table, columns: wrappedColumns });
           return Array.isArray(result) ? read : read[0];
         };
       }

@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SharedValue } from 'react-native-reanimated';
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
-import { ChannelScopeType, parseTicketMd, type User } from '@xyne/shared';
+import { ChannelScopeType, parseTicketMd, type User, buildMessageEditContent } from '@xyne/shared';
 
 import { ChatHeaderV3, getChatHeaderCollapsedHeight } from '@/src/components/chat/chat-header-v3';
 import {
@@ -813,7 +813,8 @@ const ChatChannelScreen = (): ReactElement => {
         const mutation = zero.mutate(
           mutators.messages.update({
             messageId: editingMessageId,
-            content: transformedHtml,
+            // A forward is re-sent as its whole XML (the server cannot rewrite encrypted content).
+            content: buildMessageEditContent(editingTarget.storedContent, transformedHtml),
           }),
         );
         subscribeMutationRestore(mutation, () => {

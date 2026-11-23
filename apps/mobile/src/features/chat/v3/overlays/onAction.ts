@@ -115,6 +115,7 @@ export const onAction = (
       channelId: target.channelId,
       content:
         target.isForwarded || forwarded !== null ? (forwarded?.optionalText ?? '') : target.html,
+      storedContent: target.html,
     });
     return;
   }

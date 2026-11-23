@@ -1,11 +1,19 @@
 import { createContext, useContext } from 'react';
-import type { FlowState, FlowAction, AppActionResponse, FlowDefinition } from '@xyne/shared';
+import type {
+  FlowState,
+  FlowAction,
+  AppActionResponse,
+  FlowDefinition,
+  SlashCommandArtifactClosed,
+} from '@xyne/shared';
 
 export interface FlowMessageContext {
   channelId?: string;
   senderId?: string;
   createdAt?: number;
   surface?: 'channel' | 'thread';
+  /** A slash-command artifact's close, recorded in the message's metadata. */
+  closed?: SlashCommandArtifactClosed;
 }
 
 export interface FlowContextValue {

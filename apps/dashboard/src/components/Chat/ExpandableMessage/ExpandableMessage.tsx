@@ -1,3 +1,4 @@
+import type { SlashCommandArtifactClosed } from '@xyne/shared';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import {
@@ -21,6 +22,8 @@ interface ExpandableMessageProps {
     senderId?: string;
     createdAt?: number;
     surface?: 'channel' | 'thread';
+    /** A slash-command artifact's close, recorded in the message's metadata. */
+    closed?: SlashCommandArtifactClosed;
   };
 }
 

@@ -142,3 +142,30 @@ export function getCryptoMutationOperations(): Counter {
   }
   return _cryptoMutationOperations;
 }
+
+// Unreadable / derived-facts migration of the Zero mutators (recorded via zero/zeroMetrics.ts).
+function lazyCounter(name: string, description: string): () => Counter {
+  let counter: Counter | null = null;
+  return () => (counter ??= getMeter().createCounter(name, { description, unit: '1' }));
+}
+
+export const getContractApplied = lazyCounter(
+  'zero_contract_applied',
+  'Mutations run with a request contract (args made unreadable), by mutator',
+);
+export const getFactsDerived = lazyCounter(
+  'zero_facts_derived',
+  'Values facts were derived from, by mutator, side (args / db_read), table, column and source (local / enc-rust)',
+);
+export const getFactsErrors = lazyCounter(
+  'zero_facts_errors',
+  'Failed fact extractions, by mutator, side and source',
+);
+export const getUnreadableWrapped = lazyCounter(
+  'zero_unreadable_wrapped',
+  'Values turned into UnreadableString, by mutator, side (args / db_read), table and column',
+);
+export const getStorageWrites = lazyCounter(
+  'zero_storage_writes',
+  'Encrypted-column values written by Zero mutators, by mutator, table, column and mode (dek_at_rest / dek_passthrough)',
+);

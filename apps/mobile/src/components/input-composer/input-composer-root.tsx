@@ -596,7 +596,7 @@ const RootComponent = ({
             id: uuidv4(),
             channelId: conversationId,
             ...(threadConversationId ? { conversationId: threadConversationId } : {}),
-            content,
+            content: content.trim(),
             scheduledFor,
             timestamp: Date.now(),
           }),

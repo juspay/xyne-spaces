@@ -805,7 +805,8 @@ export const ThreadMessages = ({
     void zero.mutate(
       mutators.messages.send({
         conversationId: derivedConversationId,
-        content,
+        // Trimmed here: the server stores the content as received (it may be encrypted).
+        content: content.trim(),
         type: MessageType.USER,
         showInChannel: false,
         timestamp: ts,

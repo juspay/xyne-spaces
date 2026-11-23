@@ -27,6 +27,7 @@ import { ChatOverlays, useChatOverlays } from './ChatOverlays';
 import { channelThreadOpen } from './channelThreadOpen';
 import type { ChatOpenSession } from './useChatOpen';
 import { useChatRows } from './useChatRows';
+import { buildMessageEditContent } from '@xyne/shared';
 
 const ROOT = 'flex-1 bg-chat-screen' as const;
 
@@ -91,7 +92,13 @@ export function ChatConversationView({
         }
         dispatchOverlays({ type: 'cancelEdit' });
         subscribeMutationRestore(
-          zero.mutate(mutators.messages.update({ messageId: editing.messageId, content })),
+          zero.mutate(
+            mutators.messages.update({
+              messageId: editing.messageId,
+              // A forward is re-sent as its whole XML (the server cannot rewrite encrypted content).
+              content: buildMessageEditContent(editing.storedContent, content),
+            }),
+          ),
           () => {
             dispatchOverlays({ type: 'startEdit', payload: editing });
             restore();

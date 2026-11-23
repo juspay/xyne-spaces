@@ -1,6 +1,8 @@
+import type { ReadonlyJSONValue } from "@rocicorp/zero";
 import type { FlowComponent, FlowDefinition } from "../types/flowUI";
 import {
   flowDefinitionSchema,
+  slashCommandArtifactClosedSchema,
   slashCommandArtifactPropsSchema,
   type SlashCommandArtifactClosed,
   type SlashCommandArtifactEndedCall,
@@ -327,3 +329,34 @@ export const withSlashCommandArtifactClosed = (
   content: string,
   closed: SlashCommandArtifactClosed,
 ): string | null => withSlashCommandArtifactProps(content, { closed });
+
+/**
+ * Where a close is recorded: `messages.metadata[SLASH_COMMAND_ARTIFACT_CLOSED_KEY]` holds
+ * `{ closedAt, closedBy }`. The close used to bake this into the FlowJSON (`content`); content
+ * can be client-encrypted, so the server cannot rewrite it, while metadata stays plaintext.
+ * Cards closed before keep the marker in their FlowJSON (`props.closed`).
+ */
+export const SLASH_COMMAND_ARTIFACT_CLOSED_KEY = "slashCommandArtifactClosed";
+
+/** The close recorded in a message's metadata, if any. */
+export const readSlashCommandArtifactClosed = (
+  metadata: unknown,
+): SlashCommandArtifactClosed | undefined => {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const parsed = slashCommandArtifactClosedSchema.safeParse(
+    (metadata as Record<string, unknown>)[SLASH_COMMAND_ARTIFACT_CLOSED_KEY],
+  );
+  return parsed.success ? parsed.data : undefined;
+};
+
+/** `metadata` with the close recorded in it; other keys are kept. */
+export const withSlashCommandArtifactClosedMetadata = (
+  metadata: unknown,
+  closed: SlashCommandArtifactClosed,
+): ReadonlyJSONValue =>
+  ({
+    ...(metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : {}),
+    [SLASH_COMMAND_ARTIFACT_CLOSED_KEY]: closed,
+  }) as ReadonlyJSONValue;

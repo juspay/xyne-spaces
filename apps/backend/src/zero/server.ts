@@ -36,6 +36,7 @@ import type { AuditJobsAccumulator } from './audit';
 import { decryptQueryResult } from './encryption-interceptor';
 import { executeFlatCatalogQuery, NOT_FLAT } from './flat-catalog-query';
 import { prepareEncryptedMutations, runEncryptedMutation, type MutationEncryptionContext } from './encryptedMutation';
+import { runWithMutatorName } from './zeroMetrics';
 import type { DerivedFacts } from '@xyne/shared';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
@@ -322,7 +323,9 @@ export async function handleMutate(request: Request, enc?: MutationEncryptionCon
           );
           const mutator = mustGetMutator(mutators, mutatorName);
           return runEncryptedMutation(args, prepared, async (mutationArgs, derived) => {
-            const result = await mutator.fn({ tx: wrappedTx, args: mutationArgs as typeof args, ctx: context });
+            const result = await runWithMutatorName(mutatorName, () =>
+              mutator.fn({ tx: wrappedTx, args: mutationArgs as typeof args, ctx: context }),
+            );
             attachDerivedToMessageJobs(mutationSideEffectJobs, mutationArgs, derived);
             return result;
           });
@@ -871,7 +874,7 @@ export async function runCatalogMutation(
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.
     await runEncryptedMutation(preparedArgs, prepared, async (mutationArgs, derived) => {
-      await mutator.fn({ tx: wrappedTx, args: mutationArgs as never, ctx });
+      await runWithMutatorName(name, () => mutator.fn({ tx: wrappedTx, args: mutationArgs as never, ctx }));
       attachDerivedToMessageJobs(sideEffectJobs, mutationArgs, derived);
     });
     // Audit tables live outside the Zero graph (non_zero schema); the flush is

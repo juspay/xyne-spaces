@@ -2833,9 +2833,12 @@ export default function SdlcScreen(): ReactElement {
           link: {
             url: linkUrl.trim(),
             title: linkTitle.trim() || linkUrl.trim(),
-            ...(linkPreview?.description && { description: linkPreview.description }),
             ...(linkPreview?.favicon && { favicon: linkPreview.favicon }),
           },
+          // Trimmed here and sent top-level: the server stores it as received (it may be encrypted).
+          ...(linkPreview?.description?.trim() && {
+            linkDescription: linkPreview.description.trim(),
+          }),
           timestamp: Date.now(),
         }),
       ),

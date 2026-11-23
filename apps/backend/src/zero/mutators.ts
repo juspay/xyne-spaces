@@ -68,9 +68,6 @@ import {
   removeReactionFromData,
   serializeReactionsMd,
   FormFieldType,
-  MessageAttachment,
-  createForwardedMessageXml,
-  parseForwardedMessageXml,
   type BoardMetadata,
   SavedConfigContextType,
   SavedConfigVisibility,
@@ -107,7 +104,7 @@ import {
   SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
   entityLinkContextSchema,
-  withKeptExtension,
+  withExtension,
   updateSubTicketsMdFromZero,
   linkSubTicketConversationToParentFromZero,
   parseBoardEtaManagement,
@@ -115,7 +112,6 @@ import {
   parseTicketEtaManagement,
   mergeTicketEtaManagement,
   type EtaRiskAcknowledgedActivityValue,
-  resolveTicketDescription,
 } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
@@ -129,12 +125,57 @@ import {
 } from '@/services/messageClassification/vocabulary';
 import {
   MessageArtifactStatus,
-  parseSlashCommandArtifactMessage,
-  withSlashCommandArtifactClosed,
+  getSlashCommandArtifactDefinition,
+  withSlashCommandArtifactClosedMetadata,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
-import { conversationsSendClient, derive } from '@xyne/shared';
+import {
+  conversationsForwardMessageClient,
+  messagesUpdateClient,
+  messagesSendClient,
+  ticketUpdateClient,
+  markChannelAsViewedClient,
+  markThreadActivitiesAsReadV2Client,
+  recapSetCustomRecapPromptClient,
+  userPresenceUpsertClient,
+  draftCreateAttachmentsClient,
+  sdlcAddSdlcFolderItemClient,
+  sdlcCreateTrackClient,
+  sdlcUpdateTrackClient,
+  channelUpdateCallSummaryPromptClient,
+  emailChannelPreferenceUpsertClassificationClient,
+  emailChannelPreferenceUpsertPriorityClassificationClient,
+  workspaceUpdateClient,
+  canvasCreateClient,
+  canvasUpdateClient,
+  coeCreateClient,
+  coeUpdateClient,
+  impactCreateClient,
+  impactUpdateClient,
+  rcaCreateClient,
+  rcaUpdateClient,
+  dashboardUpsertClient,
+  delayedMessagesCreateClient,
+  delayedMessagesEditClient,
+  draftMessagesEditClient,
+  subTicketCreateClient,
+  emailDraftUpsertClient,
+  emailDraftUpsertComposeDraftClient,
+  canvasCommentCreateThreadClient,
+  canvasCommentReplyClient,
+  canvasCommentUpdateClient,
+  collectionCreateClient,
+  collectionUpdateClient,
+  conversationsSendClient,
+  derive,
+  emailSignatureCreateClient,
+  emailSignatureUpdateClient,
+  linksCreateClient,
+  linksUpdateClient,
+  roleCreateClient,
+  roleUpdateClient,
+} from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
@@ -175,7 +216,6 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
 import { defineContractMutator, getMutationFacts } from './encryptedMutation';
 import type { AnyTransaction } from './unreadableTransaction';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
@@ -347,7 +387,7 @@ async function loadChannelForAppPublish(
 }
 
 async function getCanvasThreadCommentCount(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   threadId: string,
   workspaceId: string,
 ): Promise<number> {
@@ -568,7 +608,7 @@ const COLLECTION_ROLE_RANK: Record<CollectionRole, number> = {
  * current+future member.
  */
 async function resolveCollectionPermissionRole(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   collectionId: string,
   userId: string,
 ): Promise<CollectionRole | null> {
@@ -593,20 +633,9 @@ async function resolveCollectionPermissionRole(
   return role;
 }
 
-/** Guests may only mention people in the channel (see keepMentionsWithin). */
-async function guestSafeContent(
-  tx: Transaction<Schema>,
-  role: string | undefined,
-  channelId: string,
-  content: string,
-): Promise<string> {
-  if (role !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
-  const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
-  return keepMentionsWithin(content, new Set(participants.map(participant => participant.userId)));
-}
-
 /**
- * guestSafeContent for encrypted content: the ciphertext cannot be rewritten, so a guest whose
+ * Guests may only mention people in the channel. The content is unreadable and cannot be
+ * rewritten (the old guestSafeContent stripped the mention), so a guest whose
  * message mentions someone outside the channel is refused instead of having the mention
  * stripped. Group mentions (keepMentionsWithin drops every mention when one remains) and
  * `@name` handles (resolved to users only when notifying) are refused outright, since a guest
@@ -704,7 +733,7 @@ async function addMentionedConversationParticipants(
  * otherwise the ticket is left pointing at a missing conversation.
  */
 async function conversationHasTicket(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   conversationId: string,
 ): Promise<boolean> {
   const ticket = await tx.run(zql.tickets.where('conversationId', conversationId).one());
@@ -712,7 +741,7 @@ async function conversationHasTicket(
 }
 
 async function deleteConversationWithParticipants(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   conversationId: string,
 ): Promise<void> {
   // A ticket thread must outlive its messages (see conversationHasTicket).
@@ -742,7 +771,7 @@ async function deleteConversationWithParticipants(
 }
 
 async function assertCanvasChannelNotArchived(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   channelId: string | null | undefined,
 ): Promise<void> {
   if (!channelId) {
@@ -761,7 +790,7 @@ async function assertCanvasChannelNotArchived(
 
 
 async function hasCanvasVersionEditAccess(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   canvas: { id: string; createdBy: string },
   userId: string,
 ): Promise<boolean> {
@@ -789,7 +818,7 @@ async function hasCanvasVersionEditAccess(
 }
 
 async function assertCanvasCommentEditAccess(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   canvasId: string,
   userId: string,
   workspaceId: string,
@@ -844,7 +873,7 @@ function hasBoardAutoAssignment(metadata: BoardMetadata | undefined): boolean {
  * primary assignee, and optionally logs an activity + system message.
  */
 async function assignFullRoles(
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   {
     ticketId,
     userGroupId,
@@ -1780,15 +1809,18 @@ export function createMutators(
           });
         },
       ),
-      updateCallSummaryPrompt: defineMutator(
+      updateCallSummaryPrompt: defineContractMutator(
+        channelUpdateCallSummaryPromptClient,
         z.object({
           channelId: z.string(),
-          prompt: z
-            .string()
-            .max(SUMMARY_PROMPT_MAX_LENGTH, 'Call summary template must be 20000 characters or less')
-            .nullable(),
+          // The length limit is checked on the textLength fact below: zod cannot measure ciphertext.
+          prompt: z.string().nullable(),
         }),
         async ({ tx, args: { channelId, prompt } }) => {
+          const facts = getMutationFacts(channelUpdateCallSummaryPromptClient, 'prompt');
+          if ((facts?.textLength ?? 0) > SUMMARY_PROMPT_MAX_LENGTH) {
+            throw new Error('Call summary template must be 20000 characters or less');
+          }
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exist");
@@ -1804,7 +1836,8 @@ export function createMutators(
 
           await tx.mutate.channels.update({
             id: channelId,
-            callSummaryPrompt: prompt?.trim() ? prompt : null,
+            // No facts (null or '') or only whitespace means no custom prompt, as `prompt?.trim()` had it.
+            callSummaryPrompt: facts?.textIsEmpty === false ? prompt : null,
           });
         },
       ),
@@ -1839,7 +1872,8 @@ export function createMutators(
           });
         },
       ),
-      markChannelAsViewed: defineMutator(
+      markChannelAsViewed: defineContractMutator(
+        markChannelAsViewedClient,
         z.object({
           channelId: z.string(),
           conversationId: z.string().optional(),
@@ -1894,9 +1928,11 @@ export function createMutators(
             // Find the channel-level draft (conversationId === null)
             const draft = channelDrafts.find(d => d.conversationId === null);
 
-            if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+            // No facts means the draft text was empty.
+            const draftIsEmpty = getMutationFacts(markChannelAsViewedClient, 'draftMessage')?.textIsEmpty ?? true;
+            if (draft && draftIsEmpty && !draft.hasAttachment) {
               await tx.mutate.draft_messages.delete({ id: draft.id });
-            } else if (draftMessage.trim() !== '') {
+            } else if (!draftIsEmpty) {
               await tx.mutate.draft_messages.upsert({
                 workspaceId: authData.workspaceId,
                 id: draft?.id || draftMessageId,
@@ -3292,11 +3328,15 @@ export function createMutators(
           });
         },
       ),
-      forwardMessage: defineMutator(
+      forwardMessage: defineContractMutator(
+        conversationsForwardMessageClient,
         z.object({
           targetChannelId: z.string(),
           originalMessageId: z.string(),
-          optionalMessage: z.string().max(10000, 'Optional message too long').optional(),
+          // The forward's XML, built by the client (buildForwardedMessageContent).
+          content: z.string().optional(),
+          // Older clients sent only this; the server can no longer build the XML from it.
+          optionalMessage: z.string().optional(),
           conversationId: z.string(),
           messageId: z.string(),
           timestamp: z.number(),
@@ -3307,7 +3347,7 @@ export function createMutators(
           args: {
             targetChannelId,
             originalMessageId,
-            optionalMessage,
+            content,
             conversationId,
             messageId,
             timestamp,
@@ -3331,18 +3371,15 @@ export function createMutators(
             throw new Error('You are not a participant of the target channel');
           }
 
-          // Get the original message
-          const originalMessage = await tx.run(
-            zql.messages.where('messageId', originalMessageId).one()
-          );
-          if (!originalMessage) {
+          // Get the original message. Its text is unreadable; whether a forward carries optional
+          // text (which decides the attachments below) comes as a fact.
+          const originalRead = await tx.read(zql.messages.where('messageId', originalMessageId).one(), {
+            content: { forwardedHasOptionalText: derive.forwardedHasOptionalText },
+          });
+          const originalMessage = originalRead?.row;
+          if (!originalRead || !originalMessage) {
             throw new Error('Original message not found');
           }
-
-          // Get original sender info
-          const originalSender = await tx.run(
-            zql.users.where('id', originalMessage.senderId).one()
-          );
 
           // Get original message's conversation to find the channel
           const originalConversation = await tx.run(
@@ -3362,22 +3399,30 @@ export function createMutators(
             }
           }
 
-          // Handle re-forwarding: if the original message is already forwarded,
-          // parse the XML to get the optionalText and use that as content (if exists)
-          // When using optionalText, don't include attachments (it's either optionalText OR message content with attachments)
-          const isReForwarding = originalMessage.msgType === MessageType.FORWARDED;
-          let forwardedContent = originalMessage.content;
-          let useOptionalText = false;
-
-          if (isReForwarding) {
-            const parsedForwarded = parseForwardedMessageXml(originalMessage.content);
-            if (parsedForwarded?.optionalText) {
-              forwardedContent = parsedForwarded.optionalText;
-              useOptionalText = true;
-            } else if (parsedForwarded?.content) {
-              forwardedContent = parsedForwarded.content;
-            }
+          // The client built the forward's XML (it holds the original's text); check it forwards
+          // this message, from its sender, conversation and channel. The original's text inside
+          // it cannot be checked: encrypted values cannot be compared.
+          const facts = getMutationFacts(conversationsForwardMessageClient, 'content');
+          if (!content || !facts?.forwardedMessageId) {
+            throw new Error('Forwarding needs the forwarded message; update the app and try again');
           }
+          if (facts.forwardedOptionalTextLength > 10000) {
+            throw new Error('Optional message too long');
+          }
+          if (
+            facts.forwardedMessageId !== originalMessageId ||
+            facts.forwardedSenderId !== originalMessage.senderId ||
+            facts.forwardedConversationId !== originalMessage.conversationId ||
+            facts.forwardedChannelId !== (originalConversation?.channelId || null)
+          ) {
+            throw new Error('The forwarded message does not match the original');
+          }
+
+          // Re-forwarding a forward that has optional text forwards that text, without the
+          // original's attachments (it is either optional text or content with attachments).
+          const useOptionalText =
+            originalMessage.msgType === MessageType.FORWARDED &&
+            (originalRead.facts.content?.forwardedHasOptionalText ?? false);
 
           // Get original message attachments (only if not using optionalText)
           const originalAttachments = useOptionalText
@@ -3401,27 +3446,17 @@ export function createMutators(
           });
 
           // Create the forwarded message with XML content structure
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const attachmentsArray = originalAttachments as MessageAttachment[];
+          // Copied as read: the file names are unreadable and tx.mutate stores them as they are.
+          const attachmentsArray = originalAttachments;
 
-          // Create XML content for the forwarded message
-          const xmlContent = createForwardedMessageXml({
-            originalMessageId,
-            originalSenderId: originalMessage.senderId,
-            originalSenderName: originalSender?.name || 'Unknown User',
-            originalCreatedAt: originalMessage.createdAt as number,
-            originalChannelId: originalConversation?.channelId || null,
-            originalConversationId: originalMessage.conversationId,
-            optionalText: optionalMessage || null,
-            content: forwardedContent,
-          });
 
           await tx.mutate.messages.insert({
             messageId,
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            content: xmlContent,
+            // Stored as received: the client-built XML, checked above.
+            content,
             msgType: MessageType.FORWARDED,
             hasAttachment: attachmentsArray.length > 0,
             edited: false,
@@ -3437,7 +3472,7 @@ export function createMutators(
           // strictly increasing explicit position (and createdAt offset) on each clone
           // so the forwarded copy renders in the same order the sender saw.
           const orderedSourceAttachments = [...attachmentsArray]
-            .filter((a): a is MessageAttachment => !!a)
+            .filter(a => !!a)
             .sort(
               (a, b) =>
                 ((a.position ?? Number.MAX_SAFE_INTEGER) -
@@ -3707,7 +3742,8 @@ export function createMutators(
       ),
     },
     messages: {
-      send: defineMutator(
+      send: defineContractMutator(
+        messagesSendClient,
         z.object({
           conversationId: z.string(),
           content: z.string(),
@@ -3719,7 +3755,10 @@ export function createMutators(
           attachmentIds: z.array(z.string()).optional(),
         }),
         async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds } }) => {
-          if (content === '') {
+          // `content` is unreadable: decisions come from the contract's facts. No facts means the
+          // content was empty.
+          const facts = getMutationFacts(messagesSendClient, 'content');
+          if (!facts) {
             throw new Error('Message content or files are required to start a conversation');
           }
 
@@ -3729,7 +3768,8 @@ export function createMutators(
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
-          content = await guestSafeContent(tx, authData.role, conversation.channelId, content);
+          // A guest may mention only channel members: refused, not stripped (the text is unreadable).
+          await assertGuestMentionsWithin(tx, authData.role, conversation.channelId, facts);
           const [channel, participant, channelDrafts] = await Promise.all([
             tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
             tx.run(zql.channel_participants
@@ -3753,17 +3793,17 @@ export function createMutators(
           // so a second /sev2 inside it would fork the responders across two cards
           // and two calls. The channel is unrestricted — that is where a genuinely
           // separate incident belongs.
-          const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+          const outgoingArtifact = getSlashCommandArtifactDefinition(facts.slashArtifactCommand);
           if (outgoingArtifact) {
             const openArtifact = await tx.run(zql.message_artifacts
               // channelId first: it is the only selective index on this table.
               .where('channelId', conversation.channelId)
               .where('conversationId', conversationId)
-              .where('command', outgoingArtifact.definition.command)
+              .where('command', outgoingArtifact.command)
               .where('status', MessageArtifactStatus.ACTIVE)
               .one());
             if (openArtifact) {
-              throw new Error(`A ${outgoingArtifact.definition.badge} is already open in this thread`);
+              throw new Error(`A ${outgoingArtifact.badge} is already open in this thread`);
             }
           }
 
@@ -3772,7 +3812,8 @@ export function createMutators(
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            content: content.trim(),
+            // Stored as received; the client trims it.
+            content,
             msgType: type,
             hasAttachment: false,
             edited: false,
@@ -3899,7 +3940,7 @@ export function createMutators(
               asyncTasks.push(async () => {
                 try {
                   await processMeetLinksFromChatMessage(
-                    message.content,
+                    facts.meetLinks.join(' '),
                     authData.workspaceId,
                     conversationId,
                     message.messageId,
@@ -4056,7 +4097,8 @@ export function createMutators(
           const user = await tx.run(zql.users.where('id', authData.sub).one());
 
           // Add mentioned users as MENTIONED participants within Zero transaction
-          const mentions = extractAllMentions(content);
+          // Mentions by the participant rule (extractAllMentions), as facts.
+          const mentions = { userIds: facts.spanMentionUserIds, groupIds: facts.spanMentionGroupIds };
           const mentionParticipantUserIds = await resolveMentionParticipantUserIds(
             tx,
             mentions.userIds,
@@ -4113,9 +4155,15 @@ export function createMutators(
 
                   try {
                     // Execute bot - this creates the bot response message
+                    // The bot gets the reply's text from the stored message (read through Prisma,
+                    // after commit): the mutator holds it only as an unreadable value.
+                    const storedReply = await db.message.findUnique({
+                      where: { messageId: message.messageId },
+                      select: { content: true },
+                    });
                     const result = await executionOrchestrator.execute({
                       botId: botDefinition.id,
-                      message: content,
+                      message: storedReply?.content ?? '',
                       channelId: channel.id,
                       conversationId,
                       userMessageId: message.messageId,
@@ -4148,19 +4196,50 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
+      update: defineContractMutator(
+        messagesUpdateClient,
         z.object({ messageId: z.string(), content: z.string().optional() }),
         async ({ tx, args: { messageId, content } }) => {
-          const message = await tx.run(zql.messages.where('messageId', messageId).one());
-          if (!message) {
+          // The stored content is unreadable: its mentions and (for a forward) what it forwards
+          // come as facts.
+          const messageRead = await tx.read(zql.messages.where('messageId', messageId).one(), {
+            content: {
+              spanMentionUserIds: derive.spanMentionUserIds,
+              spanMentionGroupIds: derive.spanMentionGroupIds,
+              forwardedOptionalTextUserIds: derive.forwardedOptionalTextUserIds,
+              forwardedOptionalTextGroupIds: derive.forwardedOptionalTextGroupIds,
+              forwardedMessageId: derive.forwardedMessageId,
+              forwardedConversationId: derive.forwardedConversationId,
+              forwardedSenderId: derive.forwardedSenderId,
+              forwardedChannelId: derive.forwardedChannelId,
+            },
+          });
+          const message = messageRead?.row;
+          if (!messageRead || !message) {
             throw new Error('Message not available');
           }
+          const stored = messageRead.facts.content;
+          // The new content's facts; none when it was empty (or not sent).
+          const facts = content !== undefined ? getMutationFacts(messagesUpdateClient, 'content') : undefined;
 
-          // For forwarded messages, empty content is allowed (clearing optional message)
-          // For regular messages, content cannot be empty
           const isForwardedMessage = message.msgType === MessageType.FORWARDED;
-          if (content !== undefined && content === '' && !isForwardedMessage) {
+          if (content !== undefined && !facts && !isForwardedMessage) {
             throw new Error('Message content cannot be empty');
+          }
+          // A forward is edited by sending its whole XML with the new optional text (the client
+          // builds it: the server cannot rewrite encrypted text). It may not change what it forwards.
+          if (content !== undefined && isForwardedMessage) {
+            if (!facts?.forwardedMessageId) {
+              throw new Error('Editing a forwarded message needs the forwarded message; update the app and try again');
+            }
+            if (
+              facts.forwardedMessageId !== stored?.forwardedMessageId ||
+              facts.forwardedConversationId !== stored?.forwardedConversationId ||
+              facts.forwardedSenderId !== stored?.forwardedSenderId ||
+              facts.forwardedChannelId !== stored?.forwardedChannelId
+            ) {
+              throw new Error('A forwarded message cannot change what it forwards');
+            }
           }
 
           // Allow system messages to be updated by any channel participant
@@ -4179,7 +4258,19 @@ export function createMutators(
           }
           if (content !== undefined && authData.role === WorkspaceRole.GUEST) {
             const edited = await tx.run(zql.conversations.where('conversationId', message.conversationId).one());
-            content = await guestSafeContent(tx, authData.role, edited?.channelId ?? '', content);
+            // Refused, not stripped (the text is unreadable). For a forward, its optional text.
+            await assertGuestMentionsWithin(
+              tx,
+              authData.role,
+              edited?.channelId ?? '',
+              isForwardedMessage
+                ? {
+                    userIds: facts?.forwardedOptionalTextUserIds ?? [],
+                    groupIds: facts?.forwardedOptionalTextGroupIds ?? [],
+                    handles: [],
+                  }
+                : facts,
+            );
           }
 
           // Only process mention changes if content is being updated
@@ -4188,17 +4279,14 @@ export function createMutators(
           let noLongerMentionedUsers: string[] = [];
 
           if (content !== undefined) {
-            // For forwarded messages, parse XML to extract mentions from optionalText
-            // For regular messages, extract mentions from the message content
-            let oldContentToCheck = message.content;
-            if (isForwardedMessage) {
-              const parsedForwarded = parseForwardedMessageXml(message.content);
-              oldContentToCheck = parsedForwarded?.optionalText || '';
-            }
-
-            // Extract mentions from old and new content
-            const oldMentions = extractAllMentions(oldContentToCheck);
-            const newMentions = extractAllMentions(content);
+            // Mentions by the participant rule (extractAllMentions), as facts: of the text, or
+            // for a forward of its optional text.
+            const oldMentions = isForwardedMessage
+              ? { userIds: stored?.forwardedOptionalTextUserIds ?? [], groupIds: stored?.forwardedOptionalTextGroupIds ?? [] }
+              : { userIds: stored?.spanMentionUserIds ?? [], groupIds: stored?.spanMentionGroupIds ?? [] };
+            const newMentions = isForwardedMessage
+              ? { userIds: facts?.forwardedOptionalTextUserIds ?? [], groupIds: facts?.forwardedOptionalTextGroupIds ?? [] }
+              : { userIds: facts?.spanMentionUserIds ?? [], groupIds: facts?.spanMentionGroupIds ?? [] };
 
             // Find users that are newly mentioned (in new content but not in old)
             newlyMentionedUsers = newMentions.userIds.filter(
@@ -4256,17 +4344,17 @@ export function createMutators(
           // Remove users who are no longer mentioned (only if they're MENTIONED type)
           if (noLongerMentionedUsers.length > 0) {
             // Get all OTHER messages in the conversation (excluding the one being updated)
-            const allMessages = await tx.run(zql.messages
-              .where('conversationId', message.conversationId));
-
-            const otherMessages = allMessages.filter(m => m.messageId !== messageId);
+            const otherMessages = (
+              await tx.read(zql.messages.where('conversationId', message.conversationId), {
+                content: { spanMentionUserIds: derive.spanMentionUserIds },
+              })
+            ).filter(m => m.row.messageId !== messageId);
 
             for (const userId of noLongerMentionedUsers) {
               // Check if user is still mentioned in any other message
-              const stillMentioned = otherMessages.some((msg) => {
-                const msgMentions = extractAllMentions(msg.content);
-                return msgMentions.userIds.includes(userId);
-              });
+              const stillMentioned = otherMessages.some(msg =>
+                (msg.facts.content?.spanMentionUserIds ?? []).includes(userId),
+              );
 
               // If not mentioned elsewhere, check if they're a MENTIONED participant and remove them
               if (!stillMentioned) {
@@ -4286,28 +4374,12 @@ export function createMutators(
           }
 
           if (content !== undefined) {
-            if (isForwardedMessage) {
-              // For forwarded messages, parse XML, update optionalText, and re-serialize
-              const parsedForwarded = parseForwardedMessageXml(message.content);
-              if (parsedForwarded) {
-                const updatedXmlContent = createForwardedMessageXml({
-                  ...parsedForwarded,
-                  optionalText: content || null,
-                });
-                await tx.mutate.messages.update({
-                  messageId,
-                  content: updatedXmlContent,
-                  edited: true,
-                });
-              }
-            } else {
-              // For regular messages, update the content directly
-              await tx.mutate.messages.update({
-                messageId,
-                content,
-                edited: true,
-              });
-            }
+            // Stored as received: a forward's XML was rebuilt (and checked above) by the client.
+            await tx.mutate.messages.update({
+              messageId,
+              content,
+              edited: true,
+            });
           }
 
         },
@@ -4451,7 +4523,7 @@ export function createMutators(
        * is baked into the message's FlowJSON so the card still renders as finished
        * once the row has left the ACTIVE-only artifact subscription.
        */
-      closeSlashCommandArtifact: defineMutator(
+      closeSlashCommandArtifact: defineContractMutator(
         z.object({ messageId: z.string(), timestamp: z.number() }),
         async ({ tx, args: { messageId, timestamp } }) => {
           const message = await tx.run(zql.messages.where('messageId', messageId).one());
@@ -4462,29 +4534,31 @@ export function createMutators(
             throw new Error('Only the author can close this incident');
           }
 
+          // The artifact row is what makes the message an artifact here: its content is
+          // unreadable, so the FlowJSON is not parsed.
           const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
-          if (artifact && artifact.status !== MessageArtifactStatus.ACTIVE) {
+          if (!artifact) {
+            throw new Error('Message is not a slash command artifact');
+          }
+          if (artifact.status !== MessageArtifactStatus.ACTIVE) {
             throw new Error('This incident is already closed');
           }
 
-          const content = withSlashCommandArtifactClosed(message.content, {
-            closedAt: timestamp,
-            closedBy: authData.sub,
+          await tx.mutate.message_artifacts.update({
+            id: artifact.id,
+            status: MessageArtifactStatus.CANCELLED,
+            updatedAt: timestamp,
           });
-          if (!content) {
-            throw new Error('Message is not a slash command artifact');
-          }
-
-          if (artifact) {
-            await tx.mutate.message_artifacts.update({
-              id: artifact.id,
-              status: MessageArtifactStatus.CANCELLED,
-              updatedAt: timestamp,
-            });
-          }
+          // The close is recorded in metadata, not baked into the (possibly encrypted) FlowJSON.
           // Deliberately not `edited: true` — closing is a lifecycle transition,
           // not an edit, and must not raise a "message edited" notification.
-          await tx.mutate.messages.update({ messageId, content });
+          await tx.mutate.messages.update({
+            messageId,
+            metadata: withSlashCommandArtifactClosedMetadata(message.metadata, {
+              closedAt: timestamp,
+              closedBy: authData.sub,
+            }),
+          });
         },
       ),
       updateShowInChannel: defineMutator(
@@ -4658,10 +4732,14 @@ export function createMutators(
 
         },
       ),
-      delete: defineMutator(
+      delete: defineContractMutator(
         z.object({ messageId: z.string() }),
         async ({ tx, args: { messageId } }) => {
-          const message = await tx.run(zql.messages.where("messageId", messageId).one());
+          // Who the message mentions, by the participant-cleanup rule (extractAllMentions).
+          const messageRead = await tx.read(zql.messages.where("messageId", messageId).one(), {
+            content: { spanMentionUserIds: derive.spanMentionUserIds },
+          });
+          const message = messageRead?.row;
 
           if (!message) {
             throw new Error('Message not available');
@@ -4690,7 +4768,15 @@ export function createMutators(
             throw new Error('You have to be a member to delete a message');
           }
 
-          const attachments = await tx.run(zql.message_attachments.where('entityId', messageId));
+          const attachments = (
+            await tx.read(zql.message_attachments.where('entityId', messageId), {
+              originalFilename: { isHeic: derive.isHeic },
+            })
+          ).map(({ row, facts }) => ({
+            ...row,
+            // isHeicAttachment's rule: the MIME type, else the file name's extension (the fact).
+            isHeic: isHeicAttachment(row.mimetype, '') || (facts.originalFilename?.isHeic ?? false),
+          }));
           const reactions = await tx.run(zql.reactions.where('messageId', messageId));
           const reactionCounts = await tx.run(zql.reaction_counts.where('messageId', messageId));
 
@@ -4719,10 +4805,12 @@ export function createMutators(
           );
 
           // Get all OTHER messages in the conversation (excluding the one being deleted)
-          const allMessages = await tx.run(zql.messages
-            .where('conversationId', message.conversationId));
-
-          const otherMessages = allMessages.filter(m => m.messageId !== messageId);
+          const otherMessageReads = (
+            await tx.read(zql.messages.where('conversationId', message.conversationId), {
+              content: { spanMentionUserIds: derive.spanMentionUserIds },
+            })
+          ).filter(m => m.row.messageId !== messageId);
+          const otherMessages = otherMessageReads.map(m => m.row);
 
           const isInitialMessage = conversation.initialMessageId === messageId;
           const hasReplies = otherMessages.length > 0;
@@ -4731,16 +4819,15 @@ export function createMutators(
           const shouldSoftDelete = isInitialMessage && (hasReplies || hasTicket);
 
           // Clean up MENTIONED participants within Zero transaction
-          const mentions = extractAllMentions(message.content);
+          const mentionedUserIds = messageRead!.facts.content?.spanMentionUserIds ?? [];
 
-          if (mentions.userIds.length > 0) {
+          if (mentionedUserIds.length > 0) {
             // For each mentioned user, check if they're still mentioned elsewhere
-            for (const userId of mentions.userIds) {
+            for (const userId of mentionedUserIds) {
               // Check if user is still mentioned in any other message
-              const stillMentioned = otherMessages.some((msg) => {
-                const msgMentions = extractAllMentions(msg.content);
-                return msgMentions.userIds.includes(userId);
-              });
+              const stillMentioned = otherMessageReads.some((msg) =>
+                (msg.facts.content?.spanMentionUserIds ?? []).includes(userId),
+              );
 
               // If not mentioned elsewhere, check if they're a MENTIONED participant and remove them
               if (!stillMentioned && userId !== conversation.createdBy) {
@@ -4879,7 +4966,7 @@ export function createMutators(
                       if (attachment.thumbnailUrl) {
                         await storageService.deleteFile(attachment.thumbnailUrl);
                       }
-                      if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+                      if (attachment.isHeic) {
                         await deleteHeicRenditions(attachment.url);
                       }
                       if (isVideoMimetype(attachment.mimetype)) {
@@ -5804,82 +5891,28 @@ export function createMutators(
           }
         },
       ),
-      markThreadActivitiesAsRead: defineMutator(
-        z.object({ conversationId: z.string(), draftMessage: z.string(), draftMessageId: z.string(), timestamp: z.number() }),
-        async ({ tx, args: { conversationId, draftMessage, draftMessageId, timestamp } }) => {
-          const conversation = await tx.run(zql.conversations
-            .where('conversationId', conversationId)
-            .one());
+      markMissedCallsAsRead: defineMutator(
+        z.object({}),
+        async ({ tx, ctx, }) => {
+          const query = zql.activities
+            .where('userId', ctx.userID)
+            .where('actorAction', 'missed_call')
+            .where('isRead', false);
 
-          if (!conversation) {
-            throw new Error('Conversation not found');
-          }
+          const unreadMissedCalls = await tx.run(query);
 
-          const channelId = conversation.channelId;
-
-          const draft = await tx.run(
-            zql.draft_messages
-              .where('channelId', channelId)
-              .where('conversationId', conversationId)
-              .where('userId', authData.sub)
-              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null)))
-              .one(),
-          );
-
-          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
-            await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else if (draftMessage.trim() !== '') {
-            await tx.mutate.draft_messages.upsert({
-              workspaceId: authData.workspaceId,
-              id: draft?.id || draftMessageId,
-              conversationId,
-              channelId,
-              userId: authData.sub,
-              content: draftMessage,
-              hasAttachment: draft?.hasAttachment || false,
-              origin: DraftOrigin.user,
-              updatedAt: timestamp,
-              createdAt: draft?.createdAt || timestamp,
-            });
-          }
-
-          const unreadActivities = await tx.run(zql.activities
-            .where('channelId', channelId)
-            .where('userId', authData.sub)
-            .where('isRead', false)
-            .where('actionSource', 'message'));
-
-          if (unreadActivities.length === 0) {
-            return;
-          }
-
-          const activityBySourceId = new Map(
-            unreadActivities.map(a => [a.actionSourceId, a]),
-          );
-          const uniqueSourceIds = [...activityBySourceId.keys()];
-
-          const messages = await tx.run(
-            zql.messages
-              .where('messageId', 'IN', uniqueSourceIds)
-              .related('conversation'),
-          );
-
-          const messageByMessageId = new Map(
-            messages.map(m => [m.messageId, m]),
-          );
-
-          for (const [sourceId, activity] of activityBySourceId) {
-            const message = messageByMessageId.get(sourceId);
-            if (message?.conversation?.initialMessageId !== message?.messageId) {
-              await tx.mutate.activities.update({
+          if (unreadMissedCalls.length > 0) {
+            await Promise.all(unreadMissedCalls.map(activity =>
+              tx.mutate.activities.update({
                 id: activity.id,
                 isRead: true,
-              });
-            }
+              })
+            ));
           }
         },
       ),
-      markThreadActivitiesAsReadV2: defineMutator(
+      markThreadActivitiesAsReadV2: defineContractMutator(
+        markThreadActivitiesAsReadV2Client,
         z.object({ conversationId: z.string(), draftMessage: z.string(), draftMessageId: z.string(), timestamp: z.number(), participantId: z.string() }),
         async ({ tx, args: { conversationId, draftMessage, draftMessageId, timestamp, participantId } }) => {
           const conversation = await tx.run(zql.conversations
@@ -5902,9 +5935,11 @@ export function createMutators(
               .one(),
           );
 
-          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+          // No facts means the draft text was empty.
+          const draftIsEmpty = getMutationFacts(markThreadActivitiesAsReadV2Client, 'draftMessage')?.textIsEmpty ?? true;
+          if (draft && draftIsEmpty && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else if (draftMessage.trim() !== '') {
+          } else if (!draftIsEmpty) {
             await tx.mutate.draft_messages.upsert({
               workspaceId: authData.workspaceId,
               id: draft?.id || draftMessageId,
@@ -6010,26 +6045,6 @@ export function createMutators(
                 isRead: true,
               });
             }
-          }
-        },
-      ),
-      markMissedCallsAsRead: defineMutator(
-        z.object({}),
-        async ({ tx, ctx, }) => {
-          const query = zql.activities
-            .where('userId', ctx.userID)
-            .where('actorAction', 'missed_call')
-            .where('isRead', false);
-
-          const unreadMissedCalls = await tx.run(query);
-
-          if (unreadMissedCalls.length > 0) {
-            await Promise.all(unreadMissedCalls.map(activity =>
-              tx.mutate.activities.update({
-                id: activity.id,
-                isRead: true,
-              })
-            ));
           }
         },
       ),
@@ -6310,7 +6325,8 @@ export function createMutators(
       ),
     },
     ticket: {
-      update: defineMutator(
+      update: defineContractMutator(
+        ticketUpdateClient,
         z.object({
           id: z.string(),
           title: z.string().optional(),
@@ -6330,9 +6346,8 @@ export function createMutators(
           // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
         }),
         async ({ tx, args: params }) => {
-          const ticket = await tx.run(zql.tickets.where('id', params.id).related('ticketDescription').one());
+          const ticket = await tx.run(zql.tickets.where('id', params.id).one());
           if (!ticket) throw new Error('Ticket not found');
-          const currentDescription = resolveTicketDescription(ticket);
           const currentBoard = await tx.run(zql.boards.where('id', ticket.boardId).one());
           if (
             currentBoard?.boardType === BoardType.FLOW &&
@@ -6776,8 +6791,14 @@ export function createMutators(
 
           const ticketRecord = ticket as Record<string, unknown>;
           for (const field of fields) {
-            const previousValue = field === 'description' ? currentDescription : ticketRecord[field];
-            if (params[field] !== undefined && params[field] !== previousValue) {
+            const previousValue = ticketRecord[field];
+            // The description is unreadable and cannot be compared: clients send it only when it
+            // changed, so "sent" is "changed".
+            const changed =
+              field === 'description'
+                ? params.description !== undefined
+                : params[field] !== undefined && params[field] !== previousValue;
+            if (changed) {
               updateData[field] = params[field];
               if (field === 'kanbanPosition') continue;
               let activityType = field.toUpperCase();
@@ -6792,10 +6813,13 @@ export function createMutators(
 
               activities.push({
                 activityType,
-                // Both are STATUS activities; `field` tells them apart.
-                value: field === 'stageName' || field === 'statusV2'
-                  ? { field, oldValue: previousValue, newValue: params[field] }
-                  : { oldValue: previousValue, newValue: params[field] },
+                // Both are STATUS activities; `field` tells them apart. A DESCRIPTION activity
+                // carries no text: the description is encrypted and nothing renders old / new.
+                value: field === 'description'
+                  ? {}
+                  : field === 'stageName' || field === 'statusV2'
+                    ? { field, oldValue: previousValue, newValue: params[field] }
+                    : { oldValue: previousValue, newValue: params[field] },
               });
             }
           }
@@ -7096,7 +7120,8 @@ export function createMutators(
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
 
-          if (params.description !== undefined && params.description !== currentDescription) {
+          // Sent means changed (see the field loop above).
+          if (params.description !== undefined) {
             const existingDescription = await tx.run(
               zql.ticket_descriptions.where('ticketId', params.id).one()
             );
@@ -7833,7 +7858,8 @@ export function createMutators(
       ),
     },
     subTicket: {
-      create: defineMutator(
+      create: defineContractMutator(
+        subTicketCreateClient,
         z.object({
           subTicketId: z.string(),
           mappingId: z.string(),
@@ -7851,7 +7877,8 @@ export function createMutators(
           await tx.mutate.sub_tickets.insert({
             id: subTicketId,
             title,
-            description: description || null,
+            // No facts means the description was empty (or missing), as `description || null` had it.
+            description: getMutationFacts(subTicketCreateClient, 'description') ? description : null,
             mappedTicketId: null,
             createdBy: authData.sub,
             updatedBy: authData.sub,
@@ -7882,7 +7909,6 @@ export function createMutators(
             timestamp,
             value: {
               subTicketId,
-              subTicketTitle: title,
               subTicketXyneId,
             },
             channelId: parentTicket?.channelId ?? null,
@@ -9937,7 +9963,8 @@ export function createMutators(
       ),
     },
     canvas: {
-      create: defineMutator(
+      create: defineContractMutator(
+        canvasCreateClient,
         z.object({
           id: z.string(),
           title: z.string(),
@@ -10542,7 +10569,8 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
+      update: defineContractMutator(
+        canvasUpdateClient,
         z.object({
           id: z.string(),
           title: z.string().optional(),
@@ -10870,7 +10898,8 @@ export function createMutators(
       ),
     },
     canvasComment: {
-      createThread: defineMutator(
+      createThread: defineContractMutator(
+        canvasCommentCreateThreadClient,
         z.object({
           threadId: z.string(),
           commentId: z.string(),
@@ -10897,7 +10926,8 @@ export function createMutators(
             workspaceId: authData.workspaceId,
             canvasId,
             blockId,
-            anchorText: anchorText || null,
+            // No facts means the anchor text was empty (or missing), as `anchorText || null` had it.
+            anchorText: getMutationFacts(canvasCommentCreateThreadClient, 'anchorText') ? anchorText : null,
             initialCommentId: commentId,
             commentCount: 1,
             status: CanvasCommentThreadStatus.OPEN,
@@ -10924,7 +10954,8 @@ export function createMutators(
           });
         },
       ),
-      reply: defineMutator(
+      reply: defineContractMutator(
+        canvasCommentReplyClient,
         z.object({
           commentId: z.string(),
           threadId: z.string(),
@@ -10991,7 +11022,8 @@ export function createMutators(
           }
         },
       ),
-      updateComment: defineMutator(
+      updateComment: defineContractMutator(
+        canvasCommentUpdateClient,
         z.object({
           commentId: z.string(),
           body: z.string().min(1),
@@ -11767,7 +11799,8 @@ export function createMutators(
       ),
     },
     userPresence: {
-      upsert: defineMutator(
+      upsert: defineContractMutator(
+        userPresenceUpsertClient,
         z.object({
           statusEmoji: z.string().nullable().optional(),
           statusContent: z.string().nullable().optional(),
@@ -12366,7 +12399,7 @@ export function createMutators(
        * still opens and previews as what it is. Artifacts are renamed through
        * canvas.update, under their own edit access.
        */
-      renameSdlcItem: defineMutator(
+      renameSdlcItem: defineContractMutator(
         z.object({
           itemType: z.enum(['LINK', 'ATTACHMENT']),
           itemId: z.string(),
@@ -12404,13 +12437,19 @@ export function createMutators(
             });
             return;
           }
-          const attachment = await tx.run(zql.message_attachments.where('id', args.itemId).one());
+          // The stored name is unreadable: keep its extension through the fact (as written, as
+          // withKeptExtension does).
+          const attachment = await tx.read(zql.message_attachments.where('id', args.itemId).one(), {
+            originalFilename: { fileExtensionAsIs: derive.fileExtensionAsIs },
+          });
           if (!attachment) {
             throw new Error('File not found');
           }
           await tx.mutate.message_attachments.update({
             id: args.itemId,
-            originalFilename: toDisplayFilename(withKeptExtension(attachment.originalFilename, args.name)),
+            originalFilename: toDisplayFilename(
+              withExtension(attachment.facts.originalFilename?.fileExtensionAsIs ?? null, args.name),
+            ),
           });
         },
       ),
@@ -12663,7 +12702,8 @@ export function createMutators(
        * the pair of edges every track item carries — containment for where it sits,
        * flat for which track it belongs to however deep it is filed.
        */
-      addSdlcFolderItem: defineMutator(
+      addSdlcFolderItem: defineContractMutator(
+        sdlcAddSdlcFolderItemClient,
         z.object({
           itemType: z.enum(['ATTACHMENT', 'LINK']),
           itemId: z.string(),
@@ -12682,9 +12722,15 @@ export function createMutators(
               favicon: z.string().optional(),
             })
             .optional(),
+          // The link's description, top-level so it can arrive encrypted (`link.description` is the
+          // older place, still accepted). Its limit is checked on the textLength fact below.
+          linkDescription: z.string().trim().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
+          if ((getMutationFacts(sdlcAddSdlcFolderItemClient, 'linkDescription')?.textLength ?? 0) > 2000) {
+            throw new Error('Description must be 2000 characters or less');
+          }
           const participant = await tx.run(
             zql.channel_participants
               .where('channelId', args.channelId)
@@ -12732,7 +12778,7 @@ export function createMutators(
               channelId: args.channelId,
               url: args.link.url,
               title: args.link.title,
-              description: args.link.description ?? null,
+              description: args.linkDescription ?? args.link.description ?? null,
               favicon: args.link.favicon ?? null,
               visibility: LinkVisibility.DEFAULT,
               createdBy: authData.sub,
@@ -12789,16 +12835,21 @@ export function createMutators(
         }
       ),
 
-      createTrack: defineMutator(
+      createTrack: defineContractMutator(
+        sdlcCreateTrackClient,
         z.object({
           id: z.string(),
           linkId: z.string(),
           channelId: z.string(),
           name: z.string().trim().min(1).max(120),
-          description: z.string().trim().max(2000).optional(),
+          // The 2000-character limit is checked on the textLength fact below: zod cannot measure ciphertext.
+          description: z.string().trim().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
+          if ((getMutationFacts(sdlcCreateTrackClient, 'description')?.textLength ?? 0) > 2000) {
+            throw new Error('Description must be 2000 characters or less');
+          }
           // Tracks belong to the hub, never to one repository in it.
           const participant = await tx.run(
             zql.channel_participants
@@ -12834,17 +12885,22 @@ export function createMutators(
           });
         },
       ),
-      updateTrack: defineMutator(
+      updateTrack: defineContractMutator(
+        sdlcUpdateTrackClient,
         z.object({
           trackId: z.string(),
           name: z.string().trim().min(1).max(120).optional(),
-          description: z.string().trim().max(2000).nullable().optional(),
+          // The 2000-character limit is checked on the textLength fact below: zod cannot measure ciphertext.
+          description: z.string().trim().nullable().optional(),
           status: sdlcTrackStatusSchema.optional(),
           // Null goes back to the track mark.
           icon: sdlcIconNameSchema.nullable().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
+          if ((getMutationFacts(sdlcUpdateTrackClient, 'description')?.textLength ?? 0) > 2000) {
+            throw new Error('Description must be 2000 characters or less');
+          }
           const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
           if (!track) {
             throw new Error('SDLC track not found');
@@ -13679,7 +13735,8 @@ export function createMutators(
       ),
     },
     dashboard: {
-      upsert: defineMutator(
+      upsert: defineContractMutator(
+        dashboardUpsertClient,
         z.object({
           id: z.string(),
           name: z.string(),
@@ -13696,7 +13753,7 @@ export function createMutators(
             workspaceId: authData.workspaceId,
             id: id,
             name: name.trim(),
-            description: description?.trim(),
+            description,
             createdBy: existingDashboard?.createdBy ?? createdBy,
             updatedAt: now,
             createdAt: existingDashboard?.createdAt ?? now,
@@ -13772,7 +13829,8 @@ export function createMutators(
       ),
     },
     emailDraft: {
-      upsert: defineMutator(
+      upsert: defineContractMutator(
+        emailDraftUpsertClient,
         z.object({
           id: z.string(),
           conversationId: z.string(),
@@ -13857,7 +13915,8 @@ export function createMutators(
         },
       ),
       // KEEP IN SYNC with shared. Compose drafts (no thread yet), keyed by draft id.
-      upsertComposeDraft: defineMutator(
+      upsertComposeDraft: defineContractMutator(
+        emailDraftUpsertComposeDraftClient,
         z.object({
           id: z.string(),
           channelId: z.string(),
@@ -14382,7 +14441,8 @@ export function createMutators(
       ),
     },
     draft: {
-      createAttachments: defineMutator(
+      createAttachments: defineContractMutator(
+        draftCreateAttachmentsClient,
         z.object({
           draftMessageId: z.string(),
           attachments: z.array(z.object({
@@ -14439,7 +14499,8 @@ export function createMutators(
               channelId,
               conversationId: conversationId || null,
               userId: authData.sub,
-              content: content || '',
+              // No facts means the text was empty (or missing), as `content || ''` had it.
+              content: content && getMutationFacts(draftCreateAttachmentsClient, 'content') ? content : '',
               hasAttachment: true,
               origin: DraftOrigin.user,
               createdAt: timestamp,
@@ -14450,7 +14511,8 @@ export function createMutators(
             if (!existingDraft.hasAttachment) {
               await tx.mutate.draft_messages.update({
                 id: existingDraft.id,
-                content: content || existingDraft.content,
+                // No facts means the text was empty: keep the draft's own text (copied as read).
+                content: content && getMutationFacts(draftCreateAttachmentsClient, 'content') ? content : existingDraft.content,
                 hasAttachment: true,
               });
             }
@@ -15326,7 +15388,8 @@ export function createMutators(
       },
     ),
     rca: {
-      create: defineMutator(
+      create: defineContractMutator(
+        rcaCreateClient,
         z.object({
           id: z.string(),
           ticketId: z.string(),
@@ -15381,8 +15444,9 @@ export function createMutators(
             ticketId,
             ownerId: resolvedOwnerId,
             title,
-            summary: summary || null,
-            rootCause: rootCause || null,
+            // No facts means empty (or missing), as `x || null` had it.
+            summary: getMutationFacts(rcaCreateClient, 'summary') ? summary : null,
+            rootCause: getMutationFacts(rcaCreateClient, 'rootCause') ? rootCause : null,
             severity,
             bugTypeId,
             categoryTypeId,
@@ -15394,7 +15458,8 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
+      update: defineContractMutator(
+        rcaUpdateClient,
         z.object({
           id: z.string(),
           ticketId: z.string().optional(),
@@ -15716,7 +15781,8 @@ export function createMutators(
       ),
     },
     impact: {
-      create: defineMutator(
+      create: defineContractMutator(
+        impactCreateClient,
         z.object({
           id: z.string(),
           ticketId: z.string(),
@@ -15762,7 +15828,8 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
+      update: defineContractMutator(
+        impactUpdateClient,
         z.object({
           id: z.string(),
           impactTypeId: z.string().optional(),
@@ -15796,7 +15863,8 @@ export function createMutators(
       ),
     },
     coe: {
-      create: defineMutator(
+      create: defineContractMutator(
+        coeCreateClient,
         z.object({
           id: z.string(),
           rcaId: z.string(),
@@ -15846,7 +15914,8 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
+      update: defineContractMutator(
+        coeUpdateClient,
         z.object({
           id: z.string(),
           ownerId: z.string().optional(),
@@ -15936,7 +16005,8 @@ export function createMutators(
           }
         },
       ),
-      setCustomRecapPrompt: defineMutator(
+      setCustomRecapPrompt: defineContractMutator(
+        recapSetCustomRecapPromptClient,
         z.object({
           channelId: z.string(),
           prompt: z.string().nullable(),
@@ -16045,7 +16115,8 @@ export function createMutators(
       ),
     },
     links: {
-      create: defineMutator(
+      create: defineContractMutator(
+        linksCreateClient,
         z.object({
           id: z.string(),
           url: z.string().url(),
@@ -16079,7 +16150,7 @@ export function createMutators(
             id,
             url,
             title,
-            description: description || null,
+            description: getMutationFacts(linksCreateClient, 'description') ? description : null,
             favicon: favicon || null,
             channelId,
             createdBy: userId,
@@ -16090,7 +16161,8 @@ export function createMutators(
         }
       ),
 
-      update: defineMutator(
+      update: defineContractMutator(
+        linksUpdateClient,
         z.object({
           id: z.string(),
           title: z.string().min(1).optional(),
@@ -16112,18 +16184,19 @@ export function createMutators(
             throw new Error('Not authorized to update this link');
           }
 
-          const updates: Record<string, ReadonlyJSONValue> = {
+          await tx.mutate.links.update({
+            id,
             updatedAt,
-          };
-
-          if (title !== undefined) updates.title = title;
-          if (description !== undefined) updates.description = description || null;
-          if (favicon !== undefined) updates.favicon = favicon || null;
-          if (visibility !== undefined) {
-            updates.visibility = visibility === 'DEFAULT' ? LinkVisibility.DEFAULT : LinkVisibility.PERSONAL;
-          }
-
-          await tx.mutate.links.update({ id, ...updates });
+            ...(title !== undefined && { title }),
+            // No facts means the description was empty, as `description || null` had it.
+            ...(description !== undefined && {
+              description: getMutationFacts(linksUpdateClient, 'description') ? description : null,
+            }),
+            ...(favicon !== undefined && { favicon: favicon || null }),
+            ...(visibility !== undefined && {
+              visibility: visibility === 'DEFAULT' ? LinkVisibility.DEFAULT : LinkVisibility.PERSONAL,
+            }),
+          });
         }
       ),
 
@@ -16471,20 +16544,29 @@ export function createMutators(
       ),
     },
     workspace: {
-      update: defineMutator(
+      update: defineContractMutator(
+        workspaceUpdateClient,
         z.object({
           workspaceId: z.string(),
           timestamp: z.number(),
-          updates: z.object({
-            name: z.string().optional(),
-            description: z.string().optional(),
-          }),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          // Older clients send the fields nested here (plaintext; nothing in it is encrypted).
+          updates: z
+            .object({
+              name: z.string().optional(),
+              description: z.string().optional(),
+            })
+            .optional(),
         }),
-        async ({ tx, args: { workspaceId, timestamp, updates } }) => {
+        async ({ tx, args: { workspaceId, timestamp, name, description, updates } }) => {
+          const nextName = name ?? updates?.name;
+          const nextDescription = description ?? updates?.description;
           // ACL check is handled by WorkspacesACL
           await tx.mutate.workspaces.update({
             id: workspaceId,
-            ...updates,
+            ...(nextName !== undefined && { name: nextName }),
+            ...(nextDescription !== undefined && { description: nextDescription }),
             updatedAt: timestamp,
           });
         }
@@ -16529,7 +16611,8 @@ export function createMutators(
     },
 
     emailSignature: {
-      create: defineMutator(
+      create: defineContractMutator(
+        emailSignatureCreateClient,
         z.object({
           id: z.string(),
           name: z.string(),
@@ -16550,7 +16633,8 @@ export function createMutators(
         },
       ),
 
-      update: defineMutator(
+      update: defineContractMutator(
+        emailSignatureUpdateClient,
         z.object({
           id: z.string(),
           name: z.string(),
@@ -17404,7 +17488,8 @@ export function createMutators(
           }
         },
       ),
-      upsertClassificationConfig: defineMutator(
+      upsertClassificationConfig: defineContractMutator(
+        emailChannelPreferenceUpsertClassificationClient,
         z.object({
           channelId: z.string(),
           classificationEnabled: z.boolean(),
@@ -17448,7 +17533,8 @@ export function createMutators(
           }
         },
       ),
-      upsertPriorityClassificationConfig: defineMutator(
+      upsertPriorityClassificationConfig: defineContractMutator(
+        emailChannelPreferenceUpsertPriorityClassificationClient,
         z.object({
           channelId: z.string(),
           priorityClassificationEnabled: z.boolean(),
@@ -17588,7 +17674,8 @@ export function createMutators(
       ),
     },
     collection: {
-      createCollection: defineMutator(
+      createCollection: defineContractMutator(
+        collectionCreateClient,
         z.object({
           id: z.string(),
           scopeType: z.string(),
@@ -17651,7 +17738,8 @@ export function createMutators(
         },
       ),
 
-      updateCollection: defineMutator(
+      updateCollection: defineContractMutator(
+        collectionUpdateClient,
         z.object({
           id: z.string(),
           name: z.string().optional(),
@@ -18131,7 +18219,8 @@ export function createMutators(
     },
     delayedMessages: {
       /** Create a new delayed message */
-      create: defineMutator(
+      create: defineContractMutator(
+        delayedMessagesCreateClient,
         z.object({
           id: z.string(),
           channelId: z.string(),
@@ -18174,7 +18263,8 @@ export function createMutators(
             )
             : [];
 
-          if (content.trim() === '' && scheduledAttachments.length === 0) {
+          // No facts means the content was empty.
+          if ((getMutationFacts(delayedMessagesCreateClient, 'content')?.textIsEmpty ?? true) && scheduledAttachments.length === 0) {
             throw new Error('Message content is required');
           }
 
@@ -18186,7 +18276,8 @@ export function createMutators(
             channelId,
             conversationId: conversationId ?? null,
             senderId: ctx.userID,
-            content: content.trim(),
+            // Stored as received; the client trims it.
+            content,
             hasAttachment: scheduledAttachments.length > 0,
             scheduledFor,
             status: DelayedMessageStatus.PENDING,
@@ -18212,7 +18303,7 @@ export function createMutators(
       ),
 
       /** Cancel a pending delayed message */
-      cancel: defineMutator(
+      cancel: defineContractMutator(
         z.object({
           id: z.string(),
           timestamp: z.number(),
@@ -18268,7 +18359,8 @@ export function createMutators(
           });
         },
       ),
-      edit: defineMutator(
+      edit: defineContractMutator(
+        delayedMessagesEditClient,
         z.object({
           id: z.string(),
           content: z.string().min(1),
@@ -18295,13 +18387,14 @@ export function createMutators(
 
           await tx.mutate.delayed_messages.update({
             id,
-            content: content.trim(),
+            // Stored as received; the client trims it.
+            content,
             updatedAt,
           });
         }
       ),
 
-      convertToDraft: defineMutator(
+      convertToDraft: defineContractMutator(
         z.object({
           id: z.string(),
           timestamp: z.number(),
@@ -18396,7 +18489,7 @@ export function createMutators(
 
     draftMessages: {
       /** Delete a draft message by ID (only the owner can delete their own draft) */
-      delete: defineMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
+      delete: defineContractMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
         const draft = await tx.run(
           zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
         );
@@ -18408,7 +18501,8 @@ export function createMutators(
       }),
 
       /** Edit a draft message content */
-      edit: defineMutator(
+      edit: defineContractMutator(
+        draftMessagesEditClient,
         z.object({
           id: z.string(),
           content: z.string().min(1),
@@ -18423,7 +18517,8 @@ export function createMutators(
           }
           await tx.mutate.draft_messages.update({
             id,
-            content: content.trim(),
+            // Stored as received; the client trims it.
+            content,
             updatedAt: timestamp,
           });
         }
@@ -19416,7 +19511,8 @@ export function createMutators(
       ),
     },
     role: {
-      create: defineMutator(
+      create: defineContractMutator(
+        roleCreateClient,
         z.object({
           id: z.string(),
           name: z.string(),
@@ -19455,7 +19551,8 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
+      update: defineContractMutator(
+        roleUpdateClient,
         z.object({
           id: z.string(),
           name: z.string().optional(),

@@ -22,7 +22,8 @@ export function resolveTicketDescription(
   }
 
   const newDescription = ticket.ticketDescription?.description;
-  if (typeof newDescription === 'string') {
+  // A null check, not `typeof === 'string'`: on the server the value can be an unreadable wrapper.
+  if (newDescription !== null && newDescription !== undefined) {
     return newDescription;
   }
 

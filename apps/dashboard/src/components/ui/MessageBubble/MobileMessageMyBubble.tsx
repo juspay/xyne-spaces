@@ -1,6 +1,11 @@
 import React, { useMemo } from 'react';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
-import { MessageType, parseForwardedMessageXml, isForwardedMessageXml } from '@xyne/shared';
+import {
+  MessageType,
+  parseForwardedMessageXml,
+  isForwardedMessageXml,
+  readSlashCommandArtifactClosed,
+} from '@xyne/shared';
 import { formatTimeAmPm, formatRelativeTimestamp } from '../../../utils/dateUtils';
 import { useReactions } from '../../../hooks/useReaction';
 import { Bookmark } from 'lucide-react';
@@ -80,6 +85,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   onClick,
 }) => {
   const { toggleReaction } = useReactions();
+  const slashCommandArtifactClosed = readSlashCommandArtifactClosed(message.metadata);
   const isDmReadOnly = useIsDmReadOnly(channelId);
   const attachments = message.attachments || [];
 
@@ -335,6 +341,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                       senderId: message.senderId,
                       createdAt: message.createdAt,
                       surface: context === 'thread' ? 'thread' : 'channel',
+                      ...(slashCommandArtifactClosed && { closed: slashCommandArtifactClosed }),
                     }}
                   />
                 </div>

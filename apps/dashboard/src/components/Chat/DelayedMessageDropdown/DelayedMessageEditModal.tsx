@@ -47,7 +47,7 @@ export const DelayedMessageEditModal = ({
       zero.mutate(
         mutators.delayedMessages.edit({
           id: message.id,
-          content: sanitizedContent,
+          content: sanitizedContent.trim(),
           updatedAt: message.updatedAt,
         }),
       );

@@ -4,11 +4,54 @@ import { defineMutator } from '@rocicorp/zero';
 import type { DefaultContext, DefaultWrappedTransaction, MutatorDefinition, ReadonlyJSONValue } from '@rocicorp/zero';
 import type { z } from 'zod';
 import {
+  conversationsForwardMessageClient,
+  messagesUpdateClient,
+  messagesSendClient,
+  ticketUpdateClient,
+  markChannelAsViewedClient,
+  markThreadActivitiesAsReadV2Client,
+  recapSetCustomRecapPromptClient,
+  userPresenceUpsertClient,
+  draftCreateAttachmentsClient,
+  sdlcAddSdlcFolderItemClient,
+  sdlcCreateTrackClient,
+  sdlcUpdateTrackClient,
+  channelUpdateCallSummaryPromptClient,
+  emailChannelPreferenceUpsertClassificationClient,
+  emailChannelPreferenceUpsertPriorityClassificationClient,
+  workspaceUpdateClient,
+  canvasCreateClient,
+  canvasUpdateClient,
+  coeCreateClient,
+  coeUpdateClient,
+  impactCreateClient,
+  impactUpdateClient,
+  rcaCreateClient,
+  rcaUpdateClient,
+  dashboardUpsertClient,
+  delayedMessagesCreateClient,
+  delayedMessagesEditClient,
+  draftMessagesEditClient,
+  subTicketCreateClient,
+  emailDraftUpsertClient,
+  emailDraftUpsertComposeDraftClient,
+  canvasCommentCreateThreadClient,
+  canvasCommentReplyClient,
+  canvasCommentUpdateClient,
+  collectionCreateClient,
+  collectionUpdateClient,
   conversationsSendClient,
+  emailSignatureCreateClient,
+  emailSignatureUpdateClient,
+  linksCreateClient,
+  linksUpdateClient,
+  roleCreateClient,
+  roleUpdateClient,
   deriveFactsFromPlaintext,
   derivedFactsSchema,
   derivedNames,
   makeUnreadable,
+  UnreadableString,
   sourceFieldNames,
 } from '@xyne/shared';
 import type { DerivedFacts, FieldDerived, RequestContract, UnreadableBody } from '@xyne/shared';
@@ -18,6 +61,7 @@ import type { TransitCaller } from '@/services/encryption';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import { type UnreadableTransaction, unreadableTransaction } from './unreadableTransaction';
+import { recordContractApplied, recordFactsDerived, recordFactsError, recordUnreadableWrapped } from './zeroMetrics';
 
 /**
  * The Zero-mutation counterpart of middleware/encryptedRoute.ts. Every mutation the
@@ -45,6 +89,48 @@ const PREPARED_ARG = '_encPrepared';
 /** Mutators with a request contract, by Zero mutator name. */
 const MUTATION_CONTRACTS: Record<string, RequestContract> = {
   'conversations.send': conversationsSendClient,
+  'canvasComment.createThread': canvasCommentCreateThreadClient,
+  'canvasComment.reply': canvasCommentReplyClient,
+  'canvasComment.updateComment': canvasCommentUpdateClient,
+  'role.create': roleCreateClient,
+  'role.update': roleUpdateClient,
+  'collection.createCollection': collectionCreateClient,
+  'collection.updateCollection': collectionUpdateClient,
+  'emailSignature.create': emailSignatureCreateClient,
+  'emailSignature.update': emailSignatureUpdateClient,
+  'links.create': linksCreateClient,
+  'links.update': linksUpdateClient,
+  'emailDraft.upsert': emailDraftUpsertClient,
+  'emailDraft.upsertComposeDraft': emailDraftUpsertComposeDraftClient,
+  'dashboard.upsert': dashboardUpsertClient,
+  'delayedMessages.create': delayedMessagesCreateClient,
+  'delayedMessages.edit': delayedMessagesEditClient,
+  'draftMessages.edit': draftMessagesEditClient,
+  'subTicket.create': subTicketCreateClient,
+  'canvas.create': canvasCreateClient,
+  'canvas.update': canvasUpdateClient,
+  'rca.create': rcaCreateClient,
+  'rca.update': rcaUpdateClient,
+  'impact.create': impactCreateClient,
+  'impact.update': impactUpdateClient,
+  'coe.create': coeCreateClient,
+  'coe.update': coeUpdateClient,
+  'channel.updateCallSummaryPrompt': channelUpdateCallSummaryPromptClient,
+  'emailChannelPreference.upsertClassificationConfig': emailChannelPreferenceUpsertClassificationClient,
+  'emailChannelPreference.upsertPriorityClassificationConfig': emailChannelPreferenceUpsertPriorityClassificationClient,
+  'workspace.update': workspaceUpdateClient,
+  'sdlc.createTrack': sdlcCreateTrackClient,
+  'sdlc.updateTrack': sdlcUpdateTrackClient,
+  'sdlc.addSdlcFolderItem': sdlcAddSdlcFolderItemClient,
+  'draft.createAttachments': draftCreateAttachmentsClient,
+  'channel.markChannelAsViewed': markChannelAsViewedClient,
+  'activities.markThreadActivitiesAsReadV2': markThreadActivitiesAsReadV2Client,
+  'recap.setCustomRecapPrompt': recapSetCustomRecapPromptClient,
+  'userPresence.upsert': userPresenceUpsertClient,
+  'ticket.update': ticketUpdateClient,
+  'messages.send': messagesSendClient,
+  'messages.update': messagesUpdateClient,
+  'conversations.forwardMessage': conversationsForwardMessageClient,
 };
 
 /** Who is mutating, for the encryption service: the transit caller (transitCaller) and the request's manifest lane. */
@@ -72,6 +158,11 @@ function deriveLocally(mutatorName: string, args: Record<string, unknown>): Deri
 }
 
 const mutationDerivedContext = new AsyncLocalStorage<DerivedFacts | undefined>();
+
+/** The arg fields `derived` has facts for. */
+function fieldsWithFacts(derived: DerivedFacts | undefined): string[] {
+  return Object.entries(derived?.fields ?? {}).flatMap(([field, facts]) => (Object.keys(facts).length > 0 ? [field] : []));
+}
 
 /** Logs that a mutation got its derived facts and where they came from. */
 function logDerivedFacts(mutatorName: string, source: 'local' | 'encryption-service', derived: DerivedFacts | undefined): void {
@@ -155,14 +246,24 @@ export function defineContractMutator(
     | [z.ZodType<ReadonlyJSONValue, ReadonlyJSONValue>, ContractMutatorFn<never>]
 ) {
   const [contract, validator, mutator] = params.length === 3 ? params : [undefined, ...params];
-  return defineMutator(validator, ({ tx, ctx, args }) =>
-    mutator({
+  return defineMutator(validator, ({ tx, ctx, args }) => {
+    let body: unknown = args;
+    if (contract) {
+      body = makeUnreadable(contract, args as object);
+      recordContractApplied();
+      recordUnreadableWrapped({
+        side: 'args',
+        // Validated args are JSON, so every UnreadableString here was wrapped just now.
+        columns: Object.entries(body as object).flatMap(([field, value]) => (value instanceof UnreadableString ? [field] : [])),
+      });
+    }
+    return mutator({
       tx: unreadableTransaction(tx, ctx.workspaceId),
       ctx,
       // The overloads tie the args type to the contract; here it is the value either way.
-      args: (contract ? makeUnreadable(contract, args as object) : args) as never,
-    }),
-  );
+      args: body as never,
+    });
+  });
 }
 
 /** An encryption-service verdict on the mutation (stale manifest, rule violation, drift). */
@@ -279,7 +380,14 @@ export async function prepareEncryptedMutations(
         // PREPARED_ARG is set here only; one the client sent is dropped.
         const { [PREPARED_ARG]: _forged, ...plain } = args as Record<string, unknown>;
         // Plaintext args of a contracted mutator: extract the facts here, no passthrough.
-        const derived = deriveLocally(String(m!.name), plain);
+        let derived: DerivedFacts | undefined;
+        try {
+          derived = deriveLocally(String(m!.name), plain);
+        } catch (error) {
+          recordFactsError({ mutator: String(m!.name), side: 'args', source: 'local' });
+          throw error;
+        }
+        recordFactsDerived({ mutator: String(m!.name), side: 'args', source: 'local', columns: fieldsWithFacts(derived) });
         if (derived) {
           logDerivedFacts(String(m!.name), 'local', derived);
           const key = randomUUID();
@@ -301,9 +409,11 @@ export async function prepareEncryptedMutations(
           workspaceId,
         );
         logDerivedFacts(String(m!.name), 'encryption-service', derived);
+        recordFactsDerived({ mutator: String(m!.name), side: 'args', source: 'enc-rust', columns: fieldsWithFacts(derived) });
         prepared.set(key, { derived, dekPassthrough: true });
         next = { ...transformed, [PREPARED_ARG]: key };
       } catch (error) {
+        recordFactsError({ mutator: String(m!.name), side: 'args', source: 'enc-rust' });
         prepared.set(key, { error: error instanceof Error ? error : new Error(String(error)) });
         next = { ...(args as Record<string, unknown>), [PREPARED_ARG]: key };
       }

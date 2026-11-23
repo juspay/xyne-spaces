@@ -8,6 +8,7 @@ import { Schema, UserStatus } from '@xyne/shared'
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasGuestTicketAccess } from '../core/guest-access';
+import type { AnyTransaction } from '../../unreadableTransaction';
 
 /**
  * The workspace/guest/participant write gate TicketACl.canUpdate applies,
@@ -17,7 +18,7 @@ import { hasGuestTicketAccess } from '../core/guest-access';
  */
 export async function assertTicketUpdateAccess(
     ctx: QueryContext,
-    tx: Transaction<Schema>,
+    tx: AnyTransaction,
     ticket: { workspaceId: string; channelId: string; projectId: string },
 ): Promise<void> {
     if (ticket.workspaceId !== ctx.workspaceId) {

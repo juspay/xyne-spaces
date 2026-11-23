@@ -7,6 +7,7 @@
  */
 
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import { MessageType } from './zero/types.js';
 
 /**
  * Data structure for a forwarded message
@@ -142,4 +143,56 @@ export function isForwardedMessageXml(content: string): boolean {
   if (!content) return false;
   const trimmed = content.trim();
   return trimmed.startsWith('<ForwardedMessage>') && trimmed.endsWith('</ForwardedMessage>');
+}
+
+/**
+ * The content to send when editing a message whose stored content is `storedContent`: for a
+ * forwarded message, its XML with the optional text replaced by `nextText` (what an edit of a
+ * forward changes); for any other message, `nextText`. The client builds it because the server
+ * holds the stored content only encrypted.
+ */
+export function buildMessageEditContent(storedContent: string | null | undefined, nextText: string): string {
+  const forwarded = storedContent ? parseForwardedMessageXml(storedContent) : null;
+  if (!forwarded) return nextText;
+  return createForwardedMessageXml({ ...forwarded, optionalText: nextText || null });
+}
+
+/**
+ * The content of a forward of `original`: its ForwardedMessage XML. Built by the client, which
+ * holds the original's text (the server holds it only encrypted); the server checks the ids in it
+ * against the original message. Re-forwarding a forward forwards its optional text when it has
+ * one, else what it forwarded.
+ */
+export function buildForwardedMessageContent(input: {
+  original: {
+    messageId: string;
+    senderId: string;
+    content: string;
+    createdAt: number;
+    conversationId: string;
+    msgType?: string | null;
+  };
+  /** The original sender's `name`. */
+  originalSenderName: string | null | undefined;
+  /** The channel of the original message's conversation. */
+  originalChannelId: string | null | undefined;
+  optionalText: string | null | undefined;
+}): string {
+  const { original } = input;
+  let forwardedContent = original.content;
+  if (original.msgType === MessageType.FORWARDED) {
+    const parsed = parseForwardedMessageXml(original.content);
+    if (parsed?.optionalText) forwardedContent = parsed.optionalText;
+    else if (parsed?.content) forwardedContent = parsed.content;
+  }
+  return createForwardedMessageXml({
+    originalMessageId: original.messageId,
+    originalSenderId: original.senderId,
+    originalSenderName: input.originalSenderName || 'Unknown User',
+    originalCreatedAt: original.createdAt,
+    originalChannelId: input.originalChannelId || null,
+    originalConversationId: original.conversationId,
+    optionalText: input.optionalText || null,
+    content: forwardedContent,
+  });
 }

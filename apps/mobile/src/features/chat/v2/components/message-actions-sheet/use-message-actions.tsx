@@ -264,7 +264,7 @@ export const useMessageActions = ({
     if (!message || !target) return;
     const rawContent = message.content ?? '';
     // Editing a forwarded message edits only its optional text — the
-    // conversations.update mutator re-wraps it into the ForwardedMessage XML.
+    // client re-wraps it into the ForwardedMessage XML when sending (buildMessageEditContent).
     const isForwarded =
       message.msgType === MessageType.FORWARDED || isForwardedMessageXml(rawContent);
     const content = isForwarded
@@ -275,6 +275,7 @@ export const useMessageActions = ({
       conversationId: target.conversationId,
       channelId: target.channelId,
       content,
+      storedContent: rawContent,
     };
     closeActionSheet(() => onEditInChat?.(payload));
   }, [closeActionSheet, message, onEditInChat, target]);

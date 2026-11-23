@@ -950,11 +950,22 @@ export const SDLC_UPLOAD_EXTENSIONS = [
  * ending in the extension is taken as it is.
  */
 export function withKeptExtension(current: string, next: string): string {
-  const name = next.trim();
+  return withExtension(keptExtensionOf(current), next);
+}
+
+/** The extension withKeptExtension keeps: after the last dot, as written, no dot; null when none. */
+export function keptExtensionOf(current: string): string | null {
   const dot = current.lastIndexOf(".");
-  if (dot <= 0 || dot === current.length - 1) return name;
-  const extension = current.slice(dot);
-  return name.toLowerCase().endsWith(extension.toLowerCase()) ? name : `${name}${extension}`;
+  if (dot <= 0 || dot === current.length - 1) return null;
+  return current.slice(dot + 1);
+}
+
+/** `next`, trimmed, ending in `.extension` (added unless it already ends so, ignoring case). */
+export function withExtension(extension: string | null, next: string): string {
+  const name = next.trim();
+  if (!extension) return name;
+  const suffix = `.${extension}`;
+  return name.toLowerCase().endsWith(suffix.toLowerCase()) ? name : `${name}${suffix}`;
 }
 
 /** `accept` for a file input, so the picker offers only what will be taken. */

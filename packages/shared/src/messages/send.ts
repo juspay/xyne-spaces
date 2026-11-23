@@ -44,6 +44,8 @@ export function sendMessage(
       : payload.conversationId ?? uuidv4();
   const timestamp = payload.timestamp ?? Date.now();
   const type = payload.type ?? MessageType.USER;
+  // Trimmed here, once: the server stores the content as received (it may be encrypted).
+  const content = payload.content.trim();
 
   clearDraft(ref);
 
@@ -64,7 +66,7 @@ export function sendMessage(
     workspaceId: zero.context.workspaceId ?? null,
     kind: ref.kind,
     senderId,
-    content: payload.content,
+    content,
     text: payload.text ?? '',
     timestamp,
     type,
@@ -120,7 +122,7 @@ export function sendMessage(
       ? zero.mutate(
           mutators.conversations.send({
             channelId: ref.channelId,
-            content: payload.content,
+            content,
             conversationId,
             messageId,
             timestamp: fireTimestamp,
@@ -134,7 +136,7 @@ export function sendMessage(
       : zero.mutate(
           mutators.messages.send({
             conversationId,
-            content: payload.content,
+            content,
             type,
             timestamp: fireTimestamp,
             messageId,

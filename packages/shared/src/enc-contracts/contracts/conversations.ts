@@ -61,3 +61,91 @@ export const conversationsSendClient = defineRequestContract({
 });
 
 export type ConversationsSendRequest = RequestOf<typeof conversationsSendClient>;
+
+/**
+ * Zero mutator `messages.send` (a reply in a thread); its args are this body. The client trims
+ * and encrypts `content`; the mutator stores it as received and decides on these facts: mentions
+ * for the guest check (`userIds`, `groupIds`, `handles`) and, by the participant rule, for who is
+ * added (`spanMentionUserIds`, `spanMentionGroupIds`); Meet links; the slash-command artifact it
+ * is, for the one-open-artifact-per-thread rule. No facts means the content was empty.
+ */
+export const messagesSendClient = defineRequestContract({
+  sourceToDerived: {
+    content: {
+      userIds: derive.userIds,
+      groupIds: derive.groupIds,
+      handles: derive.handles,
+      spanMentionUserIds: derive.spanMentionUserIds,
+      spanMentionGroupIds: derive.spanMentionGroupIds,
+      meetLinks: derive.meetLinks,
+      slashArtifactCommand: derive.slashArtifactCommand,
+    },
+  },
+  schema: z.object({
+    conversationId: z.string(),
+    content: unreadableString(),
+    type: z.nativeEnum(MessageType),
+    showInChannel: z.boolean().optional(),
+    timestamp: z.number(),
+    messageId: z.string(),
+    childConversationId: z.string().optional(),
+    attachmentIds: z.array(z.string()).optional(),
+  }),
+});
+
+/**
+ * Zero mutator `messages.update` (edit a message). The client encrypts `content`; it is stored as
+ * received. For a forwarded message the client sends the whole forwarded XML with the new
+ * optional text (`buildMessageEditContent`); the server checks its forwarded ids against the
+ * stored message's. Mentions come by the participant rule: from the text, or for a forward from
+ * its optional text. No facts means the content was empty.
+ */
+export const messagesUpdateClient = defineRequestContract({
+  sourceToDerived: {
+    content: {
+      userIds: derive.userIds,
+      groupIds: derive.groupIds,
+      handles: derive.handles,
+      spanMentionUserIds: derive.spanMentionUserIds,
+      spanMentionGroupIds: derive.spanMentionGroupIds,
+      forwardedOptionalTextUserIds: derive.forwardedOptionalTextUserIds,
+      forwardedOptionalTextGroupIds: derive.forwardedOptionalTextGroupIds,
+      forwardedMessageId: derive.forwardedMessageId,
+      forwardedConversationId: derive.forwardedConversationId,
+      forwardedSenderId: derive.forwardedSenderId,
+      forwardedChannelId: derive.forwardedChannelId,
+    },
+  },
+  schema: z.object({
+    messageId: z.string(),
+    content: unreadableString().optional(),
+  }),
+});
+
+/**
+ * Zero mutator `conversations.forwardMessage`. The client builds the forward's XML
+ * (`buildForwardedMessageContent`, it holds the original's text) and encrypts it as `content`;
+ * it is stored as received. The server checks the forwarded ids against the original message and
+ * the optional text's length on these facts. `optionalMessage` is the older arg, no longer used.
+ */
+export const conversationsForwardMessageClient = defineRequestContract({
+  sourceToDerived: {
+    content: {
+      forwardedMessageId: derive.forwardedMessageId,
+      forwardedConversationId: derive.forwardedConversationId,
+      forwardedSenderId: derive.forwardedSenderId,
+      forwardedChannelId: derive.forwardedChannelId,
+      forwardedOptionalTextLength: derive.forwardedOptionalTextLength,
+    },
+  },
+  schema: z.object({
+    targetChannelId: z.string(),
+    originalMessageId: z.string(),
+    content: unreadableString().optional(),
+    optionalMessage: z.string().optional(),
+    conversationId: z.string(),
+    messageId: z.string(),
+    timestamp: z.number(),
+    conversationParticipantId: z.string(),
+  }),
+});

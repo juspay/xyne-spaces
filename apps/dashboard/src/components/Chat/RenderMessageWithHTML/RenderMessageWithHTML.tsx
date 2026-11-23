@@ -1,3 +1,4 @@
+import type { SlashCommandArtifactClosed } from '@xyne/shared';
 import React, { JSX, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -79,6 +80,8 @@ interface RenderMessageWithHTMLProps {
     senderId?: string;
     createdAt?: number;
     surface?: 'channel' | 'thread';
+    /** A slash-command artifact's close, recorded in the message's metadata. */
+    closed?: SlashCommandArtifactClosed;
   };
 }
 
