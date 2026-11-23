@@ -404,7 +404,7 @@ export async function loadApp(window: BrowserWindow) {
   
   // check mtls
   if (config.enableMtls) {
-    const mtls = await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+    const mtls = await keychain.checkIdentity();
     log.info("[WindowManager] MTLS Identity Present:", mtls);
 
     if (!mtls) {

@@ -10,6 +10,8 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { devicePasswordPopup } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import { IKeychain } from './IKeychain';
+import { config } from '../app/config';
+import { deviceCaCommonName, isIssuedByDeviceCa } from './deviceCa';
 
 const execAsync = promisify(exec);
 // Shell-free variant (argument array, no /bin/sh) for commands that handle a value parsed out of
@@ -30,7 +32,7 @@ const OPENSSL = 'openssl';
  */
 class LinuxKeychainService implements IKeychain {
     private privateKeyPem: string | null = null;
-    private label: string = "SimulationClient";
+    private label: string = config.MTLS_IDENTITY_LABEL;
 
     private getNssDbDir(): string {
         return path.join(os.homedir(), '.pki', 'nssdb');
@@ -271,27 +273,36 @@ class LinuxKeychainService implements IKeychain {
     }
 
     /**
-     * Deletes a certificate identity from the NSS database.
+     * Deletes every certificate issued by the device CA from all NSS databases (Chrome + Firefox).
      */
-    async deleteIdentity(commonName: string): Promise<void> {
-        log.info(`Deleting identity for "${commonName}"...`);
-
+    async deleteIdentity(): Promise<void> {
+        let issuer = '';
         try {
-            // Delete the certificate from all NSS databases (Chrome + Firefox)
-            const allNssDirs = this.getAllNssDbDirs();
-            for (const dir of allNssDirs) {
+            issuer = deviceCaCommonName();
+            log.info(`Deleting identities issued by "${issuer}"...`);
+            let deletedCount = 0;
+            for (const dir of this.getAllNssDbDirs()) {
+                let entries: { nickname: string; hasKey: boolean }[];
                 try {
-                    await execAsync(`certutil -d sql:${dir} -D -n "${commonName}"`);
-                    log.info(`Identity deleted from NSS DB: ${dir}`);
+                    entries = await this.findDeviceCertificates(dir);
                 } catch (e: any) {
-                    if (e.stderr && (e.stderr.includes('not found') || e.stderr.includes('could not find'))) {
-                        // Not in this DB, skip
-                    } else {
-                        log.warn(`Delete identity warning for ${dir}:`, e.stderr || e.message);
+                    log.warn(`Could not list NSS DB ${dir}:`, e.stderr || e.message);
+                    continue;
+                }
+                for (const { nickname } of entries) {
+                    // One nickname can hold several certificates and -D removes one per call,
+                    // so repeat until certutil no longer finds it.
+                    while (true) {
+                        try {
+                            await execFileAsync('certutil', ['-d', `sql:${dir}`, '-D', '-n', nickname]);
+                            deletedCount++;
+                        } catch {
+                            break;
+                        }
                     }
                 }
             }
-            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { common_name: commonName });
+            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { issuer, deleted_count: deletedCount });
         } catch (e: any) {
             log.warn("Delete identity warning:", e.stderr || e.message);
             Logger.logError(EnrollmentEvent.IDENTITY_DELETE_FAILED, e);
@@ -302,82 +313,71 @@ class LinuxKeychainService implements IKeychain {
     }
 
     /**
-     * Extracts certificate nicknames from certutil -L output.
+     * Extracts certificate nicknames and trust flags from certutil -L output.
      * Output format: "nickname                   trust_flags"
      */
-    private parseNicknames(certutilOutput: string): string[] {
-        const nicknames: string[] = [];
+    private parseNicknames(certutilOutput: string): { nickname: string; flags: string }[] {
+        const entries: { nickname: string; flags: string }[] = [];
         const lines = certutilOutput.split('\n');
         for (const line of lines) {
             const trimmed = line.trim();
             // Skip empty lines, header lines
             if (!trimmed || trimmed.startsWith('Certificate Nickname') || trimmed.includes('SSL,S/MIME')) continue;
             // Extract nickname (everything before the trailing trust flags like "u,u,u" or "CT,,")
-            const match = trimmed.match(/^(.+?)\s+[a-zA-Zp,]+\s*$/);
+            const match = trimmed.match(/^(.+?)\s+([a-zA-Zp,]+)\s*$/);
             if (match) {
-                nicknames.push(match[1].trim());
+                entries.push({ nickname: match[1].trim(), flags: match[2] });
             }
         }
-        return nicknames;
+        return entries;
     }
 
     /**
-     * Checks if a certificate identity exists in the NSS database.
-     * Searches by both nickname and certificate subject CN.
+     * Certificates in one NSS database issued by the device CA. The "u" trust flag marks
+     * a certificate whose private key is in the database.
      */
-    async checkIdentity(commonName: string): Promise<boolean> {
-        const nssDir = this.getNssDbDir();
-        log.info(`Checking identity for "${commonName}"...`);
+    private async findDeviceCertificates(dir: string): Promise<{ nickname: string; hasKey: boolean }[]> {
+        const { stdout } = await execFileAsync('certutil', ['-d', `sql:${dir}`, '-L']);
+        const found: { nickname: string; hasKey: boolean }[] = [];
+        for (const { nickname, flags } of this.parseNicknames(stdout)) {
+            try {
+                const { stdout: pem } = await execFileAsync('certutil', ['-d', `sql:${dir}`, '-L', '-n', nickname, '-a']);
+                const certificates = pem.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) ?? [];
+                if (certificates.some(isIssuedByDeviceCa)) {
+                    found.push({ nickname, hasKey: flags.includes('u') });
+                }
+            } catch {
+                // Could not inspect this cert, skip
+            }
+        }
+        return found;
+    }
 
+    /**
+     * Checks if a certificate issued by the device CA, with its private key, is in the NSS database.
+     */
+    async checkIdentity(): Promise<boolean> {
+        let issuer = '';
         try {
-            // List all certificates
-            const { stdout } = await execAsync(`certutil -d sql:${nssDir} -L`);
-
-            // First check: nickname matches directly
-            const lines = stdout.split('\n');
-            for (const line of lines) {
-                if (line.includes(commonName)) {
-                    Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
-                    return true;
-                }
-            }
-
-            // Second check: examine each cert's subject CN (handles nickname != CN mismatch)
-            const nicknames = this.parseNicknames(stdout);
-            for (const nickname of nicknames) {
-                try {
-                    const tmpCert = path.join(os.tmpdir(), `check_cert_${Date.now()}.pem`);
-                    await execAsync(`certutil -d sql:${nssDir} -L -n "${nickname}" -a > "${tmpCert}"`);
-                    try {
-                        const { stdout: subjectOut } = await execAsync(`${OPENSSL} x509 -in "${tmpCert}" -noout -subject -nameopt multiline`);
-                        if (subjectOut.includes(commonName)) {
-                            log.info(`Found identity "${commonName}" under nickname "${nickname}"`);
-                            Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
-                            return true;
-                        }
-                    } finally {
-                        try { await unlinkAsync(tmpCert); } catch { }
-                    }
-                } catch {
-                    // Could not inspect this cert, skip
-                }
-            }
+            issuer = deviceCaCommonName();
+            log.info(`Checking for an identity issued by "${issuer}"...`);
+            const found = (await this.findDeviceCertificates(this.getNssDbDir())).some((entry) => entry.hasKey);
 
             // Check for partial enrollment
-            if (this.privateKeyPem) {
+            if (!found && this.privateKeyPem) {
                 Logger.warn(EnrollmentEvent.PARTIAL_ENROLLMENT_DETECTED, {
-                    common_name: commonName,
+                    issuer,
                     has_private_key: true,
                     has_certificate: false,
                 });
             }
 
-            Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: false });
-            return false;
+            Logger.info(EnrollmentEvent.IDENTITY_CHECK, { issuer, found });
+            return found;
         } catch (e) {
             Logger.error(EnrollmentEvent.UNKNOWN_ERROR, {
                 operation: 'check_identity',
-                common_name: commonName,
+                issuer,
                 error: e instanceof Error ? e.message : String(e),
             });
             return false;

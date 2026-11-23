@@ -48,7 +48,7 @@ export async function handleCertificateError(
     // so aborting into the catch below would trap the user in a permanent dead-end loop.
     log.info('[CertificateErrorHandler] Clearing invalid certificate from keychain');
     try {
-      await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
+      await keychain.deleteIdentity();
       log.info('[CertificateErrorHandler] Certificate cleared successfully');
     } catch (deleteError) {
       log.error('[CertificateErrorHandler] Failed to clear certificate; continuing to re-enrollment page anyway:', deleteError);

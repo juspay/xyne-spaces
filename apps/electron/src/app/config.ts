@@ -20,7 +20,7 @@ export interface AppConfig {
   BACKEND_URL: string;
   MTLS_BACKEND_URL: string;
   MTLS_FRONTEND_URL: string;
-  MTLS_IDENTITY_NAME: string;
+  MTLS_IDENTITY_LABEL: string;     // Keychain label and CSR placeholder; the server sets the certificate subject
   UNPROTECTED_URL: string;
   FRONTEND_URL: string;
   CLAW_AUTH_URL: string;
@@ -49,7 +49,7 @@ const devConfig: AppConfig = {
   BACKEND_URL: 'http://localhost:3001',
   MTLS_BACKEND_URL: 'http://localhost:3000',
   MTLS_FRONTEND_URL: 'http://localhost:5174',
-  MTLS_IDENTITY_NAME: 'Web Simulation Client',
+  MTLS_IDENTITY_LABEL: 'com.xyne.spaces.dev.mtls',
   UNPROTECTED_URL: 'http://localhost:4001',
   FRONTEND_URL: 'http://localhost:5173',
   CLAW_AUTH_URL: 'http://localhost:3003',
@@ -77,7 +77,7 @@ const prodConfig: AppConfig = {
   BACKEND_URL: deploymentValue('XYNE_BACKEND_URL'),
   MTLS_BACKEND_URL: deploymentValue('XYNE_MTLS_BACKEND_URL'),
   MTLS_FRONTEND_URL: deploymentValue('XYNE_MTLS_FRONTEND_URL'),
-  MTLS_IDENTITY_NAME: 'Web Simulation Client',
+  MTLS_IDENTITY_LABEL: 'com.xyne.spaces.mtls',
   UNPROTECTED_URL: deploymentValue('XYNE_UNPROTECTED_URL'), // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
   FRONTEND_URL: deploymentValue('XYNE_FRONTEND_URL'),
   CLAW_AUTH_URL: deploymentValue('XYNE_CLAW_AUTH_URL'),
@@ -106,7 +106,7 @@ const sandboxConfig: AppConfig = {
   BACKEND_URL: deploymentValue('XYNE_BACKEND_URL'),
   MTLS_BACKEND_URL: deploymentValue('XYNE_MTLS_BACKEND_URL'),
   MTLS_FRONTEND_URL: deploymentValue('XYNE_MTLS_FRONTEND_URL'),
-  MTLS_IDENTITY_NAME: 'Web Simulation Client Sandbox',
+  MTLS_IDENTITY_LABEL: 'com.xyne.spaces.sandbox.mtls',
   UNPROTECTED_URL: deploymentValue('XYNE_UNPROTECTED_URL'), // Non-mTLS endpoint only reserved for pre-enrollment logs and metrics
   FRONTEND_URL: deploymentValue('XYNE_FRONTEND_URL'),
   CLAW_AUTH_URL: deploymentValue('XYNE_CLAW_AUTH_URL'),

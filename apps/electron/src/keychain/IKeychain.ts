@@ -3,6 +3,8 @@ export interface IKeychain {
     generateCSR(commonName: string): Promise<string>;
     importCertificate(certPem: string): Promise<void>;
     installRootCA(pem: string): Promise<void>;
-    deleteIdentity(commonName: string): Promise<void>;
-    checkIdentity(commonName: string): Promise<boolean>;
+    /** Removes every certificate issued by the device CA (see deviceCa.ts). */
+    deleteIdentity(): Promise<void>;
+    /** Whether a certificate issued by the device CA is present with its private key. */
+    checkIdentity(): Promise<boolean>;
 }

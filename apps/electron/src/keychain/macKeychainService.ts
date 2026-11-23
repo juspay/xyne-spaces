@@ -11,6 +11,7 @@ import { safeRecordMetric } from '../services/telemetry';
 import { app } from 'electron';
 import { IKeychain } from './IKeychain';
 import { config } from '../app/config';
+import { deviceCaCommonName, isIssuedByDeviceCa } from './deviceCa';
 
 const execAsync = promisify(exec);
 // Shell-free variant (argument array, no /bin/sh) for commands that must handle values parsed
@@ -32,7 +33,25 @@ class MacKeychainService implements IKeychain {
     // Store private key PEM in memory for the duration of the session
     // In a real app, you might want to persist these securely until enrollment is complete
     private privateKeyPem: string | null = null;
-    private label: string = "SimulationClient";
+    private label: string = config.MTLS_IDENTITY_LABEL;
+
+    /**
+     * SHA-1 hashes of the certificates in the keychain search list issued by the device CA.
+     */
+    private async findDeviceCertificates(): Promise<Set<string>> {
+        const { stdout } = await execFileAsync(SECURITY, ['find-certificate', '-a', '-Z', '-p'], {
+            maxBuffer: 64 * 1024 * 1024,
+        });
+        const hashes = new Set<string>();
+        for (const block of stdout.split(/(?=SHA-256 hash:)/)) {
+            const sha1 = block.match(/SHA-1 hash:\s*([0-9A-F]+)/i)?.[1];
+            const pem = block.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/)?.[0];
+            if (sha1 && pem && isIssuedByDeviceCa(pem)) {
+                hashes.add(sha1.toUpperCase());
+            }
+        }
+        return hashes;
+    }
 
     /**
      * Generates a EC P-384 KeyPair in memory.
@@ -258,33 +277,16 @@ class MacKeychainService implements IKeychain {
             await unlinkAsync(tmpPath);
         }
     }
-    async deleteIdentity(commonName: string): Promise<void> {
-        log.info(`Deleting identity for "${commonName}"...`);
+    async deleteIdentity(): Promise<void> {
+        let issuer = '';
         const logIdentityNotFound = () => {
             log.info("Identity not found, nothing to delete.");
-            Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
+            Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { issuer });
         };
         try {
-            const { stdout } = await execFileAsync(SECURITY, ['find-certificate', '-a', '-c', commonName, '-Z']);
-
-            // Single-pass parse: dedupe SHA-256 hashes and count blocks dropped by the
-            // exact-label filter, so externally-renamed/legacy items that `-c` matched but
-            // we skip don't disappear without a trace.
-            const hashes = new Set<string>();
-            let skippedBlocks = 0;
-            for (const block of stdout.split(/(?=SHA-256 hash:)/)) {
-                const hash = block.match(/SHA-256 hash:\s*([0-9A-F]+)/i)?.[1];
-                if (!hash) continue;
-                if (block.match(/"labl"<blob>="([^"]*)"/)?.[1] === commonName) {
-                    hashes.add(hash);
-                } else {
-                    skippedBlocks++;
-                }
-            }
-
-            if (skippedBlocks > 0) {
-                log.warn(`Skipped ${skippedBlocks} certificate block(s) matched by common name "${commonName}" whose label did not match exactly.`);
-            }
+            issuer = deviceCaCommonName();
+            log.info(`Deleting identities issued by "${issuer}"...`);
+            const hashes = await this.findDeviceCertificates();
 
             if (hashes.size === 0) {
                 logIdentityNotFound();
@@ -326,7 +328,7 @@ class MacKeychainService implements IKeychain {
 
             log.info(`Deleted ${deletedCount} identity certificate(s) successfully.`);
             Logger.info(EnrollmentEvent.IDENTITY_DELETED, {
-                common_name: commonName,
+                issuer,
                 deleted_count: deletedCount,
             });
         } catch (e: any) {
@@ -343,43 +345,39 @@ class MacKeychainService implements IKeychain {
         }
     }
 
-    async checkIdentity(commonName: string): Promise<boolean> {
-        // -p: Output pem (just to see if it finds something)
-        // -c: Match common name
-        const cmd = `${SECURITY} find-identity -p ssl-client -s "${commonName}"`;
-        log.info(`Checking identity for "${commonName}"...`, cmd);
+    async checkIdentity(): Promise<boolean> {
+        let issuer = '';
         try {
-            const { stdout } = await execAsync(cmd);
-            // If found, it lists the identity. If not, usually it says "0 valid identities found"
+            issuer = deviceCaCommonName();
+            log.info(`Checking for an identity issued by "${issuer}"...`);
+            const deviceCertificates = await this.findDeviceCertificates();
 
-            log.info("Check identity output:", stdout);
-
-            // Check if any of the found identities exactly matches the commonName
-            const lines = stdout.split('\n');
-            for (const line of lines) {
-                // Match line like: 1) HASH "Name" ...
-                const match = line.match(/^\s*\d+\)\s+[0-9A-Fa-f]+\s+"([^"]+)"/);
-                if (match && match[1] === commonName) {
-                    Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: true });
-                    return true;
-                }
-            }
+            // find-identity lists certificates that have a matching private key, by SHA-1 hash.
+            // No -p policy: `-p ssl-client` evaluates the chain as an SSL server certificate
+            // and hides identities whose EKU is clientAuth only.
+            const { stdout } = await execFileAsync(SECURITY, ['find-identity']);
+            const found = [...stdout.matchAll(/^\s*\d+\)\s+([0-9A-F]{40})\s/gim)]
+                .some((match) => deviceCertificates.has(match[1].toUpperCase()));
 
             // Check for partial enrollment: if we have keys in memory but no certificate
-            if (this.privateKeyPem) {
+            if (!found && this.privateKeyPem) {
                 Logger.warn(EnrollmentEvent.PARTIAL_ENROLLMENT_DETECTED, {
-                    common_name: commonName,
+                    issuer,
                     has_private_key: true,
                     has_certificate: false,
                 });
             }
 
-            Logger.info(EnrollmentEvent.IDENTITY_CHECK, { common_name: commonName, found: false });
-            return false;
+            Logger.info(EnrollmentEvent.IDENTITY_CHECK, {
+                issuer,
+                found,
+                device_certificates: deviceCertificates.size,
+            });
+            return found;
         } catch (e) {
             Logger.error(EnrollmentEvent.UNKNOWN_ERROR, {
                 operation: 'check_identity',
-                common_name: commonName,
+                issuer,
                 error: e instanceof Error ? e.message : String(e),
             });
             return false;
