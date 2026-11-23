@@ -3,7 +3,7 @@ import { ZeroProvider as ZeroReactProvider } from '@rocicorp/zero/react';
 import { dropAllDatabases, UpdateNeededReason, Zero } from '@rocicorp/zero';
 import { useAuth } from './AuthProvider';
 import { mutators } from '../zero/mutators';
-import { schema } from '@xyne/shared';
+import { installSyncDecryption, schema } from '@xyne/shared';
 import { VITE_ZERO_SERVER } from '../config';
 import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
@@ -17,7 +17,10 @@ interface ZeroProviderProps {
 
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
-  const { isReady: encryptionReady } = useEncryptionBootstrap();
+  const { isReady: encryptionReady, keyring, config: encryptionConfig } = useEncryptionBootstrap();
+  // Zero filters its local store, so encrypted fields are decrypted as they arrive (the wire
+  // still carries ciphertext). Set before Zero connects; follows key and flag changes.
+  installSyncDecryption(() => (encryptionConfig?.clientEncryptionEnabled ? keyring : null));
   const isRefreshing = useRef(false);
   const isRecoveringRef = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
