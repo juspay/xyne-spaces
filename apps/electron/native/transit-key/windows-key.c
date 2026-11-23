@@ -10,7 +10,12 @@
 //
 // Key material comes on stdin, never argv (visible to other processes): the arguments are only
 // the command, the provider and the key name, none of them secret. Each command prints one JSON
-// line; a failure prints {"error": "..."} and exits 1.
+// line; a failure prints {"error": "...", "status": "0x..."} and exits with what kind of failure
+// it was, so the app replaces a key only when the key itself is bad:
+//
+//   1  anything else (busy, locked out, not ready after resume, a bad input): the key is kept
+//   2  the key is bad (NTE_BAD_KEY, NTE_BAD_KEY_STATE, a public key of the wrong shape)
+//   3  this provider cannot be used here (no TPM, no P-256 key agreement)
 
 #include <windows.h>
 #include <bcrypt.h>
@@ -22,6 +27,13 @@
 #ifndef BCRYPT_KDF_RAW_SECRET
 #define BCRYPT_KDF_RAW_SECRET L"TRUNCATE"
 #endif
+#ifndef NTE_DEVICE_NOT_FOUND
+#define NTE_DEVICE_NOT_FOUND ((SECURITY_STATUS)0x80090035L)
+#endif
+
+#define EXIT_OTHER 1
+#define EXIT_BROKEN_KEY 2
+#define EXIT_UNSUPPORTED 3
 
 #define MAX_KEY_NAME 64
 #define COORD_LEN 32
@@ -34,12 +46,39 @@ static WCHAR key_name[MAX_KEY_NAME + 1];
 
 static int fail(const char *message) {
   printf("{\"error\":\"%s\"}\n", message);
-  return 1;
+  return EXIT_OTHER;
 }
 
-static int fail_status(const char *message, SECURITY_STATUS status) {
-  printf("{\"error\":\"%s (0x%08lX)\"}\n", message, (unsigned long)status);
-  return 1;
+static int fail_status(const char *message, SECURITY_STATUS status, int code) {
+  printf("{\"error\":\"%s (0x%08lX)\",\"status\":\"0x%08lX\"}\n", message,
+         (unsigned long)status, (unsigned long)status);
+  return code;
+}
+
+/** Opening the provider: only a provider that is not there, or cannot work here, is final. */
+static int provider_exit_code(SECURITY_STATUS status) {
+  switch (status) {
+    case NTE_PROV_DLL_NOT_FOUND:
+    case NTE_DEVICE_NOT_FOUND:
+    case NTE_NOT_SUPPORTED:
+    case NTE_BAD_PROVIDER:
+      return EXIT_UNSUPPORTED;
+    default:
+      return EXIT_OTHER;
+  }
+}
+
+/** A failure on the key: bad only for the key's own bad states, never a busy or locked TPM. */
+static int key_exit_code(SECURITY_STATUS status) {
+  switch (status) {
+    case NTE_BAD_KEY:
+    case NTE_BAD_KEY_STATE:
+      return EXIT_BROKEN_KEY;
+    case NTE_NOT_SUPPORTED:
+      return EXIT_UNSUPPORTED;
+    default:
+      return EXIT_OTHER;
+  }
 }
 
 static LPCWSTR provider_name(const char *which) {
@@ -134,8 +173,10 @@ static SECURITY_STATUS public_point(NCRYPT_KEY_HANDLE key, BYTE point[POINT_LEN]
 }
 
 /** ECDH inside the provider: the 32-byte X coordinate, as WebCrypto and CryptoKit return it. */
+/** `*bad_input` is set when the server point itself was refused, which says nothing of the key. */
 static SECURITY_STATUS agree(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_HANDLE key,
-                             const BYTE server_point[POINT_LEN], BYTE secret[COORD_LEN]) {
+                             const BYTE server_point[POINT_LEN], BYTE secret[COORD_LEN],
+                             int *bad_input) {
   BYTE blob[ECC_BLOB_LEN];
   BCRYPT_ECCKEY_BLOB *header = (BCRYPT_ECCKEY_BLOB *)blob;
   header->dwMagic = BCRYPT_ECDH_PUBLIC_P256_MAGIC;
@@ -148,6 +189,7 @@ static SECURITY_STATUS agree(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_HANDLE key,
   // Importing validates the point: one that is not on the curve is refused.
   SECURITY_STATUS status =
       NCryptImportKey(provider, 0, BCRYPT_ECCPUBLIC_BLOB, NULL, &server, blob, sizeof blob, 0);
+  *bad_input = status != ERROR_SUCCESS;
   if (status == ERROR_SUCCESS) {
     status = NCryptSecretAgreement(key, server, &agreed, NCRYPT_SILENT_FLAG);
   }
@@ -176,20 +218,26 @@ static int run_agree(NCRYPT_PROV_HANDLE provider) {
 
   NCRYPT_KEY_HANDLE key = 0;
   SECURITY_STATUS status = open_or_create_key(provider, &key);
-  if (status != ERROR_SUCCESS) return fail_status("cannot open or create the key", status);
+  if (status != ERROR_SUCCESS) {
+    return fail_status("cannot open or create the key", status, key_exit_code(status));
+  }
 
   BYTE point[POINT_LEN];
   BYTE secret[COORD_LEN];
   status = public_point(key, point);
   if (status != ERROR_SUCCESS) {
     NCryptFreeObject(key);
-    return fail_status("cannot read the public key", status);
+    // NTE_BAD_DATA here is public_point's own check: the key gave a public key of the wrong shape.
+    int code = status == NTE_BAD_DATA ? EXIT_BROKEN_KEY : key_exit_code(status);
+    return fail_status("cannot read the public key", status, code);
   }
-  status = agree(provider, key, server_point, secret);
+  int bad_input = 0;
+  status = agree(provider, key, server_point, secret, &bad_input);
   NCryptFreeObject(key);
   if (status != ERROR_SUCCESS) {
     SecureZeroMemory(secret, sizeof secret);
-    return fail_status("key agreement failed", status);
+    if (bad_input) return fail_status("the server point was refused", status, EXIT_OTHER);
+    return fail_status("key agreement failed", status, key_exit_code(status));
   }
 
   char secret_b64[64];
@@ -210,11 +258,11 @@ static int run_delete(NCRYPT_PROV_HANDLE provider) {
     printf("{\"deleted\":\"true\"}\n");
     return 0;
   }
-  if (status != ERROR_SUCCESS) return fail_status("cannot open the key", status);
+  if (status != ERROR_SUCCESS) return fail_status("cannot open the key", status, EXIT_OTHER);
   status = delete_key(key);
   if (status != ERROR_SUCCESS) {
     NCryptFreeObject(key);
-    return fail_status("cannot delete the key", status);
+    return fail_status("cannot delete the key", status, EXIT_OTHER);
   }
   printf("{\"deleted\":\"true\"}\n");
   return 0;
@@ -229,7 +277,9 @@ int main(int argc, char **argv) {
 
   NCRYPT_PROV_HANDLE provider = 0;
   SECURITY_STATUS status = NCryptOpenStorageProvider(&provider, name, 0);
-  if (status != ERROR_SUCCESS) return fail_status("cannot open the key storage provider", status);
+  if (status != ERROR_SUCCESS) {
+    return fail_status("cannot open the key storage provider", status, provider_exit_code(status));
+  }
 
   int code = run_agree_command ? run_agree(provider) : run_delete(provider);
   NCryptFreeObject(provider);

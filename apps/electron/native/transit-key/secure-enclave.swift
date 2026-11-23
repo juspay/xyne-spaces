@@ -8,20 +8,32 @@
 //                        → {"secret": b64 (32 bytes), "publicKey": b64 (65-byte uncompressed point)}
 //
 // Inputs come on stdin, never argv (visible in `ps`). Each command prints one JSON line;
-// a failure prints {"error": "..."} and exits 1.
+// a failure prints {"error": "..."} and exits with what kind of failure it was, so the app
+// replaces a key only when the key itself is bad:
+//
+//   1  anything else (busy, a bad input, unknown): the key is kept
+//   2  the Enclave rejected the stored key (from another Mac, after an Enclave reset, or a
+//      damaged blob, which CryptoTokenKit reports as corruptedData or objectNotFound)
+//   3  this Mac has no Secure Enclave
 
 import CryptoKit
+import CryptoTokenKit
 import Foundation
+
+let exitOther: Int32 = 1
+let exitBrokenKey: Int32 = 2
+let exitUnsupported: Int32 = 3
 
 struct Failure: Error {
   let message: String
+  var code: Int32 = exitOther
 }
 
-func respond(_ object: [String: String]) -> Never {
+func respond(_ object: [String: String], code: Int32 = 0) -> Never {
   let data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
   FileHandle.standardOutput.write(data)
   FileHandle.standardOutput.write(Data("\n".utf8))
-  exit(object["error"] == nil ? 0 : 1)
+  exit(code)
 }
 
 func readInput() throws -> [String: String] {
@@ -40,18 +52,33 @@ func bytes(_ input: [String: String], _ name: String) throws -> Data {
 }
 
 do {
-  guard SecureEnclave.isAvailable else { throw Failure(message: "Secure Enclave unavailable") }
+  guard SecureEnclave.isAvailable else {
+    throw Failure(message: "Secure Enclave unavailable", code: exitUnsupported)
+  }
   switch CommandLine.arguments.dropFirst().first {
   case "create":
     let key = try SecureEnclave.P256.KeyAgreement.PrivateKey()
     respond(["blob": key.dataRepresentation.base64EncodedString()])
   case "agree":
     let input = try readInput()
-    let key = try SecureEnclave.P256.KeyAgreement.PrivateKey(
-      dataRepresentation: try bytes(input, "blob"))
+    let blob = try bytes(input, "blob")
+    let key: SecureEnclave.P256.KeyAgreement.PrivateKey
+    do {
+      key = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: blob)
+    } catch {
+      throw Failure(
+        message: "the Secure Enclave rejected the stored key: \(error)", code: exitBrokenKey)
+    }
     let server = try P256.KeyAgreement.PublicKey(
       x963Representation: try bytes(input, "serverPoint"))
-    let secret = try key.sharedSecretFromKeyAgreement(with: server).withUnsafeBytes { Data($0) }
+    let secret: Data
+    do {
+      secret = try key.sharedSecretFromKeyAgreement(with: server).withUnsafeBytes { Data($0) }
+    } catch let error as TKError where [.corruptedData, .objectNotFound].contains(error.code) {
+      // A damaged blob opens, then fails here. Any other agreement error is not the key's.
+      throw Failure(
+        message: "the stored key is corrupt: \(error.localizedDescription)", code: exitBrokenKey)
+    }
     respond([
       "secret": secret.base64EncodedString(),
       "publicKey": key.publicKey.x963Representation.base64EncodedString(),
@@ -60,7 +87,7 @@ do {
     throw Failure(message: "usage: transit-key create | agree")
   }
 } catch let failure as Failure {
-  respond(["error": failure.message])
+  respond(["error": failure.message], code: failure.code)
 } catch {
-  respond(["error": String(describing: error)])
+  respond(["error": String(describing: error)], code: exitOther)
 }

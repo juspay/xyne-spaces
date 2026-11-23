@@ -29,22 +29,6 @@ export async function windowsAgree(
   return { secret: base64Field(output, 'secret'), publicKey: base64Field(output, 'publicKey') };
 }
 
-// windows-key.c's messages for a failure on the key itself, after the provider opened.
-const KEY_FAILURES = [
-  'cannot open or create the key',
-  'cannot read the public key',
-  'key agreement failed',
-];
-
-/**
- * Whether the helper ran, opened the provider and then failed on the key: only then is there a
- * key worth replacing. A missing or hung helper, or a provider that cannot be opened (no TPM,
- * say), has none.
- */
-export function isKeyFailure(error: unknown): boolean {
-  return error instanceof Error && KEY_FAILURES.some((failure) => error.message.includes(failure));
-}
-
 /** Removes the provider's key, so the next agree creates a fresh one. */
 export async function deleteWindowsKey(provider: WindowsKeyProvider): Promise<void> {
   await runHelper(HELPER, ['delete', provider, KEY_NAME], '');
