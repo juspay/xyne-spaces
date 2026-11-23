@@ -49,6 +49,7 @@ export const useSupportKanbanTicketsPage = ({
 }: UseSupportKanbanTicketsPageOptions): {
   tickets: Ticket[];
   isComplete: boolean;
+  isSettled: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => void;
@@ -106,6 +107,8 @@ export const useSupportKanbanTicketsPage = ({
   return {
     tickets,
     isComplete,
+    isSettled:
+      isComplete && (hasMore || !isWindowBounded || (rawCount === 0 && expectedCount === 0)),
     hasMore,
     isLoadingMore: !isComplete && page.limit > PAGE_SIZE,
     loadMore,

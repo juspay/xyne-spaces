@@ -7,13 +7,15 @@ import { useGetChannelUserStatus } from '../../hooks/useChannels';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
-import {
-  ticketMatchesDynamicFieldEntries,
-  type DynamicFieldFilterEntry,
-  type DynamicFieldQueryFilter,
-  type FormEntityValueLike,
+import type {
+  DynamicFieldFilterEntry,
+  DynamicFieldQueryFilter,
 } from '../../utils/board/dynamicFieldFilters';
 import type { ResolvedDisplayFormField } from '../../utils/board/resolveDisplayFormFields';
+import { useSupportKanbanTicketsPage } from './useSupportKanbanTicketsPage';
+import { useKanbanCounts } from '../KanbanBoardScreen/useKanbanCounts';
+
+const MATCH_EVERY_STAGE = { stage: '', otherStageNames: [] as string[] };
 
 export interface SupportTicketTableProps {
   channelId: string;
@@ -70,18 +72,68 @@ export const SupportTicketTable = ({
   );
 
   const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
-  const [supportTickets, supportTicketsDetails] = useCachedQuery(
-    queries.supportTicketsFilteredV4({
-      channelId,
-      isMember,
-      ...restTicketFilter,
-      ...(conversationIdWhitelist !== undefined
-        ? { conversationIds: conversationIdWhitelist }
+  const {
+    groups: countGroups,
+    isLoading: countsLoading,
+    error: countsError,
+  } = useKanbanCounts({
+    viewMode: 'desk',
+    columnType: 'stage',
+    channelId,
+    deskFilters: {
+      ...(ticketFilter.assignedTo ? { assignedTo: ticketFilter.assignedTo } : {}),
+      ...(ticketFilter.createdBy ? { createdBy: ticketFilter.createdBy } : {}),
+      ...(ticketFilter.priority ? { priority: ticketFilter.priority } : {}),
+      ...(ticketFilter.stageName ? { stageName: ticketFilter.stageName } : {}),
+      ...(conversationIdWhitelist ? { conversationIds: conversationIdWhitelist } : {}),
+      ...(ticketFilter.userGroups ? { userGroups: ticketFilter.userGroups } : {}),
+      ...(ticketFilter.lastEmailAtStart !== undefined
+        ? { lastEmailAtStart: ticketFilter.lastEmailAtStart }
         : {}),
-      formEntityValueFieldIds: displayFieldIds,
-    }),
-    { enabled: !!channelId },
-  );
+      ...(ticketFilter.lastEmailAtEnd !== undefined
+        ? { lastEmailAtEnd: ticketFilter.lastEmailAtEnd }
+        : {}),
+      ...(ticketFilter.createdAtStart !== undefined
+        ? { createdAtStart: ticketFilter.createdAtStart }
+        : {}),
+      ...(ticketFilter.createdAtEnd !== undefined
+        ? { createdAtEnd: ticketFilter.createdAtEnd }
+        : {}),
+      ...(ticketFilter.conversationLabelId
+        ? { conversationLabelId: ticketFilter.conversationLabelId }
+        : {}),
+    },
+    filters: {
+      dynamicFields: Object.fromEntries(
+        (dynamicFieldEntries ?? [])
+          .filter(entry => entry.fieldType !== undefined)
+          .map(entry => [entry.fieldId, entry.value]),
+      ),
+    },
+    enabled: !!channelId,
+  });
+  const expectedCount =
+    countsLoading || countsError
+      ? undefined
+      : countGroups.reduce((sum, group) => sum + group.totalCount, 0);
+  const {
+    tickets: supportTickets,
+    isComplete,
+    isSettled,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+  } = useSupportKanbanTicketsPage({
+    channelId,
+    isMember,
+    ...restTicketFilter,
+    ...(conversationIdWhitelist !== undefined ? { conversationIds: conversationIdWhitelist } : {}),
+    formEntityValueFieldIds: displayFieldIds,
+    ...MATCH_EVERY_STAGE,
+    ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
+    ...(expectedCount !== undefined ? { expectedCount } : {}),
+    enabled: !!channelId,
+  });
 
   // Records table-view load duration, mirroring Kanban/List's SUPPORT_TICKETS_LOADED
   // instrumentation so load times stay comparable across all three views.
@@ -125,7 +177,7 @@ export const SupportTicketTable = ({
     loadStartTimeRef.current = Date.now();
   }, [filterKey]);
   useEffect(() => {
-    if (supportTicketsDetails.type !== 'complete') return;
+    if (!isComplete) return;
     if (loadStartTimeRef.current === null) return;
     const duration = Date.now() - loadStartTimeRef.current;
     logger.info(Event.SUPPORT_TICKETS_LOADED, {
@@ -143,36 +195,29 @@ export const SupportTicketTable = ({
       });
     });
     loadStartTimeRef.current = null;
-  }, [supportTicketsDetails.type, filterKey, channelId]);
+  }, [isComplete, filterKey, channelId]);
 
   // Resolve the board id from the first loaded ticket, same as SupportKanbanBoard —
   // needed so stage-related columns can look up board type (linear vs non-linear).
-  const firstRowBoardId = supportTickets?.[0]?.boardId;
+  const firstRowBoardId = supportTickets[0]?.boardId;
   useEffect(() => {
     if (firstRowBoardId) onBoardIdResolved(firstRowBoardId);
   }, [firstRowBoardId, onBoardIdResolved]);
 
-  const dynamicallyFilteredTickets = useMemo(() => {
-    if (!supportTickets || !dynamicFieldEntries?.length) return supportTickets;
-    return supportTickets.filter(ticket =>
-      ticketMatchesDynamicFieldEntries(
-        (ticket as { formEntityValues?: FormEntityValueLike[] }).formEntityValues,
-        dynamicFieldEntries,
-      ),
-    );
-  }, [supportTickets, dynamicFieldEntries]);
-
   // Report loaded tickets up so the parent can source the merge dialog.
   useEffect(() => {
-    if (dynamicallyFilteredTickets) onTicketsLoaded?.(dynamicallyFilteredTickets as Ticket[]);
-  }, [dynamicallyFilteredTickets, onTicketsLoaded]);
+    onTicketsLoaded?.(supportTickets);
+  }, [supportTickets, onTicketsLoaded]);
 
-  // supportTicketsFilteredV4 already relates tagMappings on every row, so unlike
+  // supportKanbanTicketsPage already relates tagMappings on every row, so unlike
   // Board's ticketsQueryV2 there's no fallback path needed here.
   const tagsByTicketId = useMemo(() => {
     const map = new Map<string, TicketTag[]>();
-    for (const ticket of dynamicallyFilteredTickets ?? []) {
-      const tags = (ticket.tagMappings ?? []).map(m => ({
+    for (const ticket of supportTickets) {
+      const { tagMappings } = ticket as Ticket & {
+        tagMappings?: { id: string; tagName: string; ticketId: string }[];
+      };
+      const tags = (tagMappings ?? []).map(m => ({
         id: m.id,
         name: m.tagName,
         ticketId: m.ticketId,
@@ -180,9 +225,9 @@ export const SupportTicketTable = ({
       if (tags.length > 0) map.set(ticket.id, tags as TicketTag[]);
     }
     return map;
-  }, [dynamicallyFilteredTickets]);
+  }, [supportTickets]);
 
-  const projectId = supportTickets?.[0]?.projectId ?? undefined;
+  const projectId = supportTickets[0]?.projectId ?? undefined;
   const [projectTags] = useCachedQuery(
     queries.projectTagsByProjectId({ projectId: projectId || '' }),
     { enabled: !!projectId },
@@ -193,15 +238,20 @@ export const SupportTicketTable = ({
   }, [projectTags]);
 
   return (
-    <TicketTable
-      tickets={(dynamicallyFilteredTickets ?? []) as Ticket[]}
-      ticketTags={tagsByTicketId}
-      availableTags={availableTags}
-      onTitleClick={onTicketClick}
-      {...(selectedIds !== undefined ? { selectedIds } : {})}
-      {...(onSelectionChange !== undefined ? { onSelectionChange } : {})}
-      {...(visibleColumns ? { visibleColumns } : {})}
-      paginationMode='pages'
-    />
+    <div className='flex h-full min-h-0 flex-col'>
+      <TicketTable
+        tickets={supportTickets}
+        ticketTags={tagsByTicketId}
+        availableTags={availableTags}
+        onTitleClick={onTicketClick}
+        {...(selectedIds !== undefined ? { selectedIds } : {})}
+        {...(onSelectionChange !== undefined ? { onSelectionChange } : {})}
+        {...(visibleColumns ? { visibleColumns } : {})}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
+        isLoading={!isSettled && supportTickets.length === 0}
+        onLoadMore={loadMore}
+      />
+    </div>
   );
 };
