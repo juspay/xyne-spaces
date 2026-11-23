@@ -41,12 +41,11 @@ const withTransitKeyFiles = config => {
 
       for (const fileName of TRANSIT_KEY_FILES) {
         const sourcePath = path.join(sourceDir, fileName);
-        if (fs.existsSync(sourcePath)) {
-          fs.copyFileSync(sourcePath, path.join(targetDir, fileName));
-          console.log(`[${PLUGIN_NAME}] Copied transitkey/${fileName}`);
-        } else {
-          console.warn(`[${PLUGIN_NAME}] Source file not found: ${sourcePath}`);
+        if (!fs.existsSync(sourcePath)) {
+          throw new Error(`[${PLUGIN_NAME}] Missing source file: ${sourcePath}`);
         }
+        fs.copyFileSync(sourcePath, path.join(targetDir, fileName));
+        console.log(`[${PLUGIN_NAME}] Copied transitkey/${fileName}`);
       }
 
       return config;
@@ -60,15 +59,30 @@ const withTransitKeyPackageRegistration = config => {
   return withMainApplication(config, cfg => {
     let src = cfg.modResults.contents;
 
+    // A replace that finds no anchor changes nothing and the build still succeeds, with
+    // LotusTransitKey missing at runtime, so each edit is checked and a miss fails prebuild.
     const importLine = `import ${androidPackage}.transitkey.TransitKeyPackage`;
     if (!src.includes(importLine)) {
-      src = src.replace(/^(package [^\n]+\n)/m, `$1\n${importLine}\n`);
+      const withImport = src.replace(/^(package [^\n]+\n)/m, `$1\n${importLine}\n`);
+      if (withImport === src) {
+        throw new Error(
+          `[${PLUGIN_NAME}] Failed to add the TransitKeyPackage import to MainApplication.kt. ` +
+            `Expected a 'package …' line.`,
+        );
+      }
+      src = withImport;
     }
 
     if (!src.includes('add(TransitKeyPackage())')) {
       src = src.replace(
         'PackageList(this).packages.apply {\n',
         'PackageList(this).packages.apply {\n              add(TransitKeyPackage())\n',
+      );
+    }
+    if (!src.includes('add(TransitKeyPackage())')) {
+      throw new Error(
+        `[${PLUGIN_NAME}] Failed to register TransitKeyPackage in MainApplication.kt. ` +
+          `Expected anchor 'PackageList(this).packages.apply {' not found.`,
       );
     }
 

@@ -14,6 +14,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import java.io.File
+import java.io.FileOutputStream
 import java.math.BigInteger
 import java.security.GeneralSecurityException
 import java.security.InvalidKeyException
@@ -41,10 +42,13 @@ import javax.crypto.spec.GCMParameterSpec
  *
  * - The Keystore key: in StrongBox when the phone has one, else the TEE. It cannot be exported
  *   and ECDH runs inside the Keystore; only the 32-byte shared secret comes out.
- * - The wrapped key, whenever the Keystore key fails (on Android 11 and older the Keystore cannot
- *   do key agreement at all): a key made in software, stored in no-backup app storage encrypted
- *   with an AES key that lives in the Keystore. It is decrypted only for each ECDH and is useless
- *   off this phone.
+ * - The wrapped key, on Android 11 and older (the Keystore cannot do key agreement there) or where
+ *   the Keystore cannot make a working key: a key made in software, stored in no-backup app
+ *   storage encrypted with an AES key that lives in the Keystore. It is decrypted only for each
+ *   ECDH and is useless off this phone.
+ *
+ * Once chosen, a tier is kept (see selectKey), so the public key never changes between launches
+ * unless the key itself is broken.
  */
 class TransitKeyModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
@@ -68,7 +72,8 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
         result.putString("publicKey", base64(key.publicPoint))
         result.putString("storage", key.storage)
         promise.resolve(result)
-      } catch (error: Exception) {
+      } catch (error: Throwable) {
+        // Throwable, not Exception: an Error must settle the promise too, not leave JS waiting.
         promise.reject(ERROR_CODE, error.message ?: error.javaClass.simpleName, error)
       }
     }
@@ -87,7 +92,7 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
         } finally {
           secret.fill(0)
         }
-      } catch (error: Exception) {
+      } catch (error: Throwable) {
         promise.reject(ERROR_CODE, error.message ?: error.javaClass.simpleName, error)
       }
     }
@@ -182,15 +187,34 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
 
     private fun checkedKey(): TransitKey {
       cached?.let { return it }
-      // The Keystore key whenever it works; the wrapped key whenever it does not, on any phone.
-      val key = try {
-        keystoreKey()
-      } catch (error: Exception) {
-        Log.w(TAG, "Keystore key unavailable; using a wrapped key", error)
-        wrappedKey()
-      }
+      val key = selectKey()
       cached = key
       return key
+    }
+
+    /**
+     * The tier is picked so the public key stays the same across launches:
+     * - Once a wrapped key file exists it is used for good, also after an OS upgrade that brings
+     *   Keystore key agreement: switching would change the public key.
+     * - Android 11 and older: the wrapped key (the Keystore cannot do key agreement).
+     * - Otherwise the stored Keystore key. Any failure other than the key being broken fails
+     *   this call, with nothing cached, so the next call retries the same key.
+     * - With no usable Keystore key (none yet, or a broken one now deleted): a new one, else the
+     *   wrapped key, which then stays.
+     */
+    private fun selectKey(): TransitKey {
+      if (wrappedKeyFile.exists() || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+        return wrappedKey()
+      }
+      storedKeystoreKeyChecked()?.let { return it }
+      return try {
+        newKeystoreKey()
+      } catch (error: Exception) {
+        Log.w(TAG, "The Keystore cannot make a transit key; using a wrapped key", error)
+        // A half-made key would otherwise be found, and fail, on every later launch.
+        runCatching { keyStore().deleteEntry(KEY_ALIAS) }
+        wrappedKey()
+      }
     }
 
     /** The key failed itself (invalidated, unreadable or wrong), not the Keystore around it. */
@@ -224,21 +248,21 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
 
     // Keystore key (Android 12+)
 
-    private fun keystoreKey(): TransitKey {
-      // Key agreement came to the Keystore in Android 12; before that this tier fails here, as
-      // it would on any Keystore that cannot do it, instead of calling APIs the phone lacks.
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        throw UnsupportedOperationException("This Keystore cannot do key agreement")
-      }
-      val stored = storedKeystoreKey() ?: return newKeystoreKey()
+    /**
+     * The stored Keystore key once it passes the self-check; null when there is none, or when it
+     * is broken (it is then deleted). Any other failure is thrown and the key is left alone, so
+     * a passing error never replaces it.
+     */
+    @RequiresApi(Build.VERSION_CODES.S)
+    private fun storedKeystoreKeyChecked(): TransitKey? {
+      val stored = storedKeystoreKey() ?: return null
       return try {
         selfChecked(stored)
       } catch (error: Exception) {
-        // Only a key that is itself broken is replaced, never one hit by a passing error.
         if (!isKeyFailure(error)) throw error
-        Log.w(TAG, "Stored transit key is unusable; creating a new one", error)
+        Log.w(TAG, "Stored transit key is unusable; replacing it", error)
         keyStore().deleteEntry(KEY_ALIAS)
-        newKeystoreKey()
+        null
       }
     }
 
@@ -288,7 +312,7 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
       return KeystoreKey(privateKey, uncompressedPoint(publicKey as ECPublicKey), storage)
     }
 
-    // Wrapped key (older Android)
+    // Wrapped key (Android 11 and older, or a Keystore that cannot make the key)
 
     private fun wrappedKey(): TransitKey {
       val stored = try {
@@ -341,9 +365,13 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
       }
       val key = WrappedKey(point, cipher.iv, ciphertext)
 
-      // Written whole, then renamed, so a crash never leaves half a key file.
+      // Written whole and synced to disk, then renamed, so neither a crash nor a power loss
+      // leaves a short key file behind.
       val temp = File(wrappedKeyFile.parentFile, "$WRAPPED_KEY_FILE.tmp")
-      temp.writeBytes(byteArrayOf(WRAPPED_KEY_VERSION) + point + cipher.iv + ciphertext)
+      FileOutputStream(temp).use { out ->
+        out.write(byteArrayOf(WRAPPED_KEY_VERSION) + point + cipher.iv + ciphertext)
+        out.fd.sync()
+      }
       if (!temp.renameTo(wrappedKeyFile)) {
         temp.delete()
         throw IllegalStateException("Cannot store the transit key")
