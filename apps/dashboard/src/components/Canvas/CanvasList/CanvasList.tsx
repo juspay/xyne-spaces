@@ -49,6 +49,8 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
 import { useNavigate } from 'react-router-dom';
+import { CanvasPageSubscription } from './CanvasPageSubscription';
+import { shouldScanCanvasUserPages } from '../canvasListPagination';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 import { useCachedQuery } from '@xyne/shared/hooks';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
@@ -643,86 +645,6 @@ const updateOptimisticStarState = (
   };
 };
 
-const CanvasPageSubscription: React.FC<{
-  cursor: CanvasCursor | null;
-  pageSize: number;
-  channelId?: string | undefined;
-  searchQuery?: string | undefined;
-  includeArchived: boolean;
-  onlyArchived: boolean;
-  includePublicChannelCanvases?: boolean | undefined;
-  creatorFilter?: CanvasCreatorFilter | undefined;
-  createdByUserId?: string | undefined;
-  onPageComplete: (page: Canvas[], previousPageIds: Set<string>, pageSize: number) => void;
-  onLoadingChange: (isLoading: boolean) => void;
-}> = ({
-  cursor,
-  pageSize,
-  channelId,
-  searchQuery,
-  includeArchived,
-  onlyArchived,
-  includePublicChannelCanvases,
-  creatorFilter,
-  createdByUserId,
-  onPageComplete,
-  onLoadingChange,
-}) => {
-  const previousPageIdsRef = useRef<Set<string>>(new Set());
-
-  const query = useMemo(() => {
-    const trimmedSearchQuery = searchQuery?.trim();
-    if (channelId) {
-      return queries.channelCanvasesPaginated({
-        channelId,
-        limit: pageSize,
-        start: cursor,
-        includeArchived,
-        onlyArchived,
-        ...(trimmedSearchQuery ? { searchQuery: trimmedSearchQuery } : {}),
-      });
-    }
-
-    return queries.userCanvasesPaginated({
-      limit: pageSize,
-      start: cursor,
-      includeArchived,
-      onlyArchived,
-      ...(includePublicChannelCanvases ? { includePublicChannelCanvases: true } : {}),
-      ...(creatorFilter ? { creatorFilter } : {}),
-      ...(creatorFilter === 'others' && createdByUserId ? { createdByUserId } : {}),
-      ...(trimmedSearchQuery ? { searchQuery: trimmedSearchQuery } : {}),
-    });
-  }, [
-    channelId,
-    createdByUserId,
-    creatorFilter,
-    cursor,
-    includeArchived,
-    includePublicChannelCanvases,
-    onlyArchived,
-    pageSize,
-    searchQuery,
-  ]);
-
-  const [page, pageDetails] = useCachedQuery(query as never, { cursorEnabled: true });
-  const isLoading = pageDetails.type !== 'complete';
-
-  useEffect(() => {
-    onLoadingChange(isLoading);
-  }, [isLoading, onLoadingChange]);
-
-  useEffect(() => {
-    if (pageDetails.type !== 'complete') return;
-
-    const completedPage = ((page as unknown as Canvas[]) || []).slice();
-    onPageComplete(completedPage, previousPageIdsRef.current, pageSize);
-    previousPageIdsRef.current = new Set(completedPage.map(canvas => canvas.id));
-  }, [cursor, onPageComplete, page, pageDetails.type, pageSize]);
-
-  return null;
-};
-
 const ChannelScopeFolderGroupSection: React.FC<{
   folder: CanvasFolder;
   isCollapsed: boolean;
@@ -1021,8 +943,12 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     Record<string, CanvasLabelCount[] | null>
   >({});
   const [pageCursor, setPageCursor] = useState<CanvasCursor | null>(null);
+  const [nextCursor, setNextCursor] = useState<CanvasCursor | null>(null);
   const [isNextPageLoading, setIsNextPageLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [minimumVisibleRows, setMinimumVisibleRows] = useState(
+    CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD,
+  );
   const searchInputRef = useRef<HTMLInputElement>(null);
   const canvasVirtuosoRef = useRef<VirtuosoHandle>(null);
   // Rows currently on screen; the hover label refresh only re-fetches these.
@@ -1179,7 +1105,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     () => withStarredCanvasState(archiveFilteredRawItems),
     [archiveFilteredRawItems],
   );
-  const nextCursor = useMemo(() => getCanvasCursorFromLastItem(canvasItems), [canvasItems]);
   const isChannelSourceLoading = useMemo(
     () =>
       extraChannelSourceIds.some(
@@ -1203,8 +1128,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     setChannelCanvasItems([]);
     setChannelSourcePagination({});
     setPageCursor(null);
+    setNextCursor(null);
     setIsNextPageLoading(false);
     setHasMore(true);
+    setMinimumVisibleRows(CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD);
   }, [
     activeFilter,
     channelId,
@@ -1284,6 +1211,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const handlePageComplete = useCallback(
     (page: Canvas[], previousPageIds: Set<string>, pageSize: number): void => {
       applyPageToFlatList(page, previousPageIds);
+      // Advance from the completed query page, independently of rendered or accumulated rows.
+      setNextCursor(getCanvasCursorFromLastItem(page));
       setHasMore(page.length === pageSize);
     },
     [applyPageToFlatList],
@@ -1501,13 +1430,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   // Browser-only filters (call / recording exclusions, which default on) can hide every row
   // of a server-filtered page. Keep paging until a minimum number of rows is visible so a
   // tab never shows an empty state, or stalls, while matching canvases exist further down.
-  const needsMinimumVisibleRows =
-    hasPrimaryCanvasFilters && filteredCanvases.length < CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD;
-  const shouldScanFilteredUserPages =
-    (hasClientSideResultFilters || needsMinimumVisibleRows) &&
-    !isSpecificChannelScope &&
-    hasMore &&
-    Boolean(nextCursor);
+  const shouldScanFilteredUserPages = shouldScanCanvasUserPages({
+    hasClientSideResultFilters,
+    visibleRowCount: filteredCanvases.length,
+    minimumVisibleRows,
+    isSpecificChannelScope,
+    hasMore,
+    hasNextCursor: Boolean(nextCursor),
+  });
   const shouldScanFilteredChannelSources =
     hasClientSideResultFilters && extraChannelSourceIds.length > 0 && hasMoreChannelSources;
   const isFilteredScanIncomplete =
@@ -1810,45 +1740,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       visibleCanvasIdsRef.current = filteredCanvases
         .slice(Math.max(0, range.startIndex), Math.max(0, range.endIndex) + 1)
         .map(canvas => canvas.id);
-      if (
-        !paginated ||
-        hasPrimaryCanvasFilters ||
-        extraChannelSourceIds.length > 0 ||
-        isLoadingNext ||
-        filteredCanvases.length === 0
-      ) {
-        return;
-      }
-
-      const pageStartIndex =
-        Math.floor(Math.max(0, range.endIndex) / CANVAS_PAGE_SIZE) * CANVAS_PAGE_SIZE;
-      const cursorItem = filteredCanvases[pageStartIndex - 1];
-      const visiblePageCursor =
-        pageStartIndex === 0
-          ? null
-          : cursorItem
-            ? {
-                id: cursorItem.id,
-                updatedAt: cursorItem.updatedAt,
-              }
-            : pageCursor;
-
-      if (
-        getNullableCanvasCursorKey(pageCursor) === getNullableCanvasCursorKey(visiblePageCursor)
-      ) {
-        return;
-      }
-
-      setPageCursor(visiblePageCursor);
     },
-    [
-      extraChannelSourceIds.length,
-      filteredCanvases,
-      hasPrimaryCanvasFilters,
-      isLoadingNext,
-      pageCursor,
-      paginated,
-    ],
+    [filteredCanvases],
   );
 
   const toggleChannelFolder = useCallback((folderId: string): void => {
@@ -2785,7 +2678,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             data={filteredCanvases}
             computeItemKey={(_index, canvas) => canvas.id}
             endReached={() => {
-              if (shouldLoadMoreOnListEnd) requestNextResults();
+              if (!shouldLoadMoreOnListEnd) return;
+              // Keep scanning if the next page adds no visible rows and endReached cannot fire again.
+              setMinimumVisibleRows(previous =>
+                Math.max(
+                  previous,
+                  filteredCanvases.length + CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD,
+                ),
+              );
+              requestNextResults();
             }}
             rangeChanged={handleVisibleRangeChanged}
             itemContent={(index, canvas) => renderListItem(index, canvas)}
