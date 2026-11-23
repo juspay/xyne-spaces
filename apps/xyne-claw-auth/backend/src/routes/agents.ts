@@ -55,7 +55,7 @@ import { auditModelSettingsChange } from "../lib/model-settings-audit.js";
 import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
-import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError, usageHeaders } from "../lib/http.js";
 import { agentRunDetail, agentRunHealth, closeLostRuns } from "../lib/agent-run-health.js";
 
 import { createLogger } from "../logger.js";
@@ -258,6 +258,7 @@ router.post("/generate-prompt", async (req: Request, res: Response) => {
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...usageHeaders({ userId: getRequesterId(req) }),
       },
       body: JSON.stringify(req.body),
       signal: AbortSignal.timeout(35_000),
@@ -282,6 +283,7 @@ router.post("/generate-output-format", async (req: Request, res: Response) => {
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...usageHeaders({ userId: getRequesterId(req) }),
       },
       body: JSON.stringify(req.body),
       signal: AbortSignal.timeout(60_000),
@@ -347,6 +349,7 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...usageHeaders({ userId: getRequesterId(req) }),
       },
       body: JSON.stringify({ intent, catalog }),
       signal: AbortSignal.timeout(50_000),

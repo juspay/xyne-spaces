@@ -1831,6 +1831,11 @@ enum AgentAuditEvent {
   DESIGN_SYSTEM_CREATED
   DESIGN_SYSTEM_UPDATED
   DESIGN_SYSTEM_DELETED
+  // Model price changes (llm_model_prices). Added by migration
+  // 20261120090000_llm_price_audit_events (ALTER TYPE ADD VALUE).
+  LLM_PRICE_CREATED
+  LLM_PRICE_UPDATED
+  LLM_PRICE_DELETED
 }
 
 model AgentAuditLog {
@@ -3646,4 +3651,74 @@ model LoopSequenceRun {
   @@index([orgId, commandId, createdAt])
   @@index([conversationId, status])
   @@map("loop_sequence_runs")
+}
+
+/// One row per provider LLM call with the usage the provider reported, sent by xyne-claw.
+/// Run keys are copied from agent_runs at ingest so usage reads never join it.
+model LlmCallUsage {
+  /// Minted by xyne-claw per call; makes ingest retries idempotent.
+  id                   String   @id
+  orgId                String
+  userId               String?
+  agentSlug            String?
+  runId                String?
+  conversationId       String?
+  ticketId             String?
+  triggerSource        String?
+  /// main | subagent | compaction | title | follow_up | judge | ... (xyne-claw/src/llm-usage.ts)
+  callPurpose          String
+  subagentName         String?
+  /// ok | error | aborted
+  callOutcome          String
+  provider             String
+  /// platform | api_key | subscription
+  billingBasis         String
+  model                String
+  servedModel          String?
+  serviceTier          String   @default("standard")
+  /// False when the call ended without provider usage; its tokens are unknown, never estimated.
+  usageReported        Boolean
+  inputTokens          Int
+  outputTokens         Int
+  cacheReadTokens      Int
+  cacheWriteTokens     Int
+  /// NULL for subscription and unpriced API models; 0 for unpriced platform models.
+  costUsd              Decimal? @db.Decimal(14, 8)
+  priceId              String?
+  /// Threshold of the price slab that applied; null for the base rates.
+  slabOverPromptTokens Int?
+  /// Tools whose results this call read.
+  toolNames            String[] @default([])
+  responseId           String?
+  startedAt            DateTime
+  durationMs           Int
+  createdAt            DateTime @default(now())
+
+  @@index([orgId, startedAt])
+  @@index([orgId, userId, startedAt])
+  @@index([conversationId, startedAt])
+  @@map("llm_call_usage")
+}
+
+/// USD per million tokens; a call is priced by the row in effect when it started.
+model LlmModelPrice {
+  id                String   @id @default(cuid())
+  provider          String
+  model             String
+  serviceTier       String   @default("standard")
+  inputPerMTok      Decimal  @db.Decimal(12, 6)
+  outputPerMTok     Decimal  @db.Decimal(12, 6)
+  cacheReadPerMTok  Decimal  @db.Decimal(12, 6)
+  cacheWritePerMTok Decimal  @db.Decimal(12, 6)
+  effectiveFrom     DateTime
+  updatedByUserId   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  /// Prompt-size slabs: a request whose prompt (input + cache read + cache write) is over
+  /// `overPromptTokens` pays that slab's rates for all of its tokens; the highest matching slab wins.
+  /// [{ overPromptTokens, inputPerMTok, outputPerMTok, cacheReadPerMTok, cacheWritePerMTok }], rates as decimal strings.
+  slabs             Json     @default("[]")
+
+  @@unique([provider, model, serviceTier, effectiveFrom])
+  @@map("llm_model_prices")
 }

@@ -13,6 +13,11 @@ interface DateRangeFilterProps {
   dateRange: DateRangeValue | null;
   onChange: (range: DateRangeValue | null) => void;
   className?: string;
+  presets?: Preset[];
+  /** Hide the time-of-day pickers, for whole-day ranges. */
+  showTime?: boolean;
+  /** Hide the clear button, for a filter that always has a range. */
+  clearable?: boolean;
 }
 
 /* ── Date helpers ── */
@@ -109,9 +114,43 @@ export const PRESETS: Preset[] = [
   },
 ];
 
-export const matchPreset = (range: DateRangeValue | null): string | null => {
+/** Longer reporting windows, for usage and cost views. */
+export const REPORTING_PRESETS: Preset[] = [
+  ...PRESETS.slice(0, 4),
+  {
+    label: 'Last 90 days',
+    getValue: (): DateRangeValue => {
+      const start = new Date();
+      start.setDate(start.getDate() - 89);
+      return { startDate: startOfDay(start), endDate: endOfDay(new Date()) };
+    },
+  },
+  {
+    label: 'This month',
+    getValue: (): DateRangeValue => {
+      const now = new Date();
+      return { startDate: new Date(now.getFullYear(), now.getMonth(), 1), endDate: endOfDay(now) };
+    },
+  },
+  {
+    label: 'Last month',
+    getValue: (): DateRangeValue => {
+      const now = new Date();
+      return {
+        startDate: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+        endDate: endOfDay(new Date(now.getFullYear(), now.getMonth(), 0)),
+      };
+    },
+  },
+  ...PRESETS.slice(4),
+];
+
+export const matchPreset = (
+  range: DateRangeValue | null,
+  presets: Preset[] = PRESETS,
+): string | null => {
   if (!range) return null;
-  for (const preset of PRESETS) {
+  for (const preset of presets) {
     const v = preset.getValue();
     if (isSameDay(range.startDate, v.startDate) && isSameDay(range.endDate, v.endDate)) {
       return preset.label;
@@ -275,11 +314,14 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   dateRange,
   onChange,
   className,
+  presets = PRESETS,
+  showTime = true,
+  clearable = true,
 }) => {
   const [presetOpen, setPresetOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
 
-  const activePreset = useMemo(() => matchPreset(dateRange), [dateRange]);
+  const activePreset = useMemo(() => matchPreset(dateRange, presets), [dateRange, presets]);
 
   const presetLabel = activePreset ?? (dateRange ? 'Custom' : 'Date');
 
@@ -303,12 +345,12 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   const handleCalendarSelect = (range: DateRangeValue) => {
     // Carry over whatever time-of-day is already set, instead of resetting
     // a deliberately-narrowed time window back to the full day. Popover
-    // stays open — picking the date shouldn't close it before the user gets
-    // a chance to also set the time.
+    // stays open while time pickers are shown, so the user can also set the time.
     onChange({
       startDate: carryTime(range.startDate, dateRange?.startDate, false),
       endDate: carryTime(range.endDate, dateRange?.endDate, true),
     });
+    if (!showTime) setCalendarOpen(false);
   };
 
   // Time picker applies instantly against the already-committed range — no
@@ -358,7 +400,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             className='z-50 min-w-[140px] rounded-xl border bg-popover text-popover-foreground shadow-md p-1 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 duration-150'
             onCloseAutoFocus={e => e.preventDefault()}
           >
-            {PRESETS.map(preset => (
+            {presets.map(preset => (
               <button
                 key={preset.label}
                 type='button'
@@ -391,7 +433,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             <span className={cn(dateRange ? 'text-foreground' : 'text-muted-foreground')}>
               {rangeLabel}
             </span>
-            {dateRange && (
+            {dateRange && clearable && (
               <button
                 type='button'
                 aria-label='Clear date range'
@@ -416,21 +458,23 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
             onCloseAutoFocus={e => e.preventDefault()}
           >
             <CalendarView range={dateRange} onSelect={handleCalendarSelect} />
-            <div className='flex items-center gap-2 border-t border-border p-3'>
-              <TimePicker
-                value={dateRange ? formatTimeLabel(dateRange.startDate) : ''}
-                onChange={value => handleTimeChange('startDate', false, value)}
-                placeholder='Start time'
-                disabled={!dateRange}
-              />
-              <span className='text-xs text-muted-foreground'>–</span>
-              <TimePicker
-                value={dateRange ? formatTimeLabel(dateRange.endDate) : ''}
-                onChange={value => handleTimeChange('endDate', true, value)}
-                placeholder='End time'
-                disabled={!dateRange}
-              />
-            </div>
+            {showTime && (
+              <div className='flex items-center gap-2 border-t border-border p-3'>
+                <TimePicker
+                  value={dateRange ? formatTimeLabel(dateRange.startDate) : ''}
+                  onChange={value => handleTimeChange('startDate', false, value)}
+                  placeholder='Start time'
+                  disabled={!dateRange}
+                />
+                <span className='text-xs text-muted-foreground'>–</span>
+                <TimePicker
+                  value={dateRange ? formatTimeLabel(dateRange.endDate) : ''}
+                  onChange={value => handleTimeChange('endDate', true, value)}
+                  placeholder='End time'
+                  disabled={!dateRange}
+                />
+              </div>
+            )}
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>

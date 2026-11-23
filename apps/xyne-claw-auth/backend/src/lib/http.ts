@@ -57,3 +57,20 @@ export function errorMiddleware(err: unknown, req: Request, res: Response, next:
   log.error(`[unhandled] ${req.method} ${req.originalUrl}: ${errMsg(err)}`, err instanceof Error ? err.stack : undefined);
   res.status(500).json({ success: false, error: "Internal server error" });
 }
+
+export interface UsageScope {
+  userId?: string | undefined;
+  agentSlug?: string | undefined;
+  conversationId?: string | undefined;
+  orgId?: string | undefined;
+}
+
+/** Headers xyne-claw reads to attribute LLM calls made inside its S2S helper endpoints. */
+export function usageHeaders(scope: UsageScope): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (scope.userId) out["x-usage-user-id"] = scope.userId;
+  if (scope.agentSlug) out["x-usage-agent-slug"] = scope.agentSlug;
+  if (scope.conversationId) out["x-usage-conversation-id"] = scope.conversationId;
+  if (scope.orgId) out["x-usage-org-id"] = scope.orgId;
+  return out;
+}

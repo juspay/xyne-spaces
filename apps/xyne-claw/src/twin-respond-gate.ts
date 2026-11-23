@@ -21,6 +21,7 @@ import { parseArgMarkup, parseJsonObject } from "./leaked-tool-call.js";
 import { postChatCompletion, type ChatCompletionResponse } from "./litellm-chat.js";
 import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
+import { recordChatCompletion } from "./llm-usage.js";
 
 const log = createLogger("twin-respond-gate");
 
@@ -302,6 +303,7 @@ async function decideRespondLlm(req: RespondGateRequest): Promise<RespondGateRes
     );
     if (!res.ok) return FAIL_CLOSED;
     const data = (await res.json()) as ChatCompletionResponse;
+    recordChatCompletion("twin_gate", GATE_MODEL, data);
     const choice = data.choices?.[0];
     const msg = choice?.message;
     const raw = msg?.tool_calls?.[0]?.function?.arguments ?? msg?.content ?? "";

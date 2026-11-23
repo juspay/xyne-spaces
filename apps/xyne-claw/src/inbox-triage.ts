@@ -1,4 +1,5 @@
 import { xor, xorEnabled, type XorAnswer, type XorQuestion } from "./xor.js";
+import { recordChatCompletion } from "./llm-usage.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
@@ -293,6 +294,7 @@ export async function extractOpenLoops(input: ExtractInput): Promise<ExtractResu
     const data = (await res.json()) as {
       choices?: Array<{ message?: { content?: string | null; tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
+    recordChatCompletion("triage", EXTRACT_MODEL, data);
     const message = data.choices?.[0]?.message;
     const raw = message?.tool_calls?.[0]?.function?.arguments ?? message?.content ?? "";
     const result = parseExtractArguments(raw);

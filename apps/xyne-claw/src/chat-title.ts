@@ -1,4 +1,5 @@
 import { LITELLM, litellmEndpoint } from "./config.js";
+import { recordChatCompletion } from "./llm-usage.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("chat-title");
@@ -129,6 +130,7 @@ export async function generateChatTitle(input: ChatTitleInput): Promise<string |
         };
       }>;
     };
+    recordChatCompletion("title", LITELLM.fastModel, data);
     const message = data.choices?.[0]?.message;
     const title = [
       message?.content,

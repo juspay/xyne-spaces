@@ -31,6 +31,7 @@ import { createLogger } from "./logger.js";
 import { installSandboxRepoConfigLoader } from "./sandbox-repo-configs.js";
 import { startPodAddressPublisher } from "./run-ownership.js";
 import { installGlobalHttpDispatcher } from "./http-dispatcher.js";
+import { flushLlmUsage, usageScopeMiddleware } from "./llm-usage.js";
 const log = createLogger("main");
 
 log.info(`[startup] global HTTP dispatcher capped at ${installGlobalHttpDispatcher()} connections per origin`);
@@ -75,6 +76,7 @@ const runQueueWorker = startRunQueueWorker();
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
+app.use(usageScopeMiddleware);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "xyne-claw", uptime: process.uptime() });
@@ -161,6 +163,7 @@ async function shutdown(signal: string): Promise<void> {
   await stopRunControlSubscriber().catch((err) => {
     log.error("[xyne-claw] run control subscriber close failed:", err);
   });
+  await flushLlmUsage(FATAL_FLUSH_TIMEOUT_MS);
   await stopTelemetry();
   stopLoopWatchdog();
   server.close(() => process.exit(0));

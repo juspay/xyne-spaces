@@ -1,4 +1,5 @@
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import { recordChatCompletion } from "./llm-usage.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 
 /**
@@ -95,6 +96,7 @@ async function complete(messages: Array<{ role: string; content: string }>): Pro
   );
   if (!res.ok) throw new Error(`LLM returned ${res.status}`);
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
+  recordChatCompletion("routing", LITELLM.model, data);
   const card = (data.choices?.[0]?.message?.content ?? "").trim();
   if (!card) throw new Error("LLM returned no card");
   return card;

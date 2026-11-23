@@ -17,6 +17,7 @@ import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
 import { copilotHeaders, COPILOT_COMPLETIONS_URL } from "./eval-judge.js";
 
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("eval-extract");
 
 // Per-ATTEMPT timeout. Extraction reads a whole thread, so it's more generous
@@ -189,6 +190,7 @@ export async function extractEvalPairs(input: ExtractInput): Promise<ExtractResu
         const data = (await res.json()) as {
           choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
         };
+        recordChatCompletion("eval", model, data, viaCopilot ? { provider: "copilot", billing: "subscription" } : {});
         const got = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
         if (got) {
           if (attempt > 1) log.info(`[eval-extract] succeeded on attempt ${attempt} (model=${model})`);

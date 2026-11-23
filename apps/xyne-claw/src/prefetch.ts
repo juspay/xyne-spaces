@@ -30,6 +30,7 @@ import { runJudgeSite } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 
 const log = createLogger("prefetch");
 
@@ -263,6 +264,7 @@ function startPrefetchExtractionLlm(task: string): Promise<PrefetchSpec | null> 
       const body = (await res.json()) as {
         choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
       };
+      recordChatCompletion("prefetch", LITELLM.fastModel, body);
       const raw = body.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
       if (!raw) {
         log.warn("[prefetch] extractor returned no tool call — skipping prefetch");

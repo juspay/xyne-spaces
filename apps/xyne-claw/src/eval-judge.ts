@@ -16,6 +16,7 @@ import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
 import { xor, xorEnabled, type XorQuestion } from "./xor.js";
 
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("eval-judge");
 
 // Per-ATTEMPT timeout — a judge call is a short structured request; if a model
@@ -244,6 +245,7 @@ export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJud
         const data = (await res.json()) as {
           choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
         };
+        recordChatCompletion("eval", model, data, viaCopilot ? { provider: "copilot", billing: "subscription" } : {});
         const raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
         if (raw) {
           const parsed = JSON.parse(raw) as { score?: unknown; reasoning?: unknown };

@@ -17,6 +17,7 @@ import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
 import { LITELLM } from "./config.js";
 
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("entity-llm");
 
 // Own model knob: entity extraction deliberately runs a different (cheaper,
@@ -215,6 +216,7 @@ export async function completeEntityPrompt(
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
+  recordChatCompletion("entity", ENTITY_MODEL, data);
   return data.choices?.[0]?.message?.content ?? "";
 }
 

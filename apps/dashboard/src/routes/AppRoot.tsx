@@ -241,6 +241,9 @@ import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
 import AIDigitalTwinScreen from './AIScreen/screens/AIDigitalTwinScreen';
 import AISectionLayout from './AIScreen/AISectionLayout';
+import ControlPanelScreen from './AIScreen/ControlPanel/ControlPanelScreen';
+import ControlPanelSessionScreen from './AIScreen/ControlPanel/SessionDetailScreen';
+import ControlPanelSettingsScreen from './AIScreen/ControlPanel/SettingsScreen';
 import { EncryptionBootstrapProvider } from '../providers/EncryptionBootstrapProvider';
 import { EncryptionInit } from '../components/EncryptionInit';
 import UserGuideScreen from './UserGuideScreen';
@@ -1173,6 +1176,12 @@ export const router = createBrowserRouter([
                     element: <AISectionLayout />,
                     children: [
                       { path: 'metrics', element: <ClawMetricsScreen /> },
+                      { path: 'control-panel', element: <ControlPanelScreen /> },
+                      { path: 'control-panel/settings', element: <ControlPanelSettingsScreen /> },
+                      {
+                        path: 'control-panel/sessions/:conversationId',
+                        element: <ControlPanelSessionScreen />,
+                      },
                       { path: 'settings', element: <ClawSettingsScreen /> },
                     ],
                   },

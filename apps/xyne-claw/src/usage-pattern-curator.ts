@@ -1,4 +1,5 @@
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("usage-pattern-curator");
 
 /**
@@ -287,6 +288,7 @@ export async function curateUsagePatterns(req: UsagePatternRequest): Promise<Usa
     const json = await res.json() as {
       choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
+    recordChatCompletion("curator", CURATOR_MODEL, json);
     const args = json.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) {
       log.warn("[usage-pattern-curator] no tool_call in response");

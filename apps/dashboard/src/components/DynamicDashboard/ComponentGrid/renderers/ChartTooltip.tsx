@@ -16,6 +16,8 @@ interface ChartTooltipProps {
   hideLabel?: boolean;
   unit?: string | undefined;
   unitPosition?: UnitPosition | undefined;
+  /** Overrides the compact KPI formatting for numeric values. */
+  valueFormatter?: ((value: number, dataKey: string) => string) | undefined;
 }
 
 function formatTooltipValue(v: unknown, unit?: string, unitPosition?: UnitPosition): string {
@@ -46,6 +48,7 @@ export function ChartTooltip({
   hideLabel,
   unit,
   unitPosition,
+  valueFormatter,
 }: ChartTooltipProps): ReactElement | null {
   if (!active || !payload || payload.length === 0) return null;
 
@@ -81,7 +84,9 @@ export function ChartTooltip({
               )}
               {name !== '' && <span className='truncate text-muted-foreground'>{name}</span>}
               <span className='ml-auto shrink-0 pl-3 font-mono text-[12px] font-semibold tabular-nums text-foreground'>
-                {formatTooltipValue(p.value, unit, unitPosition)}
+                {valueFormatter && typeof p.value === 'number'
+                  ? valueFormatter(p.value, key)
+                  : formatTooltipValue(p.value, unit, unitPosition)}
               </span>
             </div>
           );

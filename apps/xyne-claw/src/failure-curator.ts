@@ -1,4 +1,5 @@
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("failure-curator");
 
 /**
@@ -317,6 +318,7 @@ export async function curateImprovements(req: CuratorRequest): Promise<Improveme
     const json = await res.json() as {
       choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
+    recordChatCompletion("curator", CURATOR_MODEL, json);
     const args = json.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) {
       log.warn("[failure-curator] no tool_call in response");

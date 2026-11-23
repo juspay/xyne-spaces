@@ -21,6 +21,7 @@ import { LITELLM } from "./config.js";
 import { isQuotaExhaustedError, isTransientProviderError } from "./agent.js";
 import { createHash } from "node:crypto";
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 
 const log = createLogger("provider-probe");
 
@@ -143,6 +144,10 @@ export async function probeProvider(input: ProbeInput): Promise<ProbeResult> {
       }),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
+    if (res.ok) {
+      const usageBody = await Promise.resolve(res).then((r) => r.json()).catch(() => null);
+      recordChatCompletion("probe", target.model, usageBody, input.providerConfig?.apiKey ? { provider: input.provider, billing: "api_key" } : {});
+    }
     const body = res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300);
     result = classify(res.status, body);
   } catch (err) {

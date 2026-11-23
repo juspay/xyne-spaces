@@ -159,6 +159,7 @@ import type { Todo } from "xyne-claw-shared";
 
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { usageHeaders, type UsageScope } from "../lib/http.js";
 
 const clog = createLogger("webhook");
 
@@ -348,6 +349,7 @@ async function judgeChainContinuation(
   userQuery?: string,
   judgeContext?: string,
   toolInvocations?: unknown,
+  usage: UsageScope = {},
 ): Promise<"continue" | "stop"> {
   try {
     const invocationSummary = summarizeChainToolInvocations(toolInvocations);
@@ -356,6 +358,7 @@ async function judgeChainContinuation(
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        ...usageHeaders(usage),
       },
       body: JSON.stringify({
         agentResult,
@@ -436,6 +439,7 @@ async function selectNextWorkflowEdge(
   resultText: string,
   sourceTask: string,
   toolInvocations?: unknown,
+  usage: UsageScope = {},
 ): Promise<{ edge: ChainWorkflowEdge; nextNode: ChainWorkflowNode } | null> {
   const currentNode = workflow.nodes.find((node) => node.agentSlug === currentAgentSlug);
   if (!currentNode) return null;
@@ -476,6 +480,7 @@ async function selectNextWorkflowEdge(
       sourceTask,
       edge.judgeContext,
       toolInvocations,
+      usage,
     );
     if (decision === "continue") return { edge, nextNode };
   }
@@ -4859,7 +4864,9 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // hand-off prompt (which `ctx.task` becomes after hop 1). On the first
           // hop ctx.rootTask is unset and ctx.task IS the original request.
           const originalTask = ctx.rootTask ?? ctx.task;
-          const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask, payload.toolInvocations);
+          const selected = await selectNextWorkflowEdge(workflow, ctx.agentSlug, toolsUsed, resultText, originalTask, payload.toolInvocations, {
+            userId: ctx.senderId, agentSlug: ctx.agentSlug, conversationId: ctx.conversationId, orgId: ctx.agentOrgId,
+          });
 
           if (!selected) {
             log.info(`Chain: no matching edge from ${ctx.agentSlug} in workflow ${binding.workflowId}`);

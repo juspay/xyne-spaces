@@ -8,6 +8,7 @@ import type {
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { createLogger } from "./logger.js";
+import { recordPiCall, type PiCallLabels } from "./llm-usage.js";
 
 const log = createLogger("llm");
 
@@ -72,10 +73,12 @@ function metricLine(
 function wrapStream(
   stream: AssistantMessageEventStream,
   model: Model<Api>,
+  context: Context,
   sessionId: string,
   startedAt: number,
   inflightAtStart: number,
   fastMode: boolean,
+  usage: PiCallLabels | undefined,
 ): AssistantMessageEventStream {
   let firstContentAt: number | undefined;
   let lastTerminalEvent: AssistantMessageEvent | undefined;
@@ -91,6 +94,7 @@ function wrapStream(
     const provider = model.provider || "unknown";
     const modelId = model.id || model.name || "unknown";
     log.info(metricLine(ttftMs, totalMs, result?.usage, provider, modelId, sessionId, ok, inflightAtStart, fastMode));
+    recordPiCall({ model, context, result, startedAt, labels: usage });
     if (ttftMs > 30_000) {
       log.warn(`[llm] slow-ttft ttft_ms=${ttftMs} provider=${sanitize(provider)} inflight=${inflightAtStart}`);
     }
@@ -132,7 +136,7 @@ function wrapStream(
   return wrapped as AssistantMessageEventStream;
 }
 
-export function installLlmCallMetrics(agent: StreamAgent, sessionId: string, labels?: { fastMode?: boolean }): void {
+export function installLlmCallMetrics(agent: StreamAgent, sessionId: string, labels?: { fastMode?: boolean; usage?: PiCallLabels }): void {
   const baseStreamFn = agent.streamFn;
   const fastMode = labels?.fastMode === true;
   agent.streamFn = (model, context, options) => {
@@ -152,7 +156,7 @@ export function installLlmCallMetrics(agent: StreamAgent, sessionId: string, lab
     try {
       const stream = baseStreamFn(model, context, options);
       return Promise.resolve(stream)
-        .then((resolvedStream) => wrapStream(resolvedStream, model, sessionId, startedAt, inflightAtStart, fastMode))
+        .then((resolvedStream) => wrapStream(resolvedStream, model, context, sessionId, startedAt, inflightAtStart, fastMode, labels?.usage))
         .catch((err: unknown) => {
           settleBeforeStream(false);
           throw err;

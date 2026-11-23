@@ -91,6 +91,7 @@ import { localHarnessBridgeRouter, localHarnessRouter } from "../routes/local-ha
 import { runsRouter } from "../routes/runs.js";
 import { metricsRouter } from "../routes/metrics.js";
 import { metricsToolsRouter } from "../routes/metrics-tools.js";
+import { usageRouter, usageInternalRouter } from "../routes/usage.js";
 import { memoryRouter } from "../routes/memory.js";
 import { agentIndexRouter } from "../routes/agent-index.js";
 import { toolIndexRouter } from "../routes/tool-index.js";
@@ -251,6 +252,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/sandbox-profiles`, requireInternalS2S, sandboxProfilesInternalRouter); // Spaces → sandbox profile editor
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
   app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
+  app.use(`${BASE}/internal/llm-usage`, requireStrictS2S, usageInternalRouter);
   app.use(`${BASE}/internal/agent-create`, requireStrictS2S, agentCreateCheckRouter);
 }
 
@@ -358,6 +360,7 @@ function mountWorkspace(app: Express): void {
   app.use(`${BASE}/runs`, requireAuth, allowReadAccessToken("runs:read"), runsRouter);
   // One chain so unhandled requests fall through without re-authenticating.
   app.use(`${BASE}/metrics`, requireAuth, requireNoAccessToken, metricsRouter, metricsToolsRouter);
+  app.use(`${BASE}/usage`, requireAuth, requireNoAccessToken, usageRouter);
   // Mount-level baseline auth (defense-in-depth): every memory route also has
   // stricter per-route middleware (requireUserAuth / requireClawAdmin), but a
   // future route that forgets it must still fail closed at the mount. requireAuth

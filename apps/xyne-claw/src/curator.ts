@@ -26,6 +26,7 @@ import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import { chunkTranscript } from "./claude-session-parse.js";
 
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("curator");
 
 const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://llm.example.com").replace(/\/$/, "");
@@ -412,6 +413,7 @@ async function llmCall(
         };
       }>;
     };
+    recordChatCompletion("curator", CURATOR_MODEL, data);
     const message = data.choices?.[0]?.message;
     const toolCalls = message?.tool_calls;
     if (!Array.isArray(toolCalls) || toolCalls.length === 0) {

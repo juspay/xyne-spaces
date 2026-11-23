@@ -34,6 +34,8 @@ export interface ColumnDef<TData extends Record<string, unknown>> {
   renderCell?: (value: unknown, row: TData, index: number) => ReactNode;
   /** Custom header renderer */
   renderHeader?: () => ReactNode;
+  /** Cell in a totals row under the data; the row shows when any column has one */
+  renderFooter?: () => ReactNode;
 }
 
 export type TableVariant = 'default' | 'bordered' | 'striped';

@@ -35,6 +35,7 @@ import { LITELLM, litellmEndpoint } from "./config.js";
 import { matchesAttachmentType, VIDEO_ATTACHMENT, VIDEO_MIME_PREFIX } from "xyne-claw-shared";
 
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("video-attachment");
 
 const execFileAsync = promisify(execFile);
@@ -201,6 +202,7 @@ async function rollWindow(
     return priorState;
   }
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  recordChatCompletion("video", LITELLM.model, json);
   const next = json.choices?.[0]?.message?.content?.trim();
   return next && next.length > 0 ? next : priorState;
 }
