@@ -305,9 +305,7 @@ export async function retryOnStaleClientManifest(
   }
 
   const config = error.config as ClientManifestRetryConfig | undefined;
-  const data = error.response?.data as
-    | { code?: string; latestVersion?: number; environment?: string }
-    | undefined;
+  const data = error.response?.data as { code?: string; latestVersion?: number } | undefined;
   if (
     !config ||
     error.response?.status !== 409 ||
@@ -318,11 +316,10 @@ export async function retryOnStaleClientManifest(
   }
   config._encManifestRetried = true;
 
-  if (!(await refetchClientManifest(data.latestVersion, data.environment))) {
+  if (!(await refetchClientManifest(data.latestVersion))) {
     logger.error('[encryption] Client manifest still not the one the server expects', {
       url: config.url,
       latestVersion: data.latestVersion,
-      environment: data.environment,
     });
     return null;
   }

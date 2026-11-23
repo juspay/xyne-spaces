@@ -6,10 +6,9 @@ import { logger } from '@/utils/logger';
 
 const router = Router();
 
-// Client encryption manifest for the tag, as served by the encryption service (each
-// deployment is pinned to one environment), encrypted for the caller's transit public key:
-// `clientManifest` is an ENC:…|tk-… string the client decrypts with its keyring (plain JSON
-// when transit is not configured).
+// Client encryption manifest for the tag (the version the encryption service deployment
+// serves), encrypted for the caller's transit public key: `clientManifest` is an ENC:…|tk-…
+// string the client decrypts with its keyring (plain JSON when transit is not configured).
 router.get('/', async (req: Request, res: Response) => {
   const subject = req.user?.sid;
   if (!req.user || !subject) {
