@@ -111,6 +111,7 @@ interface NotionNode {
   canvasId?: string;
   created?: boolean;
   joinedOnly?: boolean; // member import over a canvas that isn't theirs — leave it as it is
+  rowOf?: string; // a database row: written into its database's canvas (this relPath), not a canvas of its own
 }
 
 interface Placement {
@@ -150,6 +151,7 @@ export async function listNotionSections(root: string, workspaceId: string): Pro
 
   const sections = new Map<string, NotionSection>();
   for (const node of nodes) {
+    if (node.rowOf) continue; // part of its database's canvas
     const section = sections.get(node.sectionKey) ?? { key: node.sectionKey, title: node.sectionTitle, pages: 0, databases: 0 };
     node.kind === 'database' ? section.databases++ : section.pages++;
     if (node.key === node.sectionKey) {
@@ -186,6 +188,16 @@ function buildTree(root: string, files: string[]): NotionNode[] {
       sectionKey: '',
       sectionTitle: '',
     });
+  }
+  // Database rows live inside their database's canvas (table on top, each row's content below), so a
+  // to-do list stays one page. A row's own sub-pages hang off the database instead.
+  for (const node of nodes.values()) {
+    const parent = node.parentRelPath ? nodes.get(node.parentRelPath) : undefined;
+    if (node.kind === 'page' && parent?.kind === 'database') node.rowOf = parent.relPath;
+  }
+  for (const node of nodes.values()) {
+    const parent = node.parentRelPath ? nodes.get(node.parentRelPath) : undefined;
+    if (parent?.rowOf) node.parentRelPath = parent.rowOf;
   }
   for (const node of nodes.values()) {
     let top = node;
@@ -231,6 +243,13 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     return false;
   });
   const byPath = new Map(nodes.map(n => [n.relPath, n]));
+  const canvasNodes = nodes.filter(n => !n.rowOf);
+  // A row's comments are shown on its database's canvas.
+  for (const row of nodes) {
+    if (!row.rowOf) continue;
+    const dbKey = byPath.get(row.rowOf)?.key;
+    if (dbKey) commentsByPage.set(dbKey, [...(commentsByPage.get(dbKey) ?? []), ...(commentsByPage.get(row.key) ?? [])]);
+  }
 
   const placementOf = (node: NotionNode): Placement => {
     const access = accessOf(node.sectionKey);
@@ -261,7 +280,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
   };
 
   const folderIds = new Map<string, string>();
-  for (const node of nodes) {
+  for (const node of canvasNodes) {
     const placement = placementOf(node);
     const folderName = `Notion · ${node.sectionTitle}`;
     const folderKey = `${placement.channelId ?? `personal:${placement.ownerIds[0]}`}:${folderName}`;
@@ -272,7 +291,10 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     node.joinedOnly = result.joinedOnly;
   }
 
-  for (const node of nodes) {
+  // Links to a row land on its database's canvas.
+  for (const row of nodes) if (row.rowOf) row.canvasId = byPath.get(row.rowOf)?.canvasId;
+
+  for (const node of canvasNodes) {
     const canvasId = node.canvasId!;
     const placement = placementOf(node);
     const ownerEmail = owners.get(createdBy.get(node.key) ?? '')?.email;
@@ -286,7 +308,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     try {
       const raw = await fs.readFile(path.join(root, node.relPath), 'utf8');
       let markdown = node.kind === 'database'
-        ? databaseToMarkdown(raw, node, nodes, target)
+        ? await databaseToMarkdown(raw, node, nodes, root, byPath, canvasId, target, summary)
         : await pageToMarkdown(raw, node, root, byPath, canvasId, target, summary);
 
       const parent = node.parentRelPath ? byPath.get(node.parentRelPath) : undefined;
@@ -465,25 +487,61 @@ async function pageToMarkdown(
   return md.replace(/ [0-9a-f]{32}\b/gi, '');
 }
 
-function databaseToMarkdown(raw: string, node: NotionNode, nodes: NotionNode[], target: NotionImportTarget): string {
-  const rows = parseCsv(raw.replace(/^﻿/, ''));
+/**
+ * A database as one canvas: the table of rows (a static snapshot of its properties), then each
+ * row's own content under a heading, so a to-do list reads as a single page.
+ */
+async function databaseToMarkdown(
+  raw: string,
+  node: NotionNode,
+  nodes: NotionNode[],
+  root: string,
+  byPath: Map<string, NotionNode>,
+  canvasId: string,
+  target: NotionImportTarget,
+  summary: NotionImportSummary,
+): Promise<string> {
+  const rows = parseCsv(raw.replace(/^\uFEFF/, ''));
   if (rows.length === 0) return '_Empty database._';
   const [header, ...body] = rows;
-  const rowPages = new Map(
-    nodes.filter(n => n.parentRelPath === node.relPath && n.kind === 'page').map(n => [n.title, n]),
-  );
   const cell = (v: string) => v.replace(/\|/g, '\\|').replace(/\n/g, ' ').replace(/ \([^)]*[0-9a-f]{32}[^)]*\)/gi, '');
-  return [
+  const table = [
     `> 🗂️ Imported from a Notion database (${body.length} rows). Typed properties, views, relations and rollups are not supported in Canvas yet — this is a static snapshot.`,
     '',
     `| ${header.map(cell).join(' | ')} |`,
     `| ${header.map(() => '---').join(' | ')} |`,
-    ...body.map(r => {
-      const page = rowPages.get(r[0]);
-      const first = page?.canvasId ? `[${cell(r[0])}](${canvasPath(page.canvasId, target.workspaceId)})` : cell(r[0] ?? '');
-      return `| ${[first, ...header.slice(1).map((_, i) => cell(r[i + 1] ?? ''))].join(' | ')} |`;
-    }),
-  ].join('\n');
+    ...body.map(r => `| ${header.map((_, i) => cell(r[i] ?? '')).join(' | ')} |`),
+  ];
+
+  // Rows in table order; any the table didn't list (title mismatch) follow at the end.
+  const rowNodes = nodes.filter(n => n.rowOf === node.relPath);
+  const order = new Map(body.map((r, i) => [r[0] ?? '', i]));
+  rowNodes.sort((a, b) => (order.get(a.title) ?? Infinity) - (order.get(b.title) ?? Infinity));
+  const sections: string[] = [];
+  for (const row of rowNodes) {
+    let rowRaw: string;
+    try {
+      rowRaw = await fs.readFile(path.join(root, row.relPath), 'utf8');
+    } catch {
+      continue;
+    }
+    const content = demoteHeadings((await pageToMarkdown(rowRaw, row, root, byPath, canvasId, target, summary)).trim());
+    if (content) sections.push(`## ${row.title}\n\n${content}`);
+  }
+  return [...table, ...(sections.length ? ['', '---', '', sections.join('\n\n')] : [])].join('\n');
+}
+
+/** A row's headings sit under its "## Title": shift them down one level (capped at ###), outside code fences. */
+function demoteHeadings(md: string): string {
+  let inFence = false;
+  return md
+    .split('\n')
+    .map(line => {
+      if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
+      if (inFence) return line;
+      return line.replace(/^(#{1,6})(\s)/, (_m, hashes: string, space: string) => `${'#'.repeat(Math.min(hashes.length + 1, 3))}${space}`);
+    })
+    .join('\n');
 }
 
 // ---------------------------------------------------------------------------------------------

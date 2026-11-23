@@ -219,8 +219,7 @@ export class NotionApiCollector {
             adopt: (id, kind) => adopt(id, kind, item.id),
           };
           const body = await this.renderChildren(item.id, ctx, 0);
-          const props = item.raw.parent?.type === 'database_id' ? propertiesBlock(item.raw.properties) : '';
-          await fs.writeFile(file, `# ${item.title}\n\n${props}${body}`);
+          await fs.writeFile(file, `# ${item.title}\n\n${body}`);
           await this.collectComments(item.id, ctx.blocks);
         }
       } catch (error) {
@@ -554,11 +553,3 @@ function propertyText(p: Json): string {
 }
 
 /** Database row pages carry their properties above the body, like Notion's export does. */
-function propertiesBlock(props: Json): string {
-  const lines = Object.entries(props ?? {})
-    .filter(([, p]: [string, Json]) => p.type !== 'title')
-    .map(([k, p]) => [k, propertyText(p)] as const)
-    .filter(([, v]) => v !== '')
-    .map(([k, v]) => `${k}: ${v}`);
-  return lines.length ? `${lines.join('  \n')}\n\n` : '';
-}

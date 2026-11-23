@@ -24,7 +24,22 @@ export const removeUnknownBlocks = <T extends { type?: string; children?: unknow
 export const knownBlockTypesOf = (schema: unknown): ReadonlySet<string> =>
   new Set(Object.keys((schema as { blockSchema: Record<string, unknown> }).blockSchema));
 
+/** A URL on another site (e.g. a public image from a Notion import), or an inline data/blob URL. */
+const isDirectUrl = (source: string): boolean => {
+  if (/^(data|blob):/i.test(source)) return true;
+  if (!/^https?:\/\//i.test(source)) return false;
+  try {
+    const apiOrigin = new URL(BASE_URL, window.location.origin).origin;
+    return new URL(source).origin !== apiOrigin;
+  } catch {
+    return false;
+  }
+};
+
 export const resolveFileUrl = async (attachmentId: string): Promise<string> => {
+  // External files load straight from their own host: fetching them through the API client sends
+  // our auth headers cross-origin, which fails (CORS) and left such images blank in the editor.
+  if (isDirectUrl(attachmentId)) return attachmentId;
   try {
     const blob = await createPreviewUrl(attachmentId);
 
