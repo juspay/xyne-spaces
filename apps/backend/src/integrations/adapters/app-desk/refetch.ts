@@ -25,6 +25,7 @@ import { repositories } from '@/database/repositories';
 import { ExternalSourceRepository, MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { emailService } from '@/services/emailService';
+import { updateSourceSyncCursorLocked } from '@/bypassAcl/emailFetchServices';
 import { websocketService } from '@/services/websocketService';
 import {
   AttachmentConversionService,
@@ -96,11 +97,20 @@ function parseRetryAfterMs(header: string | null): number | null {
 }
 
 /**
- * Group a page's messages by thread, preserving the export's oldest-first
- * order inside each group. Messages of one thread must ingest sequentially —
- * they race on the same find-thread-then-create read/write in ingestMessage —
- * while separate threads never touch the same conversation and can run
- * together. Same shape as GoogleRefetch's threadGroups.
+ * Group a page's messages by thread, each group sorted oldest-first by sentAt.
+ * Messages of one thread must ingest sequentially — they race on the same
+ * find-thread-then-create read/write in ingestMessage — while separate threads
+ * never touch the same conversation and can run together. Same shape as
+ * GoogleRefetch's threadGroups.
+ *
+ * The sort is not optional: the first message ingested for a thread creates
+ * the ticket and stamps its createdAt, so a newer message arriving first dates
+ * the whole ticket late. Apps do not reliably send threads in order — one
+ * concatenates two separately-sorted message lists per thread, newer list
+ * first. The sort is stable, so equal timestamps keep the export's order.
+ * It only orders within a page; a thread split across pages still ingests in
+ * page order. mapExportPage drops rows whose sentAt does not parse, so every
+ * value compared here is a valid date.
  */
 function groupPageByThread(messages: AppDeskExportMessage[]): AppDeskExportMessage[][] {
   const groups = new Map<string | undefined, AppDeskExportMessage[]>();
@@ -110,7 +120,22 @@ function groupPageByThread(messages: AppDeskExportMessage[]): AppDeskExportMessa
     if (existing) existing.push(message);
     else groups.set(key, [message]);
   }
-  return [...groups.values()];
+  return [...groups.values()].map(group =>
+    group.length > 1
+      ? [...group].sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt))
+      : group,
+  );
+}
+
+/** A source's parked-cursor map; a missing or unreadable value reads as empty. */
+function parseCursorMap(raw: string | null): ResumeCursorMap {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as ResumeCursorMap;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 interface ExportResumeCursor {
@@ -662,9 +687,10 @@ export class AppDeskRefetch extends BaseRefetch {
   }
 
   // Both writes are best-effort: losing the cursor only means the next run
-  // restarts the window, and per-message dedup absorbs the overlap. The row is
-  // re-read before merging so two windows parking concurrently don't clobber
-  // each other.
+  // restarts the window, and per-message dedup absorbs the overlap. Each one is
+  // a read-modify-write under a row lock (updateSourceSyncCursorLocked), so two
+  // windows of one source parking or clearing at the same moment — e.g. on two
+  // worker pods — merge into the map instead of overwriting each other.
   private async persistResumeCursor(
     sourceId: string,
     startDate: string,
@@ -672,29 +698,33 @@ export class AppDeskRefetch extends BaseRefetch {
     resume: ExportResumeCursor,
   ): Promise<void> {
     try {
-      const map = await this.loadCursorMap(sourceId);
-      map[windowKey(startDate, endDate)] = resume;
-      while (Object.keys(map).length > MAX_RESUME_WINDOWS) {
-        let oldestKey = '';
-        let oldestParkedAt = Infinity;
-        for (const [key, entry] of Object.entries(map)) {
-          if (entry.parkedAt < oldestParkedAt) {
-            oldestParkedAt = entry.parkedAt;
-            oldestKey = key;
+      let parkedWindows = 0;
+      await updateSourceSyncCursorLocked(sourceId, current => {
+        const map = parseCursorMap(current);
+        map[windowKey(startDate, endDate)] = resume;
+        while (Object.keys(map).length > MAX_RESUME_WINDOWS) {
+          let oldestKey = '';
+          let oldestParkedAt = Infinity;
+          for (const [key, entry] of Object.entries(map)) {
+            if (entry.parkedAt < oldestParkedAt) {
+              oldestParkedAt = entry.parkedAt;
+              oldestKey = key;
+            }
           }
+          // A malformed entry (no parkedAt) must not wedge the loop — evict
+          // anything rather than spin on a delete that never matches.
+          if (!oldestKey) oldestKey = Object.keys(map)[0];
+          delete map[oldestKey];
         }
-        // A malformed entry (no parkedAt) must not wedge the loop — evict
-        // anything rather than spin on a delete that never matches.
-        if (!oldestKey) oldestKey = Object.keys(map)[0];
-        delete map[oldestKey];
-      }
-      await externalSourceRepo.update(sourceId, { lastSyncCursor: JSON.stringify(map) });
+        parkedWindows = Object.keys(map).length;
+        return JSON.stringify(map);
+      });
       logger.info(`${TAG} [CURSOR_PARKED] export budget exhausted mid-window`, {
         sourceId,
         startDate,
         endDate,
         pagesIngested: resume.pageCount,
-        parkedWindows: Object.keys(map).length,
+        parkedWindows,
       });
     } catch (error) {
       logger.warn(`${TAG} failed to park resume cursor`, { sourceId, error });
@@ -703,31 +733,47 @@ export class AppDeskRefetch extends BaseRefetch {
 
   private async clearResumeCursor(sourceId: string, startDate: string, endDate: string): Promise<void> {
     try {
-      const map = await this.loadCursorMap(sourceId);
-      const key = windowKey(startDate, endDate);
-      if (!(key in map)) return;
-      delete map[key];
-      await externalSourceRepo.update(sourceId, {
-        lastSyncCursor: Object.keys(map).length > 0 ? JSON.stringify(map) : null,
+      let cleared = false;
+      await updateSourceSyncCursorLocked(sourceId, current => {
+        const map = parseCursorMap(current);
+        const key = windowKey(startDate, endDate);
+        if (!(key in map)) return undefined;
+        delete map[key];
+        cleared = true;
+        return Object.keys(map).length > 0 ? JSON.stringify(map) : null;
       });
-      logger.info(`${TAG} [CURSOR_CLEARED] window export completed`, { sourceId });
+      if (cleared) logger.info(`${TAG} [CURSOR_CLEARED] window export completed`, { sourceId });
     } catch (error) {
       logger.warn(`${TAG} failed to clear resume cursor`, { sourceId, error });
     }
   }
 
-  /** Current cursor map for a source row; a missing/unreadable column reads as an empty map. */
-  private async loadCursorMap(sourceId: string): Promise<ResumeCursorMap> {
-    const row = await db.externalSource.findUnique({
-      where: { id: sourceId },
-      select: { lastSyncCursor: true },
-    });
-    if (!row?.lastSyncCursor) return {};
-    try {
-      const parsed = JSON.parse(row.lastSyncCursor) as ResumeCursorMap;
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-      return {};
+  /**
+   * A ticket is dated by the message that created it. When the live push
+   * dropped a thread's opening messages, a later reply created the ticket, and
+   * this pull is now appending messages OLDER than the ticket itself. Move the
+   * ticket and its conversation back to the oldest message so the created-at
+   * filter and ordering match the real thread start.
+   *
+   * Conditional updateMany: it only ever moves a date earlier, so a re-run, a
+   * concurrent append or an out-of-order page can't push it forward again.
+   */
+  private async backdateThreadToMessage(conversationId: string, sentAt: Date): Promise<void> {
+    const [tickets, conversations] = await db.$transaction([
+      db.ticket.updateMany({
+        where: { conversationId, createdAt: { gt: sentAt } },
+        data: { createdAt: sentAt },
+      }),
+      db.conversation.updateMany({
+        where: { conversationId, createdAt: { gt: sentAt } },
+        data: { createdAt: sentAt },
+      }),
+    ]);
+    if (tickets.count > 0 || conversations.count > 0) {
+      logger.info(`${TAG} backdated thread to an older pulled message`, {
+        conversationId,
+        createdAt: sentAt.toISOString(),
+      });
     }
   }
 
@@ -809,6 +855,7 @@ export class AppDeskRefetch extends BaseRefetch {
         ...(uploadedFiles.length > 0 && { uploadedFiles }),
       });
       await this.applyFormFieldsToThread(ctx, message, threadEmail.conversationId);
+      await this.backdateThreadToMessage(threadEmail.conversationId, receivedAt);
       return 'appended';
     }
 
@@ -839,6 +886,9 @@ export class AppDeskRefetch extends BaseRefetch {
           }),
           fromEmailAddress: senderEmail,
         }),
+        // Same name-only fallback as appDeskInbound: the sender column reads
+        // fromEmailAddress, and chat apps send a name with no email.
+        ...(!senderEmail && senderName && { fromEmailAddress: senderName }),
       },
       receivedAt,
       boardId: ctx.boardId,
