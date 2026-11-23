@@ -3701,6 +3701,7 @@ model LlmCallUsage {
 }
 
 /// USD per million tokens; a call is priced by the row in effect when it started.
+// workspace-check:ignore — global provider list prices shared by every org; only claw admins write them, and per-org cost lives on llm_call_usage (orgId).
 model LlmModelPrice {
   id                String   @id @default(cuid())
   provider          String
