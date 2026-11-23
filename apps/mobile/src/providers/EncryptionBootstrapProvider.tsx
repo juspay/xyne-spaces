@@ -1,4 +1,6 @@
 import { ReactElement, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import {
   EncryptionBootstrapProvider as SharedProvider,
   useEncryptionBootstrapInit,
@@ -91,6 +93,31 @@ export function EncryptionBootstrapProvider({ children }: { children: ReactNode 
     }),
     [state, keyring, cookieState],
   );
+
+  // A failed setup is kept until reset and Zero stays closed on it, so try again when the app
+  // comes back to the foreground or the network comes back (not on any online report: NetInfo
+  // fires one on subscribe, and a server error would then retry in a loop).
+  const failed = value.error !== null;
+  useEffect(() => {
+    if (!failed) return;
+    const appState = AppState.addEventListener('change', next => {
+      if (next === 'active') reset();
+    });
+    let wasOffline = false;
+    const unsubscribeNetInfo = NetInfo.addEventListener(net => {
+      const online = net.isConnected === true && net.isInternetReachable !== false;
+      if (!online) {
+        wasOffline = true;
+      } else if (wasOffline) {
+        wasOffline = false;
+        reset();
+      }
+    });
+    return (): void => {
+      appState.remove();
+      unsubscribeNetInfo();
+    };
+  }, [failed, reset]);
 
   return <SharedProvider value={value}>{children}</SharedProvider>;
 }
