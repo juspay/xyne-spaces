@@ -100,3 +100,33 @@ test('other sockets, and the sync socket without a keyring, pass messages throug
   sync.receive(encrypted);
   assert.deepEqual(syncSeen, [encrypted]);
 });
+
+test('a close that arrives behind a held message is delivered after it, with its code', async () => {
+  const ring = await keyring();
+  const Socket = createDecryptingWebSocket(FakeSocket, () => ring);
+  const ws = new Socket(SYNC_URL);
+  const seen = [];
+  ws.addEventListener('message', () => seen.push('message'));
+  ws.addEventListener('close', event => seen.push(`close:${event.code}`));
+
+  ws.receive(JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 't', value: { a: await encryptField('x', ring) } }] }]));
+  const close = typeof CloseEvent === 'function' ? new CloseEvent('close', { code: 1006 }) : Object.assign(new Event('close'), { code: 1006 });
+  ws.dispatchEvent(close);
+  await settle();
+
+  assert.deepEqual(seen, ['message', 'close:1006']);
+});
+
+test('a pong is not held behind a message that is still being decrypted', async () => {
+  const ring = await keyring();
+  const Socket = createDecryptingWebSocket(FakeSocket, () => ring);
+  const ws = new Socket(SYNC_URL);
+  const seen = [];
+  ws.addEventListener('message', event => seen.push(JSON.parse(event.data)[0]));
+
+  ws.receive(JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 't', value: { a: await encryptField('x', ring) } }] }]));
+  ws.receive(JSON.stringify(['pong', {}]));
+  assert.deepEqual(seen, ['pong']);
+  await settle();
+  assert.deepEqual(seen, ['pong', 'pokePart']);
+});

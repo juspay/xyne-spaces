@@ -2,7 +2,7 @@ import type { TransitKeyring } from './keyring.js';
 import { decryptField, isEncryptedField } from './field-decrypt.js';
 import { decryptionCache } from './decryption-cache.js';
 import { getCryptoLogger } from './crypto-logger.js';
-import { Event } from '../logger/events.js';
+import { Event as LogEvent } from '../logger/events.js';
 
 /**
  * Decrypt-on-ingest for Zero's sync socket.
@@ -55,7 +55,7 @@ export async function decryptPokeMessage(message: unknown, keyring: TransitKeyri
             decrypted[field] = await decryptValue(value as string, keyring);
             changed = true;
           } catch (error) {
-            getCryptoLogger().warn(Event.ENCRYPTION_WS_MESSAGE_DECRYPT, {
+            getCryptoLogger().warn(LogEvent.ENCRYPTION_WS_MESSAGE_DECRYPT, {
               outcome: 'left_encrypted',
               table: String(op.tableName ?? 'unknown'),
               field,
@@ -82,6 +82,12 @@ async function decryptFrame(data: string, keyring: TransitKeyring): Promise<stri
   return decrypted === null ? data : JSON.stringify(decrypted);
 }
 
+function closeEventLike(event: CloseEvent): Event {
+  const init = { code: event.code, reason: event.reason, wasClean: event.wasClean };
+  if (typeof CloseEvent === 'function') return new CloseEvent('close', init);
+  return Object.assign(new Event('close'), init);
+}
+
 /**
  * A WebSocket class that hands Zero's sync messages to its listeners only after their
  * encrypted fields are decrypted. Messages keep their arrival order: one that needs no
@@ -97,25 +103,39 @@ export function createDecryptingWebSocket(Base: typeof WebSocket, getKeyring: Ke
     constructor(url: string | URL, protocols?: string | string[]) {
       super(url, protocols);
       if (!ZERO_SYNC_PATH.test(String(url))) return;
-      // Registered before any caller's listener, so it runs first and can hold the event back.
-      super.addEventListener('message', event => this.#intercept(event as MessageEvent));
+      // Registered before any caller's listener, so these run first and can hold an event back.
+      super.addEventListener('message', event => this.#interceptMessage(event as MessageEvent));
+      super.addEventListener('close', event => this.#interceptClose(event as CloseEvent));
     }
 
-    #intercept(event: MessageEvent): void {
+    #interceptMessage(event: MessageEvent): void {
       if (released.has(event)) return;
       const keyring = getKeyring();
       const data: unknown = event.data;
+      // A pong carries no rows and must not wait: Zero drops the connection if it is late.
+      if (typeof data === 'string' && data.startsWith('["pong"')) return;
       const needsDecrypt = keyring !== null && typeof data === 'string' && data.includes('"ENC:');
       if (!needsDecrypt && this.#pending === 0) return;
 
       event.stopImmediatePropagation();
-      this.#pending += 1;
       // Decrypts start at once (frames overlap); delivery stays in arrival order.
       const ready = needsDecrypt ? decryptFrame(data as string, keyring).catch(() => data) : Promise.resolve(data);
+      this.#deliverInOrder(async () => new MessageEvent('message', { data: await ready, origin: event.origin, lastEventId: event.lastEventId }));
+    }
+
+    // A close behind held messages waits for them, as it would on a plain socket; otherwise Zero
+    // would reconnect first and then apply the old connection's messages.
+    #interceptClose(event: CloseEvent): void {
+      if (released.has(event) || this.#pending === 0) return;
+      event.stopImmediatePropagation();
+      this.#deliverInOrder(async () => closeEventLike(event));
+    }
+
+    #deliverInOrder(build: () => Promise<Event>): void {
+      this.#pending += 1;
       this.#tail = this.#tail.then(async () => {
-        const out = await ready;
+        const next = await build();
         this.#pending -= 1;
-        const next = new MessageEvent('message', { data: out, origin: event.origin, lastEventId: event.lastEventId });
         released.add(next);
         this.dispatchEvent(next);
       });
