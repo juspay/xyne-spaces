@@ -16,6 +16,7 @@ import {
   runWithDekPassthrough,
 } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
+import { revealUnreadableResponse } from './revealUnreadableResponse';
 import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } from './decryptionMiddleware';
 
 /**
@@ -31,6 +32,9 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  *    reads them only through reveal().
  * 4. transformResponse: the JSON response's storage ciphertext becomes transit ciphertext
  *    for the caller (encryption service /internal/transit/transform-response).
+ * 5. revealUnreadableResponse: `UnreadableString`s in the response (rows read through
+ *    unreadableDb) are revealed before step 4 serializes the body; it runs first because
+ *    Express calls the res.json installed last first.
  *
  * The manifest is the encryption service's alone: it picks the rule for the request and
  * runs every check against it; this file forwards the request and relays its verdict.
@@ -39,7 +43,14 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  *   router.post(path, uploadMultiple, ...encryptedRoute(contract, { resolveWorkspaceId }), handler)
  */
 export function encryptedRoute(contract: RequestContract, options: Omit<EncryptedRouteOptions, 'contract'>) {
-  return [enterDekPassthrough, transformRequest({ contract, ...options }), makeBodyUnreadable(contract), transformResponse];
+  return [
+    enterDekPassthrough,
+    transformRequest({ contract, ...options }),
+    makeBodyUnreadable(contract),
+    transformResponse,
+    // After transformResponse on purpose: rows read through unreadableDb are revealed before it serializes the body.
+    revealUnreadableResponse,
+  ];
 }
 
 export type EncryptedRouteOptions = {

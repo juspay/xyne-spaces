@@ -28,3 +28,5 @@ export { recapSetCustomRecapPromptClient, userPresenceUpsertClient } from './con
 export { ticketUpdateClient } from './contracts/tickets.js';
 export { appsChatPostMessageClient, appsChatUpdateMessageClient } from './contracts/apps.js';
 export type { AppsChatPostMessageRequest, AppsChatUpdateMessageRequest } from './contracts/apps.js';
+export { createDmClient } from './contracts/users.js';
+export type { CreateDmRequest } from './contracts/users.js';

@@ -15,12 +15,14 @@ import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
 import { pingDatabase } from '@/bypassAcl/healthServices';
+import { type UnreadableDb, withUnreadableFields } from './unreadable-extension';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
   private static wrappedInstance: PrismaClient | null = null;
   private static readReplicaInstance: PrismaClient | null = null;
   private static wrappedReplicaInstance: PrismaClient | null = null;
+  private static unreadableInstance: UnreadableDb | null = null;
   private static isConnected = false;
 
   static getReadReplicaInstance(): PrismaClient | null {
@@ -99,6 +101,16 @@ export class DatabaseClient {
     return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;
   }
 
+  /**
+   * The same client as `getInstance()`, except the fields in UNREADABLE_FIELDS come back as
+   * `UnreadableString` (see unreadable-extension.ts). Code moves to it once it no longer
+   * reads those fields as text.
+   */
+  static getUnreadableInstance(): UnreadableDb {
+    DatabaseClient.unreadableInstance ??= withUnreadableFields(DatabaseClient.getInstance());
+    return DatabaseClient.unreadableInstance;
+  }
+
   static async connect(): Promise<void> {
     if (DatabaseClient.isConnected) {
       return;
@@ -121,6 +133,7 @@ export class DatabaseClient {
         await DatabaseClient.instance.$disconnect();
         DatabaseClient.instance = null;
         DatabaseClient.wrappedInstance = null;
+        DatabaseClient.unreadableInstance = null;
         DatabaseClient.isConnected = false;
         logger.info('Database disconnected successfully');
       } catch (error) {
@@ -161,3 +174,4 @@ export class DatabaseClient {
 
 export const db = DatabaseClient.getInstance();
 export const readReplicaDb = DatabaseClient.getReadReplicaInstance();
+export const unreadableDb = DatabaseClient.getUnreadableInstance();

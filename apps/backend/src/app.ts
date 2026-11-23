@@ -230,6 +230,7 @@ import { unifiedDMService } from '@/bots/unified/services/unified-dm-service';
 import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } from '@/services/twinReplyDraftService';
 import userMigrationRoutes from '@/routes/userMigration';
 import { encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
+import { revealUnreadableResponse } from './middleware/revealUnreadableResponse';
 import internalRoutes from '@/routes/internal';
 import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
@@ -372,6 +373,8 @@ export class App {
     // Request-body decryption needs the auth session (JWT sid), so the auth middlewares run
     // it after authenticating instead of it being mounted here.
     this.app.use(encryptResponseBodyMiddleware);
+    // After it on purpose: rows read through unreadableDb are revealed before the body is encrypted.
+    this.app.use(revealUnreadableResponse);
 
     // Public SDK API. Uses the same cookie-based auth as the dashboard via
     // authMiddleware.authenticate. When disabled, nothing is mounted here
