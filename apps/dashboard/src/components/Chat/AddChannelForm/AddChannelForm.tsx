@@ -33,6 +33,13 @@ import {
   PromoteGroupDmRequest,
 } from '../../../services/Chat/channelService';
 import Input from '../../ui/Input';
+import {
+  EMPTY_X_APP_KEYS,
+  XAppKeysFields,
+  isXAppKeysComplete,
+  trimXAppKeys,
+} from '../../xyne-desk/DeskIntegrationCard/XAppKeysFields';
+import type { XAppKeys } from '../../../services/clients/socialMediaDeskApi';
 import Textarea from '../../ui/Textarea';
 import RadioGroup, { Radio } from '../../ui/RadioGroup';
 import { Badge } from '../../ui/Badge';
@@ -148,11 +155,11 @@ function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput
   );
 }
 
-export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM' | 'FACEBOOK';
+export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM' | 'FACEBOOK' | 'X';
 
 /** Providers connected by an OAuth redirect: no extra fields here and the board is optional. */
 export const isOAuthSocialProvider = (provider: SocialProvider | undefined): boolean =>
-  provider === 'INSTAGRAM' || provider === 'FACEBOOK';
+  provider === 'INSTAGRAM' || provider === 'FACEBOOK' || provider === 'X';
 
 export interface AppStoreDeskInput {
   keyId: string;
@@ -198,6 +205,7 @@ interface AddChannelFormProps {
       applications?: GooglePlayApplicationInput[];
       serviceAccountKey?: string;
       appStore?: AppStoreDeskInput;
+      xApp?: XAppKeys;
     },
   ) => void;
   onCancel: () => void;
@@ -240,8 +248,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   ]);
   const [appStoreKeyId, setAppStoreKeyId] = useState('');
   const [appStorePrivateKey, setAppStorePrivateKey] = useState('');
+  const [xAppKeys, setXAppKeys] = useState<XAppKeys>(EMPTY_X_APP_KEYS);
 
   const isSocialMediaDeskValid = (boardId?: string): boolean => {
+    if (socialProvider === 'X') return isXAppKeysComplete(xAppKeys);
     if (isOAuthSocialProvider(socialProvider)) return true;
     if (!boardId) return false;
     return socialProvider === 'GOOGLE_PLAY'
@@ -431,7 +441,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                       })),
                     },
                   }
-                : {}),
+                : socialProvider === 'X'
+                  ? { xApp: trimXAppKeys(xAppKeys) }
+                  : {}),
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.DL) {
@@ -539,6 +551,12 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           return 'Android package names must be unique';
         if (!boardIdValue) return 'Please select a board';
       }
+      if (
+        deskType === DeskType.SOCIAL_MEDIA &&
+        socialProvider === 'X' &&
+        !isXAppKeysComplete(xAppKeys)
+      )
+        return 'Enter all four X app keys';
       if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'APP_STORE') {
         if (!APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()))
           return 'Enter the Key ID from App Store Connect';
@@ -966,6 +984,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 <SelectItem value='APP_STORE'>App Store reviews</SelectItem>
                 <SelectItem value='INSTAGRAM'>Instagram DMs</SelectItem>
                 <SelectItem value='FACEBOOK'>Facebook Page</SelectItem>
+                <SelectItem value='X'>X (Twitter)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1232,6 +1251,24 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             You&apos;ll be redirected to Instagram to authorize your Business account. No extra
             details needed here.
           </p>
+        </div>
+      )}
+
+      {requireConnector && deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'X' && (
+        <div className='space-y-3 rounded-lg border border-border bg-muted/20 p-3'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Connect your X app</p>
+            <p className='text-xs text-muted-foreground'>
+              Mentions, replies and DMs to the X account you authorize will create tickets. You will
+              be redirected to X to sign in.
+            </p>
+          </div>
+          <XAppKeysFields
+            idPrefix='x-create-keys'
+            value={xAppKeys}
+            onChange={setXAppKeys}
+            trackCategory='ADD_CHANNEL_FORM'
+          />
         </div>
       )}
 

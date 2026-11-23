@@ -117,6 +117,12 @@ const envSchema = Joi.object({
   ENABLE_GMAIL_PULL_WORKER: Joi.boolean().default(false),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
   ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
+  // X activity streams (one per tenant X app, Redis-leased). Set on the worker role.
+  ENABLE_X_STREAM_WORKER: Joi.boolean().default(false),
+  // X (Twitter) endpoints — leave empty to use the public X endpoints (https://api.x.com /
+  // https://x.com/i/oauth2/authorize). Override for proxies or alternative gateways.
+  X_API_BASE: Joi.string().uri().allow('').default(''),
+  X_AUTHORIZE_URL: Joi.string().uri().allow('').default(''),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
@@ -1041,6 +1047,9 @@ export const config = {
   enableGmailPullWorker: envVars.ENABLE_GMAIL_PULL_WORKER as boolean,
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
+  enableXStreamWorker: envVars.ENABLE_X_STREAM_WORKER as boolean,
+  X_API_BASE: envVars.X_API_BASE as string,
+  X_AUTHORIZE_URL: envVars.X_AUTHORIZE_URL as string,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   // Radar execution engine. Two switches: enqueue on message insert, and run

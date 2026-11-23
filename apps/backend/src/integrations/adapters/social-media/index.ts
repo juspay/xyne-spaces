@@ -2,3 +2,4 @@ export { googlePlayReviewsAdapter } from './google-play';
 export { appStoreReviewsAdapter } from './app-store';
 export { instagramAdapter } from './instagram';
 export { facebookAdapter } from './facebook';
+export { xAdapter } from './x';

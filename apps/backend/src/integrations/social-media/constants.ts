@@ -13,6 +13,7 @@ export const SOCIAL_MEDIA_PLATFORMS: readonly ExternalSourcePlatform[] = [
   ExternalSourcePlatform.APP_STORE,
   ExternalSourcePlatform.INSTAGRAM,
   ExternalSourcePlatform.FACEBOOK,
+  ExternalSourcePlatform.X,
 ] as const;
 
 /** Meta messaging providers: webhook-driven, 24h reply window, several accounts per desk. */

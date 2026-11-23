@@ -14,6 +14,7 @@ import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCa
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreDeskIntegrationCard';
 import { MetaDeskIntegrationCard } from '../../DeskIntegrationCard/MetaDeskIntegrationCard';
+import { XDeskIntegrationCard } from '../../DeskIntegrationCard/XDeskIntegrationCard';
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { ConnectedSlackSection } from '../ConnectedSlackSection';
 import { ConnectedChannelsDeskAppSection } from '../ConnectedChannelsDeskAppSection';
@@ -208,6 +209,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       {isSocial && (
         <MetaDeskIntegrationCard provider='facebook' channelId={channelId} canManage={canManage} />
       )}
+      {isSocial && <XDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {/*
         Single owner of app connections on every desk type, APP included. Apps and Slack both
         went 1:N per channel, so unlike social they cannot be managed by a

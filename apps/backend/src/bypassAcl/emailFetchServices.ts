@@ -131,6 +131,25 @@ export function catchUpSocialMediaSource(workspaceId: string, sourceId: string):
 }
 
 /**
+ * X stream gap repair: after the activity stream reconnects, poll the window it may have missed.
+ * Runs in the stream worker with no request context, so ingested rows need workspaceId stamped.
+ * Without a window the source's cursor decides (first connect after a worker restart).
+ */
+export function repairXStreamGap(
+  workspaceId: string,
+  sourceId: string,
+  window: { startDate: Date; endDate: Date } | undefined,
+): Promise<number> {
+  return asService(
+    ['ExternalSource', 'Ticket', 'Email'],
+    'x stream worker: gap repair is a background job with no request context, ingested rows need workspaceId stamped',
+    'x-stream-gap-repair',
+    workspaceId,
+    async () => (await socialMediaService.syncSource(sourceId, window ? { backfill: window } : undefined)).synced,
+  );
+}
+
+/**
  * Relocated from workers/emailClassificationWorker.ts's processJob. Background job → no
  * request context; classification writes (ticket assignment, activity, workload) need
  * workspaceId stamped.

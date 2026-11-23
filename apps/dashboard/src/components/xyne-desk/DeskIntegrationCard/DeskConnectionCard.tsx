@@ -11,6 +11,10 @@ interface DeskConnectionCardProps {
   onDisconnect: () => Promise<void>;
   onReconnect?: () => Promise<void>;
   reconnectLabel?: string;
+  /** Label of the desk-wide disconnect button (e.g. "Disconnect all" on multi-account desks). */
+  disconnectLabel?: string;
+  /** Hide the desk-wide disconnect, e.g. when per-account rows already cover it. */
+  hideDisconnect?: boolean;
   disconnectTitle: string;
   disconnectPrompt: string;
   disconnectBullets: string[];
@@ -26,6 +30,8 @@ export const DeskConnectionCard = ({
   onDisconnect,
   onReconnect,
   reconnectLabel = 'Reconnect',
+  disconnectLabel = 'Disconnect',
+  hideDisconnect = false,
   disconnectTitle,
   disconnectPrompt,
   disconnectBullets,
@@ -86,42 +92,42 @@ export const DeskConnectionCard = ({
             {value ?? '—'}
           </span>
         </div>
-        {isConnected ? (
-          <button
-            type='button'
-            onClick={() => setShowDisconnectConfirm(true)}
-            disabled={isDisconnecting}
-            className={cn(
-              'inline-flex h-[32px] shrink-0 items-center gap-1.5 px-[10px] py-1.5 text-desk-label',
-              'text-desk-destructive border rounded-[10px] shadow-sm',
-              'hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+        {isConnected
+          ? !hideDisconnect && (
+              <button
+                type='button'
+                onClick={() => setShowDisconnectConfirm(true)}
+                disabled={isDisconnecting}
+                className={cn(
+                  'inline-flex h-[32px] shrink-0 items-center gap-1.5 px-[10px] py-1.5 text-desk-label',
+                  'text-desk-destructive border rounded-[10px] shadow-sm',
+                  'hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+                )}
+                data-track-category={trackCategory}
+                data-track-name='open-disconnect-confirm'
+              >
+                <Unplug size={14} className='shrink-0' />
+                {disconnectLabel}
+              </button>
+            )
+          : onReconnect && (
+              <button
+                type='button'
+                data-ph-capture-attribute-track-id='desk_reconnect_integration'
+                onClick={() => void handleReconnect()}
+                disabled={isReconnecting}
+                className={cn(
+                  'inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium',
+                  'text-foreground border border-border rounded-[10px] bg-background shadow-sm',
+                  'hover:bg-desk-accent-subtle transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+                )}
+                data-track-category={trackCategory}
+                data-track-name='reconnect'
+              >
+                <Plug size={14} className='shrink-0' />
+                {isReconnecting ? 'Reconnecting…' : reconnectLabel}
+              </button>
             )}
-            data-track-category={trackCategory}
-            data-track-name='open-disconnect-confirm'
-          >
-            <Unplug size={14} className='shrink-0' />
-            Disconnect
-          </button>
-        ) : (
-          onReconnect && (
-            <button
-              type='button'
-              data-ph-capture-attribute-track-id='desk_reconnect_integration'
-              onClick={() => void handleReconnect()}
-              disabled={isReconnecting}
-              className={cn(
-                'inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium',
-                'text-foreground border border-border rounded-[10px] bg-background shadow-sm',
-                'hover:bg-desk-accent-subtle transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-              )}
-              data-track-category={trackCategory}
-              data-track-name='reconnect'
-            >
-              <Plug size={14} className='shrink-0' />
-              {isReconnecting ? 'Reconnecting…' : reconnectLabel}
-            </button>
-          )
-        )}
       </div>
 
       <DisconnectConfirmDialog

@@ -108,6 +108,7 @@ class AdapterRegistry {
     ozonetel: ExternalSourcePlatform.OZONETEL,
     instagram: ExternalSourcePlatform.INSTAGRAM,
     facebook: ExternalSourcePlatform.FACEBOOK,
+    x: ExternalSourcePlatform.X,
   };
 
   private tryMapStringToPlatform(platformStr: string): ExternalSourcePlatform | undefined {

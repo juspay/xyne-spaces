@@ -25,6 +25,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   [ExternalSourcePlatform.GOOGLE_PLAY]: 'Google Play',
   [ExternalSourcePlatform.APP_STORE]: 'App Store',
   [ExternalSourcePlatform.SLACK_DESK]: 'Slack',
+  [ExternalSourcePlatform.X]: 'X',
 };
 
 // One-off DL member backfill sources are temporary and never shown as a connected account.
