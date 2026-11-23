@@ -1,29 +1,31 @@
 import log from 'electron-log/main';
-import { config } from '../app/config';
+import type { WebContents } from 'electron';
 import path from 'path';
 import { getMainWindow } from '../window/manager';
 import { keychain } from '../keychain';
 /**
- * SSL/TLS error codes that indicate certificate issues requiring re-enrollment
+ * Error code the mTLS gateway returns, with HTTP 403, when the client certificate has been
+ * revoked. The TLS handshake still succeeds, so this arrives as a response, not a load error.
  */
-const CERTIFICATE_ERROR_CODES = [
-  // Network error codes
-  'ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED',
-  'ERR_BAD_SSL_CLIENT_AUTH_CERT',
-];
+export const CLIENT_CERTIFICATE_REVOKED = 'client_certificate_revoked';
 
 /**
- * Check if an error string indicates a certificate problem
+ * Whether a response is the gateway's revoked-certificate rejection, which requires re-enrollment
  */
-export function isCertificateError(errorDescription: string): boolean {
-  if (!errorDescription) return false;
-  
-  const upperError = errorDescription.toUpperCase();
-  
-  return CERTIFICATE_ERROR_CODES.some(code => {
-    const upperCode = code.toUpperCase();
-    return upperError.includes(upperCode);
-  });
+export function isCertificateRevokedResponse(statusCode: number, body: string): boolean {
+  return statusCode === 403 && body.includes(CLIENT_CERTIFICATE_REVOKED);
+}
+
+/**
+ * Reads the loaded page's text, e.g. a JSON error body that Chromium renders as plain text
+ */
+export async function readPageText(webContents: WebContents): Promise<string> {
+  try {
+    const text: unknown = await webContents.executeJavaScript('document.body ? document.body.innerText : ""');
+    return typeof text === 'string' ? text : '';
+  } catch {
+    return '';
+  }
 }
 
 /**
