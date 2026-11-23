@@ -15,12 +15,11 @@ from typing import Optional, Tuple
 
 import aiohttp
 from aiohttp import web
-from google.auth import load_credentials_from_dict, load_credentials_from_file
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from openai import AzureOpenAI
-from google.oauth2 import service_account
 
 from config import Config, get_logger
+from config.google_credentials import google_credentials
 from infra import get_user_registry
 
 logger = get_logger(__name__)
@@ -120,40 +119,16 @@ _GOOGLE_STREAM_PHRASE_LIMIT = 1200  # streaming — Google's documented max phra
 _DEEPGRAM_KEYWORD_LIMIT = 100  # Deepgram's documented max keywords/request
 
 
-def _load_google_credentials_info(cfg: Config) -> dict:
-    logger.debug('[google] Loading credentials info')
-    if cfg.google_voice_credentials_json:
-        try:
-            return json.loads(cfg.google_voice_credentials_json)
-        except json.JSONDecodeError as e:
-            raise ValueError(f'Invalid GOOGLE_VOICE_CREDENTIALS_JSON: {e}') from e
-
-    credentials_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-    if not credentials_file:
-        raise ValueError('Google STT requires GOOGLE_VOICE_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS')
-
-    try:
-        with open(credentials_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        raise ValueError(f'Failed to read GOOGLE_APPLICATION_CREDENTIALS: {e}') from e
-
-
 async def _transcribe_with_google(
     path: str,
     cfg: Config,
     requested_language: Optional[str],
     extra_hints: Optional[list] = None,
 ) -> Tuple[str, str, str]:
-    credentials_info = _load_google_credentials_info(cfg)
-
-    # project_id: prefer value from credentials JSON (service-account format),
-    # fall back to GCS_PROJECT_ID which is always set in config.
-    project_id = credentials_info.get('project_id') or cfg.gcs_project_id
-    if not project_id:
-        raise ValueError(
-            'Google STT requires a project_id — set GCS_PROJECT_ID in .env or use a service-account credentials file'
-        )
+    # In a thread: the first ADC lookup may call the metadata server.
+    creds, project_id = await asyncio.to_thread(
+        google_credentials, cfg.google_voice_credentials_json, cfg.gcs_project_id
+    )
 
     target_codes = _language_codes(requested_language or '', cfg.google_stt_voice_input_language)
     target_language = target_codes[0]
@@ -164,33 +139,6 @@ async def _transcribe_with_google(
         f'[google] Starting transcription | project={project_id} | location={_GOOGLE_LOCATION} | model={cfg.google_stt_model}'
         f' | language={target_language} | hints={len(extra_hints or [])} extra'
     )
-    # Load credentials using google.auth so both service-account JSON and ADC
-    # (authorized_user) formats are handled correctly.
-    credentials_file = (
-        None
-        if cfg.google_voice_credentials_json  # inline JSON path: write to tmp file
-        else os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-    )
-
-    if cfg.google_voice_credentials_json:
-        # Write the inline JSON to a temporary file that google.auth can read
-        import tempfile as _tf
-        with _tf.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as _f:
-            _f.write(cfg.google_voice_credentials_json)
-            credentials_file = _f.name
-
-    if credentials_file:
-        creds, _ = load_credentials_from_file(
-            credentials_file,
-            scopes=['https://www.googleapis.com/auth/cloud-platform'],
-        )
-    else:
-        # Last resort: build from the parsed dict (service-account only)
-        creds = service_account.Credentials.from_service_account_info(
-            credentials_info,
-            scopes=['https://www.googleapis.com/auth/cloud-platform'],
-        )
-        
     if not creds.valid:
         logger.debug('[google] Refreshing credentials token')
         await asyncio.to_thread(creds.refresh, GoogleAuthRequest())
@@ -357,28 +305,14 @@ async def _transcribe_with_deepgram(
 
 
 async def _build_google_credentials(cfg: Config):
-    """Return (credentials, project_id) ready for use with REST or gRPC clients."""
-    credentials_info = _load_google_credentials_info(cfg)
-    project_id = credentials_info.get('project_id') or cfg.gcs_project_id
-    if not project_id:
-        raise ValueError(
-            'Google STT requires a project_id — set GCS_PROJECT_ID in .env or use a service-account credentials file'
-        )
+    """Return (credentials, project_id) ready for use with REST or gRPC clients.
 
-    # Inline-JSON path is loaded straight from the in-memory dict — it must never
-    # touch disk as plaintext.
-    if cfg.google_voice_credentials_json:
-        creds, _ = load_credentials_from_dict(
-            credentials_info,
-            scopes=['https://www.googleapis.com/auth/cloud-platform'],
-        )
-    else:
-        creds, _ = load_credentials_from_file(
-            os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
-            scopes=['https://www.googleapis.com/auth/cloud-platform'],
-        )
-
-    return creds, project_id
+    Uses the configured key if there is one, else Application Default Credentials
+    (Workload Identity on GKE). The key is loaded from memory and never written to disk.
+    """
+    return await asyncio.to_thread(
+        google_credentials, cfg.google_voice_credentials_json, cfg.gcs_project_id
+    )
 
 
 async def _stream_with_google(
