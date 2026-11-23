@@ -5,7 +5,9 @@
  * `xyne_ws_<workspaceId>_token` cookie the dashboard sets on login — which
  * `/api/sdk` then authenticates with the ordinary `authMiddleware`. The
  * session is returned in the poll body only; no cookie is set, so a poll made
- * from the Spaces origin never disturbs the dashboard's own cookies.
+ * from the Spaces origin never disturbs the dashboard's own cookies. That first
+ * JWT carries the approving browser session's `sid`: logging that session out
+ * (or a password reset) ends it, and it never outlives that session.
  *
  * A client that sends `refresh: true` to `/init` also gets a refresh token from
  * the poll, which `/refresh` trades for a new session (and a new refresh
@@ -25,7 +27,8 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { UserStatus } from '@xyne/shared';
 import { sdkSsoService } from '@/services/sdkSsoService';
-import { jwtService } from '@/services/jwtService';
+import { mintAccessToken } from '@/services/accessTokenService';
+import { authSessionService } from '@/services/authSessionService';
 import { authMiddleware } from '@/middleware/auth';
 import { sdkSsoInitLimiter, sdkSsoPollLimiter, sdkSsoRefreshLimiter } from '@/middleware/rateLimiters';
 import { config } from '@/config/env';
@@ -366,22 +369,30 @@ router.post('/approve', authMiddleware.authenticate, async (req: Request, res: R
         });
       }
 
-      // The same session JWT login issues, so `authMiddleware` accepts it
-      const token = jwtService.generateToken({
-        sub: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        picture: targetUser.picture || undefined,
-        workspaceId: targetUser.workspaceId,
-        memberId: targetUser.orgMemberId,
+      // Minted under the approving user's own auth session (the `sid` authMiddleware just
+      // verified as ACTIVE), so it is revocable like any login JWT and never outlives that
+      // session. A token without `sid` would be rejected by authMiddleware.
+      const approverSession = user.sid
+        ? await authSessionService.findActiveById(user.sid, targetUser.orgMemberId)
+        : null;
+      if (!approverSession) {
+        return res.status(401).json({
+          error: 'access_denied',
+          message: 'Your session has ended. Sign in again to approve.',
+        });
+      }
+
+      const minted = mintAccessToken({
+        user: targetUser,
+        sessionId: approverSession.id,
+        refreshTokenExpiry: approverSession.refreshTokenExpiry,
       });
-      const exp = jwtService.decodeToken(token)?.exp;
 
       session = {
         userId: targetUser.id,
         workspaceId: targetUser.workspaceId,
-        token,
-        expiresAt: exp ? exp * 1000 : Date.now() + config.jwt.expirationSeconds * 1000,
+        token: minted.token,
+        expiresAt: minted.expiresAt,
       };
     }
 

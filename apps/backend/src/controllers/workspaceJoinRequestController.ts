@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import { verifyPendingAuthToken } from '@/utils/pendingAuthToken';
 import {
+  UserStatus,
   WorkspaceJoinRequestAction,
   type WorkspaceJoinRequestAction as WorkspaceJoinRequestActionType,
   WorkspaceJoinRequestStatus,
 } from '@xyne/shared';
+import { db } from '@/database/client';
 import { workspaceJoinRequestService } from '@/services/workspaceJoinRequestService';
 import { logger } from '@/utils/logger';
 import { PENDING_AUTH_COOKIE, readWorkspaceJwt } from '@/services/accessTokenService';
@@ -145,9 +147,36 @@ export class WorkspaceJoinRequestController {
     if (pendingEmail) return pendingEmail;
 
     // Already signed in: the workspace JWT cookie identifies the member (xs is only sent to
-    // /auth/refresh-session). An expired JWT reads as not signed in; the client refreshes on 401.
-    const jwtRead = readWorkspaceJwt(req);
-    return jwtRead.status === 'valid' ? jwtRead.payload.email : null;
+    // /auth/refresh-session). An expired JWT, or one whose auth session was revoked, reads as not
+    // signed in; the client refreshes on 401.
+    const jwtRead = await readWorkspaceJwt(req);
+    if (jwtRead.status !== 'valid') return null;
+
+    // This route has no auth middleware, so re-check what it would: a user who left or was
+    // deactivated in the token's workspace, or left the org, is not signed in.
+    const user = await db.user.findUnique({
+      where: { id: jwtRead.payload.sub },
+      select: {
+        email: true,
+        status: true,
+        leftAt: true,
+        workspaceId: true,
+        orgMemberId: true,
+        orgMember: { select: { leftAt: true } },
+      },
+    });
+    if (
+      !user ||
+      user.workspaceId !== jwtRead.payload.workspaceId ||
+      user.orgMemberId !== jwtRead.payload.memberId ||
+      user.status === UserStatus.INACTIVE ||
+      user.leftAt ||
+      !user.orgMember ||
+      user.orgMember.leftAt
+    ) {
+      return null;
+    }
+    return user.email;
   }
 }
 

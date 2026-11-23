@@ -1463,24 +1463,25 @@ export class AuthV2Controller {
          * (xs is only sent to /auth/refresh-session). Happens when a signed-in user picks
          * another workspace. Identity comes from the org member; any workspace user row of
          * theirs carries the provider identity. An expired JWT is a 401 TOKEN_EXPIRED so the
-         * client refreshes and retries.
+         * client refreshes and retries. readWorkspaceJwt also requires the JWT's auth session to
+         * be ACTIVE: a logged-out, revoked or superseded session must never mint a new one here.
          */
-        const jwtRead = readWorkspaceJwt(req);
+        const jwtRead = await readWorkspaceJwt(req);
+        if (jwtRead.status === 'revoked') {
+          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=session_revoked)`);
+          res.status(401).json({
+            error: 'Unauthorized',
+            code: 'SESSION_REVOKED',
+            message: 'Session has been logged out',
+          });
+          return;
+        }
         if (jwtRead.status !== 'valid') {
           logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=no_auth, jwt=${jwtRead.status})`);
           res.status(401).json({
             error: 'Unauthorized',
             code: jwtRead.status === 'expired' ? 'TOKEN_EXPIRED' : 'TOKEN_MISSING',
             message: 'Pending auth data not found or expired'
-          });
-          return;
-        }
-        if (jwtRead.payload.sid && (await authSessionService.isSessionRevoked(jwtRead.payload.sid))) {
-          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=session_logged_out)`);
-          res.status(401).json({
-            error: 'Unauthorized',
-            code: 'TOKEN_INVALID',
-            message: 'Session has been logged out',
           });
           return;
         }

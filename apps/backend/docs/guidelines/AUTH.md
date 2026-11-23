@@ -11,11 +11,13 @@ Authentication and authorization using JWT tokens and ACL. Located in `src/middl
 | **Google / Microsoft / Email login** | `authMiddleware.authenticate` | Every user route, Zero included; JWT cookie per workspace |
 
 No middleware ever refreshes a token. An expired or missing JWT is a `401` with a `code`
-(`TOKEN_MISSING`, `TOKEN_EXPIRED`, `TOKEN_INVALID`); the client calls `GET /api/auth/refresh-session`
-and retries.
+(`TOKEN_MISSING`, `TOKEN_EXPIRED`); the client calls `GET /api/auth/refresh-session` and retries.
+Every other code is final and sends the client to login: `TOKEN_INVALID`, `SESSION_REVOKED` (the
+token's auth session is no longer ACTIVE), `USER_REMOVED`, `EMAIL_DOMAIN_NOT_ALLOWED`.
 
 The JWT is read only from the `xyne_ws_<workspaceId>_token` cookie; an `Authorization` header is never
-accepted as a user credential. Every request re-checks the user (`status`, `leftAt`) and the org member (`leftAt`).
+accepted as a user credential. Every request re-checks, in Postgres, the auth session behind the token's
+`sid` (ACTIVE, unexpired), the user (`status`, `leftAt`) and the org member (`leftAt`).
 
 ---
 
@@ -53,7 +55,9 @@ Requests must send `x-device-id` on login routes: a login without it is rejected
 **Token Lifecycle:**
 1. User logs in (Google / Microsoft / email). Every flow ends in `services/loginCompletionService.completeLogin`:
    auth session (`xs`) → JWT cookies → AUTH/LOGIN activity event → contacts grant.
-2. Token validated on each request via `jwtService.verifyToken()`.
+2. Token validated on each request via `accessTokenService.readWorkspaceJwt()`: signature and expiry,
+   claims (`sub`, `memberId`, `sid`, `workspaceId` = the cookie's workspace), and the `sid` auth session
+   ACTIVE and unexpired in Postgres. A revoked session → `401 SESSION_REVOKED`.
 3. Expired → `401 TOKEN_EXPIRED`. Client calls `GET /api/auth/refresh-session`.
 4. `refreshSession` (`authV2Controller`) validates `xs` (`authSessionService.validateRefresh`), picks the workspace from
    `xyne_last_workspace`, checks the user row (`status`, `leftAt`) and sets a fresh `xyne_ws_*` cookie.
@@ -85,8 +89,9 @@ zero-cache forwards the browser cookies.
 
 **Flow:**
 1. Token extracted from `xyne_ws_<workspaceId>_token` (workspace from `x-workspace-id` or `xyne_last_workspace`)
-2. Verified via `jwtService.verifyToken()`
-3. If invalid/expired, returns 401 (no retry)
+2. Verified by `authenticate` (`readWorkspaceJwt`); `zeroController` forwards that same token
+   (`req.authToken`) to Zero as `Authorization`, replacing anything the client sent
+3. If invalid/expired/revoked, returns 401 (no retry)
 4. Zero reports `needs-auth`; the dashboard calls `/auth/refresh-session` and reconnects
 
 **Location:** `src/middleware/auth.ts` - `authenticate`
@@ -140,15 +145,20 @@ zero-cache forwards the browser cookies.
 **Key operations:**
 - `issueOnLogin` - revoke the device's previous ACTIVE row, create the new one, set `xs`
 - `validateRefresh` - `xs` cookie → ACTIVE, unexpired session + org member (null when the member left); only `/auth/refresh-session` can call it
-- `findActiveById` - session by the JWT `sid` for authenticated routes (switch/create workspace)
+- `findActiveById` - ACTIVE, unexpired session by the JWT `sid`; `readWorkspaceJwt` calls it for every access token, and switch/create workspace use it for the session's expiry
 - `revokeOnLogout` - revoke by the JWT `sid` and/or `(orgMemberId, deviceKey)`, clear `xs`
-- Public routes that need "is this caller signed in" read the workspace JWT cookie via `accessTokenService.readWorkspaceJwt`; an expired JWT answers so the client refreshes and retries (`login-workspace`, join requests, call-invite routing `needs-refresh`)
+- `accessTokenService.readWorkspaceJwt` is the one place a user access token is accepted: `authenticate` and the public routes that need "is this caller signed in" (`login-workspace`, join requests, call-invite routing) all call it. An expired JWT answers so the client refreshes and retries (`needs-refresh` for call-invite routing); a revoked one is final
 - `revokeAllForOrgMember` - password change/reset, account deactivation: sign out every device
 - `createExternalSession` / `rotateTokenHash` - SDK SSO refresh sessions (platform `sdk`)
 
 **Session States:** `ACTIVE`, `REVOKED` (`revokeReason`: `superseded`, `logout`, `password_changed`,
 `password_reset`, `account_deactivated`, `refresh_token_reused`, …). Expiry is `refreshTokenExpiry`,
 never extended.
+
+**Revocation:** revoking a session is the `auth_sessions` row update, nothing else. Because
+`readWorkspaceJwt` reads that row on every request, every JWT minted under the session (all carry its
+`sid`) is rejected from the next request on. There is no denylist or cache to keep in sync; do not add
+one that can answer "not revoked" on its own (a miss or an error must fall through to Postgres).
 
 **Legacy:** `workflow.user_sessions` (`UserSession`) is no longer read or written; the table and Prisma model
 remain only until a later cleanup.
@@ -188,6 +198,10 @@ remain only until a later cleanup.
 ## Anti-Patterns
 
 - Minting a JWT anywhere other than `accessTokenService` / `completeLogin` / `refreshSession`
+- Accepting a user JWT with `jwtService.verifyToken` (or `jwt.verify`) directly: it skips the
+  auth-session check. Use `authenticate`, or `readWorkspaceJwt` on public routes
+- Forwarding a token to a downstream verifier (e.g. Zero) other than `req.authToken`, the one
+  `authenticate` checked
 - Storing tokens in localStorage (XSS vulnerable)
 - Skipping ACL for sensitive resources
 - Not validating token expiry before operations

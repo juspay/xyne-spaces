@@ -10,16 +10,9 @@ import {
   revokeAuthSessionsForOrgMemberTx,
   rotateAuthSessionTokenTx,
 } from '@/bypassAcl/transactions/authSessionStore';
-import { redisService } from '@/services/redisService';
 import { logger as baseLogger } from '../utils/logger';
 
 const logger = baseLogger.child({ module: 'AuthSessionService' });
-
-/**
- * Logged-out session ids, kept for one access-token lifetime: a JWT minted before
- * logout carries the sid and stays verifiable until it expires.
- */
-const REVOKED_SESSION_KEY_PREFIX = 'auth:revoked-sid:';
 
 /** Persistent per-client device key header (replaces x-client-session-id). */
 export const DEVICE_KEY_HEADER = 'x-device-id';
@@ -289,8 +282,10 @@ export class AuthSessionService {
   }
 
   /**
-   * An ACTIVE, unexpired session by id (the JWT `sid`), scoped to its org member. For routes
-   * that already authenticated the caller and need the session's expiry (switch/create workspace).
+   * An ACTIVE, unexpired session by id (the JWT `sid`), scoped to its org member, or null.
+   * `readWorkspaceJwt` calls this for every access token it accepts, so a session revoked here
+   * (any revoke below commits to this row) stops its JWTs on the next request. Also used by
+   * routes that need the session's expiry (switch/create workspace).
    */
   findActiveById(id: string, orgMemberId: string) {
     return db.authSession.findFirst({
@@ -325,7 +320,6 @@ export class AuthSessionService {
   /** Sign an org member out of every device (password change/reset, deactivation). Returns the revoked count. */
   async revokeAllForOrgMember(orgMemberId: string, reason: AuthSessionRevokeReason): Promise<number> {
     const revokedIds = await revokeAuthSessionsForOrgMemberTx(orgMemberId, AuthSessionStatus.ACTIVE, AuthSessionStatus.REVOKED, reason);
-    await this.markSessionsRevoked(revokedIds);
     logger.info('[AUTH-SESSION] Revoked all auth sessions for org member', { orgMemberId, reason, revoked: revokedIds.length });
     return revokedIds.length;
   }
@@ -333,7 +327,6 @@ export class AuthSessionService {
   /** Revoke one auth session by id. Returns true when a row was revoked. */
   async revokeById(id: string, reason: AuthSessionRevokeReason): Promise<boolean> {
     const revokedIds = await revokeAuthSessionByIdTx(id, AuthSessionStatus.ACTIVE, AuthSessionStatus.REVOKED, reason);
-    await this.markSessionsRevoked(revokedIds);
     logger.info('[AUTH-SESSION] Revoked auth session by id', { authSessionId: id, reason, revoked: revokedIds.length });
     return revokedIds.length > 0;
   }
@@ -382,7 +375,6 @@ export class AuthSessionService {
   async revokeOnLogout(req: Request, res: Response, identity: { orgMemberId?: string; sessionId?: string }): Promise<void> {
     const presented = getPresentedRefreshToken(req);
     const deviceKey = getDeviceKey(req);
-    const revokedIds: string[] = [];
     try {
       const revoked = await revokeActiveAuthSessionsTx({
         id: identity.sessionId,
@@ -393,7 +385,6 @@ export class AuthSessionService {
         revokedStatus: AuthSessionStatus.REVOKED,
         revokeReason: AuthSessionRevokeReason.LOGOUT,
       });
-      revokedIds.push(...revoked);
       logger.info('[AUTH-SESSION] Revoked auth session(s) on logout', {
         revoked: revoked.length,
         orgMemberId: identity.orgMemberId,
@@ -408,40 +399,7 @@ export class AuthSessionService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    if (identity.sessionId && !revokedIds.includes(identity.sessionId)) {
-      revokedIds.push(identity.sessionId);
-    }
-    await this.markSessionsRevoked(revokedIds);
     this.clearAuthSessionCookie(req, res);
-  }
-
-  /** Deny access JWTs carrying these sids until the longest-lived one has expired. Never throws. */
-  private async markSessionsRevoked(sessionIds: string[]): Promise<void> {
-    await Promise.all(sessionIds.map(sessionId => this.markSessionRevoked(sessionId)));
-  }
-
-  private async markSessionRevoked(sessionId: string): Promise<void> {
-    try {
-      await redisService.set(`${REVOKED_SESSION_KEY_PREFIX}${sessionId}`, '1', config.jwt.expirationSeconds);
-    } catch (error) {
-      logger.error('[AUTH-SESSION] Failed to mark auth session revoked', {
-        sessionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /** True when the sid was logged out within the last access-token lifetime. Fails open on Redis errors. */
-  async isSessionRevoked(sessionId: string): Promise<boolean> {
-    try {
-      return (await redisService.get(`${REVOKED_SESSION_KEY_PREFIX}${sessionId}`)) !== null;
-    } catch (error) {
-      logger.error('[AUTH-SESSION] Failed to read revoked auth session', {
-        sessionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
   }
 
   /**

@@ -506,7 +506,7 @@ export class TestAuthController {
       // Mirror the real logout: revoke the auth session (from the JWT's sid; xs is only sent
       // to /auth/refresh-session) and clear the cookies, otherwise the browser keeps a valid
       // xs and re-login sees stale data.
-      const jwtRead = readWorkspaceJwt(req);
+      const jwtRead = await readWorkspaceJwt(req);
       const sessionId = jwtRead.status === 'valid' ? jwtRead.payload.sid : undefined;
       if (sessionId) {
         await authSessionService.revokeById(sessionId, AuthSessionRevokeReason.TEST_CLEANUP).catch((err: unknown) =>

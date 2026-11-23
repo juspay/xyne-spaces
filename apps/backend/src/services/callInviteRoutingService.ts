@@ -51,7 +51,7 @@ class CallInviteRoutingService {
     // reported as such so the client refreshes and probes again, instead of a
     // signed-in member landing in the guest lobby for not having opened Spaces
     // since yesterday.
-    const claim = this.claimFromWorkspaceToken(req, callWorkspaceId);
+    const claim = await this.claimFromWorkspaceToken(req, callWorkspaceId);
     if (claim === 'expired') {
       return { result: 'needs-refresh' };
     }
@@ -96,9 +96,12 @@ class CallInviteRoutingService {
     return { result: 'internal', workspaceId: callWorkspaceId };
   }
 
-  /** The workspace-scoped access token for the call's own workspace; `'expired'` when present but past its exp. */
-  private claimFromWorkspaceToken(req: Request, callWorkspaceId: string): CallInviteClaim | 'expired' | null {
-    const read = readWorkspaceJwt(req, callWorkspaceId);
+  /**
+   * The workspace-scoped access token for the call's own workspace; `'expired'` when present but
+   * past its exp. A token whose auth session was revoked reads as no claim (guest lobby).
+   */
+  private async claimFromWorkspaceToken(req: Request, callWorkspaceId: string): Promise<CallInviteClaim | 'expired' | null> {
+    const read = await readWorkspaceJwt(req, callWorkspaceId);
     if (read.status === 'expired') {
       return 'expired';
     }
