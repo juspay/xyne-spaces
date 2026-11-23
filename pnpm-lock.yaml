@@ -282,6 +282,9 @@ importers:
       '@types/yauzl':
         specifier: 2.10.3
         version: 2.10.3
+      '@xdevplatform/chat-xdk-server':
+        specifier: 0.7.6
+        version: 0.7.6(juicebox-sdk@0.3.7)
       '@xyne/cache':
         specifier: workspace:*
         version: link:../../packages/cache
@@ -396,6 +399,9 @@ importers:
       jszip:
         specifier: 3.10.1
         version: 3.10.1
+      juicebox-sdk:
+        specifier: 0.3.7
+        version: 0.3.7
       jwks-rsa:
         specifier: 3.2.2
         version: 3.2.2
@@ -10028,6 +10034,15 @@ packages:
       link-preview-js:
         optional: true
 
+  '@xdevplatform/chat-xdk-server@0.7.6':
+    resolution: {integrity: sha512-Db7cUH1TXe8oORZqMspY9EvFHcEBXWkJzhSyf7wmFRepkVNanfD1LHk+kbqnFjEWlYaTnMHNealBzvmxaQbj8Q==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      juicebox-sdk: ^0.3.0
+    peerDependenciesMeta:
+      juicebox-sdk:
+        optional: true
+
   '@xmldom/xmldom@0.8.15':
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
     engines: {node: '>=10.0.0'}
@@ -14749,6 +14764,9 @@ packages:
 
   jszip@3.10.1:
     resolution: {integrity: sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g==}
+
+  juicebox-sdk@0.3.7:
+    resolution: {integrity: sha512-2E+sZyoF1YXlRx5te2km5aGpmRxfkPOHH5GaOhTji0e9cU19Z98ucZ1ytY4ffmDdpJ1b8MVjoi/6oNi/wt/zpw==}
 
   junk@4.0.1:
     resolution: {integrity: sha512-Qush0uP+G8ZScpGMZvHUiRfI0YBWuB3gVBYlI0v0vvOJt5FLicco+IkP0a50LqTTQhmts/m6tP5SWE+USyIvcQ==}
@@ -29776,6 +29794,10 @@ snapshots:
       - supports-color
       - utf-8-validate
 
+  '@xdevplatform/chat-xdk-server@0.7.6(juicebox-sdk@0.3.7)':
+    optionalDependencies:
+      juicebox-sdk: 0.3.7
+
   '@xmldom/xmldom@0.8.15': {}
 
   '@xobotyi/scrollbar-width@1.9.5': {}
@@ -35774,6 +35796,8 @@ snapshots:
       pako: 1.0.11
       readable-stream: 2.3.8
       setimmediate: 1.0.5
+
+  juicebox-sdk@0.3.7: {}
 
   junk@4.0.1: {}
 
