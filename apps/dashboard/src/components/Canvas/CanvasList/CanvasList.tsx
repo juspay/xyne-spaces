@@ -50,6 +50,9 @@ import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
 import { useNavigate } from 'react-router-dom';
 import { CanvasPageSubscription } from './CanvasPageSubscription';
+import { CanvasLivePageSubscriptions } from './CanvasLivePageSubscriptions';
+import { mergeLiveCanvasPage } from './mergeLiveCanvasPage';
+import { useCanvasPaginationScope } from './useCanvasPaginationScope';
 import { shouldScanCanvasUserPages } from '../canvasListPagination';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 import { useCachedQuery } from '@xyne/shared/hooks';
@@ -944,6 +947,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   >({});
   const [pageCursor, setPageCursor] = useState<CanvasCursor | null>(null);
   const [nextCursor, setNextCursor] = useState<CanvasCursor | null>(null);
+  const firstLivePageRef = useRef<Canvas[]>([]);
+  const currentLivePageRef = useRef<Canvas[]>([]);
   const [isNextPageLoading, setIsNextPageLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [minimumVisibleRows, setMinimumVisibleRows] = useState(
@@ -1123,16 +1128,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const isInitialLoading =
     paginated && rawItems.length === 0 && isLoadingNext && !isSpecificChannelScope;
 
-  useLayoutEffect(() => {
-    setCanvasItems([]);
-    setChannelCanvasItems([]);
-    setChannelSourcePagination({});
-    setPageCursor(null);
-    setNextCursor(null);
-    setIsNextPageLoading(false);
-    setHasMore(true);
-    setMinimumVisibleRows(CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD);
-  }, [
+  const paginationScopeKey = JSON.stringify([
+    currentUserId,
     activeFilter,
     channelId,
     excludeCallGeneratedCanvases,
@@ -1151,6 +1148,25 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     includePublicChannelCanvases,
     serverCreatorFilter,
   ]);
+  const { isReady: isPaginationScopeReady, isCurrent: isCurrentPaginationScope } =
+    useCanvasPaginationScope(paginationScopeKey);
+
+  useLayoutEffect(() => {
+    firstLivePageRef.current = [];
+    currentLivePageRef.current = [];
+    setCanvasItems([]);
+    setChannelCanvasItems([]);
+    setChannelSourcePagination({});
+    setPageCursor(null);
+    setNextCursor(null);
+    setIsNextPageLoading(false);
+    setHasMore(true);
+    setMinimumVisibleRows(CANVAS_FILTERED_AUTO_PAGINATION_THRESHOLD);
+  }, [paginationScopeKey]);
+
+  useLayoutEffect(() => {
+    currentLivePageRef.current = [];
+  }, [pageCursor]);
 
   useEffect(() => {
     if (activeFilter !== 'shared') {
@@ -1185,37 +1201,70 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     setCollapsedChannelFolderIds(new Set());
   }, [selectedScopeChannelId]);
 
-  const applyPageToFlatList = useCallback((page: Canvas[], previousPageIds: Set<string>): void => {
-    const nextPageIds = new Set(page.map(canvas => canvas.id));
-
-    setCanvasItems(previousItems => {
-      const byId = new Map(previousItems.map(canvas => [canvas.id, canvas]));
-
-      previousPageIds.forEach(canvasId => {
-        if (nextPageIds.has(canvasId)) return;
-        byId.delete(canvasId);
+  const applyPageToFlatList = useCallback(
+    (
+      page: Canvas[],
+      previousPageIds: Set<string>,
+      otherLivePage: Canvas[],
+      preserveDisplacedRows = false,
+    ): void => {
+      setCanvasItems(previousItems => {
+        const mergedItems = mergeLiveCanvasPage(
+          previousItems,
+          page,
+          previousPageIds,
+          otherLivePage,
+          preserveDisplacedRows,
+        );
+        return areCanvasItemListsEqual(previousItems, mergedItems) ? previousItems : mergedItems;
       });
-
-      page.forEach(canvas => {
-        const existing = byId.get(canvas.id);
-        if (!existing || canvas.updatedAt >= existing.updatedAt) {
-          byId.set(canvas.id, canvas);
-        }
-      });
-
-      const mergedItems = sortCanvasItems(Array.from(byId.values()));
-      return areCanvasItemListsEqual(previousItems, mergedItems) ? previousItems : mergedItems;
-    });
-  }, []);
+    },
+    [],
+  );
 
   const handlePageComplete = useCallback(
     (page: Canvas[], previousPageIds: Set<string>, pageSize: number): void => {
-      applyPageToFlatList(page, previousPageIds);
+      if (!isCurrentPaginationScope()) return;
+      currentLivePageRef.current = page;
+      applyPageToFlatList(page, previousPageIds, firstLivePageRef.current);
       // Advance from the completed query page, independently of rendered or accumulated rows.
       setNextCursor(getCanvasCursorFromLastItem(page));
       setHasMore(page.length === pageSize);
     },
-    [applyPageToFlatList],
+    [applyPageToFlatList, isCurrentPaginationScope],
+  );
+
+  const handleCachedFirstPage = useCallback(
+    (page: Canvas[], previousPageIds: Set<string>): void => {
+      if (!isCurrentPaginationScope()) return;
+      firstLivePageRef.current = page;
+      applyPageToFlatList(page, previousPageIds, currentLivePageRef.current);
+    },
+    [applyPageToFlatList, isCurrentPaginationScope],
+  );
+
+  const handleFirstPageComplete = useCallback(
+    (
+      page: Canvas[],
+      previousPageIds: Set<string>,
+      pageSize: number,
+      isPaginationPage: boolean,
+    ): void => {
+      if (!isCurrentPaginationScope()) return;
+      firstLivePageRef.current = page;
+      applyPageToFlatList(
+        page,
+        previousPageIds,
+        currentLivePageRef.current,
+        page.length === pageSize,
+      );
+      // Background updates to the newest rows must not rewind pagination.
+      if (isPaginationPage) {
+        setNextCursor(getCanvasCursorFromLastItem(page));
+        setHasMore(page.length === pageSize);
+      }
+    },
+    [applyPageToFlatList, isCurrentPaginationScope],
   );
 
   const handleChannelPageComplete = useCallback(
@@ -1225,6 +1274,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       previousPageIds: Set<string>,
       pageSize: number,
     ): void => {
+      if (!isCurrentPaginationScope()) return;
       setChannelCanvasItems(previousItems => {
         const nextPageIds = new Set(page.map(canvas => canvas.id));
         const retainedItems = previousItems.filter(
@@ -1255,15 +1305,20 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         };
       });
     },
-    [],
+    [isCurrentPaginationScope],
   );
 
-  const handlePageLoadingChange = useCallback((isLoading: boolean): void => {
-    setIsNextPageLoading(isLoading);
-  }, []);
+  const handlePageLoadingChange = useCallback(
+    (isLoading: boolean): void => {
+      if (!isCurrentPaginationScope()) return;
+      setIsNextPageLoading(isLoading);
+    },
+    [isCurrentPaginationScope],
+  );
 
   const handleChannelLoadingChange = useCallback(
     (sourceChannelId: string, isLoading: boolean): void => {
+      if (!isCurrentPaginationScope()) return;
       setChannelSourcePagination(previous => {
         const current = previous[sourceChannelId] ?? getDefaultChannelSourceState();
         if (current.isLoading === isLoading) return previous;
@@ -1276,7 +1331,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         };
       });
     },
-    [],
+    [isCurrentPaginationScope],
   );
 
   const setActiveFilter = (filter: FilterTab): void => {
@@ -1427,9 +1482,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     showStarredOnly ||
     onlyCallGeneratedCanvases ||
     onlyRecordingGeneratedCanvases;
-  // Browser-only filters (call / recording exclusions, which default on) can hide every row
-  // of a server-filtered page. Keep paging until a minimum number of rows is visible so a
-  // tab never shows an empty state, or stalls, while matching canvases exist further down.
+  // Browser-only filters and starred separation can hide every row of any query page.
+  // Scan while client-side result filters are active or the visible-row target is unmet,
+  // provided more query results are available, so hidden pages do not stall pagination.
   const shouldScanFilteredUserPages = shouldScanCanvasUserPages({
     hasClientSideResultFilters,
     visibleRowCount: filteredCanvases.length,
@@ -1671,6 +1726,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   });
 
   const requestNextPage = useCallback((): void => {
+    if (!isCurrentPaginationScope()) return;
     if (!paginated || !hasMore || isNextPageLoading || !nextCursor) {
       return;
     }
@@ -1680,12 +1736,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     }
 
     setPageCursor(nextCursor);
-  }, [hasMore, isNextPageLoading, nextCursor, pageCursor, paginated]);
+  }, [hasMore, isCurrentPaginationScope, isNextPageLoading, nextCursor, pageCursor, paginated]);
 
   const requestNextChannelSourcePages = useCallback((): void => {
+    if (!isCurrentPaginationScope()) return;
     if (!paginated || extraChannelSourceIds.length === 0) return;
 
     setChannelSourcePagination(previous => {
+      if (!isCurrentPaginationScope()) return previous;
       const next = { ...previous };
       let didChange = false;
 
@@ -1711,7 +1769,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
       return didChange ? next : previous;
     });
-  }, [extraChannelSourceIds, paginated]);
+  }, [extraChannelSourceIds, isCurrentPaginationScope, paginated]);
 
   const requestNextResults = useCallback((): void => {
     requestNextPage();
@@ -2161,11 +2219,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         refreshCanvasLabelsIfStale(CANVAS_LABEL_REFRESH_STALE_MS, visibleCanvasIdsRef.current)
       }
     >
-      {paginated && (
-        <CanvasPageSubscription
-          key={`${canvasListResetKey}:${
-            pageCursor ? getCanvasCursorKey(pageCursor) : 'first-page'
-          }`}
+      {paginated && isPaginationScopeReady && (
+        <CanvasLivePageSubscriptions
+          key={canvasListResetKey}
           cursor={pageCursor}
           pageSize={canvasPageSize}
           channelId={channelId}
@@ -2176,10 +2232,13 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           creatorFilter={serverCreatorFilter}
           createdByUserId={selectedSharedByUserId ?? undefined}
           onPageComplete={handlePageComplete}
+          onFirstPageComplete={handleFirstPageComplete}
+          onCachedPage={handleCachedFirstPage}
           onLoadingChange={handlePageLoadingChange}
         />
       )}
       {paginated &&
+        isPaginationScopeReady &&
         extraChannelSourceIds.map(sourceChannelId => {
           const sourceState =
             channelSourcePagination[sourceChannelId] ?? getDefaultChannelSourceState();
@@ -2678,6 +2737,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             data={filteredCanvases}
             computeItemKey={(_index, canvas) => canvas.id}
             endReached={() => {
+              if (!isCurrentPaginationScope()) return;
               if (!shouldLoadMoreOnListEnd) return;
               // Keep scanning if the next page adds no visible rows and endReached cannot fire again.
               setMinimumVisibleRows(previous =>
