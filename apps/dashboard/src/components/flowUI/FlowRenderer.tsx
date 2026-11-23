@@ -288,7 +288,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         message: String(
           `[FlowRenderer] → sending ${action.type} actionId=${action.actionId} values=`,
         ),
-        context: [stateRef.current.values],
+        context: [Object.keys(stateRef.current.values)],
       });
       try {
         const draftValues =
@@ -311,7 +311,6 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
         logger.info(LogEvent.INFO, {
           type: 'migrated_console_log',
           message: String(`[FlowRenderer] ← response type=${response.type}`),
-          context: [response],
         });
 
         if (response.type === 'error') {

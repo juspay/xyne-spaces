@@ -89,11 +89,6 @@ const hydrateNativeSession = async (sessionId: string | null | undefined): Promi
   logger.info(LoggerEvent.FRONTEND_ERROR, {
     type: 'migrated_console_info',
     message: String('[AUTH] Native session injected via cookie, attempting /auth/me fetch'),
-    context: [
-      {
-        sessionId,
-      },
-    ],
   });
   return fetchUserFromSession();
 };

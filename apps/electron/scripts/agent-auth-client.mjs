@@ -67,10 +67,10 @@ async function request(flags) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const json = await res.json().catch(() => ({}));
+  const { accessToken, ...json } = await res.json().catch(() => ({}));
   console.log(`status ${res.status}:`, json);
-  if (res.status === 200 && json.accessToken) {
-    saveToken({ token: json.accessToken, expiresAt: json.expiresAt, agentName: body.agentName });
+  if (res.status === 200 && accessToken) {
+    saveToken({ token: accessToken, expiresAt: json.expiresAt, agentName: body.agentName });
     console.log(`\nToken cached at ${TOKEN_FILE}`);
   }
 }
@@ -100,8 +100,8 @@ async function release() {
 }
 
 function whoami() {
-  const t = loadToken();
-  console.log(t ?? 'No cached token.');
+  const { token, ...t } = loadToken() ?? {};
+  console.log(token ? t : 'No cached token.');
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
