@@ -751,6 +751,11 @@ const envSchema = Joi.object({
   GOOGLE_PUBSUB_MAX_DELIVERY_ATTEMPTS: Joi.number().integer().min(5).max(100).default(10),
   // Messages one subscriber holds unacked at a time.
   GOOGLE_PUBSUB_PULL_MAX_MESSAGES: Joi.number().integer().min(1).max(1000).default(16),
+  // Notion OAuth app for "Import my Notion" (Migrations → Notion). Unset: that button reports
+  // "not set up"; the integration-token import works without it.
+  NOTION_CLIENT_ID: Joi.string().allow('').default(''),
+  NOTION_CLIENT_SECRET: Joi.string().allow('').default(''),
+  NOTION_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_CLIENT_ID: Joi.string().allow('').default(''),
   MICROSOFT_CLIENT_SECRET: Joi.string().allow('').default(''),
   MICROSOFT_TENANT_ID: Joi.string().allow('').default(''),
@@ -1623,6 +1628,11 @@ export const config = {
     pubsubDeadLetterTopic: envVars.GOOGLE_PUBSUB_DEAD_LETTER_TOPIC as string,
     pubsubMaxDeliveryAttempts: envVars.GOOGLE_PUBSUB_MAX_DELIVERY_ATTEMPTS as number,
     pubsubPullMaxMessages: envVars.GOOGLE_PUBSUB_PULL_MAX_MESSAGES as number,
+  },
+  notion: {
+    clientId: envVars.NOTION_CLIENT_ID as string,
+    clientSecret: envVars.NOTION_CLIENT_SECRET as string,
+    redirectUri: envVars.NOTION_REDIRECT_URI as string,
   },
   microsoft: {
     clientId: envVars.MICROSOFT_CLIENT_ID as string,

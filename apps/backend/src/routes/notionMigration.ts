@@ -76,9 +76,8 @@ interface OAuthState {
 }
 
 function oauthConfig() {
-  const clientId = process.env.NOTION_CLIENT_ID;
-  const clientSecret = process.env.NOTION_CLIENT_SECRET;
-  const redirectUri = process.env.NOTION_REDIRECT_URI;
+  // From config, not process.env: in deployed environments the secret is KMS-encrypted in env.
+  const { clientId, clientSecret, redirectUri } = config.notion;
   return clientId && clientSecret && redirectUri ? { clientId, clientSecret, redirectUri } : null;
 }
 
