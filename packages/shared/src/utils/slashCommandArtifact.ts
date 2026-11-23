@@ -1,11 +1,12 @@
-import type { FlowComponent, FlowDefinition } from "../types/flowUI";
+import type { FlowComponent, FlowDefinition } from "../types/flowUI.js";
 import {
   flowDefinitionSchema,
   slashCommandArtifactPropsSchema,
   type SlashCommandArtifactClosed,
   type SlashCommandArtifactEndedCall,
   type SlashCommandArtifactProps,
-} from "../validation/flowSchema";
+} from "../validation/flowSchema.js";
+import { isEncryptedField } from "../crypto/field-decrypt.js";
 
 const FLOW_JSON_ATTRIBUTE_PATTERN = /data-flow-json="([^"]+)"/i;
 
@@ -259,6 +260,57 @@ export const getSlashCommandArtifactProjection = (
   return {
     command: artifact.props.command,
     messagePreview: artifact.body.replace(/\s+/g, " ").trim(),
+  };
+};
+
+/**
+ * Projection a sending client passes alongside the message (`artifactCommand`
+ * / `artifactPreview` mutator args). The client computes it from the plaintext
+ * body before the body is encrypted, so the server never has to read message
+ * content to write the `message_artifacts` row.
+ */
+export interface SlashCommandArtifactProjectionInput {
+  command?: string | undefined;
+  messagePreview?: string | undefined;
+}
+
+/** Upper bound on a client-supplied preview; the body it collapses is already length-limited upstream. */
+const MAX_ARTIFACT_PREVIEW_LENGTH = 10_000;
+
+/**
+ * Decide the `message_artifacts` projection for a send.
+ *
+ * - No client projection: derive it from content (SDK callers, older clients,
+ *   server-authored messages). Encrypted content yields null, i.e. no row.
+ * - Client projection: the command must be registered, and when the content is
+ *   readable it must agree with what was actually sent, so a client cannot claim
+ *   an artifact the message does not carry. The preview is taken from the
+ *   client because it is the only party that can read an encrypted body.
+ */
+export const resolveSlashCommandArtifactProjection = (
+  content: string | null | undefined,
+  input: SlashCommandArtifactProjectionInput | null | undefined,
+): SlashCommandArtifactProjection | null => {
+  const derived = getSlashCommandArtifactProjection(content);
+  if (!input || input.command === undefined) return derived;
+
+  if (!getSlashCommandArtifactDefinition(input.command)) {
+    throw new Error(`Unknown slash command artifact: ${input.command}`);
+  }
+  const contentIsReadable = !isEncryptedField(content);
+  if (contentIsReadable && (!derived || derived.command !== input.command)) {
+    throw new Error("Slash command artifact does not match the message content");
+  }
+  if (
+    input.messagePreview !== undefined &&
+    input.messagePreview.length > MAX_ARTIFACT_PREVIEW_LENGTH
+  ) {
+    throw new Error("Slash command artifact preview is too long");
+  }
+
+  return {
+    command: input.command,
+    messagePreview: input.messagePreview ?? derived?.messagePreview ?? "",
   };
 };
 

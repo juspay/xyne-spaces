@@ -5,6 +5,7 @@ import { queries } from '../zero/queries.js';
 import { mutators } from '../zero/mutators.js';
 import { MessageType } from '../zero/schema.js';
 import type { EntityLinkContextInput } from '../sdlc.js';
+import type { SlashCommandArtifactProjection } from '../utils/slashCommandArtifact.js';
 import type { ConversationRef } from './conversationRef.js';
 import { subscribeSendLifecycle } from './mutationLifecycle.js';
 
@@ -52,6 +53,8 @@ export type PendingMessage = {
   childConversationId?: string;
   attachments?: PendingAttachment[];
   entityLinkContext?: EntityLinkContextInput;
+  /** Client-computed artifact projection; replayed with the send (see SendPayload.artifact). */
+  artifact?: SlashCommandArtifactProjection;
   sessionId: string;
   zeroStateAtSend: ZeroStateName;
   mutatorFired: boolean;
@@ -210,6 +213,10 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
         type: entry.type,
         attachmentIds,
         ...(entry.entityLinkContext !== undefined && { entityLinkContext: entry.entityLinkContext }),
+        ...(entry.artifact !== undefined && {
+          artifactCommand: entry.artifact.command,
+          artifactPreview: entry.artifact.messagePreview,
+        }),
       }),
     );
   } else {
@@ -225,6 +232,10 @@ export function firePendingMutator(zero: Zero, entry: PendingMessage): void {
           showInChannel: entry.alsoSendToChannel,
         }),
         ...(childConversationId !== undefined && { childConversationId }),
+        ...(entry.artifact !== undefined && {
+          artifactCommand: entry.artifact.command,
+          artifactPreview: entry.artifact.messagePreview,
+        }),
       }),
     );
   }

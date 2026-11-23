@@ -129,7 +129,8 @@ import {
 } from '@/services/messageClassification/vocabulary';
 import {
   MessageArtifactStatus,
-  parseSlashCommandArtifactMessage,
+  getSlashCommandArtifactDefinition,
+  resolveSlashCommandArtifactProjection,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
@@ -2871,6 +2872,10 @@ export function createMutators(
           timestamp: z.number(),
           attachmentIds: z.array(z.string()).optional(),
           entityLinkContext: entityLinkContextSchema.optional(),
+          // Slash-command artifact projection, computed by the client from the
+          // plaintext body.
+          artifactCommand: z.string().optional(),
+          artifactPreview: z.string().optional(),
         }),
         async ({
           tx,
@@ -2883,6 +2888,8 @@ export function createMutators(
             timestamp,
             attachmentIds,
             entityLinkContext,
+            artifactCommand,
+            artifactPreview,
           },
         }) => {
           if (content === '') {
@@ -3139,6 +3146,30 @@ export function createMutators(
 
           await tx.mutate.messages.insert(message);
           logger.info(`💬 [MUTATOR-CREATE-MESSAGE] Message ${message.messageId} created, type: ${type}`);
+
+          // The artifact row is written here, by the sender, rather than derived
+          // from content by the side-effect worker
+          const artifact = resolveSlashCommandArtifactProjection(message.content, {
+            command: artifactCommand,
+            messagePreview: artifactPreview,
+          });
+          if (artifact) {
+            await tx.mutate.message_artifacts.insert({
+              // One artifact per message, and the client's optimistic row must
+              // coincide with this one — so the message id doubles as the row id.
+              id: messageId,
+              workspaceId: authData.workspaceId,
+              messageId,
+              channelId,
+              conversationId,
+              isInitialMessage: true,
+              messagePreview: artifact.messagePreview,
+              messageCreatedAt: now,
+              command: artifact.command,
+              status: MessageArtifactStatus.ACTIVE,
+              updatedAt: now,
+            });
+          }
 
           if (type === MessageType.USER) {
             const userProfile = await tx.run(zql.user_profiles.where('userId', authData.sub).one());
@@ -3737,8 +3768,10 @@ export function createMutators(
           messageId: z.string(),
           childConversationId: z.string().optional(),
           attachmentIds: z.array(z.string()).optional(),
+          artifactCommand: z.string().optional(),
+          artifactPreview: z.string().optional(),
         }),
-        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds } }) => {
+        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds, artifactCommand, artifactPreview } }) => {
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -3773,17 +3806,21 @@ export function createMutators(
           // so a second /sev2 inside it would fork the responders across two cards
           // and two calls. The channel is unrestricted — that is where a genuinely
           // separate incident belongs.
-          const outgoingArtifact = parseSlashCommandArtifactMessage(content);
+          const outgoingArtifact = resolveSlashCommandArtifactProjection(content, {
+            command: artifactCommand,
+            messagePreview: artifactPreview,
+          });
           if (outgoingArtifact) {
             const openArtifact = await tx.run(zql.message_artifacts
               // channelId first: it is the only selective index on this table.
               .where('channelId', conversation.channelId)
               .where('conversationId', conversationId)
-              .where('command', outgoingArtifact.definition.command)
+              .where('command', outgoingArtifact.command)
               .where('status', MessageArtifactStatus.ACTIVE)
               .one());
             if (openArtifact) {
-              throw new Error(`A ${outgoingArtifact.definition.badge} is already open in this thread`);
+              const badge = getSlashCommandArtifactDefinition(outgoingArtifact.command)?.badge ?? outgoingArtifact.command;
+              throw new Error(`A ${badge} is already open in this thread`);
             }
           }
 
@@ -3891,6 +3928,22 @@ export function createMutators(
 
           await tx.mutate.messages.insert(message);
           logger.info(`💬 [MUTATOR-CREATE-REPLY] Reply message ${message.messageId} created in conversation ${conversationId}, type: ${type}`);
+
+          if (outgoingArtifact) {
+            await tx.mutate.message_artifacts.insert({
+              id: messageId,
+              workspaceId: authData.workspaceId,
+              messageId,
+              channelId: conversation.channelId,
+              conversationId,
+              isInitialMessage: false,
+              messagePreview: outgoingArtifact.messagePreview,
+              messageCreatedAt: timestamp,
+              command: outgoingArtifact.command,
+              status: MessageArtifactStatus.ACTIVE,
+              updatedAt: timestamp,
+            });
+          }
 
           if (type === MessageType.USER) {
             asyncTasks.push(async () => {
@@ -4169,8 +4222,14 @@ export function createMutators(
         },
       ),
       update: defineMutator(
-        z.object({ messageId: z.string(), content: z.string().optional() }),
-        async ({ tx, args: { messageId, content } }) => {
+        z.object({
+          messageId: z.string(),
+          content: z.string().optional(),
+          // New one-line preview for the message's artifact row when an artifact
+          // message is edited; computed by the client from the plaintext body.
+          artifactPreview: z.string().optional(),
+        }),
+        async ({ tx, args: { messageId, content, artifactPreview } }) => {
           const message = await tx.run(zql.messages.where('messageId', messageId).one());
           if (!message) {
             throw new Error('Message not available');
@@ -4330,6 +4389,15 @@ export function createMutators(
             }
           }
 
+          if (artifactPreview !== undefined) {
+            const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
+            if (artifact) {
+              await tx.mutate.message_artifacts.update({
+                id: artifact.id,
+                messagePreview: artifactPreview,
+              });
+            }
+          }
         },
       ),
       react: defineMutator(
@@ -4842,6 +4910,14 @@ export function createMutators(
             }
 
             await deleteConversationWithParticipants(tx, channelCopy.conversationId);
+          }
+
+          // The artifact row follows its message in both delete scenarios. Done
+          // here rather than by the side-effect worker because that handler only
+          // reacts to content it can parse, which an encrypted body is not.
+          const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
+          if (artifact) {
+            await tx.mutate.message_artifacts.delete({ id: artifact.id });
           }
 
           // 5. Final Delete Logic
