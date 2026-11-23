@@ -146,6 +146,23 @@ export class NotionApiCollector {
       items.set(bare(r.id), { id: bare(r.id), kind, title: titleOf(r), parentId: null, raw: r });
     }
     for (const item of items.values()) item.parentId = await this.resolveParent(item.raw.parent, items);
+
+    // Notion's own member directory ("System → People" in the page picker): one row per workspace
+    // member, not content. Dropped with its rows even when the user ticks it.
+    const skipped = new Set(
+      [...items.values()].filter(i => i.kind === 'database' && i.parentId === null && isPeopleDirectory(i.raw)).map(i => i.id),
+    );
+    for (let grew = skipped.size > 0; grew; ) {
+      grew = false;
+      for (const item of items.values()) {
+        if (item.parentId && skipped.has(item.parentId) && !skipped.has(item.id)) {
+          skipped.add(item.id);
+          grew = true;
+        }
+      }
+    }
+    for (const id of skipped) items.delete(id);
+    if (skipped.size) onProgress?.(`Skipped Notion's People directory (${skipped.size - 1} member rows)`);
     onProgress?.(`Found ${[...items.values()].filter(i => i.kind === 'page').length} pages, ${[...items.values()].filter(i => i.kind === 'database').length} databases`);
 
     // Lay out paths: "<Title> <id>" nested under the parent's folder.
@@ -180,6 +197,8 @@ export class NotionApiCollector {
         }
       }
       if (object.archived || object.in_trash) return undefined;
+      // A link to a member's row in the skipped People directory doesn't bring it back.
+      if (skipped.has(id) || skipped.has(bare(object.parent?.database_id ?? ''))) return undefined;
       const item: Item = { id, kind, title: titleOf(object), parentId, raw: object };
       items.set(id, item);
       queue.push(item);
@@ -469,6 +488,11 @@ function titleOf(r: Json): string {
   const props = r.properties ?? {};
   const titleProp = Object.values(props).find((p: Json) => p?.type === 'title') as Json;
   return plain(titleProp?.title ?? []) || 'Untitled';
+}
+
+/** Notion's built-in member directory: a top-level database titled "People" (System → People). */
+function isPeopleDirectory(r: Json): boolean {
+  return titleOf(r).trim().toLowerCase() === 'people';
 }
 
 function richText(rt: Json[], ctx: RenderCtx): string {

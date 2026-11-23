@@ -74,6 +74,7 @@ import { TableOfContents, TocHeading } from '../TableOfContents';
 import { CanvasSearch } from '../CanvasSearch/CanvasSearch';
 import { CanvasCodeCopyButton } from '../CanvasCodeCopyButton';
 import { useCanvasTableFilters } from '../useCanvasTableFilters';
+import { useCanvasInAppLinks } from '../useCanvasInAppLinks';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { useTheme } from '../../../hooks/useTheme';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -563,6 +564,8 @@ export const CollaborativeCanvasEditor = forwardRef<
     const [isFocused, setIsFocused] = useState(false);
 
     useCanvasTableFilters(containerRef);
+    // Links to another canvas (or any page of this app) open in place, not in a new browser tab.
+    useCanvasInAppLinks(containerRef);
     const getCanvasCommentEditor = useCallback(
       () =>
         editor

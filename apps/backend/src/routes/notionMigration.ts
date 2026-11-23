@@ -1,5 +1,5 @@
 /**
- * Notion migration — token import, admin review, ingest (first cut).
+ * Notion migration — token import with an access review, member OAuth import, ingest (first cut).
  *
  * Two ways in, one pipeline (collect → [review] → ingest):
  *
@@ -25,7 +25,6 @@ import { authMiddleware } from '@/middleware/auth';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { runWithContext } from '@/database/tenant/context';
-import { DatabaseClient } from '@/database/client';
 import { NotionApiCollector } from '@/services/notion/notionApiCollector';
 import {
   importNotionTree,
@@ -58,14 +57,6 @@ interface ImportJob {
 }
 
 const jobs = new Map<string, ImportJob>();
-
-/** People in the Notion workspace, as seen by imports (Notion user list incl. emails), per Spaces workspace. */
-const notionPeople = new Map<string, { notionWorkspace?: string; people: Map<string, { name: string; email?: string }> }>();
-
-const isAdmin = (req: Request) => {
-  const u = req.user as { role?: string; orgRole?: string } | undefined;
-  return ['admin', 'owner', 'ADMIN', 'OWNER'].includes(u?.role ?? '') || ['ADMIN', 'OWNER'].includes(u?.orgRole ?? '');
-};
 
 const publicView = (job: ImportJob) => {
   const { stagingDir: _dir, ...view } = job;
@@ -192,10 +183,6 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
 // The router is mounted before the app-wide JSON parser, so POST routes parse their own body.
 
 router.post('/token-import', express.json({ limit: '16kb' }), authMiddleware.authenticate, async (req: Request, res: Response) => {
-  if (!isAdmin(req)) {
-    res.status(403).json({ error: 'FORBIDDEN', message: 'Only workspace admins can run a Notion import.' });
-    return;
-  }
   const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
   if (!/^(ntn_|secret_)[A-Za-z0-9]{20,}$/.test(token)) {
     res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Paste a Notion integration token (starts with ntn_ or secret_).' });
@@ -225,62 +212,12 @@ router.post('/token-import', express.json({ limit: '16kb' }), authMiddleware.aut
   res.status(202).json(publicView(job));
 });
 
-/**
- * Admin: who has brought in their Notion so far. Access to shared and teamspace pages is rebuilt
- * from who imported them (Notion's API doesn't expose its sharing lists), so people who haven't
- * imported yet are missing from those canvases — this is the list to follow up on.
- */
-router.get('/coverage', authMiddleware.authenticate, async (req: Request, res: Response) => {
-  if (!isAdmin(req)) {
-    res.status(403).json({ error: 'FORBIDDEN' });
-    return;
-  }
-  const workspaceId = req.user!.workspaceId!;
-  const db = DatabaseClient.getInstance();
-  // Everyone recorded as having imported a Notion page into this workspace (canvas metadata seenBy).
-  const notionCanvases = await db.canvas.findMany({
-    where: { workspaceId, metadata: { path: ['notionImport', 'kind'], not: 'none' } },
-    select: { metadata: true },
-  });
-  const importedIds = new Set(
-    notionCanvases.flatMap(c => ((c.metadata as { notionImport?: { seenBy?: string[] } } | null)?.notionImport?.seenBy ?? [])),
-  );
-  // Real people only — never bots or app agents.
-  const humans = await db.user.findMany({
-    where: { workspaceId, status: 'ACTIVE', userType: 'USER', role: { not: 'GUEST' } },
-    select: { id: true, email: true, name: true },
-  });
-  const byEmail = new Map(humans.map(h => [h.email.toLowerCase(), h]));
-
-  const known = notionPeople.get(workspaceId);
-  if (!known) {
-    // No import yet, so we don't know the Notion workspace's people — show Spaces people instead.
-    res.json({
-      source: 'spaces',
-      people: humans
-        .map(h => ({ name: h.name ?? h.email, email: h.email, hasSpacesAccount: true, imported: importedIds.has(h.id) }))
-        .sort((a, b) => a.email.localeCompare(b.email)),
-    });
-    return;
-  }
-  res.json({
-    source: 'notion',
-    notionWorkspace: known.notionWorkspace,
-    people: [...known.people.values()]
-      .map(p => {
-        const account = p.email ? byEmail.get(p.email.toLowerCase()) : undefined;
-        return { name: p.name, email: p.email, hasSpacesAccount: Boolean(account), imported: account ? importedIds.has(account.id) : false };
-      })
-      .sort((a, b) => (a.email ?? a.name).localeCompare(b.email ?? b.name)),
-  });
-});
-
 router.get('/mine', authMiddleware.authenticate, (req: Request, res: Response) => {
   const mine = [...jobs.values()]
     .filter(j => j.userId === req.user!.id)
     .sort((a, b) => b.startedAt - a.startedAt)
     .map(publicView);
-  res.json({ jobs: mine, isAdmin: isAdmin(req) });
+  res.json({ jobs: mine });
 });
 
 router.get('/jobs/:id', authMiddleware.authenticate, (req: Request, res: Response) => {
@@ -298,7 +235,7 @@ router.get('/jobs/:id', authMiddleware.authenticate, (req: Request, res: Respons
  */
 router.post('/jobs/:id/approve', express.json({ limit: '1mb' }), authMiddleware.authenticate, async (req: Request, res: Response) => {
   const job = jobs.get(req.params.id);
-  if (!job || job.userId !== req.user!.id || !isAdmin(req)) {
+  if (!job || job.userId !== req.user!.id) {
     res.status(404).json({ error: 'NOT_FOUND' });
     return;
   }
@@ -338,10 +275,6 @@ async function collect(job: ImportJob, accessToken: string): Promise<void> {
   try {
     const collected = await new NotionApiCollector(accessToken).collect(log);
     log(`Collected ${collected.pages} pages, ${collected.databases} databases, ${collected.files} files, ${collected.manifest.users.length} Notion users`);
-    const known = notionPeople.get(job.workspaceId) ?? { notionWorkspace: job.notionWorkspace, people: new Map() };
-    for (const u of collected.manifest.users) known.people.set(u.email ?? u.id, { name: u.name, email: u.email });
-    known.notionWorkspace = job.notionWorkspace ?? known.notionWorkspace;
-    notionPeople.set(job.workspaceId, known);
     collected.warnings.forEach(w => log(`! ${w}`));
     if (collected.pages + collected.databases === 0) {
       throw new Error(job.kind === 'member'

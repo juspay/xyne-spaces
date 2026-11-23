@@ -10,7 +10,7 @@ export type NotionImportStatus =
   | 'completed'
   | 'failed';
 
-/** Admin's access choice for one top-level Notion page (and everything under it). */
+/** The importer's access choice for one top-level Notion page (and everything under it). */
 export type NotionSectionChoice = 'public' | 'private-owner' | 'private-me' | 'skip';
 
 export interface NotionSection {
@@ -24,7 +24,7 @@ export interface NotionSection {
 
 export interface NotionImportJob {
   id: string;
-  /** token = admin's workspace import; member = someone bringing their own pages via Notion sign-in */
+  /** token = workspace import with an integration token; member = someone bringing their own pages via Notion sign-in */
   kind: 'token' | 'member';
   userId: string;
   status: NotionImportStatus;
@@ -59,28 +59,17 @@ export interface NotionImportJob {
   finishedAt?: number;
 }
 
-/** Who has imported: the Notion workspace's people once an import has run, Spaces people before that. */
-export interface NotionCoverage {
-  source: 'notion' | 'spaces';
-  notionWorkspace?: string;
-  people: Array<{ name: string; email?: string; hasSpacesAccount: boolean; imported: boolean }>;
-}
-
 export const notionMigrationApi = {
   /** Notion's consent + page-picker URL for the signed-in user; the caller navigates there. */
   connectUrl: async (): Promise<string> =>
     (await apiInstance.get<{ url: string }>(`${BASE}/connect?format=json`)).data.url,
 
-  /** Start an import from the merchant's Notion integration token (admin only). */
+  /** Start an import from the merchant's Notion integration token. */
   startWithToken: async (token: string): Promise<NotionImportJob> =>
     (await apiInstance.post<NotionImportJob>(`${BASE}/token-import`, { token })).data,
 
-  /** Admin: who has imported their Notion so far (access to shared pages fills in as people do). */
-  coverage: async (): Promise<NotionCoverage> =>
-    (await apiInstance.get<NotionCoverage>(`${BASE}/coverage`)).data,
-
-  listMine: async (): Promise<{ jobs: NotionImportJob[]; isAdmin: boolean }> =>
-    (await apiInstance.get<{ jobs: NotionImportJob[]; isAdmin: boolean }>(`${BASE}/mine`)).data,
+  listMine: async (): Promise<{ jobs: NotionImportJob[] }> =>
+    (await apiInstance.get<{ jobs: NotionImportJob[] }>(`${BASE}/mine`)).data,
 
   approve: async (
     jobId: string,

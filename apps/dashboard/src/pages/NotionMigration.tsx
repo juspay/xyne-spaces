@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TriangleAlert } from 'lucide-react';
 import {
   notionMigrationApi,
-  type NotionCoverage,
   type NotionImportJob,
   type NotionSection,
   type NotionSectionChoice,
@@ -57,7 +56,7 @@ const isRunning = (job: NotionImportJob): boolean =>
   job.status === 'collecting' || job.status === 'ingesting';
 
 // ---------------------------------------------------------------------------------------------
-// Admin review (a token import waits here before anything is created)
+// Access review (a token import waits here before anything is created)
 // ---------------------------------------------------------------------------------------------
 const CHOICE_LABEL: Record<NotionSectionChoice, string> = {
   'private-owner': 'Private to its owner',
@@ -200,27 +199,13 @@ function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Workspace import (admin)
+// Workspace import (integration token)
 // ---------------------------------------------------------------------------------------------
-function WorkspaceImportCard({
-  coverage,
-  onStarted,
-}: {
-  coverage: NotionCoverage | undefined;
-  onStarted: () => Promise<void>;
-}): React.JSX.Element {
+function WorkspaceImportCard({ onStarted }: { onStarted: () => Promise<void> }): React.JSX.Element {
   const [token, setToken] = useState('');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stepsOpen, setStepsOpen] = useState(false);
-
-  const people = coverage?.people ?? [];
-  const doneCount = people.filter(p => p.imported).length;
-  const progress = people.length ? `${(doneCount / people.length) * 100}%` : '0%';
-  const workspaceName =
-    coverage?.source === 'notion'
-      ? (coverage.notionWorkspace ?? 'Notion workspace')
-      : 'Spaces members';
 
   const start = async (): Promise<void> => {
     setError(null);
@@ -238,61 +223,9 @@ function WorkspaceImportCard({
 
   return (
     <section className='flex flex-col gap-4 rounded-xl border border-border bg-card p-5'>
-      <div className='flex items-center gap-2'>
-        <div className='text-sm font-semibold'>Workspace import</div>
-        <Badge variant='secondary'>Admin</Badge>
-      </div>
+      <div className='text-sm font-semibold'>Workspace import</div>
 
       <div className='flex flex-col gap-2'>
-        <div className='flex items-baseline justify-between gap-3 text-[13px]'>
-          <span className='font-medium'>{workspaceName}</span>
-          <span className='tabular-nums text-muted-foreground'>
-            {doneCount} of {people.length} members imported
-          </span>
-        </div>
-        <div className='h-1 rounded-sm bg-muted'>
-          <div className='h-1 rounded-sm bg-primary' style={{ width: progress }} />
-        </div>
-      </div>
-
-      {people.length > 0 && (
-        <div className='overflow-hidden rounded-[10px] border border-border text-[13px]'>
-          <div className='grid grid-cols-[minmax(0,1fr)_120px] gap-3 bg-muted/50 px-[14px] py-2 text-xs font-medium text-muted-foreground'>
-            <span>Member</span>
-            <span>Status</span>
-          </div>
-          {people.map(p => {
-            const status = p.imported ? 'Imported' : p.hasSpacesAccount ? 'Pending' : 'No account';
-            return (
-              <div
-                key={p.email ?? p.name}
-                className='grid grid-cols-[minmax(0,1fr)_120px] items-center gap-3 border-t border-border px-[14px] py-[9px]'
-              >
-                <span className='truncate'>{p.email ?? p.name}</span>
-                <span
-                  className={cn(
-                    'flex items-center gap-1.5',
-                    p.imported ? 'text-foreground' : 'text-muted-foreground',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'size-1.5 rounded-full',
-                      p.imported ? 'bg-[hsl(142_60%_40%)]' : 'bg-border',
-                    )}
-                  />
-                  {status}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div className='text-xs text-muted-foreground'>
-        Shared and teamspace pages reach members only after they import.
-      </div>
-
-      <div className='flex flex-col gap-2 pt-1'>
         <label htmlFor='notion-token' className='text-[13px] font-medium'>
           Integration token
         </label>
@@ -522,7 +455,6 @@ const NotionMigration = (): React.JSX.Element => {
       waitingForNotion || query.state.data?.jobs.some(isRunning) ? POLL_MS : false,
   });
   const jobs = data?.jobs ?? [];
-  const isAdmin = data?.isAdmin ?? false;
 
   // Stop waiting once the import shows up (the user clicked Allow), or after 10 minutes.
   const notionJobArrived =
@@ -539,13 +471,6 @@ const NotionMigration = (): React.JSX.Element => {
     );
     return () => clearTimeout(timer);
   }, [waitingForNotion, notionJobArrived]);
-
-  const { data: coverage } = useQuery({
-    queryKey: ['notion-migration', 'coverage'],
-    queryFn: notionMigrationApi.coverage,
-    enabled: isAdmin,
-    refetchInterval: jobs.some(isRunning) ? POLL_MS * 5 : false,
-  });
 
   const newestId = jobs[0]?.id;
   const isOpen = (id: string): boolean => openRows[id] ?? id === newestId;
@@ -607,9 +532,8 @@ const NotionMigration = (): React.JSX.Element => {
             )}
           </section>
 
-          {isAdmin && !isLoading && (
+          {!isLoading && (
             <WorkspaceImportCard
-              coverage={coverage}
               onStarted={() =>
                 queryClient.invalidateQueries({ queryKey: ['notion-migration', 'mine'] })
               }
