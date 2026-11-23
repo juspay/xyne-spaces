@@ -11,6 +11,7 @@ import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptServic
 import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { callEncryptionService } from '@/services/callEncryptionService';
+import { getEncryptionProvider } from '@/services/encryption';
 import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
 import { TicketController } from './ticketController';
 // import { CallController } from './callController';
@@ -33,6 +34,8 @@ const AGENT_DISPATCH_CLAIM_TTL_SECONDS = 60 * 60;
 /** Raw 32-byte X25519 public key, base64. */
 const callSessionBodySchema = z.object({
   publicKey: z.string().refine((value) => callEncryptionService.isUsableAgentPublicKey(value), 'publicKey must be a 32-byte X25519 key'),
+  // The job's P-256 transit key (base64 uncompressed point), for calls keyed by the encryption service.
+  transitPublicKey: z.string().regex(/^B[A-P][A-Za-z0-9+/]{85}=$/, 'transitPublicKey must be a base64 uncompressed P-256 point').optional(),
   /** The LiveKit dispatch this job belongs to (`ctx.job.dispatch_id`). */
   dispatchId: z.string().min(1).max(128),
 });
@@ -170,7 +173,7 @@ class TranscriptionAgentController {
         return;
       }
 
-      const { dispatchId, publicKey } = parsed.data;
+      const { dispatchId, publicKey, transitPublicKey } = parsed.data;
       const claim = await redisService.claimAgentDispatch(dispatchId, callId, publicKey, AGENT_DISPATCH_CLAIM_TTL_SECONDS);
       if (claim !== 'claimed_by_caller') {
         // `unknown` (not recorded for this call) may just mean the record hasn't landed yet,
@@ -180,14 +183,29 @@ class TranscriptionAgentController {
         return;
       }
 
-      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion);
+      if (callEncryptionService.isServiceKeyed(call) && !transitPublicKey) {
+        logger.warn(`[${callId}] agent_call_session_refused | reason=transit_key_required, dispatch_id=${dispatchId}`);
+        res.status(400).json({ success: false, error: 'transitPublicKey required', reason: 'transit_key_required' });
+        return;
+      }
+      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion, {
+        kind: 'agent',
+        clientKey: transitPublicKey ?? '',
+      });
       if (!encryption) {
         logger.info(`[${callId}] agent_call_session_issued | encrypted=false, dispatch_id=${dispatchId}`);
         res.json({ success: true, encrypted: false });
         return;
       }
 
-      const sealedKey = callEncryptionService.sealKeyForAgent(callId, encryption.key, publicKey);
+      if (encryption.encryptedKey) {
+        // The agent derives the transit key from the service's public keys (ECDH, as clients do).
+        const transitServerKeys = await getEncryptionProvider().getTransitServerKeys();
+        logger.info(`[${callId}] agent_call_session_issued | encrypted=true, key_source=service, dispatch_id=${dispatchId}`);
+        res.json({ success: true, encrypted: true, encryptedKey: encryption.encryptedKey, transitServerKeys });
+        return;
+      }
+      const sealedKey = callEncryptionService.sealKeyForAgent(callId, encryption.key!, publicKey);
       logger.info(`[${callId}] agent_call_session_issued | encrypted=true, dispatch_id=${dispatchId}`);
       res.json({ success: true, encrypted: true, sealedKey });
     } catch (error) {

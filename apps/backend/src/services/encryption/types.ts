@@ -97,6 +97,27 @@ export type TransitCaller = {
   allowExpiredAuthToken?: boolean;
 };
 
+/**
+ * Kinds of key the encryption service generates and keeps wrapped (`generateKey`).
+ * - `CALL`: a call's E2EE media key; `keyValue` is the call's room name (externalId).
+ */
+export type GeneratedKeyType = 'CALL';
+
+export type GenerateKeyInput = {
+  keyType: GeneratedKeyType;
+  /** The workspace whose DEK wraps the key. */
+  workspaceId: string;
+  /** What the key is for; one key exists per (keyType, keyValue). */
+  keyValue: string;
+};
+
+/**
+ * A generated key as the backend holds it: DEK ciphertext (`ENC:v1|<dekId>|…`), which the
+ * backend cannot open. For `CALL` the plaintext is `{"callId","key"}`. Put it in a response
+ * as it is; `transformResponse` re-encrypts it to the caller's transit key.
+ */
+export type WrappedKey = { wrappedKey: string };
+
 /** One chunk of a chunked encrypted file container (`@xyne/shared` file-container). */
 export type FileChunk = {
   index: number;
@@ -276,4 +297,9 @@ export interface EncryptionProvider {
    * the backend never sees the plaintext.
    */
   transformResponse<T>(body: T, caller: TransitCaller): Promise<TransitEncryptResult<T>>;
+  /**
+   * A random key for `(keyType, keyValue)`, wrapped. Created on the first request and the
+   * same for every later one.
+   */
+  generateKey(input: GenerateKeyInput): Promise<WrappedKey>;
 }

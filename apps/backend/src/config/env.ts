@@ -267,6 +267,10 @@ const envSchema = Joi.object({
       }
       return value;
     }),
+  // Where keys of newly activated calls come from: `derived` (HKDF of CALL_E2EE_MASTER_KEY) or
+  // `encryption-service` (random per call, released encrypted to each joiner; the backend never
+  // holds it). A call keeps the source it activated with. Switch once every client can open them.
+  CALL_E2EE_KEY_SOURCE: Joi.string().valid('derived', 'encryption-service').default('derived'),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
@@ -1180,6 +1184,7 @@ export const config = {
     e2eePreviousMasterKeys: (envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS
       ? JSON.parse(envVars.CALL_E2EE_PREVIOUS_MASTER_KEYS as string)
       : {}) as Record<string, string>,
+    e2eeKeySource: envVars.CALL_E2EE_KEY_SOURCE as 'derived' | 'encryption-service',
   },
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,

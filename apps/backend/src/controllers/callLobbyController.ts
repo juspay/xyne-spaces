@@ -9,6 +9,7 @@ import {
   getHostControls,
 } from '@/services/liveKitService';
 import { callEncryptionService } from '@/services/callEncryptionService';
+import { getEncryptionProvider } from '@/services/encryption';
 import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -283,9 +284,15 @@ export const callLobbyController = {
 
       // An admitted guest is a participant like any other and needs the media key.
       const encryption = callRecord
-        ? await callEncryptionService.credentialsForJoin(callRecord, pinCallEncryptionKeyVersion)
+        ? await callEncryptionService.credentialsForJoin(callRecord, pinCallEncryptionKeyVersion, {
+            kind: 'guest',
+            // The guest's one-off transit public key, for calls keyed by the encryption service.
+            clientKey: typeof req.body?.transitPublicKey === 'string' ? req.body.transitPublicKey : '',
+          })
         : undefined;
       if (encryption) res.set('Cache-Control', 'no-store');
+      // A service-issued key is opened with the service's public keys; the guest has no session to fetch them.
+      const transitServerKeys = encryption?.encryptedKey ? await getEncryptionProvider().getTransitServerKeys() : undefined;
       res.json({
         token,
         serverUrl: livekitService.getServerUrl(),
@@ -293,6 +300,7 @@ export const callLobbyController = {
         callType: call.callType,
         participantId: participant.id,
         ...(encryption && { encryption }),
+        ...(transitServerKeys && { transitServerKeys }),
       });
     } catch (err) {
       logger.error(`[call-lobby] externalJoin failed | error=${err}`);

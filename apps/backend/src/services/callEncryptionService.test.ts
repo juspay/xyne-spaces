@@ -5,12 +5,17 @@ const livekit = {
   e2eeMasterKey: KEY_V2,
   e2eeMasterKeyVersion: 2,
   e2eePreviousMasterKeys: { '1': KEY_V1 } as Record<string, string>,
+  e2eeKeySource: 'derived' as 'derived' | 'encryption-service',
 };
+
+const generateKey = jest.fn();
+const transformResponse = jest.fn();
 
 jest.mock('@/config/env', () => ({ config: { livekit } }));
 jest.mock('@/utils/logger', () => ({
   logger: { info: jest.fn(), error: jest.fn(), debug: jest.fn(), warn: jest.fn() },
 }));
+jest.mock('@/services/encryption', () => ({ getEncryptionProvider: () => ({ generateKey, transformResponse }) }));
 // @xyne/shared ships ESM that jest's transform ignores — stub the enums used.
 jest.mock('@xyne/shared', () => ({
   CallStatus: { PENDING: 'PENDING', SCHEDULED: 'SCHEDULED', ACTIVE: 'ACTIVE', ENDED: 'ENDED', CANCELLED: 'CANCELLED' },
@@ -18,13 +23,22 @@ jest.mock('@xyne/shared', () => ({
 }));
 
 import { createDecipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, type KeyObject } from 'crypto';
-import type { Call } from '@prisma/client';
-import { callEncryptionService } from './callEncryptionService';
+import { callEncryptionService, SERVICE_KEY_VERSION, type CallKeyRecipient } from './callEncryptionService';
 
-const row = (status: string, e2ee?: Record<string, boolean | number>): Pick<Call, 'externalId' | 'metadata' | 'status'> => ({
+const user: CallKeyRecipient = { kind: 'user', userId: 'u1', authToken: 'jwt' };
+const row = (status: string, e2ee?: Record<string, boolean | number>) => ({
+  id: 'call-1',
   externalId: 'room-1',
+  workspaceId: 'ws-1',
   status,
   metadata: e2ee ? { e2ee } : {},
+});
+const keyAt = (version: number) => callEncryptionService.deriveKey('room-1', version).toString('base64');
+const noPin = jest.fn(async () => null);
+
+afterEach(() => {
+  livekit.e2eeKeySource = 'derived';
+  jest.clearAllMocks();
 });
 
 describe('callEncryptionService key ring', () => {
@@ -49,51 +63,84 @@ describe('callEncryptionService key ring', () => {
     expect(callEncryptionService.stateForNewCall({ callType: 'HEADLESS' as never })).toBeUndefined();
   });
 
-  it('hands a not-yet-activated call the current version and an activated row its pinned one', () => {
-    const current = callEncryptionService.deriveKey('room-1', 2).toString('base64');
-    const v1 = callEncryptionService.deriveKey('room-1', 1).toString('base64');
-    expect(callEncryptionService.credentialsFor(row('PENDING', { enabled: true }))).toEqual({ key: current });
-    expect(callEncryptionService.credentialsFor(row('SCHEDULED', { enabled: true }))).toEqual({ key: current });
-    expect(callEncryptionService.credentialsForState('room-1', { enabled: true })).toEqual({ key: current });
-    expect(callEncryptionService.credentialsFor(row('ACTIVE', { enabled: true, keyVersion: 1 }))).toEqual({ key: v1 });
-    expect(callEncryptionService.credentialsFor(row('ENDED', { enabled: true, keyVersion: 2 }))).toEqual({ key: current });
+  it('hands an activated row its pinned version and a new call the current one', async () => {
+    await expect(callEncryptionService.credentialsForState(row('PENDING'), { enabled: true }, user)).resolves.toEqual({ key: keyAt(2) });
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: 1 }), noPin, user)).resolves.toEqual({ key: keyAt(1) });
+    await expect(callEncryptionService.credentialsForJoin(row('ENDED', { enabled: true, keyVersion: 2 }), noPin, user)).resolves.toEqual({ key: keyAt(2) });
   });
 
-  it('treats an activated row without a version as version 1', () => {
-    const v1 = callEncryptionService.deriveKey('room-1', 1).toString('base64');
-    expect(callEncryptionService.credentialsFor(row('ACTIVE', { enabled: true }))).toEqual({ key: v1 });
+  it('treats an activated row without a version as version 1', async () => {
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true }), noPin, user)).resolves.toEqual({ key: keyAt(1) });
   });
 
-  it('returns nothing for unencrypted calls', () => {
-    expect(callEncryptionService.credentialsFor(row('ACTIVE'))).toBeUndefined();
-    expect(callEncryptionService.credentialsFor(row('ACTIVE', { enabled: false }))).toBeUndefined();
+  it('returns nothing for unencrypted calls', async () => {
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE'), noPin, user)).resolves.toBeUndefined();
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: false }), noPin, user)).resolves.toBeUndefined();
     expect(callEncryptionService.isCallEncrypted(row('ACTIVE', { enabled: true }))).toBe(true);
     expect(callEncryptionService.isCallEncrypted(row('ACTIVE'))).toBe(false);
   });
 });
 
 describe('callEncryptionService.credentialsForJoin', () => {
-  const joinRow = (status: string, e2ee?: Record<string, boolean | number>) => ({ id: 'call-1', ...row(status, e2ee) });
-  const keyAt = (version: number) => callEncryptionService.deriveKey('room-1', version).toString('base64');
-
   it('pins the current version on a row that is not activated yet and uses it', async () => {
     const pin = jest.fn(async (_callId: string, version: number) => version);
-    await expect(callEncryptionService.credentialsForJoin(joinRow('SCHEDULED', { enabled: true }), pin)).resolves.toEqual({ key: keyAt(2) });
-    await expect(callEncryptionService.credentialsForJoin(joinRow('PENDING', { enabled: true }), pin)).resolves.toEqual({ key: keyAt(2) });
+    await expect(callEncryptionService.credentialsForJoin(row('SCHEDULED', { enabled: true }), pin, user)).resolves.toEqual({ key: keyAt(2) });
+    await expect(callEncryptionService.credentialsForJoin(row('PENDING', { enabled: true }), pin, user)).resolves.toEqual({ key: keyAt(2) });
     expect(pin).toHaveBeenCalledWith('call-1', 2);
   });
 
   it('uses the version already stored when another join pinned first', async () => {
     const pin = jest.fn(async () => 1);
-    await expect(callEncryptionService.credentialsForJoin(joinRow('SCHEDULED', { enabled: true }), pin)).resolves.toEqual({ key: keyAt(1) });
+    await expect(callEncryptionService.credentialsForJoin(row('SCHEDULED', { enabled: true }), pin, user)).resolves.toEqual({ key: keyAt(1) });
   });
 
   it('does not write for pinned, activated or unencrypted rows', async () => {
     const pin = jest.fn(async () => 2);
-    await expect(callEncryptionService.credentialsForJoin(joinRow('SCHEDULED', { enabled: true, keyVersion: 1 }), pin)).resolves.toEqual({ key: keyAt(1) });
-    await expect(callEncryptionService.credentialsForJoin(joinRow('ACTIVE', { enabled: true }), pin)).resolves.toEqual({ key: keyAt(1) });
-    await expect(callEncryptionService.credentialsForJoin(joinRow('ACTIVE'), pin)).resolves.toBeUndefined();
+    await expect(callEncryptionService.credentialsForJoin(row('SCHEDULED', { enabled: true, keyVersion: 1 }), pin, user)).resolves.toEqual({ key: keyAt(1) });
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true }), pin, user)).resolves.toEqual({ key: keyAt(1) });
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE'), pin, user)).resolves.toBeUndefined();
     expect(pin).not.toHaveBeenCalled();
+  });
+});
+
+describe('callEncryptionService with keys from the encryption service', () => {
+  beforeEach(() => {
+    livekit.e2eeKeySource = 'encryption-service';
+    generateKey.mockResolvedValue({ wrappedKey: 'ENC:v1|dek-1|wrapped' });
+    transformResponse.mockResolvedValue({ body: { encryptedKey: 'ENC:v1|tk-1|abc' } });
+  });
+
+  it('pins the service version at activation and on a first join', async () => {
+    expect(callEncryptionService.stateAtActivation({ enabled: true })).toEqual({ enabled: true, keyVersion: SERVICE_KEY_VERSION });
+    const pin = jest.fn(async (_callId: string, version: number) => version);
+    await expect(callEncryptionService.credentialsForJoin(row('SCHEDULED', { enabled: true }), pin, user)).resolves.toEqual({
+      encryptedKey: 'ENC:v1|tk-1|abc',
+    });
+    expect(pin).toHaveBeenCalledWith('call-1', SERVICE_KEY_VERSION);
+  });
+
+  it('generates the call key by room name and workspace, then re-encrypts it to the recipient', async () => {
+    const guest: CallKeyRecipient = { kind: 'guest', clientKey: 'BA==' };
+    await callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }), noPin, guest);
+    expect(generateKey).toHaveBeenCalledWith({ keyType: 'CALL', workspaceId: 'ws-1', keyValue: 'room-1' });
+    expect(transformResponse).toHaveBeenCalledWith({ encryptedKey: 'ENC:v1|dek-1|wrapped' }, { clientKey: 'BA==' });
+    await callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }), noPin, user);
+    expect(transformResponse).toHaveBeenLastCalledWith({ encryptedKey: 'ENC:v1|dek-1|wrapped' }, { authToken: 'jwt' });
+  });
+
+  it('fails the join when the key comes back still under the DEK (API client encryption off)', async () => {
+    transformResponse.mockResolvedValue({ body: { encryptedKey: 'ENC:v1|dek-1|wrapped' } });
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }), noPin, user)).rejects.toThrow(/re-encrypted/);
+  });
+
+  it('keeps calls pinned to a derived version on the derived key during the cutover', async () => {
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: 1 }), noPin, user)).resolves.toEqual({ key: keyAt(1) });
+    expect(generateKey).not.toHaveBeenCalled();
+  });
+
+  it('fails the join when the service cannot generate the key', async () => {
+    generateKey.mockRejectedValue(new Error('unavailable'));
+    await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }), noPin, user)).rejects.toThrow('unavailable');
   });
 });
 

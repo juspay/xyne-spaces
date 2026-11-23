@@ -445,8 +445,13 @@ export enum CallOrigin {
  * initiate/join responses. Never travels through LiveKit.
  */
 export interface CallEncryptionCredentials {
-  /** 32-byte key, base64. */
-  key: string;
+  /** 32-byte key, base64 (calls whose key the backend derives). */
+  key?: string;
+  /**
+   * Calls keyed by the encryption service: transit ciphertext of `{"callId","key"}`
+   * for this client's transit key. Open with `openCallKey`; the backend can't read it.
+   */
+  encryptedKey?: string;
 }
 
 export enum CallStatus {

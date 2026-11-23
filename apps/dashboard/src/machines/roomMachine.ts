@@ -1136,7 +1136,7 @@ export const roomMachine = setup({
 
         // The key must be in the provider before the first frame goes out or comes in.
         if (encryption) {
-          await applyRoomEncryption(room, encryption);
+          await applyRoomEncryption(room, encryption, externalId);
           logRoomMachineEvent(externalId, 'encryption_enabled');
         }
 

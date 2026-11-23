@@ -3,6 +3,8 @@ import type { Call } from '@prisma/client';
 import { CallStatus, CallType, type CallEncryptionCredentials } from '@xyne/shared';
 import { config } from '@/config/env';
 import type { CallEncryptionState } from '@/database/repositories/callRepository';
+import { getEncryptionProvider } from '@/services/encryption';
+import type { TransitCaller } from '@/services/encryption/types';
 import { logger } from '@/utils/logger';
 
 /**
@@ -22,6 +24,11 @@ import { logger } from '@/utils/logger';
  * keeps the versions that calls still in progress were activated with. A call pins
  * its version when it is activated (first participant_joined), not when its row is
  * written, so a scheduled or recurring call never carries a retired version.
+ *
+ * With CALL_E2EE_KEY_SOURCE=encryption-service, calls activate on SERVICE_KEY_VERSION
+ * instead: the encryption service creates a random key per call (`generateKey`, kept wrapped
+ * under the workspace's WORKSPACE_CALLS DEK) and `transformResponse` re-encrypts it to each
+ * recipient's transit key, so the backend only relays ciphertext it can't open.
  */
 
 const KEY_INFO_PREFIX = 'xyne-call-e2ee:v';
@@ -33,6 +40,26 @@ const AGENT_SEAL_INFO = 'xyne-agent-call-key:v1';
 export type SealedCallKey = { ephemeralPublicKey: string; nonce: string; ciphertext: string };
 /** Activated rows written before versions existed. */
 const LEGACY_KEY_VERSION = 1;
+/** Pinned version meaning "keyed by the encryption service" (derived versions start at 1). */
+export const SERVICE_KEY_VERSION = 0;
+
+/** Transit ciphertext (`ENC:v1|tk-N|…`): what a recipient can open. */
+const TRANSIT_CIPHERTEXT_PREFIX = 'ENC:v1|tk-';
+
+type KeyedCall = Pick<Call, 'id' | 'externalId' | 'metadata' | 'status' | 'workspaceId'>;
+
+/** Who a call's E2EE key is released to. */
+export type CallKeyRecipient =
+  /** A signed-in user: the session's transit key (`transitCaller(req)`). */
+  | ({ kind: 'user'; userId: string } & TransitCaller)
+  /** A lobby guest or a transcription agent job: a one-off transit key sent with the join. */
+  | { kind: 'guest' | 'agent'; clientKey: string };
+
+const transitCallerOf = (recipient: CallKeyRecipient): TransitCaller => {
+  if (recipient.kind !== 'user') return { clientKey: recipient.clientKey };
+  const { kind: _kind, userId: _userId, ...caller } = recipient;
+  return caller;
+};
 
 export type { CallEncryptionCredentials };
 
@@ -70,6 +97,7 @@ class CallEncryptionService {
   }
 
   currentKeyVersion(): number {
+    if (config.livekit.e2eeKeySource === 'encryption-service') return SERVICE_KEY_VERSION;
     return this.keyRing().currentVersion;
   }
 
@@ -113,38 +141,45 @@ class CallEncryptionService {
     );
   }
 
-  /** The key material a join response carries, or undefined for an unencrypted call. */
-  credentialsFor(call: Pick<Call, 'externalId' | 'metadata' | 'status'>): CallEncryptionCredentials | undefined {
-    const state = encryptionStateOf(call);
-    // Not activated yet: the version activation will pin is the current one. An
-    // activated row with no version predates versioning.
-    return this.credentials(call.externalId, state, isNotYetActivated(call) ? undefined : LEGACY_KEY_VERSION);
-  }
-
   /**
-   * Key for a join response. A row not activated yet (a SCHEDULED call, or a PENDING one
-   * written before /initiate pinned versions) has the current version pinned on it now, so
-   * every participant and the later activation use one version even if the master key
-   * rotates in between. `pinKeyVersion` writes only when no version is stored and returns
-   * the stored one. It is passed in because the repository imports this module.
+   * Key for a join response, for `recipient`. A row not activated yet (a SCHEDULED call, or a
+   * PENDING one written before /initiate pinned versions) has the current version pinned on it
+   * now, so every participant and the later activation use one version even if the key source
+   * or master key changes in between. `pinKeyVersion` writes only when no version is stored and
+   * returns the stored one. It is passed in because the repository imports this module.
    */
   async credentialsForJoin(
-    call: Pick<Call, 'id' | 'externalId' | 'metadata' | 'status'>,
+    call: KeyedCall,
     pinKeyVersion: (callId: string, keyVersion: number) => Promise<number | null>,
+    recipient: CallKeyRecipient,
   ): Promise<CallEncryptionCredentials | undefined> {
     const state = encryptionStateOf(call);
     if (state?.enabled !== true) return undefined;
-    if (state.keyVersion === undefined && isNotYetActivated(call)) {
-      const current = this.currentKeyVersion();
-      const pinned = (await pinKeyVersion(call.id, current)) ?? current;
-      return this.credentials(call.externalId, { ...state, keyVersion: pinned }, undefined);
+    let keyVersion = state.keyVersion;
+    if (keyVersion === undefined) {
+      if (isNotYetActivated(call)) {
+        const current = this.currentKeyVersion();
+        keyVersion = (await pinKeyVersion(call.id, current)) ?? current;
+      } else {
+        keyVersion = LEGACY_KEY_VERSION;
+      }
     }
-    return this.credentialsFor(call);
+    return this.credentials(call, keyVersion, recipient);
   }
 
   /** Same, for a call whose row is being written in the same request (not activated yet). */
-  credentialsForState(roomName: string, state: CallEncryptionState | undefined): CallEncryptionCredentials | undefined {
-    return this.credentials(roomName, state, undefined);
+  async credentialsForState(
+    call: Pick<Call, 'externalId' | 'workspaceId'>,
+    state: CallEncryptionState | undefined,
+    recipient: CallKeyRecipient,
+  ): Promise<CallEncryptionCredentials | undefined> {
+    if (state?.enabled !== true) return undefined;
+    return this.credentials(call, state.keyVersion ?? this.currentKeyVersion(), recipient);
+  }
+
+  /** Whether a call's key comes from the encryption service (vs. derived here). */
+  isServiceKeyed(call: Pick<Call, 'metadata'>): boolean {
+    return encryptionStateOf(call)?.keyVersion === SERVICE_KEY_VERSION;
   }
 
   /**
@@ -190,18 +225,25 @@ class CallEncryptionService {
     };
   }
 
-  private credentials(
-    roomName: string,
-    state: CallEncryptionState | undefined,
-    fallbackVersion: number | undefined,
-  ): CallEncryptionCredentials | undefined {
-    if (state?.enabled !== true) return undefined;
+  private async credentials(
+    call: Pick<Call, 'externalId' | 'workspaceId'>,
+    keyVersion: number,
+    recipient: CallKeyRecipient,
+  ): Promise<CallEncryptionCredentials> {
+    const roomName = call.externalId;
     try {
-      const keyVersion = state.keyVersion ?? fallbackVersion ?? this.currentKeyVersion();
-      return { key: this.deriveKey(roomName, keyVersion).toString('base64') };
+      if (keyVersion !== SERVICE_KEY_VERSION) {
+        return { key: this.deriveKey(roomName, keyVersion).toString('base64') };
+      }
+      const provider = getEncryptionProvider();
+      const { wrappedKey } = await provider.generateKey({ keyType: 'CALL', workspaceId: call.workspaceId, keyValue: roomName });
+      const { body } = await provider.transformResponse({ encryptedKey: wrappedKey }, transitCallerOf(recipient));
+      // transformResponse is a no-op with API client encryption off; DEK ciphertext would leave the client silent.
+      if (!body.encryptedKey.startsWith(TRANSIT_CIPHERTEXT_PREFIX)) throw new Error('Call key was not re-encrypted to the recipient');
+      return { encryptedKey: body.encryptedKey };
     } catch (error) {
-      // An encrypted call with no usable master key would leave every client in silence; fail loudly.
-      logger.error(`[${roomName}] e2ee_key_derivation_failed`, error);
+      // An encrypted call with no usable key would leave every client in silence; fail loudly.
+      logger.error(`[${roomName}] e2ee_key_unavailable | key_version=${keyVersion}, recipient=${recipient.kind}`, error);
       throw error;
     }
   }

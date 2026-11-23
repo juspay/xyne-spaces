@@ -41,7 +41,7 @@ router.post('/workspaces/backfill-provision', async (req: Request, res: Response
     });
 
     const results = await getEncryptionProvider().backfillEntities(workspaces.flatMap((workspace) => (
-      ['WORKSPACE', 'WORKSPACE_STORAGE'].map((entityType) => ({
+      ['WORKSPACE', 'WORKSPACE_STORAGE', 'WORKSPACE_CALLS'].map((entityType) => ({
         entityId: workspace.id,
         orgId: workspace.orgId,
         entityType,

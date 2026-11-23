@@ -3,16 +3,20 @@
 LiveKit hands the agent a job, but the key never travels through LiveKit. Before
 joining, the job asks the backend (POST /api/transcriptionAgent/:callId/session)
 and only joins once the backend answers. The call key comes back sealed to a
-one-time X25519 key generated for this job, and lives only in this process's
-memory. Never log it.
+one-time X25519 key generated for this job (keys the backend derives), or as
+encryption-service transit ciphertext for a one-time P-256 key (calls keyed by
+the encryption service, which the backend can't read). It lives only in this
+process's memory. Never log it.
 """
 import asyncio
 import base64
+import json
 from dataclasses import dataclass
 from typing import Optional
 
 import aiohttp
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -25,6 +29,9 @@ logger = get_logger(__name__)
 # Must match AGENT_SEAL_INFO in the backend's callEncryptionService.
 _SEAL_INFO = b"xyne-agent-call-key:v1"
 _MAX_ATTEMPTS = 4
+# Must match DERIVE_INFO in the encryption service's transit_keys.rs.
+_TRANSIT_INFO = b"transit/v1"
+_TRANSIT_PREFIX = "ENC:v1|tk-"
 
 
 class CallSessionError(Exception):
@@ -64,6 +71,32 @@ def _unseal(room_name: str, private_key: X25519PrivateKey, sealed: dict) -> str:
     return plaintext.decode("utf-8")
 
 
+def _p256_point(private_key: ec.EllipticCurvePrivateKey) -> bytes:
+    return private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.X962, format=serialization.PublicFormat.UncompressedPoint
+    )
+
+
+def _open_service_key(room_name: str, private_key: ec.EllipticCurvePrivateKey, encrypted: str, server_keys: dict) -> str:
+    """Opens `ENC:v1|tk-<version>|<b64(iv||ct||tag)>` the way web clients do: ECDH with that
+    server key version, HKDF-SHA256(salt = clientPoint || serverPoint, info "transit/v1"),
+    AES-256-GCM. The plaintext names its call; a key for another call is rejected."""
+    if not encrypted.startswith(_TRANSIT_PREFIX):
+        raise ValueError("not transit ciphertext")
+    version_text, data = encrypted[len(_TRANSIT_PREFIX):].split("|", 1)
+    version = int(version_text)
+    server = next(k for k in server_keys["keys"] if k["version"] == version)
+    server_point = base64.b64decode(server["publicKey"])
+    client_point = _p256_point(private_key)
+    shared = private_key.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), server_point))
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=client_point + server_point, info=_TRANSIT_INFO).derive(shared)
+    combined = base64.b64decode(data)
+    payload = json.loads(AESGCM(key).decrypt(combined[:12], combined[12:], None).decode("utf-8"))
+    if payload.get("callId") != room_name:
+        raise ValueError("call key issued for another call")
+    return payload["key"]
+
+
 async def fetch_call_session(backend_url: str, api_key: str, room_name: str, dispatch_id: str) -> CallSession:
     """Raises CallSessionError if the backend refuses or can't be reached."""
     if not backend_url or not api_key:
@@ -75,10 +108,15 @@ async def fetch_call_session(backend_url: str, api_key: str, room_name: str, dis
     public_key = private_key.public_key().public_bytes(
         encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
     )
+    transit_key = ec.generate_private_key(ec.SECP256R1())
     url = f"{backend_url}/api/transcriptionAgent/{room_name}/session"
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
     # The backend gives each dispatch it created exactly one session.
-    body = {"publicKey": base64.b64encode(public_key).decode("ascii"), "dispatchId": dispatch_id}
+    body = {
+        "publicKey": base64.b64encode(public_key).decode("ascii"),
+        "transitPublicKey": base64.b64encode(_p256_point(transit_key)).decode("ascii"),
+        "dispatchId": dispatch_id,
+    }
 
     last_error = "no attempt"
     for attempt in range(_MAX_ATTEMPTS):
@@ -91,6 +129,10 @@ async def fetch_call_session(backend_url: str, api_key: str, room_name: str, dis
                         data = await response.json()
                         if not data.get("encrypted"):
                             return CallSession(call_key=None)
+                        if "encryptedKey" in data:
+                            return CallSession(
+                                call_key=_open_service_key(room_name, transit_key, data["encryptedKey"], data["transitServerKeys"])
+                            )
                         return CallSession(call_key=_unseal(room_name, private_key, data["sealedKey"]))
                     reason = ""
                     if response.status == 403:

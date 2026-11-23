@@ -60,3 +60,4 @@ export {
   decryptDownloadedFile,
 } from './file-container.js';
 export type { FileContainerHeader } from './file-container.js';
+export { openCallKey } from './call-key.js';

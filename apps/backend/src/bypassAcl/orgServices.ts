@@ -57,6 +57,11 @@ export function createOrganizationWithWorkspace(
             orgId: workspace.orgId,
             entityType: 'WORKSPACE_STORAGE',
           });
+          await getEncryptionProvider().provisionEntity({
+            entityId: workspace.id,
+            orgId: workspace.orgId,
+            entityType: 'WORKSPACE_CALLS',
+          });
 
           // 3. Create DM project for the workspace (required by the system)
           await tx.project.create({
