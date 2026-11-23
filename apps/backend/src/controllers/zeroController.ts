@@ -46,6 +46,16 @@ function handleZeroError(res: Response, error: unknown, rateLimitMessage: string
   });
 }
 
+/**
+ * Zero re-reads the caller from `Authorization` (extractAuthDataFromRequest checks only the
+ * signature). Forward exactly the token authMiddleware verified for this request (auth session,
+ * user, org member), never one picked from another cookie or a client-supplied header.
+ */
+function setVerifiedAuthorization(headers: Headers, req: Request): void {
+  headers.delete('authorization');
+  if (req.authToken) headers.set('authorization', `Bearer ${req.authToken}`);
+}
+
 export const handlePush = async (req: Request, res: Response): Promise<void> => {
     try {
       // Convert Express request to Web API Request
@@ -60,11 +70,7 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
         }
       });
 
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
+      setVerifiedAuthorization(headers, req);
 
       const webRequest = new Request(url, {
         method: 'POST',
@@ -99,11 +105,7 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
         }
       });
 
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
+      setVerifiedAuthorization(headers, req);
 
       const webRequest = new Request(url, {
         method: 'POST',
@@ -137,11 +139,7 @@ export const handleGetQueriesFallback = async (req: Request, res: Response): Pro
       }
     });
 
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
+      setVerifiedAuthorization(headers, req);
 
     const webRequest = new Request(url, {
       method: 'POST',
@@ -184,11 +182,7 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       }
     });
 
-    // Add token from workspace-specific cookie to Authorization header
-    const workspaceId = req.cookies?.xyne_last_workspace;
-    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-    }
+    setVerifiedAuthorization(headers, req);
 
     const webRequest = new Request(url, {
       method: 'POST',
@@ -222,11 +216,7 @@ export const handleQueryZqlToSql = async (req: Request, res: Response): Promise<
       }
     });
 
-    // Add token from workspace-specific cookie to Authorization header
-    const workspaceId = req.cookies?.xyne_last_workspace;
-    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-    }
+    setVerifiedAuthorization(headers, req);
 
     const webRequest = new Request(url, {
       method: 'POST',

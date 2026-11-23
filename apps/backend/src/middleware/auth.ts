@@ -2,9 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { OrgRole, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { createHash } from 'crypto';
 import { logger as baseLogger, loggerContext, type LogContext } from '@/utils/logger';
-import { jwtService, type JwtPayload } from '../services/jwtService';
-import { workspaceTokenCookieName, LAST_WORKSPACE_COOKIE } from '../services/accessTokenService';
-import { authSessionService } from '../services/authSessionService';
+import { readWorkspaceJwt } from '../services/accessTokenService';
 import { decryptRequestBodyMiddleware } from './decryptionMiddleware';
 import { db } from '@/database/client';
 import '../types/express';
@@ -28,8 +26,10 @@ const logger = baseLogger.child({ module: 'AuthMiddleware' });
  * - TOKEN_EXPIRED — the JWT arrived but is past `exp` (clock skew, non-browser clients).
  *
  * Final (a refresh cannot help, the client should log out):
- * - TOKEN_INVALID — bad signature, malformed, or claims that do not match the request.
- * - SESSION_REVOKED — the auth session behind the token was logged out.
+ * - TOKEN_INVALID — bad signature, malformed, no `sid`, or claims that do not match the request.
+ * - SESSION_REVOKED — the auth session behind the token is no longer ACTIVE in Postgres: logged
+ *   out, password changed/reset, superseded by a newer login on the device, revoked by an admin,
+ *   or past its expiry.
  * - USER_REMOVED — the user left or was deactivated in the workspace or organisation.
  * - EMAIL_DOMAIN_NOT_ALLOWED — the user's email domain is blocked by policy.
  */
@@ -58,9 +58,12 @@ const wwwAuthenticateFor = (code: AuthFailureCode, message: string): string => {
     : `Bearer realm="xyne", error="invalid_token", error_description="${description}"`;
 };
 
-/** Classify a jwtService.verifyToken failure. */
-export const classifyTokenError = (error: unknown): Exclude<AuthFailureCode, 'TOKEN_MISSING'> =>
-  error instanceof Error && error.message === 'JWT token has expired' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID';
+/** 401 code and message for each way readWorkspaceJwt can reject a presented token. */
+const TOKEN_REJECTIONS: Record<'expired' | 'invalid' | 'revoked', [AuthFailureCode, string]> = {
+  expired: ['TOKEN_EXPIRED', 'Token expired; refresh the session'],
+  invalid: ['TOKEN_INVALID', 'Token verification failed'],
+  revoked: ['SESSION_REVOKED', 'Session has been logged out'],
+};
 
 export class AuthMiddleware {
   private reject(res: Response, code: AuthFailureCode, message: string, error = 'Authentication required'): void {
@@ -71,49 +74,29 @@ export class AuthMiddleware {
   /**
    * The only authentication for user routes. Reads the JWT from the `xyne_ws_<workspaceId>_token`
    * cookie (workspace from `x-workspace-id`, else `xyne_last_workspace`); an Authorization header
-   * is never read. The user and org member are re-checked on every request.
+   * is never read. The auth session (`sid`), the user and the org member are re-checked in
+   * Postgres on every request.
    */
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const logPrefix = `[AUTH] [${req.method} ${req.path}]`;
-    const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.[LAST_WORKSPACE_COOKIE];
 
     try {
-      const token = workspaceId ? req.cookies?.[workspaceTokenCookieName(workspaceId)] : undefined;
-      if (typeof token !== 'string' || !token) {
-        logger.info(`${logPrefix} No token`, { workspaceId });
+      // Signature, claims and the auth session (Postgres) in one place; see readWorkspaceJwt.
+      const read = await readWorkspaceJwt(req);
+      if (read.status === 'missing') {
+        logger.info(`${logPrefix} No token`, { workspaceId: read.workspaceId });
         this.reject(res, 'TOKEN_MISSING', 'Session token is missing');
         return;
       }
-      const tokenPreview = `${token.slice(0, 8)}...${token.slice(-6)}`;
-
-      let payload: JwtPayload;
-      try {
-        payload = jwtService.verifyToken(token);
-      } catch (err) {
-        const code = classifyTokenError(err);
-        logger.info(`${logPrefix} Token rejected: ${code}`, {
-          tokenPreview,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        this.reject(res, code, code === 'TOKEN_EXPIRED' ? 'Token expired; refresh the session' : 'Token verification failed');
+      const tokenPreview = `${read.token.slice(0, 8)}...${read.token.slice(-6)}`;
+      if (read.status !== 'valid') {
+        const [code, message] = TOKEN_REJECTIONS[read.status];
+        const log = read.status === 'expired' ? logger.info.bind(logger) : logger.warn.bind(logger);
+        log(`${logPrefix} Token rejected: ${code}`, { tokenPreview, workspaceId: read.workspaceId, reason: read.reason });
+        this.reject(res, code, message);
         return;
       }
-
-      if (!payload.sub || !payload.workspaceId || !payload.memberId || payload.workspaceId !== workspaceId) {
-        logger.warn(`${logPrefix} Token claims do not match the request`, {
-          tokenPreview,
-          tokenWorkspaceId: payload.workspaceId,
-          workspaceId,
-        });
-        this.reject(res, 'TOKEN_INVALID', 'Token payload is invalid');
-        return;
-      }
-
-      if (payload.sid && (await authSessionService.isSessionRevoked(payload.sid))) {
-        logger.warn(`${logPrefix} Token belongs to a logged-out session`, { tokenPreview, sid: payload.sid });
-        this.reject(res, 'SESSION_REVOKED', 'Session has been logged out');
-        return;
-      }
+      const { token, payload } = read;
 
       const [user, orgMember] = await Promise.all([
         db.user.findUnique({

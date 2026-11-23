@@ -11,8 +11,9 @@ export interface JwtPayload {
   memberId: string;
   /**
    * auth_sessions.id the token was minted under; encryption, push tokens and activity key on it.
-   * Absent only on the JWT handed to an SDK at device-flow approval (routes/sdk-sso.ts), which
-   * has no auth session of its own until the SDK's first refresh.
+   * Required to be accepted: `readWorkspaceJwt` rejects a token without one, and a token whose
+   * session is no longer ACTIVE. Optional in the type only because `verifyToken` decodes any
+   * signed token.
    */
   sid?: string;
   providerUserId?: string;

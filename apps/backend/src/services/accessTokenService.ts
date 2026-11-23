@@ -11,6 +11,7 @@
 import type { Request, Response } from 'express';
 import { config } from '@/config/env';
 import { jwtService, type JwtPayload } from './jwtService';
+import { authSessionService } from './authSessionService';
 
 /** The workspace user the token is for (a `users` row) and its org member. */
 export interface AccessTokenSubject {
@@ -126,31 +127,68 @@ export function issueAccessCookies(
   return minted;
 }
 
+/** A verified access token whose `sid` is a live auth session. */
+export type SessionJwtPayload = JwtPayload & { sid: string };
+
 export type WorkspaceJwtRead =
-  | { status: 'valid'; workspaceId: string; payload: JwtPayload }
-  | { status: 'expired' | 'invalid'; workspaceId: string }
-  | { status: 'missing' };
+  | { status: 'valid'; workspaceId: string; token: string; payload: SessionJwtPayload }
+  /**
+   * - `expired`: past `exp`; the session may still be alive, so the client refreshes and retries.
+   * - `invalid`: bad signature, malformed, no `sid`, or claims that do not match the cookie's workspace.
+   * - `revoked`: the auth session behind `sid` is no longer ACTIVE (logout, password change/reset,
+   *   superseded by a newer login on the device, admin revoke) or has expired. Final: refresh cannot help.
+   */
+  | { status: 'expired' | 'invalid' | 'revoked'; workspaceId: string; token: string; reason: string }
+  | { status: 'missing'; workspaceId?: string };
 
 /**
- * Read and verify the workspace JWT cookie of a request outside the auth middlewares (public
- * routes that want to know whether the caller is signed in). Workspace from `x-workspace-id`,
- * else `xyne_last_workspace`, else `workspaceId` when given. `expired` lets the caller answer
- * 401 so the client refreshes and retries.
+ * Read and verify the workspace JWT cookie. The ONLY way a user access token is accepted: the
+ * auth middleware and the public routes that ask "is this caller signed in" (login-workspace,
+ * join requests, call-invite routing) all go through here, so none of them can skip a check.
+ *
+ * Workspace: `workspaceId` when given, else `x-workspace-id`, else `xyne_last_workspace`. The token
+ * must be signed, carry `sub`/`memberId`/`sid`, be minted for that workspace, and its `sid` must
+ * be an ACTIVE, unexpired `auth_sessions` row of the token's org member. The session is read from
+ * Postgres on every call: it is the record logout and revocation write, so a revoked session is
+ * rejected as soon as the revoke commits. A database error propagates (fails closed).
  */
-export function readWorkspaceJwt(req: Request, workspaceId?: string): WorkspaceJwtRead {
+export async function readWorkspaceJwt(req: Request, workspaceId?: string): Promise<WorkspaceJwtRead> {
+  const header = req.headers['x-workspace-id'];
+  const cookie = req.cookies?.[LAST_WORKSPACE_COOKIE];
   const targetWorkspaceId =
-    workspaceId ?? (req.headers['x-workspace-id'] as string | undefined) ?? req.cookies?.[LAST_WORKSPACE_COOKIE];
-  if (typeof targetWorkspaceId !== 'string' || !targetWorkspaceId) return { status: 'missing' };
+    workspaceId ||
+    (typeof header === 'string' && header ? header : undefined) ||
+    (typeof cookie === 'string' && cookie ? cookie : undefined);
+  if (!targetWorkspaceId) return { status: 'missing' };
 
   const token = req.cookies?.[workspaceTokenCookieName(targetWorkspaceId)];
-  if (typeof token !== 'string' || !token) return { status: 'missing' };
+  if (typeof token !== 'string' || !token) return { status: 'missing', workspaceId: targetWorkspaceId };
 
+  const rejected = (status: 'expired' | 'invalid' | 'revoked', reason: string): WorkspaceJwtRead => ({
+    status,
+    workspaceId: targetWorkspaceId,
+    token,
+    reason,
+  });
+
+  let payload: JwtPayload;
   try {
-    return { status: 'valid', workspaceId: targetWorkspaceId, payload: jwtService.verifyToken(token) };
+    payload = jwtService.verifyToken(token);
   } catch (error) {
-    const expired = error instanceof Error && error.message === 'JWT token has expired';
-    return { status: expired ? 'expired' : 'invalid', workspaceId: targetWorkspaceId };
+    const message = error instanceof Error ? error.message : String(error);
+    return message === 'JWT token has expired' ? rejected('expired', message) : rejected('invalid', message);
   }
+
+  if (!payload.sub || !payload.memberId || payload.workspaceId !== targetWorkspaceId) {
+    return rejected('invalid', 'claims do not match the request');
+  }
+  // Every token minted since auth sessions exist carries `sid`; one without it cannot be revoked.
+  if (!payload.sid) return rejected('invalid', 'no session id');
+
+  const session = await authSessionService.findActiveById(payload.sid, payload.memberId);
+  if (!session) return rejected('revoked', 'auth session is not active');
+
+  return { status: 'valid', workspaceId: targetWorkspaceId, token, payload: { ...payload, sid: payload.sid } };
 }
 
 /** Clear the JWT cookie for one workspace (logout). */
