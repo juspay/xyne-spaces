@@ -74,6 +74,7 @@ export const SupportTicketTable = ({
   const {
     tickets: supportTickets,
     isComplete,
+    isSettled,
     hasMore,
     isLoadingMore,
     loadMore,
@@ -202,7 +203,7 @@ export const SupportTicketTable = ({
         {...(visibleColumns ? { visibleColumns } : {})}
         hasMore={hasMore}
         isLoadingMore={isLoadingMore}
-        isLoading={!isComplete && supportTickets.length === 0}
+        isLoading={!isSettled && supportTickets.length === 0}
         onLoadMore={loadMore}
       />
     </div>
