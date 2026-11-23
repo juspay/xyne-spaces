@@ -89,6 +89,12 @@ export function isRequestContext(): boolean {
   return !(source.req as unknown as Record<symbol, boolean>)[WORKSPACE_SCOPED];
 }
 
+/** The request whose scope is open, or null outside one (jobs, workers, explicit contexts). */
+export function currentRequest(): Request | null {
+  const source = storage.getStore();
+  return source?.kind === 'request' ? source.req : null;
+}
+
 /** Read the current tenant context, or null when none is open / resolvable. */
 export function getContextOrNull(): TenantCtx | null {
   return resolve(storage.getStore());

@@ -24,6 +24,17 @@ const GCS_IMPORT_PATHS = [
     name: './gcsServiceFactory',
     message: 'Use getStorageService() from @/services/storage instead of GCSServiceFactory.',
   },
+  // Storage clients made outside storageServiceFactory skip SafeStorageService, so the
+  // files they write are not encrypted.
+  {
+    name: '@google-cloud/storage',
+    message: 'Use getStorageService() from @/services/storage: it encrypts every file written.',
+  },
+  {
+    name: '@xyne/storage',
+    importNames: ['createStorageService', 'GCSService', 'GCSAdapter', 'S3StorageService', 'AzureBlobStorageService'],
+    message: 'Use getStorageService() from @/services/storage: it encrypts every file written.',
+  },
 ];
 const GCS_IMPORT_PATTERNS = [
   {

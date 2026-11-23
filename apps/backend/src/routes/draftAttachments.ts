@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { DraftAttachmentController } from '../controllers/draftAttachmentController';
 import { authMiddleware } from '../middleware/auth';
 import { uploadMultiple } from '../middleware/upload';
+import { clientFileEncryption } from '../middleware/clientFileEncryption';
 
 const router = Router();
 const draftAttachmentController = new DraftAttachmentController();
@@ -31,6 +32,7 @@ const draftAttachmentController = new DraftAttachmentController();
 router.post(
   '/attachments/upload',
   authMiddleware.authenticate,
+  clientFileEncryption,
   uploadMultiple,
   draftAttachmentController.uploadDraftAttachment.bind(draftAttachmentController)
 );

@@ -8,10 +8,13 @@ import type {
   EncryptBatchItem,
   EncryptedFieldConfig,
   EncryptionProvider,
+  FileChunksResult,
   GenerateStorageKeyInput,
+  OpenFileChunksInput,
   ProvisionEntityInput,
   ProvisionEntityResult,
   SealEventInput,
+  SealFileChunksInput,
   StorageObjectKey,
   TransformRequestInput,
   TransformRequestResult,
@@ -132,6 +135,14 @@ const provider: EncryptionProvider = {
   async sealEvent(_input: SealEventInput): Promise<{ sealed: string }> {
     return unsupported('sealEvent');
   },
+  async sealFileChunks(_input: SealFileChunksInput): Promise<FileChunksResult> {
+    return unsupported('sealFileChunks');
+  },
+
+  async openFileChunksForTransit(_input: OpenFileChunksInput): Promise<FileChunksResult> {
+    return unsupported('openFileChunksForTransit');
+  },
+
 
   async getTransitClientManifest(
     _params: { tag: string } & TransitCaller,

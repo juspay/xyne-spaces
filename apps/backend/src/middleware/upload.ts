@@ -4,6 +4,7 @@ import { Parse as parseZipStream, type Entry as ZipEntry } from 'unzipper';
 import { logger } from '../utils/logger';
 import { storageService } from '../services/storage';
 import { AppError } from './errorHandler';
+import { isClientFileEncryption } from './clientFileEncryption';
 import { config } from '@/config/env';
 import { db } from '../database/client';
 import { runInRequestContext } from '../database/tenant/context';
@@ -606,13 +607,18 @@ const streamingStorage: multer.StorageEngine = {
         });
       });
 
-      const { head, body } = await readHeadAndRewind(file.stream, 12);
+      // A client-encrypted file is the client's transit container: its bytes cannot be read
+      // here, so the content checks (HEIC sniffing, executable and archive screening) are skipped.
+      const clientEncrypted = isClientFileEncryption(req);
+      const { head, body } = clientEncrypted
+        ? { head: Buffer.alloc(0), body: file.stream }
+        : await readHeadAndRewind(file.stream, 12);
       const effectiveContentType = isHeicBuffer(head)
         ? 'image/heic'
         : file.mimetype || 'application/octet-stream';
 
-      const result = await uploadScreened(body, originalName, file.mimetype, (screenedBody) =>
-        storageService.uploadStream(screenedBody, {
+      const store = (storedBody: Readable) =>
+        storageService.uploadStream(storedBody, {
           filename: originalName,
           contentType: effectiveContentType,
           metadata: {
@@ -622,8 +628,10 @@ const streamingStorage: multer.StorageEngine = {
           },
           scopeType: 'CONVERSATION',
           scopeId: 'temp',
-        }),
-      );
+        });
+      const result = clientEncrypted
+        ? await store(body)
+        : await uploadScreened(body, originalName, file.mimetype, store);
 
       logger.info(`[UPLOAD-STREAM] Stream propagated to object storage`, {
         traceLabel,
