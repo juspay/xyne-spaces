@@ -4,12 +4,22 @@ import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema } from '../core/types';
 import { assertWorkspaceMatch } from '../core/workspace-match';
 import { zql } from '../../queries';
+import { hasGuestTicketAccess } from '../core/guest-access';
 
 export class TicketStageRequestsACL extends BaseACL<'ticket_stage_requests'> {
 
   // Gate on the ticket's own channel (PUBLIC or participant), mirroring
   // TicketAssignmentsACL.verifyTicketAccess / TicketsACL reads.
   private async verifyTicketAccess(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+    // Guests reach only tickets in channels they were invited to or participate in —
+    // never a public channel they aren't part of.
+    if (this.ctx.role === 'GUEST') {
+      const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+      if (!ticket || !(await hasGuestTicketAccess(this.ctx, tx, ticket))) {
+        throw new MutationACLError('Ticket stage request failed: guest does not have access to this ticket', 'ticket_stage_requests');
+      }
+      return;
+    }
     const accessible = await tx.run(
       zql.tickets
         .where('id', ticketId)
