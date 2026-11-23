@@ -256,6 +256,41 @@ export async function encryptionResponseInterceptor(
 }
 
 /**
+ * Decrypts the transit-encrypted fields of a JSON response body held as text, for
+ * requests made outside axios (the artifact request bridge's raw fetch). Returns the
+ * text unchanged when client encryption is off or not ready, the text is not JSON, or
+ * nothing in it is encrypted. A field that fails to decrypt leaves the whole body as
+ * received, so the caller still gets the response.
+ */
+export async function decryptResponseText(text: string): Promise<string> {
+  if (!isEncryptionReady() || !getEncryptionState().apiClientEncryptionEnabled) {
+    return text;
+  }
+  if (!text.includes('ENC:')) {
+    return text;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return text;
+  }
+
+  try {
+    return JSON.stringify(await decryptObject(parsed));
+  } catch (error) {
+    logger.error('[encryption] Failed to decrypt response text', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return text;
+  }
+}
+
+/**
  * Retry once when the backend rejects a write for a stale client manifest (409
  * ENC_MANIFEST_STALE): refresh the manifest, then re-send through `resend` (the same
  * axios instance) so the request interceptor re-stamps the headers. Returns null when
