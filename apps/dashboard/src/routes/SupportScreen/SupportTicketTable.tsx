@@ -13,6 +13,7 @@ import type {
 } from '../../utils/board/dynamicFieldFilters';
 import type { ResolvedDisplayFormField } from '../../utils/board/resolveDisplayFormFields';
 import { useSupportKanbanTicketsPage } from './useSupportKanbanTicketsPage';
+import { useKanbanCounts } from '../KanbanBoardScreen/useKanbanCounts';
 
 const MATCH_EVERY_STAGE = { stage: '', otherStageNames: [] as string[] };
 
@@ -72,6 +73,50 @@ export const SupportTicketTable = ({
 
   const { conversationIdWhitelist, ...restTicketFilter } = ticketFilter;
   const {
+    groups: countGroups,
+    isLoading: countsLoading,
+    error: countsError,
+  } = useKanbanCounts({
+    viewMode: 'desk',
+    columnType: 'stage',
+    channelId,
+    deskFilters: {
+      ...(ticketFilter.assignedTo ? { assignedTo: ticketFilter.assignedTo } : {}),
+      ...(ticketFilter.createdBy ? { createdBy: ticketFilter.createdBy } : {}),
+      ...(ticketFilter.priority ? { priority: ticketFilter.priority } : {}),
+      ...(ticketFilter.stageName ? { stageName: ticketFilter.stageName } : {}),
+      ...(conversationIdWhitelist ? { conversationIds: conversationIdWhitelist } : {}),
+      ...(ticketFilter.userGroups ? { userGroups: ticketFilter.userGroups } : {}),
+      ...(ticketFilter.lastEmailAtStart !== undefined
+        ? { lastEmailAtStart: ticketFilter.lastEmailAtStart }
+        : {}),
+      ...(ticketFilter.lastEmailAtEnd !== undefined
+        ? { lastEmailAtEnd: ticketFilter.lastEmailAtEnd }
+        : {}),
+      ...(ticketFilter.createdAtStart !== undefined
+        ? { createdAtStart: ticketFilter.createdAtStart }
+        : {}),
+      ...(ticketFilter.createdAtEnd !== undefined
+        ? { createdAtEnd: ticketFilter.createdAtEnd }
+        : {}),
+      ...(ticketFilter.conversationLabelId
+        ? { conversationLabelId: ticketFilter.conversationLabelId }
+        : {}),
+    },
+    filters: {
+      dynamicFields: Object.fromEntries(
+        (dynamicFieldEntries ?? [])
+          .filter(entry => entry.fieldType !== undefined)
+          .map(entry => [entry.fieldId, entry.value]),
+      ),
+    },
+    enabled: !!channelId,
+  });
+  const expectedCount =
+    countsLoading || countsError
+      ? undefined
+      : countGroups.reduce((sum, group) => sum + group.totalCount, 0);
+  const {
     tickets: supportTickets,
     isComplete,
     isSettled,
@@ -86,6 +131,7 @@ export const SupportTicketTable = ({
     formEntityValueFieldIds: displayFieldIds,
     ...MATCH_EVERY_STAGE,
     ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
+    ...(expectedCount !== undefined ? { expectedCount } : {}),
     enabled: !!channelId,
   });
 
