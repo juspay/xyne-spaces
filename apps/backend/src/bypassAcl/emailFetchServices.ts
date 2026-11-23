@@ -1,4 +1,6 @@
-import { asService } from './base';
+import { asService, transaction } from './base';
+import { lockExternalSourceRow } from './rowLockServices';
+import { db } from '@/database/client';
 import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
 import { socialMediaService } from '@/integrations/social-media/socialMediaService';
 import { emailService } from '@/services/emailService';
@@ -6,7 +8,7 @@ import type { ExternalSource } from '@prisma/client';
 import type { ExternalSourceAdapter, RefetchOptions } from '@/integrations/core/types';
 import type { EmailClassificationWorker } from '@/workers/emailClassificationWorker';
 
-const EMAIL_FETCH_TABLES = ['Email', 'ExternalMessage', 'ExternalSource', 'Ticket', 'TicketActivity'] as const;
+const EMAIL_FETCH_TABLES = ['Conversation', 'Email', 'ExternalMessage', 'ExternalSource', 'Ticket', 'TicketActivity'] as const;
 
 /**
  * Relocated from workers/emailFetchWorker.ts's runCatchup. Background job → open a tenant scope
@@ -23,6 +25,44 @@ export function catchUpEmailSource(
     'email-fetch-worker',
     workspaceId,
     () => catchUpFromCursor(...args),
+  );
+}
+
+/**
+ * Read-modify-write of `external_sources.lastSyncCursor` under a row lock.
+ *
+ * The app-desk refetch keeps one JSON map of parked resume cursors per source,
+ * keyed by window. Two windows of the same source running on different worker
+ * pods would otherwise both read the map, each change its own entry, and the
+ * second write would drop the first window's cursor. The `FOR UPDATE` lock
+ * serializes them so every write merges into the latest map.
+ *
+ * `mutate` gets the current raw value and returns the new one; `undefined`
+ * means "no change" and skips the write.
+ */
+export function updateSourceSyncCursorLocked(
+  sourceId: string,
+  mutate: (current: string | null) => string | null | undefined,
+): Promise<void> {
+  return transaction(
+    ['ExternalSource'],
+    'refetch resume cursors: FOR UPDATE row lock so concurrent windows merge into one map instead of overwriting it',
+    db,
+    async tx => {
+      await lockExternalSourceRow(tx, sourceId);
+      const row = await tx.externalSource.findUnique({
+        where: { id: sourceId },
+        select: { lastSyncCursor: true },
+      });
+      if (!row) return;
+      const next = mutate(row.lastSyncCursor);
+      if (next === undefined || next === row.lastSyncCursor) return;
+      await tx.externalSource.update({
+        where: { id: sourceId },
+        data: { lastSyncCursor: next },
+      });
+    },
+    { maxWait: 10_000, timeout: 10_000 },
   );
 }
 
