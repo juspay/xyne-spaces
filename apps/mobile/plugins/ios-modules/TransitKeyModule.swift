@@ -14,7 +14,9 @@
 //
 //  Both are Keychain items in an access group of their own (not the one the notification
 //  extension shares), usable after the first unlock since boot, never in backups and never
-//  moved to another phone. Only the public key and ECDH results leave this module.
+//  moved to another phone; the Enclave key itself is usable on the same terms. Once a tier is
+//  chosen it is kept, so the public key changes only when the key itself is broken. Only the
+//  public key and ECDH results leave this module.
 //
 
 import CryptoKit
@@ -82,6 +84,7 @@ class TransitKeyModule: NSObject {
     case corruptItem
     case selfCheckFailed
     case keychain(OSStatus)
+    case noAccessGroup
 
     var description: String {
       switch self {
@@ -91,6 +94,7 @@ class TransitKeyModule: NSObject {
       case .corruptItem: return "Stored transit key is corrupt"
       case .selfCheckFailed: return "Transit key agreement self-check failed"
       case .keychain(let status): return "Keychain error \(status)"
+      case .noAccessGroup: return "Cannot read this app's Keychain access group"
       }
     }
   }
@@ -128,8 +132,9 @@ class TransitKeyModule: NSObject {
   private static let service = "net.juspay.xynespaces.transit-key"
   private static let enclaveAccount = "secure-enclave"
   private static let keychainAccount = "keychain"
-  /// This app's own group, `<team>.<bundle id>.transit-key`, filled in at prebuild.
-  private static let accessGroup = "__TRANSIT_KEY_ACCESS_GROUP__"
+  /// The end of this app's own group, `<bundle id>.transit-key`, filled in at prebuild; the app id
+  /// prefix in front of it is read at runtime (see transitKeyGroup).
+  private static let groupSuffix = "__TRANSIT_KEY_GROUP_SUFFIX__"
 
   /// One queue for every key call, so two calls never create the key twice.
   private static let queue = DispatchQueue(label: "net.juspay.xynespaces.transit-key")
@@ -137,29 +142,52 @@ class TransitKeyModule: NSObject {
   /// The key, checked once per process; used only on `queue`.
   private static var cached: TransitKey?
 
+  /// The full access group once resolved; used only on `queue`.
+  private static var accessGroup: String?
+
   private static func checkedKey() throws -> TransitKey {
     if let cached { return cached }
-    // The Enclave key whenever it works; the Keychain key whenever it does not.
-    let key: TransitKey
-    do {
-      key = try enclaveKey()
-    } catch {
-      NSLog(
-        "[TransitKey] Secure Enclave key unavailable; using a Keychain key: %@", describe(error))
-      key = try keychainKey()
-    }
+    let key = try selectKey()
     cached = key
     return key
   }
 
-  /// The key failed itself (unreadable, corrupt or wrong), not the Keychain around it: only
-  /// then is it replaced. A Keychain error (say, before the first unlock) never deletes a key.
-  private static func isKeyFailure(_ error: Error) -> Bool {
-    if error is CryptoKitError { return true }
-    // The Enclave refusing a stored handle (from another device, or after an Enclave reset).
-    if let error = error as? TKError {
-      return [.corruptedData, .objectNotFound, .badParameter].contains(error.code)
+  /// The tier is kept across launches, so the public key never changes unless the key is broken:
+  /// - A Keychain key, once one exists, is used for good.
+  /// - No Secure Enclave (the Simulator): the Keychain key.
+  /// - Otherwise the stored Enclave key. Any failure other than the key being broken (a locked
+  ///   phone, a Keychain error) fails this call with nothing cached, so the next call retries it.
+  /// - With no usable Enclave key (none yet, or a broken one now deleted): a new one, else the
+  ///   Keychain key, which then stays.
+  private static func selectKey() throws -> TransitKey {
+    if try itemExists(account: keychainAccount) || !SecureEnclave.isAvailable {
+      return try keychainKey()
     }
+    if let key = try storedEnclaveKey() { return key }
+    do {
+      return try newEnclaveKey()
+    } catch {
+      NSLog(
+        "[TransitKey] The Secure Enclave cannot make a transit key; using a Keychain key: %@",
+        describe(error))
+      return try keychainKey()
+    }
+  }
+
+  /// The Enclave says the key object is corrupt or gone, or agreement worked but gave the wrong
+  /// secret. Never any other error from agreement: that is the phone (say, locked), not the key.
+  private static func isBrokenEnclaveKey(_ error: Error) -> Bool {
+    if let error = error as? TKError {
+      return [.corruptedData, .objectNotFound].contains(error.code)
+    }
+    if case TransitKeyError.selfCheckFailed = error { return true }
+    return false
+  }
+
+  /// The stored Keychain key's bytes are unreadable, or it gives the wrong secret. Its agreement
+  /// runs in software, so a locked phone cannot cause either; a Keychain error never counts.
+  private static func isBrokenKeychainKey(_ error: Error) -> Bool {
+    if error is CryptoKitError { return true }
     if let error = error as? TransitKeyError {
       switch error {
       case .corruptItem, .selfCheckFailed: return true
@@ -183,21 +211,43 @@ class TransitKeyModule: NSObject {
     return key
   }
 
-  private static func enclaveKey() throws -> TransitKey {
-    guard SecureEnclave.isAvailable else { throw TransitKeyError.noSecureEnclave }
-    if let handle = try readItem(account: enclaveAccount) {
-      do {
-        let privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: handle)
-        return try selfChecked(EnclaveKey(privateKey: privateKey))
-      } catch where isKeyFailure(error) {
-        NSLog(
-          "[TransitKey] Stored Secure Enclave key is unusable; creating a new one: %@",
-          describe(error))
-        try deleteItem(account: enclaveAccount)
-      }
+  /// The stored Enclave key once it passes the self-check; nil when there is none, or when the
+  /// Enclave rejects it as broken (it is then deleted). Any other failure is thrown and the key
+  /// is kept: an error from key agreement (say, on a locked phone) never deletes it.
+  private static func storedEnclaveKey() throws -> TransitKey? {
+    guard let handle = try readItem(account: enclaveAccount) else { return nil }
+    let privateKey: SecureEnclave.P256.KeyAgreement.PrivateKey
+    do {
+      privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: handle)
+    } catch {
+      // The Enclave cannot open this handle: from another phone, or after an Enclave reset.
+      NSLog(
+        "[TransitKey] The Secure Enclave rejected the stored key; replacing it: %@",
+        describe(error))
+      try deleteItem(account: enclaveAccount)
+      return nil
     }
-    // No access control: the key is usable without Face ID or the passcode, so it never prompts.
-    let privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey()
+    do {
+      return try selfChecked(EnclaveKey(privateKey: privateKey))
+    } catch where isBrokenEnclaveKey(error) {
+      NSLog("[TransitKey] Stored Secure Enclave key is broken; replacing it: %@", describe(error))
+      try deleteItem(account: enclaveAccount)
+      return nil
+    }
+  }
+
+  private static func newEnclaveKey() throws -> TransitKey {
+    // Usable after the first unlock since boot, like the Keychain items, so a push or VoIP wake on
+    // a locked phone can use it (CryptoKit's default allows only an unlocked phone). No user
+    // presence, so it never prompts.
+    var accessError: Unmanaged<CFError>?
+    guard
+      let access = SecAccessControlCreateWithFlags(
+        nil, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, .privateKeyUsage, &accessError)
+    else {
+      throw accessError.map { $0.takeRetainedValue() as Error } ?? TransitKeyError.noSecureEnclave
+    }
+    let privateKey = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: access)
     let key = try selfChecked(EnclaveKey(privateKey: privateKey))
     // Kept only once it has passed, so a bad key is never stored for later launches.
     try writeItem(account: enclaveAccount, data: privateKey.dataRepresentation)
@@ -211,7 +261,7 @@ class TransitKeyModule: NSObject {
         let privateKey = try P256.KeyAgreement.PrivateKey(rawRepresentation: raw)
         let publicPoint = privateKey.publicKey.x963Representation
         return try selfChecked(KeychainKey(publicPoint: publicPoint))
-      } catch where isKeyFailure(error) {
+      } catch where isBrokenKeychainKey(error) {
         NSLog(
           "[TransitKey] Stored Keychain key is unusable; creating a new one: %@", describe(error))
         try deleteItem(account: keychainAccount)
@@ -226,17 +276,51 @@ class TransitKeyModule: NSObject {
 
   // MARK: - Keychain
 
-  private static func baseQuery(account: String) -> [String: Any] {
+  /// This app's own group, `<app id prefix>.<bundle id>.transit-key`. The prefix is read at
+  /// runtime: it is that of whichever team signed this build (an enterprise or CI profile too),
+  /// which a team ID fixed at prebuild may not match, and every call would then fail.
+  private static func transitKeyGroup() throws -> String {
+    if let accessGroup { return accessGroup }
+    let group = "\(try appIdentifierPrefix()).\(groupSuffix)"
+    accessGroup = group
+    return group
+  }
+
+  /// The app id prefix, from the group iOS gives an item saved without one: the app's default
+  /// group, `<prefix>.<bundle id>`, first in its keychain-access-groups. The probe item holds no
+  /// data.
+  private static func appIdentifierPrefix() throws -> String {
+    var query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: "\(service).probe",
+      kSecAttrAccount as String: "app-identifier-prefix",
+      kSecReturnAttributes as String: true,
+    ]
+    var result: AnyObject?
+    var status = SecItemCopyMatching(query as CFDictionary, &result)
+    if status == errSecItemNotFound {
+      query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+      status = SecItemAdd(query as CFDictionary, &result)
+    }
+    guard status == errSecSuccess else { throw TransitKeyError.keychain(status) }
+    guard let attributes = result as? [String: Any],
+      let group = attributes[kSecAttrAccessGroup as String] as? String,
+      let prefix = group.split(separator: ".").first
+    else { throw TransitKeyError.noAccessGroup }
+    return String(prefix)
+  }
+
+  private static func baseQuery(account: String) throws -> [String: Any] {
     [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: account,
-      kSecAttrAccessGroup as String: accessGroup,
+      kSecAttrAccessGroup as String: try transitKeyGroup(),
     ]
   }
 
   fileprivate static func readItem(account: String) throws -> Data? {
-    var query = baseQuery(account: account)
+    var query = try baseQuery(account: account)
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var result: AnyObject?
@@ -247,19 +331,37 @@ class TransitKeyModule: NSObject {
     return data
   }
 
+  /// Whether the item exists, without reading its data.
+  private static func itemExists(account: String) throws -> Bool {
+    let status = SecItemCopyMatching(try baseQuery(account: account) as CFDictionary, nil)
+    if status == errSecItemNotFound { return false }
+    guard status == errSecSuccess else { throw TransitKeyError.keychain(status) }
+    return true
+  }
+
+  /// Replaces the item in one step when it exists, else adds it: the stored value is never
+  /// deleted first, so a failed write or a killed app cannot lose it.
   private static func writeItem(account: String, data: Data) throws {
-    try deleteItem(account: account)
-    var query = baseQuery(account: account)
-    query[kSecValueData as String] = data
+    let query = try baseQuery(account: account)
     // After the first unlock since boot, so background work can use it; never in backups and
     // never moved to another phone.
-    query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-    let status = SecItemAdd(query as CFDictionary, nil)
+    let attributes: [String: Any] = [
+      kSecValueData as String: data,
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+    ]
+    var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+    if status == errSecItemNotFound {
+      status = SecItemAdd(query.merging(attributes) { $1 } as CFDictionary, nil)
+      // Added in between: update it instead.
+      if status == errSecDuplicateItem {
+        status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+      }
+    }
     guard status == errSecSuccess else { throw TransitKeyError.keychain(status) }
   }
 
   private static func deleteItem(account: String) throws {
-    let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
+    let status = SecItemDelete(try baseQuery(account: account) as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else {
       throw TransitKeyError.keychain(status)
     }

@@ -21,14 +21,6 @@ function appName(config) {
   return config.name?.replace(/\s+/g, '') || 'lotus';
 }
 
-function appleTeamId(config) {
-  const teamId = config.ios?.appleTeamId;
-  if (typeof teamId !== 'string' || !teamId.trim()) {
-    throw new Error(`[${PLUGIN_NAME}] ios.appleTeamId is required for the transit key group`);
-  }
-  return teamId.trim();
-}
-
 function transitKeyGroupSuffix() {
   return `${getPrebuildVariant().iosBundleIdentifier}.transit-key`;
 }
@@ -40,7 +32,9 @@ const withTransitKeyFiles = config => {
       const { projectRoot, platformProjectRoot } = config.modRequest;
       const sourceDir = path.join(projectRoot, 'plugins', 'ios-modules');
       const targetDir = path.join(platformProjectRoot, appName(config));
-      const accessGroup = `${appleTeamId(config)}.${transitKeyGroupSuffix()}`;
+      // Only the part after the app id prefix: the module reads the prefix at runtime, so the
+      // group matches whichever team signs the build.
+      const groupSuffix = transitKeyGroupSuffix();
 
       if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
@@ -53,7 +47,7 @@ const withTransitKeyFiles = config => {
         }
         const source = fs
           .readFileSync(sourcePath, 'utf8')
-          .replace(/__TRANSIT_KEY_ACCESS_GROUP__/g, accessGroup);
+          .replace(/__TRANSIT_KEY_GROUP_SUFFIX__/g, groupSuffix);
         fs.writeFileSync(path.join(targetDir, fileName), source, 'utf8');
         console.log(`[${PLUGIN_NAME}] Copied ${fileName}`);
       }
