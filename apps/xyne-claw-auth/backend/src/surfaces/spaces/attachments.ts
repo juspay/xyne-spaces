@@ -9,7 +9,11 @@ import { createLogger } from "../../logger.js";
 import { spacesDbAvailable } from "../../lib/spaces-db.js";
 import { renderAttachmentsToPdf } from "../../lib/result-pdf.js";
 import { renderMarkdownToHtml } from "../../lib/result-html.js";
-import { expandSpacesMentions, resolveUnboundMentions } from "../../lib/mention-transform.js";
+import {
+  expandSpacesMentions,
+  MENTION_PREFIX,
+  resolveUnboundMentions,
+} from "../../lib/mention-transform.js";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../../lib/mention-lookups.js";
 
 const log = createLogger("spaces-attachments");
@@ -131,7 +135,7 @@ export async function prepareAgentResultForPosting(
   log.info(
     `[webhook/result] mention lookup branch=${meta.senderSpacesToken ? "sender-token" : lookups ? "db-fallback" : "none"} agent=${meta.agentSlug ?? "(unknown)"} senderWorkspaceId=${meta.senderWorkspaceId ?? "(none)"} agentWorkspaceId=${meta.agentWorkspaceId ?? "(none)"} rawLen=${rawText.length}`,
   );
-  if (!lookups && /(^|[^A-Za-z0-9_>])@[A-Za-z0-9._%+\-]+/.test(rawText)) {
+  if (!lookups && new RegExp(`${MENTION_PREFIX}@[A-Za-z0-9._%+\\-]+`).test(rawText)) {
     log.warn(
       `[webhook/result] mention resolution skipped with @-like text: no sender token and Spaces DB unavailable agent=${meta.agentSlug ?? "(unknown)"}`,
     );

@@ -1,5 +1,5 @@
 import { type ReactElement } from 'react';
-import { spacesBaseUrl } from '../developerTools';
+import { MCP_NPM_PACKAGE, MCP_NPX_SPEC, spacesBaseUrl } from '../developerTools';
 import { McpSignIn } from './McpSignIn';
 import {
   Callout,
@@ -169,7 +169,6 @@ const ALL_TOOLS = TOOL_GROUPS.flatMap(group => group.tools);
 const WRITE_COUNT = ALL_TOOLS.filter(tool => tool.write).length;
 
 const SERVER_NAME = 'xyne-spaces';
-const MCP_PACKAGE = '@xyne/spaces-mcp';
 /** Placeholder for the folder holding `node` and `npx`, e.g. /opt/homebrew/bin. */
 const NODE_BIN = '<node-folder>';
 const SETUP_OPTIONS = [
@@ -186,7 +185,7 @@ function serverConfig(baseUrl: string): {
   args: string[];
   env: Record<string, string>;
 } {
-  return { command: 'npx', args: ['-y', MCP_PACKAGE], env: { XYNE_SPACES_BASE_URL: baseUrl } };
+  return { command: 'npx', args: ['-y', MCP_NPX_SPEC], env: { XYNE_SPACES_BASE_URL: baseUrl } };
 }
 
 /** Cursor's install deep link takes the server config as base64 JSON. */
@@ -228,7 +227,7 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
     return (
       <Text>
         Nothing to do. The repo&apos;s <InlineCode>.mcp.json</InlineCode> registers the server and
-        runs the latest published <InlineCode>{MCP_PACKAGE}</InlineCode> with{' '}
+        runs the latest published <InlineCode>{MCP_NPM_PACKAGE}</InlineCode> with{' '}
         <InlineCode>npx</InlineCode>. An agent opened at the repo root already has it, so go
         straight to signing in.
       </Text>
@@ -239,7 +238,7 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
       <>
         <Text>Run this once. It adds the server to every project:</Text>
         <CodeBlock
-          code={`claude mcp add --scope user ${SERVER_NAME} \\\n  --env XYNE_SPACES_BASE_URL=${baseUrl} \\\n  -- npx -y ${MCP_PACKAGE}`}
+          code={`claude mcp add --scope user ${SERVER_NAME} \\\n  --env XYNE_SPACES_BASE_URL=${baseUrl} \\\n  -- npx -y ${MCP_NPX_SPEC}`}
           trackName='Spaces MCP: copy Claude Code command'
         />
       </>
@@ -280,7 +279,7 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
       mcpServers: {
         [SERVER_NAME]: {
           command: `${NODE_BIN}/npx`,
-          args: ['-y', MCP_PACKAGE],
+          args: ['-y', MCP_NPX_SPEC],
           env: { XYNE_SPACES_BASE_URL: baseUrl, PATH: `${NODE_BIN}:/usr/bin:/bin` },
         },
       },
@@ -349,9 +348,9 @@ export function McpDoc(): ReactElement {
 
       <DocSection eyebrow='Get started' title='Set up in three steps'>
         <Callout>
-          The server is published on npm as <InlineCode>{MCP_PACKAGE}</InlineCode> and your agent
-          runs it with <InlineCode>npx</InlineCode>, so there is nothing to clone or build. You need{' '}
-          <strong>Node.js 22</strong> or later.
+          The server is published on npm as <InlineCode>{MCP_NPM_PACKAGE}</InlineCode> and your
+          agent runs it with <InlineCode>npx</InlineCode>, so there is nothing to clone or build.
+          You need <strong>Node.js 22</strong> or later.
         </Callout>
         <div className='flex flex-col'>
           <Step n={1} title='Connect it to your agent'>
@@ -370,7 +369,7 @@ export function McpDoc(): ReactElement {
               and update tickets, run this in a terminal:
             </Text>
             <CodeBlock
-              code={`npx -y ${MCP_PACKAGE} writes on`}
+              code={`npx -y ${MCP_NPM_PACKAGE} writes on`}
               trackName='Spaces MCP: copy enable writes'
             />
             <Text>

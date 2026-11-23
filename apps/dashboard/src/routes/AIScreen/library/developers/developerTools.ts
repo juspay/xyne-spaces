@@ -23,6 +23,17 @@ export interface DeveloperTool {
 /** The storage SDK on npm; CLI apps bundle it, other code installs it directly. */
 export const STORAGE_NPM_PACKAGE = '@xyne/xyne-storage-sdk';
 
+/** The Spaces MCP on npm. */
+export const MCP_NPM_PACKAGE = '@xyne/spaces-mcp';
+/**
+ * What an agent's config tells `npx` to start the MCP with. npx keeps a copy
+ * per spec and reuses it without checking the registry, so a bare name would
+ * keep running whichever version was first downloaded; `@latest` makes it
+ * check each time the server starts. One-off commands such as `writes` don't
+ * need it.
+ */
+export const MCP_NPX_SPEC = `${MCP_NPM_PACKAGE}@latest`;
+
 export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
   {
     id: 'mcp',

@@ -1,10 +1,8 @@
 import { type ReactElement, useCallback, useEffect, useState } from 'react';
 import type { SpacesMcpStatus } from '@/types/electron';
 import { cn } from '@/utils/classNames';
-import { spacesBaseUrl } from '../developerTools';
+import { MCP_NPM_PACKAGE, spacesBaseUrl } from '../developerTools';
 import { Callout, CodeBlock, InlineCode, Text } from './docPrimitives';
-
-const MCP_PACKAGE = '@xyne/spaces-mcp';
 
 /**
  * The desktop app's bridge to `~/.xyne/agent/spaces.json`, when it has one.
@@ -47,7 +45,7 @@ function TerminalSignIn({ baseUrl }: { baseUrl: string }): ReactElement {
         Either opens an approval page with a short code: check it matches, then approve.
       </Text>
       <CodeBlock
-        code={`XYNE_SPACES_BASE_URL=${baseUrl} npx -y ${MCP_PACKAGE} login`}
+        code={`XYNE_SPACES_BASE_URL=${baseUrl} npx -y ${MCP_NPM_PACKAGE} login`}
         trackName='Spaces MCP: copy login command'
       />
       <Callout tone='warning'>
