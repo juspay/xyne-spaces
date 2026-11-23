@@ -820,7 +820,6 @@ export const claimDoclingPartsForSubmitBatch = async (
   }
 
   const attemptToken = randomUUID();
-  const permitValues = permitIds.map((id, i) => `(${i + 1}, '${id.replace(/'/g, "''")}')`).join(', ');
 
   const rows = await rawQuery(
     DOCLING_TABLES,
@@ -930,8 +929,12 @@ export const claimDoclingPartsForSubmitBatch = async (
       ORDER BY selected_rank
       LIMIT ${permitIds.length}
     ),
+    -- Permit ids are bound as one text[] parameter (never spliced into the SQL);
+    -- WITH ORDINALITY gives each its 1-based rank to pair with selected_rank.
+    -- text, not uuid: disabled-mode permits look like 'disabled:<kind>:<uuid>'.
     selected_permits (selected_rank, permit_id) AS (
-      VALUES ${Prisma.raw(permitValues)}
+      SELECT t.ord::int, t.permit_id
+      FROM unnest(${permitIds}::text[]) WITH ORDINALITY AS t(permit_id, ord)
     ),
     claimed AS (
       UPDATE non_zero.docling_async_parts p
