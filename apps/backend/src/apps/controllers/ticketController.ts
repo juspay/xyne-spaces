@@ -2738,7 +2738,7 @@ export class TicketController {
         });
       }
       if (!senderEmail) {
-        logger.warn('[AppDeskInbound] senderEmail not sent - reporterEmail/fromEmailAddress will not be set on the ticket', {
+        logger.warn('[AppDeskInbound] senderEmail not sent - reporterEmail will not be set; fromEmailAddress falls back to senderName', {
           channelId,
           threadId,
           senderNameReceived: senderName,
@@ -3019,6 +3019,9 @@ export class TicketController {
             reporterEmail: extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase(),
             fromEmailAddress: senderEmail,
           }),
+          // Chat apps send a name with no email; the ticket list's sender column
+          // reads fromEmailAddress and renders a bare name as-is.
+          ...(!senderEmail?.trim() && senderName?.trim() && { fromEmailAddress: senderName.trim() }),
         },
         receivedAt: arrivedAt,
         boardId: effectiveBoardId,
