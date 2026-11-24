@@ -16,6 +16,7 @@ import { webhookRouter } from "../routes/webhook.js";
 import { flowActionRouter } from "../routes/flow-action.js";
 import { twinDraftInternalRouter } from "../routes/twin-draft-internal.js";
 import { attachmentsInternalRouter } from "../routes/attachments.js";
+import { workflowSandboxInternalRouter } from "../routes/workflow-sandbox-internal.js";
 import { appConnectorsInternalRouter } from "../routes/app-connectors-internal.js";
 import { agentsInternalRouter } from "../routes/agents-internal.js";
 import { agentsRouter } from "../routes/agents.js";
@@ -237,6 +238,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/agent-warm`, requireStrictS2S, agentWarmInternalRouter);
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
+  app.use(`${BASE}/internal/workflow-sandbox`, requireInternalS2S, workflowSandboxInternalRouter); // Spaces → run workflow code in a fresh Kata sandbox via claw (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/app-connectors`, requireInternalS2S, appConnectorsInternalRouter); // Spaces → sdk.connectors: run the viewer's own MCP connection for an artifact app (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/surface`, requireStrictS2S, surfaceInternalRouter);       // app-control calls from xyne-claw → the user's desktop window
