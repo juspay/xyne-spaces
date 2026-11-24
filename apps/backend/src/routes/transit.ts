@@ -36,7 +36,7 @@ router.get('/config', async (_req: Request, res: Response) => {
   try {
     res.json({
       ...(await getEncryptionProvider().getClientConfig()),
-      fileChunkSize: config.enc.storageFileChunkSize,
+      fileChunkSize: config.enc.enableStorageEncryption ? config.enc.storageFileChunkSize : 0,
     });
   } catch {
     res.status(502).json({ error: 'Encryption service unavailable' });
