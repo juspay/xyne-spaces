@@ -287,15 +287,15 @@ export class LiveKitService {
    * no cache, since a stale read here just means an extra ~3s health-check timeout on an
    * already-rolled-back name, not a correctness issue. `getObjectValue` already fails
    * closed to `{}` internally on any CAC error, so no separate try/catch is needed here.
-   * A deployment without Superposition sets TRANSCRIPTION_AGENT_NAME and
-   * TRANSCRIPTION_AGENT_HEALTH_URL instead: one agent, as the 'default' role.
+   * A deployment without Superposition sets TRANSCRIPTION_AGENT_NAME instead: one agent, as
+   * the 'default' role, health-checked at the agent's own PYTHON_AGENT_URL.
    */
   private async getConfiguredAgentRoles(): Promise<Record<string, ConfiguredTranscriptionAgent>> {
     if (config.transcriptionAgentName) {
       return {
         [DEFAULT_TRANSCRIPTION_AGENT_ROLE]: {
           agentName: config.transcriptionAgentName,
-          url: config.transcriptionAgentHealthUrl,
+          url: `${config.pythonAgentUrl.replace(/\/+$/, '')}/health`,
         },
       };
     }
