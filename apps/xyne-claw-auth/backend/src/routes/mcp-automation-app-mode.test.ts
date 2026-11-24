@@ -65,16 +65,19 @@ describe("entry-stage swap", () => {
       mcpSrc.indexOf("let automationAppSwap"),
       mcpSrc.indexOf("Virtual xyne-spaces entry"),
     );
-    expect(swap).toContain("getAppTokenCredentials(runCtx?.spacesAppUserId || userId)");
+    // The run's app user first, then the session agent's bot (no run context), then the user.
+    expect(swap).toContain("runCtx?.spacesAppUserId ||");
+    expect(swap).toContain("where: { spacesAppId }, select: { spacesAppUserId: true }");
+    expect(swap).toContain("getAppTokenCredentials(appUserId)");
     expect(swap).not.toContain("getAppTokenCredentials(userId)");
   });
 
   it("checks app-tools against the agent's xyne-spaces grants under the swap", () => {
-    // The agent config names xyne-spaces; without the alias, enforcement drops the
-    // whole app-tools server and the run has no Spaces tools at all.
-    expect(mcpSrc).toContain(
-      'automationAppSwap ? new Map([["xyne-spaces-app-tools", "xyne-spaces"]]) : undefined',
-    );
+    // The agent config names xyne-spaces; without the alias, the prefilter or the
+    // enforcement drops the whole app-tools server and the run has no Spaces tools.
+    expect(mcpSrc).toContain('new Map([["xyne-spaces-app-tools", "xyne-spaces"]])');
+    const uses = mcpSrc.match(/automationAppSwap \? APP_SWAP_CONFIGURED_AS : undefined/g) ?? [];
+    expect(uses.length).toBe(2);
   });
 
   it("suppresses the app-token xyne-spaces fallback listing under the swap", () => {

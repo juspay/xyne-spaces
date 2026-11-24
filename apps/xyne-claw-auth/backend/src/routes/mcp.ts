@@ -646,25 +646,33 @@ function serverToolsKey(serverType: string, serverName: string): string {
   return `${serverType}\u0000${serverName}`;
 }
 
+// Under the app-mode swap, xyne-spaces-app-tools stands in for xyne-spaces, so the agent's
+// xyne-spaces grants decide which of its tools are listed (prefilter and enforcement alike).
+const APP_SWAP_CONFIGURED_AS: ReadonlyMap<string, string> = new Map([["xyne-spaces-app-tools", "xyne-spaces"]]);
+
 async function serverTypesAgentCannotUse(
   entries: ListEntry[],
   userId: string,
   config: AgentToolsConfig | undefined,
   sessionAgentTools: { slug: string; subagentToolRefs: SubagentToolRefs[] } | null | undefined,
+  configuredAs: ReadonlyMap<string, string> = new Map(),
 ): Promise<Set<string>> {
   const skipped = new Set<string>();
   if (!config || !sessionAgentTools) return skipped;
   const known = await loadKnownMcpTools(userId, [...new Set(entries.map((e) => e.serverType))]);
   for (const entry of entries) {
     if (CUSTOM_TOOL_INJECTIONS.some((inj) => inj.match(entry.serverType))) continue;
-    const keep = mcpServerMayServeAgentConfig({
-      config,
-      serverType: entry.serverType,
-      serverName: entry.serverName,
-      knownTools: known.get(entry.serverType) ?? null,
-      parseGatewayServerType,
-      subagentRefs: sessionAgentTools.subagentToolRefs,
-    });
+    const mayServe = (serverType: string, serverName: string) =>
+      mcpServerMayServeAgentConfig({
+        config,
+        serverType,
+        serverName,
+        knownTools: known.get(entry.serverType) ?? null,
+        parseGatewayServerType,
+        subagentRefs: sessionAgentTools.subagentToolRefs,
+      });
+    const alias = configuredAs.get(entry.serverType);
+    const keep = mayServe(entry.serverType, entry.serverName) || (!!alias && mayServe(alias, alias));
     if (!keep) skipped.add(entry.serverType);
   }
   return skipped;
@@ -1147,7 +1155,16 @@ async function buildMcpResolutionEntries(args: {
     // Only swap when the app token actually resolves AND the app-tools
     // server row exists — otherwise we'd strip Spaces access and silently
     // break the run. Keep the user server and log loudly instead.
-    const appCreds = await getAppTokenCredentials(runCtx?.spacesAppUserId || userId);
+    // A listing without a run context (e.g. after the session's run entry expired) still
+    // knows the agent from the session's spacesAppId; its bot is the app user to act as.
+    const appUserId =
+      runCtx?.spacesAppUserId ||
+      (spacesAppId
+        ? (await prisma.agent.findUnique({ where: { spacesAppId }, select: { spacesAppUserId: true } }))
+            ?.spacesAppUserId
+        : null) ||
+      userId;
+    const appCreds = await getAppTokenCredentials(appUserId);
     const appToolsRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
     if (appCreds && appToolsRow) {
       automationAppSwap = true;
@@ -1164,7 +1181,7 @@ async function buildMcpResolutionEntries(args: {
       );
     } else {
       log.warn(
-        `[mcp/tools] automation app-mode SKIPPED for userId=${userId} appUserId=${runCtx?.spacesAppUserId ?? "none"}: ` +
+        `[mcp/tools] automation app-mode SKIPPED for userId=${userId} appUserId=${appUserId === userId ? "none" : appUserId}: ` +
         `appCreds=${!!appCreds} appToolsRow=${!!appToolsRow}. ` +
         "Keeping xyne-spaces user MCP to avoid stripping Spaces access. " +
         "If this is an automation run, the agent's app is likely not installed / app token missing.",
@@ -1347,7 +1364,13 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
         })
       : Promise.resolve(null);
 
-  const prefilterSkips = await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+  const prefilterSkips = await serverTypesAgentCannotUse(
+    entries,
+    userId,
+    strictAgentToolsConfig,
+    sessionAgentTools,
+    automationAppSwap ? APP_SWAP_CONFIGURED_AS : undefined,
+  );
   const listingEntries = entries.filter((entry) => !prefilterSkips.has(entry.serverType));
   if (prefilterSkips.size > 0) {
     log.info(
@@ -1681,7 +1704,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           sessionAgentTools.slug,
           entryTypes,
           sessionAgentTools.subagentToolRefs,
-          automationAppSwap ? new Map([["xyne-spaces-app-tools", "xyne-spaces"]]) : undefined,
+          automationAppSwap ? APP_SWAP_CONFIGURED_AS : undefined,
         ),
       );
     }
