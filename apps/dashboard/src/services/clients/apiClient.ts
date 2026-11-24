@@ -21,7 +21,6 @@ import {
 } from './sessionRefresh';
 import { stateMachineActor } from '../../machines/stateMachine';
 import {
-  decryptResponseText,
   encryptionRequestInterceptor,
   encryptionResponseInterceptor,
   retryOnStaleClientManifest,
@@ -412,27 +411,3 @@ export function clearAuthTokens(): void {
 
 // Export the configured Axios instance
 export const apiInstance: AxiosInstance = apiConfig;
-
-/**
- * fetch for backend calls that cannot go through `apiInstance`: clients that must be handed a
- * fetch function (the workflow UI's) or that read event streams. Sends the session cookie, as
- * `apiInstance` does with `withCredentials`, and decrypts the transit-encrypted fields of JSON
- * responses, as `encryptionResponseInterceptor` does for axios. Event streams and other non-JSON
- * bodies are returned untouched. (window.fetch itself is patched in utils/logger.ts for the device
- * key and session refresh, so those apply here too.)
- */
-export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  // eslint-disable-next-line local-rules/no-fetch-use-axios
-  const response = await globalThis.fetch(input, { ...init, credentials: 'include' });
-
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('json') || response.status === 204 || response.status === 304) {
-    return response;
-  }
-
-  const raw = await response.text();
-  const text = await decryptResponseText(raw);
-  const headers = new Headers(response.headers);
-  if (text !== raw) headers.delete('content-length');
-  return new Response(text, { status: response.status, statusText: response.statusText, headers });
-}
