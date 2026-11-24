@@ -1,3 +1,5 @@
+// First, so every outbound fetch goes through the egress proxy where one is set.
+import "./boot/egress-proxy.js";
 import { createLogger } from "./logger.js";
 const log = createLogger("main");
 
