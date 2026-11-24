@@ -3,8 +3,10 @@ import { beforeEach, describe, it } from 'node:test';
 
 import {
   BUBBLE_BEHIND_STEP,
+  BUBBLE_CLEAR_ALL_HEIGHT,
   BUBBLE_EDGE_INSET,
   BUBBLE_LIST_GAP,
+  BUBBLE_LIST_ROW_HEIGHT,
   BUBBLE_SIZE,
   BUBBLE_TUCK_DISTANCE,
 } from '@/src/features/conversation/constants';
@@ -23,6 +25,7 @@ import {
   behindDirection,
   bubbleFaceIds,
   bubbleListPlacement,
+  bubbleListRowsMaxHeight,
   bubbleRestX,
   bubbleSettleSide,
   bubbleTuckSide,
@@ -216,6 +219,7 @@ describe('bubbleListPlacement', () => {
       sideInset: BUBBLE_EDGE_INSET,
       edgeOffset: 120 + BUBBLE_SIZE + BUBBLE_LIST_GAP,
       growsDown: true,
+      maxHeight: 852 - (120 + BUBBLE_SIZE + BUBBLE_LIST_GAP) - BUBBLE_EDGE_INSET,
     });
   });
 
@@ -225,7 +229,25 @@ describe('bubbleListPlacement', () => {
       sideInset: BUBBLE_EDGE_INSET,
       edgeOffset: 852 - 600 + BUBBLE_LIST_GAP,
       growsDown: false,
+      maxHeight: 600 - BUBBLE_LIST_GAP - BUBBLE_EDGE_INSET,
     });
+  });
+
+  it('stops short of the safe edge it grows toward', () => {
+    const down = bubbleListPlacement(321, 120, 393, 852, 59, 34);
+    assert.equal(down.maxHeight, 852 - down.edgeOffset - 34 - BUBBLE_EDGE_INSET);
+    const up = bubbleListPlacement(14, 600, 393, 852, 59, 34);
+    assert.equal(up.maxHeight, 852 - up.edgeOffset - 59 - BUBBLE_EDGE_INSET);
+  });
+});
+
+describe('bubbleListRowsMaxHeight', () => {
+  it('leaves room for "Clear all" and the gap above it', () => {
+    assert.equal(bubbleListRowsMaxHeight(600), 600 - BUBBLE_CLEAR_ALL_HEIGHT - BUBBLE_LIST_GAP);
+  });
+
+  it('keeps at least one row when the room is tight', () => {
+    assert.equal(bubbleListRowsMaxHeight(20), BUBBLE_LIST_ROW_HEIGHT);
   });
 });
 

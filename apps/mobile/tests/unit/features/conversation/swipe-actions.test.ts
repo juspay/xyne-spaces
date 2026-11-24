@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  CONTINUATION_TOP_OFFSET,
   MESSAGE_AVATAR_SIZE,
+  MESSAGE_BODY_LINE_HEIGHT,
   MESSAGE_PADDING_Y,
   SWIPE_ASK_AI_THRESHOLD,
   SWIPE_REPLY_THRESHOLD,
@@ -120,6 +122,9 @@ describe('swipeAffordanceTop', () => {
   });
 
   it('centres on the first line of a continuation, which pulls up under the row above', () => {
-    assert.equal(swipeAffordanceTop(true, 32), -9);
+    assert.equal(
+      swipeAffordanceTop(true, 32),
+      CONTINUATION_TOP_OFFSET + (MESSAGE_BODY_LINE_HEIGHT - 32) / 2,
+    );
   });
 });
