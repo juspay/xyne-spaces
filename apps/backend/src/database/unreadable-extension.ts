@@ -1,6 +1,61 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { UnreadableString, reveal } from '@xyne/shared';
-import { UNREADABLE_FIELDS, type UnreadableField, type UnreadableModel, unreadableFieldsOf } from './unreadableFields';
+import { UNREADABLE_COLUMNS } from '@/zero/unreadableColumns';
+
+type UnreadableTable = keyof typeof UNREADABLE_COLUMNS;
+
+/**
+ * The Prisma model of each table in UNREADABLE_COLUMNS, the one list of unreadable columns
+ * (Zero's; its column names are the Prisma field names). A table added there without its
+ * model here is a compile error.
+ */
+const MODEL_OF_TABLE = {
+  canvas_comment_threads: 'CanvasCommentThread',
+  canvas_comments: 'CanvasComment',
+  canvases: 'Canvas',
+  channel_user_status: 'ChannelUserStatus',
+  channels: 'Channel',
+  coes: 'COE',
+  collections: 'Collection',
+  dashboards: 'Dashboard',
+  delayed_messages: 'DelayedMessage',
+  draft_messages: 'DraftMessage',
+  email_drafts: 'EmailDraft',
+  email_channel_preferences: 'EmailChannelPreference',
+  email_signatures: 'EmailSignature',
+  impacts: 'Impact',
+  links: 'Link',
+  message_artifacts: 'MessageArtifact',
+  message_attachments: 'MessageAttachment',
+  messages: 'Message',
+  rcas: 'RCA',
+  roles: 'Role',
+  sdlc_tracks: 'SdlcTrack',
+  sub_tickets: 'SubTicket',
+  ticket_descriptions: 'TicketDescription',
+  tickets: 'Ticket',
+  user_presence: 'UserPresence',
+  users: 'User',
+  workspaces: 'Workspace',
+} as const satisfies { readonly [T in UnreadableTable]: Prisma.ModelName };
+
+type UnreadableModel = (typeof MODEL_OF_TABLE)[UnreadableTable];
+
+/** The table of model `M`. */
+type TableOf<M> = { [T in UnreadableTable]: (typeof MODEL_OF_TABLE)[T] extends M ? T : never }[UnreadableTable];
+
+/** The unreadable fields of model `M`; `never` for a model with none. */
+type UnreadableField<M> = (typeof UNREADABLE_COLUMNS)[TableOf<M>][number];
+
+/** Per Prisma model, its unreadable fields. */
+const FIELDS_OF_MODEL: Readonly<Record<string, readonly string[]>> = Object.fromEntries(
+  (Object.keys(MODEL_OF_TABLE) as UnreadableTable[]).map(table => [MODEL_OF_TABLE[table], UNREADABLE_COLUMNS[table]]),
+);
+
+/** The unreadable fields of a model at runtime; empty for a model with none. */
+function unreadableFieldsOf(model: string | undefined): readonly string[] {
+  return (model && FIELDS_OF_MODEL[model]) || [];
+}
 
 type Scalars<M extends Prisma.ModelName> = Prisma.TypeMap['model'][M]['payload']['scalars'];
 
@@ -25,7 +80,7 @@ function wrap(value: unknown): unknown {
 
 function buildResultConfig(): UnreadableResultConfig {
   const result: Record<string, Record<string, { needs: Record<string, true>; compute: (row: Record<string, unknown>) => unknown }>> = {};
-  for (const [model, fields] of Object.entries(UNREADABLE_FIELDS)) {
+  for (const [model, fields] of Object.entries(FIELDS_OF_MODEL)) {
     const key = model.charAt(0).toLowerCase() + model.slice(1);
     result[key] = Object.fromEntries(
       fields.map(field => [field, { needs: { [field]: true }, compute: (row: Record<string, unknown>) => wrap(row[field]) }]),
@@ -97,7 +152,7 @@ function unwrapArgs(model: string, operation: string, args: unknown): unknown {
 /**
  * The Prisma counterpart of zero/unreadableTransaction.ts, for `unreadableDb`:
  *
- * - every read returns the fields in UNREADABLE_FIELDS as `UnreadableString`, including on
+ * - every read returns the fields in UNREADABLE_COLUMNS as `UnreadableString`, including on
  *   rows reached through `include` / `select` of a relation and on rows a write returns;
  * - a write takes an `UnreadableString` for those fields and stores the value it holds;
  * - an `UnreadableString` anywhere else in the arguments (another field, a nested write, a
@@ -128,7 +183,7 @@ export type UnreadableDb = ReturnType<typeof withUnreadableFields>;
 /**
  * An unreadable value typed as the string a Prisma write argument declares, for a write
  * through `unreadableDb`: the extension above unwraps it right before the query, so the code
- * writing it never reads it. Only for a field in UNREADABLE_FIELDS (anything else is refused
+ * writing it never reads it. Only for a field in UNREADABLE_COLUMNS (anything else is refused
  * at runtime), and only through `unreadableDb` (the plain client gets an object, not a string).
  */
 export function unreadableWriteValue(value: UnreadableString): string {

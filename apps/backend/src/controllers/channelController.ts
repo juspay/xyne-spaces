@@ -44,7 +44,6 @@ import {
 import '../types/express'; // Import to enable Express types augmentation
 import type { ContractRequest } from '../types/express';
 import { makeRequestUnreadable } from '../middleware/unreadableRequest';
-import { revealUnreadable } from '@/utils/revealUnreadable';
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
 import { notificationService } from '../services/notificationService';
@@ -354,7 +353,6 @@ export class ChannelController {
     conversationId: string;
     initialMessage: {
       messageId: string;
-      content: UnreadableString;
       msgType: MessageType;
       hasAttachment: boolean;
       attachments: any[];
@@ -526,23 +524,21 @@ export class ChannelController {
         senderId: createdMessage.senderId,
         senderName: senderInfo.name,
         senderPicture: senderInfo.picture,
-        content: createdMessage.content,
         msgType: createdMessage.msgType,
         hasAttachment: createdMessage.hasAttachment,
         attachments: [],
         createdAt: createdMessage.createdAt,
       };
 
-      // Both go to the channel's clients, so the content is revealed for them as it is stored.
-      const outboundMessage = revealUnreadable(conversationMessage);
-      await websocketService.broadcastToSession(channelId, 'new_conversation', outboundMessage);
-      await redisService.broadcastMessageToSession(channelId, outboundMessage);
+      // No `content`: it is unreadable here, and clients get the message itself through Zero
+      // sync. No Redis publish either: nothing subscribes to the session channel (see
+      // websocketService), and its ChatMessage shape requires the content.
+      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
 
       return {
         conversationId: conversation.conversationId,
         initialMessage: {
           messageId: createdMessage.messageId,
-          content: createdMessage.content,
           msgType: createdMessage.msgType as MessageType,
           hasAttachment: createdMessage.hasAttachment,
           attachments: [],

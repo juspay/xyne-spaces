@@ -102,7 +102,7 @@ export class DatabaseClient {
   }
 
   /**
-   * The same client as `getInstance()`, except the fields in UNREADABLE_FIELDS come back as
+   * The same client as `getInstance()`, except the fields in UNREADABLE_COLUMNS come back as
    * `UnreadableString` (see unreadable-extension.ts). Code moves to it once it no longer
    * reads those fields as text.
    */
