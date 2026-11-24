@@ -576,24 +576,49 @@ export class App {
       void new ReactionController().reactAsUser(req, res);
     });
     // TEMPORARY (XYNE-67075): content extraction for the encryption service's
-    // transform-request (the REST reply route and the conversations.send mutator), until the
-    // extractor runs as a sidecar container in the encryption-api pod (apps/encryption-extractor
-    // in the private repo; switch back by pointing EXTRACTOR_URL at it and deleting this
-    // route). It cannot be switched off before then: client-encrypted writes need it. The body
-    // carries message plaintext: never log it (morgan and requestLogger log the request line
-    // only).
+    // transform-request (the REST reply route and the conversations.send mutator) and
+    // derive-facts (tx.read), until the extractor runs as a sidecar container in the
+    // encryption-api pod (apps/encryption-extractor in the private repo; switch back by
+    // pointing EXTRACTOR_URL at it and deleting these routes). They cannot be switched off
+    // before then: client-encrypted writes need them. The bodies carry message plaintext:
+    // never log them (morgan and requestLogger log the request line only).
+    const knownExtractors = new Set<string>(EXTRACTORS);
+    const isExtractItem = (item: unknown): item is { text: string; extractors: ExtractorName[] } => {
+      const { text, extractors } = (item ?? {}) as { text?: unknown; extractors?: unknown };
+      return (
+        typeof text === 'string' &&
+        Array.isArray(extractors) &&
+        extractors.every((name): name is ExtractorName => typeof name === 'string' && knownExtractors.has(name))
+      );
+    };
+    // Single value: what the encryption service called before extract-batch; kept until every
+    // encryption deployment calls extract-batch, then delete.
     this.app.post('/api/internal/content/extract', validateS2SKey, (req: Request, res: Response) => {
-      const { text, extractors } = (req.body ?? {}) as { text?: unknown; extractors?: unknown };
-      const known = new Set<string>(EXTRACTORS);
-      if (
-        typeof text !== 'string' ||
-        !Array.isArray(extractors) ||
-        !extractors.every((name): name is ExtractorName => typeof name === 'string' && known.has(name))
-      ) {
+      if (!isExtractItem(req.body)) {
         res.status(400).json({ error: 'Bad request', message: 'text must be a string and extractors known extractor names' });
         return;
       }
-      res.json(runExtractors(text, extractors));
+      res.json(runExtractors(req.body.text, req.body.extractors));
+    });
+    // `{ items: [{ text, extractors }] }` → `{ results: [<facts per item, in order>] }`: all of
+    // a request's values in one call. A bad item fails the whole call, naming its `index`.
+    this.app.post('/api/internal/content/extract-batch', validateS2SKey, (req: Request, res: Response) => {
+      const { items } = (req.body ?? {}) as { items?: unknown };
+      if (!Array.isArray(items)) {
+        res.status(400).json({ error: 'Bad request', message: 'items must be an array' });
+        return;
+      }
+      const index = items.findIndex(item => !isExtractItem(item));
+      if (index !== -1) {
+        res.status(400).json({
+          error: 'Bad request',
+          message: `items[${index}]: text must be a string and extractors known extractor names`,
+          index,
+        });
+        return;
+      }
+      const valid = items as { text: string; extractors: ExtractorName[] }[];
+      res.json({ results: valid.map(({ text, extractors }) => runExtractors(text, extractors)) });
     });
     this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
       try {
