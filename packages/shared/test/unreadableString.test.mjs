@@ -6,6 +6,7 @@ import { inspect } from 'node:util';
 import {
   UnreadableString,
   reveal,
+  makeReadable,
   makeUnreadable,
   replyToConversationClient,
   conversationsSendClient,
@@ -56,4 +57,36 @@ test('makeUnreadable keeps absent fields absent and does not wrap twice', () => 
 test('the contract schema still validates the plain body', () => {
   assert.ok(replyToConversationClient.schema.safeParse({ content: 'hello' }).success);
   assert.ok(!replyToConversationClient.schema.safeParse({ content: 42 }).success);
+});
+
+test('the reply contract marks content unreadable in its response too', () => {
+  assert.deepEqual(replyToConversationClient.unreadableResponseFields, ['content']);
+  assert.deepEqual(conversationsSendClient.unreadableResponseFields, []);
+  assert.equal(conversationsSendClient.response, undefined);
+});
+
+test('a response with an unreadable field is redacted until makeReadable writes it', () => {
+  const response = { messageId: 'm1', content: UnreadableString.make('hello'), msgType: 'USER' };
+  assert.equal(JSON.stringify(response), '{"messageId":"m1","content":"<redacted>","msgType":"USER"}');
+  const wire = makeReadable(replyToConversationClient, response);
+  assert.equal(JSON.stringify(wire), '{"messageId":"m1","content":"hello","msgType":"USER"}');
+  assert.ok(response.content instanceof UnreadableString);
+});
+
+test('makeReadable reveals only the fields the response schema marks', () => {
+  const stray = { content: 'plain', other: UnreadableString.make('not declared') };
+  assert.equal(JSON.stringify(makeReadable(replyToConversationClient, stray)), '{"content":"plain","other":"<redacted>"}');
+  assert.deepEqual(makeReadable(replyToConversationClient, { error: 'nope' }), { error: 'nope' });
+  assert.equal(makeReadable(replyToConversationClient, undefined), undefined);
+  const noResponse = { content: UnreadableString.make('x') };
+  assert.equal(makeReadable(conversationsSendClient, noResponse), noResponse);
+});
+
+test('the response schema accepts the wire form of a reply', () => {
+  const wire = {
+    messageId: 'm1', conversationId: 'c1', content: 'hello', msgType: 'USER',
+    createdAt: new Date().toISOString(), sender: { id: 'u1', name: 'A', email: 'a@x.io' },
+  };
+  assert.ok(replyToConversationClient.response.safeParse(wire).success);
+  assert.ok(!replyToConversationClient.response.safeParse({ ...wire, messageId: 42 }).success);
 });

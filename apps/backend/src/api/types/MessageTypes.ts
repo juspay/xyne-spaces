@@ -49,19 +49,8 @@ export interface ApiPagination {
 
 // API Response Types for each endpoint
 
-// POST /conversations/:conversationId/messages
-export interface SendMessageResponse {
-  messageId: string;
-  conversationId: string;
-  content: string;
-  msgType: string;
-  hasAttachment?: boolean;
-  edited?: boolean;
-  visibleTo?: string | null;
-  attachments?: ApiMessageAttachment[];
-  createdAt: Date;
-  sender: ApiMessageUser;
-}
+// POST /conversations/:conversationId/messages: ReplyToConversationResponse, in
+// packages/shared/src/enc-contracts/contracts/conversations.ts
 
 // GET /conversations/:conversationId/messages
 export interface GetMessagesResponse {

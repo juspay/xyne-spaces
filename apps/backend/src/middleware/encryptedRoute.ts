@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import {
   derivedFactsSchema,
   derivedNames,
+  makeReadable,
   makeUnreadable,
   sourceFieldNames,
 } from '@xyne/shared';
@@ -32,6 +33,10 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  *    reads them only through reveal().
  * 4. transformResponse: the JSON response's storage ciphertext becomes transit ciphertext
  *    for the caller (encryption service /internal/transit/transform-response).
+ * 5. writeResponse: the response's `unreadableString()` fields, which the handler passed as
+ *    `UnreadableString`, become their text here, as the body is written; outside production
+ *    a 2xx body that does not match the contract's `response` schema is also logged. It
+ *    wraps res.json last, so it gets the body as the handler wrote it, before step 4.
  *
  * The manifest is the encryption service's alone: it picks the rule for the request and
  * runs every check against it; this file forwards the request and relays its verdict.
@@ -40,7 +45,13 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  *   router.post(path, uploadMultiple, ...encryptedRoute(contract, { resolveWorkspaceId }), handler)
  */
 export function encryptedRoute(contract: RequestContract, options: Omit<EncryptedRouteOptions, 'contract'>) {
-  return [enterDekPassthrough, transformRequest({ contract, ...options }), makeBodyUnreadable(contract), transformResponse];
+  return [
+    enterDekPassthrough,
+    transformRequest({ contract, ...options }),
+    makeBodyUnreadable(contract),
+    transformResponse,
+    writeResponse(contract),
+  ];
 }
 
 export type EncryptedRouteOptions = {
@@ -259,4 +270,40 @@ function transformResponse(req: Request, res: Response, next: NextFunction): voi
   }) as Response['json'];
 
   next();
+}
+
+/**
+ * The one place a contracted route's response becomes readable: the contract's unreadable
+ * response fields are turned into their text and the result is sent. Outside production it
+ * also compares each 2xx body with the contract's `response` schema and logs where they
+ * differ (field paths and issue codes, never values); the response is sent either way.
+ */
+function writeResponse(contract: RequestContract) {
+  const schema = contract.response;
+  return function writeResponseMiddleware(req: Request, res: Response, next: NextFunction): void {
+    const sendJson = res.json.bind(res);
+    res.json = ((body?: unknown): Response => {
+      const wire = makeReadable(contract, body);
+      if (schema && config.env !== 'production' && res.statusCode >= 200 && res.statusCode < 300) {
+        const route = `${sanitizeForLog(req.method)} ${sanitizeForLog(req.baseUrl)}${String(req.route?.path ?? '')}`;
+        try {
+          // Through JSON first: the schema is checked against the wire form (a Date is a string there).
+          const parsed = schema.safeParse(JSON.parse(JSON.stringify(wire)));
+          if (!parsed.success) {
+            logger.warn('[encryptedRoute] response does not match its contract', {
+              route,
+              issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), code: issue.code })),
+            });
+          }
+        } catch (error) {
+          logger.warn('[encryptedRoute] response could not be checked against its contract', {
+            route,
+            reason: error instanceof Error ? error.name : 'unknown',
+          });
+        }
+      }
+      return sendJson(wire);
+    }) as Response['json'];
+    next();
+  };
 }

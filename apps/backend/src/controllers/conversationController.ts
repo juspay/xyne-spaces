@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import type { replyToConversationClient } from '@xyne/shared';
-import type { ContractRequest } from '@/types/express';
-import { isEncryptedField, reveal } from '@xyne/shared';
+import type { ReplyToConversationResponse, replyToConversationClient } from '@xyne/shared';
+import { ContractError, type ContractInput } from '@/middleware/serveApi';
+import { isEncryptedField, reveal, UnreadableString } from '@xyne/shared';
 import type { FieldFacts } from '@xyne/shared';
 import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
@@ -26,7 +26,7 @@ import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, Works
 import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/bots';
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
-import { SendMessageResponse, GetMessagesResponse } from '../api/types/MessageTypes';
+import { GetMessagesResponse } from '../api/types/MessageTypes';
 import { config } from '../config/env';
 import { z } from 'zod';
 import { logger } from '../utils/logger';
@@ -521,11 +521,19 @@ export class ConversationController {
         });
 
         // Handle bot command with the new conversation ID
-        await this.handleBotCommand(content.trim(), conversation.conversationId, userId, res, {
-          isNewConversation: true,
-          channelId,
-          initialMessageId: conversation.conversationId,
-        });
+        await this.handleBotCommand(
+          content.trim(),
+          conversation.conversationId,
+          userId,
+          (status, sentBody) => {
+            res.status(status).json(sentBody);
+          },
+          {
+            isNewConversation: true,
+            channelId,
+            initialMessageId: conversation.conversationId,
+          },
+        );
         return;
       }
 
@@ -954,20 +962,22 @@ export class ConversationController {
   };
 
   // POST /api/conversations/{conversationId}/messages - Reply to conversation (with optional file attachments)
-  replyToConversation = async (
-    req: ContractRequest<typeof replyToConversationClient>,
-    res: Response,
-  ): Promise<void> => {
+  // An API handler (middleware/serveApi.ts): it gets the contract's request, returns
+  // the contract's response, and answers anything else by throwing a ContractError.
+  replyToConversation = async ({
+    params,
+    body,
+    derived,
+    user,
+    files: reqFiles,
+  }: ContractInput<typeof replyToConversationClient>): Promise<ReplyToConversationResponse> => {
     try {
-      const { conversationId } = req.params;
-      const { content, msgType, visibleTo, fileMetadata: fileMetadataJson } = req.body;
-      const reqFiles =
-        (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } })
-          .files || {};
+      const { conversationId } = params;
+      const { content, msgType, visibleTo, fileMetadata: fileMetadataJson } = body;
       const files = reqFiles['files'] || [];
       const thumbnails = reqFiles['thumbnails'] || [];
-      const userId = req.user!.id;
-      const showInChannel = req.body.showInChannel === true || req.body.showInChannel === 'true';
+      const userId = user.id;
+      const showInChannel = body.showInChannel === true || body.showInChannel === 'true';
 
       // Parse file metadata if present
       let fileMetadata:
@@ -980,14 +990,13 @@ export class ConversationController {
           logger.info('Received valid file metadata', { metadata: fileMetadata });
         } catch (error) {
           logger.error('Failed to parse or validate fileMetadata', { error });
-          res.status(400).json({
+          throw new ContractError(400, {
             error: 'Invalid file metadata format',
             details:
               error instanceof z.ZodError
                 ? error.issues
                 : 'File metadata must be a valid JSON array',
           });
-          return;
         }
       }
 
@@ -1003,14 +1012,12 @@ export class ConversationController {
 
       // Validate required fields - either content or files must be present
       if ((!content || reveal(content).trim() === '') && files.length === 0) {
-        res.status(400).json({ error: 'Message content or files are required' });
-        return;
+        throw new ContractError(400, { error: 'Message content or files are required' });
       }
 
       const conversation = await this.conversationRepository.findById(conversationId);
       if (!conversation) {
-        res.status(404).json({ error: 'Conversation not found' });
-        return;
+        throw new ContractError(404, { error: 'Conversation not found' });
       }
 
       // 🔒 SECURITY FIX: PREVENT AUTO-ADD TO PRIVATE CHANNELS
@@ -1030,11 +1037,10 @@ export class ConversationController {
           );
         } else {
           // PRIVATE channels require explicit invitation
-          res.status(403).json({
+          throw new ContractError(403, {
             error: 'Access denied - you must be a member of this private channel to reply',
             code: 'NOT_CHANNEL_MEMBER',
           });
-          return;
         }
       }
 
@@ -1051,15 +1057,13 @@ export class ConversationController {
           logger.error('File upload failed:', error);
           // Send the actual error message to the client
           const errorMessage = error instanceof Error ? error.message : 'File upload failed';
-          res.status(400).json({ error: errorMessage });
-          return;
+          throw new ContractError(400, { error: errorMessage });
         }
       }
 
       // Check if this is a bot command (only for text content, not file uploads).
       // Content that arrived as workspace-DEK ciphertext is opaque here; the encryption
-      // service's extracted command (req.derived) stands in for parsing it.
-      const derived = req.derived;
+      // service's extracted command (`derived`) stands in for parsing it.
       // The reply route runs unencrypted today (contract `sourceToDerived: {}`), so no facts
       // arrive; once `content` is listed in its contract they appear under `fields.content`.
       const facts: FieldFacts | undefined = (derived?.fields as Record<string, FieldFacts> | undefined)?.content;
@@ -1067,11 +1071,10 @@ export class ConversationController {
       // a rule whose extraction policy leaves out `text` cannot be accepted (policy lives in the
       // encryption service's database, so this is a configuration error, not a client one).
       if (content && isEncryptedField(reveal(content)) && facts?.textLength === undefined) {
-        res.status(400).json({
+        throw new ContractError(400, {
           error: 'Encrypted content arrived without its derived length',
           code: 'ENC_DERIVED_INVALID',
         });
-        return;
       }
       const isBotCommand = facts?.isBotCommand !== undefined
         ? facts.isBotCommand
@@ -1082,8 +1085,26 @@ export class ConversationController {
             ? `/${facts.commandName} ${facts.commandArgs ?? ''}`
             : '/'
           : undefined;
-        await this.handleBotCommand(content ? reveal(content).trim() : '', conversationId, userId, res, { commandText });
-        return;
+        // handleBotCommand answers through `send`; its answer becomes this handler's.
+        const bot: { sent?: { status: number; body: Record<string, unknown> } } = {};
+        await this.handleBotCommand(
+          content ? reveal(content).trim() : '',
+          conversationId,
+          userId,
+          (status, sentBody) => {
+            bot.sent = { status, body: sentBody };
+          },
+          { commandText },
+        );
+        if (!bot.sent || bot.sent.status >= 400) {
+          throw new ContractError(bot.sent?.status ?? 500, bot.sent?.body ?? { error: 'Failed to process bot command' });
+        }
+        // The bot answer is built untyped in handleBotCommand, so this cast is unchecked; the
+        // response check in encryptedRoute reports a mismatch outside production.
+        return {
+          ...bot.sent.body,
+          content: UnreadableString.make(String(bot.sent.body.content ?? '')),
+        } as ReplyToConversationResponse;
       }
 
       // Generate child conversation ID if showInChannel is true
@@ -1121,7 +1142,7 @@ export class ConversationController {
           createdBy: userId,
           storageProvider: config.fileStorage.provider,
           conversationId: conversationId,
-          workspaceId: req.user!.workspaceId!,
+          workspaceId: user.workspaceId!,
           metadata: file.metadata || {},
         }));
 
@@ -1135,7 +1156,7 @@ export class ConversationController {
           : [];
 
       // Push Vespa job for message indexing
-      this.pushVespaJobForMessage(message.messageId, userId, req.user!.workspaceId!).catch(
+      this.pushVespaJobForMessage(message.messageId, userId, user.workspaceId!).catch(
         (error) => {
           logger.error(
             `[ConversationController] Error pushing Vespa job for message ${message.messageId}:`,
@@ -1168,13 +1189,13 @@ export class ConversationController {
 
       if (
         message.msgType === MessageType.USER &&
-        req.user?.workspaceId &&
+        user.workspaceId &&
         channel?.scopeType === ChannelScopeType.DEFAULT
       ) {
         void processMeetLinksFromChatMessage(
           // Extracted Meet links stand in for encrypted content.
           facts?.meetLinks ? facts.meetLinks.join(' ') : message.content,
-          req.user.workspaceId,
+          user.workspaceId,
           conversationId,
           message.messageId,
         ).catch((error) => {
@@ -1226,10 +1247,10 @@ export class ConversationController {
 
       const handler = new MessagesSideEffectHandler({
         userID: userId,
-        workspaceId: req.user!.workspaceId!,
-        role: req.user!.role!,
-        memberId: req.user!.memberId!,
-        orgRole: req.user!.orgRole!,
+        workspaceId: user.workspaceId!,
+        role: user.role!,
+        memberId: user.memberId!,
+        orgRole: user.orgRole!,
       });
       handler
         .onInsert({
@@ -1240,10 +1261,11 @@ export class ConversationController {
         })
         .catch((err) => logger.error('Side-effect handler error: replyToConversation', err));
 
-      const response: SendMessageResponse = {
+      // The response type is the contract's; encryptedRoute turns `content` back into text as it writes the body.
+      const response: ReplyToConversationResponse = {
         messageId: message.messageId,
         conversationId: message.conversationId,
-        content: message.content,
+        content: UnreadableString.make(message.content),
         msgType: message.msgType,
         hasAttachment: message.hasAttachment,
         edited: (message as Message & { edited?: boolean }).edited ?? false,
@@ -1264,10 +1286,11 @@ export class ConversationController {
         sender: senderInfo,
       };
 
-      res.status(201).json(response);
+      return response;
     } catch (error) {
+      if (error instanceof ContractError) throw error;
       logger.error('Error replying to conversation:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      throw new ContractError(500, { error: 'Internal server error' });
     }
   };
 
@@ -1418,7 +1441,8 @@ export class ConversationController {
     content: string,
     conversationId: string,
     userId: string,
-    res: Response,
+    /** Answers the request: status and JSON body. Called exactly once. */
+    send: (status: number, body: Record<string, unknown>) => void,
     options?: {
       isNewConversation?: boolean;
       channelId?: string;
@@ -1499,7 +1523,7 @@ export class ConversationController {
           await redisService.broadcastMessageToSession(conversationId, chatMessage);
         }
 
-        res.status(400).json({
+        send(400, {
           error: parseResult.error,
           messageId: errorMessage.messageId,
         });
@@ -1608,7 +1632,7 @@ export class ConversationController {
           data: conversationMessage,
         });
 
-        res.status(201).json({
+        send(201, {
           conversationId,
           channelId: options.channelId,
           messageId: triggerMessage.messageId,
@@ -1627,7 +1651,7 @@ export class ConversationController {
         await websocketService.broadcastToSession(conversationId, 'new_message', chatMessage);
         await redisService.broadcastMessageToSession(conversationId, chatMessage);
 
-        res.status(201).json({
+        send(201, {
           messageId: triggerMessage.messageId,
           conversationId: triggerMessage.conversationId,
           content: triggerMessage.content,
@@ -1643,7 +1667,7 @@ export class ConversationController {
       }
     } catch (error) {
       logger.error('Error handling bot command:', error);
-      res.status(500).json({ error: 'Failed to process bot command' });
+      send(500, { error: 'Failed to process bot command' });
     }
   }
 

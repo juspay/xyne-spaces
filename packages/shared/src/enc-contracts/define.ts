@@ -1,6 +1,12 @@
 import type { z } from 'zod';
 import type { Derivable, ExtractorName, ExtractorOutput } from './extractors.js';
-import { UnreadableString, isUnreadableSchema } from './unreadable-string.js';
+import { UnreadableString, isUnreadableSchema, reveal } from './unreadable-string.js';
+
+/**
+ * Marks an object as made by `defineRequestContract`. Not exported, so nothing outside this
+ * folder can name it: a contract can only be defined here, next to the others.
+ */
+const contractBrand: unique symbol = Symbol('RequestContract');
 
 declare const encryptedBrand: unique symbol;
 /** A field value the client encrypts: the handler only ever sees it as ciphertext. */
@@ -30,17 +36,34 @@ export type DerivedSpec = { readonly [N in ExtractorName]?: Derivable<N> };
 export type SourceToDerived<F extends string = string> = { readonly [K in F]?: DerivedSpec };
 
 /**
- * One API's request type: the zod schema of its body and `sourceToDerived`. The route that
- * uses it attaches it where the route is registered (the path lives only there and, as the
- * rule's `value`, in the encryption service's database). What the sources are encrypted *to*
+ * One API's types: the zod schema of its request body, `sourceToDerived` and, for an HTTP API,
+ * the `response` it answers with. The route that uses it attaches it where the route is
+ * registered (the path lives only there and, as the rule's `value`, in the encryption
+ * service's database). What the sources are encrypted *to*
  * (the rule's `transform`) is policy in that database and reaches the backend and clients
  * through the manifest. The encryption service checks on each request that the contract and
  * the matched rule agree on field names and on which fields are encrypted.
+ *
+ * Contracts are defined only in this folder (`defineRequestContract` is not exported from the
+ * package) and an HTTP one is listed in `API` (api.ts), which is what the backend serves from.
  */
-export interface RequestContract<S extends z.ZodObject = z.ZodObject, D extends SourceToDerived = SourceToDerived> {
+export interface RequestContract<
+  S extends z.ZodObject = z.ZodObject,
+  D extends SourceToDerived = SourceToDerived,
+  R extends z.ZodType | undefined = z.ZodType | undefined,
+> {
+  readonly [contractBrand]: true;
   kind: 'REQUEST';
   schema: S;
   sourceToDerived: D;
+  /**
+   * The JSON body of a 2xx response. Absent for a Zero mutator. A field marked
+   * `unreadableString()` is an `UnreadableString` in the handler's hands and becomes its text
+   * only as the response is written (`makeReadable`).
+   */
+  response: R;
+  /** The response fields marked `unreadableString()`. */
+  unreadableResponseFields: readonly string[];
   /** The fields the schema marks `unreadableString()`: handlers get them as `UnreadableString`, see `makeUnreadable`. */
   unreadableFields: readonly string[];
 }
@@ -48,15 +71,25 @@ export interface RequestContract<S extends z.ZodObject = z.ZodObject, D extends 
 export function defineRequestContract<
   S extends z.ZodObject,
   const D extends SourceToDerived<FieldName<S>> = Record<never, never>,
->(contract: { schema: S; sourceToDerived?: D }): RequestContract<S, D> {
+  R extends z.ZodType | undefined = undefined,
+>(contract: { schema: S; sourceToDerived?: D; response?: R }): RequestContract<S, D, R> {
   return {
+    [contractBrand]: true,
     kind: 'REQUEST',
     schema: contract.schema,
     sourceToDerived: (contract.sourceToDerived ?? {}) as D,
-    unreadableFields: Object.entries(contract.schema.shape)
-      .filter(([, field]) => isUnreadableSchema(field))
-      .map(([name]) => name),
+    response: contract.response as R,
+    unreadableResponseFields: unreadableFieldNames((contract.response as { shape?: unknown } | undefined)?.shape),
+    unreadableFields: unreadableFieldNames(contract.schema.shape),
   };
+}
+
+/** The keys of an object schema's shape that are marked `unreadableString()`; none for anything else. */
+function unreadableFieldNames(shape: unknown): string[] {
+  if (!shape || typeof shape !== 'object') return [];
+  return Object.entries(shape)
+    .filter(([, field]) => isUnreadableSchema(field))
+    .map(([name]) => name);
 }
 
 /** The names of the fields a contract encrypts. */
@@ -140,6 +173,30 @@ export type FieldDerived<D, F extends keyof D> = {
 export type RequestDerived<C> = C extends RequestContract<z.ZodObject, infer D>
   ? { version: 2; fields: { [F in keyof D]?: FieldDerived<D, F> } }
   : never;
+
+/**
+ * The 2xx response body a handler builds for a contract that declares one: its
+ * `unreadableString()` fields are `UnreadableString`, so the handler passes them on without
+ * reading them.
+ */
+export type ResponseBody<C> = C extends { response: infer R extends z.ZodType } ? z.output<R> : never;
+
+/**
+ * The response as it goes over the wire: a copy of `body` with the contract's unreadable
+ * response fields turned back into their text. Run it where the response is written (the
+ * route middleware), never in a handler. Without it those fields serialize as `<redacted>`.
+ */
+export function makeReadable(contract: RequestContract, body: unknown): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || contract.unreadableResponseFields.length === 0) {
+    return body;
+  }
+  const readable = { ...body } as Record<string, unknown>;
+  for (const field of contract.unreadableResponseFields) {
+    const value = readable[field];
+    if (value instanceof UnreadableString) readable[field] = reveal(value);
+  }
+  return readable;
+}
 
 /** The whole request as the handler sees it: the body as sent, and the derived facts (when there was text to derive from). */
 export type RequestOf<C> = { body: RequestBody<C>; derived?: RequestDerived<C> };

@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { MessageType } from '../../zero/types.js';
-import { defineRequestContract, type RequestOf } from '../define.js';
+import { defineRequestContract, type RequestOf, type ResponseBody } from '../define.js';
 import { derive } from '../extractors.js';
 import { unreadableString } from '../unreadable-string.js';
 
 /**
- * Conversation reply API; attached to its route in the backend's routes/conversations.ts.
+ * Conversation reply API; attached to its route in the backend's routes/conversations.ts. It
+ * answers with the stored message, or, for a bot command, the trigger message with its `botExecution`.
  * Runs unencrypted for now (`sourceToDerived: {}`, manifest rule revision 2): clients without
  * transit encryption still post here, and the handler parses the plaintext. To re-enable,
  * list `content` here with the facts the handler reads and ship a rule revision with
@@ -22,9 +23,41 @@ export const replyToConversationClient = defineRequestContract({
       .union([z.boolean(), z.enum(['true', 'false']).transform(value => value === 'true')])
       .optional(),
   }),
+  response: z.object({
+    messageId: z.string(),
+    conversationId: z.string(),
+    content: unreadableString(),
+    msgType: z.string(),
+    hasAttachment: z.boolean().optional(),
+    edited: z.boolean().optional(),
+    visibleTo: z.string().nullable().optional(),
+    attachments: z
+      .array(
+        z.object({
+          attachmentId: z.string(),
+          fileName: z.string(),
+          fileSize: z.number(),
+          mimeType: z.string(),
+          fileUrl: z.string(),
+          thumbnailUrl: z.string().nullable().optional(),
+          uploadedBy: z.string(),
+          messageId: z.string(),
+          conversationId: z.string().nullable(),
+          createdAt: z.coerce.date(),
+          metadata: z.unknown(),
+        }),
+      )
+      .optional(),
+    createdAt: z.coerce.date(),
+    sender: z.object({ id: z.string(), name: z.string(), email: z.string(), picture: z.string().optional() }),
+    // Bot command replies only.
+    channelId: z.string().optional(),
+    botExecution: z.object({ executionId: z.string(), botName: z.string(), queued: z.boolean() }).optional(),
+  }),
 });
 
 export type ReplyToConversationRequest = RequestOf<typeof replyToConversationClient>;
+export type ReplyToConversationResponse = ResponseBody<typeof replyToConversationClient>;
 
 /**
  * Zero mutator `conversations.send` (start a conversation); its args are this body. The
