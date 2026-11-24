@@ -341,6 +341,10 @@ const envSchema = Joi.object({
   WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
   WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
   WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
+  // Code execution for workflows (CODE step, run_code): each run in a fresh Kata sandbox via
+  // xyne-claw-auth → xyne-claw (XYNE_CLAW_AUTH_URL / INTERNAL_S2S_KEY). Set it on the process that
+  // runs workflow steps (the workflows worker). Off: CODE steps fail closed.
+  ENABLE_WORKFLOWS_SANDBOX: Joi.boolean().default(false),
   ENABLE_CONVERSATIONAL_FLOW_WORKER: Joi.boolean().default(false),
   CONVERSATIONAL_FLOW_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(50),
   CONVERSATIONAL_FLOW_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(60_000),
@@ -1306,6 +1310,7 @@ export const config = {
     workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
     lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
     baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
+    sandboxEnabled: envVars.ENABLE_WORKFLOWS_SANDBOX as boolean,
     conversationalFlow: {
       workerEnabled: envVars.ENABLE_CONVERSATIONAL_FLOW_WORKER as boolean,
       workerConcurrency: envVars.CONVERSATIONAL_FLOW_WORKER_CONCURRENCY as number,
