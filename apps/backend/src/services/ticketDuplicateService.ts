@@ -1,6 +1,12 @@
 import { createHash } from 'crypto';
 import { logger } from '@/utils/logger';
-import { ActivityType, MAX_DUPLICATE_LOOKBACK_DAYS, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
+import {
+  ActivityType,
+  MAX_DUPLICATE_LOOKBACK_DAYS,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  TicketReferenceRelation,
+} from '@xyne/shared';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import {
   resolveBoardTicketFormId,
   resolveFormFieldDefinitionsForForm,
@@ -94,7 +100,7 @@ export type DuplicateDetectionOutcome = {
 /**
  * One raw scope-field value carried by the NEW ticket, handed to the service as a
  * 1:1 map of the caller's precomputed custom-field write payload entries (fieldId +
- * raw actualFieldValue — never re-read from the DB here: desk flows sync form values
+ * raw value — never re-read from the DB here: desk flows sync form values
  * only AFTER ticket creation, so reading would race). In-service normalization
  * (via buildFormFields) and project/type resolution both happen lazily inside
  * buildScopeDynamicFieldValues.
@@ -168,7 +174,7 @@ export const buildDuplicateScopeFieldValues = async (params: {
     const indexedRows = buildFormFields(
       scopableFields.map(({ id }) => ({
         fieldId: id,
-        actualFieldValue: rawValueByFieldId.get(id) as Prisma.JsonValue,
+        value: rawValueByFieldId.get(id) as Prisma.JsonValue,
       })),
       fieldTypeByFieldId,
     );
@@ -480,11 +486,10 @@ class TicketDuplicateService {
     }
 
     const [savedValues, parentMappings, referenceActivities] = await Promise.all([
-      prisma.formEntityValues.findMany({
+      findFormEntityValues(prisma, {
         where: { entityId: ticket.id, entityType: 'TICKET' },
         orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
         distinct: ['fieldId'],
-        select: { fieldId: true, actualFieldValue: true },
       }),
       prisma.ticketSubTicketMapping.findMany({
         where: { subTicket: { mappedTicketId: ticket.id } },
@@ -509,7 +514,7 @@ class TicketDuplicateService {
     const parentTicketIds = parentMappings.map(mapping => mapping.ticketId);
     // Search excludes parents and dismissed candidates only.
     const excludeTicketIds = [...parentTicketIds, ...dismissedTicketIds];
-    const scopeFieldValues = savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue }));
+    const scopeFieldValues = savedValues.map(v => ({ fieldId: v.fieldId, value: v.value }));
 
     // Linked duplicates are deliberately OUT of the fingerprint: a new link must not
     // invalidate the cache, or every open would re-run and keep linking the next

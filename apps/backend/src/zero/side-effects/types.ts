@@ -55,8 +55,7 @@ export interface FormEntityValuePreviousValue {
   entityId: string;
   fieldId: string;
   entityType: string;
-  fieldValue: string;
-  actualFieldValue: unknown;
+  value: unknown;
 }
 
 export interface DelayedMessagePreviousValue {

@@ -49,7 +49,8 @@ import { agentWarmRouter, agentWarmInternalRouter } from "../routes/agent-warm.j
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
 import { designSystemsRouter } from "../routes/design-systems.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
-import { artifactAppStorageRouter, storageBearerAuthBridge } from "../routes/artifact-app-storage.js";
+// Disabled (Storage SDK)
+// import { artifactAppStorageRouter, storageBearerAuthBridge } from "../routes/artifact-app-storage.js";
 import { designSharesRouter, publicDesignSharesRouter } from "../routes/design-shares.js";
 import { conversationArtifactsRouter } from "../routes/conversation-artifacts.js";
 import { sessionsArchiveRouter } from "../routes/sessions-archive.js";
@@ -222,10 +223,11 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);
   app.use(`${BASE}/design-systems`, requireAuth, requireNoAccessToken, designSystemsRouter);
   app.use(`${BASE}/artifact-app-agents`, requireAuth, artifactAppAgentsRouter);
-  // storageBearerAuthBridge runs first: bare-Bearer SDK calls get the token's
-  // own workspaceId claim turned into the cookie form requireAuth expects.
-  // Scoped to this path only — requireAuth itself is untouched.
-  app.use(`${BASE}/artifact-app-storage`, storageBearerAuthBridge, requireAuth, artifactAppStorageRouter);
+  // Disabled (Storage SDK): POST /artifact-app-storage/query, /put and /delete
+  // // storageBearerAuthBridge runs first: bare-Bearer SDK calls get the token's
+  // // own workspaceId claim turned into the cookie form requireAuth expects.
+  // // Scoped to this path only — requireAuth itself is untouched.
+  // app.use(`${BASE}/artifact-app-storage`, storageBearerAuthBridge, requireAuth, artifactAppStorageRouter);
   app.use(`${BASE}/design-shares`, requireAuth, requireNoAccessToken, designSharesRouter);
   app.use(`${BASE}/conversation-artifacts`, requireAuth, requireNoAccessToken, conversationArtifactsRouter);
   app.use(`${BASE}/daily-brief`, requireAuth, requireNoAccessToken, dailyBriefRouter);

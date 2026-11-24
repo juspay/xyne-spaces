@@ -77,6 +77,14 @@ module.exports = {
     }],
     'local-rules/no-rocicorp-define-query': 'error',
     'local-rules/require-is-deleted-filter': 'error',
+    'local-rules/form-entity-values-through-repository': ['error', {
+      allowedFiles: [
+        'src/database/repositories/formEntityValueRepository.ts',
+        'src/zero/formsMutatorHelpers.ts',
+        // Checks the parent row exists for the items table's own access rule.
+        'src/database/acl/tables/form-entity-value-items-acl.ts',
+      ],
+    }],
   },
   env: {
     node: true,

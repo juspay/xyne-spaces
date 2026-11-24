@@ -1,7 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, type FormEntityValueRead } from '@xyne/shared';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import {
   buildKanbanTicketWhere,
   type KanbanFormFieldGroup,
@@ -42,7 +43,7 @@ type KanbanCountGroupedRow = {
 export type FormEntityValueRow = {
   entityId: string;
   fieldId: string;
-  actualFieldValue: Prisma.JsonValue | null;
+  value: FormEntityValueRead;
 };
 
 export type KanbanStageCounts = Record<string, number>;
@@ -145,7 +146,7 @@ export const filterTicketsByDynamicFields = <T extends { id: string }>(
 
     for (const [fieldId, filterValue] of Object.entries(dynamicFields)) {
       const fieldEntry = ticketFormValues.find(value => value.fieldId === fieldId);
-      if (!fieldEntry || !matchesDynamicFilter(fieldEntry.actualFieldValue, filterValue)) {
+      if (!fieldEntry || !matchesDynamicFilter(fieldEntry.value, filterValue)) {
         return false;
       }
     }
@@ -162,7 +163,7 @@ export const getFormFieldGroupKeys = (
   const fieldEntry = formValuesByTicketId
     .get(ticketId)
     ?.find(value => value.fieldId === groupBy.fieldId);
-  const actualValue = fieldEntry?.actualFieldValue ?? null;
+  const actualValue = fieldEntry?.value ?? null;
 
   if (groupBy.fieldType === FormFieldType.MULTI_SELECT) {
     const values = getJsonValueStrings(actualValue);
@@ -405,21 +406,18 @@ export const getKanbanCounts = async (
 
   const formEntityValues =
     tickets.length > 0 && formFieldIds.size > 0
-      ? await db.formEntityValues.findMany({
+      ? await findFormEntityValues(db, {
           where: {
             entityType: TICKET_ENTITY_TYPE,
             entityId: { in: tickets.map(ticket => ticket.id) },
             fieldId: { in: [...formFieldIds] },
           },
-          select: {
-            entityId: true,
-            fieldId: true,
-            actualFieldValue: true,
-          },
         })
       : [];
 
-  const formValuesByTicketId = getFormEntityValuesByTicketId(formEntityValues);
+  const formValuesByTicketId = getFormEntityValuesByTicketId(
+    formEntityValues.map(row => ({ entityId: row.entityId, fieldId: row.fieldId, value: row.value })),
+  );
   const filteredTickets = filterTicketsByDynamicFields(
     tickets,
     context.filters?.dynamicFields,

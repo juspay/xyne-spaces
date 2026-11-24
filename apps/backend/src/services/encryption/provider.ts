@@ -9,6 +9,7 @@ import type {
   GenerateStorageKeyInput,
   ProvisionEntityInput,
   ProvisionEntityResult,
+  SealEventInput,
   StorageObjectKey,
   TransformRequestInput,
   TransformRequestResult,
@@ -122,8 +123,12 @@ const provider: EncryptionProvider = {
   },
 
 
+  async sealEvent(_input: SealEventInput): Promise<{ sealed: string }> {
+    return unsupported('sealEvent');
+  },
+
   async getTransitClientManifest(
-    _params: { tag: string; environment: string } & TransitCaller,
+    _params: { tag: string } & TransitCaller,
   ): Promise<{ clientManifest: string } | null> {
     if (!config.enc.apiClientEncryptionEnabled) return null;
     return unsupported('getTransitClientManifest');

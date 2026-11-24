@@ -13,7 +13,6 @@ import { config } from '@/config/env';
 import {
   getEncryptionProvider,
   isDekPassthrough,
-  manifestEnvironmentForRequest,
   runWithDekPassthrough,
 } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
@@ -54,7 +53,7 @@ export type EncryptedRouteOptions = {
 const WORKSPACE_ENTITY_TYPE = 'WORKSPACE';
 
 function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): void {
-  if (config.enc.enableDbEncryption && config.enc.apiClientEncryptionEnabled && req.user?.sid) {
+  if (config.enc.enableDbEncryption && config.enc.apiClientEncryptionEnabled && (req.user?.sid || req.proxyClient)) {
     runWithDekPassthrough(() => next());
     return;
   }
@@ -150,7 +149,6 @@ async function transformRequestBody(
       ...caller,
       method: req.method,
       path: req.originalUrl,
-      environment: manifestEnvironmentForRequest(req),
       ...contract,
       entityId: await options.resolveWorkspaceId(req),
       entityType: WORKSPACE_ENTITY_TYPE,
@@ -228,7 +226,7 @@ async function transformRequestBody(
  */
 function transformResponse(req: Request, res: Response, next: NextFunction): void {
   const caller = transitCaller(req);
-  if (!isDekPassthrough() || !req.user?.sid || !hasTransitCaller(caller)) {
+  if (!isDekPassthrough() || !(req.user?.sid || req.proxyClient) || !hasTransitCaller(caller)) {
     return next();
   }
 

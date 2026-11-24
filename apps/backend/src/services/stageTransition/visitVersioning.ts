@@ -1,4 +1,4 @@
-import { ReenterMode } from '@xyne/shared';
+import { ReenterMode, readFormEntityValue, type TypedFormEntityValueRow } from '@xyne/shared';
 
 /**
  * Visit versioning + ETA reset/continue decision logic for NON_LINEAR stage transitions.
@@ -161,18 +161,16 @@ export function decideVisitVersion(input: VisitVersionInput): VisitVersionDecisi
  * to compare and would otherwise turn "field left blank" into "field changed".
  */
 export function foldFormRowsToValues(
-  rows: ReadonlyArray<{
-    fieldId: string;
-    actualFieldValue: unknown;
-  }>,
+  rows: ReadonlyArray<TypedFormEntityValueRow & { fieldId: string }>,
   fieldIdToName: ReadonlyMap<string, string>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const row of rows) {
-    if (row.actualFieldValue === null || row.actualFieldValue === undefined) continue;
+    const value = readFormEntityValue(row);
+    if (value === null) continue;
     const name = fieldIdToName.get(row.fieldId);
     if (!name) continue;
-    out[name] = row.actualFieldValue;
+    out[name] = value;
   }
   return out;
 }

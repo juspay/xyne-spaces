@@ -1,8 +1,20 @@
 import { Prisma } from '@prisma/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
-import { resolveParentOption, isFieldActive, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import {
+  resolveParentOption,
+  isFieldActive,
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+  assertFormFieldType,
+} from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
-import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
+import { resolveFieldDefinitionsByIds, resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
+import {
+  findFormEntityValueKeys,
+  findFormEntityValues,
+  upsertFormEntityValue,
+} from '@/database/repositories/formEntityValueRepository';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { normalizeCustomFieldValue } from '@/apps/controllers/ticketController.helpers';
 import { logger } from '@/utils/logger';
@@ -39,7 +51,7 @@ export type CustomFieldWritePayload = {
     fieldName: string;
     fieldId: string;
     fieldValue: string;
-    actualFieldValue: Prisma.InputJsonValue;
+    value: Prisma.InputJsonValue;
   }>;
 };
 
@@ -55,7 +67,7 @@ export const resolveSavedParentValues = async (params: {
   const { ticketId, fieldIds, contextId } = params;
   if (fieldIds.length === 0) return new Map();
 
-  const rows = await prismaClient.formEntityValues.findMany({
+  const rows = await findFormEntityValues(prismaClient, {
     where: {
       entityId: ticketId,
       entityType: 'TICKET',
@@ -64,12 +76,11 @@ export const resolveSavedParentValues = async (params: {
     },
     orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
     distinct: ['fieldId'],
-    select: { fieldId: true, actualFieldValue: true, fieldValue: true },
   });
 
   const result = new Map<string, string>();
   for (const row of rows) {
-    const raw = row.actualFieldValue ?? row.fieldValue;
+    const raw = row.value;
     if (typeof raw === 'string') result.set(row.fieldId, raw);
   }
   return result;
@@ -83,7 +94,7 @@ export const validateUserCustomFieldReferences = async (
   fieldValues: Array<{
     fieldName: string;
     fieldType: string;
-    actualFieldValue: Prisma.InputJsonValue;
+    value: Prisma.InputJsonValue;
   }>,
   workspaceId: string,
 ): Promise<void> => {
@@ -93,9 +104,9 @@ export const validateUserCustomFieldReferences = async (
   const userIds = Array.from(
     new Set(
       userFieldEntries.flatMap(fieldValue =>
-        Array.isArray(fieldValue.actualFieldValue)
-          ? fieldValue.actualFieldValue
-          : [fieldValue.actualFieldValue],
+        Array.isArray(fieldValue.value)
+          ? fieldValue.value
+          : [fieldValue.value],
       ).filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
     ),
   );
@@ -113,9 +124,9 @@ export const validateUserCustomFieldReferences = async (
 
   for (const fieldValue of userFieldEntries) {
     const referencedUserIds = (
-      Array.isArray(fieldValue.actualFieldValue)
-        ? fieldValue.actualFieldValue
-        : [fieldValue.actualFieldValue]
+      Array.isArray(fieldValue.value)
+        ? fieldValue.value
+        : [fieldValue.value]
     ).filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
 
     const invalidUserIds = referencedUserIds.filter(userId => !validUserIds.has(userId));
@@ -221,7 +232,7 @@ export const buildCustomFieldWritePayload = async (
       fieldName,
       fieldId: field.id,
       fieldValue: normalized.fieldValue,
-      actualFieldValue: normalized.actualFieldValue,
+      value: normalized.value,
     };
   });
 
@@ -231,7 +242,7 @@ export const buildCustomFieldWritePayload = async (
       return {
         fieldName: fieldValue.fieldName,
         fieldType: field?.fieldType ?? '',
-        actualFieldValue: fieldValue.actualFieldValue,
+        value: fieldValue.value,
       };
     }),
     workspaceId,
@@ -337,14 +348,14 @@ export const buildPartialCustomFieldWritePayload = async (
         fieldName,
         fieldId: field.id,
         fieldValue: normalized.fieldValue,
-        actualFieldValue: normalized.actualFieldValue,
+        value: normalized.value,
       };
 
       await validateUserCustomFieldReferences(
         [{
           fieldName,
           fieldType: field.fieldType,
-          actualFieldValue: fieldValue.actualFieldValue,
+          value: fieldValue.value,
         }],
         workspaceId,
       );
@@ -417,7 +428,7 @@ const toTicketChangeValue = (value: unknown): string | number | null => {
  * user referenced. Mirrors the keying used by emitCustomFieldWriteSideEffects.
  */
 export const buildCreationFormFieldChanges = (
-  fields: ReadonlyArray<{ fieldId: string; fieldName: string; actualFieldValue: unknown }>,
+  fields: ReadonlyArray<{ fieldId: string; fieldName: string; value: unknown }>,
 ): FormFieldChanges => {
   const changes = new Map<
     string,
@@ -426,7 +437,7 @@ export const buildCreationFormFieldChanges = (
   for (const field of fields) {
     const entry = {
       previousValue: null,
-      newValue: toTicketChangeValue(field.actualFieldValue),
+      newValue: toTicketChangeValue(field.value),
     };
     changes.set(field.fieldId, entry);
     changes.set(field.fieldName, entry);
@@ -643,17 +654,17 @@ export const syncCustomFieldValues = async (
   customFieldValues: CustomFieldWritePayload,
   updatedBy: string,
 ): Promise<void> => {
-  const latestValue = await prismaClient.formEntityValues.findFirst({
+  const [latestValue] = await findFormEntityValueKeys(prismaClient, {
     where: {
       entityId: ticketId,
       entityType: FormEntityType.TICKET,
       contextId: customFieldValues.contextId,
     },
     orderBy: { version: 'desc' },
-    select: { version: true },
+    take: 1,
   });
   const currentVersion = latestValue?.version ?? 1;
-  const existingValues = await prismaClient.formEntityValues.findMany({
+  const existingValues = await findFormEntityValues(prismaClient, {
     where: {
       entityId: ticketId,
       entityType: FormEntityType.TICKET,
@@ -661,51 +672,37 @@ export const syncCustomFieldValues = async (
       version: currentVersion,
       fieldId: { in: customFieldValues.fieldValues.map(fieldValue => fieldValue.fieldId) },
     },
-    select: {
-      fieldId: true,
-      fieldValue: true,
-      actualFieldValue: true,
-    },
   });
-  const existingValueByFieldId = new Map(existingValues.map(value => [value.fieldId, value]));
+  const existingValueByFieldId = new Map(
+    existingValues.map(value => [value.fieldId, value.value]),
+  );
   const workspaceId = await resolveWorkspaceIdFromModel(prismaClient, 'ticket', { id: ticketId });
+  const definitions = await resolveFieldDefinitionsByIds(
+    prismaClient,
+    customFieldValues.fieldValues.map(fieldValue => fieldValue.fieldId),
+  );
 
   await Promise.all(
     customFieldValues.fieldValues.map(async fieldValue => {
       const existingValue = existingValueByFieldId.get(fieldValue.fieldId);
-      await prismaClient.formEntityValues.upsert({
-        where: {
-          entityId_entityType_fieldId_contextId_version: {
-            entityId: ticketId,
-            entityType: FormEntityType.TICKET,
-            fieldId: fieldValue.fieldId,
-            contextId: customFieldValues.contextId,
-            version: currentVersion,
-          },
-        },
-        create: {
-          entityId: ticketId,
-          workspaceId,
-          entityType: FormEntityType.TICKET,
-          formId: customFieldValues.formId,
-          fieldId: fieldValue.fieldId,
-          contextId: customFieldValues.contextId,
-          version: currentVersion,
-          fieldValue: fieldValue.fieldValue,
-          actualFieldValue: fieldValue.actualFieldValue,
-        },
-        update: {
-          fieldValue: fieldValue.fieldValue,
-          actualFieldValue: fieldValue.actualFieldValue,
-          updatedAt: new Date(),
-        },
+      await upsertFormEntityValue(prismaClient, {
+        entityId: ticketId,
+        workspaceId,
+        entityType: FormEntityType.TICKET,
+        formId: customFieldValues.formId,
+        fieldId: fieldValue.fieldId,
+        contextId: customFieldValues.contextId,
+        version: currentVersion,
+        fieldType: assertFormFieldType(definitions.get(fieldValue.fieldId)?.fieldType, fieldValue.fieldId),
+        value: fieldValue.value,
+        updatedAt: new Date(),
       });
 
       await createTicketCustomFieldActivity({
         ticketId,
         fieldName: fieldValue.fieldName,
-        oldValue: existingValue?.actualFieldValue ?? existingValue?.fieldValue,
-        newValue: fieldValue.actualFieldValue,
+        oldValue: existingValue,
+        newValue: fieldValue.value,
         updatedBy,
       });
     }),
@@ -716,11 +713,9 @@ export const syncCustomFieldValues = async (
     return {
       fieldId: fieldValue.fieldId,
       fieldName: fieldValue.fieldName,
-      newActualValue: fieldValue.actualFieldValue,
+      newActualValue: fieldValue.value,
       newFieldValue: fieldValue.fieldValue,
-      previousValue: existingValue
-        ? (existingValue.actualFieldValue ?? existingValue.fieldValue)
-        : undefined,
+      previousValue: existingValue ?? undefined,
       hadPreviousValue: existingValueByFieldId.has(fieldValue.fieldId),
     };
   });

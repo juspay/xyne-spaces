@@ -100,6 +100,12 @@ const EXECUTION_EXTERNAL_WAIT = 'EXTERNAL_WAIT';
 /** The two states a step itself reports while parked. */
 const PARKED_STEP_STATUSES = ['EXTERNAL_WAIT', 'REVIEW_WAIT'] as const;
 
+/** Steps that can be the gate an approver sees — shared by the run filter and the step select. */
+const APPROVER_GATE_STEPS: Prisma.WorkflowStepWhereInput = {
+  status: { in: [...PARKED_STEP_STATUSES] },
+  OR: [{ stepSubType: GateCategory.WaitingOnApprover }, { stepSubType: null }],
+};
+
 /**
  * The seek half of a `(createdAt DESC, id DESC)` keyset page: everything sorting
  * strictly after the cursor's position. A tuple comparison rather than an
@@ -216,6 +222,9 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         ...WORKFLOWS_SCOPE,
         status: EXECUTION_EXTERNAL_WAIT,
         workflow: { workspaceId: filter.workspaceId, ...WORKFLOWS_SCOPE },
+        // Only runs that have a parked approver step; the rest were read, with their
+        // whole workflow definition, just to be dropped below.
+        workflowSteps: { some: APPROVER_GATE_STEPS },
         ...(workflowIds && workflowIds.length > 0 ? { workflowId: { in: [...workflowIds] } } : {}),
       },
       select: {
@@ -224,10 +233,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         createdAt: true,
         workflow: { select: { metadata: true, context: true } },
         workflowSteps: {
-          where: {
-            status: { in: [...PARKED_STEP_STATUSES] },
-            OR: [{ stepSubType: GateCategory.WaitingOnApprover }, { stepSubType: null }],
-          },
+          where: APPROVER_GATE_STEPS,
           select: { stepName: true, status: true, stepExecutorType: true },
         },
       },

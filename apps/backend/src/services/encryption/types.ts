@@ -67,7 +67,22 @@ export type StorageObjectKey = {
  * session, whose registered transit key the encryption service looks up and uses; `clientKey`
  * (the public key the request itself carried) applies when that session registered none.
  */
+export type SealEventInput = {
+  /** The event JSON exactly as the bot will receive it. */
+  event: string;
+  webhookUrl: string;
+  signingSecret: string;
+  proxyClient: { role: 'egress'; version: number };
+};
+
 export type TransitCaller = {
+  /**
+   * Xyne Apps traffic relayed from the ingress or egress transit proxy (its `x-xyne-transit-proxy:
+   * <role>;<version>` header). The encryption service then uses its apps server keys and the
+   * proxy key pinned for that role and version; it refuses `clientKey` / `authToken`
+   * alongside, so the backend can never choose the key a reply is encrypted to.
+   */
+  proxyClient?: { role: 'ingress' | 'egress'; version: number };
   clientKey?: string;
   authToken?: string;
   /**
@@ -86,8 +101,6 @@ export type TransformRequestInput<T> = TransitCaller & {
   method?: string;
   path?: string;
   mutator?: string;
-  /** The request's manifest lane (manifestEnvironmentForRequest). */
-  environment: string;
   /**
    * The route's request contract, compared with the rule: its field names, which of them
    * the client encrypts, and the extractors its handler reads.
@@ -158,7 +171,13 @@ export interface EncryptionProvider {
    * The manifest for a client, encrypted with its transit key, as a string to send as is.
    * `null` when there is no manifest (404).
    */
-  getTransitClientManifest(params: { tag: string; environment: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
+  /**
+   * Seal an outbound app event for the egress transit proxy: the encryption service signs
+   * `event` with the app's signing secret and encrypts `{ url, body, signature }` to the
+   * pinned egress proxy key. Only the proxy can open it.
+   */
+  sealEvent(input: SealEventInput): Promise<{ sealed: string }>;
+  getTransitClientManifest(params: { tag: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
   /**
    * Rule-driven counterpart of decryptRequest. Transit-encrypted fields the rule marks
    * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to

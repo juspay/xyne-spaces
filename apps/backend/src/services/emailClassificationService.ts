@@ -3,7 +3,6 @@
  * Runs AI classification on incoming emails and resolves user group assignments.
  */
 
-import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger.js';
 import { resolveFormFieldDefinitionsForForm } from '../utils/fieldDefinition.js';
 import { EmailClassificationRepository } from '../database/repositories/emailClassificationRepository.js';
@@ -23,7 +22,17 @@ import type {
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { decide } from '@/services/decision/decide';
 import type { DecisionEngine, DecisionTask, TaskFeature, TaskInput } from '@/services/decision/types';
-import { ActivityType, TicketPriority, FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
+import {
+  ActivityType,
+  TicketPriority,
+  FormContextType,
+  FormEntityType,
+  FormFieldType,
+} from '@xyne/shared';
+import {
+  findFormEntityValues,
+  upsertFormEntityValue,
+} from '@/database/repositories/formEntityValueRepository';
 
 // const AGENT_NAME = 'EmailClassification'; // framework removed
 // const PRIORITY_AGENT_NAME = 'EmailPriorityClassification';
@@ -449,9 +458,8 @@ export class EmailClassificationService {
     // Compute the max in code (NULL = version 1): the version column is nullable with no DB
     // default, and ORDER BY version DESC would sort NULLs first in Postgres — a legacy NULL
     // row would masquerade as the latest version.
-    const existingValues = await db.formEntityValues.findMany({
+    const existingValues = await findFormEntityValues(db, {
       where: { entityId: ticketId, entityType: 'TICKET', contextId: ticket.boardId },
-      select: { version: true, fieldId: true, fieldValue: true },
     });
     const currentVersion = existingValues.reduce((max, v) => Math.max(max, v.version ?? 1), 1);
 
@@ -459,7 +467,10 @@ export class EmailClassificationService {
     const previousValueByFieldId = new Map(
       existingValues
         .filter(v => (v.version ?? 1) === currentVersion)
-        .map(v => [v.fieldId, v.fieldValue]),
+        .map(v => {
+          const value = v.value;
+          return [v.fieldId, Array.isArray(value) ? value.join(',') : value === null ? '' : String(value)];
+        }),
     );
     const changes: { fieldName: string; oldValue: string | null; newValue: string }[] = [];
     const writtenFieldIds: string[] = [];
@@ -474,40 +485,20 @@ export class EmailClassificationService {
       const previousValue = previousValueByFieldId.get(field.id) ?? null;
       if (previousValue === valueStr) continue; // no-op — don't rewrite or log
 
-      // actualFieldValue: arrays for MULTI_SELECT/USER, scalar otherwise
       const isMulti = field.fieldType === FormFieldType.MULTI_SELECT || field.fieldType === FormFieldType.USER;
-      const actualFieldValue = isMulti ? [valueStr] : valueStr;
-
       try {
-        await db.formEntityValues.upsert({
-          where: {
-            entityId_entityType_fieldId_contextId_version: {
-              entityId: ticketId,
-              entityType: 'TICKET',
-              fieldId: field.id,
-              contextId: ticket.boardId,
-              version: currentVersion,
-            },
-          },
-          create: {
-            id: randomUUID(),
-            formId: formMapping.formId,
-            workspaceId: ticket.workspaceId,
-            entityId: ticketId,
-            entityType: 'TICKET',
-            version: currentVersion,
-            fieldId: field.id,
-            contextId: ticket.boardId,
-            fieldValue: valueStr,
-            actualFieldValue,
-            createdAt: now,
-            updatedAt: now,
-          },
-          update: {
-            fieldValue: valueStr,
-            actualFieldValue,
-            updatedAt: now,
-          },
+        await upsertFormEntityValue(db, {
+          formId: formMapping.formId,
+          workspaceId: ticket.workspaceId,
+          entityId: ticketId,
+          entityType: 'TICKET',
+          version: currentVersion,
+          fieldId: field.id,
+          contextId: ticket.boardId,
+          fieldType: field.fieldType,
+          value: isMulti ? [valueStr] : valueStr,
+          createdAt: now,
+          updatedAt: now,
         });
         changes.push({ fieldName: field.fieldName, oldValue: previousValue, newValue: valueStr });
         writtenFieldIds.push(field.id);

@@ -24,6 +24,7 @@ import {
   TicketPriority,
   TicketReferenceRelation,
   TicketStatusV2,
+  assertFormFieldType,
 } from '@xyne/shared';
 import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
 import { JiraMigrationClient } from '@/services/jira/client';
@@ -41,6 +42,14 @@ import {
   syncConversationTicketMdFromPrismaTicket,
 } from '@/utils/ticketMd';
 import { processIssuesChunkTx } from '@/bypassAcl/transactions/jiraMigrationImportService';
+import {
+  createFormEntityValue,
+  createFormEntityValues,
+  findFormEntityValue,
+  findFormEntityValueKeys,
+  type NewFormEntityValue,
+  updateFormEntityValue,
+} from '@/database/repositories/formEntityValueRepository';
 
 type JiraFieldDefinition = {
   id: string;
@@ -1014,18 +1023,12 @@ export class JiraMigrationImportService {
 
     for (const ticketIdChunk of ticketIdChunks) {
       for (const fieldIdChunk of fieldIdChunks) {
-        const existingValues = await db.formEntityValues.findMany({
+        const existingValues = await findFormEntityValueKeys(db, {
           where: {
             entityType: FormEntityType.TICKET,
             contextId,
             entityId: { in: ticketIdChunk },
             fieldId: { in: fieldIdChunk },
-          },
-          select: {
-            id: true,
-            entityId: true,
-            fieldId: true,
-            contextId: true,
           },
         });
 
@@ -3563,16 +3566,7 @@ export class JiraMigrationImportService {
             });
           }
 
-          const formEntityValuesData: Array<{
-            formId: string;
-            entityId: string;
-            entityType: FormEntityType;
-            fieldId: string;
-            contextId: string;
-            fieldValue: string;
-            actualFieldValue: any;
-            workspaceId: string;
-          }> = [];
+          const formEntityValuesData: Array<NewFormEntityValue & { contextId: string }> = [];
 
           for (const [jiraFieldId, mapping] of fieldMap.entries()) {
             const value = await this.normalizeFormValue(
@@ -3594,13 +3588,13 @@ export class JiraMigrationImportService {
 
             if (currentFormId) {
               formEntityValuesData.push({
+                fieldType: assertFormFieldType(mapping.fieldType, mapping.fieldId),
+                value,
                 formId: currentFormId,
                 entityId: ticketId,
                 entityType: FormEntityType.TICKET,
                 fieldId: mapping.fieldId,
                 contextId: board.id,
-                fieldValue: '',
-                actualFieldValue: value,
                 workspaceId,
               });
             }
@@ -3609,10 +3603,7 @@ export class JiraMigrationImportService {
           try {
             if (!existingTicket) {
               if (formEntityValuesData.length > 0) {
-                await db.formEntityValues.createMany({
-                  data: formEntityValuesData,
-                  skipDuplicates: true,
-                });
+                await createFormEntityValues(db, formEntityValuesData, { skipDuplicates: true });
 
                 await this.preloadExistingFormValues(
                   [ticketId],
@@ -3629,16 +3620,12 @@ export class JiraMigrationImportService {
                 );
                 const existingValueId = this.existingFormValuesByKey.get(formValueCacheKey);
 
+                const valueUpdate = { fieldType: formValue.fieldType, value: formValue.value };
                 if (existingValueId) {
-                  await db.formEntityValues.update({
-                    where: { id: existingValueId },
-                    data: {
-                      actualFieldValue: formValue.actualFieldValue,
-                    },
-                  });
+                  await updateFormEntityValue(db, existingValueId, valueUpdate);
                 } else {
                   try {
-                    const createdFormValue = await db.formEntityValues.create({ data: formValue });
+                    const createdFormValue = await createFormEntityValue(db, formValue);
                     this.existingFormValuesByKey.set(formValueCacheKey, createdFormValue.id);
                   } catch (error) {
                     const isUniqueViolation =
@@ -3651,7 +3638,7 @@ export class JiraMigrationImportService {
                       throw error;
                     }
 
-                    const existingValue = await db.formEntityValues.findFirst({
+                    const existingValue = await findFormEntityValue(db, {
                       where: {
                         entityId: formValue.entityId,
                         entityType: formValue.entityType,
@@ -3665,12 +3652,7 @@ export class JiraMigrationImportService {
                     }
 
                     this.existingFormValuesByKey.set(formValueCacheKey, existingValue.id);
-                    await db.formEntityValues.update({
-                      where: { id: existingValue.id },
-                      data: {
-                        actualFieldValue: formValue.actualFieldValue,
-                      },
-                    });
+                    await updateFormEntityValue(db, existingValue.id, valueUpdate);
                   }
                 }
               }

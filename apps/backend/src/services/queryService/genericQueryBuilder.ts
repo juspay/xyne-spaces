@@ -13,8 +13,106 @@ import {
 } from './types';
 import { PrismaFieldType, getFieldMetadata, getModelFields, hasField } from './genericFieldRegistry';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
+import { FormFieldType, toTypedFormEntityValue } from '@xyne/shared';
+import {
+  findFormEntityValueKeys,
+  findFormEntityValues,
+} from '@/database/repositories/formEntityValueRepository';
+import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
 
 const MAX_QUERY_LIMIT = 10000;
+
+type TypedFilterTarget =
+  | { column: 'textValue' | 'plainValue'; value: string }
+  | { column: 'numberValue'; value: number }
+  | { column: 'dateValue'; value: Date }
+  | { column: 'boolValue'; value: boolean }
+  | { column: 'items'; value: string[] };
+
+const EMPTY_FORM_ENTITY_VALUE: Record<string, unknown> = {
+  textValue: null,
+  numberValue: null,
+  dateValue: null,
+  boolValue: null,
+  plainValue: null,
+  items: { none: {} },
+};
+
+const MATCH_NOTHING: Record<string, unknown> = { id: { in: [] } };
+
+const isMultiValueType = (fieldType: string) =>
+  fieldType === FormFieldType.MULTI_SELECT || fieldType === FormFieldType.USER;
+
+// Without a field definition, pick the column from the filter value's own type.
+const inferFieldType = (value: unknown): string => {
+  if (typeof value === 'number') return FormFieldType.NUMBER;
+  if (typeof value === 'boolean') return FormFieldType.BOOLEAN;
+  if (Array.isArray(value)) return FormFieldType.MULTI_SELECT;
+  return FormFieldType.SINGLE_SELECT;
+};
+
+/** The typed column a filter value for this field type is compared against, coerced to that column's type. */
+function typedFilterTarget(fieldType: string | undefined, value: unknown): TypedFilterTarget | null {
+  const type = fieldType ?? inferFieldType(value);
+  const typed = toTypedFormEntityValue(type, value);
+  const { columns } = typed;
+  if (isMultiValueType(type)) return typed.items.length > 0 ? { column: 'items', value: typed.items } : null;
+  switch (type) {
+    case FormFieldType.NUMBER:
+      return columns.numberValue === null ? null : { column: 'numberValue', value: columns.numberValue };
+    case FormFieldType.DATE:
+      return columns.dateValue === null ? null : { column: 'dateValue', value: new Date(columns.dateValue) };
+    case FormFieldType.BOOLEAN:
+      return columns.boolValue === null ? null : { column: 'boolValue', value: columns.boolValue };
+    case FormFieldType.STRING:
+      return columns.textValue === null ? null : { column: 'textValue', value: columns.textValue };
+    default:
+      return columns.plainValue === null ? null : { column: 'plainValue', value: columns.plainValue };
+  }
+}
+
+function typedEquals(fieldType: string | undefined, value: unknown): Record<string, unknown> {
+  if (value === null || value === undefined) return EMPTY_FORM_ENTITY_VALUE;
+  const target = typedFilterTarget(fieldType, value);
+  if (!target) return MATCH_NOTHING;
+  if (target.column === 'items') {
+    return { AND: target.value.map(item => ({ items: { some: { item } } })) };
+  }
+  // textValue is encrypted at rest; equality goes through its hash.
+  if (target.column === 'textValue') return { textHash: formEntityValueTextHash(target.value) };
+  return { [target.column]: target.value };
+}
+
+function typedNotEquals(fieldType: string | undefined, value: unknown): Record<string, unknown> {
+  if (value === null || value === undefined) return { NOT: EMPTY_FORM_ENTITY_VALUE };
+  const target = typedFilterTarget(fieldType, value);
+  if (!target) return {};
+  if (target.column === 'items') {
+    return { AND: target.value.map(item => ({ items: { none: { item } } })) };
+  }
+  if (target.column === 'textValue') return { textHash: { not: formEntityValueTextHash(target.value) } };
+  return { [target.column]: { not: target.value } };
+}
+
+/** Range and substring operators ({ gt: x }, { contains: x }, { gte: a, lte: b }, ...) on the field type's column. */
+function typedCompare(fieldType: string | undefined, ops: Record<string, unknown>): Record<string, unknown> {
+  const isStringOp = (op: string) => op === 'contains' || op === 'startsWith' || op === 'endsWith';
+  let column: TypedFilterTarget['column'] | null = null;
+  const filter: Record<string, unknown> = {};
+  for (const [op, raw] of Object.entries(ops)) {
+    const target = isStringOp(op) ? typedFilterTarget(fieldType ?? FormFieldType.SINGLE_SELECT, String(raw)) : typedFilterTarget(fieldType, raw);
+    if (!target) return MATCH_NOTHING;
+    if (isStringOp(op) && (target.column === 'numberValue' || target.column === 'dateValue' || target.column === 'boolValue')) {
+      return MATCH_NOTHING;
+    }
+    column = target.column;
+    filter[op] = target.column === 'items' ? target.value[0] : target.value;
+  }
+  if (!column) return {};
+  if (column === 'items') return { items: { some: { item: filter } } };
+  return { [column]: filter };
+}
+
 const QUERY_TIMEOUT = 30000;
 
 /**
@@ -314,9 +412,8 @@ export class GenericQueryBuilder {
     const formEntityWhere = this.buildFormEntityValuesWhere(customFieldFilters, entityType, fieldTypeMap);
 
     const matchingValues = await withTimeout(
-      this.prisma.formEntityValues.findMany({
+      findFormEntityValueKeys(this.prisma, {
         where: formEntityWhere,
-        select: { entityId: true },
         distinct: ['entityId'],
       })
     );
@@ -411,92 +508,61 @@ export class GenericQueryBuilder {
   }
 
   /**
-   * Build a single FormEntityValue condition
-   * Returns array for 'in'/'notIn' operators since Prisma Json doesn't support them
+   * Build a single FormEntityValue condition against the typed value columns.
+   * Returns array for 'in'/'notIn' operators, OR'd by the caller.
    */
   private buildFormEntityValueCondition(
     fieldId: string,
     value: any,
     fieldType?: string
   ): Record<string, unknown> | Record<string, unknown>[] {
-    const condition: Record<string, unknown> = { fieldId };
+    const withField = (column: Record<string, unknown>) => ({ fieldId, ...column });
 
     // If value is a primitive, treat as equals
     if (typeof value !== 'object' || value === null) {
-      condition.actualFieldValue = { equals: value };
-      return condition;
+      return withField(typedEquals(fieldType, value));
     }
 
     if (Array.isArray(value)) {
-      // Prisma's Json type doesn't support 'in' operator
-      // Return array of conditions to be OR'd together
-      const storedAsString = fieldType === 'STRING';
-      return value.map(v => ({
-        fieldId,
-        actualFieldValue: { equals: storedAsString ? String(v) : v },
-      }));
+      return value.map(v => withField(typedEquals(fieldType, v)));
     }
 
     // Object with operators
     const filterObj = value as Record<string, unknown>;
+    let column: Record<string, unknown> = {};
 
     if ('equals' in filterObj && filterObj.equals !== undefined) {
-      condition.actualFieldValue = { equals: filterObj.equals };
+      column = typedEquals(fieldType, filterObj.equals);
     }
     if ('notEquals' in filterObj && filterObj.notEquals !== undefined) {
-      condition.actualFieldValue = { not: filterObj.notEquals };
+      column = typedNotEquals(fieldType, filterObj.notEquals);
     }
     if ('in' in filterObj && Array.isArray(filterObj.in)) {
-      // Prisma's Json type doesn't support 'in' operator - return array for OR
-      const storedAsString = fieldType === 'STRING';
-      return (filterObj.in as unknown[]).map(v => ({
-        fieldId,
-        actualFieldValue: { equals: storedAsString ? String(v) : v },
-      }));
+      return (filterObj.in as unknown[]).map(v => withField(typedEquals(fieldType, v)));
     }
     if ('notIn' in filterObj && Array.isArray(filterObj.notIn)) {
       // For notIn, use OR with NOT equals for each value
-      const storedAsString = fieldType === 'STRING';
-      return (filterObj.notIn as unknown[]).map(v => ({
-        fieldId,
-        actualFieldValue: { not: { equals: storedAsString ? String(v) : v } },
-      }));
+      return (filterObj.notIn as unknown[]).map(v => withField(typedNotEquals(fieldType, v)));
     }
-    if ('contains' in filterObj && filterObj.contains !== undefined) {
-      condition.actualFieldValue = { contains: filterObj.contains };
-    }
-    if ('startsWith' in filterObj && filterObj.startsWith !== undefined) {
-      condition.actualFieldValue = { startsWith: filterObj.startsWith };
-    }
-    if ('endsWith' in filterObj && filterObj.endsWith !== undefined) {
-      condition.actualFieldValue = { endsWith: filterObj.endsWith };
-    }
-    if ('gt' in filterObj && filterObj.gt !== undefined) {
-      condition.actualFieldValue = { gt: filterObj.gt };
-    }
-    if ('gte' in filterObj && filterObj.gte !== undefined) {
-      condition.actualFieldValue = { gte: filterObj.gte };
-    }
-    if ('lt' in filterObj && filterObj.lt !== undefined) {
-      condition.actualFieldValue = { lt: filterObj.lt };
-    }
-    if ('lte' in filterObj && filterObj.lte !== undefined) {
-      condition.actualFieldValue = { lte: filterObj.lte };
+    for (const op of ['contains', 'startsWith', 'endsWith', 'gt', 'gte', 'lt', 'lte'] as const) {
+      if (op in filterObj && filterObj[op] !== undefined) {
+        column = typedCompare(fieldType, { [op]: filterObj[op] });
+      }
     }
     if ('between' in filterObj && filterObj.between !== undefined) {
       const betweenValue = filterObj.between;
       if (Array.isArray(betweenValue) && betweenValue.length === 2) {
-        condition.actualFieldValue = { gte: betweenValue[0], lte: betweenValue[1] };
+        column = typedCompare(fieldType, { gte: betweenValue[0], lte: betweenValue[1] });
       }
     }
     if ('isEmpty' in filterObj && filterObj.isEmpty) {
-      condition.actualFieldValue = { equals: null };
+      column = EMPTY_FORM_ENTITY_VALUE;
     }
     if ('isNotEmpty' in filterObj && filterObj.isNotEmpty) {
-      condition.actualFieldValue = { not: { equals: null } };
+      column = { NOT: EMPTY_FORM_ENTITY_VALUE };
     }
 
-    return condition;
+    return withField(column);
   }
 
   /**
@@ -625,16 +691,11 @@ export class GenericQueryBuilder {
 
     // Get custom field values for all entities
     const customFieldIds = aggregations.map(agg => agg.field.replace('custom.', ''));
-    const customFieldValues = await this.prisma.formEntityValues.findMany({
+    const customFieldValues = await findFormEntityValues(this.prisma, {
       where: {
         entityId: { in: entityIds },
-      entityType,
+        entityType,
         fieldId: { in: customFieldIds },
-      },
-      select: {
-        entityId: true,
-        fieldId: true,
-        actualFieldValue: true,
       },
     });
 
@@ -653,7 +714,7 @@ export class GenericQueryBuilder {
         valuesByField.set(fieldId, []);
       }
       const fieldType = fieldTypeMap.get(cf.fieldId);
-      let value: any = cf.actualFieldValue;
+      let value: any = cf.value;
       
       // Convert based on field type
       if (fieldType === 'NUMBER') {
@@ -811,16 +872,11 @@ export class GenericQueryBuilder {
       const customFieldValuesByField = new Map<string, Map<string, any>>();
       
       if (allCustomFieldIds.length > 0) {
-        const customFieldValues = await this.prisma.formEntityValues.findMany({
+        const customFieldValues = await findFormEntityValues(this.prisma, {
           where: {
             entityId: { in: entityData.map((e: any) => e.id) },
             entityType: query.entityType,
             fieldId: { in: allCustomFieldIds },
-          },
-          select: {
-            entityId: true,
-            fieldId: true,
-            actualFieldValue: true,
           },
         });
 
@@ -830,7 +886,7 @@ export class GenericQueryBuilder {
           if (!customFieldValuesByField.has(fieldKey)) {
             customFieldValuesByField.set(fieldKey, new Map());
           }
-          customFieldValuesByField.get(fieldKey)!.set(cf.entityId, cf.actualFieldValue);
+          customFieldValuesByField.get(fieldKey)!.set(cf.entityId, cf.value);
         });
       }
 
@@ -1407,20 +1463,13 @@ export class GenericQueryBuilder {
 
     // Fetch custom fields for these entities with timeout
     const customFieldValues = await withTimeout(
-      this.prisma.formEntityValues.findMany({
+      findFormEntityValues(this.prisma, {
         where: {
           entityId: { in: entityIds as string[] },
           entityType: {
             equals: query.entityType,
             mode: 'insensitive',
           },
-        },
-        select: {
-          entityId: true,
-          fieldId: true,
-          fieldValue: true,
-          actualFieldValue: true,
-          entityType: true,
         },
       })
     );
@@ -1467,7 +1516,7 @@ export class GenericQueryBuilder {
       if (!customFieldsByEntity.has(cfv.entityId)) {
         customFieldsByEntity.set(cfv.entityId, {});
       }
-      const fieldValue = cfv.actualFieldValue !== null ? cfv.actualFieldValue : cfv.fieldValue;
+      const fieldValue = cfv.value;
       const fieldInfo = fieldIdToInfo.get(cfv.fieldId);
       const displayName = fieldInfo?.fieldName || cfv.fieldId;
       customFieldsByEntity.get(cfv.entityId)![`custom.${cfv.fieldId}`] = {

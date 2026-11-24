@@ -68,7 +68,11 @@ import { FormattingShortcutsExtension } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
 import { TextEmoticonExtension } from '../TipTapExtensions/TextEmoticonExtension';
 import type { InputBoxProps } from './InputBox.types';
-import { formatTypingMessage, resolveCommandTextFromHtml } from './InputBox.utils';
+import {
+  formatTypingMessage,
+  getCanvasAttachmentFile,
+  resolveCommandTextFromHtml,
+} from './InputBox.utils';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
@@ -1060,6 +1064,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               extensions: Array.from(files).map(f => getFileExtension(f.name)),
             });
             void addFilesWithLimit(files);
+          } else if (features.fileAttachments && clipboard) {
+            const attachmentFile = getCanvasAttachmentFile(clipboard.getData('blocknote/html'));
+            if (attachmentFile) {
+              event.preventDefault();
+              void attachmentFile
+                .then(file => addFilesWithLimit([file]))
+                .catch(() => toast.error('Could not paste the Canvas attachment'));
+              return true;
+            }
           }
 
           /** Insert a table at the cursor by building ProseMirror nodes programmatically.

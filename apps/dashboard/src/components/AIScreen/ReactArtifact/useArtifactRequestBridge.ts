@@ -5,6 +5,7 @@ import {
   type HostRequestMessage,
 } from './artifactData.constants';
 import { API_BASE_URL } from '../../../config';
+import { decryptResponseText } from '../../../services/encryptionInterceptors';
 import type { PreviewClientRef } from './useArtifactDataBridge';
 
 // The backend origin the dashboard's own api client talks to. On localhost that
@@ -41,7 +42,11 @@ const FORWARDABLE_HEADERS = ['content-type', 'accept', 'x-route-env'];
  * here only after deciding it is safe to run as arbitrary app code. Requests are
  * resolved same-origin below, so an absolute URL to another host can never match.
  */
-const ALLOWED_PREFIXES = ['/api/sdk/', STORAGE_PREFIX];
+const ALLOWED_PREFIXES = [
+  '/api/sdk/',
+  // Disabled (Storage SDK)
+  // STORAGE_PREFIX,
+];
 
 /**
  * Runs an app's backend `fetch` calls as the current viewer.
@@ -230,8 +235,13 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
           return;
         }
         streams.delete(requestId);
-        const text = await res.text();
-        reply(requestId, res.status, Object.fromEntries(res.headers.entries()), text);
+        const raw = await res.text();
+        const responseHeaders = Object.fromEntries(res.headers.entries());
+        const text = (responseHeaders['content-type'] ?? '').includes('json')
+          ? await decryptResponseText(raw)
+          : raw;
+        if (text !== raw) delete responseHeaders['content-length'];
+        reply(requestId, res.status, responseHeaders, text);
       } catch (err) {
         streams.delete(requestId);
         reply(requestId, 0, {}, '', err instanceof Error ? err.message : 'Request failed.');

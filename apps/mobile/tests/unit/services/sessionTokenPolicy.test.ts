@@ -7,6 +7,9 @@ import {
   getProactiveRearmDelay,
   INITIAL_AUTH_RETRY_STATE,
   isDeadSessionFailure,
+  isRefreshableAuthFailure,
+  isSessionEndedAuthFailure,
+  isSessionEndedRefusal,
   MAX_DEAD_SESSION_ATTEMPTS,
   nextAuthRetry,
   TOKEN_REFRESH_LEAD_SECONDS,
@@ -99,7 +102,7 @@ describe('nextAuthRetry', () => {
     }
   });
 
-  it('signs out only after the session cookie is refused repeatedly', () => {
+  it('signs out once the backend has ended the session', () => {
     for (const kind of ['unauthorized'] as const) {
       const decisions = replayFailures(kind, MAX_DEAD_SESSION_ATTEMPTS);
       const actions = decisions.map(decision => decision.action);
@@ -111,23 +114,98 @@ describe('nextAuthRetry', () => {
     }
   });
 
-  it('a transient blip between refusals resets the sign-out budget', () => {
+  it('signs out on the first session-ended refusal, even after transient blips', () => {
     let state: AuthRetryState = INITIAL_AUTH_RETRY_STATE;
-    const feed = (kind: RefreshFailureKind): void => {
-      const decision = nextAuthRetry(kind, state);
+    for (let i = 0; i < 3; i += 1) {
+      const decision = nextAuthRetry('transient', state);
       assert.equal(decision.action, 'retry');
       if (decision.action === 'retry') {
         state = decision.state;
       }
-    };
+    }
+    assert.equal(nextAuthRetry('unauthorized', state).action, 'sign-out');
+  });
+});
 
-    feed('unauthorized');
-    feed('unauthorized');
-    feed('transient');
-    assert.equal(state.deadSessionAttempts, 0);
-    // Backoff still remembers the total attempts.
-    assert.equal(state.attempts, 3);
-    feed('unauthorized');
-    assert.equal(nextAuthRetry('unauthorized', state).action, 'retry');
+describe('isSessionEndedRefusal', () => {
+  it('ends the session on the backend refresh codes', () => {
+    assert.equal(isSessionEndedRefusal(401, { code: 'REFRESH_INVALID' }), true);
+    assert.equal(isSessionEndedRefusal(403, { code: 'WORKSPACE_ACCESS_DENIED' }), true);
+    assert.equal(isSessionEndedRefusal(401, { error: 'email_domain_not_allowed' }), true);
+  });
+
+  it('ignores a 401/403 from a gateway, WAF or ingress that carries no such code', () => {
+    assert.equal(isSessionEndedRefusal(401, null), false);
+    assert.equal(isSessionEndedRefusal(403, null), false);
+    assert.equal(isSessionEndedRefusal(403, '<html>403 Forbidden</html>'), false);
+    assert.equal(isSessionEndedRefusal(401, { message: 'Unauthorized' }), false);
+  });
+
+  it('needs the code to match its status', () => {
+    assert.equal(isSessionEndedRefusal(403, { code: 'REFRESH_INVALID' }), false);
+    assert.equal(isSessionEndedRefusal(401, { code: 'WORKSPACE_ACCESS_DENIED' }), false);
+    assert.equal(isSessionEndedRefusal(503, { code: 'REFRESH_INVALID' }), false);
+  });
+});
+
+describe('isRefreshableAuthFailure', () => {
+  it('refreshes on a missing or expired JWT', () => {
+    for (const code of ['TOKEN_MISSING', 'TOKEN_EXPIRED']) {
+      assert.equal(isRefreshableAuthFailure(401, { code }), true);
+    }
+  });
+
+  it('does not refresh on the final auth middleware codes', () => {
+    for (const code of [
+      'TOKEN_INVALID',
+      'SESSION_REVOKED',
+      'USER_REMOVED',
+      'EMAIL_DOMAIN_NOT_ALLOWED',
+    ]) {
+      assert.equal(isRefreshableAuthFailure(401, { code }), false);
+    }
+  });
+
+  it('reads a JSON string body, as file downloads report it', () => {
+    assert.equal(isRefreshableAuthFailure(401, '{"code":"TOKEN_EXPIRED"}'), true);
+  });
+
+  it('leaves other 401s alone, including the refresh endpoint refusing', () => {
+    assert.equal(isRefreshableAuthFailure(401, { code: 'REFRESH_INVALID' }), false);
+    assert.equal(isRefreshableAuthFailure(401, { message: 'Unauthorized' }), false);
+    assert.equal(isRefreshableAuthFailure(401, '<html>401</html>'), false);
+    assert.equal(isRefreshableAuthFailure(401, null), false);
+  });
+
+  it('only applies to 401', () => {
+    assert.equal(isRefreshableAuthFailure(403, { code: 'TOKEN_EXPIRED' }), false);
+  });
+});
+
+describe('isSessionEndedAuthFailure', () => {
+  it('ends the session on an invalid token, a gone or revoked session, a removed user or a blocked domain', () => {
+    for (const code of [
+      'TOKEN_INVALID',
+      'REFRESH_INVALID',
+      'SESSION_REVOKED',
+      'USER_REMOVED',
+      'EMAIL_DOMAIN_NOT_ALLOWED',
+    ]) {
+      assert.equal(isSessionEndedAuthFailure(401, { code }), true);
+    }
+    assert.equal(isSessionEndedAuthFailure(401, '{"code":"SESSION_REVOKED"}'), true);
+  });
+
+  it('keeps the session for a missing or expired token', () => {
+    for (const code of ['TOKEN_MISSING', 'TOKEN_EXPIRED']) {
+      assert.equal(isSessionEndedAuthFailure(401, { code }), false);
+    }
+  });
+
+  it('keeps the session for 401s without a code and for other statuses', () => {
+    assert.equal(isSessionEndedAuthFailure(401, { error: 'User removed from workspace' }), false);
+    assert.equal(isSessionEndedAuthFailure(401, '<html>401</html>'), false);
+    assert.equal(isSessionEndedAuthFailure(401, null), false);
+    assert.equal(isSessionEndedAuthFailure(403, { code: 'USER_REMOVED' }), false);
   });
 });

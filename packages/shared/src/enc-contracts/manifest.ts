@@ -21,6 +21,5 @@ export interface ClientEncryptionManifest {
   schemaKey: string;
   version: number;
   tag: string;
-  environment: string;
   rules: ClientManifestRule[];
 }

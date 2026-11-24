@@ -14,7 +14,11 @@ import { useZero } from '@/src/hooks/useZero';
 import { Event, logger, ZeroSocketState } from '@/src/utils/logger';
 import { logger as structuredLogger } from '@/src/observability/logging/appLogger';
 import { getActiveWorkspaceId } from '@/src/utils/activeWorkspace';
-import { getAuthOperation, getAuthSessionGeneration } from '@/src/services/authSessionLifecycle';
+import {
+  getAuthOperation,
+  getAuthSessionGeneration,
+  isAuthScopeCurrent,
+} from '@/src/services/authSessionLifecycle';
 import { getRetryDelay } from './initialStateLoaderUtils';
 import {
   isFatalZeroClientResetReason,
@@ -108,7 +112,13 @@ export function useStartupZeroConnection({
         generation,
         operation,
       );
-      if (!isActiveRef.current || getActiveWorkspaceId() !== requestedWorkspaceId) {
+      // A session-ended refusal has already been handled by refreshAuthSession's
+      // listeners, which start a new auth session; signing out again here would repeat it.
+      if (
+        !isActiveRef.current ||
+        getActiveWorkspaceId() !== requestedWorkspaceId ||
+        !isAuthScopeCurrent(generation, operation)
+      ) {
         return;
       }
       if (result.ok) {

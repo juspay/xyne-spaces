@@ -24,3 +24,5 @@ export { sdlcCreateTrackClient, sdlcUpdateTrackClient, sdlcAddSdlcFolderItemClie
 export { draftCreateAttachmentsClient, markThreadActivitiesAsReadV2Client, markChannelAsViewedClient } from './contracts/drafts.js';
 export { recapSetCustomRecapPromptClient, userPresenceUpsertClient } from './contracts/presence.js';
 export { ticketUpdateClient } from './contracts/tickets.js';
+export { appsChatPostMessageClient, appsChatUpdateMessageClient } from './contracts/apps.js';
+export type { AppsChatPostMessageRequest, AppsChatUpdateMessageRequest } from './contracts/apps.js';

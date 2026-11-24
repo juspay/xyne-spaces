@@ -30,7 +30,7 @@ const COMMANDS: { group: string; rows: { name: string; description: string }[] }
       {
         name: 'spaces app archive [<appId>]',
         description:
-          'Hide an app everywhere without deleting it. Versions, storage and its published state are kept.',
+          'Hide an app everywhere without deleting it. Its versions and published state are kept.',
       },
       {
         name: 'spaces app unarchive [<appId>]',
@@ -108,8 +108,8 @@ export function CliDoc(): ReactElement {
             },
             {
               title: 'The SDK already wired in',
-              body: 'Read and write Spaces data as the viewer, with per-app storage alongside.',
-              example: 'const { spaces, storage } = await xyne();',
+              body: 'Read and write Spaces data as the viewer.',
+              example: 'const { spaces } = await xyne();',
             },
             {
               title: 'One build, every surface',
@@ -197,8 +197,8 @@ spaces app publish       # ship it to your workspace`}
           </Step>
           <Step n={2} title='Rename it'>
             <Text>
-              Change <InlineCode>title</InlineCode> and push again. The app keeps its id, versions
-              and storage, and takes the new name.
+              Change <InlineCode>title</InlineCode> and push again. The app keeps its id and
+              versions, and takes the new name.
             </Text>
             <CodeBlock code='spaces app publish' trackName='Spaces CLI: copy rename publish' />
             <Text>

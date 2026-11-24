@@ -133,8 +133,8 @@ const MUTATION_CONTRACTS: Record<string, RequestContract> = {
   'conversations.forwardMessage': conversationsForwardMessageClient,
 };
 
-/** Who is mutating, for the encryption service: the transit caller (transitCaller) and the request's manifest lane. */
-export type MutationEncryptionContext = TransitCaller & { environment: string };
+/** Who is mutating, for the encryption service: the transit caller (transitCaller). */
+export type MutationEncryptionContext = TransitCaller;
 
 /**
  * Each prepared mutation's outcome: the facts to run with and whether its fields are now
@@ -307,7 +307,6 @@ async function transformMutationArgs(
       ...(enc.authToken ? { authToken: enc.authToken } : {}),
       ...(enc.clientKey ? { clientKey: enc.clientKey } : {}),
       mutator: mutatorName,
-      environment: enc.environment,
       ...(contract
         ? {
             contractFields: Object.keys(contract.schema.shape),

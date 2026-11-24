@@ -4,7 +4,7 @@ import type { VespaTicketFormField } from '@/vespa/src/types';
 
 export type TicketDynamicFieldValue = {
   fieldId: string;
-  actualFieldValue: Prisma.JsonValue | null;
+  value: Prisma.JsonValue | null;
 };
 
 export const normalizeVespaFieldValue = (value: Prisma.JsonValue): string | null => {
@@ -90,7 +90,7 @@ export const buildFormFields = (
   const formFields: VespaTicketFormField[] = [];
 
   for (const value of values) {
-    const rawValue = value.actualFieldValue;
+    const rawValue = value.value;
     if (rawValue === null || rawValue === undefined) continue;
 
     const fieldType = fieldTypeByFieldId.get(value.fieldId);
@@ -153,7 +153,7 @@ export const buildFormFieldGramEntries = (
   for (const value of values) {
     const fieldType = fieldTypeByFieldId.get(value.fieldId);
     if (!fieldType || !GRAM_FIELD_TYPES.has(fieldType)) continue;
-    const raw = value.actualFieldValue;
+    const raw = value.value;
     if (!(typeof raw === 'number' && Number.isFinite(raw)) && !(typeof raw === 'string' && raw.trim())) continue;
     const current = latest.get(value.fieldId);
     const isNewer =
@@ -163,5 +163,5 @@ export const buildFormFieldGramEntries = (
         (value.updatedAt?.getTime() ?? 0) > (current.updatedAt?.getTime() ?? 0));
     if (isNewer) latest.set(value.fieldId, value);
   }
-  return [...latest].map(([fieldId, value]) => `${fieldId}::${String(value.actualFieldValue)}`);
+  return [...latest].map(([fieldId, value]) => `${fieldId}::${String(value.value)}`);
 };
