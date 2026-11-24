@@ -45,7 +45,9 @@ const inferEmailCandidatesFromName = (name?: string): string[] => {
   const domain = config.orgEmailDomain;
   if (!name || !domain) return [];
 
-  const cleaned = name.replace(/_juspay$/i, '').replace(/[_-]+/g, ' ');
+  // Confluence display names can carry an `_<org>` suffix, where <org> is the domain's first label.
+  const orgSuffix = domain.split('.')[0].replace(/[^a-z0-9]/gi, '');
+  const cleaned = (orgSuffix ? name.replace(new RegExp(`_${orgSuffix}$`, 'i'), '') : name).replace(/[_-]+/g, ' ');
   const nameParts = cleaned
     .split(/\s+/)
     .map(normalizeNamePart)

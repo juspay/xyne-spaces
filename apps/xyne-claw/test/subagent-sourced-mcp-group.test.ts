@@ -19,9 +19,9 @@ function tool(name: string): ToolDefinition {
 }
 
 const subagentSourcedGroup: McpToolGroup = {
-  serverType: "juspay-dashboard-stream",
-  serverName: "Juspay Dashboard Stream",
-  tools: [tool("Juspay_Dashboard_Stream__query"), tool("Juspay_Dashboard_Stream__write_row")],
+  serverType: "xyne-dashboard-stream",
+  serverName: "Xyne Dashboard Stream",
+  tools: [tool("Xyne_Dashboard_Stream__query"), tool("Xyne_Dashboard_Stream__write_row")],
   writeTools: ["write_row"],
   sourceSubagent: { id: "sub-pl", name: "paymentlinks" },
 };
@@ -48,13 +48,13 @@ async function runTool(def: ToolDefinition, params: unknown): Promise<string> {
 
 describe("subagent-sourced MCP groups", () => {
   it("matches subagent tool names when the sanitized server name itself contains a double underscore", () => {
-    const serverName = "Juspay Dashboard (Streamable HTTP)";
+    const serverName = "Xyne Dashboard (Streamable HTTP)";
     const prefixed = (raw: string) =>
       `${serverName}__${raw}`.replace(/[^a-zA-Z0-9_\-]/g, "_");
     const withRaw = (raw: string): ToolDefinition =>
       ({ ...tool(prefixed(raw)), mcpToolName: raw }) as unknown as ToolDefinition;
     const group: McpToolGroup = {
-      serverType: "juspay-dashboard-stream",
+      serverType: "xyne-dashboard-stream",
       serverName,
       tools: [withRaw("create_payment_link"), withRaw("list_payment_links_v1")],
       writeTools: ["create_payment_link"],
@@ -92,8 +92,8 @@ describe("subagent-sourced MCP groups", () => {
       customSubagents as never,
     );
 
-    expect(directTools.map((t) => t.name)).not.toContain("Juspay_Dashboard_Stream__query");
-    expect(directTools.map((t) => t.name)).not.toContain("Juspay_Dashboard_Stream__write_row");
+    expect(directTools.map((t) => t.name)).not.toContain("Xyne_Dashboard_Stream__query");
+    expect(directTools.map((t) => t.name)).not.toContain("Xyne_Dashboard_Stream__write_row");
     expect(subagentTools.map((t) => t.name)).toContain("paymentlinks");
   });
 
@@ -109,13 +109,13 @@ describe("subagent-sourced MCP groups", () => {
       includeSubagentTools: true,
     });
     expect(items.map((i) => i.entry.source)).toEqual(["custom-subagent:paymentlinks"]);
-    expect(items[0]!.entry.name).toBe("Juspay_Dashboard_Stream__query");
+    expect(items[0]!.entry.name).toBe("Xyne_Dashboard_Stream__query");
   });
 
   it("passes a group without the marker through to direct tools as before", () => {
     const { sourceSubagent: _omit, ...plain } = subagentSourcedGroup;
     const { directTools } = buildFastModeDirectTools({ groups: [plain as McpToolGroup] });
-    expect(directTools.map((t) => t.name)).toContain("Juspay_Dashboard_Stream__query");
+    expect(directTools.map((t) => t.name)).toContain("Xyne_Dashboard_Stream__query");
   });
 });
 
