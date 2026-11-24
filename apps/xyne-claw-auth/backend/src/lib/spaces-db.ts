@@ -444,16 +444,19 @@ export interface SpacesUserProfile {
  * references a user we haven't seen yet — eliminates the "log in to the
  * dashboard once before webhooks work" prerequisite.
  *
- * Returns null on the usual reasons (SPACES_DB_URL unset, user not in Spaces,
- * DB error). Callers must treat null as "skip JIT, request fails normally".
+ * Without SPACES_DB_URL (deployments that give claw-auth no Spaces DB login),
+ * the profile comes from Spaces' Claw-only internal API instead (XYNE_CLAW_S2S_KEY).
+ *
+ * Returns null on the usual reasons (user not in Spaces, DB or API error).
+ * Callers must treat null as "skip JIT, request fails normally".
  */
 export async function getSpacesUserById(
   userId: string,
   caller: SpacesAuthCaller = "unknown",
 ): Promise<SpacesUserProfile | null> {
-  const client = getClient();
-  if (!client) return null;
   if (!userId) return null;
+  const client = getClient();
+  if (!client) return getSpacesUserByIdFromApi(userId, caller);
 
   const started = Date.now();
   try {
@@ -480,6 +483,57 @@ export async function getSpacesUserById(
     const elapsed = Date.now() - started;
     log.warn(
       `[spaces-db] user-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${errMsg(err)}`,
+    );
+    return null;
+  }
+}
+
+const USER_PROFILE_TIMEOUT_MS = 5_000;
+
+const nullableString = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+
+/** `getSpacesUserById` through Spaces' Claw-only `/api/internal/claw/user-profile`. */
+async function getSpacesUserByIdFromApi(
+  userId: string,
+  caller: SpacesAuthCaller,
+): Promise<SpacesUserProfile | null> {
+  if (!CONFIG.spacesInternalUrl || !CONFIG.xyneClawS2sKey) return null;
+
+  const started = Date.now();
+  try {
+    const res = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/claw/user-profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      body: JSON.stringify({ userId }),
+      signal: AbortSignal.timeout(USER_PROFILE_TIMEOUT_MS),
+    });
+    const elapsed = Date.now() - started;
+    if (res.status === 404) {
+      log.info(`[spaces-db] user-lookup userId=${userId} caller=${caller} result=miss source=api ms=${elapsed}`);
+      return null;
+    }
+    if (!res.ok) {
+      log.warn(`[spaces-db] user-lookup userId=${userId} caller=${caller} result=error source=api status=${res.status} ms=${elapsed}`);
+      return null;
+    }
+    const body = (await res.json()) as Record<string, unknown>;
+    if (body["id"] !== userId || typeof body["email"] !== "string" || typeof body["name"] !== "string") {
+      log.warn(`[spaces-db] user-lookup userId=${userId} caller=${caller} result=error source=api: unexpected response`);
+      return null;
+    }
+    log.info(`[spaces-db] user-lookup userId=${userId} caller=${caller} result=hit source=api ms=${elapsed}`);
+    return {
+      id: userId,
+      email: body["email"],
+      name: body["name"],
+      spacesOrgMemberId: nullableString(body["spacesOrgMemberId"]),
+      workspaceId: nullableString(body["workspaceId"]),
+      spacesOrgId: nullableString(body["spacesOrgId"]),
+    };
+  } catch (err) {
+    const elapsed = Date.now() - started;
+    log.warn(
+      `[spaces-db] user-lookup userId=${userId} caller=${caller} result=error source=api ms=${elapsed} err=${errMsg(err)}`,
     );
     return null;
   }

@@ -1116,14 +1116,18 @@ async function buildMcpResolutionEntries(args: {
   // splicing the listing afterwards. `isAutomation` is the explicit dispatch
   // flag; resolveMentions/externalResultCallback is the legacy proxy kept
   // for sessions dispatched before the flag existed.
+  //
+  // Without SPACES_DB_URL there is no source for a user's Spaces session, so
+  // every run is served in app mode: Spaces calls act as the agent's bot.
   const { getSession } = await import("./webhook.js");
   const runCtx = await getSession(sessionId).catch(() => null);
   const isAutomationRun =
     runCtx?.isAutomation === true ||
     runCtx?.resolveMentions === true ||
     !!runCtx?.externalResultCallback;
+  const useAppMode = isAutomationRun || !CONFIG.spacesDbUrl;
   let automationAppSwap = false;
-  if (isAutomationRun) {
+  if (useAppMode) {
     // Only swap when the app token actually resolves AND the app-tools
     // server row exists — otherwise we'd strip Spaces access and silently
     // break the run. Keep the user server and log loudly instead.
