@@ -227,6 +227,13 @@ class WorkerService {
       // const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');
       // await recordingCleanupQueue.initialize();
 
+      // Google Meet's own transcripts for opted-in organisers' meetings (every minute).
+      if (appConfig.meetTranscripts.enabled) {
+        logger.info('Initializing Meet transcript queue...');
+        const { meetTranscriptQueue } = await import('@/queues/meetTranscriptQueue');
+        await meetTranscriptQueue.initialize();
+      }
+
       // HLS → MP4 stitch worker. Queue-based and CPU/disk-heavy (ffmpeg), so it
       // is isolated behind its own flag: deploy a dedicated stitch node by enabling
       // ONLY ENABLE_STITCH_WORKER. The API never consumes (enqueue is producer-only).
@@ -558,6 +565,11 @@ class WorkerService {
       }
 
       await gmailPubSubPullWorker.shutdown();
+
+      if (appConfig.meetTranscripts.enabled) {
+        const { meetTranscriptQueue } = await import('@/queues/meetTranscriptQueue');
+        await meetTranscriptQueue.close();
+      }
 
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();

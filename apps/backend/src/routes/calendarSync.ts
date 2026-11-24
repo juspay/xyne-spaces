@@ -13,6 +13,9 @@
  */
 
 import express, { type Response } from 'express';
+import { config } from '@/config/env';
+import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { enqueueGoogleCalendarManualSync } from '@/queues/googleCalendarSyncQueue';
@@ -54,6 +57,50 @@ router.get('/provider', async (req, res) => {
   } catch (err) {
     logger.error('[CALENDAR_SYNC][ROUTE] Failed to get provider:', err);
     return res.status(500).json({ success: false, error: 'Failed to determine calendar provider' });
+  }
+});
+
+// GET /meet-transcripts — the "Google Meet transcripts" setting of the current user.
+// `available`: the feature is on (GOOGLE_MEET_TRANSCRIPTS_ENABLED); `enabled`: they
+// turned it on (services/meetTranscriptService.ts).
+router.get('/meet-transcripts', async (req, res) => {
+  try {
+    const preference = await db.userPreference.findUnique({
+      where: { userId: req.user!.id },
+      select: { meetTranscripts: true },
+    });
+    return res.json({
+      success: true,
+      available: config.meetTranscripts.enabled,
+      enabled: preference?.meetTranscripts === true,
+    });
+  } catch (err) {
+    logger.error('[CALENDAR_SYNC][ROUTE] Failed to read Meet transcripts setting:', err);
+    return res.status(500).json({ success: false, error: 'Failed to read the setting' });
+  }
+});
+
+// PUT /meet-transcripts { enabled } — turns the setting on or off for the current user.
+router.put('/meet-transcripts', async (req, res) => {
+  const userId = req.user!.id;
+  const workspaceId = req.user!.workspaceId;
+  const enabled: unknown = req.body?.enabled;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'enabled must be a boolean' });
+  }
+  if (!workspaceId) {
+    return res.status(400).json({ success: false, error: 'No workspace selected' });
+  }
+  try {
+    await db.userPreference.upsert({
+      where: { userId },
+      update: { meetTranscripts: enabled },
+      create: { ...USER_PREFERENCE_NOTIFICATION_DEFAULTS, userId, workspaceId, meetTranscripts: enabled },
+    });
+    return res.json({ success: true, enabled });
+  } catch (err) {
+    logger.error('[CALENDAR_SYNC][ROUTE] Failed to save Meet transcripts setting:', err);
+    return res.status(500).json({ success: false, error: 'Failed to save the setting' });
   }
 });
 

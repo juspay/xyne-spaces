@@ -554,6 +554,10 @@ const envSchema = Joi.object({
   DRIVE_IMPORT_MAX_FILES: Joi.number().integer().min(1).default(7000), // files per folder import
   DRIVE_IMPORT_MAX_TOTAL_BYTES: Joi.number().integer().min(1).default(1024 * 1024 * 1024), // 1 GB / folder
   DRIVE_IMPORT_MAX_DEPTH: Joi.number().integer().min(1).default(40), // folder nesting depth
+  // Google Meet's own transcripts, read through the Meet REST API. Turning this on adds
+  // two Meet scopes to "Connect Google Calendar": the Google Cloud project must have the
+  // Meet REST API enabled and both scopes on its OAuth consent screen first.
+  GOOGLE_MEET_TRANSCRIPTS_ENABLED: Joi.boolean().default(false),
   VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion,vespa-files'),
   // 8083, not 8080: y-sweet owns 8080, so docker-compose.dev.yml publishes Vespa's feed port on 8083.
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8083'),
@@ -1475,6 +1479,9 @@ export const config = {
     maxFiles: envVars.DRIVE_IMPORT_MAX_FILES as number,
     maxTotalBytes: envVars.DRIVE_IMPORT_MAX_TOTAL_BYTES as number,
     maxDepth: envVars.DRIVE_IMPORT_MAX_DEPTH as number,
+  },
+  meetTranscripts: {
+    enabled: envVars.GOOGLE_MEET_TRANSCRIPTS_ENABLED as boolean,
   },
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,

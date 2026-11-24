@@ -616,6 +616,21 @@ export class TranscriptService {
   }
 
   /**
+   * Stores transcript entries as the call's raw JSONL transcript, where
+   * retrieveTranscript reads it. For transcripts that don't come from the
+   * transcription agent (e.g. Google Meet's own, services/meetTranscriptService.ts).
+   */
+  async storeRawTranscript(callId: string, entries: TranscriptEntry[]): Promise<void> {
+    const buffer = Buffer.from(entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n', 'utf-8');
+    await this.transcriptStorage.uploadFileV2(buffer, {
+      path: `transcriptions/${callId}.jsonl`,
+      contentType: 'application/x-ndjson',
+      metadata: { callId, type: 'transcript' },
+    });
+    logger.info(`[${callId}] raw_transcript_stored`, { entries_count: entries.length });
+  }
+
+  /**
    * Parse JSONL content into transcript entries
    */
   parseTranscriptEntries(jsonlContent: string): TranscriptEntry[] {

@@ -608,6 +608,7 @@ export const userPreferenceTable = table("user_preferences")
     allowThreadBroadcastMentions: boolean(),
     showThreadTags: boolean(),
     recordingDefaultSummaryTemplateId: string().optional(),
+    meetTranscripts: boolean().optional(),
     globalDesktopNotificationLevel: string().optional(),
     globalMobileNotificationLevel: string().optional(),
     threadReplyNotificationsEnabled: boolean(),

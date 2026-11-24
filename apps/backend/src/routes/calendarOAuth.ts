@@ -30,6 +30,20 @@ const GOOGLE_CALENDAR_SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/calendar.events',
 ];
+/**
+ * Extra scopes for Google Meet's own transcripts (services/googleMeetApi.ts):
+ * read a meeting's transcript, and turn automatic transcription on for it.
+ * Only requested when GOOGLE_MEET_TRANSCRIPTS_ENABLED is set.
+ */
+export const GOOGLE_MEET_TRANSCRIPT_SCOPES = [
+  'https://www.googleapis.com/auth/meetings.space.readonly',
+  'https://www.googleapis.com/auth/meetings.space.settings',
+];
+function googleCalendarScopes(): string[] {
+  return config.meetTranscripts.enabled
+    ? [...GOOGLE_CALENDAR_SCOPES, ...GOOGLE_MEET_TRANSCRIPT_SCOPES]
+    : GOOGLE_CALENDAR_SCOPES;
+}
 const MICROSOFT_CALENDAR_SCOPES = [
   'openid',
   'email',
@@ -193,7 +207,7 @@ router.post('/init', authMiddleware.authenticate, async (req: Request, res: Resp
     if (provider === 'GOOGLE') {
       authUrl = createGoogleClient(req).generateAuthUrl({
         access_type: 'offline',
-        scope: GOOGLE_CALENDAR_SCOPES,
+        scope: googleCalendarScopes(),
         prompt: 'consent',
         include_granted_scopes: true,
         login_hint: user.email,
