@@ -69,6 +69,14 @@ describe("entry-stage swap", () => {
     expect(swap).not.toContain("getAppTokenCredentials(userId)");
   });
 
+  it("checks app-tools against the agent's xyne-spaces grants under the swap", () => {
+    // The agent config names xyne-spaces; without the alias, enforcement drops the
+    // whole app-tools server and the run has no Spaces tools at all.
+    expect(mcpSrc).toContain(
+      'automationAppSwap ? new Map([["xyne-spaces-app-tools", "xyne-spaces"]]) : undefined',
+    );
+  });
+
   it("suppresses the app-token xyne-spaces fallback listing under the swap", () => {
     // Without this gate the fallback re-lists the user server (with app
     // creds) right after the swap removed it, resurrecting the duplicate.
