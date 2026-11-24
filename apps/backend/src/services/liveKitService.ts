@@ -253,22 +253,27 @@ export class LiveKitService {
   async resolveAgentNameForUser(userId: string, context: { roomName?: string } = {}): Promise<string | null> {
     const tag = context.roomName ? `[${context.roomName}] ` : '';
     let role: string;
-    try {
-      role = await superpositionClient.getStringValue(
-        TRANSCRIPTION_AGENT_ROLE_FLAG,
-        NO_EXPLICIT_DISPATCH,
-        { userId },
-      );
-    } catch (error) {
-      // CAC/user-matching failure: treat exactly like an unlisted user rather than
-      // falling back to DEFAULT_TRANSCRIPTION_AGENT_ROLE — a Superposition outage must
-      // not suddenly hand every production user a second explicit-dispatch agent.
-      // Automatic dispatch is still there regardless, so this fails safe either way.
-      logger.error(`${tag}transcription_agent_role_resolution_failed | userId=${userId}, error=${error}, falling_back_to=no_explicit_dispatch`);
-      return null;
+    if (config.transcriptionAgentName) {
+      role = DEFAULT_TRANSCRIPTION_AGENT_ROLE;
+    } else {
+      try {
+        role = await superpositionClient.getStringValue(
+          TRANSCRIPTION_AGENT_ROLE_FLAG,
+          NO_EXPLICIT_DISPATCH,
+          { userId },
+        );
+      } catch (error) {
+        // CAC/user-matching failure: treat exactly like an unlisted user rather than
+        // falling back to DEFAULT_TRANSCRIPTION_AGENT_ROLE — a Superposition outage must
+        // not suddenly hand every production user a second explicit-dispatch agent.
+        // Automatic dispatch is still there regardless, so this fails safe either way.
+        logger.error(`${tag}transcription_agent_role_resolution_failed | userId=${userId}, error=${error}, falling_back_to=no_explicit_dispatch`);
+        return null;
+      }
     }
 
-    logger.info(`${tag}transcription_agent_role_resolved | userId=${userId}, role=${role}`);
+    const roleSource = config.transcriptionAgentName ? 'env' : 'superposition';
+    logger.info(`${tag}transcription_agent_role_resolved | userId=${userId}, role=${role}, source=${roleSource}`);
 
     if (role === NO_EXPLICIT_DISPATCH) {
       logger.info(`${tag}transcription_agent_dispatch_not_applicable | userId=${userId}, reason=role_is_none`);
@@ -282,8 +287,18 @@ export class LiveKitService {
    * no cache, since a stale read here just means an extra ~3s health-check timeout on an
    * already-rolled-back name, not a correctness issue. `getObjectValue` already fails
    * closed to `{}` internally on any CAC error, so no separate try/catch is needed here.
+   * A deployment without Superposition sets TRANSCRIPTION_AGENT_NAME instead: one agent, as
+   * the 'default' role, health-checked at the agent's own PYTHON_AGENT_URL.
    */
   private async getConfiguredAgentRoles(): Promise<Record<string, ConfiguredTranscriptionAgent>> {
+    if (config.transcriptionAgentName) {
+      return {
+        [DEFAULT_TRANSCRIPTION_AGENT_ROLE]: {
+          agentName: config.transcriptionAgentName,
+          url: `${config.pythonAgentUrl.replace(/\/+$/, '')}/health`,
+        },
+      };
+    }
     const value = await superpositionClient.getObjectValue(TRANSCRIPTION_AGENT_ROLES_CONFIG_KEY, {});
     return (value ?? {}) as unknown as Record<string, ConfiguredTranscriptionAgent>;
   }

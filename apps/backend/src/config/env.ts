@@ -429,6 +429,8 @@ const envSchema = Joi.object({
   XYNE_API_KEY: Joi.string().allow('').default(''),
   // Transcription Agent API Key (for S2S authentication)
   TRANSCRIPTION_AGENT_API_KEY: Joi.string().default(''),
+  // Transcription agent (its agent_name) for every call when Superposition isn't used; checked at PYTHON_AGENT_URL/health
+  TRANSCRIPTION_AGENT_NAME: Joi.string().allow('').default(''),
   // Mettle user sync webhook API Key (for S2S authentication)
   METTLE_USER_SYNC_API_KEY: Joi.string().allow('').default(''),
   // Team intelligence sync API Key (for S2S authentication)
@@ -1253,6 +1255,7 @@ export const config = {
     apiKey: envVars.XYNE_API_KEY,
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
+  transcriptionAgentName: envVars.TRANSCRIPTION_AGENT_NAME as string,
   mettleUserSyncApiKey: envVars.METTLE_USER_SYNC_API_KEY,
   teamIntelligenceSyncApiKey: envVars.TEAM_INTELLIGENCE_SYNC_API_KEY,
   telepresenceMonitoringApiKey: envVars.TELEPRESENCE_MONITORING_API_KEY,
