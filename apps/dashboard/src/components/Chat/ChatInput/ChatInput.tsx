@@ -24,7 +24,6 @@ import {
   ChannelType,
   BaseTicketType,
   CommandAccessibility,
-  buildMessageEditContent,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { getAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
@@ -162,8 +161,6 @@ interface ChatInputProps {
   showTypingIndicator?: boolean;
   hasTicket?: boolean;
   isForwardedContent?: boolean;
-  /** When editing: the message's stored content, so a forward is re-sent as its whole XML. */
-  editedMessageContent?: string;
   threadParticipantIds?: ReadonlySet<string>;
   dockSlot?: React.ReactNode;
   twinEdit?: TwinEditSession | undefined;
@@ -187,7 +184,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       onCancel,
       hasTicket = false,
       isForwardedContent = false,
-      editedMessageContent,
       threadParticipantIds,
       dockSlot,
       twinEdit,
@@ -1083,9 +1079,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           const result = zero.mutate(
             mutators.messages.update({
               messageId,
-              // A forward is edited by sending its whole XML with the new optional text: the server
-              // cannot rewrite the stored (encrypted) content.
-              content: buildMessageEditContent(editedMessageContent, processedHtml),
+              // For a forward, only its new optional text: the server rebuilds the forward around it.
+              content: processedHtml,
             }),
           );
           handleMutationResult(

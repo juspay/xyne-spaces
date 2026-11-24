@@ -95,10 +95,11 @@ export const messagesSendClient = defineRequestContract({
 
 /**
  * Zero mutator `messages.update` (edit a message). The client encrypts `content`; it is stored as
- * received. For a forwarded message the client sends the whole forwarded XML with the new
- * optional text (`buildMessageEditContent`); the server checks its forwarded ids against the
- * stored message's. Mentions come by the participant rule: from the text, or for a forward from
- * its optional text. No facts means the content was empty.
+ * received. For a forwarded message `content` is only the new optional text: the server builds
+ * the edited forward from the stored one (`forwardedMessageEditTemplate`), so an edit cannot
+ * change what the forward quotes. Mentions come by the participant rule from the text. No facts
+ * means the content was empty. `forwardedMessageId` is set only when the text is itself a forward's
+ * XML: an older client sending the whole forward, which is refused.
  */
 export const messagesUpdateClient = defineRequestContract({
   sourceToDerived: {
@@ -108,12 +109,7 @@ export const messagesUpdateClient = defineRequestContract({
       handles: derive.handles,
       spanMentionUserIds: derive.spanMentionUserIds,
       spanMentionGroupIds: derive.spanMentionGroupIds,
-      forwardedOptionalTextUserIds: derive.forwardedOptionalTextUserIds,
-      forwardedOptionalTextGroupIds: derive.forwardedOptionalTextGroupIds,
       forwardedMessageId: derive.forwardedMessageId,
-      forwardedConversationId: derive.forwardedConversationId,
-      forwardedSenderId: derive.forwardedSenderId,
-      forwardedChannelId: derive.forwardedChannelId,
     },
   },
   schema: z.object({

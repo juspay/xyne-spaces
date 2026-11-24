@@ -245,7 +245,7 @@ import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
 import { EXTRACTORS, isComposeTemplateName, runComposeTemplate, runExtractors, type ExtractorName } from '@xyne/shared';
-import { ZodError } from 'zod';
+import type { ZodError } from 'zod';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';
 // Disabled (Claw)
@@ -649,12 +649,15 @@ export class App {
         try {
           results.push(runComposeTemplate(template, inputs));
         } catch (error) {
-          const paths = error instanceof ZodError ? error.issues.map(issue => issue.path.join('.') || '(root)') : [];
-          res.status(400).json({
-            error: 'Bad request',
-            message: `items[${index}]: inputs do not match template ${template}${paths.length > 0 ? ` (${paths.join(', ')})` : ''}`,
-            index,
-          });
+          // The input paths of a shape mismatch; otherwise the template refused inputs of the
+          // right shape (a forward edit of content that is not a forward). Never the error's own
+          // message: it could quote an input.
+          // Checked by shape, not instanceof: @xyne/shared's zod may be another module instance.
+          const issues = (error as Partial<ZodError> | null)?.name === 'ZodError' ? (error as ZodError).issues : undefined;
+          const message = issues
+            ? `inputs do not match template ${template} (${issues.map(issue => issue.path.join('.') || '(root)').join(', ')})`
+            : `template ${template} cannot be built from these inputs`;
+          res.status(400).json({ error: 'Bad request', message: `items[${index}]: ${message}`, index });
           return;
         }
       }

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { UnreadableString, isUnreadableSchema, reveal, unreadableString } from './unreadable-string.js';
-import { buildForwardedMessageContent } from '../forwardedMessage.js';
+import { buildForwardedMessageContent, createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 
 /**
  * A value the server stores encrypted but cannot build itself, because it is made from values it
@@ -81,9 +81,29 @@ export const forwardedMessageTemplate = defineComposeTemplate({
     }),
 });
 
+/**
+ * An edited forward's content: the stored forward with its optional text replaced, everything it
+ * forwards (the original's text, sender, date, ids) kept as stored. The client sends only the new
+ * text, so an edit cannot change what the forward quotes. Refused when the stored content is not
+ * a forward.
+ */
+export const forwardedMessageEditTemplate = defineComposeTemplate({
+  name: 'forwardedMessageEdit',
+  inputs: z.object({
+    storedContent: unreadableString(),
+    optionalText: unreadableString().nullable(),
+  }),
+  build: inputs => {
+    const stored = parseForwardedMessageXml(inputs.storedContent);
+    if (!stored) throw new Error('forwardedMessageEdit: the stored content is not a forwarded message');
+    return createForwardedMessageXml({ ...stored, optionalText: inputs.optionalText || null });
+  },
+});
+
 /** Every compose template, by name: the names the encryption service and the transformer accept. */
 export const COMPOSE_TEMPLATES = {
   forwardedMessage: forwardedMessageTemplate,
+  forwardedMessageEdit: forwardedMessageEditTemplate,
 } as const;
 
 export type ComposeTemplateName = keyof typeof COMPOSE_TEMPLATES;

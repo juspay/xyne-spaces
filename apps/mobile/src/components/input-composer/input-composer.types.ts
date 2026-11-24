@@ -55,8 +55,6 @@ export type ChatInputEditingMessage = {
   conversationId: string;
   channelId: string;
   content: string;
-  /** The message's stored content, so an edited forward is re-sent as its whole XML. */
-  storedContent?: string;
 };
 
 export type ComposerSnapshot = {

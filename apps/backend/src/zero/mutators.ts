@@ -131,7 +131,7 @@ import {
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
-import { forwardedMessageTemplate } from '@xyne/shared';
+import { forwardedMessageEditTemplate, forwardedMessageTemplate } from '@xyne/shared';
 import {
   conversationsForwardMessageClient,
   messagesUpdateClient,
@@ -4243,7 +4243,7 @@ export function createMutators(
         messagesUpdateClient,
         z.object({ messageId: z.string(), content: z.string().optional() }),
         async ({ tx, args: { messageId, content } }) => {
-          // The stored content is unreadable: its mentions and (for a forward) what it forwards
+          // The stored content is unreadable: its mentions (for a forward, its optional text's)
           // come as facts.
           const messageRead = await tx.read(zql.messages.where('messageId', messageId).one(), {
             content: {
@@ -4251,10 +4251,6 @@ export function createMutators(
               spanMentionGroupIds: derive.spanMentionGroupIds,
               forwardedOptionalTextUserIds: derive.forwardedOptionalTextUserIds,
               forwardedOptionalTextGroupIds: derive.forwardedOptionalTextGroupIds,
-              forwardedMessageId: derive.forwardedMessageId,
-              forwardedConversationId: derive.forwardedConversationId,
-              forwardedSenderId: derive.forwardedSenderId,
-              forwardedChannelId: derive.forwardedChannelId,
             },
           });
           const message = messageRead?.row;
@@ -4269,20 +4265,11 @@ export function createMutators(
           if (content !== undefined && !facts && !isForwardedMessage) {
             throw new Error('Message content cannot be empty');
           }
-          // A forward is edited by sending its whole XML with the new optional text (the client
-          // builds it: the server cannot rewrite encrypted text). It may not change what it forwards.
-          if (content !== undefined && isForwardedMessage) {
-            if (!facts?.forwardedMessageId) {
-              throw new Error('Editing a forwarded message needs the forwarded message; update the app and try again');
-            }
-            if (
-              facts.forwardedMessageId !== stored?.forwardedMessageId ||
-              facts.forwardedConversationId !== stored?.forwardedConversationId ||
-              facts.forwardedSenderId !== stored?.forwardedSenderId ||
-              facts.forwardedChannelId !== stored?.forwardedChannelId
-            ) {
-              throw new Error('A forwarded message cannot change what it forwards');
-            }
+          // A forward's edit sends only its new optional text; the server rebuilds the forward
+          // around it below. A client that still sends the whole forward's XML is refused: that
+          // XML would become the optional text, and what it quotes would come from the client.
+          if (content !== undefined && isForwardedMessage && facts?.forwardedMessageId) {
+            throw new Error('Editing a forwarded message sends only its text; update the app and try again');
           }
 
           // Allow system messages to be updated by any channel participant
@@ -4301,19 +4288,8 @@ export function createMutators(
           }
           if (content !== undefined && authData.role === WorkspaceRole.GUEST) {
             const edited = await tx.run(zql.conversations.where('conversationId', message.conversationId).one());
-            // Refused, not stripped (the text is unreadable). For a forward, its optional text.
-            await assertGuestMentionsWithin(
-              tx,
-              authData.role,
-              edited?.channelId ?? '',
-              isForwardedMessage
-                ? {
-                    userIds: facts?.forwardedOptionalTextUserIds ?? [],
-                    groupIds: facts?.forwardedOptionalTextGroupIds ?? [],
-                    handles: [],
-                  }
-                : facts,
-            );
+            // Refused, not stripped (the text is unreadable). For a forward, `content` is its text.
+            await assertGuestMentionsWithin(tx, authData.role, edited?.channelId ?? '', facts);
           }
 
           // Only process mention changes if content is being updated
@@ -4322,14 +4298,12 @@ export function createMutators(
           let noLongerMentionedUsers: string[] = [];
 
           if (content !== undefined) {
-            // Mentions by the participant rule (extractAllMentions), as facts: of the text, or
-            // for a forward of its optional text.
+            // Mentions by the participant rule (extractAllMentions), as facts. The stored ones are
+            // a forward's optional text's; the new content is the text itself either way.
             const oldMentions = isForwardedMessage
               ? { userIds: stored?.forwardedOptionalTextUserIds ?? [], groupIds: stored?.forwardedOptionalTextGroupIds ?? [] }
               : { userIds: stored?.spanMentionUserIds ?? [], groupIds: stored?.spanMentionGroupIds ?? [] };
-            const newMentions = isForwardedMessage
-              ? { userIds: facts?.forwardedOptionalTextUserIds ?? [], groupIds: facts?.forwardedOptionalTextGroupIds ?? [] }
-              : { userIds: facts?.spanMentionUserIds ?? [], groupIds: facts?.spanMentionGroupIds ?? [] };
+            const newMentions = { userIds: facts?.spanMentionUserIds ?? [], groupIds: facts?.spanMentionGroupIds ?? [] };
 
             // Find users that are newly mentioned (in new content but not in old)
             newlyMentionedUsers = newMentions.userIds.filter(
@@ -4416,8 +4390,22 @@ export function createMutators(
             }
           }
 
-          if (content !== undefined) {
-            // Stored as received: a forward's XML was rebuilt (and checked above) by the client.
+          if (content !== undefined && isForwardedMessage) {
+            // The stored forward with only its optional text replaced, built by the encryption
+            // service (forwardedMessageEditTemplate) and stored encrypted as it comes back.
+            const edit = await compose(
+              {
+                template: forwardedMessageEditTemplate,
+                inputs: { storedContent: message.content, optionalText: content },
+                current: message.content,
+              },
+              { workspaceId: authData.workspaceId },
+            );
+            if (!edit.unchanged) {
+              await tx.mutate.messages.update({ messageId, content: edit.value, edited: true });
+            }
+          } else if (content !== undefined) {
+            // Stored as received.
             await tx.mutate.messages.update({
               messageId,
               content,

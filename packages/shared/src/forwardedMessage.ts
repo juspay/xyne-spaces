@@ -146,22 +146,10 @@ export function isForwardedMessageXml(content: string): boolean {
 }
 
 /**
- * The content to send when editing a message whose stored content is `storedContent`: for a
- * forwarded message, its XML with the optional text replaced by `nextText` (what an edit of a
- * forward changes); for any other message, `nextText`. The client builds it because the server
- * holds the stored content only encrypted.
- */
-export function buildMessageEditContent(storedContent: string | null | undefined, nextText: string): string {
-  const forwarded = storedContent ? parseForwardedMessageXml(storedContent) : null;
-  if (!forwarded) return nextText;
-  return createForwardedMessageXml({ ...forwarded, optionalText: nextText || null });
-}
-
-/**
- * The content of a forward of `original`: its ForwardedMessage XML. Built by the client, which
- * holds the original's text (the server holds it only encrypted); the server checks the ids in it
- * against the original message. Re-forwarding a forward forwards its optional text when it has
- * one, else what it forwarded.
+ * The content of a forward of `original`: its ForwardedMessage XML. Re-forwarding a forward
+ * forwards its optional text when it has one, else what it forwarded. The stored one is built
+ * next to the plaintext by the encryption service (`forwardedMessageTemplate`), from the original
+ * the server read; clients build it only for their local, not-yet-synced row.
  */
 export function buildForwardedMessageContent(input: {
   original: {

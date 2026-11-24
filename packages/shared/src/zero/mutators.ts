@@ -72,7 +72,7 @@ import {
   MessageArtifactStatus,
 } from './schema.js';
 import { FlowPlanSchema, serializeFlowPlan, validateFlowPlan } from '../board-types/index.js';
-import { createForwardedMessageXml, isForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
+import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getNudgeActionBehavior } from '../nudges.js';
 import {
   parseTicketMd,
@@ -2834,10 +2834,10 @@ export const mutators = defineMutators({
         }
 
         if (content !== undefined) {
-          // Callers send a forward's whole XML (buildMessageEditContent); only a caller that
-          // still sends just the optional text falls through to the rebuild below.
-          if (isForwardedMessage && !isForwardedMessageXml(content)) {
-            // For forwarded messages, parse XML, update optionalText, and re-serialize
+          // A forward's `content` is only its new optional text. The forward is rebuilt around it
+          // here for the local row; the server builds the stored one the same way
+          // (forwardedMessageEditTemplate) and sync replaces this.
+          if (isForwardedMessage) {
             const parsedForwarded = parseForwardedMessageXml(message.content);
             if (parsedForwarded) {
               const updatedXmlContent = createForwardedMessageXml({
