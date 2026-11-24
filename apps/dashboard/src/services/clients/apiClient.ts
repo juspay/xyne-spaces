@@ -411,3 +411,65 @@ export function clearAuthTokens(): void {
 
 // Export the configured Axios instance
 export const apiInstance: AxiosInstance = apiConfig;
+
+/**
+ * `apiInstance` as a fetch function, for clients that must be handed one (such as the workflow
+ * SDK's `createWorkflowClient`). Each call goes through `apiInstance` and so gets everything above:
+ * the session cookie, request encryption, response decryption, session refresh and metrics. The
+ * result is returned as a fetch `Response`; an HTTP error keeps its status and body.
+ *
+ * Event streams (`Accept: text/event-stream`) are the one exception: their readers need
+ * `res.body.getReader()`, which axios cannot provide in the browser, so they use fetch with the
+ * session cookie. The backend writes streams outside its response encryption.
+ */
+export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const url = input instanceof Request ? input.url : input.toString();
+  const headers = new Headers(init.headers);
+
+  if ((headers.get('accept') ?? '').includes('text/event-stream')) {
+    // eslint-disable-next-line local-rules/no-fetch-use-axios
+    return globalThis.fetch(url, { ...init, credentials: 'include' });
+  }
+
+  // apiInstance adds BASE_URL itself, and the encryption manifest matches the path below it.
+  const path = url.startsWith(BASE_URL) ? url.slice(BASE_URL.length) : url;
+  const isJsonBody =
+    typeof init.body === 'string' && (headers.get('content-type') ?? '').includes('application/json');
+
+  try {
+    const response = await apiConfig.request<unknown>({
+      url: path,
+      method: init.method ?? 'GET',
+      headers: Object.fromEntries(headers.entries()),
+      // A parsed body, so the request interceptor can encrypt it like any other call's.
+      data: isJsonBody ? (JSON.parse(init.body as string) as unknown) : init.body,
+      ...(init.signal ? { signal: init.signal } : {}),
+    });
+    return toFetchResponse(response.status, response.data, response);
+  } catch (error) {
+    // The response interceptor rejects HTTP errors as an Error carrying `status` (and
+    // `responseData`, the body, when it named an error). Anything without a status (network
+    // failure, abort) is rethrown, as fetch would.
+    if (axios.isAxiosError(error) && error.response) {
+      return toFetchResponse(error.response.status, error.response.data, error.response);
+    }
+    const failed = error as { status?: unknown; responseData?: unknown; message?: unknown };
+    if (typeof failed.status !== 'number') throw error;
+    return toFetchResponse(failed.status, failed.responseData ?? { error: String(failed.message ?? '') });
+  }
+}
+
+function toFetchResponse(status: number, data: unknown, source?: AxiosResponse<unknown>): Response {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries((source?.headers ?? {}) as Record<string, unknown>)) {
+    if (typeof value === 'string') headers.set(name, value);
+  }
+  headers.delete('content-length');
+  const statusText = source?.statusText ?? '';
+
+  const empty = status === 204 || status === 304 || data === undefined || data === null || data === '';
+  if (empty) return new Response(null, { status, statusText, headers });
+  if (typeof data === 'string') return new Response(data, { status, statusText, headers });
+  headers.set('content-type', 'application/json');
+  return new Response(JSON.stringify(data), { status, statusText, headers });
+}
