@@ -676,6 +676,10 @@ function enforceMcpToolsListing(
   agentSlug: string,
   entryTypes: Map<string, EnforcementLogType>,
   subagentRefs: SubagentToolRefs[] = [],
+  // Server types checked against the agent config as another type: under the app-mode
+  // swap, xyne-spaces-app-tools stands in for xyne-spaces, so the agent's xyne-spaces
+  // grants decide which of its tools are listed.
+  configuredAs: ReadonlyMap<string, string> = new Map(),
 ): McpServerTools[] {
   let kept = 0;
   let dropped = 0;
@@ -688,14 +692,26 @@ function enforceMcpToolsListing(
       continue;
     }
 
+    const alias = configuredAs.get(serverTools.serverType);
     const retainedForSubagents = new Set<string>();
-    const filtered = filterMcpServerToolsForAgentConfig(
-      serverTools,
-      config,
-      parseGatewayServerType,
-      subagentRefs,
-      retainedForSubagents,
-    );
+    const aliasFiltered = alias
+      ? filterMcpServerToolsForAgentConfig(
+          { ...serverTools, serverType: alias, serverName: alias },
+          config,
+          parseGatewayServerType,
+          subagentRefs,
+          retainedForSubagents,
+        )
+      : null;
+    const filtered = aliasFiltered
+      ? { ...aliasFiltered, serverType: serverTools.serverType, serverName: serverTools.serverName }
+      : filterMcpServerToolsForAgentConfig(
+          serverTools,
+          config,
+          parseGatewayServerType,
+          subagentRefs,
+          retainedForSubagents,
+        );
     if (!filtered) {
       dropped += 1;
       const type =
@@ -1665,6 +1681,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           sessionAgentTools.slug,
           entryTypes,
           sessionAgentTools.subagentToolRefs,
+          automationAppSwap ? new Map([["xyne-spaces-app-tools", "xyne-spaces"]]) : undefined,
         ),
       );
     }
