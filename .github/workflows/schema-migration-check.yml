@@ -93,9 +93,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # package-manager-cache: false — setup-node v5 auto-enables caching from
+      # package.json's "packageManager" (pnpm), which fails because pnpm is not
+      # installed here. This job runs one dependency-free node script, so it
+      # needs neither pnpm nor a cache.
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          package-manager-cache: false
 
       - name: Exact dependency versions guard
         run: node scripts/validate-exact-dependency-versions.mjs --ci
