@@ -1,5 +1,6 @@
 import {
   UnreadableString,
+  isCiphertextValue,
   reveal,
   runComposeTemplate,
   type ComposeInputs,
@@ -99,7 +100,7 @@ function heldInputs(template: ComposeTemplate, inputs: Record<string, unknown>):
 /** The template run here, on plaintext parts (DB encryption off). */
 function composeLocally(item: { template: string; inputs: Record<string, unknown>; current: string | null }): ComposeItemResult {
   for (const [field, value] of Object.entries(item.inputs)) {
-    if (typeof value === 'string' && value.startsWith('ENC:')) {
+    if (isCiphertextValue(value)) {
       throw new Error(`compose ${item.template}: ${field} is ciphertext and DB encryption is off`);
     }
   }

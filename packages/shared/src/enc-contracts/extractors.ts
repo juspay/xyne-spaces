@@ -35,6 +35,7 @@ export const EXTRACTORS = [
   'forwardedOptionalTextGroupIds',
   'forwardedOptionalTextLength',
   'forwardedHasOptionalText',
+  'rawLength',
 ] as const;
 export type ExtractorName = (typeof EXTRACTORS)[number];
 
@@ -72,6 +73,11 @@ export interface ExtractorOutput {
   textLength: number;
   /** The text is blank once trimmed. */
   textIsEmpty: boolean;
+  /**
+   * The stored string's length (`text.length`, markup included): what a storage limit checks,
+   * where `textLength` (visible characters) would let mostly-markup text through.
+   */
+  rawLength: number;
   /** The message carries FlowJSON (a card, a plan, a slash-command artifact). */
   flowJsonPresent: boolean;
   /** Forwarded message: the original message id; null when the content is not a forward. */
@@ -168,6 +174,7 @@ export const fieldFactsSchema: z.ZodType<FieldFacts> = z.object({
   commandArgs: z.string().nullable().optional(),
   textLength: z.number().int().nonnegative().optional(),
   textIsEmpty: z.boolean().optional(),
+  rawLength: z.number().int().nonnegative().optional(),
   flowJsonPresent: z.boolean().optional(),
   forwardedMessageId: z.string().nullable().optional(),
   forwardedConversationId: z.string().nullable().optional(),

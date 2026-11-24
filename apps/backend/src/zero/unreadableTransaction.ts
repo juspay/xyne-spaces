@@ -10,7 +10,7 @@ import type {
   UpdateValue,
   UpsertValue,
 } from '@rocicorp/zero';
-import { UnreadableString, reveal, runExtractors } from '@xyne/shared';
+import { UnreadableString, isCiphertextValue, reveal, runExtractors } from '@xyne/shared';
 import type { DerivedSpec, ExtractorName, FieldDerived, FieldFacts } from '@xyne/shared';
 import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
@@ -107,7 +107,7 @@ function wrapRow(table: string, columns: readonly string[], row: unknown, wrappe
   for (const [column, value] of Object.entries(record)) {
     // Ciphertext in a column not listed: the list is behind the database. Fail here, not
     // later where the value would be used as text.
-    if (typeof value === 'string' && value.startsWith('ENC:') && !columns.includes(column)) {
+    if (isCiphertextValue(value) && !columns.includes(column)) {
       throw new Error(`${table}.${column} holds ciphertext but is not in UNREADABLE_COLUMNS`);
     }
   }
@@ -248,7 +248,7 @@ async function deriveRowFacts(
       }
     } else {
       results = items.map(({ column, value, derive }) => {
-        if (value.startsWith('ENC:')) throw new Error(`tx.read: ${table}.${column} is ciphertext and DB encryption is off`);
+        if (isCiphertextValue(value)) throw new Error(`tx.read: ${table}.${column} is ciphertext and DB encryption is off`);
         return runExtractors(value, derive);
       });
     }

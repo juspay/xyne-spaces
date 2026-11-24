@@ -126,6 +126,7 @@ import {
 import {
   MessageArtifactStatus,
   getSlashCommandArtifactDefinition,
+  readSlashCommandArtifactClosed,
   withSlashCommandArtifactClosedMetadata,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
@@ -650,16 +651,24 @@ async function assertGuestMentionsWithin(
   tx: AnyTransaction,
   role: string | undefined,
   channelId: string,
-  mentions: Pick<ExtractorOutput, 'userIds' | 'groupIds' | 'handles'> | undefined,
+  mentions:
+    | (Pick<ExtractorOutput, 'userIds' | 'groupIds' | 'handles'> &
+        Partial<Pick<ExtractorOutput, 'spanMentionUserIds' | 'spanMentionGroupIds'>>)
+    | undefined,
 ): Promise<void> {
   if (role !== WorkspaceRole.GUEST || !mentions) return;
-  if (mentions.groupIds.length > 0 || mentions.handles.length > 0) {
+  // Every mention any rule finds: the notification rule (userIds, which needs data-username)
+  // and the participant rule (spanMention*, which does not). A mention only one of them sees
+  // would otherwise pass here and still add that user to the thread.
+  const userIds = [...new Set([...mentions.userIds, ...(mentions.spanMentionUserIds ?? [])])];
+  const groupIds = [...mentions.groupIds, ...(mentions.spanMentionGroupIds ?? [])];
+  if (groupIds.length > 0 || mentions.handles.length > 0) {
     throw new Error('Guests can only mention members of this channel');
   }
-  if (mentions.userIds.length === 0) return;
+  if (userIds.length === 0) return;
   const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
   const allowed = new Set(participants.map(participant => participant.userId));
-  if (mentions.userIds.some(userId => !allowed.has(userId))) {
+  if (userIds.some(userId => !allowed.has(userId))) {
     throw new Error('Guests can only mention members of this channel');
   }
 }
@@ -1837,12 +1846,12 @@ export function createMutators(
         channelUpdateCallSummaryPromptClient,
         z.object({
           channelId: z.string(),
-          // The length limit is checked on the textLength fact below: zod cannot measure ciphertext.
+          // The length limit is checked on the rawLength fact below: zod cannot measure ciphertext.
           prompt: z.string().nullable(),
         }),
         async ({ tx, args: { channelId, prompt } }) => {
           const facts = getMutationFacts(channelUpdateCallSummaryPromptClient, 'prompt');
-          if ((facts?.textLength ?? 0) > SUMMARY_PROMPT_MAX_LENGTH) {
+          if ((facts?.rawLength ?? 0) > SUMMARY_PROMPT_MAX_LENGTH) {
             throw new Error('Call summary template must be 20000 characters or less');
           }
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -3423,7 +3432,7 @@ export function createMutators(
 
           // The optional text is the only part of the forward the client sends.
           const optionalFacts = getMutationFacts(conversationsForwardMessageClient, 'optionalMessage');
-          if (optionalFacts && optionalFacts.textLength > 10000) {
+          if (optionalFacts && optionalFacts.rawLength > 10000) {
             throw new Error('Optional message too long');
           }
 
@@ -4560,29 +4569,36 @@ export function createMutators(
       closeSlashCommandArtifact: defineContractMutator(
         z.object({ messageId: z.string(), timestamp: z.number() }),
         async ({ tx, args: { messageId, timestamp } }) => {
-          const message = await tx.run(zql.messages.where('messageId', messageId).one());
-          if (!message) {
+          // Whether the content is a slash-command card comes as a fact: the content is unreadable.
+          const messageRead = await tx.read(zql.messages.where('messageId', messageId).one(), {
+            content: { slashArtifactCommand: derive.slashArtifactCommand },
+          });
+          const message = messageRead?.row;
+          if (!messageRead || !message) {
             throw new Error('Message not available');
           }
           if (message.senderId !== authData.sub) {
             throw new Error('Only the author can close this incident');
           }
 
-          // The artifact row is what makes the message an artifact here: its content is
-          // unreadable, so the FlowJSON is not parsed.
+          // The artifact row tracks the card's status. Cards sent before the rows existed have
+          // none: their content alone (the fact) makes them a card, and the close is recorded
+          // only in the metadata below.
           const artifact = await tx.run(zql.message_artifacts.where('messageId', messageId).one());
-          if (!artifact) {
+          if (!artifact && !messageRead.facts.content?.slashArtifactCommand) {
             throw new Error('Message is not a slash command artifact');
           }
-          if (artifact.status !== MessageArtifactStatus.ACTIVE) {
+          if (artifact ? artifact.status !== MessageArtifactStatus.ACTIVE : readSlashCommandArtifactClosed(message.metadata)) {
             throw new Error('This incident is already closed');
           }
 
-          await tx.mutate.message_artifacts.update({
-            id: artifact.id,
-            status: MessageArtifactStatus.CANCELLED,
-            updatedAt: timestamp,
-          });
+          if (artifact) {
+            await tx.mutate.message_artifacts.update({
+              id: artifact.id,
+              status: MessageArtifactStatus.CANCELLED,
+              updatedAt: timestamp,
+            });
+          }
           // The close is recorded in metadata, not baked into the (possibly encrypted) FlowJSON.
           // Deliberately not `edited: true` — closing is a lifecycle transition,
           // not an edit, and must not raise a "message edited" notification.
@@ -4838,13 +4854,25 @@ export function createMutators(
             })
           );
 
-          // Get all OTHER messages in the conversation (excluding the one being deleted)
-          const otherMessageReads = (
-            await tx.read(zql.messages.where('conversationId', message.conversationId), {
-              content: { spanMentionUserIds: derive.spanMentionUserIds },
-            })
-          ).filter(m => m.row.messageId !== messageId);
-          const otherMessages = otherMessageReads.map(m => m.row);
+          // Get all OTHER messages in the conversation (excluding the one being deleted). Their
+          // mention facts are only needed when this message mentioned someone (to find who is
+          // mentioned nowhere else): without mentions the rows are read without facts, so a
+          // delete in a long thread does not send the whole thread for extraction.
+          const mentionedUserIds = messageRead!.facts.content?.spanMentionUserIds ?? [];
+          const otherMessageReads =
+            mentionedUserIds.length > 0
+              ? (
+                  await tx.read(zql.messages.where('conversationId', message.conversationId), {
+                    content: { spanMentionUserIds: derive.spanMentionUserIds },
+                  })
+                ).filter(m => m.row.messageId !== messageId)
+              : [];
+          const otherMessages =
+            mentionedUserIds.length > 0
+              ? otherMessageReads.map(m => m.row)
+              : (await tx.run(zql.messages.where('conversationId', message.conversationId))).filter(
+                  m => m.messageId !== messageId,
+                );
 
           const isInitialMessage = conversation.initialMessageId === messageId;
           const hasReplies = otherMessages.length > 0;
@@ -4853,7 +4881,6 @@ export function createMutators(
           const shouldSoftDelete = isInitialMessage && (hasReplies || hasTicket);
 
           // Clean up MENTIONED participants within Zero transaction
-          const mentionedUserIds = messageRead!.facts.content?.spanMentionUserIds ?? [];
 
           if (mentionedUserIds.length > 0) {
             // For each mentioned user, check if they're still mentioned elsewhere
@@ -12757,12 +12784,12 @@ export function createMutators(
             })
             .optional(),
           // The link's description, top-level so it can arrive encrypted (`link.description` is the
-          // older place, still accepted). Its limit is checked on the textLength fact below.
+          // older place, still accepted). Its limit is checked on the rawLength fact below.
           linkDescription: z.string().trim().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          if ((getMutationFacts(sdlcAddSdlcFolderItemClient, 'linkDescription')?.textLength ?? 0) > 2000) {
+          if ((getMutationFacts(sdlcAddSdlcFolderItemClient, 'linkDescription')?.rawLength ?? 0) > 2000) {
             throw new Error('Description must be 2000 characters or less');
           }
           const participant = await tx.run(
@@ -12876,12 +12903,12 @@ export function createMutators(
           linkId: z.string(),
           channelId: z.string(),
           name: z.string().trim().min(1).max(120),
-          // The 2000-character limit is checked on the textLength fact below: zod cannot measure ciphertext.
+          // The 2000-character limit is checked on the rawLength fact below: zod cannot measure ciphertext.
           description: z.string().trim().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          if ((getMutationFacts(sdlcCreateTrackClient, 'description')?.textLength ?? 0) > 2000) {
+          if ((getMutationFacts(sdlcCreateTrackClient, 'description')?.rawLength ?? 0) > 2000) {
             throw new Error('Description must be 2000 characters or less');
           }
           // Tracks belong to the hub, never to one repository in it.
@@ -12924,7 +12951,7 @@ export function createMutators(
         z.object({
           trackId: z.string(),
           name: z.string().trim().min(1).max(120).optional(),
-          // The 2000-character limit is checked on the textLength fact below: zod cannot measure ciphertext.
+          // The 2000-character limit is checked on the rawLength fact below: zod cannot measure ciphertext.
           description: z.string().trim().nullable().optional(),
           status: sdlcTrackStatusSchema.optional(),
           // Null goes back to the track mark.
@@ -12932,7 +12959,7 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
-          if ((getMutationFacts(sdlcUpdateTrackClient, 'description')?.textLength ?? 0) > 2000) {
+          if ((getMutationFacts(sdlcUpdateTrackClient, 'description')?.rawLength ?? 0) > 2000) {
             throw new Error('Description must be 2000 characters or less');
           }
           const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());

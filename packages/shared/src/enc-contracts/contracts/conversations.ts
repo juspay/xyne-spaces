@@ -126,11 +126,12 @@ export const messagesUpdateClient = defineRequestContract({
  * Zero mutator `conversations.forwardMessage`. The client sends only what the forwarder wrote,
  * `optionalMessage`, encrypted; the server builds the forward's XML from the original message it
  * reads itself (`forwardedMessageTemplate`, composed by the encryption service), so nothing of the
- * original comes from the client. The optional text's length is checked on its facts.
+ * original comes from the client. The optional text's stored length (the old zod `.max(10000)`)
+ * is checked on its `rawLength` fact.
  */
 export const conversationsForwardMessageClient = defineRequestContract({
   sourceToDerived: {
-    optionalMessage: { textLength: derive.textLength },
+    optionalMessage: { rawLength: derive.rawLength },
   },
   schema: z.object({
     targetChannelId: z.string(),

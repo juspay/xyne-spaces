@@ -76,6 +76,7 @@ const EXTRACTOR_FNS: { [K in ExtractorName]: (g: Groups) => ExtractorOutput[K] }
   commandArgs: g => g.command()?.args ?? null,
   textLength: g => g.text().length,
   textIsEmpty: g => g.text().isEmpty,
+  rawLength: g => g.raw.length,
   flowJsonPresent: g => extractFlowJsonPresent(g.raw),
   forwardedMessageId: g => g.forwarded().messageId,
   forwardedConversationId: g => g.forwarded().conversationId,

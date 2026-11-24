@@ -7,10 +7,11 @@ import { sdlcIconNameSchema, sdlcTrackStatusSchema } from '../../sdlc.js';
 /**
  * Zero mutators `sdlc.createTrack`, `sdlc.updateTrack`, `sdlc.addSdlcFolderItem`. The client
  * trims and encrypts the track / link description; it is stored as received. Its 2000-character
- * limit is checked on `textLength`, since zod cannot measure ciphertext.
+ * limit is checked on `rawLength` (the stored string, as the old zod `.max` measured it), since
+ * zod cannot measure ciphertext.
  */
 export const sdlcCreateTrackClient = defineRequestContract({
-  sourceToDerived: { description: { textLength: derive.textLength } },
+  sourceToDerived: { description: { rawLength: derive.rawLength } },
   schema: z.object({
     id: z.string(),
     linkId: z.string(),
@@ -22,7 +23,7 @@ export const sdlcCreateTrackClient = defineRequestContract({
 });
 
 export const sdlcUpdateTrackClient = defineRequestContract({
-  sourceToDerived: { description: { textLength: derive.textLength } },
+  sourceToDerived: { description: { rawLength: derive.rawLength } },
   schema: z.object({
     trackId: z.string(),
     name: z.string().trim().min(1).max(120).optional(),
@@ -35,7 +36,7 @@ export const sdlcUpdateTrackClient = defineRequestContract({
 
 /** `linkDescription` is the encrypted, top-level description; `link.description` is still accepted (plaintext) from older clients. */
 export const sdlcAddSdlcFolderItemClient = defineRequestContract({
-  sourceToDerived: { linkDescription: { textLength: derive.textLength } },
+  sourceToDerived: { linkDescription: { rawLength: derive.rawLength } },
   schema: z.object({
     itemType: z.enum(['ATTACHMENT', 'LINK']),
     itemId: z.string(),
