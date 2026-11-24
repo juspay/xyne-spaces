@@ -27,6 +27,8 @@ import { ExternalMessageRepository } from '@/database/repositories/externalMessa
 import { emailService } from '@/services/emailService';
 import { updateSourceSyncCursorLocked } from '@/bypassAcl/emailFetchServices';
 import { websocketService } from '@/services/websocketService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { ticketSchema } from '@/vespa/src/types';
 import {
   AttachmentConversionService,
   ExternalAttachmentService,
@@ -759,6 +761,10 @@ export class AppDeskRefetch extends BaseRefetch {
    * concurrent append or an out-of-order page can't push it forward again.
    */
   private async backdateThreadToMessage(conversationId: string, sentAt: Date): Promise<void> {
+    const lateTickets = await db.ticket.findMany({
+      where: { conversationId, createdAt: { gt: sentAt } },
+      select: { id: true, workspaceId: true },
+    });
     const [tickets, conversations] = await db.$transaction([
       db.ticket.updateMany({
         where: { conversationId, createdAt: { gt: sentAt } },
@@ -774,6 +780,14 @@ export class AppDeskRefetch extends BaseRefetch {
         conversationId,
         createdAt: sentAt.toISOString(),
       });
+    }
+    // The ticket's search doc carries createdAt too; a feed job re-reads the
+    // row, so re-feeding it picks up the new date. (The stage ETA is not
+    // affected: it is computed from ingest time, not from createdAt.)
+    for (const ticket of lateTickets) {
+      vespaQueue
+        .addJob({ schema: ticketSchema, jobType: 'feed', docId: ticket.id, workspaceId: ticket.workspaceId })
+        .catch((err: unknown) => logger.error(`${TAG} Vespa re-feed after backdate failed`, { ticketId: ticket.id, err }));
     }
   }
 
