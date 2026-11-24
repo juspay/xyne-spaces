@@ -1,6 +1,6 @@
 # Override envars using -e
-# make push-all -e NS=asia.gcr.io/xyne-spaces -e VERSION=1.0.0
-NS ?= asia.gcr.io/xyne-spaces
+# make push-all -e NS=asia.gcr.io/artifactory-494310 -e VERSION=1.0.0
+NS ?= asia.gcr.io/artifactory-494310
 VERSION ?= $(shell git rev-parse --short=7 HEAD)
 BACKEND_IMAGE_NAME ?= xyne-spaces-backend
 RUNNER_IMAGE_NAME ?= xyne-spaces-runner
