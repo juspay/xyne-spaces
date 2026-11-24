@@ -1,5 +1,5 @@
-import { useEffect, useRef, type ComponentRef, type ReactElement } from 'react';
-import { AccessibilityInfo, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, type ComponentRef, type ReactElement } from 'react';
+import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import {
@@ -11,9 +11,14 @@ import {
   BUBBLE_LIST_EXIT_MS,
   BUBBLE_LIST_GAP,
   BUBBLE_LIST_ROW_WIDTH,
+  BUBBLE_LIST_SHADOW_ROOM,
   BUBBLE_SHADOW,
 } from '../../constants';
-import type { BubbleListPlacement, ParkedThread } from '../../model/bubbles';
+import {
+  bubbleListRowsMaxHeight,
+  type BubbleListPlacement,
+  type ParkedThread,
+} from '../../model/bubbles';
 import { fadeScaleTransition } from '../../model/fade-scale-transition';
 import { ConversationScrim } from '../conversation-scrim';
 import { BubbleListRow } from './bubble-list-row';
@@ -37,8 +42,9 @@ type BubbleListProps = {
 /**
  * The parked threads, opened from the bubble (Figma "8 · Tap: the list of
  * threads"): a pill per thread lined up with the bubble's side, newest
- * nearest it, then "Clear all", over the 20% scrim. A modal for screen
- * readers; the scrim, the bubble, back or Escape fold it.
+ * nearest it, then "Clear all", over the 20% scrim. It stays inside the safe
+ * area: past the room it has, the rows scroll and "Clear all" stays put. A
+ * modal for screen readers; the scrim, the bubble, back or Escape fold it.
  */
 export function BubbleList({
   parked,
@@ -52,6 +58,20 @@ export function BubbleList({
   const firstRef = useRef<ComponentRef<typeof View>>(null);
   const rowWidth = Math.min(BUBBLE_LIST_ROW_WIDTH, screenWidth - BUBBLE_EDGE_INSET * 2);
   const align = placement.side === 'left' ? 'flex-start' : 'flex-end';
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const rowsMaxHeight = bubbleListRowsMaxHeight(placement.maxHeight);
+  // The rows clip only at their own ends, so scrolled rows never run under
+  // the bubble or "Clear all"; the shadow room is sideways only.
+  const clearSidePadding = placement.growsDown ? 'paddingBottom' : 'paddingTop';
+  // Newest nearest the bubble: first at the top when the list grows down, last
+  // at the bottom (scrolled into view) when it grows up.
+  const rows = useMemo(
+    () => (placement.growsDown ? parked : [...parked].reverse()),
+    [parked, placement.growsDown],
+  );
+  const scrollToBubble = useCallback((): void => {
+    scrollRef.current?.scrollToEnd({ animated: false });
+  }, []);
 
   useEffect(() => {
     const first = firstRef.current;
@@ -78,14 +98,40 @@ export function BubbleList({
           [placement.growsDown ? 'top' : 'bottom']: placement.edgeOffset,
           flexDirection: placement.growsDown ? 'column' : 'column-reverse',
           alignItems: align,
-          rowGap: BUBBLE_LIST_GAP,
         }}
       >
-        {parked.map((thread, index) => (
-          <View key={thread.threadId} ref={index === 0 ? firstRef : undefined}>
-            <BubbleListRow thread={thread} width={rowWidth} onOpen={onOpen} onRemove={onRemove} />
-          </View>
-        ))}
+        <ScrollView
+          ref={scrollRef}
+          style={{
+            flexGrow: 0,
+            maxHeight: rowsMaxHeight + BUBBLE_LIST_GAP,
+            marginHorizontal: -BUBBLE_LIST_SHADOW_ROOM,
+          }}
+          contentContainerStyle={{
+            paddingHorizontal: BUBBLE_LIST_SHADOW_ROOM,
+            // The gap to "Clear all" is the rows' own padding, so a scrolled
+            // row ends above it instead of under it.
+            [clearSidePadding]: BUBBLE_LIST_GAP,
+            rowGap: BUBBLE_LIST_GAP,
+            alignItems: align,
+          }}
+          showsVerticalScrollIndicator={false}
+          {...(placement.growsDown ? {} : { onContentSizeChange: scrollToBubble })}
+        >
+          {rows.map(thread => (
+            <View
+              key={thread.threadId}
+              ref={thread.threadId === parked[0]?.threadId ? firstRef : undefined}
+            >
+              <BubbleListRow
+                thread={thread}
+                width={rowWidth}
+                onOpen={onOpen}
+                onRemove={onRemove}
+              />
+            </View>
+          ))}
+        </ScrollView>
         <Pressable
           accessibilityRole='button'
           accessibilityLabel='Clear all parked threads'

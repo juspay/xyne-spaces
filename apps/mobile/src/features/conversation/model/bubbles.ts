@@ -1,9 +1,11 @@
 import {
   BUBBLE_BEHIND_STEP,
+  BUBBLE_CLEAR_ALL_HEIGHT,
   BUBBLE_CLOSE_SLOP,
   BUBBLE_EDGE_INSET,
   BUBBLE_FLING_PROJECTION,
   BUBBLE_LIST_GAP,
+  BUBBLE_LIST_ROW_HEIGHT,
   BUBBLE_SIZE,
   BUBBLE_TUCK_DISTANCE,
 } from '../constants';
@@ -248,6 +250,11 @@ export type BubbleListPlacement = Readonly<{
   /** Distance from the top of the screen when it grows down, from the bottom when it grows up. */
   edgeOffset: number;
   growsDown: boolean;
+  /**
+   * The most the list may take, from `edgeOffset` to the far safe edge less
+   * the edge inset. Rows past it scroll; "Clear all" always shows.
+   */
+  maxHeight: number;
 }>;
 
 /**
@@ -260,6 +267,8 @@ export function bubbleListPlacement(
   bubbleY: number,
   screenWidth: number,
   screenHeight: number,
+  safeTop = 0,
+  safeBottom = 0,
 ): BubbleListPlacement {
   const side: BubbleSide = bubbleX + BUBBLE_SIZE / 2 < screenWidth / 2 ? 'left' : 'right';
   const sideInset = Math.max(
@@ -270,5 +279,18 @@ export function bubbleListPlacement(
   const edgeOffset = growsDown
     ? bubbleY + BUBBLE_SIZE + BUBBLE_LIST_GAP
     : screenHeight - bubbleY + BUBBLE_LIST_GAP;
-  return { side, sideInset, edgeOffset, growsDown };
+  const farEdge = (growsDown ? safeBottom : safeTop) + BUBBLE_EDGE_INSET;
+  const maxHeight = Math.max(screenHeight - edgeOffset - farEdge, 0);
+  return { side, sideInset, edgeOffset, growsDown, maxHeight };
+}
+
+/**
+ * How tall the scrolling rows may be: the list's room less "Clear all" and
+ * the gap above it, but never under one row, so a cramped list still shows one.
+ */
+export function bubbleListRowsMaxHeight(maxHeight: number): number {
+  return Math.max(
+    maxHeight - BUBBLE_CLEAR_ALL_HEIGHT - BUBBLE_LIST_GAP,
+    BUBBLE_LIST_ROW_HEIGHT,
+  );
 }

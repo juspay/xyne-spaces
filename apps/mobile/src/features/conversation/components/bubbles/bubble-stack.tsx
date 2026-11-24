@@ -212,8 +212,12 @@ export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElemen
       open(only);
       return;
     }
-    setList(current => (current ? null : bubbleListPlacement(x.get(), y.get(), width, height)));
-  }, [height, open, parked, width, x, y]);
+    setList(current =>
+      current
+        ? null
+        : bubbleListPlacement(x.get(), y.get(), width, height, insets.top, insets.bottom),
+    );
+  }, [height, insets.bottom, insets.top, open, parked, width, x, y]);
 
   const putAllDown = useCallback((): void => {
     void haptics.success();

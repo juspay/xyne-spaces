@@ -38,7 +38,7 @@ export const neutral = {
 export const blue = {
   50: '#e6f0fc',
   500: '#2f7cf6',
-  600: '#1d6ae5',
+  600: '#1a73e8',
   900: '#1b2a40',
 } as const;
 

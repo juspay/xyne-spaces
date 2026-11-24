@@ -19,14 +19,21 @@ import { setHoldSource } from '../model/hold-source-store';
  *
  * The menu draws outside the list, where the list's render tokens (window
  * width, text widths) are not provided, so the copy carries the row's own.
+ *
+ * `topInset` is room the copy adds above the row's own frame (a continuation
+ * drawn with its full top padding); the lifted card grows upward by it, so the
+ * words stay where they were.
  */
-export function useHoldSource(buildCopy: () => ReactElement): {
+export function useHoldSource(
+  buildCopy: () => ReactElement,
+  topInset = 0,
+): {
   rowRef: RefObject<View | null>;
   registerHold: (messageId: string | null) => void;
 } {
   const rowRef = useRef<View>(null);
   const tokens = useChatRenderTokens();
-  const sourceRef = useLatestRef({ buildCopy, tokens });
+  const sourceRef = useLatestRef({ buildCopy, tokens, topInset });
 
   const registerHold = useCallback(
     (messageId: string | null): void => {
@@ -43,8 +50,13 @@ export function useHoldSource(buildCopy: () => ReactElement): {
             onMeasured(null);
             return;
           }
+          const inset = source.topInset;
           node.measureInWindow((x, y, width, height) => {
-            onMeasured(width > 0 && height > 0 ? { x, y, width, height } : null);
+            onMeasured(
+              width > 0 && height > 0
+                ? { x, y: y - inset, width, height: height + inset }
+                : null,
+            );
           });
         },
       });

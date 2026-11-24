@@ -26,6 +26,7 @@ import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types'
 import { DELETED_ATTACHMENT_PLACEHOLDER } from '@/src/utils/activeAttachments';
 
 import {
+  BODY_GUARD_LINE_HEIGHT,
   COLLAPSE_FADE_HEIGHT,
   CONTINUATION_TOP_OFFSET,
   MESSAGE_EXTRAS_GAP,
@@ -43,6 +44,7 @@ import {
 } from '../constants';
 import { useSenderIsAgent } from '../hooks/use-sender-is-agent';
 import type { AgentPlan } from '../model/agent-plan';
+import { bodyEndsWithGuardLine } from '../model/body-end-guard';
 import { flatCollapse } from '../model/collapse';
 import { lowerMeridiem } from '../model/message-time';
 import { parsePullRequestUrl } from '../model/pull-request';
@@ -115,6 +117,11 @@ export type FlatMessageProps = {
   plan?: AgentPlan | null | undefined;
   /** Joins the block above: no avatar or header, words close under the last element. */
   isContinuation?: boolean | undefined;
+  /**
+   * Drawn on its own, as the hold menu's lifted copy: a continuation keeps the
+   * full top padding, since there is no row above it to pull up under.
+   */
+  isLifted?: boolean | undefined;
   /** The row's pressable, so the hold menu can measure where to lift it from. */
   rowRef?: Ref<View> | undefined;
   /** Screen-reader stand-ins for gestures the row offers (its swipes). */
@@ -178,6 +185,7 @@ function FlatMessageLayout({
   onTicketPress,
   plan = null,
   isContinuation = false,
+  isLifted = false,
   rowRef,
   accessibilityActions,
   onAccessibilityAction,
@@ -194,6 +202,12 @@ function FlatMessageLayout({
   const replyCount = parentMessage ? 0 : (paintRow.replyPreview?.count ?? paintRow.replyCount);
   const showThread = !!onThreadPress && replyCount > 0 && !isDeleted;
   const hasWords = paintRow.body.markdown.trim().length > 0;
+  // The rich body's invisible end line (after a list or code block) is pulled
+  // back up, so the extras sit as close under it as under a plain paragraph.
+  const guardLift = useMemo(
+    () => (isRich && bodyEndsWithGuardLine(paintRow.body.markdown) ? BODY_GUARD_LINE_HEIGHT : 0),
+    [isRich, paintRow.body.markdown],
+  );
   const isAgent = useSenderIsAgent(sender.senderId);
   const hasReactions = (paintRow.reactionPreview?.reactions.length ?? 0) > 0;
   const bodyWidth = useConversationBodyWidth();
@@ -227,7 +241,7 @@ function FlatMessageLayout({
         : {})}
       delayLongPress={LONG_PRESS_DELAY_MS}
       className='flex-row'
-      style={isContinuation ? getContinuationRowStyle : getMessageRowStyle}
+      style={isContinuation && !isLifted ? getContinuationRowStyle : getMessageRowStyle}
     >
       <View style={{ width: MESSAGE_AVATAR_SIZE }}>
         {isContinuation ? null : <MessageAvatar paintRow={paintRow} />}
@@ -281,7 +295,7 @@ function FlatMessageLayout({
                   <AgentPlanCard key={paintRow.messageId} plan={plan} />
                 </View>
               ) : (
-                <View style={{ marginBottom: hasWords ? -CONTENT_INNER_MARGIN : 0 }}>
+                <View style={{ marginBottom: hasWords ? -CONTENT_INNER_MARGIN - guardLift : 0 }}>
                   {isRich ? (
                     <ConversationComposer.Content
                       lineHeight={MESSAGE_BODY_LINE_HEIGHT}

@@ -75,13 +75,18 @@ export const RENDERER_BUBBLE_PADDING = 16;
 
 /** The bottom margin the shared content block puts under the words. */
 export const CONTENT_INNER_MARGIN = 10;
+/**
+ * The empty line the shared renderer adds after a closing list or code block
+ * (see `bodyEndsWithGuardLine`): one body line, which the flat row takes back.
+ */
+export const BODY_GUARD_LINE_HEIGHT = MESSAGE_BODY_LINE_HEIGHT;
 
 /**
  * A second message from the same sender, close in time, joins the block above
  * it: no avatar, no header, and its words sit this far under the last element
  * of the message before.
  */
-export const CONTINUATION_GAP = 8;
+export const CONTINUATION_GAP = 12;
 /**
  * The row above keeps its bottom padding, so a continuation pulls up by the
  * difference instead of adding its own top padding (negative: it overlaps that
@@ -779,6 +784,11 @@ export const BUBBLE_LIST_ICON_SIZE = 16;
 export const BUBBLE_LIST_GAP = 8;
 export const BUBBLE_CLEAR_ALL_HEIGHT = 40;
 export const BUBBLE_CLEAR_ALL_PADDING_X = 16;
+/**
+ * Room the scrolling rows keep at their sides for the float shadow (blur 18),
+ * which the scroll view would otherwise clip.
+ */
+export const BUBBLE_LIST_SHADOW_ROOM = 24;
 export const BUBBLE_LIST_ENTER_MS = 180;
 export const BUBBLE_LIST_EXIT_MS = 120;
 export const BUBBLE_LIST_ENTER_SCALE = 0.96;
