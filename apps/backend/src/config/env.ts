@@ -3,6 +3,7 @@ import Joi from 'joi';
 
 dotenv.config();
 
+import { envDefaultOverrides } from '@/config/env-override';
 import { getKmsSecrets } from '@/config/kmsSecrets';
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
@@ -821,6 +822,11 @@ const envSchema = Joi.object({
   RETRY_MAX_DELAY_MS: Joi.number().integer().min(1).empty('').default(5_000),
   CONNECT_RETRY_MAX_DELAY_MS: Joi.number().integer().min(1).empty('').default(30_000),
 }).unknown();
+
+// Build-time defaults (env-override.ts, replaced by the private build) fill only variables the pod
+// leaves unset. This is what the private pipeline used to inject here; with envDefaultOverrides in
+// this file it skips that patch.
+for (const [k, v] of Object.entries(envDefaultOverrides)) if (process.env[k] === undefined) process.env[k] = String(v);
 
 const { error, value: envVars } = envSchema.validate({ ...process.env, ...getKmsSecrets() });
 
