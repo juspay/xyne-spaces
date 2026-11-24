@@ -2,6 +2,8 @@ export { EXTRACTORS, derive, derivedFactsSchema, fieldFactsSchema } from './extr
 export type { Derivable, ExtractorGroups, ExtractorName, ExtractorOutput, FieldFacts, DerivedFacts } from './extractors.js';
 export { defineRequestContract, makeUnreadable, sourceFieldNames, derivedNames } from './define.js';
 export { UnreadableString, reveal, unreadableString } from './unreadable-string.js';
+export { COMPOSE_TEMPLATES, defineComposeTemplate, forwardedMessageTemplate, isComposeTemplateName, runComposeTemplate } from './compose.js';
+export type { ComposeInputs, ComposeResult, ComposeTemplate, ComposeTemplateName } from './compose.js';
 export type { DerivedSpec, Encrypted, FieldDerived, RequestContract, RequestBody, RequestDerived, RequestOf, SourceToDerived, UnreadableBody } from './define.js';
 export { matchesRoute, normalizeRequestPath } from './route-match.js';
 export { replyToConversationClient, conversationsSendClient, messagesSendClient, messagesUpdateClient, conversationsForwardMessageClient } from './contracts/conversations.js';

@@ -39,7 +39,6 @@ import {
   MessageType,
   parseForwardedMessageXml,
   parseTicketMd,
-  buildForwardedMessageContent,
 } from '@xyne/shared';
 import { channelService } from '../../../services/Chat/channelService';
 import { useNavigate } from 'react-router-dom';
@@ -242,15 +241,10 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             mutators.conversations.forwardMessage({
               targetChannelId: firstTarget.id,
               originalMessageId: message.messageId,
-              // Built here, where the original's text is readable; the server checks its ids.
-              content: buildForwardedMessageContent({
-                original: message,
-                originalSenderName: sender?.name,
-                originalChannelId: channelId,
-                optionalText: value.optionalMessageText.trim()
-                  ? value.optionalMessageHtml
-                  : undefined,
-              }),
+              // Only what the forwarder wrote; the server builds the forward from the original.
+              optionalMessage: value.optionalMessageText.trim()
+                ? value.optionalMessageHtml
+                : undefined,
               conversationId,
               messageId,
               timestamp,

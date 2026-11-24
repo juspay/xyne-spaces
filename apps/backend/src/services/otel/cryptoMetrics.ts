@@ -169,3 +169,11 @@ export const getStorageWrites = lazyCounter(
   'zero_storage_writes',
   'Encrypted-column values written by Zero mutators, by mutator, table, column and mode (dek_at_rest / dek_passthrough)',
 );
+export const getComposed = lazyCounter(
+  'zero_composed',
+  'Values built by a compose template (server builds them from encrypted parts), by mutator, template, source (local / enc-rust) and result (changed / unchanged)',
+);
+export const getComposeErrors = lazyCounter(
+  'zero_compose_errors',
+  'Failed composes, by mutator, template and source',
+);

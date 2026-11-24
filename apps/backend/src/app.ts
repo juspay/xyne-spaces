@@ -244,7 +244,8 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
-import { EXTRACTORS, runExtractors, type ExtractorName } from '@xyne/shared';
+import { EXTRACTORS, isComposeTemplateName, runComposeTemplate, runExtractors, type ExtractorName } from '@xyne/shared';
+import { ZodError } from 'zod';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';
 // Disabled (Claw)
@@ -626,6 +627,38 @@ export class App {
       }
       const valid = items as { text: string; extractors: ExtractorName[] }[];
       res.json({ results: valid.map(({ text, extractors }) => runExtractors(text, extractors)) });
+    });
+    // TEMPORARY (XYNE-67075), like extract-batch: the transformer the encryption service calls
+    // with decrypted inputs to build a value the backend stores but cannot build itself (a
+    // forward's XML; see COMPOSE_TEMPLATES). `{ items: [{ template, inputs }] }` →
+    // `{ results: [<built value per item, in order>] }`. A bad item fails the whole call, naming
+    // its `index`; the message names the template or the input path, never a value.
+    this.app.post('/api/internal/content/compose-batch', validateS2SKey, (req: Request, res: Response) => {
+      const { items } = (req.body ?? {}) as { items?: unknown };
+      if (!Array.isArray(items)) {
+        res.status(400).json({ error: 'Bad request', message: 'items must be an array' });
+        return;
+      }
+      const results: string[] = [];
+      for (const [index, item] of items.entries()) {
+        const { template, inputs } = (item ?? {}) as { template?: unknown; inputs?: unknown };
+        if (!isComposeTemplateName(template)) {
+          res.status(400).json({ error: 'Bad request', message: `items[${index}]: unknown compose template`, index });
+          return;
+        }
+        try {
+          results.push(runComposeTemplate(template, inputs));
+        } catch (error) {
+          const paths = error instanceof ZodError ? error.issues.map(issue => issue.path.join('.') || '(root)') : [];
+          res.status(400).json({
+            error: 'Bad request',
+            message: `items[${index}]: inputs do not match template ${template}${paths.length > 0 ? ` (${paths.join(', ')})` : ''}`,
+            index,
+          });
+          return;
+        }
+      }
+      res.json({ results });
     });
     this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
       try {

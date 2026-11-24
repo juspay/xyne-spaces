@@ -130,6 +130,7 @@ import {
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
+import { forwardedMessageTemplate } from '@xyne/shared';
 import {
   conversationsForwardMessageClient,
   messagesUpdateClient,
@@ -292,6 +293,7 @@ import { ensureFlowSkippedStage } from '@/services/flowStageTransitionRecovery';
 import { assertTicketUpdateAccess } from './acl/tables/tickets-acl';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
+import { compose } from '@/services/encryption/compose';
 import { escapeHtml } from '@/utils/htmlEscape';
 
 function sortCallParticipantsForPreview<T extends {
@@ -3355,9 +3357,7 @@ export function createMutators(
         z.object({
           targetChannelId: z.string(),
           originalMessageId: z.string(),
-          // The forward's XML, built by the client (buildForwardedMessageContent).
-          content: z.string().optional(),
-          // Older clients sent only this; the server can no longer build the XML from it.
+          // What the forwarder wrote; the rest of the forward is built from the original here.
           optionalMessage: z.string().optional(),
           conversationId: z.string(),
           messageId: z.string(),
@@ -3369,7 +3369,7 @@ export function createMutators(
           args: {
             targetChannelId,
             originalMessageId,
-            content,
+            optionalMessage,
             conversationId,
             messageId,
             timestamp,
@@ -3421,24 +3421,36 @@ export function createMutators(
             }
           }
 
-          // The client built the forward's XML (it holds the original's text); check it forwards
-          // this message, from its sender, conversation and channel. The original's text inside
-          // it cannot be checked: encrypted values cannot be compared.
-          const facts = getMutationFacts(conversationsForwardMessageClient, 'content');
-          if (!content || !facts?.forwardedMessageId) {
-            throw new Error('Forwarding needs the forwarded message; update the app and try again');
-          }
-          if (facts.forwardedOptionalTextLength > 10000) {
+          // The optional text is the only part of the forward the client sends.
+          const optionalFacts = getMutationFacts(conversationsForwardMessageClient, 'optionalMessage');
+          if (optionalFacts && optionalFacts.textLength > 10000) {
             throw new Error('Optional message too long');
           }
-          if (
-            facts.forwardedMessageId !== originalMessageId ||
-            facts.forwardedSenderId !== originalMessage.senderId ||
-            facts.forwardedConversationId !== originalMessage.conversationId ||
-            facts.forwardedChannelId !== (originalConversation?.channelId || null)
-          ) {
-            throw new Error('The forwarded message does not match the original');
-          }
+
+          // The forward's XML, built from the original as read here and the optional text. Both
+          // are unreadable, so the encryption service builds it (forwardedMessageTemplate) and
+          // returns it encrypted: the server never reads the text it stores, and no part of the
+          // original can come from the client.
+          const originalSender = await tx.run(zql.users.where('id', originalMessage.senderId).one());
+          const forward = await compose(
+            {
+              template: forwardedMessageTemplate,
+              inputs: {
+                originalMessageId: originalMessage.messageId,
+                originalSenderId: originalMessage.senderId,
+                originalSenderName: originalSender?.name ?? null,
+                originalCreatedAt: originalMessage.createdAt as number,
+                originalConversationId: originalMessage.conversationId,
+                originalChannelId: originalConversation?.channelId || null,
+                originalMsgType: originalMessage.msgType ?? null,
+                originalContent: originalMessage.content,
+                // Empty text counts as none (the template's rule), so it goes as it is.
+                optionalText: optionalMessage ?? null,
+              },
+            },
+            { workspaceId: authData.workspaceId },
+          );
+          if (forward.unchanged) throw new Error('forward: a new message cannot be unchanged');
 
           // Re-forwarding a forward that has optional text forwards that text, without the
           // original's attachments (it is either optional text or content with attachments).
@@ -3477,8 +3489,8 @@ export function createMutators(
             conversationId,
             workspaceId: authData.workspaceId,
             senderId: authData.sub,
-            // Stored as received: the client-built XML, checked above.
-            content,
+            // Stored as composed: ciphertext of the XML built above (tx.mutate stores it as is).
+            content: forward.value,
             msgType: MessageType.FORWARDED,
             hasAttachment: attachmentsArray.length > 0,
             edited: false,

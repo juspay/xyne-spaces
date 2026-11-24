@@ -20,7 +20,6 @@ import {
   MessageType,
   parseForwardedMessageXml,
   type MessageAttachment,
-  buildForwardedMessageContent,
 } from '@xyne/shared';
 
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -379,15 +378,8 @@ export function useForwardMessageViewModel({
           mutators.conversations.forwardMessage({
             targetChannelId: firstTarget.id,
             originalMessageId: target.initialMessage?.messageId ?? '',
-            // Built here, where the original's text is readable; the server checks its ids.
-            ...(target.initialMessage && {
-              content: buildForwardedMessageContent({
-                original: target.initialMessage,
-                originalSenderName: sender?.name,
-                originalChannelId: target.channelId,
-                optionalText: optionalMessage.trim() || undefined,
-              }),
-            }),
+            // Only what the forwarder wrote; the server builds the forward from the original.
+            optionalMessage: optionalMessage.trim() || undefined,
             conversationId,
             messageId,
             timestamp,

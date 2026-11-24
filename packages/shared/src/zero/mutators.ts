@@ -2204,8 +2204,7 @@ export const mutators = defineMutators({
       z.object({
         targetChannelId: z.string(),
         originalMessageId: z.string(),
-        // The forward's XML (buildForwardedMessageContent); the server stores this one.
-        content: z.string().optional(),
+        // What the forwarder wrote: the only part of the forward the client sends (encrypted).
         optionalMessage: z.string().optional(),
         conversationId: z.string(),
         messageId: z.string(),
@@ -2219,7 +2218,6 @@ export const mutators = defineMutators({
           targetChannelId,
           originalMessageId,
           optionalMessage,
-          content,
           conversationId,
           messageId,
           timestamp,
@@ -2275,9 +2273,9 @@ export const mutators = defineMutators({
 
         const now = timestamp;
 
-        // Create XML content for the forwarded message
-        // The caller's XML when sent (what the server stores); the local build is for older callers.
-        const xmlContent = content ?? createForwardedMessageXml({
+        // The forward's XML for the local row only, so it shows at once: the server builds the
+        // stored one itself from the original (forwardedMessageTemplate) and sync replaces this.
+        const xmlContent = createForwardedMessageXml({
           originalMessageId,
           originalSenderId: originalMessage.senderId,
           originalSenderName: originalSender?.name || 'Unknown User',

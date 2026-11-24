@@ -77,10 +77,9 @@ export type SealEventInput = {
 
 export type TransitCaller = {
   /**
-   * Xyne Apps traffic relayed from the ingress or egress transit proxy (its `x-xyne-transit-proxy:
-   * <role>;<version>` header). The encryption service then uses its apps server keys and the
-   * proxy key pinned for that role and version; it refuses `clientKey` / `authToken`
-   * alongside, so the backend can never choose the key a reply is encrypted to.
+   * Xyne Apps traffic relayed by the ingress or egress proxy. The encryption service then
+   * uses its apps server keys and the proxy key pinned for this role and version, and
+   * refuses `clientKey` / `authToken` alongside it.
    */
   proxyClient?: { role: 'ingress' | 'egress'; version: number };
   clientKey?: string;
@@ -134,6 +133,22 @@ export type DeriveFactsInput = {
   entityType: string;
 };
 
+/**
+ * One value to compose (see COMPOSE_TEMPLATES in @xyne/shared): the template, its inputs with
+ * the encrypted ones as they are stored, and the stored value it would replace, if any.
+ */
+export type ComposeItem = { template: string; inputs: Record<string, unknown>; current?: string | null };
+
+export type ComposeInput = {
+  items: ComposeItem[];
+  /** Owner of the value: every encrypted input must be under its key, and the result is encrypted under it. */
+  entityId: string;
+  entityType: string;
+};
+
+/** Per item: the built value encrypted under the entity's key, or `unchanged` when it equals `current`. */
+export type ComposeItemResult = { unchanged: true } | { unchanged: false; value: string };
+
 export type TransitEncryptResult<T> = {
   body: T;
 };
@@ -171,13 +186,13 @@ export interface EncryptionProvider {
    * The manifest for a client, encrypted with its transit key, as a string to send as is.
    * `null` when there is no manifest (404).
    */
+  getTransitClientManifest(params: { tag: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
   /**
    * Seal an outbound app event for the egress transit proxy: the encryption service signs
    * `event` with the app's signing secret and encrypts `{ url, body, signature }` to the
    * pinned egress proxy key. Only the proxy can open it.
    */
   sealEvent(input: SealEventInput): Promise<{ sealed: string }>;
-  getTransitClientManifest(params: { tag: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
   /**
    * Rule-driven counterpart of decryptRequest. Transit-encrypted fields the rule marks
    * `client: true` come back as workspace-DEK ciphertext (`transform: MASTER_DEK`, ready to
@@ -192,6 +207,12 @@ export interface EncryptionProvider {
    * decrypted, plaintext. One `FieldFacts` per item, in order.
    */
   deriveFacts(input: DeriveFactsInput): Promise<FieldFacts[]>;
+  /**
+   * Values the backend stores but cannot build, because it holds their parts only encrypted:
+   * the encryption service decrypts the inputs, builds each template and returns the result
+   * encrypted (or `unchanged`). The backend never sees the plaintext. One result per item, in order.
+   */
+  compose(input: ComposeInput): Promise<ComposeItemResult[]>;
   /**
    * DEK-to-transit counterpart of encryptResponse: storage ciphertext (ENC:v1|<dekId>|…) in
    * `body` comes back as transit ciphertext (ENC:v1|tk-…|…) for the client of `caller`;

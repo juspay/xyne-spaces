@@ -2,6 +2,8 @@ import type { FieldFacts } from '@xyne/shared';
 import { config } from '@/config/env';
 import type {
   ClientEncryptionConfig,
+  ComposeInput,
+  ComposeItemResult,
   DeriveFactsInput,
   EncryptBatchItem,
   EncryptedFieldConfig,
@@ -84,6 +86,10 @@ const provider: EncryptionProvider = {
 
   async deriveFacts(_input: DeriveFactsInput): Promise<FieldFacts[]> {
     return unsupported('deriveFacts');
+  },
+
+  async compose(_input: ComposeInput): Promise<ComposeItemResult[]> {
+    return unsupported('compose');
   },
 
   async transformResponse<T>(body: T, _caller: TransitCaller): Promise<TransitEncryptResult<T>> {

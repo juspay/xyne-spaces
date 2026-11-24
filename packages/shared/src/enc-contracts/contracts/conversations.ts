@@ -123,26 +123,19 @@ export const messagesUpdateClient = defineRequestContract({
 });
 
 /**
- * Zero mutator `conversations.forwardMessage`. The client builds the forward's XML
- * (`buildForwardedMessageContent`, it holds the original's text) and encrypts it as `content`;
- * it is stored as received. The server checks the forwarded ids against the original message and
- * the optional text's length on these facts. `optionalMessage` is the older arg, no longer used.
+ * Zero mutator `conversations.forwardMessage`. The client sends only what the forwarder wrote,
+ * `optionalMessage`, encrypted; the server builds the forward's XML from the original message it
+ * reads itself (`forwardedMessageTemplate`, composed by the encryption service), so nothing of the
+ * original comes from the client. The optional text's length is checked on its facts.
  */
 export const conversationsForwardMessageClient = defineRequestContract({
   sourceToDerived: {
-    content: {
-      forwardedMessageId: derive.forwardedMessageId,
-      forwardedConversationId: derive.forwardedConversationId,
-      forwardedSenderId: derive.forwardedSenderId,
-      forwardedChannelId: derive.forwardedChannelId,
-      forwardedOptionalTextLength: derive.forwardedOptionalTextLength,
-    },
+    optionalMessage: { textLength: derive.textLength },
   },
   schema: z.object({
     targetChannelId: z.string(),
     originalMessageId: z.string(),
-    content: unreadableString().optional(),
-    optionalMessage: z.string().optional(),
+    optionalMessage: unreadableString().optional(),
     conversationId: z.string(),
     messageId: z.string(),
     timestamp: z.number(),

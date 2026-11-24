@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import {
+  getComposeErrors,
+  getComposed,
   getContractApplied,
   getFactsDerived,
   getFactsErrors,
@@ -16,7 +18,9 @@ import {
  *   local or enc-rust); `zero_facts_errors` when that failed;
  * - `zero_unreadable_wrapped`: a value turned into an UnreadableString (args or db_read);
  * - `zero_storage_writes`: an encrypted column written plaintext and encrypted at rest
- *   (`dek_at_rest`), or written already encrypted (`dek_passthrough`).
+ *   (`dek_at_rest`), or written already encrypted (`dek_passthrough`);
+ * - `zero_composed`: a value built by a compose template (`source` local or enc-rust, `result`
+ *   changed or unchanged); `zero_compose_errors` when that failed.
  *
  * Args have no table: their `table` is `args` and `column` the arg field.
  */
@@ -89,4 +93,17 @@ export function recordUnreadableWrapped(input: { side: MetricSide; table?: strin
 /** `columns`: the encrypted columns of one write of `table`, stored as `mode`. */
 export function recordStorageWrites(table: string, mode: StorageMode, columns: readonly string[]): void {
   addPerColumn(getStorageWrites(), { mutator: currentMutatorName(), table, mode }, columns);
+}
+
+/** `unchanged`: one entry per value built by `template`, whether it equalled the stored one. */
+export function recordComposed(input: { template: string; source: MetricSource; unchanged: readonly boolean[] }): void {
+  const mutator = currentMutatorName();
+  const unchanged = input.unchanged.filter(Boolean).length;
+  const changed = input.unchanged.length - unchanged;
+  if (changed > 0) getComposed().add(changed, { mutator, template: input.template, source: input.source, result: 'changed' });
+  if (unchanged > 0) getComposed().add(unchanged, { mutator, template: input.template, source: input.source, result: 'unchanged' });
+}
+
+export function recordComposeError(input: { template: string; source: MetricSource }): void {
+  getComposeErrors().add(1, { mutator: currentMutatorName(), template: input.template, source: input.source });
 }
