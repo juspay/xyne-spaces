@@ -18,7 +18,7 @@ import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { currentWorkspaceId } from '@/database/tenant/context';
-import { clientFileCaller } from '@/middleware/clientFileEncryption';
+import { clientFileCaller, isUnencryptedFileWrite } from '@/middleware/clientFileEncryption';
 import { getEncryptionProvider, type TransitCaller } from '@/services/encryption';
 import { collect, openFileForTransit, sealFile } from './fileContainerStream';
 
@@ -76,28 +76,28 @@ export class SafeStorageService implements StorageService {
   ) {}
 
   async uploadFile(buffer: Buffer, options: UploadOptions): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadFile(buffer, options);
+    if (!this.encrypts()) return this.inner.uploadFile(buffer, options);
     const { bytes, plaintextBytes } = await this.sealBuffer(buffer);
     const result = await this.inner.uploadFile(bytes, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: plaintextBytes };
   }
 
   async uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadStream(stream, options);
+    if (!this.encrypts()) return this.inner.uploadStream(stream, options);
     const sealed = this.sealStream(stream);
     const result = await this.inner.uploadStream(sealed.stream, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: await sealed.plaintextBytes };
   }
 
   async uploadFileV2(buffer: Buffer, options: UploadV2Options): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadFileV2(buffer, options);
+    if (!this.encrypts()) return this.inner.uploadFileV2(buffer, options);
     const { bytes, plaintextBytes } = await this.sealBuffer(buffer);
     const result = await this.inner.uploadFileV2(bytes, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: plaintextBytes };
   }
 
   async uploadStreamToPath(stream: NodeJS.ReadableStream, options: UploadToPathOptions): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadStreamToPath(stream, options);
+    if (!this.encrypts()) return this.inner.uploadStreamToPath(stream, options);
     const sealed = this.sealStream(stream);
     const result = await this.inner.uploadStreamToPath(sealed.stream, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: await sealed.plaintextBytes };
@@ -186,6 +186,11 @@ export class SafeStorageService implements StorageService {
 
   buildStorageUri(path: string): string {
     return this.inner.buildStorageUri(path);
+  }
+
+  /** Whether a write now is encrypted: on, unless the request's route stores files unencrypted. */
+  private encrypts(): boolean {
+    return this.options.encryptWrites && !isUnencryptedFileWrite();
   }
 
   private sealStream(source: NodeJS.ReadableStream): ReturnType<typeof sealFile> {

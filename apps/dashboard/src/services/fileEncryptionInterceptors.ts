@@ -5,23 +5,22 @@ import {
   decryptDownloadedFile,
   encryptFileForUpload,
   hasFileContainerMagic,
+  isClientEncryptedFileRoute,
   isValidFileChunkSize,
 } from '@xyne/shared';
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
 
 /**
- * Routes mounted with the backend's clientFileEncryption: uploads to them are sent as transit
- * containers and downloads from them come back as transit containers. Every other route keeps
- * sending and receiving plaintext files.
+ * Files to and from @xyne/shared's CLIENT_ENCRYPTED_FILE_ROUTES (the list the backend marks
+ * requests by) travel as transit containers. Every other route keeps sending and receiving
+ * plaintext files.
  */
-const UPLOAD_ROUTES = [/\/conversations\/[^/]+\/messages$/, /\/drafts\/attachments\/upload$/];
-const DOWNLOAD_ROUTES = [/\/attachments\/[^/]+\/(download|thumbnail)$/];
-
 function pathOf(config: InternalAxiosRequestConfig): string {
   return new URL(config.url ?? '', 'http://localhost').pathname;
 }
 
-function fileEncryptionActive(): boolean {
+/** Whether files on the client-encrypted routes are encrypted and decrypted here. */
+export function fileEncryptionActive(): boolean {
   if (!isEncryptionReady()) return false;
   const { keyring, apiClientEncryptionEnabled, fileChunkSize } = getEncryptionState();
   return keyring !== null && apiClientEncryptionEnabled && isValidFileChunkSize(fileChunkSize);
@@ -59,7 +58,7 @@ export async function fileEncryptionRequestInterceptor(
   if (
     method === 'post' &&
     config.data instanceof FormData &&
-    UPLOAD_ROUTES.some(r => r.test(path))
+    isClientEncryptedFileRoute('POST', path)
   ) {
     config.data = await encryptFormDataFiles(config.data);
     config.headers.set(FILE_ENCRYPTION_HEADER, FILE_ENCRYPTION_HEADER_VALUE);
@@ -69,7 +68,7 @@ export async function fileEncryptionRequestInterceptor(
   if (
     method === 'get' &&
     (config.responseType === 'blob' || config.responseType === 'arraybuffer') &&
-    DOWNLOAD_ROUTES.some(r => r.test(path))
+    isClientEncryptedFileRoute('GET', path)
   ) {
     config.headers.set(FILE_ENCRYPTION_HEADER, FILE_ENCRYPTION_HEADER_VALUE);
   }

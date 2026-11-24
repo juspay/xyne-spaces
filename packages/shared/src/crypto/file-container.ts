@@ -23,6 +23,40 @@ export const FILE_CONTAINER_MAGIC = 'XEF1';
  */
 export const FILE_ENCRYPTION_HEADER = 'x-file-encryption';
 export const FILE_ENCRYPTION_HEADER_VALUE = FILE_CONTAINER_MAGIC;
+
+/**
+ * Routes whose files travel as transit containers when the request carries
+ * FILE_ENCRYPTION_HEADER: the client encrypts what it uploads to them and decrypts what it
+ * downloads from them. The backend marks requests by this list and the dashboard encrypts
+ * and decrypts by it, so the two cannot disagree. Paths are written without the `/api` prefix;
+ * `:name` matches one path segment.
+ */
+export const CLIENT_ENCRYPTED_FILE_ROUTES: ReadonlyArray<{ method: 'GET' | 'POST'; path: string }> = [
+  // Uploads
+  { method: 'POST', path: '/conversations/:conversationId/messages' },
+  { method: 'POST', path: '/drafts/attachments/upload' },
+  { method: 'POST', path: '/channels/:channelId/conversations' },
+  { method: 'POST', path: '/attachments/upload' },
+  { method: 'POST', path: '/tickets' },
+  { method: 'POST', path: '/users/me/picture' },
+  { method: 'POST', path: '/apps/upload-picture/:appId' },
+  // Downloads
+  { method: 'GET', path: '/attachments/:attachmentId/download' },
+  { method: 'GET', path: '/attachments/:attachmentId/thumbnail' },
+  { method: 'GET', path: '/users/:id/picture' },
+];
+
+const CLIENT_ENCRYPTED_FILE_PATTERNS = CLIENT_ENCRYPTED_FILE_ROUTES.map(({ method, path }) => ({
+  method,
+  pattern: new RegExp(`^${path.replace(/:[A-Za-z]+/g, '[^/]+')}$`),
+}));
+
+/** Whether `method` + `pathname` (with or without `/api`, no query) is a client-encrypted file route. */
+export function isClientEncryptedFileRoute(method: string, pathname: string): boolean {
+  const path = pathname.replace(/^\/api(?=\/)/, '').replace(/\/+$/, '') || '/';
+  const verb = method.toUpperCase();
+  return CLIENT_ENCRYPTED_FILE_PATTERNS.some(r => r.method === verb && r.pattern.test(path));
+}
 export const FILE_ID_LENGTH = 16;
 export const FILE_CHUNK_IV_LENGTH = 12;
 export const FILE_CHUNK_TAG_LENGTH = 16;

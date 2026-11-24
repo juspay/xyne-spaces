@@ -32,6 +32,7 @@ import { isSupportedMimeType } from '@/services/fileProcessor';
 import { cacheManager } from '../utils/cacheManager';
 import { pipeline } from 'node:stream/promises';
 import { findFormEntityValue } from '@/database/repositories/formEntityValueRepository';
+import { isClientFileEncryption } from '@/middleware/clientFileEncryption';
 
 const db = DatabaseClient.getInstance();
 
@@ -392,7 +393,8 @@ export class AttachmentController {
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
       res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Content-Length', fileSize);
+      // An encrypted file goes out as the caller's transit container, not the stored size.
+      if (!isClientFileEncryption(req)) res.setHeader('Content-Length', fileSize);
       res.setHeader('Content-Disposition', `inline; filename="thumbnail.jpg"`);
       res.setHeader('Cache-Control', 'private, max-age=3600');
 

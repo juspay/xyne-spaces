@@ -1,5 +1,5 @@
 import { PassThrough, type Readable } from 'stream';
-import { FILE_CHUNK_OVERHEAD, parseFileHeader, type FileContainerHeader } from '@xyne/shared';
+import { FILE_CHUNK_OVERHEAD, hasFileContainerMagic, parseFileHeader, type FileContainerHeader } from '@xyne/shared';
 import { getEncryptionProvider, type FileChunk, type TransitCaller } from '@/services/encryption';
 
 /** Input bytes per encryption-service call: base64 of it stays well under its 10 MB limit. */
@@ -91,13 +91,23 @@ async function readContainer(source: Source): Promise<{ header: FileContainerHea
   return { header, chunks };
 }
 
-/** Plaintext cut into `chunkSize` pieces; an empty input is one empty last chunk. */
-function plaintextChunks(source: Source, chunkSize: number): AsyncGenerator<FileChunk> {
-  return records(new ByteQueue(), source[Symbol.asyncIterator](), chunkSize, () => ({
+/**
+ * Plaintext cut into `chunkSize` pieces; an empty input is one empty last chunk. Bytes that are
+ * already a container were sent encrypted to a route that does not take client-encrypted
+ * files: encrypting them again would store a file nobody can read, so they are refused.
+ */
+async function* plaintextChunks(source: Source, chunkSize: number): AsyncGenerator<FileChunk> {
+  const chunks = records(new ByteQueue(), source[Symbol.asyncIterator](), chunkSize, () => ({
     index: 0,
     last: true,
     data: Buffer.alloc(0),
   }));
+  for await (const chunk of chunks) {
+    if (chunk.index === 0 && hasFileContainerMagic(chunk.data)) {
+      throw new Error('Upload is an encrypted file container on a route that does not take one');
+    }
+    yield chunk;
+  }
 }
 
 async function* batches(chunks: AsyncIterable<FileChunk>): AsyncGenerator<FileChunk[]> {

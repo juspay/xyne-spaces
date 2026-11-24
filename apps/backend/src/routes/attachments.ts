@@ -2,7 +2,6 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { AttachmentController } from '../controllers/attachmentController';
 import { config } from '../config/env';
 import { uploadMultiple } from '../middleware/upload';
-import { clientFileEncryption } from '../middleware/clientFileEncryption';
 
 const router = Router();
 const attachmentController = new AttachmentController();
@@ -59,10 +58,10 @@ router.get(
 );
 
 // Download attachment by ID
-router.get('/attachments/:attachmentId/download', clientFileEncryption, attachmentController.downloadAttachment.bind(attachmentController));
+router.get('/attachments/:attachmentId/download', attachmentController.downloadAttachment.bind(attachmentController));
 
 // Download thumbnail by attachment ID
-router.get('/attachments/:attachmentId/thumbnail', clientFileEncryption, attachmentController.downloadThumbnail.bind(attachmentController));
+router.get('/attachments/:attachmentId/thumbnail', attachmentController.downloadThumbnail.bind(attachmentController));
 
 // Upload attachments for an entity (e.g., IMPACT)
 router.post(

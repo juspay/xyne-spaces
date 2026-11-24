@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '../utils/logger';
 import { setSafeInlineImageHeaders } from '../utils/safeAttachmentDownload';
 import { DatabaseClient } from '@/database/client';
+import { isClientFileEncryption } from '@/middleware/clientFileEncryption';
 import type { UserWithMappings } from '../types/database';
 
 const storageService = getStorageService();
@@ -1240,9 +1241,12 @@ export class UserManagementController {
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
       setSafeInlineImageHeaders(res, metadata.contentType || 'image/png');
-      res.setHeader('Content-Length', fileSize);
+      // An encrypted picture goes out as the caller's transit container: its length is not the
+      // stored size, and only that caller's browser may cache it.
+      const clientEncrypted = isClientFileEncryption(req);
+      if (!clientEncrypted) res.setHeader('Content-Length', fileSize);
       // Cache for 1 year - safe because picture path includes timestamp and changes on each upload
-      res.setHeader('Cache-Control', 'public, max-age=31536000');
+      res.setHeader('Cache-Control', `${clientEncrypted ? 'private' : 'public'}, max-age=31536000`);
 
       const stream = await storageService.createReadStream(gcsPath);
       stream.pipe(res);
