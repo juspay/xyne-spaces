@@ -275,12 +275,14 @@ test:
 	# Add your test commands here
 	echo "All tests completed"
 
-# GCP authentication
+WIF_CRED_FILE ?= /etc/gcp/wif-cred.json
+
 configure-docker:
-	gcloud auth activate-service-account $(SERVICE_ACCOUNT) --key-file=$(GCP) --project=$(PROJECT_ID) -q
+	gcloud auth login --cred-file=$(WIF_CRED_FILE) --quiet
 	gcloud auth configure-docker asia.gcr.io -q
 
+# Revokes whichever account is currently active
 revoke-sa:
-	gcloud auth revoke $(SERVICE_ACCOUNT) -q || true
+	gcloud auth revoke $$(gcloud config get account 2>/dev/null) -q || true
 
 .PHONY: build-backend push-backend clean-backend prisma-generate build-runner push-runner clean-runner build-dashboard push-dashboard clean-dashboard export-dashboard-bundle build-dashboard-edge push-dashboard-edge clean-dashboard-edge build-external-dashboard push-external-dashboard clean-external-dashboard build-lighton-ocr-wrapper push-lighton-ocr-wrapper clean-lighton-ocr-wrapper build-tei-batch-proxy push-tei-batch-proxy clean-tei-batch-proxy build-transcription-agent push-transcription-agent clean-transcription-agent build-claw push-claw clean-claw build-claw-auth-backend push-claw-auth-backend clean-claw-auth-backend build-claw-auth-frontend push-claw-auth-frontend clean-claw-auth-frontend build-claw-all push-claw-all clean-claw-all lint-dashboard typecheck run-pr-police build-all push-all clean-all test configure-docker revoke-sa
