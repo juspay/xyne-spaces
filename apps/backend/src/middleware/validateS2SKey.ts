@@ -24,3 +24,17 @@ export const validateS2SKey = (req: Request, res: Response, next: NextFunction):
   }
   next();
 };
+
+/**
+ * Like validateS2SKey, but against XYNE_CLAW_S2S_KEY: only the Claw services
+ * (xyne-claw-auth, xyne-claw) hold it, so routes behind it are Claw-only.
+ */
+export const validateClawS2SKey = (req: Request, res: Response, next: NextFunction): void => {
+  const s2sKey = config.xyneClaw.s2sKey;
+  const provided = req.headers['x-s2s-key'];
+  if (!s2sKey || typeof provided !== 'string' || !keysMatch(s2sKey, provided)) {
+    res.status(401).json({ error: 'Invalid or missing S2S key' });
+    return;
+  }
+  next();
+};
