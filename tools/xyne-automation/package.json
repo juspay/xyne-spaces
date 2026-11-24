@@ -33,15 +33,15 @@
   "license": "Apache-2.0",
   "type": "commonjs",
   "devDependencies": {
-    "@biomejs/biome": "^2.4.11",
-    "@getgauge/cli": "^1.6.30",
+    "@biomejs/biome": "2.5.6",
+    "@getgauge/cli": "1.6.35",
     "@playwright/test": "1.63.0",
-    "@types/node": "^24.6.1",
-    "chalk": "^4.1.2",
-    "dotenv": "^17.2.3",
-    "gauge-ts": "^0.3.6",
-    "ts-node": "^10.9.2",
-    "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.9.3"
+    "@types/node": "24.13.3",
+    "chalk": "4.1.2",
+    "dotenv": "17.4.2",
+    "gauge-ts": "0.3.6",
+    "ts-node": "10.9.2",
+    "tsconfig-paths": "4.2.0",
+    "typescript": "5.9.3"
   }
 }

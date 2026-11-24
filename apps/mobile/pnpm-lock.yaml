@@ -109,7 +109,7 @@ importers:
         specifier: 57.0.9
         version: 57.0.9(@babel/core@7.29.7)(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(expo@57.0.32)(react-dom@19.2.3(react@19.2.3))(react-native-worklets@0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       '@expo/vector-icons':
-        specifier: ^15.0.3
+        specifier: 15.1.1
         version: 15.1.1(expo-font@57.0.1)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       '@gorhom/bottom-sheet':
         specifier: 5.2.14
@@ -121,40 +121,40 @@ importers:
         specifier: 3.0.0-beta.48
         version: 3.0.0-beta.48(react@19.2.3)
       '@livekit/react-native':
-        specifier: ^2.10.0
+        specifier: 2.12.0
         version: 2.12.0(@livekit/react-native-webrtc@144.1.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)))(livekit-client@2.21.0(@types/dom-mediacapture-record@1.0.22))(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(tslib@2.8.1)
       '@livekit/react-native-webrtc':
         specifier: 144.1.2
         version: 144.1.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       '@noble/curves':
-        specifier: ^1.9.7
+        specifier: 1.9.7
         version: 1.9.7
       '@noble/hashes':
-        specifier: ^1.8.0
+        specifier: 1.8.0
         version: 1.8.0
       '@op-engineering/op-sqlite':
-        specifier: ^16.1.0
+        specifier: 16.2.2
         version: 16.2.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       '@opentelemetry/api':
-        specifier: ^1.9.1
+        specifier: 1.9.1
         version: 1.9.1
       '@opentelemetry/exporter-metrics-otlp-http':
-        specifier: ^0.211.0
+        specifier: 0.211.0
         version: 0.211.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/exporter-trace-otlp-http':
-        specifier: ^0.216.0
+        specifier: 0.216.0
         version: 0.216.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/resources':
-        specifier: ^2.7.1
+        specifier: 2.10.0
         version: 2.10.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-metrics':
-        specifier: ^2.5.0
+        specifier: 2.10.0
         version: 2.10.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/sdk-trace-base':
-        specifier: ^2.7.1
+        specifier: 2.10.0
         version: 2.10.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/semantic-conventions':
-        specifier: ^1.40.0
+        specifier: 1.43.0
         version: 1.43.0
       '@react-native-async-storage/async-storage':
         specifier: 2.2.0
@@ -166,7 +166,7 @@ importers:
         specifier: 12.0.1
         version: 12.0.1(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       '@react-native-cookies/cookies':
-        specifier: ^6.2.1
+        specifier: 6.2.1
         version: 6.2.1(patch_hash=8c51cab8f3bca7b2951a664227ea8ec584ee6fb452b73756456dd73d8729df08)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       '@react-native-firebase/app':
         specifier: 24.1.1
@@ -181,7 +181,7 @@ importers:
         specifier: 16.1.4
         version: 16.1.4(expo@57.0.32)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       '@react-native-masked-view/masked-view':
-        specifier: ^0.3.2
+        specifier: 0.3.2
         version: 0.3.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       '@react-native-menu/menu':
         specifier: 2.0.0
@@ -190,13 +190,13 @@ importers:
         specifier: 1.6.1
         version: 1.6.1(@op-engineering/op-sqlite@16.2.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))
       '@tanstack/react-query':
-        specifier: ^5.90.21
+        specifier: 5.101.4
         version: 5.101.4(react@19.2.3)
       '@tanstack/react-table':
-        specifier: ^8.21.3
+        specifier: 8.21.3
         version: 8.21.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@xstate/react':
-        specifier: ^6.0.0
+        specifier: 6.1.0
         version: 6.1.0(@types/react@19.2.18)(react@19.2.3)(xstate@5.32.5)
       '@xyne/shared':
         specifier: link:../../packages/shared
@@ -205,13 +205,13 @@ importers:
         specifier: 1.20.0
         version: 1.20.0
       clsx:
-        specifier: ^2.1.1
+        specifier: 2.1.1
         version: 2.1.1
       date-fns:
-        specifier: ^4.1.0
+        specifier: 4.4.0
         version: 4.4.0
       engine.io-client:
-        specifier: ^6.6.6
+        specifier: 6.6.6
         version: 6.6.6
       expo:
         specifier: 57.0.32
@@ -259,7 +259,7 @@ importers:
         specifier: 57.0.8
         version: 57.0.8(expo@57.0.32)
       expo-intent-launcher:
-        specifier: ~57.0.1
+        specifier: 57.0.1
         version: 57.0.1(expo@57.0.32)
       expo-keep-awake:
         specifier: 57.0.1
@@ -304,13 +304,13 @@ importers:
         specifier: 57.0.2
         version: 57.0.2(expo@57.0.32)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       fuse.js:
-        specifier: ^7.1.0
+        specifier: 7.5.0
         version: 7.5.0
       livekit-client:
         specifier: 2.21.0
         version: 2.21.0(@types/dom-mediacapture-record@1.0.22)
       lucide-react-native:
-        specifier: ^0.575.0
+        specifier: 0.575.0
         version: 0.575.0(react-native-svg@15.15.4(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       protobufjs:
         specifier: 8.7.1
@@ -325,40 +325,40 @@ importers:
         specifier: 0.86.0
         version: 0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)
       react-native-callkeep:
-        specifier: ^4.3.16
+        specifier: 4.3.16
         version: 4.3.16(patch_hash=76fe8d8b855a4584dda13e194720845db75d9afa849137dc3b5890aaf6d18832)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       react-native-device-info:
-        specifier: ^15.0.2
+        specifier: 15.0.2
         version: 15.0.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       react-native-drawer-layout:
         specifier: 4.2.10
         version: 4.2.10(0f0e3cd6d63dc6939f453b1c3784f685)
       react-native-enriched:
-        specifier: ^0.8.1
+        specifier: 0.8.1
         version: 0.8.1(patch_hash=e5f03b682a459c3c6b57f082bb6187924ad0b54f4cb90fa357cd39501c723d09)(@floating-ui/dom@1.8.0)(@types/react-dom@19.2.3(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-enriched-markdown:
-        specifier: ^0.7.4
+        specifier: 0.7.4
         version: 0.7.4(patch_hash=7262363fb59fc93d3b7c4f28160cd92388197c3b7a4950c9c761d443a4a7f236)(@expo/config-plugins@57.0.7(typescript@6.0.3))(katex@0.16.47)(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-file-viewer:
-        specifier: ^2.1.5
+        specifier: 2.1.5
         version: 2.1.5(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       react-native-gesture-handler:
-        specifier: ~2.32.0
+        specifier: 2.32.0
         version: 2.32.0(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-get-random-values:
-        specifier: ~1.11.0
+        specifier: 1.11.0
         version: 1.11.0(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       react-native-is-edge-to-edge:
-        specifier: ^1.3.1
+        specifier: 1.3.1
         version: 1.3.1(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-keyboard-controller:
         specifier: 1.22.2
         version: 1.22.2(react-native-reanimated@4.5.3(react-native-worklets@0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-mmkv:
-        specifier: ^4.3.1
+        specifier: 4.3.2
         version: 4.3.2(react-native-nitro-modules@0.35.10(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-nitro-modules:
-        specifier: ^0.35.6
+        specifier: 0.35.10
         version: 0.35.10(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-notify-kit:
         specifier: 10.5.0
@@ -373,10 +373,10 @@ importers:
         specifier: 4.5.3
         version: 4.5.3(react-native-worklets@0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-safe-area-context:
-        specifier: ~5.7.0
+        specifier: 5.7.0
         version: 5.7.0(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-screens:
-        specifier: ~4.26.0
+        specifier: 4.26.2
         version: 4.26.2(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-svg:
         specifier: 15.15.4
@@ -385,10 +385,10 @@ importers:
         specifier: 1.1.12
         version: 1.1.12(react-dom@19.2.3(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-vision-camera:
-        specifier: ^4.7.3
+        specifier: 4.7.3
         version: 4.7.3(react-native-reanimated@4.5.3(react-native-worklets@0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react-native-voip-push-notification:
-        specifier: ^3.3.2
+        specifier: 3.3.3
         version: 3.3.3(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))
       react-native-web:
         specifier: 0.21.2
@@ -400,19 +400,19 @@ importers:
         specifier: 0.11.1
         version: 0.11.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       socket.io-client:
-        specifier: ^4.8.3
+        specifier: 4.8.3
         version: 4.8.3
       tailwind-merge:
-        specifier: ^3.5.0
+        specifier: 3.6.0
         version: 3.6.0
       tailwind-variants:
-        specifier: ^3.2.2
+        specifier: 3.3.1
         version: 3.3.1(tailwind-merge@3.6.0)(tailwindcss@4.3.3)
       tailwindcss:
-        specifier: ^4.2.1
+        specifier: 4.3.3
         version: 4.3.3
       unicode-emoji-json:
-        specifier: ^0.9.0
+        specifier: 0.9.0
         version: 0.9.0
       uniwind:
         specifier: 1.10.1
@@ -421,29 +421,29 @@ importers:
         specifier: 14.0.2
         version: 14.0.2
       xstate:
-        specifier: ^5.28.0
+        specifier: 5.32.5
         version: 5.32.5
       zod:
         specifier: 4.6.6
         version: 4.6.6
     devDependencies:
       '@eslint/js':
-        specifier: ^8.57.1
+        specifier: 8.57.1
         version: 8.57.1
       '@expo/config-plugins':
         specifier: 57.0.7
         version: 57.0.7(typescript@6.0.3)
       '@jest/globals':
-        specifier: ^29.7.0
+        specifier: 29.7.0
         version: 29.7.0
       '@react-native-community/cli':
-        specifier: latest
+        specifier: 21.0.0
         version: 21.0.0(typescript@6.0.3)
       '@testing-library/react-native':
-        specifier: ^13.3.3
+        specifier: 13.3.3
         version: 13.3.3(jest@29.7.0(@types/node@20.19.43)(ts-node@10.9.2(@types/node@20.19.43)(typescript@6.0.3)))(react-native@0.86.0(@babel/core@7.29.7)(@react-native-community/cli@21.0.0(typescript@6.0.3))(@react-native/jest-preset@0.86.0(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.0(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react-test-renderer@19.2.3(react@19.2.3))(react@19.2.3)
       '@types/jest':
-        specifier: ^29.5.14
+        specifier: 29.5.14
         version: 29.5.14
       '@types/react':
         specifier: 19.2.18
@@ -452,37 +452,37 @@ importers:
         specifier: 19.1.0
         version: 19.1.0
       airborne-devkit:
-        specifier: ^0.36.0
+        specifier: 0.36.5
         version: 0.36.5(typescript@6.0.3)
       babel-preset-expo:
         specifier: 57.0.6
         version: 57.0.6(@babel/core@7.29.7)(@babel/runtime@7.29.7)(expo@57.0.32)(react-refresh@0.18.0)
       dotenv:
-        specifier: ^16.4.7
+        specifier: 16.6.1
         version: 16.6.1
       eslint:
-        specifier: ^9.25.0
+        specifier: 9.39.5
         version: 9.39.5(jiti@2.7.0)
       eslint-config-expo:
         specifier: 57.0.1
         version: 57.0.1(eslint@9.39.5(jiti@2.7.0))(typescript@6.0.3)
       eslint-config-prettier:
-        specifier: ^9.1.2
+        specifier: 9.1.2
         version: 9.1.2(eslint@9.39.5(jiti@2.7.0))
       eslint-plugin-jsx-a11y:
-        specifier: ^6.10.2
+        specifier: 6.10.2
         version: 6.10.2(eslint@9.39.5(jiti@2.7.0))
       eslint-plugin-react:
-        specifier: ^7.37.5
+        specifier: 7.37.5
         version: 7.37.5(eslint@9.39.5(jiti@2.7.0))
       eslint-plugin-react-hooks:
-        specifier: ^5.2.0
+        specifier: 5.2.0
         version: 5.2.0(eslint@9.39.5(jiti@2.7.0))
       globals:
         specifier: 17.9.0
         version: 17.9.0
       jest:
-        specifier: ~29.7.0
+        specifier: 29.7.0
         version: 29.7.0(@types/node@20.19.43)(ts-node@10.9.2(@types/node@20.19.43)(typescript@6.0.3))
       jest-expo:
         specifier: 57.0.2
@@ -497,7 +497,7 @@ importers:
         specifier: 4.23.11
         version: 4.23.11
       typescript:
-        specifier: ~6.0.3
+        specifier: 6.0.3
         version: 6.0.3
       typescript-eslint:
         specifier: 8.66.0
@@ -3401,13 +3401,6 @@ packages:
     resolution: {integrity: sha512-Y1XfSefHIOub9762qm3ShafdlEE/Va8h3kLUeMq765fNeWeNLcOP2YUPr86H1SlyGwZTOqQ67RlBZPZ3k9Djgg==}
     engines: {node: '>=18.0.0'}
 
-  '@smithy/core@3.31.0':
-    resolution: {integrity: sha512-sylYk2l9d7CmRv8ts8p0SDQUr3VO+HMeS1nrjL6+UtbO8ktJHTOeQ1McX+aAyvGGccp5aZX9eNtdcXrSwzoZaw==}
-    engines: {node: '>=18.0.0'}
-    deprecated: |-
-      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
-        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
-
   '@smithy/core@3.36.0':
     resolution: {integrity: sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g==}
     engines: {node: '>=18.0.0'}
@@ -3469,10 +3462,6 @@ packages:
 
   '@smithy/smithy-client@4.14.15':
     resolution: {integrity: sha512-QSvETzP9PzWlf4uXnqvu9Z7Y2mfdNnpRM9Gs8h28crWS0DCQkevY9wMkRTKpUlk5cs60DKNca0dO+2zwuJWeRw==}
-    engines: {node: '>=18.0.0'}
-
-  '@smithy/types@4.16.1':
-    resolution: {integrity: sha512-0JFs3V2y2M9tKW5na/qxe69Zv+uxLMO7QBbhxF/FHu/Gp2NFZAAL9tWl9PU02xxo07pb3G9FTyjNc6D5uZrJIg==}
     engines: {node: '>=18.0.0'}
 
   '@smithy/types@4.19.0':
@@ -9112,13 +9101,13 @@ snapshots:
   '@aws-sdk/core@3.775.0':
     dependencies:
       '@aws-sdk/types': 3.775.0
-      '@smithy/core': 3.31.0
+      '@smithy/core': 3.36.0
       '@smithy/node-config-provider': 4.6.2
       '@smithy/property-provider': 4.5.2
       '@smithy/protocol-http': 5.5.15
       '@smithy/signature-v4': 5.6.11
       '@smithy/smithy-client': 4.14.15
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       '@smithy/util-middleware': 4.5.2
       fast-xml-parser: 4.5.7
       tslib: 2.8.1
@@ -9127,20 +9116,20 @@ snapshots:
     dependencies:
       '@aws-sdk/types': 3.775.0
       '@smithy/protocol-http': 5.5.15
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@aws-sdk/middleware-logger@3.775.0':
     dependencies:
       '@aws-sdk/types': 3.775.0
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@aws-sdk/middleware-recursion-detection@3.775.0':
     dependencies:
       '@aws-sdk/types': 3.775.0
       '@smithy/protocol-http': 5.5.15
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@aws-sdk/middleware-user-agent@3.787.0':
@@ -9148,25 +9137,25 @@ snapshots:
       '@aws-sdk/core': 3.775.0
       '@aws-sdk/types': 3.775.0
       '@aws-sdk/util-endpoints': 3.787.0
-      '@smithy/core': 3.31.0
+      '@smithy/core': 3.36.0
       '@smithy/protocol-http': 5.5.15
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@aws-sdk/types@3.775.0':
     dependencies:
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@aws-sdk/types@3.974.2':
     dependencies:
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@aws-sdk/util-endpoints@3.787.0':
     dependencies:
       '@aws-sdk/types': 3.775.0
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       '@smithy/util-endpoints': 3.7.2
       tslib: 2.8.1
 
@@ -9177,7 +9166,7 @@ snapshots:
   '@aws-sdk/util-user-agent-browser@3.775.0':
     dependencies:
       '@aws-sdk/types': 3.775.0
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       bowser: 2.14.1
       tslib: 2.8.1
 
@@ -9186,7 +9175,7 @@ snapshots:
       '@aws-sdk/middleware-user-agent': 3.787.0
       '@aws-sdk/types': 3.775.0
       '@smithy/node-config-provider': 4.6.2
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@babel/code-frame@7.29.7':
@@ -12978,11 +12967,6 @@ snapshots:
       '@smithy/core': 3.36.0
       tslib: 2.8.1
 
-  '@smithy/core@3.31.0':
-    dependencies:
-      '@smithy/types': 4.16.1
-      tslib: 2.8.1
-
   '@smithy/core@3.36.0':
     dependencies:
       '@smithy/types': 4.19.0
@@ -12990,8 +12974,8 @@ snapshots:
 
   '@smithy/fetch-http-handler@5.6.12':
     dependencies:
-      '@smithy/core': 3.31.0
-      '@smithy/types': 4.16.1
+      '@smithy/core': 3.36.0
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@smithy/hash-node@4.5.2':
@@ -13035,8 +13019,8 @@ snapshots:
 
   '@smithy/node-http-handler@4.9.12':
     dependencies:
-      '@smithy/core': 3.31.0
-      '@smithy/types': 4.16.1
+      '@smithy/core': 3.36.0
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@smithy/property-provider@4.5.2':
@@ -13046,23 +13030,19 @@ snapshots:
 
   '@smithy/protocol-http@5.5.15':
     dependencies:
-      '@smithy/core': 3.31.0
+      '@smithy/core': 3.36.0
       tslib: 2.8.1
 
   '@smithy/signature-v4@5.6.11':
     dependencies:
-      '@smithy/core': 3.31.0
-      '@smithy/types': 4.16.1
+      '@smithy/core': 3.36.0
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@smithy/smithy-client@4.14.15':
     dependencies:
-      '@smithy/core': 3.31.0
-      '@smithy/types': 4.16.1
-      tslib: 2.8.1
-
-  '@smithy/types@4.16.1':
-    dependencies:
+      '@smithy/core': 3.36.0
+      '@smithy/types': 4.19.0
       tslib: 2.8.1
 
   '@smithy/types@4.19.0':
@@ -13858,7 +13838,7 @@ snapshots:
       '@aws-sdk/util-user-agent-browser': 3.775.0
       '@aws-sdk/util-user-agent-node': 3.787.0
       '@smithy/config-resolver': 4.7.2
-      '@smithy/core': 3.31.0
+      '@smithy/core': 3.36.0
       '@smithy/fetch-http-handler': 5.6.12
       '@smithy/hash-node': 4.5.2
       '@smithy/invalid-dependency': 4.5.2
@@ -13870,7 +13850,7 @@ snapshots:
       '@smithy/node-http-handler': 4.9.12
       '@smithy/protocol-http': 5.5.15
       '@smithy/smithy-client': 4.14.15
-      '@smithy/types': 4.16.1
+      '@smithy/types': 4.19.0
       '@smithy/url-parser': 4.5.2
       '@smithy/util-base64': 4.6.2
       '@smithy/util-body-length-browser': 4.5.2

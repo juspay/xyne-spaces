@@ -19,26 +19,26 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@xyne/icons": "workspace:*",
     "@xyne/kata-sdk": "workspace:*",
-    "marked": "^18.0.4",
-    "mermaid": "^11.4.0",
-    "pdf-lib": "^1.17.1",
-    "pdf-parse": "^2.4.5",
-    "pdfkit": "^0.15.2",
+    "marked": "18.0.7",
+    "mermaid": "11.16.1",
+    "pdf-lib": "1.17.1",
+    "pdf-parse": "2.4.5",
+    "pdfkit": "0.15.2",
     "playwright": "1.63.0",
-    "pptxgenjs": "^4.0.1",
-    "sanitize-html": "^2.17.7",
-    "winston": "^3.19.0",
-    "yaml": "^2.7.0"
+    "pptxgenjs": "4.0.1",
+    "sanitize-html": "2.17.7",
+    "winston": "3.19.0",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/pdf-parse": "^1.1.5",
-    "@types/pdfkit": "^0.13.9",
-    "@types/sanitize-html": "^2.16.1",
-    "typescript": "^5.7.0",
-    "vitest": "^3.2.6"
+    "@types/node": "22.20.1",
+    "@types/pdf-parse": "1.1.5",
+    "@types/pdfkit": "0.13.9",
+    "@types/sanitize-html": "2.16.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
   }
 }
