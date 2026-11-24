@@ -422,7 +422,10 @@ export const apiInstance: AxiosInstance = apiConfig;
  * `res.body.getReader()`, which axios cannot provide in the browser, so they use fetch with the
  * session cookie. The backend writes streams outside its response encryption.
  */
-export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+export async function apiFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
   const url = input instanceof Request ? input.url : input.toString();
   const headers = new Headers(init.headers);
 
@@ -434,7 +437,8 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   // apiInstance adds BASE_URL itself, and the encryption manifest matches the path below it.
   const path = url.startsWith(BASE_URL) ? url.slice(BASE_URL.length) : url;
   const isJsonBody =
-    typeof init.body === 'string' && (headers.get('content-type') ?? '').includes('application/json');
+    typeof init.body === 'string' &&
+    (headers.get('content-type') ?? '').includes('application/json');
 
   try {
     const response = await apiConfig.request<unknown>({
@@ -468,7 +472,8 @@ function toFetchResponse(status: number, data: unknown, source?: AxiosResponse<u
   headers.delete('content-length');
   const statusText = source?.statusText ?? '';
 
-  const empty = status === 204 || status === 304 || data === undefined || data === null || data === '';
+  const empty =
+    status === 204 || status === 304 || data === undefined || data === null || data === '';
   if (empty) return new Response(null, { status, statusText, headers });
   if (typeof data === 'string') return new Response(data, { status, statusText, headers });
   headers.set('content-type', 'application/json');
