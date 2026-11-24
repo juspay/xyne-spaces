@@ -135,6 +135,10 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
  * route set goes along for a session the service has no key for.
  */
 export function transitCaller(req: Request): TransitCaller {
+  // Proxy traffic names only the proxy: never a session token or a key of its own.
+  if (req.proxyClient) {
+    return { proxyClient: req.proxyClient };
+  }
   const cookie: unknown = req.cookies?.[TRANSIT_KEY_COOKIE];
   const clientKey = typeof cookie === 'string' && cookie.length > 0 ? cookie : undefined;
   return {
@@ -145,7 +149,7 @@ export function transitCaller(req: Request): TransitCaller {
 
 /** Whether the request names a transit key at all (an access token or a key of its own). */
 export function hasTransitCaller(caller: TransitCaller): boolean {
-  return Boolean(caller.authToken || caller.clientKey);
+  return Boolean(caller.proxyClient || caller.authToken || caller.clientKey);
 }
 
 /**

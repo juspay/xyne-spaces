@@ -7,6 +7,7 @@ import type {
   GenerateStorageKeyInput,
   ProvisionEntityInput,
   ProvisionEntityResult,
+  SealEventInput,
   StorageObjectKey,
   TransformRequestInput,
   TransformRequestResult,
@@ -115,6 +116,10 @@ const provider: EncryptionProvider = {
     return unsupported('unwrapStorageKeys');
   },
 
+
+  async sealEvent(_input: SealEventInput): Promise<{ sealed: string }> {
+    return unsupported('sealEvent');
+  },
 
   async getTransitClientManifest(
     _params: { tag: string; environment: string } & TransitCaller,
