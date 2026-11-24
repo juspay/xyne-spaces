@@ -167,8 +167,6 @@ export interface CommitAnalysisParams {
   hotfixSync?: boolean;
   // Multi-repo hotfix: restrict analysis to the merged repo's board(s) + post-merge head.
   hotfixOverride?: { boardIds: string[]; mergeCommitSha: string; branch: string };
-  // Re-run keeps the deployed pointer frozen (it was set at create).
-  isReRun?: boolean;
 }
 
 interface ReleaseRepoContext {
@@ -456,7 +454,7 @@ export class CommitAnalysisController {
       envChanges = releaseResult.envChanges;
       appMatchSummary = releaseResult.appMatchSummary;
 
-      if (newCommitId && affectedApplications.length > 0 && !params.isReRun) {
+      if (newCommitId && affectedApplications.length > 0) {
         const applicationIds = affectedApplications.map((app) => app.id);
         await releaseService.updateDeployedCommits(applicationIds, newCommitId);
       }

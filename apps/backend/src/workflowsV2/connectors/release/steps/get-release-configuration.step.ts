@@ -26,6 +26,8 @@ const GetReleaseConfigurationOutputSchema = z.object({
   trackingMode: z.string().nullable().describe('COMMIT_RANGE or VERSION'),
   vcsProvider: z.string().nullable().describe('GITHUB or BITBUCKET_SERVER'),
   repoUrl: z.string(),
+  repoOwner: z.string().nullable().describe('GitHub owner of the repository; null when it is not a GitHub URL'),
+  repoName: z.string().nullable().describe('GitHub repository name; null when it is not a GitHub URL'),
   ticketPrefix: z.string().describe("Prefix of the ticket IDs in pull request titles: the board's project code"),
   services: z.array(ReleaseServiceSchema),
 });
@@ -99,10 +101,13 @@ export class GetReleaseConfigurationStep extends BaseActionStep<
       throw new Error(`Services on board ${board.name} do not share one repository URL: ${repoUrls.join(', ')}`);
     }
 
+    const github = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(repoUrl);
     return {
       trackingMode: board.releaseTrackingMode,
       vcsProvider: board.vcsProvider,
       repoUrl,
+      repoOwner: github?.[1] ?? null,
+      repoName: github?.[2] ?? null,
       ticketPrefix: board.project.code,
       services: services.map(({ id, name, boardId, regex, envPaths, migrationPaths }) => ({
         id,

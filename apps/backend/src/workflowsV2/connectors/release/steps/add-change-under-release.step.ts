@@ -9,8 +9,6 @@ import { XyneRelease } from '@/services/release/xyne/xyneRelease';
 import { XyneChangeType } from '@/services/release/xyne/xyneReleaseForm';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 import { workspaceOf } from '../../xyne-spaces/context';
-import { ticketIssues } from '../../xyne-spaces/validation';
-import type { Checked, ConfigIssue } from '../../xyne-spaces/validation';
 
 const AddChangeUnderReleaseConfigSchema = z.object({
   ticket: variableRef(z.string().min(1)).describe("Ticket id or ID like PLAT-12 of a release's service ticket"),
@@ -42,10 +40,6 @@ export class AddChangeUnderReleaseStep extends BaseActionStep<typeof AddChangeUn
   readonly description = "Records an env or migration change from a file's diff under one of a release's service tickets.";
   readonly category = 'release';
   readonly icon = 'FileDiff';
-
-  validateConfig(ctx: Checked<{ ticket?: string }>): Promise<ConfigIssue[]> {
-    return ticketIssues(ctx, 'ticket', ctx.known.ticket);
-  }
 
   async execute(config: AddChangeUnderReleaseConfig, ctx: StepExecutionContext): Promise<AddChangeUnderReleaseOutput> {
     const workspaceId = workspaceOf(ctx, this.type);

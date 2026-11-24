@@ -5,8 +5,6 @@ import { z } from 'zod/v3';
 import { db } from '@/database/client';
 import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import { workspaceOf } from '../../xyne-spaces/context';
-import { ticketIssues } from '../../xyne-spaces/validation';
-import type { Checked, ConfigIssue } from '../../xyne-spaces/validation';
 
 const AddTicketsUnderReleaseConfigSchema = z.object({
   ticket: variableRef(z.string().min(1)).describe("Ticket id or ID like PLAT-12 of the release's service ticket"),
@@ -33,10 +31,6 @@ export class AddTicketsUnderReleaseStep extends BaseActionStep<
     "Adds dev tickets, by ID, to a release under one of its service tickets. Tickets already there are skipped. A Hotfix release marks them as hotfixes.";
   readonly category = 'release';
   readonly icon = 'ListPlus';
-
-  validateConfig(ctx: Checked<{ ticket?: string }>): Promise<ConfigIssue[]> {
-    return ticketIssues(ctx, 'ticket', ctx.known.ticket);
-  }
 
   async execute(config: AddTicketsUnderReleaseConfig, ctx: StepExecutionContext): Promise<AddTicketsUnderReleaseOutput> {
     const workspaceId = workspaceOf(ctx, this.type);

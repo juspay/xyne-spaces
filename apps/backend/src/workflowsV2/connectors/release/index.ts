@@ -1,10 +1,11 @@
 import { BaseConnector } from '@xyne/workflow-sdk';
 import type { AnyStep } from '@xyne/workflow-sdk';
 import { GetReleaseConfigurationStep } from './steps/get-release-configuration.step';
-import { AddTicketsUnderReleaseStep } from './steps/add-tickets-under-release.step';
-import { AddChangeUnderReleaseStep } from './steps/add-change-under-release.step';
 import { UpdateDeployedCommitStep } from './steps/update-deployed-commit.step';
 import { LinkReleaseNotesStep } from './steps/link-release-notes.step';
+import { AnalyseReleaseStep } from './steps/analyse-release.step';
+import { WriteReleaseStep } from './steps/write-release.step';
+import { BuildReleaseReportStep } from './steps/build-release-report.step';
 
 export class ReleaseConnector extends BaseConnector {
   readonly id = 'release';
@@ -17,9 +18,10 @@ export class ReleaseConnector extends BaseConnector {
 
   readonly steps: readonly AnyStep[] = [
     new GetReleaseConfigurationStep(),
-    new AddTicketsUnderReleaseStep(),
-    new AddChangeUnderReleaseStep(),
     new UpdateDeployedCommitStep(),
     new LinkReleaseNotesStep(),
+    new AnalyseReleaseStep(),
+    new WriteReleaseStep(),
+    new BuildReleaseReportStep(),
   ];
 }
