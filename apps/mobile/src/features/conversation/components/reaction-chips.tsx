@@ -1,25 +1,21 @@
-import { memo, useCallback, useMemo, useState, type ReactElement } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { memo, useCallback, useMemo, type ReactElement } from 'react';
+import { View } from 'react-native';
 import type { User } from '@xyne/shared';
+import { usePendingByMessageId } from '@xyne/shared/messages';
 
-import { ReactionEmojiDisplay } from '@/src/components/chat/message/reactions/reaction-emoji-display';
-import {
-  groupReactionsForPill,
-  type RawReaction,
-} from '@/src/components/chat/message/reactions/reaction-pill.utils';
-import {
-  ReactionsBottomSheet,
-  useReactionsSheetModel,
-} from '@/src/features/chat/v2/components/conversation-composer/conversation-composer-reactions';
+import { groupReactionsForPill } from '@/src/components/chat/message/reactions/reaction-pill.utils';
+import { useChatRenderTokens } from '@/src/features/chat/v2/components/chat/message-row';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 import { haptics } from '@/src/utils/haptics';
 
-import {
-  REACTION_CHIP_GAP,
-  REACTION_CHIP_HEIGHT,
-  REACTION_CHIP_PADDING_X,
-  REACTION_EMOJI_SIZE,
-} from '../constants';
+import { REACTION_CHIP_GAP } from '../constants';
+import { useTransientSheet } from '../hooks/use-transient-sheet';
+import { AddReactionSheet } from './add-reaction-sheet';
+import { useConversationCanReact } from './conversation-palette';
+import { AddReactionChip, ReactionChip } from './reaction-chip';
+import { ReactionsSheet } from './reactions-sheet';
+
+const ROW_STYLE = { gap: REACTION_CHIP_GAP } as const;
 
 type ReactionChipsProps = {
   paintRow: ChatPaintRow;
@@ -28,87 +24,77 @@ type ReactionChipsProps = {
 };
 
 /**
- * Emoji and count chips under a message. Tapping any chip opens the same
- * reactions sheet the classic pill does, where your own reaction can be removed.
+ * Emoji and count chips under a message, ended by a "+" that opens the emoji
+ * picker. Tapping a chip opens who reacted, where your own reaction can be removed.
+ * The "+" follows the hold menu's reaction rail: absent where the screen does
+ * not allow reacting and on a message that has not been sent.
  */
 export const ReactionChips = memo(function ReactionChips({
   paintRow,
   currentUser,
   hydrateCustomEmoji,
 }: ReactionChipsProps): ReactElement | null {
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const { mutedForeground } = useChatRenderTokens();
+  const details = useTransientSheet();
+  const picker = useTransientSheet();
   const reactions = paintRow.reactionPreview?.reactions;
+  const { messageId } = paintRow;
+  const canReact = useConversationCanReact();
+  const pendingEntry = usePendingByMessageId(messageId ?? '');
+  const reactableMessageId = canReact && !pendingEntry ? messageId : undefined;
   const groups = useMemo(() => groupReactionsForPill(reactions ?? []), [reactions]);
 
-  const handleOpen = useCallback((): void => {
+  const { open: openDetails } = details;
+  const handleOpenDetails = useCallback((): void => {
     void haptics.buttonTap();
-    setIsSheetOpen(true);
-  }, []);
+    openDetails();
+  }, [openDetails]);
 
-  if (groups.length === 0) return null;
+  const { open: openPicker } = picker;
+  const handleOpenPicker = useCallback((): void => {
+    void haptics.buttonTap();
+    openPicker();
+  }, [openPicker]);
+
+  if (!reactions || groups.length === 0) return null;
 
   return (
-    <View className='flex-row flex-wrap' style={{ gap: REACTION_CHIP_GAP }}>
+    <View className='flex-row flex-wrap' style={ROW_STYLE}>
       {groups.map(group => (
-        <Pressable
+        <ReactionChip
           key={group.emojiName}
-          accessibilityRole='button'
+          id={group.emojiName}
+          label={String(group.count)}
+          emojiName={group.emojiName}
+          hydrateCustomEmoji={hydrateCustomEmoji}
           accessibilityLabel={`${group.count} ${group.emojiName} ${group.count === 1 ? 'reaction' : 'reactions'}`}
-          onPress={handleOpen}
-          onLongPress={handleOpen}
-          className='flex-row items-center rounded-full bg-spaces-surface'
-          style={{
-            height: REACTION_CHIP_HEIGHT,
-            paddingHorizontal: REACTION_CHIP_PADDING_X,
-            columnGap: REACTION_CHIP_GAP,
-          }}
-        >
-          <ReactionEmojiDisplay
-            emojiName={group.emojiName}
-            size={REACTION_EMOJI_SIZE}
-            hydrateCustomEmoji={hydrateCustomEmoji}
-          />
-          <Text className='text-[12px] leading-4 text-spaces-muted'>{group.count}</Text>
-        </Pressable>
+          onPress={handleOpenDetails}
+          onLongPress={handleOpenDetails}
+        />
       ))}
-      {isSheetOpen ? (
-        <ReactionDetails
-          reactions={reactions ?? []}
+      {reactableMessageId ? (
+        <AddReactionChip iconColor={mutedForeground} onPress={handleOpenPicker} />
+      ) : null}
+      {details.mounted ? (
+        <ReactionsSheet
+          reactions={reactions}
           currentUserId={currentUser?.id}
-          onOpenChange={setIsSheetOpen}
+          hydrateCustomEmoji={hydrateCustomEmoji}
+          isOpen={details.isOpen}
+          onOpenChange={details.onOpenChange}
+          onDismiss={details.onDismiss}
+        />
+      ) : null}
+      {reactableMessageId && picker.mounted ? (
+        <AddReactionSheet
+          messageId={reactableMessageId}
+          reactions={reactions}
+          currentUserId={currentUser?.id}
+          isOpen={picker.isOpen}
+          onOpenChange={picker.onOpenChange}
+          onDismiss={picker.onDismiss}
         />
       ) : null}
     </View>
   );
 });
-
-type ReactionDetailsProps = {
-  reactions: readonly RawReaction[];
-  currentUserId: string | undefined;
-  onOpenChange: (open: boolean) => void;
-};
-
-/** Mounted only while the sheet is open, so a row does not subscribe to every user. */
-function ReactionDetails({
-  reactions,
-  currentUserId,
-  onOpenChange,
-}: ReactionDetailsProps): ReactElement {
-  const { groups, total, rows, handleRemoveReaction } = useReactionsSheetModel({
-    raw: reactions,
-    messageId: reactions[0]?.messageId,
-    currentUserId,
-  });
-
-  return (
-    <ReactionsBottomSheet
-      isOpen
-      onOpenChange={onOpenChange}
-      rows={rows}
-      groups={groups}
-      total={total}
-      currentUserId={currentUserId}
-      onRemoveReaction={handleRemoveReaction}
-    />
-  );
-}

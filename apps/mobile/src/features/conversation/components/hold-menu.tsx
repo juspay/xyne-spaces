@@ -17,7 +17,6 @@ import {
 import Animated, {
   Easing,
   cancelAnimation,
-  runOnJS,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -25,29 +24,41 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
+import { scheduleOnRN } from 'react-native-worklets';
 
-import { FullWindowOverlay } from '@/src/components/full-window-overlay';
+import { useLatestRef } from '@/src/components/input-composer/utils/use-latest-ref';
 import type { MessageActionsViewProps } from '@/src/features/chat/v2/components/message-actions-sheet';
 import { QUICK_REACTIONS } from '@/src/features/chat/v2/components/message-actions-sheet';
 import { haptics } from '@/src/utils/haptics';
 
 import {
-  HOLD_BACKDROP_OPACITY,
-  HOLD_DESTRUCTIVE_COLOR,
+  HOLD_ANDROID_Z_INDEX,
+  HOLD_CARD_SHADOW,
+  HOLD_ENTER_OFFSET,
+  HOLD_FOCUS_SETTLE_MS,
+  HOLD_MENU_ENTER_SCALE,
   HOLD_MENU_ICON_SIZE,
-  HOLD_MENU_PADDING_Y,
-  HOLD_MENU_RADIUS,
+  HOLD_MENU_PADDING,
   HOLD_MENU_ROW_GAP,
   HOLD_MENU_ROW_HEIGHT,
   HOLD_MENU_ROW_PADDING_X,
+  HOLD_MENU_ROW_RADIUS,
+  HOLD_MORE_ICON_SIZE,
+  HOLD_MORE_SIZE,
+  HOLD_RADIUS,
+  HOLD_RAIL_ENTER_SCALE,
   HOLD_RAIL_HEIGHT,
   HOLD_RAIL_PADDING,
   HOLD_REACTION_EMOJI_SIZE,
   HOLD_REACTION_SIZE,
+  HOLD_REDUCED_MOTION_MS,
   HOLD_SIDE_INSET,
+  TRAY_SHADOW,
 } from '../constants';
 import { computeHoldLayout, orderHoldMenuActions, type HoldRect } from '../model/hold-menu';
 import { claimHoldHaptic, clearHoldSource, getHoldSource } from '../model/hold-source-store';
+import { colorOf } from '../model/token-color';
+import { ConversationOverlayLayer, type AndroidOverlayLayer } from './conversation-overlay-layer';
 import { ConversationPaletteProvider } from './conversation-palette';
 
 const ENTER_MS = 200;
@@ -56,30 +67,22 @@ const EASE_OUT = Easing.out(Easing.cubic);
 /** Longest the first measure waits for the keyboard to finish hiding. */
 const KEYBOARD_WAIT_MS = 600;
 /** Moves focus to the first item once the enter animation has laid things out. */
-const FOCUS_DELAY_MS = ENTER_MS + 50;
+const FOCUS_DELAY_MS = ENTER_MS + HOLD_FOCUS_SETTLE_MS;
 /** Without a separate window the root has to out-stack the screen's headers and composer. */
 const ANDROID_LAYER_STYLE =
-  Platform.OS === 'android' ? ({ zIndex: 11000, elevation: 11000 } as const) : undefined;
+  Platform.OS === 'android'
+    ? ({ zIndex: HOLD_ANDROID_Z_INDEX, elevation: HOLD_ANDROID_Z_INDEX } as const)
+    : undefined;
 
-const SHADOW_RAIL = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.12,
-  shadowRadius: 16,
-  elevation: 8,
-} as const;
-/** The Figma "Tray" shadow. */
-const SHADOW_TRAY = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 8 },
-  shadowOpacity: 0.16,
-  shadowRadius: 24,
-  elevation: 12,
-} as const;
+type HoldMenuProps = MessageActionsViewProps & {
+  /** Android: a modal inside the thread card, whose clipping would cut off the menu. */
+  android?: AndroidOverlayLayer;
+};
 
 /**
- * The redesigned message hold: the screen dims, the held message is lifted as a
- * card in place, a reaction rail sits above it and the actions below.
+ * The redesigned message hold: the held message is lifted as a card in place
+ * (the screen behind stays undimmed; tapping it closes), a reaction rail sits
+ * above it and the actions below.
  *
  * It replaces only the classic sheet's `actions` view (see `ActionsView` on
  * `MessageActionsSheet`); the sheet still owns forward, the emoji picker, the
@@ -94,32 +97,31 @@ export function HoldMenu({
   onOpenEmojiPicker,
   onRequestClose,
   onDismissed,
-}: MessageActionsViewProps): ReactElement {
+  android = 'inline',
+}: HoldMenuProps): ReactElement {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [overlaySize, setOverlaySize] = useState<{ width: number; height: number } | null>(null);
   const reduceMotion = useReducedMotion();
-  const foreground = useCSSVariable('--color-spaces-foreground') as string;
+  const foreground = colorOf(useCSSVariable('--color-spaces-foreground'));
+  const danger = colorOf(useCSSVariable('--color-status-danger'));
 
   const rootRef = useRef<View>(null);
   const [rect, setRect] = useState<HoldRect | null>(null);
   const [ready, setReady] = useState(false);
-  const [source] = useState(() => getHoldSource(target.conversationId));
+  const [source] = useState(() => getHoldSource(target.message.messageId));
   const firstItemRef = useRef<View>(null);
   const measureToken = useRef(0);
 
   const progress = useSharedValue(0);
   const dismissedRef = useRef(false);
-  const onDismissedRef = useRef(onDismissed);
-  useEffect(() => {
-    onDismissedRef.current = onDismissed;
-  });
+  const onDismissedRef = useLatestRef(onDismissed);
   const finishDismiss = useCallback((): void => {
     if (dismissedRef.current) return;
     dismissedRef.current = true;
     clearHoldSource();
     onDismissedRef.current();
-  }, []);
+  }, [onDismissedRef]);
 
   // Where the overlay and the held row are in the window. Both are read in
   // window coordinates, so it holds wherever the overlay is mounted.
@@ -173,11 +175,13 @@ export function HoldMenu({
   useEffect(() => {
     if (!ready || !isOpen) return;
     // A remount (forward, then back) is the same hold, not a new one.
-    if (claimHoldHaptic(target.conversationId)) void haptics.longPress();
-    progress.value = reduceMotion
-      ? withTiming(1, { duration: 80 })
-      : withTiming(1, { duration: ENTER_MS, easing: EASE_OUT });
-  }, [isOpen, progress, ready, reduceMotion, target.conversationId]);
+    if (claimHoldHaptic(target.message.messageId)) void haptics.longPress();
+    progress.set(
+      reduceMotion
+        ? withTiming(1, { duration: HOLD_REDUCED_MOTION_MS })
+        : withTiming(1, { duration: ENTER_MS, easing: EASE_OUT }),
+    );
+  }, [isOpen, progress, ready, reduceMotion, target.message.messageId]);
 
   // VoiceOver stays inside the menu and starts on its first item.
   useEffect(() => {
@@ -195,9 +199,11 @@ export function HoldMenu({
       finishDismiss();
       return;
     }
-    progress.value = withTiming(0, { duration: EXIT_MS, easing: EASE_OUT }, finished => {
-      if (finished) runOnJS(finishDismiss)();
-    });
+    progress.set(
+      withTiming(0, { duration: EXIT_MS, easing: EASE_OUT }, finished => {
+        if (finished) scheduleOnRN(finishDismiss);
+      }),
+    );
   }, [finishDismiss, isOpen, progress, ready, reduceMotion]);
 
   useEffect(() => (): void => cancelAnimation(progress), [progress]);
@@ -224,25 +230,34 @@ export function HoldMenu({
     ],
   );
 
-  const backdropStyle = useAnimatedStyle(() => ({
-    opacity: progress.value * HOLD_BACKDROP_OPACITY,
-  }));
   const cardStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: reduceMotion ? [] : [{ translateY: (1 - progress.value) * -layout.cardShift }],
+    opacity: progress.get(),
+    transform: reduceMotion ? [] : [{ translateY: (1 - progress.get()) * -layout.cardShift }],
   }));
-  const railStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: reduceMotion
-      ? []
-      : [{ translateY: (1 - progress.value) * 10 }, { scale: 0.92 + 0.08 * progress.value }],
-  }));
-  const menuStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: reduceMotion
-      ? []
-      : [{ translateY: (1 - progress.value) * -10 }, { scale: 0.96 + 0.04 * progress.value }],
-  }));
+  const railStyle = useAnimatedStyle(() => {
+    const p = progress.get();
+    return {
+      opacity: p,
+      transform: reduceMotion
+        ? []
+        : [
+            { translateY: (1 - p) * HOLD_ENTER_OFFSET },
+            { scale: HOLD_RAIL_ENTER_SCALE + (1 - HOLD_RAIL_ENTER_SCALE) * p },
+          ],
+    };
+  });
+  const menuStyle = useAnimatedStyle(() => {
+    const p = progress.get();
+    return {
+      opacity: p,
+      transform: reduceMotion
+        ? []
+        : [
+            { translateY: (1 - p) * -HOLD_ENTER_OFFSET },
+            { scale: HOLD_MENU_ENTER_SCALE + (1 - HOLD_MENU_ENTER_SCALE) * p },
+          ],
+    };
+  });
 
   const handleLayout = useCallback((event: LayoutChangeEvent): void => {
     const { width, height } = event.nativeEvent.layout;
@@ -255,9 +270,7 @@ export function HoldMenu({
   const firstIsRail = showReactionRail;
 
   return (
-    // A separate window on iOS, so the menu sits above the composer dock and
-    // the headers that carry their own z-index. Its origin is the window's.
-    <FullWindowOverlay disableFullWindowOverlay={false}>
+    <ConversationOverlayLayer android={android} onRequestClose={onRequestClose}>
       <View
         ref={rootRef}
         collapsable={false}
@@ -267,7 +280,6 @@ export function HoldMenu({
         onAccessibilityEscape={onRequestClose}
         onLayout={handleLayout}
       >
-        <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]} />
         <Pressable
           accessibilityRole='button'
           accessibilityLabel='Close message actions'
@@ -291,8 +303,13 @@ export function HoldMenu({
                   cardStyle,
                 ]}
               >
-                <View className='bg-spaces-surface-raised' style={[styles.cardFill, SHADOW_TRAY]}>
-                  <ConversationPaletteProvider>{source?.content}</ConversationPaletteProvider>
+                {/* The shadow sits outside the clip, which would otherwise cut it off on iOS. */}
+                <View className='bg-spaces-surface-raised' style={styles.cardShadow}>
+                  <View style={styles.cardFill}>
+                    <ConversationPaletteProvider raised>
+                      {source?.content}
+                    </ConversationPaletteProvider>
+                  </View>
                 </View>
               </Animated.View>
             ) : null}
@@ -306,8 +323,8 @@ export function HoldMenu({
                 ]}
               >
                 <View
-                  className='flex-row items-center justify-between rounded-full bg-spaces-surface-raised'
-                  style={[{ height: HOLD_RAIL_HEIGHT, padding: HOLD_RAIL_PADDING }, SHADOW_RAIL]}
+                  className='flex-row items-center justify-between bg-spaces-surface-raised'
+                  style={styles.rail}
                 >
                   {QUICK_REACTIONS.map((emoji, index) => (
                     <Pressable
@@ -322,15 +339,17 @@ export function HoldMenu({
                       <Text style={styles.emoji}>{emoji}</Text>
                     </Pressable>
                   ))}
-                  <Pressable
-                    accessibilityRole='button'
-                    accessibilityLabel='More reactions'
-                    onPress={onOpenEmojiPicker}
-                    className='items-center justify-center rounded-full bg-spaces-surface'
-                    style={styles.reaction}
-                  >
-                    <Plus size={HOLD_MENU_ICON_SIZE} color={foreground} />
-                  </Pressable>
+                  <View className='items-center justify-center' style={styles.reaction}>
+                    <Pressable
+                      accessibilityRole='button'
+                      accessibilityLabel='More reactions'
+                      onPress={onOpenEmojiPicker}
+                      className='items-center justify-center rounded-full bg-spaces-surface'
+                      style={styles.more}
+                    >
+                      <Plus size={HOLD_MORE_ICON_SIZE} color={foreground} />
+                    </Pressable>
+                  </View>
                 </View>
               </Animated.View>
             ) : null}
@@ -344,63 +363,73 @@ export function HoldMenu({
                 ]}
               >
                 <View
-                  className='overflow-hidden bg-spaces-surface-raised'
-                  style={[
-                    { height: layout.menuHeight, borderRadius: HOLD_MENU_RADIUS },
-                    SHADOW_TRAY,
-                  ]}
+                  className='bg-spaces-surface-raised'
+                  style={[styles.menuShadow, { height: layout.menuHeight }]}
                 >
-                  <ScrollView
-                    scrollEnabled={layout.menuScrolls}
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={styles.menuContent}
-                  >
-                    {menuActions.map((action, index) => (
-                      <Pressable
-                        key={action.id}
-                        ref={!firstIsRail && index === 0 ? firstItemRef : undefined}
-                        accessibilityRole='button'
-                        accessibilityLabel={action.menuLabel}
-                        onPress={action.onPress}
-                        className='flex-row items-center active:bg-spaces-surface'
-                        style={styles.menuRow}
-                      >
-                        <View style={styles.menuIcon}>{action.icon}</View>
-                        <Text
-                          className='text-[16px] leading-[22px] text-spaces-foreground'
-                          style={
-                            action.variant === 'destructive'
-                              ? { color: HOLD_DESTRUCTIVE_COLOR }
-                              : undefined
-                          }
-                          numberOfLines={1}
+                  <View className='flex-1 overflow-hidden' style={styles.menuClip}>
+                    <ScrollView
+                      scrollEnabled={layout.menuScrolls}
+                      showsVerticalScrollIndicator={false}
+                      contentContainerStyle={styles.menuContent}
+                    >
+                      {menuActions.map((action, index) => (
+                        <Pressable
+                          key={action.id}
+                          ref={!firstIsRail && index === 0 ? firstItemRef : undefined}
+                          accessibilityRole='button'
+                          accessibilityLabel={action.menuLabel}
+                          onPress={action.onPress}
+                          className='flex-row items-center active:bg-spaces-surface'
+                          style={styles.menuRow}
                         >
-                          {action.menuLabel}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
+                          <View style={styles.menuIcon}>{action.icon}</View>
+                          <Text
+                            className='text-[16px] leading-[22px] text-spaces-foreground'
+                            style={action.variant === 'destructive' ? { color: danger } : undefined}
+                            numberOfLines={1}
+                          >
+                            {action.menuLabel}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
                 </View>
               </Animated.View>
             ) : null}
           </>
         ) : null}
       </View>
-    </FullWindowOverlay>
+    </ConversationOverlayLayer>
   );
 }
 
+/** The hold menu for the thread card. */
+export function ThreadCardHoldMenu(props: MessageActionsViewProps): ReactElement {
+  return <HoldMenu {...props} android='modal' />;
+}
+
 const styles = StyleSheet.create({
-  backdrop: { backgroundColor: '#000' },
   card: { position: 'absolute' },
   block: { position: 'absolute' },
-  cardFill: { flex: 1, borderRadius: HOLD_MENU_RADIUS, overflow: 'hidden' },
+  cardShadow: { flex: 1, borderRadius: HOLD_RADIUS, boxShadow: HOLD_CARD_SHADOW },
+  cardFill: { flex: 1, borderRadius: HOLD_RADIUS, overflow: 'hidden' },
+  rail: {
+    height: HOLD_RAIL_HEIGHT,
+    padding: HOLD_RAIL_PADDING,
+    borderRadius: HOLD_RADIUS,
+    ...TRAY_SHADOW,
+  },
   reaction: { width: HOLD_REACTION_SIZE, height: HOLD_REACTION_SIZE },
+  more: { width: HOLD_MORE_SIZE, height: HOLD_MORE_SIZE },
   emoji: { fontSize: HOLD_REACTION_EMOJI_SIZE },
-  menuContent: { paddingVertical: HOLD_MENU_PADDING_Y },
+  menuShadow: { borderRadius: HOLD_RADIUS, ...TRAY_SHADOW },
+  menuClip: { borderRadius: HOLD_RADIUS },
+  menuContent: { padding: HOLD_MENU_PADDING },
   menuRow: {
     height: HOLD_MENU_ROW_HEIGHT,
     paddingHorizontal: HOLD_MENU_ROW_PADDING_X,
+    borderRadius: HOLD_MENU_ROW_RADIUS,
     columnGap: HOLD_MENU_ROW_GAP,
   },
   menuIcon: {

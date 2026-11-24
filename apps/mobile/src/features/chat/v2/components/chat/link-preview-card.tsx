@@ -94,7 +94,8 @@ const fetchLinkPreviewMetadata = (preview: LinkPreview): Promise<LinkPreview | n
   return request;
 };
 
-const useResolvedLinkPreview = (preview: LinkPreview | null): LinkPreview | null => {
+/** The preview with its fetched page metadata merged in, once that arrives. */
+export const useResolvedLinkPreview = (preview: LinkPreview | null): LinkPreview | null => {
   const [resolved, setResolved] = useState<LinkPreview | null>(() => {
     if (!preview) return null;
     return metadataCache.get(preview.url) ?? preview;
@@ -125,6 +126,19 @@ const useResolvedLinkPreview = (preview: LinkPreview | null): LinkPreview | null
   return resolved;
 };
 
+/** Opens a previewed link: a call or message deep link in the app, anything else safe outside it. */
+export const openLinkPreviewUrl = (url: string): void => {
+  if (navigateToCallDeepLinkIfApplicable(router, url)) {
+    return;
+  }
+  if (navigateToMessageDeepLinkIfApplicable(router, url)) {
+    return;
+  }
+  if (isSafeExternalUrl(url)) {
+    void Linking.openURL(url).catch(() => undefined);
+  }
+};
+
 const LinkPreviewCardComponent = ({
   preview,
   isCurrentUser,
@@ -140,17 +154,7 @@ const LinkPreviewCardComponent = ({
 
   if (!resolvedPreview) return null;
 
-  const openLink = (): void => {
-    if (navigateToCallDeepLinkIfApplicable(router, resolvedPreview.url)) {
-      return;
-    }
-    if (navigateToMessageDeepLinkIfApplicable(router, resolvedPreview.url)) {
-      return;
-    }
-    if (isSafeExternalUrl(resolvedPreview.url)) {
-      void Linking.openURL(resolvedPreview.url).catch(() => undefined);
-    }
-  };
+  const openLink = (): void => openLinkPreviewUrl(resolvedPreview.url);
   const thumbnailUri =
     resolvedPreview.image ??
     (youtubeVideoId ? `https://img.youtube.com/vi/${youtubeVideoId}/hqdefault.jpg` : null);

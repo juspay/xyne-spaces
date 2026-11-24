@@ -11,8 +11,13 @@ const MARKDOWN_LIST_ITEM_PATTERN = /^[ \t]{0,3}(?:[-+*]|\d+[.)])[ \t]+/;
 type LongMessageCollapseArgs = {
   markdown: string;
   maxWidth: number;
-  viewportHeight: number;
-};
+  /** Average glyph width for a body set larger than the chat's; omitted keeps the chat estimate. */
+  charWidth?: number;
+} & (
+  | { viewportHeight: number; collapsedLines?: undefined }
+  /** A fixed fold for screens that set their own; the viewport is then not consulted. */
+  | { collapsedLines: number; viewportHeight?: undefined }
+);
 
 export type LongMessageCollapseModel = {
   shouldCollapse: boolean;
@@ -39,8 +44,12 @@ const countReadableCharacters = (readableText: string): number =>
 const countExplicitContentLines = (readableText: string): number =>
   readableText.split('\n').filter(line => line.trim().length > 0).length;
 
-const estimateMarkdownLineCount = (readableText: string, maxWidth: number): number => {
-  const charsPerLine = Math.max(18, Math.floor(maxWidth / ESTIMATED_BODY_CHAR_WIDTH));
+const estimateMarkdownLineCount = (
+  readableText: string,
+  maxWidth: number,
+  charWidth: number,
+): number => {
+  const charsPerLine = Math.max(18, Math.floor(maxWidth / charWidth));
   const lines = readableText.split('\n');
 
   return lines.reduce((total, line) => {
@@ -53,20 +62,22 @@ const estimateMarkdownLineCount = (readableText: string, maxWidth: number): numb
 const countMarkdownListItems = (markdown: string): number =>
   markdown.split('\n').filter(line => MARKDOWN_LIST_ITEM_PATTERN.test(line)).length;
 
-export const getLongMessageCollapseModel = ({
-  markdown,
-  maxWidth,
-  viewportHeight,
-}: LongMessageCollapseArgs): LongMessageCollapseModel => {
-  const collapsedNumberOfLines = clamp(
-    Math.floor((viewportHeight * LONG_MESSAGE_VIEWPORT_RATIO) / 20),
-    LONG_MESSAGE_MIN_COLLAPSED_LINES,
-    LONG_MESSAGE_MAX_COLLAPSED_LINES,
-  );
+export const getLongMessageCollapseModel = (
+  args: LongMessageCollapseArgs,
+): LongMessageCollapseModel => {
+  const { markdown, maxWidth, charWidth = ESTIMATED_BODY_CHAR_WIDTH } = args;
+  const collapsedNumberOfLines =
+    args.collapsedLines === undefined
+      ? clamp(
+          Math.floor((args.viewportHeight * LONG_MESSAGE_VIEWPORT_RATIO) / 20),
+          LONG_MESSAGE_MIN_COLLAPSED_LINES,
+          LONG_MESSAGE_MAX_COLLAPSED_LINES,
+        )
+      : args.collapsedLines;
   const readableText = markdownToCollapsedPreviewText(markdown);
   const readableCharacterCount = countReadableCharacters(readableText);
   const explicitContentLineCount = countExplicitContentLines(readableText);
-  const estimatedLineCount = estimateMarkdownLineCount(readableText, maxWidth);
+  const estimatedLineCount = estimateMarkdownLineCount(readableText, maxWidth, charWidth);
   const collapseThreshold = collapsedNumberOfLines + LONG_MESSAGE_LINE_BUFFER;
   const isClearlyLongText = readableCharacterCount >= LONG_MESSAGE_MIN_READABLE_CHARS;
   const isStructuredList = countMarkdownListItems(markdown) >= 2;

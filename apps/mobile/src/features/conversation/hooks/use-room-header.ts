@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { useRouter } from 'expo-router';
 
 import { useConversationHeaderRoutes } from '@/src/components/chat/chat-header-v3/use-conversation-header-routes';
 import { chatOpenProfiler } from '@/src/features/chat/chatOpenProfiler';
@@ -7,7 +6,7 @@ import { useConversationHeaderData } from '@/src/hooks/useConversationHeaderData
 
 import { roomKindOf, roomTitle, type RoomKind } from '../model/room-title';
 
-export type RoomHeaderModel = {
+type RoomHeaderModel = {
   isTitlePending: boolean;
   kind: RoomKind;
   title: string;
@@ -17,21 +16,18 @@ export type RoomHeaderModel = {
   dmUserId: string | null;
   isOnline: boolean;
   isPrivateChannel: boolean;
-  statusEmoji: string | null;
-  statusText: string | null;
   onOpenInfo: () => void;
   onAskAI: () => void;
-  onSearch: () => void;
   onCall: () => void;
 };
 
 /**
  * What the room header shows and does. The data, call handler and the info and
- * Ask AI routes are the classic header's; search is the one route of its own.
+ * Ask AI routes are the classic header's; search is find in this channel,
+ * which `ChannelFindProvider` owns.
  */
 export function useRoomHeader(channelId: string, enabled: boolean): RoomHeaderModel {
   chatOpenProfiler.count('chat_header_v3_render');
-  const router = useRouter();
   const {
     channel,
     displayName,
@@ -40,8 +36,6 @@ export function useRoomHeader(channelId: string, enabled: boolean): RoomHeaderMo
     isChannel,
     isPrivateChannel,
     dmProfileUserId,
-    dmStatusEmoji,
-    dmStatusContent,
     isOnline,
     memberCount,
     memberLabel,
@@ -55,13 +49,6 @@ export function useRoomHeader(channelId: string, enabled: boolean): RoomHeaderMo
   const kind = roomKindOf(channel?.scopeType);
   const { handleOpenInfo, handleAskAI } = useConversationHeaderRoutes(channelId, channel);
 
-  const onSearch = useCallback((): void => {
-    router.push({
-      pathname: '/global-search',
-      params: { scopeChannelId: channelId, scopeLabel: roomTitle(displayName, kind) },
-    });
-  }, [channelId, displayName, kind, router]);
-
   const onCall = useCallback((): void => {
     void handleCallPress();
   }, [handleCallPress]);
@@ -74,11 +61,8 @@ export function useRoomHeader(channelId: string, enabled: boolean): RoomHeaderMo
     dmUserId: isDM ? dmProfileUserId : null,
     isOnline,
     isPrivateChannel: isChannel && isPrivateChannel,
-    statusEmoji: isDM && dmStatusEmoji ? dmStatusEmoji : null,
-    statusText: isDM && dmStatusEmoji && dmStatusContent ? dmStatusContent : null,
     onOpenInfo: handleOpenInfo,
     onAskAI: handleAskAI,
-    onSearch,
     onCall,
   };
 }

@@ -25,6 +25,8 @@ export const useThreadHeaderActions = ({
 }): {
   replyCount: number;
   repliesMd: string | null | undefined;
+  /** The message the thread hangs off, when loaded. */
+  rootMessage: Parameters<typeof messageScopeParams>[0] | undefined;
   handleOpenParentConversation: () => void;
   handleAskAI: () => void;
 } => {
@@ -73,6 +75,7 @@ export const useThreadHeaderActions = ({
   return {
     replyCount: conversation?.replyCount ?? 0,
     repliesMd: conversation?.replies_md,
+    rootMessage,
     handleOpenParentConversation,
     handleAskAI,
   };

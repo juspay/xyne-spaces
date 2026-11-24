@@ -30,6 +30,14 @@ export const SEMANTIC_ROLES = [
   /** Unread badge, and anything that has to read as "new". */
   'accent',
   'accent-foreground',
+  /** The "Read more" link under a folded message: the accent, as readable text. */
+  'read-more',
+  /** Something finished well (an agent plan's "Done" tag), and the surface behind it. */
+  'positive',
+  'positive-surface',
+  /** Under way (a ticket in progress), and stuck or urgent (a blocked ticket, urgent priority). */
+  'warning',
+  'negative',
 ] as const;
 
 export type SemanticRole = (typeof SEMANTIC_ROLES)[number];

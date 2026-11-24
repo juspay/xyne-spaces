@@ -1,29 +1,21 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Calendar, Check, Clock } from 'lucide-react-native';
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
-import { Alert, Platform, Pressable, Text, View } from 'react-native';
+import { useCallback, type ReactElement } from 'react';
+import { Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { cn } from '@/src/utils/cn';
-import { haptics } from '@/src/utils/haptics';
 
-import {
-  SCHEDULE_PRESETS,
-  defaultCustomScheduleTime,
-  formatScheduleConfirmCopy,
-  validateScheduledFor,
-} from './schedule-message-utils';
-
-type PickerMode = 'date' | 'time' | null;
-type ScheduleView = 'presets' | 'custom' | 'confirm';
+import { SCHEDULE_PRESETS, formatScheduleConfirmCopy } from './schedule-message-utils';
+import { useSchedulePicker } from './use-schedule-picker';
 
 export type ScheduleSheetMode = 'create' | 'reschedule';
 
-type ScheduleMessageSheetProps = {
+export type ScheduleMessageSheetProps = {
   isOpen: boolean;
   mode: ScheduleSheetMode;
   initialScheduledFor?: number;
@@ -42,91 +34,24 @@ export function ScheduleMessageSheet({
   const { accentBg, accentFg } = useBubbleAccent();
   const foreground = useCSSVariable('--color-foreground') as string;
   const border = useCSSVariable('--color-border') as string;
-  const [view, setView] = useState<ScheduleView>('presets');
-  const [customDateTime, setCustomDateTime] = useState<Date>(() => defaultCustomScheduleTime());
-  const [pendingScheduledFor, setPendingScheduledFor] = useState<number | null>(null);
-  const [pickerMode, setPickerMode] = useState<PickerMode>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setView('presets');
-      setPickerMode(null);
-      setPendingScheduledFor(null);
-      setIsSubmitting(false);
-      return;
-    }
-    const initial =
-      typeof initialScheduledFor === 'number' && initialScheduledFor > Date.now()
-        ? new Date(initialScheduledFor)
-        : defaultCustomScheduleTime();
-    setCustomDateTime(initial);
-  }, [initialScheduledFor, isOpen]);
-
   const close = useCallback((): void => {
     onOpenChange(false);
   }, [onOpenChange]);
-
-  const goToConfirm = useCallback((scheduledFor: number): void => {
-    const error = validateScheduledFor(scheduledFor);
-    if (error) {
-      Alert.alert('Pick a future time', error);
-      return;
-    }
-    setPickerMode(null);
-    setPendingScheduledFor(scheduledFor);
-    setView('confirm');
-  }, []);
-
-  const submit = useCallback(async (): Promise<void> => {
-    if (pendingScheduledFor === null) return;
-    const error = validateScheduledFor(pendingScheduledFor);
-    if (error) {
-      Alert.alert('Pick a future time', error);
-      return;
-    }
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    try {
-      await onConfirm(pendingScheduledFor);
-      void haptics.success();
-      close();
-    } catch (caught) {
-      Alert.alert(
-        'Could not schedule',
-        caught instanceof Error ? caught.message : 'Please try again.',
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [close, isSubmitting, onConfirm, pendingScheduledFor]);
-
-  const togglePicker = useCallback((next: Exclude<PickerMode, null>): void => {
-    setPickerMode(current => (current === next ? null : next));
-  }, []);
-
-  const handlePickerChange = useCallback(
-    (event: DateTimePickerEvent, selectedDate?: Date): void => {
-      if (Platform.OS === 'android') setPickerMode(null);
-      if (event.type === 'dismissed' || !selectedDate) return;
-      setCustomDateTime(current => {
-        const next = new Date(current);
-        if (pickerMode === 'date') {
-          next.setFullYear(
-            selectedDate.getFullYear(),
-            selectedDate.getMonth(),
-            selectedDate.getDate(),
-          );
-        } else {
-          next.setHours(selectedDate.getHours(), selectedDate.getMinutes(), 0, 0);
-        }
-        return next;
-      });
-    },
-    [pickerMode],
-  );
-
-  const pickerValue = customDateTime > new Date() ? customDateTime : defaultCustomScheduleTime();
+  const {
+    view,
+    customDateTime,
+    pendingScheduledFor,
+    pickerMode,
+    isSubmitting,
+    pickerValue,
+    goToConfirm,
+    submit,
+    openCustom,
+    backToPresets,
+    togglePicker,
+    closePicker,
+    handlePickerChange,
+  } = useSchedulePicker({ isOpen, initialScheduledFor, onConfirm, onDone: close });
 
   return (
     <AppBottomSheet
@@ -165,10 +90,7 @@ export function ScheduleMessageSheet({
               <Pressable
                 accessibilityRole='button'
                 accessibilityLabel='Custom time'
-                onPress={() => {
-                  setPickerMode(null);
-                  setView('custom');
-                }}
+                onPress={openCustom}
                 className='flex-row items-center gap-3 border-t border-border px-4 py-4 active:bg-accent'
               >
                 <Calendar size={18} color={foreground} />
@@ -230,7 +152,7 @@ export function ScheduleMessageSheet({
                     <Pressable
                       accessibilityRole='button'
                       accessibilityLabel='Done selecting schedule time'
-                      onPress={() => setPickerMode(null)}
+                      onPress={closePicker}
                       className='items-center border-t border-foreground/10 py-3 active:opacity-70'
                     >
                       <View className='flex-row items-center gap-1.5'>
@@ -276,7 +198,7 @@ export function ScheduleMessageSheet({
               <Pressable
                 accessibilityRole='button'
                 accessibilityLabel='Back'
-                onPress={() => setView('presets')}
+                onPress={backToPresets}
                 className='mt-2 h-12 items-center justify-center rounded-xl active:opacity-80'
               >
                 <Text className='text-[16px] text-secondary-foreground'>Back</Text>

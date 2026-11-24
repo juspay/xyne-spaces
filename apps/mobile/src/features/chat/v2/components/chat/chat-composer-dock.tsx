@@ -32,6 +32,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     borderRadius: SCROLL_TO_BOTTOM_SIZE / 2,
   },
+  intrinsicContent: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
 });
 
 const SCROLL_TO_BOTTOM_BUTTON_GAP = 12;
@@ -120,6 +126,14 @@ export type ChatComposerDockProps = {
   onShellReady?: () => void;
   shellReadyKey?: string;
   scrollToBottomSlot?: ReactNode;
+  /**
+   * Lay the composer out at its own height instead of inside the shell's
+   * current height. In flow, the shell's height caps what a measured text field
+   * is offered, so a field with no growing sibling rows never grows; out of
+   * flow it reaches its own max height in one pass and the shell follows
+   * through `onComposerLayout`. Unset keeps the in-flow content.
+   */
+  intrinsicContentHeight?: boolean;
 };
 
 export function ChatComposerDock({
@@ -132,6 +146,7 @@ export function ChatComposerDock({
   onShellReady,
   shellReadyKey,
   scrollToBottomSlot,
+  intrinsicContentHeight = false,
 }: ChatComposerDockProps): ReactElement {
   const shellRef = useRef<View>(null);
   const composerContentRef = useRef<View>(null);
@@ -222,6 +237,16 @@ export function ChatComposerDock({
     [markShellReady, onComposerLayout],
   );
 
+  const holdStyle = disabled
+    ? {
+        opacity: 0,
+        transform: [
+          { translateX: COMPOSER_HOLD_OFFSCREEN_TRANSLATE },
+          { translateY: COMPOSER_HOLD_OFFSCREEN_TRANSLATE },
+        ],
+      }
+    : undefined;
+
   const animatedComposerStyle = useAnimatedStyle(
     () => ({ height: composerHeight.value }),
     [composerHeight],
@@ -262,17 +287,7 @@ export function ChatComposerDock({
           collapsable={false}
           pointerEvents={disabled ? 'none' : 'auto'}
           onLayout={handleComposerLayout}
-          style={
-            disabled
-              ? {
-                  opacity: 0,
-                  transform: [
-                    { translateX: COMPOSER_HOLD_OFFSCREEN_TRANSLATE },
-                    { translateY: COMPOSER_HOLD_OFFSCREEN_TRANSLATE },
-                  ],
-                }
-              : undefined
-          }
+          style={intrinsicContentHeight ? [styles.intrinsicContent, holdStyle] : holdStyle}
         >
           {children}
         </View>

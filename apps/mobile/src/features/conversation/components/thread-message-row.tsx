@@ -1,16 +1,15 @@
 import { memo, useCallback, type ReactElement } from 'react';
 import { View } from 'react-native';
+import { usePendingStatusByMessageId } from '@xyne/shared/messages';
 
 import type { ThreadMessageRowProps } from '@/src/features/chat/v2/components/chat/chat-renderers';
 import { useInitialMessageFacts } from '@/src/features/chat/v2/components/chat/chat-message-list-row';
 
-import { useHoldSource } from '../hooks/use-hold-source';
+import { useIsContinuation, useRowFlow } from '../hooks/use-agent-plan';
+import { useFlatHoldCopy } from '../hooks/use-flat-hold-copy';
 import { THREAD_LIST_INSET } from '../constants';
-import { isContinuationRow } from '../model/grouping';
-import { usesClassicRow } from '../model/row-policy';
-import { FlatMessage } from './flat-message';
-
-const NOOP = (): void => undefined;
+import { isRestyledRow } from '../model/row-policy';
+import { FlatMessage, type FlatMessageContentProps } from './flat-message';
 
 /**
  * A message inside the thread screen: root first, replies after, all flat.
@@ -32,11 +31,18 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
   onContentExpanded,
   onPress,
   onLongPress,
+  onTicketPress,
   previousPaint,
+  previousConversation,
 }: ThreadMessageRowProps): ReactElement {
-  const { isFlowJsonMessage } = useInitialMessageFacts(conversation);
+  const { plan, isClassicFlow } = useRowFlow(useInitialMessageFacts(conversation));
+  const sendStatus = usePendingStatusByMessageId(paintRow.messageId ?? '');
+  const isContinuation = useIsContinuation(previousPaint, previousConversation, paintRow, {
+    stripEndsBlock: false,
+    showsSendStatus: sendStatus !== null,
+  });
 
-  const flatProps = {
+  const flatProps: FlatMessageContentProps = {
     paintRow,
     conversation,
     currentUser,
@@ -47,27 +53,16 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
     allowMediaHydration,
     allowInlineEmojiHydration,
     hydrateInlineEmoji,
-    isContinuation: isContinuationRow(previousPaint, paintRow, { stripEndsBlock: false }),
+    isContinuation,
+    plan,
   };
-  // The hold menu lifts a copy of this message: still, and without press handlers.
-  const { rowRef, registerHold } = useHoldSource(() => (
-    <FlatMessage {...flatProps} onPress={NOOP} />
-  ));
+  const { rowRef, registerHold } = useFlatHoldCopy(flatProps);
   const handleHold = useCallback((): void => {
-    registerHold(conversation.conversationId);
+    registerHold(paintRow.messageId);
     onLongPress?.();
-  }, [conversation.conversationId, onLongPress, registerHold]);
+  }, [onLongPress, paintRow.messageId, registerHold]);
 
-  const classic = usesClassicRow({
-    hasConversation: true,
-    rowKind: paintRow.rowKind,
-    isTicketActivity: paintRow.isTicketActivity === true,
-    hasTicketPreview: !!paintRow.ticketPreview,
-    hasRecordingPreview: !!paintRow.recordingPreview,
-    isFlowJson: isFlowJsonMessage,
-  });
-
-  if (classic) return classicContent;
+  if (!isRestyledRow(paintRow, { isFlowJson: isClassicFlow })) return classicContent;
 
   return (
     // The thread list insets its rows by 12; the flat message carries its own padding.
@@ -77,6 +72,7 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
         rowRef={rowRef}
         onPress={onPress}
         onLongPress={onLongPress ? handleHold : undefined}
+        onTicketPress={onTicketPress}
       />
     </View>
   );

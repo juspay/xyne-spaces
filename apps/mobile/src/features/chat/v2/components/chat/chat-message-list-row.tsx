@@ -184,7 +184,8 @@ export const useInitialMessageFacts = (
     [conversation?.initial_message_md],
   );
   const isForwardedMessage = initialMessageSummary?.msgType === MessageType.FORWARDED;
-  const isFlowJsonMessage = isFlowJsonHtml(initialMessageSummary?.content ?? '');
+  const content = initialMessageSummary?.content ?? '';
+  const isFlowJsonMessage = useMemo(() => isFlowJsonHtml(content), [content]);
   return { initialMessageSummary, isForwardedMessage, isFlowJsonMessage };
 };
 

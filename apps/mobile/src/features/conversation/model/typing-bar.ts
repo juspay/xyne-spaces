@@ -1,20 +1,18 @@
-import { COMPOSER_INPUT_LINE_HEIGHT } from '@/src/components/input-composer/composer-input-typography';
-import { getChatComposerBottomPadding } from '@/src/features/chat/v3/composer/chatKeyboardConfig';
+import { getChatComposerBottomPadding } from '@/src/features/chat/v2/chatKeyboardConfig';
 
-export type TypingBarAction = 'mic' | 'send' | 'dictating';
+import {
+  TYPING_BAR_DICTATING_WIDTH,
+  TYPING_BAR_FIELD_HEIGHT,
+  TYPING_BAR_MIC_SIZE,
+  TYPING_BAR_PADDING_TOP,
+  TYPING_BAR_REPLY_PADDING_Y,
+  TYPING_BAR_SEND_SIZE,
+  TYPING_BAR_TRAILING_GUTTER,
+} from '../constants';
 
-export const TYPING_BAR_REPLY_PLACEHOLDER = 'Reply…';
+type TypingBarAction = 'mic' | 'send' | 'dictating';
 
-/** Width the field reserves for each trailing control, so text never runs under it. */
-export const MIC_SIZE = 36;
-/** Send fills the 36px pill exactly; anything larger is clipped by it. */
-export const SEND_SIZE = 36;
-/** The bar's own top padding, the pill's vertical padding and its single line. */
-export const BAR_TOP_PADDING = 8;
-export const FIELD_PADDING_Y = 9;
-export const FIELD_MIN_HEIGHT = FIELD_PADDING_Y * 2 + COMPOSER_INPUT_LINE_HEIGHT;
-export const DICTATING_WIDTH = 128;
-const TRAILING_GUTTER = 4;
+const TYPING_BAR_REPLY_PLACEHOLDER = 'Reply…';
 
 /**
  * What sits at the right of the field. Dictation wins while listening; otherwise
@@ -32,8 +30,13 @@ export function typingBarAction(state: {
 }
 
 export function trailingInset(action: TypingBarAction): number {
-  const width = action === 'send' ? SEND_SIZE : action === 'mic' ? MIC_SIZE : DICTATING_WIDTH;
-  return width + TRAILING_GUTTER;
+  const width =
+    action === 'send'
+      ? TYPING_BAR_SEND_SIZE
+      : action === 'mic'
+        ? TYPING_BAR_MIC_SIZE
+        : TYPING_BAR_DICTATING_WIDTH;
+  return width + TYPING_BAR_TRAILING_GUTTER;
 }
 
 /** The least height the bar occupies, so the list reserves what the bar really needs. */
@@ -43,9 +46,14 @@ export function getRoomTypingBarMinimumHeight(
 ): number {
   return Math.ceil(
     getChatComposerBottomPadding(safeAreaBottom, includeBottomSafeArea) +
-      BAR_TOP_PADDING +
-      FIELD_MIN_HEIGHT,
+      TYPING_BAR_PADDING_TOP +
+      TYPING_BAR_FIELD_HEIGHT,
   );
+}
+
+/** Figma "Typing bar · Reply": the thread card's bar has its own padding and no safe area. */
+export function getThreadTypingBarMinimumHeight(): number {
+  return TYPING_BAR_REPLY_PADDING_Y * 2 + TYPING_BAR_FIELD_HEIGHT;
 }
 
 /** The screen's placeholder wins; a thread without one reads "Reply…". */

@@ -20,6 +20,11 @@
       --color-spaces-surface-raised: #ffffff;
       --color-spaces-accent: #F0716A;
       --color-spaces-accent-foreground: #ffffff;
+      --color-spaces-read-more: #c9524b;
+      --color-spaces-positive: #317a4a;
+      --color-spaces-positive-surface: #e0f5e4;
+      --color-spaces-warning: #f0a35e;
+      --color-spaces-negative: #d0453b;
     }
     @variant dark {
       --color-spaces-background: #181819;
@@ -36,6 +41,11 @@
       --color-spaces-surface-raised: #3c3c3c;
       --color-spaces-accent: #F0716A;
       --color-spaces-accent-foreground: #ffffff;
+      --color-spaces-read-more: #e07a73;
+      --color-spaces-positive: #7fd49a;
+      --color-spaces-positive-surface: #1b3324;
+      --color-spaces-warning: #f0a35e;
+      --color-spaces-negative: #d0453b;
     }
   }
 }

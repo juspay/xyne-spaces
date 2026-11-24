@@ -58,6 +58,16 @@ export const COMPOSER_INPUT_COLLAPSED_HEIGHT = 24;
  */
 export const COMPOSER_INPUT_EXPANDED_MAX_HEIGHT = 96;
 
+/**
+ * Opt-in line metrics for a restyled field: blurred it is one `lineHeight`
+ * tall, focused it grows to `maxLines` before scrolling. Unset, the classic
+ * 18 line with the collapsed and expanded heights above applies.
+ */
+export type ComposerFieldMetrics = {
+  lineHeight: number;
+  maxLines: number;
+};
+
 /** Fixed width for DM status placeholder text before the trailing status emoji. */
 export const COMPOSER_STATUS_PLACEHOLDER_TEXT_WIDTH = 180;
 export const PLACEHOLDER_MAX_LENGTH = 20;

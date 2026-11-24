@@ -55,7 +55,25 @@ export const indigo = {
   500: '#5e6ad2',
 } as const;
 
-/** The default theme's accent: unread badges, the compose button. */
+/**
+ * The default theme's accent: unread badges, the compose button. `400` and
+ * `600` are the same hue tuned to read as text on the dark and light pages.
+ */
 export const coral = {
+  400: '#e07a73',
   500: '#F0716A',
+  600: '#c9524b',
+} as const;
+
+/** Finished, done: Figma's Container/Positive (`100`) and Text/Positive (`700`), with dark-page twins. */
+export const green = {
+  100: '#e0f5e4',
+  300: '#7fd49a',
+  700: '#317a4a',
+  900: '#1b3324',
+} as const;
+
+/** Blocked or urgent: Figma's Error/Text, a ticket's red ring and priority bars. */
+export const red = {
+  500: '#d0453b',
 } as const;

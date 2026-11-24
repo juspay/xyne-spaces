@@ -156,15 +156,25 @@ export function useComposerDraft({
 
   // Restore the thread draft synchronously before paint when leaving edit mode
   // so reply-only UI (e.g. also-send-to-channel) does not flash stale content.
+  const wasSuppressedRef = useRef(suppressDraftSync);
   useLayoutEffect(() => {
+    const leavingEdit = wasSuppressedRef.current && !suppressDraftSync;
+    wasSuppressedRef.current = suppressDraftSync;
     if (suppressDraftSync) return;
+    // Typing in the edit was not typing in the draft, so the synced draft's
+    // attachments come back below.
+    if (leavingEdit) composerDirtyRef.current = false;
 
     const hydrationSeq = ++hydrationSeqRef.current;
     const currentDraftId = draftId;
     const { text: nextText, html: nextHtml } = getDraft(currentDraftId);
 
     resetComposerAndInput(nextText, nextHtml, { skipInputSync: true });
-    const paintedNative = paintNativeValue(nextText, nextHtml);
+    // Leaving an edit, the field still shows the edited message: the draft is
+    // written even when empty, since the input keeps its edit defaultValue.
+    const leaveEditNative = composerNativeSetValue(nextText, nextHtml);
+    if (leavingEdit) syncInputValue(leaveEditNative);
+    const paintedNative = leavingEdit ? leaveEditNative : paintNativeValue(nextText, nextHtml);
 
     void prepareDraftComposerContent(nextText, nextHtml).then(({ text, html }) => {
       if (hydrationSeq !== hydrationSeqRef.current) return;
@@ -183,6 +193,7 @@ export function useComposerDraft({
     resetComposerAndInput,
     suppressDraftSync,
     suppressDraftSyncRef,
+    syncInputValue,
     syncSendUi,
     textRef,
   ]);
@@ -192,8 +203,11 @@ export function useComposerDraft({
     appliedRemoteRowIdRef.current = null;
   }, [draftId]);
 
+  // Runs again as an edit ends (`suppressDraftSync`), which reset the
+  // attachments, so the synced draft's attachments return with its text.
   useEffect(() => {
-    if (suppressDraftSyncRef.current || !channelId) return;
+    // The prop re-runs this as an edit ends; the ref also covers a twin edit.
+    if (suppressDraftSync || suppressDraftSyncRef.current || !channelId) return;
 
     const row = findZeroDraftForComposer(zeroDrafts ?? [], channelId, threadId);
     const localDraft = getDraft(draftId);
@@ -256,6 +270,7 @@ export function useComposerDraft({
     htmlRef,
     resetComposerAndInput,
     setAttachmentsState,
+    suppressDraftSync,
     suppressDraftSyncRef,
     syncInputValue,
     syncSendUi,

@@ -4,13 +4,17 @@ import {
   useContext,
   useEffect,
   useState,
+  type ComponentType,
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { View } from 'react-native';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { KeyboardController } from 'react-native-keyboard-controller';
 
-import { ScheduleMessageSheet } from '@/src/features/drafts-sent/schedule-message-sheet';
+import {
+  ScheduleMessageSheet,
+  type ScheduleMessageSheetProps,
+} from '@/src/features/drafts-sent/schedule-message-sheet';
 import { formatScheduledToast } from '@/src/features/drafts-sent/schedule-message-utils';
 import { showMessageToast } from '@/src/utils/toast';
 import { cn } from '@/src/utils/cn';
@@ -19,6 +23,7 @@ import { useChatInputConversation, useChatInputHandlers } from './input-composer
 import {
   UpcomingScheduledBanner,
   useUpcomingScheduledBannerVisible,
+  type ScheduledBannerViewProps,
 } from './upcoming-scheduled-banner';
 
 const ComposerScheduleStripContext = createContext(false);
@@ -30,6 +35,17 @@ export const useComposerScheduleStripVisible = (): boolean =>
 type ComposerScheduleHostProps = {
   /** Composer field(s) that share the same rounded chrome as the schedule strip. */
   children: ReactNode;
+  /** Merged after the default chrome, for composers that restyle the field. */
+  className?: string;
+  /** Applied over the chrome's classes, for metrics a composer keeps as numbers (its radius). */
+  style?: StyleProp<ViewStyle>;
+  /** Draws the schedule picker instead of the classic bottom sheet, with the sheet's own props. */
+  SchedulePicker?: ComponentType<ScheduleMessageSheetProps> | undefined;
+  /**
+   * Draws the upcoming banner above the field's chrome instead of the strip
+   * glued inside it; the field then keeps its rounded top.
+   */
+  ScheduledBannerView?: ComponentType<ScheduledBannerViewProps> | undefined;
 };
 
 /**
@@ -37,7 +53,14 @@ type ComposerScheduleHostProps = {
  * Send long-press calls `openSchedule` from handlers, which opens this sheet.
  * Wraps children so the schedule strip sits inside the same input bubble.
  */
-export function ComposerScheduleHost({ children }: ComposerScheduleHostProps): ReactElement {
+export function ComposerScheduleHost({
+  children,
+  className,
+  style,
+  ...seams
+}: ComposerScheduleHostProps): ReactElement {
+  const SchedulePicker = seams.SchedulePicker ?? ScheduleMessageSheet;
+  const ScheduledBannerView = seams.ScheduledBannerView;
   const { conversationId, threadId, isEditing, isTwinEditing } = useChatInputConversation();
   const { registerOpenSchedule, confirmSchedule, inputRef } = useChatInputHandlers();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -84,27 +107,34 @@ export function ComposerScheduleHost({ children }: ComposerScheduleHostProps): R
     threadId || null,
     recentScheduledFor,
   );
-  const showScheduleStrip = hasUpcomingBanner && !isEditing && !isTwinEditing;
+  const showScheduleStrip =
+    hasUpcomingBanner && !isEditing && !isTwinEditing && ScheduledBannerView === undefined;
+  const banner =
+    !isEditing && !isTwinEditing ? (
+      <UpcomingScheduledBanner
+        channelId={conversationId}
+        conversationId={threadId || null}
+        recentScheduledFor={recentScheduledFor}
+        onRecentScheduledForExpire={clearRecentScheduledFor}
+        View={ScheduledBannerView}
+      />
+    ) : null;
 
   return (
     <ComposerScheduleStripContext.Provider value={showScheduleStrip}>
+      {ScheduledBannerView === undefined ? null : banner}
       <View
         className={cn(
           'w-full self-stretch rounded-[20px] bg-conversation-input-bg',
           isTwinEditing ? '' : 'shadow-xs',
+          className,
         )}
+        style={style}
       >
-        {!isEditing && !isTwinEditing ? (
-          <UpcomingScheduledBanner
-            channelId={conversationId}
-            conversationId={threadId || null}
-            recentScheduledFor={recentScheduledFor}
-            onRecentScheduledForExpire={clearRecentScheduledFor}
-          />
-        ) : null}
+        {ScheduledBannerView === undefined ? banner : null}
         {children}
       </View>
-      <ScheduleMessageSheet
+      <SchedulePicker
         isOpen={isSheetOpen}
         mode='create'
         onOpenChange={setIsSheetOpen}

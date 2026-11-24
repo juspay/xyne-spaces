@@ -1,5 +1,5 @@
 import { Check } from 'lucide-react-native';
-import { memo, type ReactElement } from 'react';
+import { memo, useCallback, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 
@@ -17,16 +17,39 @@ type AlsoSendToChannelProps = {
   label?: string;
 };
 
+type AlsoSendToChannelState = {
+  /** A thread reply with something to send, outside an edit. */
+  visible: boolean;
+  checked: boolean;
+  toggle: () => void;
+};
+
+/** When the "Also send to channel" choice shows, and its value, for any surface that draws it. */
+export const useAlsoSendToChannel = (): AlsoSendToChannelState => {
+  const { threadId, isEditing, isTwinEditing } = useChatInputConversation();
+  const { alsoSendToChannel } = useChatInputComposerState();
+  const { hasComposerContent } = useChatInputText();
+  const { setAlsoSendToChannelState } = useChatInputActions();
+  const toggle = useCallback(
+    (): void => setAlsoSendToChannelState(!alsoSendToChannel),
+    [alsoSendToChannel, setAlsoSendToChannelState],
+  );
+  return {
+    visible: !isEditing && !isTwinEditing && Boolean(threadId) && hasComposerContent,
+    checked: alsoSendToChannel,
+    toggle,
+  };
+};
+
 const AlsoSendToChannelComponent = ({
   className,
   label = 'Also send to channel',
 }: AlsoSendToChannelProps): ReactElement | null => {
-  const { threadId, isEditing, isTwinEditing } = useChatInputConversation();
-  const { alsoSendToChannel } = useChatInputComposerState();
-  const { hasComposerContent } = useChatInputText();
-  const canShowAlsoSendToChannel =
-    !isEditing && !isTwinEditing && Boolean(threadId) && hasComposerContent;
-  const { setAlsoSendToChannelState } = useChatInputActions();
+  const {
+    visible: canShowAlsoSendToChannel,
+    checked: alsoSendToChannel,
+    toggle,
+  } = useAlsoSendToChannel();
   const {
     tokens: { ambientActionBg },
   } = useSelectedChatBubbleContentTokens();
@@ -44,7 +67,7 @@ const AlsoSendToChannelComponent = ({
       accessibilityRole='checkbox'
       accessibilityLabel={label}
       accessibilityState={{ checked: alsoSendToChannel }}
-      onPress={() => setAlsoSendToChannelState(!alsoSendToChannel)}
+      onPress={toggle}
       className={cn('flex-row items-center gap-2 px-1 py-1', className)}
     >
       <View

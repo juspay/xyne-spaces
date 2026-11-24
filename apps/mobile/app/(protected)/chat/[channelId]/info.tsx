@@ -1,4 +1,4 @@
-import { ReactElement, ReactNode, useState } from 'react';
+import { ReactElement, ReactNode, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { SafeAreaView } from '@/src/components/ui/safe-area-view';
@@ -44,6 +44,9 @@ import { canShowChannelTickets } from '@/src/features/channel-tickets/gate';
 import { useChannelTicketsWarmup } from '@/src/features/channel-tickets/load';
 import { ChannelScopeType } from '@xyne/shared';
 import { useCanReadTicket } from '@xyne/shared/hooks';
+// Direct paths, not the conversation barrel: only the redesigned info screen is needed here.
+import { ChannelInfoScreen } from '@/src/features/conversation/components/channel-info-screen';
+import { isConversationThreadCard } from '@/src/features/conversation/flag';
 
 // The icon box is sized to exactly one line of the title so the #/lock stays
 // centred on the first line when a long name wraps. Must track `text-2xl`,
@@ -431,4 +434,13 @@ const ConversationInfoScreen = (): ReactElement => {
   );
 };
 
-export default ConversationInfoScreen;
+/**
+ * The redesigned info screen comes with the redesigned room (the flag the
+ * thread route reads), pinned for the mount like the flags it reads.
+ */
+const ConversationInfoRoute = (): ReactElement => {
+  const conversation = useRef(isConversationThreadCard()).current;
+  return conversation ? <ChannelInfoScreen /> : <ConversationInfoScreen />;
+};
+
+export default ConversationInfoRoute;

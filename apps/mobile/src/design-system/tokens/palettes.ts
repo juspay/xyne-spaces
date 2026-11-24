@@ -1,6 +1,6 @@
 import type { ThemeName } from 'uniwind';
 
-import { blue, coral, indigo, neutral, orange } from './primitives';
+import { blue, coral, green, indigo, neutral, orange, red } from './primitives';
 import type { RoleValues } from './roles';
 
 export type ThemeMode = 'light' | 'dark';
@@ -41,6 +41,11 @@ const PALETTES = {
       'surface-raised': neutral[0],
       accent: coral[500],
       'accent-foreground': neutral[0],
+      'read-more': coral[600],
+      positive: green[700],
+      'positive-surface': green[100],
+      warning: orange[300],
+      negative: red[500],
     },
     dark: {
       background: neutral[900],
@@ -62,6 +67,12 @@ const PALETTES = {
       'surface-raised': neutral[700],
       accent: coral[500],
       'accent-foreground': neutral[0],
+      /** Lifted to 6:1 on the dark page; the light side's coral is only 4:1 here. */
+      'read-more': coral[400],
+      positive: green[300],
+      'positive-surface': green[900],
+      warning: orange[300],
+      negative: red[500],
     },
   },
 } satisfies Record<string, Palette>;

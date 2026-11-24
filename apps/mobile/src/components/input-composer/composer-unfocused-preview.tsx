@@ -1,13 +1,14 @@
 import { memo, useMemo, type ReactElement } from 'react';
 import { Platform, Text, type TextStyle } from 'react-native';
 
-import { COMPOSER_INPUT_FONT_SIZE, COMPOSER_INPUT_LINE_HEIGHT } from './composer-input-typography';
+import { COMPOSER_INPUT_FONT_SIZE } from './composer-input-typography';
 import { parseComposerHtmlToUnfocusedPreviewSegments } from './utils/composer-unfocused-preview.utils';
 
 type ComposerUnfocusedPreviewProps = {
   html: string;
   fallbackText: string;
   textColor: string;
+  lineHeight: number;
   mentionBg: string;
   mentionText: string;
 };
@@ -16,6 +17,7 @@ const ComposerUnfocusedPreviewComponent = ({
   html,
   fallbackText,
   textColor,
+  lineHeight,
   mentionBg,
   mentionText,
 }: ComposerUnfocusedPreviewProps): ReactElement | null => {
@@ -30,7 +32,7 @@ const ComposerUnfocusedPreviewComponent = ({
 
   const baseTextStyle: TextStyle = {
     fontSize: COMPOSER_INPUT_FONT_SIZE,
-    lineHeight: COMPOSER_INPUT_LINE_HEIGHT,
+    lineHeight,
     color: textColor,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   };

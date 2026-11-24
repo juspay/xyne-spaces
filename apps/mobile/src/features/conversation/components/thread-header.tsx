@@ -1,7 +1,6 @@
 import { useMemo, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, Minus, Sparkles } from 'lucide-react-native';
+import { ChevronDown, Minus } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 import { parseRepliesMd } from '@xyne/shared';
 
@@ -12,11 +11,20 @@ import {
   THREAD_HEADER_AVATAR_OVERLAP,
   THREAD_HEADER_AVATAR_SIZE,
   THREAD_HEADER_BUTTON_SIZE,
+  THREAD_HEADER_GAP,
   THREAD_HEADER_HEIGHT,
+  THREAD_HEADER_ICON_SIZE,
   THREAD_HEADER_MAX_AVATARS,
+  THREAD_HEADER_PADDING_TOP,
+  THREAD_HEADER_PADDING_X,
+  THREAD_HEADER_Z_INDEX,
 } from '../constants';
+import { useParkThread } from '../hooks/use-park-thread';
+import { useSelfFace } from '../hooks/use-self-face';
+import { roomKindOf, roomTitle } from '../model/room-title';
 import { replyCountLabel, stripRepliers } from '../model/thread-strip';
-import { HeaderButton } from './header-button';
+import { colorOf } from '../model/token-color';
+import { IconButton } from './icon-button';
 import { OverlappingAvatars } from './overlapping-avatars';
 
 type ThreadHeaderProps = {
@@ -26,17 +34,17 @@ type ThreadHeaderProps = {
 };
 
 /**
- * The thread's header: a back button, the repliers and their count (which opens
- * the parent conversation), Ask AI scoped to the thread, and a close button.
- * Back and close both leave the thread; the card-over-the-room presentation
- * that would give them different jobs is a later phase. Absolutely positioned,
- * because the thread screen reserves its height with a spacer below it.
+ * The thread card's header (Figma "6 · A thread, opened"): collapse on the
+ * left, park on the right, and the repliers with their count between them
+ * (which opens the parent conversation). Both controls leave the thread;
+ * park also keeps it as a bubble over the room.
+ * Absolutely positioned, because the thread screen reserves its height with a
+ * spacer below it.
  */
 export function ThreadHeader({ channelId, threadId, onBack }: ThreadHeaderProps): ReactElement {
-  const insets = useSafeAreaInsets();
-  const foreground = useCSSVariable('--color-spaces-foreground') as string;
+  const foreground = colorOf(useCSSVariable('--color-spaces-foreground'));
   const { channel, displayName, isDM } = useConversationHeaderData(channelId, { enabled: false });
-  const { replyCount, repliesMd, handleOpenParentConversation, handleAskAI } =
+  const { replyCount, repliesMd, rootMessage, handleOpenParentConversation } =
     useThreadHeaderActions({
       channelId,
       threadId,
@@ -47,33 +55,51 @@ export function ThreadHeader({ channelId, threadId, onBack }: ThreadHeaderProps)
     () => stripRepliers(parseRepliesMd(repliesMd).repliers, THREAD_HEADER_MAX_AVATARS),
     [repliesMd],
   );
+  const self = useSelfFace();
+  const park = useParkThread({
+    channelId,
+    threadId,
+    channelName: roomTitle(displayName, roomKindOf(channel?.scopeType)),
+    rootMessage,
+    repliesMd,
+    onBack,
+  });
 
   return (
     <View
       className='absolute left-0 right-0 top-0 bg-spaces-background'
-      style={{ zIndex: 40, paddingTop: insets.top, height: THREAD_HEADER_HEIGHT + insets.top }}
+      style={{
+        zIndex: THREAD_HEADER_Z_INDEX,
+        height: THREAD_HEADER_HEIGHT,
+        paddingTop: THREAD_HEADER_PADDING_TOP,
+        paddingHorizontal: THREAD_HEADER_PADDING_X,
+      }}
     >
-      <View className='flex-1 flex-row items-center px-4' style={{ columnGap: 8 }}>
-        <HeaderButton
-          label='Back'
+      <View
+        className='flex-row items-center'
+        style={{ height: THREAD_HEADER_BUTTON_SIZE, columnGap: THREAD_HEADER_GAP }}
+      >
+        <IconButton
+          label='Collapse thread'
           size={THREAD_HEADER_BUTTON_SIZE}
           onPress={onBack}
           className='bg-spaces-surface'
         >
-          <ChevronDown size={20} color={foreground} />
-        </HeaderButton>
+          <ChevronDown size={THREAD_HEADER_ICON_SIZE} color={foreground} />
+        </IconButton>
 
         <Pressable
           accessibilityRole='button'
           accessibilityLabel={`Open conversation ${displayName}`}
           onPress={handleOpenParentConversation}
           className='min-w-0 flex-1 flex-row items-center justify-center active:opacity-60'
-          style={{ columnGap: 8 }}
+          style={{ columnGap: THREAD_HEADER_GAP }}
         >
           <OverlappingAvatars
             userIds={replierIds}
             size={THREAD_HEADER_AVATAR_SIZE}
             overlap={THREAD_HEADER_AVATAR_OVERLAP}
+            self={self}
           />
           <Text
             className='shrink text-[16px] font-medium leading-5 text-spaces-foreground'
@@ -83,23 +109,14 @@ export function ThreadHeader({ channelId, threadId, onBack }: ThreadHeaderProps)
           </Text>
         </Pressable>
 
-        <HeaderButton
-          label='Ask AI'
+        <IconButton
+          label='Park thread'
           size={THREAD_HEADER_BUTTON_SIZE}
-          onPress={handleAskAI}
+          onPress={park}
           className='bg-spaces-surface'
         >
-          <Sparkles size={20} color={foreground} />
-        </HeaderButton>
-
-        <HeaderButton
-          label='Close thread'
-          size={THREAD_HEADER_BUTTON_SIZE}
-          onPress={onBack}
-          className='bg-spaces-surface'
-        >
-          <Minus size={20} color={foreground} />
-        </HeaderButton>
+          <Minus size={THREAD_HEADER_ICON_SIZE} color={foreground} />
+        </IconButton>
       </View>
     </View>
   );

@@ -1,6 +1,6 @@
 import { Loader2, Video, X } from 'lucide-react-native';
 import { memo, type ReactElement, useCallback, useEffect } from 'react';
-import { Alert, ColorValue, FlatList, Pressable, Text, View } from 'react-native';
+import { ColorValue, FlatList, Pressable, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   FadeIn,
@@ -12,8 +12,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { ComposerAttachment } from './input-composer.types';
 import { getFileTypeConfig } from '@/src/components/chat/file-attachment-card';
-import { useChatInputActions, useChatInputComposerState } from './input-composer-context';
-import { useDraftAttachments } from '@/src/hooks/useDraftAttachments';
+import { useChatInputComposerState } from './input-composer-context';
+import { localPreviewUri } from './input-composer-attachment-helpers';
+import { useComposerAttachmentActions } from './hooks/useComposerAttachmentActions';
 import { useMtlsImage } from '@/src/hooks/useMtlsImage';
 import { useMtlsThumbnail } from '@/src/hooks/useMtlsThumbnail';
 import { useCSSVariable } from 'uniwind';
@@ -77,18 +78,6 @@ const UploadingOverlay = (): ReactElement => {
       </Animated.View>
     </View>
   );
-};
-
-const isLocalPreviewUri = (uri: string): boolean =>
-  uri.startsWith('file://') ||
-  uri.startsWith('content://') ||
-  uri.startsWith('ph://') ||
-  uri.startsWith('assets-library://');
-
-const localPreviewUri = (attachment: ComposerAttachment): string | null => {
-  if (isLocalPreviewUri(attachment.thumbnailUri ?? '')) return attachment.thumbnailUri ?? null;
-  if (isLocalPreviewUri(attachment.localUri)) return attachment.localUri;
-  return null;
 };
 
 const ImageAttachmentItem = ({ attachment, onRemove }: AttachmentItemProps): ReactElement => {
@@ -204,41 +193,7 @@ const AttachmentItem = ({ attachment, onRemove }: AttachmentItemProps): ReactEle
 
 const AttachmentsListComponent = ({ className }: AttachmentsListProps): ReactElement | null => {
   const { attachments } = useChatInputComposerState();
-  const { setAttachments, beginAttachmentMutation, endAttachmentMutation } = useChatInputActions();
-  const { removeAttachment: deleteDraftAttachment } = useDraftAttachments();
-
-  const handleRemove = useCallback(
-    (attachmentId: string): void => {
-      const removedAttachment = attachments.find(item => item.attachmentId === attachmentId);
-      if (!removedAttachment) return;
-
-      setAttachments(prev => prev.filter(item => item.attachmentId !== attachmentId));
-      beginAttachmentMutation();
-
-      void (async (): Promise<void> => {
-        try {
-          const isDeleted = await deleteDraftAttachment(attachmentId);
-          if (!isDeleted) {
-            setAttachments(prev =>
-              prev.some(item => item.attachmentId === removedAttachment.attachmentId)
-                ? prev
-                : [...prev, removedAttachment],
-            );
-            Alert.alert('Failed to remove attachment', 'Please try removing the attachment again.');
-          }
-        } finally {
-          endAttachmentMutation();
-        }
-      })();
-    },
-    [
-      attachments,
-      beginAttachmentMutation,
-      deleteDraftAttachment,
-      endAttachmentMutation,
-      setAttachments,
-    ],
-  );
+  const { remove: handleRemove } = useComposerAttachmentActions();
 
   const renderItem = useCallback(
     ({ item }: { item: ComposerAttachment }): ReactElement => (

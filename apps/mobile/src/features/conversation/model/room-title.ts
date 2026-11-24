@@ -13,7 +13,8 @@ export function roomTitle(name: string, kind: RoomKind): string {
   return kind === 'channel' ? `#${name}` : name;
 }
 
-/** The typing bar's placeholder: "Message #channel" or "Message Name". */
+/** The typing bar's placeholder: "Message #channel", "Message Priya" (first name) or the group's name. */
 export function composerPlaceholder(name: string, kind: RoomKind): string {
-  return `Message ${roomTitle(name, kind)}`;
+  const target = kind === 'dm' ? (name.trim().split(/\s+/)[0] ?? '') : roomTitle(name, kind);
+  return `Message ${target}`;
 }

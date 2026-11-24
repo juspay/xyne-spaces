@@ -1,6 +1,8 @@
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 import { startOfLocalDay } from '@/src/features/dms/model/timestamp';
 
+import { isRestyledRow } from './row-policy';
+
 /** Messages further apart than this start a new block. */
 export const CONTINUATION_WINDOW_MS = 5 * 60_000;
 
@@ -10,23 +12,19 @@ export type ContinuationOptions = {
    * a continuation. The thread screen draws no strips, so it turns this off.
    */
   stripEndsBlock?: boolean;
+  /** The row above is a flow card, which keeps the classic row. */
+  previousIsFlowJson?: boolean;
+  /**
+   * `current` shows a send status (the pending clock or the failed mark). Both
+   * live beside the time, so the row keeps its header while it has one.
+   */
+  showsSendStatus?: boolean;
 };
-
-/** Rows the flat layout does not restyle, or that are not a person speaking. */
-function isPlainMessage(row: ChatPaintRow): boolean {
-  return (
-    row.rowKind !== 'SYSTEM' &&
-    row.rowKind !== 'TICKET' &&
-    row.isTicketActivity !== true &&
-    !row.ticketPreview &&
-    !row.recordingPreview
-  );
-}
 
 /**
  * Whether `current` joins the block `previous` ends: same sender, same
  * calendar day, within five minutes, with nothing in between that closes the
- * block (a deletion, a thread strip, a system or ticket row).
+ * block (a deletion, a thread strip, a row the flat layout does not restyle).
  *
  * `previous` is the row directly above, or undefined when that is a divider
  * or there is none.
@@ -34,10 +32,16 @@ function isPlainMessage(row: ChatPaintRow): boolean {
 export function isContinuationRow(
   previous: ChatPaintRow | undefined,
   current: ChatPaintRow,
-  { stripEndsBlock = true }: ContinuationOptions = {},
+  {
+    stripEndsBlock = true,
+    previousIsFlowJson = false,
+    showsSendStatus = false,
+  }: ContinuationOptions = {},
 ): boolean {
-  if (!previous) return false;
-  if (!isPlainMessage(previous) || !isPlainMessage(current)) return false;
+  if (!previous || showsSendStatus) return false;
+  if (!isRestyledRow(previous, { isFlowJson: previousIsFlowJson }) || !isRestyledRow(current)) {
+    return false;
+  }
   if (previous.isDeleted) return false;
   if (stripEndsBlock && (previous.replyPreview?.count ?? previous.replyCount) > 0) return false;
 

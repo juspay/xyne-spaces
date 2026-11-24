@@ -46,6 +46,7 @@ import {
 } from './utils/insert-composer-emoji';
 import { transformComposerCustomEmojiHtmlForSend } from '@/src/utils/customEmoji';
 import { useLatestRef } from './utils/use-latest-ref';
+import { isSameSelection, isSameStyleState } from './utils/rich-state-equality';
 import { getDraft } from './utils/drafts';
 import {
   composerNativeSetValue,
@@ -165,9 +166,16 @@ const RootComponent = ({
   const selectionRef = useRef<ChatInputSelection | null>(null);
   const emojiInsertCaretRef = useRef<ComposerCaret | null>(null);
 
+  // The editor reports its style state on every keystroke, mostly unchanged, and
+  // can repeat a selection; keeping the current object lets React bail out
+  // instead of re-rendering the format buttons.
   const setSelection = useCallback((next: ChatInputSelection | null): void => {
     selectionRef.current = next;
-    setSelectionValue(next);
+    setSelectionValue(prev => (isSameSelection(prev, next) ? prev : next));
+  }, []);
+
+  const setStyleState = useCallback((next: OnChangeStateEvent | null): void => {
+    setStyleStateValue(prev => (isSameStyleState(prev, next) ? prev : next));
   }, []);
 
   const inputRef = useRef<EnrichedTextInputInstance | null>(null);
@@ -764,7 +772,7 @@ const RootComponent = ({
       insertEmoji,
       rememberSelectionForEmojiInsert,
       setHtmlState,
-      setStyleState: setStyleStateValue,
+      setStyleState,
       setSelection,
       notifyComposerNativeTextChange,
       notifyUserSelectionChange,
@@ -796,6 +804,7 @@ const RootComponent = ({
       setInputFocused,
       setHtmlState,
       setSelection,
+      setStyleState,
       setText,
     ],
   );

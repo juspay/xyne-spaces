@@ -90,6 +90,7 @@ import {
   CHAT_KEYBOARD_GESTURE_INTERPOLATOR,
   CHAT_KEYBOARD_GESTURE_OFFSET,
   getChatKeyboardGeometry,
+  getChatKeyboardStickyOffset,
   includesChatComposerBottomSafeArea,
   type ChatComposerInsetMode,
   CHAT_KEYBOARD_SHOULD_PERSIST_TAPS,
@@ -97,6 +98,7 @@ import {
 import {
   ChatComposerDock,
   ChatComposerScrollToBottomButton,
+  type ChatComposerScrollToBottomButtonProps,
 } from '@/src/features/chat/v2/components/chat/chat-composer-dock';
 import { useChatComposerGeometry } from '@/src/features/chat/v2/hooks/use-chat-composer-geometry';
 import { useSendScrollToTail } from '@/src/features/chat/v2/hooks/useSendScrollToTail';
@@ -282,6 +284,15 @@ export type ChatThreadProps = {
   /** Least height the replacement composer occupies. Unset keeps the classic input's. */
   composerMinimumHeight?:
     ((safeAreaBottom: number, includeBottomSafeArea: boolean) => number) | undefined;
+  /** Passed to the composer dock; see `ChatComposerDock`'s `intrinsicContentHeight`. */
+  composerIntrinsicHeight?: boolean | undefined;
+  /**
+   * Distance from the thread's bottom edge to the window's, for a thread laid
+   * out above the screen bottom (a card). Unset derives it from the inset mode.
+   */
+  keyboardBottomOffset?: number | undefined;
+  /** Optional replacement for the scroll-to-bottom button. Unset keeps the classic one. */
+  scrollToBottomButton?: ComponentType<ChatComposerScrollToBottomButtonProps> | undefined;
 };
 
 type EditingTarget = {
@@ -329,14 +340,24 @@ function ChatThreadInner({
   messageActionsView,
   composerInput,
   composerMinimumHeight = getConversationInputMinimumHeight,
+  composerIntrinsicHeight = false,
+  keyboardBottomOffset,
+  scrollToBottomButton,
 }: ChatThreadProps): ReactElement {
   const ThreadComposerInput = composerInput ?? ConversationInput;
+  const ScrollToBottomButton = scrollToBottomButton ?? ChatComposerScrollToBottomButton;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const includeBottomSafeArea = includesChatComposerBottomSafeArea(composerInsetMode);
   const keyboardGeometry = useMemo(
-    () => getChatKeyboardGeometry(insets.bottom, composerInsetMode),
-    [composerInsetMode, insets.bottom],
+    () =>
+      keyboardBottomOffset === undefined
+        ? getChatKeyboardGeometry(insets.bottom, composerInsetMode)
+        : {
+            listOffset: keyboardBottomOffset,
+            stickyOffset: getChatKeyboardStickyOffset(keyboardBottomOffset),
+          },
+    [composerInsetMode, insets.bottom, keyboardBottomOffset],
   );
   const threadHeaderHeight = hideHeader
     ? 0
@@ -1622,6 +1643,9 @@ function ChatThreadInner({
     }
   }, [dismissKeyboard]);
 
+  const formatThreadDate = renderers?.formatThreadDate ?? formatDateLabel;
+  const showThreadRootDate = renderers?.showThreadRootDate ?? true;
+
   const updateDatePillLabel = useCallback(() => {
     const state = listRef.current?.getState?.();
     if (!state) return;
@@ -1648,7 +1672,7 @@ function ChatThreadInner({
       if (!current) continue;
       const prev = i > 0 ? data[i - 1] : undefined;
       if (!prev || !isSameDay(prev.createdAt, current.createdAt)) {
-        label = formatDateLabel(current.createdAt);
+        label = formatThreadDate(current.createdAt);
         labelCreatedAt = current.createdAt;
         break;
       }
@@ -1656,7 +1680,7 @@ function ChatThreadInner({
 
     setDatePillLabel(prev => (prev === label ? prev : label));
     setDatePillCreatedAt(prev => (prev === labelCreatedAt ? prev : labelCreatedAt));
-  }, [data]);
+  }, [data, formatThreadDate]);
 
   const checkScrollPosition = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -1937,9 +1961,10 @@ function ChatThreadInner({
             }
           : undefined;
       const previousMessage = index > 0 ? data[index - 1] : undefined;
-      const showDateDivider =
-        !previousMessage || !isSameDay(previousMessage.createdAt, item.createdAt);
-      const dateText = showDateDivider ? formatDateLabel(item.createdAt) : null;
+      const showDateDivider = previousMessage
+        ? !isSameDay(previousMessage.createdAt, item.createdAt)
+        : showThreadRootDate;
+      const dateText = showDateDivider ? formatThreadDate(item.createdAt) : null;
       const previousPaintItem =
         index > 0 ? getPaintItemForMessage(data[index - 1] as MessageItem, index - 1) : undefined;
       const nextPaintItem =
@@ -2029,10 +2054,14 @@ function ChatThreadInner({
           {...(!shouldShowJoinChannel
             ? { onLongPress: (): void => handleLongPress(item.messageId) }
             : {})}
+          {...(handleParentTicketPress ? { onTicketPress: handleParentTicketPress } : {})}
           // The replies divider sits between the root and its first reply, so that
           // reply cannot join the root's block.
           {...(previousPaintItem && !(index === 1 && replyCount > 0)
-            ? { previousPaint: previousPaintItem.paint }
+            ? {
+                previousPaint: previousPaintItem.paint,
+                previousConversation: previousPaintItem.conversation,
+              }
             : {})}
         />
       ) : (
@@ -2122,6 +2151,7 @@ function ChatThreadInner({
       data,
       dismissKeyboard,
       expandedConversationIds,
+      formatThreadDate,
       getPaintItemForMessage,
       handleLongPress,
       handleThreadMessagePress,
@@ -2140,6 +2170,7 @@ function ChatThreadInner({
       rowEntranceController,
       rowEntranceTick,
       shouldShowJoinChannel,
+      showThreadRootDate,
       threadId,
       threadOpenIdentityKey,
     ],
@@ -2296,6 +2327,10 @@ function ChatThreadInner({
     () => ({ paddingBottom: composerGeometry.totalHeight.value }),
     [composerGeometry.totalHeight],
   );
+  const FloatingDateComponent = renderers?.FloatingDate ?? DatePillBadge;
+  const SkeletonComponent = renderers?.Skeleton ?? ConversationSkeleton;
+  const ListNotice = renderers?.ListNotice;
+  const ListEmpty = renderers?.ListEmpty;
   const threadOpenPlaceholder = (
     <Animated.View
       pointerEvents='none'
@@ -2316,7 +2351,7 @@ function ChatThreadInner({
       onLayout={shouldShowThreadOpenPlaceholder ? handleListLayout : undefined}
     >
       {THREAD_OPEN_PLACEHOLDER_ROW_KEYS.map(key => (
-        <ConversationSkeleton key={key} />
+        <SkeletonComponent key={key} />
       ))}
     </Animated.View>
   );
@@ -2429,9 +2464,13 @@ function ChatThreadInner({
                       ListEmptyComponent={
                         shouldShowThreadQueryError ? null : (
                           <View className='items-center p-6'>
-                            <Text className='text-sm text-secondary-foreground'>
-                              No messages yet
-                            </Text>
+                            {ListEmpty ? (
+                              <ListEmpty surface='thread' />
+                            ) : (
+                              <Text className='text-sm text-secondary-foreground'>
+                                No messages yet
+                              </Text>
+                            )}
                           </View>
                         )
                       }
@@ -2446,9 +2485,13 @@ function ChatThreadInner({
                   pointerEvents='none'
                   className='absolute inset-0 items-center justify-center px-6'
                 >
-                  <Text className='text-center text-sm text-secondary-foreground'>
-                    Couldn&apos;t load messages.
-                  </Text>
+                  {ListNotice ? (
+                    <ListNotice title="Couldn't load messages." />
+                  ) : (
+                    <Text className='text-center text-sm text-secondary-foreground'>
+                      Couldn&apos;t load messages.
+                    </Text>
+                  )}
                 </View>
               ) : null}
               {shouldShowThreadTargetSyncTimeout ||
@@ -2457,11 +2500,21 @@ function ChatThreadInner({
                   pointerEvents='none'
                   className='absolute inset-0 items-center justify-center px-6'
                 >
-                  <Text className='text-center text-sm text-secondary-foreground'>
-                    {isThreadPlacementUnavailable
-                      ? "Couldn't position this message."
-                      : 'This message is still syncing.'}
-                  </Text>
+                  {ListNotice ? (
+                    <ListNotice
+                      title={
+                        isThreadPlacementUnavailable
+                          ? "Couldn't position this message."
+                          : 'This message is still syncing.'
+                      }
+                    />
+                  ) : (
+                    <Text className='text-center text-sm text-secondary-foreground'>
+                      {isThreadPlacementUnavailable
+                        ? "Couldn't position this message."
+                        : 'This message is still syncing.'}
+                    </Text>
+                  )}
                 </View>
               ) : null}
               {datePillLabel && datePillCreatedAt !== null ? (
@@ -2479,7 +2532,7 @@ function ChatThreadInner({
                     datePillAnimatedStyle,
                   ]}
                 >
-                  <DatePillBadge
+                  <FloatingDateComponent
                     key={`thread-floating-date-${datePillCreatedAt}`}
                     dateText={datePillLabel}
                     onLayout={layout =>
@@ -2500,8 +2553,9 @@ function ChatThreadInner({
                 onComposerHeight={composerGeometry.onComposerHeight}
                 keyboardGeometry={keyboardGeometry}
                 onComposerLayout={composerGeometry.onComposerLayout}
+                intrinsicContentHeight={composerIntrinsicHeight}
                 scrollToBottomSlot={
-                  <ChatComposerScrollToBottomButton
+                  <ScrollToBottomButton
                     composerHeight={composerGeometry.totalHeight}
                     enabled={postPaintReady}
                     onPress={handleScrollToBottomPress}

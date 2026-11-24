@@ -2,7 +2,7 @@ import {
   HOLD_BLOCK_GAP,
   HOLD_EDGE_INSET,
   HOLD_MAX_CARD_SHARE,
-  HOLD_MENU_PADDING_Y,
+  HOLD_MENU_PADDING,
   HOLD_MENU_ROW_HEIGHT,
   HOLD_MIN_MENU_ROWS,
   HOLD_RAIL_HEIGHT,
@@ -68,7 +68,7 @@ export function orderHoldMenuActions<T extends HoldMenuActionInput>(
 
 export type HoldRect = { x: number; y: number; width: number; height: number };
 
-export type HoldLayoutInput = {
+type HoldLayoutInput = {
   windowHeight: number;
   insetTop: number;
   insetBottom: number;
@@ -78,7 +78,7 @@ export type HoldLayoutInput = {
   menuRowCount: number;
 };
 
-export type HoldLayout = {
+type HoldLayout = {
   /** Top of the rail (unused when the rail is hidden). */
   railTop: number;
   /** Top of the lifted message; equals the middle of the stack when there is no message. */
@@ -93,7 +93,7 @@ export type HoldLayout = {
 };
 
 export const holdMenuNaturalHeight = (rows: number): number =>
-  rows * HOLD_MENU_ROW_HEIGHT + HOLD_MENU_PADDING_Y * 2;
+  rows * HOLD_MENU_ROW_HEIGHT + HOLD_MENU_PADDING * 2;
 
 /**
  * Stacks rail, message and menu, then slides the stack so all of it stays

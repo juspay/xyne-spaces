@@ -157,7 +157,8 @@ export function useAgentProgress(
 
     let subscribed = false;
     const attach = (): void => {
-      if (subscribed) return;
+      // A connect that resolves after cleanup must not add a listener nothing will remove.
+      if (aborted || subscribed) return;
       subscribed = true;
       websocketService.on<SessionActivityEvent>('session_activity', handler);
       // Progress is published to the channel session id; subscribe so live ticks arrive.

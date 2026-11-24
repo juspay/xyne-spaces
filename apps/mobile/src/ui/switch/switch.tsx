@@ -16,6 +16,12 @@ const TRACK_HEIGHT = 32;
 const THUMB_SIZE = 26;
 const INSET = (TRACK_HEIGHT - THUMB_SIZE) / 2;
 const THUMB_TRAVEL = TRACK_WIDTH - THUMB_SIZE - INSET * 2;
+/** The conversation screens' Figma "Toggle": 40 × 24 with a 20 thumb. */
+const COMPACT_TRACK_WIDTH = 40;
+const COMPACT_TRACK_HEIGHT = 24;
+const COMPACT_THUMB_SIZE = 20;
+const COMPACT_INSET = (COMPACT_TRACK_HEIGHT - COMPACT_THUMB_SIZE) / 2;
+const COMPACT_THUMB_TRAVEL = COMPACT_TRACK_WIDTH - COMPACT_THUMB_SIZE - COMPACT_INSET * 2;
 const THUMB_COLOR = '#FFFFFF';
 
 /**
@@ -33,6 +39,10 @@ export type SwitchProps = {
   accessibilityLabel?: string;
   /** Called after the slide has come to rest. */
   onSettled?: () => void;
+  /** `compact` is the 40 × 24 toggle; `regular` (the default) is 52 × 32. */
+  size?: 'regular' | 'compact';
+  /** The off track; the surface colour by default, which vanishes on a surface-coloured row. */
+  offColor?: string;
 };
 
 /**
@@ -57,8 +67,13 @@ export function Switch({
   disabled = false,
   accessibilityLabel,
   onSettled,
+  size = 'regular',
+  offColor: ownOffColor,
 }: SwitchProps): ReactElement {
-  const offColor = useCSSVariable('--color-spaces-surface') as string;
+  const surfaceColor = useCSSVariable('--color-spaces-surface') as string;
+  const offColor = ownOffColor ?? surfaceColor;
+  const compact = size === 'compact';
+  const thumbTravel = compact ? COMPACT_THUMB_TRAVEL : THUMB_TRAVEL;
   const onColor = useCSSVariable('--color-spaces-accent') as string;
 
   const progress = useSharedValue(value ? 1 : 0);
@@ -83,7 +98,7 @@ export function Switch({
   }));
 
   const thumbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: progress.get() * THUMB_TRAVEL }],
+    transform: [{ translateX: progress.get() * thumbTravel }],
   }));
 
   return (
@@ -99,8 +114,8 @@ export function Switch({
       }}
       style={disabled ? styles.disabled : null}
     >
-      <Animated.View style={[styles.track, trackStyle]}>
-        <Animated.View style={[styles.thumb, thumbStyle]} />
+      <Animated.View style={[compact ? styles.compactTrack : styles.track, trackStyle]}>
+        <Animated.View style={[compact ? styles.compactThumb : styles.thumb, thumbStyle]} />
       </Animated.View>
     </Pressable>
   );
@@ -119,6 +134,19 @@ const styles = StyleSheet.create({
     borderRadius: THUMB_SIZE / 2,
     backgroundColor: THUMB_COLOR,
     boxShadow: '0px 1px 3px rgba(0, 0, 0, 0.25)',
+  },
+  compactTrack: {
+    width: COMPACT_TRACK_WIDTH,
+    height: COMPACT_TRACK_HEIGHT,
+    borderRadius: COMPACT_TRACK_HEIGHT / 2,
+    padding: COMPACT_INSET,
+  },
+  compactThumb: {
+    width: COMPACT_THUMB_SIZE,
+    height: COMPACT_THUMB_SIZE,
+    borderRadius: COMPACT_THUMB_SIZE / 2,
+    backgroundColor: THUMB_COLOR,
+    boxShadow: '0px 1px 2px rgba(18, 20, 28, 0.06), 0px 2px 6px rgba(18, 20, 28, 0.035)',
   },
   disabled: {
     opacity: 0.4,

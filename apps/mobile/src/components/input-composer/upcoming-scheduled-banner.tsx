@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ComponentType, type ReactElement } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { ChevronRight, Clock } from 'lucide-react-native';
@@ -14,12 +14,22 @@ import { useQuery } from '@/src/hooks/useQuery';
 import { haptics } from '@/src/utils/haptics';
 import { queries } from '@/src/zero/queries';
 
+/** What a restyled banner draws: the same count, next send time and tap the default strip has. */
+export type ScheduledBannerViewProps = {
+  upcomingCount: number;
+  earliestScheduledFor: number;
+  /** Opens Drafts & Sent → Scheduled. */
+  onPress: () => void;
+};
+
 type UpcomingScheduledBannerProps = {
   channelId: string;
   conversationId: string | null;
   /** Optimistic time until Zero catches up after scheduling from this composer. */
   recentScheduledFor: number | null;
   onRecentScheduledForExpire?: () => void;
+  /** Draws the banner instead of the strip glued to the field; the fade in and out stay. */
+  View?: ComponentType<ScheduledBannerViewProps> | undefined;
 };
 
 type UpcomingScheduledBannerModel = {
@@ -94,7 +104,9 @@ export const UpcomingScheduledBanner = ({
   conversationId,
   recentScheduledFor,
   onRecentScheduledForExpire,
+  ...props
 }: UpcomingScheduledBannerProps): ReactElement | null => {
+  const BannerView = props.View;
   const router = useRouter();
   const foreground = useCSSVariable('--color-foreground') as string;
   const mutedForeground = useCSSVariable('--color-muted-foreground') as string;
@@ -116,6 +128,18 @@ export const UpcomingScheduledBanner = ({
       params: { tab: 'scheduled' },
     });
   };
+
+  if (BannerView) {
+    return (
+      <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(180)}>
+        <BannerView
+          upcomingCount={upcomingCount}
+          earliestScheduledFor={earliestScheduledFor}
+          onPress={openScheduledTab}
+        />
+      </Animated.View>
+    );
+  }
 
   const bannerCopy =
     upcomingCount > 1

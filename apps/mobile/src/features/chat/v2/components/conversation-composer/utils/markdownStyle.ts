@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import type { MarkdownStyle } from 'react-native-enriched-markdown';
 
-const MONO_FONT = Platform.select({
+export const MONO_FONT = Platform.select({
   ios: 'Menlo',
   android: 'monospace',
   default: 'monospace',
@@ -75,6 +75,10 @@ type BuildArgs = {
   tableHeaderBackground?: string;
   tableBorderColor?: string;
   variant?: Variant;
+  /** Replaces the paragraph, list and quote line height; omitted keeps the chat default. */
+  lineHeight?: number;
+  /** Laid over the code block's own style; omitted keeps the chat's. */
+  codeBlock?: MarkdownStyle['codeBlock'];
 };
 
 export const buildComposerMarkdownStyle = ({
@@ -89,11 +93,13 @@ export const buildComposerMarkdownStyle = ({
   tableHeaderBackground,
   tableBorderColor,
   variant = 'primary',
+  lineHeight,
+  codeBlock,
 }: BuildArgs): MarkdownStyle => {
   const baseFontSize = VARIANT_FONT_SIZE[variant];
   const paragraphColor = foreground;
   const isSystem = variant === 'system';
-  const paragraphLineHeight = PARAGRAPH_LINE_HEIGHT;
+  const paragraphLineHeight = lineHeight ?? PARAGRAPH_LINE_HEIGHT;
   const paragraphLetterSpacing = isSystem ? -0.16 : undefined;
   const paragraphFontWeight = VARIANT_FONT_WEIGHT[variant];
 
@@ -116,7 +122,7 @@ export const buildComposerMarkdownStyle = ({
     blockquote: {
       fontSize: Math.max(13, baseFontSize - 1),
       color: foreground,
-      lineHeight: PARAGRAPH_LINE_HEIGHT,
+      lineHeight: paragraphLineHeight,
       borderColor: brand,
       borderWidth: 3,
       backgroundColor: 'transparent',
@@ -126,7 +132,7 @@ export const buildComposerMarkdownStyle = ({
     list: {
       fontSize: baseFontSize,
       color: paragraphColor,
-      lineHeight: BODY_LINE_HEIGHT,
+      lineHeight: lineHeight ?? BODY_LINE_HEIGHT,
       // Keep list bullets aligned with the message text instead of using the muted gray tone.
       bulletColor: paragraphColor,
       bulletSize: 4,
@@ -151,6 +157,7 @@ export const buildComposerMarkdownStyle = ({
       lineHeight: Platform.select({ ios: 17, android: 18, default: 18 }),
       marginTop: 2,
       marginBottom: 6,
+      ...codeBlock,
     },
     code: {
       fontFamily: MONO_FONT,

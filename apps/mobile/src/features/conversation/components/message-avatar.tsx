@@ -1,4 +1,4 @@
-import { memo, type ReactElement } from 'react';
+import { memo, useMemo, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import {
@@ -7,9 +7,9 @@ import {
 } from '@/src/features/chat/v2/components/chat/chat-user-profile-actions-sheet';
 import { getSenderAvatarFallbackUser } from '@/src/features/chat/v2/paint/chatPaintAvatarFallback';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
-import { AVATAR_GEOMETRY, AvatarFace } from '@/src/ui/avatar';
+import { AVATAR_GEOMETRY, AvatarFace, type AvatarFallbackUser } from '@/src/ui/avatar';
 
-import { MESSAGE_AVATAR_SIZE } from '../constants';
+import { MESSAGE_AVATAR_SIZE, SELF_FACE_INITIALS_SHARE } from '../constants';
 import { initialsOf } from '../model/initials';
 
 type MessageAvatarProps = {
@@ -28,25 +28,15 @@ export const MessageAvatar = memo(function MessageAvatar({
     userId: sender.senderId,
     displayName: sender.displayName,
   });
+  // Memoised so SenderFace's memo holds across the row's renders.
+  const fallbackUser = useMemo(() => getSenderAvatarFallbackUser(sender), [sender]);
 
-  const face = isSelf ? (
-    <View
-      className='items-center justify-center bg-spaces-identity-self'
-      style={{
-        width: MESSAGE_AVATAR_SIZE,
-        height: MESSAGE_AVATAR_SIZE,
-        borderRadius: MESSAGE_AVATAR_SIZE / AVATAR_GEOMETRY.radiusDivisor,
-      }}
-    >
-      <Text className='text-[12px] font-semibold text-spaces-accent-foreground'>
-        {initialsOf(sender.displayName)}
-      </Text>
-    </View>
-  ) : (
-    <AvatarFace
+  const face = (
+    <SenderFace
       userId={sender.senderId}
-      size={MESSAGE_AVATAR_SIZE}
-      fallbackUser={getSenderAvatarFallbackUser(sender)}
+      displayName={sender.displayName}
+      isSelf={isSelf}
+      fallbackUser={fallbackUser}
     />
   );
 
@@ -61,5 +51,48 @@ export const MessageAvatar = memo(function MessageAvatar({
     >
       {face}
     </Pressable>
+  );
+});
+
+type SenderFaceProps = {
+  userId: string;
+  displayName: string;
+  isSelf: boolean;
+  fallbackUser?: AvatarFallbackUser | undefined;
+  /** The message row's 32 by default; the initials scale with it. */
+  size?: number | undefined;
+};
+
+/**
+ * A person's face alone, for anything that draws one without a paint row
+ * (find results, parked threads, the answer toast), so you look the same
+ * everywhere: your initials on the identity colour, anyone else their avatar.
+ */
+export const SenderFace = memo(function SenderFace({
+  userId,
+  displayName,
+  isSelf,
+  fallbackUser,
+  size = MESSAGE_AVATAR_SIZE,
+}: SenderFaceProps): ReactElement {
+  if (!isSelf) {
+    return <AvatarFace userId={userId} size={size} fallbackUser={fallbackUser} />;
+  }
+  return (
+    <View
+      className='items-center justify-center bg-spaces-identity-self'
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / AVATAR_GEOMETRY.radiusDivisor,
+      }}
+    >
+      <Text
+        className='font-semibold text-spaces-accent-foreground'
+        style={{ fontSize: size * SELF_FACE_INITIALS_SHARE }}
+      >
+        {initialsOf(displayName)}
+      </Text>
+    </View>
   );
 });

@@ -6,10 +6,12 @@ import {
   View,
   type GestureResponderEvent,
 } from 'react-native';
+import type { MarkdownStyle } from 'react-native-enriched-markdown';
 import { useCSSVariable } from 'uniwind';
 
 import { useConversationComposer } from './conversation-composer-context';
 import { FlowJsonActionRow, FlowJsonMessageParts } from './flow-json-message';
+import { FadedBody, type LongMessagePresentation } from './long-message-presentation';
 import { ConversationComposerMarkdownBody } from './conversation-composer-markdown-body';
 import { htmlToMD, normalizeActivityPreviewMarkdown } from './utils/htmlToMD';
 import { buildComposerMarkdownStyle } from './utils/markdownStyle';
@@ -34,7 +36,20 @@ import { markdownFlavorFor } from '@/src/utils/markdownTable';
 
 const READ_MORE_VERTICAL_GAP = 4;
 
-const Content = memo((): ReactElement | null => {
+type ContentProps = {
+  /** Body line height for screens that set their own; omitted keeps the chat default. */
+  lineHeight?: number;
+  /** A screen's own fold, link style and fade; omitted keeps the paint row's collapse and the chat link. */
+  presentation?: LongMessagePresentation | undefined;
+  /** A screen's own code block look, laid over the chat's; must be stable across renders. */
+  codeBlockStyle?: MarkdownStyle['codeBlock'];
+};
+
+const Content = memo(function ConversationComposerContent({
+  lineHeight,
+  presentation,
+  codeBlockStyle,
+}: ContentProps): ReactElement | null {
   const {
     item,
     kind,
@@ -137,6 +152,8 @@ const Content = memo((): ReactElement | null => {
         tableHeaderBackground: tableHeaderBg,
         tableBorderColor,
         variant: contentVariant,
+        ...(lineHeight !== undefined ? { lineHeight } : {}),
+        ...(codeBlockStyle ? { codeBlock: codeBlockStyle } : {}),
       }),
     [
       resolvedForeground,
@@ -147,6 +164,8 @@ const Content = memo((): ReactElement | null => {
       tableBorderColor,
       tableHeaderBg,
       contentVariant,
+      lineHeight,
+      codeBlockStyle,
     ],
   );
 
@@ -169,9 +188,14 @@ const Content = memo((): ReactElement | null => {
   );
 
   // The paint row is the canonical body model for primary chat messages. Use
-  // its collapse decision here as well so the paint and rich paths agree.
-  const paintRowCollapse =
-    contentVariant === 'primary' && parsedPaintMarkdown && paintRow ? paintRow.body.collapse : null;
+  // its collapse decision here as well so the paint and rich paths agree. A
+  // screen's own fold applies to every message, forwards included, because its
+  // paint path applies it the same way.
+  const paintRowCollapse = presentation
+    ? presentation.collapse
+    : contentVariant === 'primary' && parsedPaintMarkdown && paintRow
+      ? paintRow.body.collapse
+      : null;
 
   const hasTicketPreview = !!paintRow?.ticketPreview || !!ticketFromMd;
   const handleReadMorePress = useCallback(
@@ -218,35 +242,37 @@ const Content = memo((): ReactElement | null => {
       {/* The rich Flow renderer has no line-clamp contract. Use its Markdown
           projection for the collapsed preview, then mount the rich tree after
           the user expands it. */}
-      {hasFlowJson && !isCollapsed ? (
-        <FlowJsonMessageParts
-          parts={flowParts}
-          markdownStyle={markdownStyle}
-          containerStyle={{ maxWidth: markdownMaxWidth }}
-          onLinkPress={url => {
-            void handleMentionPress(url);
-          }}
-          {...(currentUser?.id ? { currentUserId: currentUser.id } : {})}
-          isOwnMessage={isCurrentUser}
-          selectable={false}
-          hydrateInlineEmoji={allowInlineEmojiHydration}
-        />
-      ) : (
-        <ConversationComposerMarkdownBody
-          markdown={previewMarkdown}
-          markdownStyle={markdownStyle}
-          containerStyle={{ maxWidth: markdownMaxWidth }}
-          onLinkPress={({ url }) => {
-            void handleMentionPress(url);
-          }}
-          selectable={false}
-          {...(currentUser?.id ? { currentUserId: currentUser.id } : {})}
-          isOwnMessage={isCurrentUser}
-          hydrateInlineEmoji={allowInlineEmojiHydration}
-          {...(markdownFlavor ? { flavor: markdownFlavor } : {})}
-          {...(isCollapsed ? { collapsedNumberOfLines } : {})}
-        />
-      )}
+      <FadedBody fade={presentation?.fade} collapsed={isCollapsed}>
+        {hasFlowJson && !isCollapsed ? (
+          <FlowJsonMessageParts
+            parts={flowParts}
+            markdownStyle={markdownStyle}
+            containerStyle={{ maxWidth: markdownMaxWidth }}
+            onLinkPress={url => {
+              void handleMentionPress(url);
+            }}
+            {...(currentUser?.id ? { currentUserId: currentUser.id } : {})}
+            isOwnMessage={isCurrentUser}
+            selectable={false}
+            hydrateInlineEmoji={allowInlineEmojiHydration}
+          />
+        ) : (
+          <ConversationComposerMarkdownBody
+            markdown={previewMarkdown}
+            markdownStyle={markdownStyle}
+            containerStyle={{ maxWidth: markdownMaxWidth }}
+            onLinkPress={({ url }) => {
+              void handleMentionPress(url);
+            }}
+            selectable={false}
+            {...(currentUser?.id ? { currentUserId: currentUser.id } : {})}
+            isOwnMessage={isCurrentUser}
+            hydrateInlineEmoji={allowInlineEmojiHydration}
+            {...(markdownFlavor ? { flavor: markdownFlavor } : {})}
+            {...(isCollapsed ? { collapsedNumberOfLines } : {})}
+          />
+        )}
+      </FadedBody>
       {hasFlowJson && isCollapsed
         ? flowParts.map((part, index) =>
             part.type === 'flow' ? (
@@ -275,7 +301,16 @@ const Content = memo((): ReactElement | null => {
           className='self-start'
           style={{ paddingTop: READ_MORE_VERTICAL_GAP, paddingBottom: READ_MORE_VERTICAL_GAP }}
         >
-          <Text style={{ color: readMoreColor, fontSize: 15, lineHeight: 20, fontWeight: '600' }}>
+          <Text
+            style={
+              presentation?.readMoreTextStyle ?? {
+                color: readMoreColor,
+                fontSize: 15,
+                lineHeight: 20,
+                fontWeight: '600',
+              }
+            }
+          >
             Read more
           </Text>
         </Pressable>

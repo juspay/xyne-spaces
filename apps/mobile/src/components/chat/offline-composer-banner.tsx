@@ -1,14 +1,31 @@
-import { type ReactElement } from 'react';
+import { type ComponentType, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { Wifi, WifiOff } from 'lucide-react-native';
 import { useUniwind } from 'uniwind';
 import { useZeroOfflineState } from '@xyne/shared/hooks';
 
+/** What a restyled banner draws: the same states, copy and reconnect the default one has. */
+export type OfflineBannerViewProps = {
+  status: 'offline' | 'reconnected';
+  /** The offline copy, which differs while a message is being edited. */
+  message: string;
+  isReconnecting: boolean;
+  onReconnect: () => void;
+};
+
 type OfflineComposerBannerProps = {
   /** When true, the banner shows edit-copy instead of draft-copy. */
   isEditing?: boolean;
+  /** Draws the banner instead of the amber / green pill; the fade in and out stay. */
+  View?: ComponentType<OfflineBannerViewProps> | undefined;
 };
+
+/** The offline copy, for drafts or for an edit in progress. */
+const offlineBannerMessage = (isEditing: boolean): string =>
+  isEditing
+    ? "You're offline. Edits can't be saved until you reconnect."
+    : "You're offline. Messages will be saved as drafts until you reconnect.";
 
 // Tailwind amber/green palette — mirrors dashboard's ChatInput banner.
 const OFFLINE_COLORS = {
@@ -54,11 +71,26 @@ const RECONNECTED_COLORS = {
  */
 export const OfflineComposerBanner = ({
   isEditing = false,
+  ...props
 }: OfflineComposerBannerProps): ReactElement | null => {
+  const BannerView = props.View;
   const { showOfflineBanner, isReconnected, isReconnecting, refreshConnection } =
     useZeroOfflineState();
   const { theme } = useUniwind();
   const isDark = theme === 'dark';
+
+  if (BannerView && (showOfflineBanner || isReconnected)) {
+    return (
+      <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(180)}>
+        <BannerView
+          status={showOfflineBanner ? 'offline' : 'reconnected'}
+          message={offlineBannerMessage(isEditing)}
+          isReconnecting={isReconnecting}
+          onReconnect={refreshConnection}
+        />
+      </Animated.View>
+    );
+  }
 
   if (showOfflineBanner) {
     const c = isDark ? OFFLINE_COLORS.dark : OFFLINE_COLORS.light;
@@ -74,9 +106,7 @@ export const OfflineComposerBanner = ({
             numberOfLines={2}
             style={{ color: c.text, fontSize: 11, lineHeight: 14, flexShrink: 1 }}
           >
-            {isEditing
-              ? "You're offline. Edits can't be saved until you reconnect."
-              : "You're offline. Messages will be saved as drafts until you reconnect."}
+            {offlineBannerMessage(isEditing)}
           </Text>
           <Pressable
             onPress={refreshConnection}

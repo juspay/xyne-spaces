@@ -1,22 +1,37 @@
 import { type ReactElement } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import type { DatePillProps } from '@/src/components/chat/date-pill';
 
 import {
   DIVIDER_HEIGHT,
-  DIVIDER_PADDING_BOTTOM,
-  DIVIDER_PADDING_TOP,
-  REPLY_DIVIDER_HEIGHT,
-  REPLY_DIVIDER_PADDING_X,
+  DIVIDER_PADDING_Y,
+  FLOATING_DATE_INSET_TOP,
+  FLOATING_DATE_PADDING_X,
+  FLOATING_DATE_PADDING_Y,
+  ROW_SHADOW,
+  REPLY_RULE_INSET_X,
+  REPLY_RULE_MARGIN_Y,
+  REPLY_RULE_THICKNESS,
   THREAD_LIST_INSET,
 } from '../constants';
-import { replyCountLabel } from '../model/thread-strip';
 
 const DIVIDER_STYLE = {
   height: DIVIDER_HEIGHT,
-  paddingTop: DIVIDER_PADDING_TOP,
-  paddingBottom: DIVIDER_PADDING_BOTTOM,
+  paddingVertical: DIVIDER_PADDING_Y,
+} as const;
+
+const FLOATING_DATE_ROW_STYLE = { paddingTop: FLOATING_DATE_INSET_TOP } as const;
+const FLOATING_DATE_STYLE = {
+  paddingHorizontal: FLOATING_DATE_PADDING_X,
+  paddingVertical: FLOATING_DATE_PADDING_Y,
+  boxShadow: ROW_SHADOW,
+} as const;
+
+const REPLY_RULE_STYLE = {
+  height: REPLY_RULE_THICKNESS,
+  marginVertical: REPLY_RULE_MARGIN_Y,
+  marginHorizontal: REPLY_RULE_INSET_X - THREAD_LIST_INSET,
 } as const;
 
 /** "New": where unread messages start. */
@@ -25,6 +40,12 @@ export function UnreadDivider(): ReactElement {
     <View className='items-center' style={DIVIDER_STYLE}>
       <Text className='text-[14px] font-medium leading-[18px] text-spaces-accent'>New</Text>
     </View>
+  );
+}
+
+function DateLabel({ dateText }: { dateText: string }): ReactElement {
+  return (
+    <Text className='text-[14px] font-medium leading-[18px] text-spaces-subtle'>{dateText}</Text>
   );
 }
 
@@ -37,26 +58,31 @@ export function DateRow({ dateText, onLayout }: DatePillProps): ReactElement {
       style={DIVIDER_STYLE}
       onLayout={event => onLayout?.(event.nativeEvent.layout)}
     >
-      <Text className='text-[14px] font-medium leading-[18px] text-spaces-subtle'>{dateText}</Text>
+      <DateLabel dateText={dateText} />
     </View>
   );
 }
 
-/** "N replies" under the thread's root message, with a hairline running to the edge. */
-export function ReplyDivider({ replyCount }: { replyCount: number }): ReactElement {
+/**
+ * The day of the messages at the top while the list scrolls: the date row's
+ * words on a background pill, so they stay readable over the messages.
+ */
+export function FloatingDate({ dateText, onLayout }: DatePillProps): ReactElement {
   return (
-    <View
-      className='flex-row items-center'
-      style={{
-        height: REPLY_DIVIDER_HEIGHT,
-        marginHorizontal: REPLY_DIVIDER_PADDING_X - THREAD_LIST_INSET,
-        columnGap: 8,
-      }}
-    >
-      <Text className='text-[14px] leading-[18px] text-spaces-subtle'>
-        {replyCountLabel(replyCount)}
-      </Text>
-      <View className='flex-1 bg-spaces-outline' style={{ height: StyleSheet.hairlineWidth }} />
+    <View className='items-center' style={FLOATING_DATE_ROW_STYLE}>
+      <View
+        collapsable={false}
+        className='rounded-full border border-spaces-outline bg-spaces-background'
+        style={FLOATING_DATE_STYLE}
+        onLayout={event => onLayout?.(event.nativeEvent.layout)}
+      >
+        <DateLabel dateText={dateText} />
+      </View>
     </View>
   );
+}
+
+/** Figma "Rule": a plain inset hairline between the thread's root message and its replies. */
+export function ReplyDivider(): ReactElement {
+  return <View className='bg-spaces-outline' style={REPLY_RULE_STYLE} />;
 }

@@ -40,6 +40,7 @@ import {
   PLACEHOLDER_MAX_LENGTH,
   composerInputLeadingInset,
   composerInputTrailingInset,
+  type ComposerFieldMetrics,
 } from './composer-input-typography';
 import { ComposerUnfocusedPreview } from './composer-unfocused-preview';
 import { shouldShowComposerStatusPlaceholder } from './utils/composer-status-placeholder.utils';
@@ -73,8 +74,14 @@ type InputProps = EnrichedTextInputProps & {
   /** Pinned to the field's trailing edge; reserve its width with `trailingInset`. */
   trailingSlot?: ReactNode;
   trailingInset?: number;
-  /** Replaces the focused footer row (attach / format / emoji / send). */
+  /** Where the trailing slot sits as the field grows; unset keeps it centred. */
+  trailingAlign?: 'center' | 'end';
+  /** Replaces the focused footer row (attach / format / emoji / send); `null` drops it. */
   footerSlot?: ReactNode;
+  /** Line height and focused line cap; unset keeps the classic field heights. */
+  fieldMetrics?: ComposerFieldMetrics;
+  /** Replaces the attachment chips above the text; unset keeps `ChatInput.AttachmentsList`. */
+  attachmentsSlot?: ReactNode;
 };
 
 const normalizePastedText = (value: string): string =>
@@ -107,9 +114,13 @@ const InputComponent = ({
   hideLeadingAttach = false,
   trailingSlot,
   trailingInset = 0,
+  trailingAlign = 'center',
   footerSlot,
+  fieldMetrics,
+  attachmentsSlot,
   editable = true,
   placeholder,
+  placeholderTextColor: placeholderTextColorOverride,
   onChangeText,
   onChangeHtml,
   onChangeState,
@@ -153,7 +164,8 @@ const InputComponent = ({
   const { hasComposerContent } = useChatInputText();
   const { addAttachments: uploadDraftAttachments } = useDraftAttachments();
   const inputTextColor = useCSSVariable('--color-foreground') as string;
-  const placeholderTextColor = useCSSVariable('--color-secondary-foreground') as string;
+  const defaultPlaceholderTextColor = useCSSVariable('--color-secondary-foreground') as string;
+  const placeholderTextColor = placeholderTextColorOverride ?? defaultPlaceholderTextColor;
   const cursorColor = useCSSVariable('--color-primary') as string;
   const mentionBg = useCSSVariable('--color-mention-other-bg') as string;
   const mentionText = useCSSVariable('--color-mention-other-text') as string;
@@ -174,6 +186,14 @@ const InputComponent = ({
     plainText: string;
     copiedAt: number;
   } | null>(null);
+  // The native field applies a changed defaultValue as a new value, after any
+  // setValue queued in the same commit. Dropping it when an edit ends would
+  // blank the draft just put back, so the last edit text stays; leaving the
+  // edit writes the field itself (useComposerDraft).
+  const [nativeDefaultValue, setNativeDefaultValue] = useState(editDefaultValue);
+  if (editDefaultValue && editDefaultValue !== nativeDefaultValue) {
+    setNativeDefaultValue(editDefaultValue);
+  }
   const latestTextRef = useRef('');
   const latestHtmlRef = useRef(editDefaultValue ?? '');
   const [unfocusedPreviewText, setUnfocusedPreviewText] = useState('');
@@ -542,18 +562,21 @@ const InputComponent = ({
     () => ensureSelfMentionIndicator(mentionIndicators ?? DEFAULT_MENTION_INDICATORS),
     [mentionIndicators],
   );
+  const lineHeight = fieldMetrics?.lineHeight ?? COMPOSER_INPUT_LINE_HEIGHT;
+  const collapsedHeight = fieldMetrics?.lineHeight ?? COMPOSER_INPUT_COLLAPSED_HEIGHT;
+  const expandedMaxHeight = fieldMetrics
+    ? fieldMetrics.lineHeight * fieldMetrics.maxLines
+    : COMPOSER_INPUT_EXPANDED_MAX_HEIGHT;
   const inputStyle = useMemo(
     () => ({
       fontSize: COMPOSER_INPUT_FONT_SIZE,
-      lineHeight: COMPOSER_INPUT_LINE_HEIGHT,
+      lineHeight,
       color: inputTextColor,
       // Focus alone must not allocate the multiline height. The native editor
       // grows from this floor only when content wraps, so the dock measures the
       // real field height and the list reserves exactly that same geometry.
-      maxHeight: isInputFocused
-        ? COMPOSER_INPUT_EXPANDED_MAX_HEIGHT
-        : COMPOSER_INPUT_COLLAPSED_HEIGHT,
-      minHeight: COMPOSER_INPUT_COLLAPSED_HEIGHT,
+      maxHeight: isInputFocused ? expandedMaxHeight : collapsedHeight,
+      minHeight: collapsedHeight,
       // Padding must live on the native field. Wrap width is textView.frame
       // width; a padded wrapper + width 100% made the editor wrap wider than
       // the visible pill, so words/emoji jumped to the next line when the
@@ -566,7 +589,15 @@ const InputComponent = ({
       width: '100%' as const,
       alignSelf: 'stretch' as const,
     }),
-    [inputPaddingLeft, inputPaddingRight, inputTextColor, isInputFocused],
+    [
+      collapsedHeight,
+      expandedMaxHeight,
+      inputPaddingLeft,
+      inputPaddingRight,
+      inputTextColor,
+      isInputFocused,
+      lineHeight,
+    ],
   );
   return (
     <View
@@ -578,7 +609,7 @@ const InputComponent = ({
       )}
       style={shellStyle ? [{ borderRadius: 20, overflow: 'hidden' }, shellStyle] : shellBaseStyle}
     >
-      <ChatInput.AttachmentsList />
+      {attachmentsSlot === undefined ? <ChatInput.AttachmentsList /> : attachmentsSlot}
       <View className='relative w-full min-w-0'>
         {showStatusPlaceholderOverlay && statusEmoji ? (
           <View
@@ -594,7 +625,8 @@ const InputComponent = ({
               style={{
                 maxWidth: COMPOSER_STATUS_PLACEHOLDER_TEXT_WIDTH,
                 fontSize: COMPOSER_INPUT_FONT_SIZE,
-                lineHeight: COMPOSER_INPUT_LINE_HEIGHT,
+                lineHeight,
+                ...(placeholderTextColorOverride ? { color: placeholderTextColorOverride } : {}),
                 ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
               }}
               numberOfLines={1}
@@ -624,6 +656,7 @@ const InputComponent = ({
               html={unfocusedPreviewHtml}
               fallbackText={unfocusedPreviewText}
               textColor={inputTextColor}
+              lineHeight={lineHeight}
               mentionBg={mentionBg}
               mentionText={mentionText}
             />
@@ -639,7 +672,7 @@ const InputComponent = ({
           ref={inputRef}
           {...restProps}
           scrollEnabled={isInputFocused}
-          {...(editDefaultValue ? { defaultValue: editDefaultValue } : {})}
+          {...(nativeDefaultValue ? { defaultValue: nativeDefaultValue } : {})}
           placeholder={nativePlaceholder}
           placeholderTextColor={placeholderTextColor}
           cursorColor={cursorColor}
@@ -661,7 +694,12 @@ const InputComponent = ({
           accessibilityState={{ disabled }}
         />
         {trailingSlot ? (
-          <View className='absolute right-0 top-0 bottom-0 z-10 justify-center'>
+          <View
+            className={cn(
+              'absolute right-0 top-0 bottom-0 z-10',
+              trailingAlign === 'end' ? 'justify-end' : 'justify-center',
+            )}
+          >
             {trailingSlot}
           </View>
         ) : null}

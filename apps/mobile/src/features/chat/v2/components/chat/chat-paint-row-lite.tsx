@@ -46,6 +46,10 @@ import { hasMarkdownTable } from '@/src/utils/markdownTable';
 import { DELETED_ATTACHMENT_PLACEHOLDER } from '@/src/utils/activeAttachments';
 import { useMentionPress } from '@/src/features/chat/v2/components/conversation-composer/utils/useMentionPress';
 import {
+  ReadMoreWithFade,
+  type LongMessagePresentation,
+} from '@/src/features/chat/v2/components/conversation-composer/long-message-presentation';
+import {
   PaintMediaPlaceholder,
   PaintParentPreview,
   PaintReactionSummary,
@@ -238,11 +242,13 @@ const EmojiPaintPreviewText = ({
   markdownMaxWidth,
   mutedForeground,
   conversationId,
+  lineHeight,
 }: InteractivePaintPreviewRendererProps & {
   hydrateInlineEmoji: boolean;
   markdownMaxWidth: number;
   mutedForeground: string;
   conversationId: string;
+  lineHeight: number;
 }): ReactElement => {
   const emojiIds = useMemo(
     () =>
@@ -260,7 +266,7 @@ const EmojiPaintPreviewText = ({
   const emojiLines = useMemo(() => groupPaintPreviewSegmentsByLine(segments), [segments]);
   const collapsedBodyStyle = isCollapsed
     ? {
-        maxHeight: PARAGRAPH_LINE_HEIGHT * collapsedLines,
+        maxHeight: lineHeight * collapsedLines,
         overflow: 'hidden' as const,
       }
     : undefined;
@@ -271,11 +277,7 @@ const EmojiPaintPreviewText = ({
         {emojiLines.map((line, lineIndex) => (
           <View
             key={`emoji-line-${lineIndex}`}
-            style={
-              line.length === 0
-                ? { width: '100%', height: PARAGRAPH_LINE_HEIGHT }
-                : EMOJI_LINE_STYLE
-            }
+            style={line.length === 0 ? { width: '100%', height: lineHeight } : EMOJI_LINE_STYLE}
           >
             {line.map((segment, index) => {
               if (segment.kind !== 'emoji') {
@@ -353,6 +355,7 @@ const InlineRichPaintPreviewText = ({
   isCollapsed,
   collapsedLines,
   readMore,
+  lineHeight,
 }: {
   markdown: string;
   markdownMaxWidth: number;
@@ -369,6 +372,7 @@ const InlineRichPaintPreviewText = ({
   isCollapsed: boolean;
   collapsedLines: number;
   readMore: ReactElement | null;
+  lineHeight: number | undefined;
 }): ReactElement => {
   const handleLinkPress = useMentionPress();
   const inlineMarkdownStyle = useMemo(
@@ -380,8 +384,9 @@ const InlineRichPaintPreviewText = ({
         brand,
         linkColor: messageLinkColor,
         ...(compact ? { variant: 'compactActivity' as const } : {}),
+        ...(lineHeight !== undefined ? { lineHeight } : {}),
       }),
-    [bodyTextColor, foregroundMuted, cardBg, brand, compact, messageLinkColor],
+    [bodyTextColor, foregroundMuted, cardBg, brand, compact, messageLinkColor, lineHeight],
   );
 
   return (
@@ -412,6 +417,8 @@ export const PaintPreviewText = ({
   hydrateInlineEmoji = true,
   isExpanded = false,
   onExpand,
+  lineHeight,
+  presentation,
 }: {
   row: ChatPaintRow;
   className?: string | undefined;
@@ -420,6 +427,13 @@ export const PaintPreviewText = ({
   hydrateInlineEmoji?: boolean | undefined;
   isExpanded?: boolean;
   onExpand?: (conversationId: string) => void;
+  /**
+   * Body line height for screens that set their own, applied on every path
+   * (plain, markdown, inline rich, emoji) and in compact too; omitted keeps the chat default.
+   */
+  lineHeight?: number | undefined;
+  /** A screen's own fold, link style and fade; omitted keeps the paint row's collapse and the chat link. */
+  presentation?: LongMessagePresentation | undefined;
 }): ReactElement => {
   // Mention chip tokens are kept in step with the rich `RichInlineText` renderer so
   // the lite-to-rich promotion shows no color/highlight pop. All colors come from
@@ -442,7 +456,11 @@ export const PaintPreviewText = ({
   } = useChatRenderTokens();
   const isOwnMessage = row.rowKind === 'CURRENT_USER' || row.senderPaintModel.isCurrentUser;
   const bodyTextColor = textColor ?? (isOwnMessage ? rootTextUser : rootTextOther);
-  const bodyTextStyle = compact ? COMPACT_ACTIVITY_BODY_TEXT_STYLE : PRIMARY_BODY_TEXT_STYLE;
+  const bodyTextStyle = useMemo(() => {
+    const base = compact ? COMPACT_ACTIVITY_BODY_TEXT_STYLE : PRIMARY_BODY_TEXT_STYLE;
+    return lineHeight !== undefined ? { ...base, lineHeight } : base;
+  }, [compact, lineHeight]);
+  const effectiveLineHeight = lineHeight ?? PARAGRAPH_LINE_HEIGHT;
   const messageLinkColor = isOwnMessage ? linkColorUser : linkColor;
   const readMoreColor = isOwnMessage ? actionPrimaryColor : linkColor;
   const handleLinkPress = useMentionPress();
@@ -465,7 +483,8 @@ export const PaintPreviewText = ({
     segments,
   });
   const markdownMaxWidth = inlineContentMaxWidth;
-  const isCollapsed = row.collapse.isCollapsible && !isExpanded;
+  const collapse = presentation?.collapse ?? row.collapse;
+  const isCollapsed = collapse.isCollapsible && !isExpanded;
 
   const handleReadMorePress = useCallback(
     (event: GestureResponderEvent) => {
@@ -475,7 +494,7 @@ export const PaintPreviewText = ({
     [onExpand, row.conversationId],
   );
 
-  const readMore = isCollapsed ? (
+  const readMoreLink = (
     <Pressable
       accessibilityRole='button'
       accessibilityLabel='Read more'
@@ -485,16 +504,25 @@ export const PaintPreviewText = ({
       style={{ paddingTop: READ_MORE_VERTICAL_GAP, paddingBottom: READ_MORE_VERTICAL_GAP }}
     >
       <Text
-        style={{
-          color: readMoreColor,
-          fontSize: 15,
-          lineHeight: 20,
-          fontWeight: '600',
-        }}
+        style={
+          presentation?.readMoreTextStyle ?? {
+            color: readMoreColor,
+            fontSize: 15,
+            lineHeight: 20,
+            fontWeight: '600',
+          }
+        }
       >
         Read more
       </Text>
     </Pressable>
+  );
+  const readMore = isCollapsed ? (
+    presentation ? (
+      <ReadMoreWithFade fade={presentation.fade}>{readMoreLink}</ReadMoreWithFade>
+    ) : (
+      readMoreLink
+    )
   ) : null;
 
   if (row.isDeleted) {
@@ -521,8 +549,9 @@ export const PaintPreviewText = ({
         currentUserId={row.currentUserId}
         className={className}
         isCollapsed={isCollapsed}
-        collapsedLines={row.collapse.collapsedLines}
+        collapsedLines={collapse.collapsedLines}
         readMore={readMore}
+        lineHeight={lineHeight}
       />
     );
   }
@@ -537,6 +566,7 @@ export const PaintPreviewText = ({
       tableHeaderBackground: tableHeaderBg,
       tableBorderColor,
       ...(compact ? { variant: 'compactActivity' as const } : {}),
+      ...(lineHeight !== undefined ? { lineHeight } : {}),
     });
 
     return (
@@ -553,7 +583,7 @@ export const PaintPreviewText = ({
           isOwnMessage={isOwnMessage}
           hydrateInlineEmoji={hydrateInlineEmoji}
           {...(hasMarkdownTable(row.body.markdown) ? { flavor: 'github' as const } : {})}
-          {...(isCollapsed ? { collapsedNumberOfLines: row.collapse.collapsedLines } : {})}
+          {...(isCollapsed ? { collapsedNumberOfLines: collapse.collapsedLines } : {})}
         />
         {readMore}
       </View>
@@ -568,7 +598,7 @@ export const PaintPreviewText = ({
         bodyTextStyle={bodyTextStyle}
         className={className}
         isCollapsed={isCollapsed}
-        collapsedLines={row.collapse.collapsedLines}
+        collapsedLines={collapse.collapsedLines}
         readMore={readMore}
         isOwnMessage={isOwnMessage}
         messageLinkColor={messageLinkColor}
@@ -577,6 +607,7 @@ export const PaintPreviewText = ({
         markdownMaxWidth={markdownMaxWidth}
         mutedForeground={mutedForeground}
         conversationId={row.conversationId}
+        lineHeight={effectiveLineHeight}
       />
     );
   }
@@ -589,7 +620,7 @@ export const PaintPreviewText = ({
         bodyTextStyle={bodyTextStyle}
         className={className}
         isCollapsed={isCollapsed}
-        collapsedLines={row.collapse.collapsedLines}
+        collapsedLines={collapse.collapsedLines}
         readMore={readMore}
         isOwnMessage={isOwnMessage}
         messageLinkColor={messageLinkColor}
@@ -605,7 +636,7 @@ export const PaintPreviewText = ({
       bodyTextStyle={bodyTextStyle}
       className={className}
       isCollapsed={isCollapsed}
-      collapsedLines={row.collapse.collapsedLines}
+      collapsedLines={collapse.collapsedLines}
       readMore={readMore}
     />
   );

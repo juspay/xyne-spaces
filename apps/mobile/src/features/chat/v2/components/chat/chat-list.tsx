@@ -12,7 +12,16 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Pressable, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  Text,
+  useWindowDimensions,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ViewStyle,
+} from 'react-native';
 import Animated, {
   type SharedValue,
   useAnimatedStyle,
@@ -288,6 +297,12 @@ type ChatListProps = {
   onMessagePress: (conversation: ConversationItem, paintRow: ChatPaintRow) => void;
   onMessageLongPress: (conversation: ConversationItem) => void;
   onScrolledUpChange?: ((isScrolledUp: boolean) => void) | undefined;
+  /**
+   * True while the user drags past the newest message with nothing newer to
+   * load (iOS rubber-band; Android, at the end while dragging); false on release.
+   * Called only when the value flips. Unset, the scroll handlers are the plain ones.
+   */
+  onDragPastNewestChange?: ((isPast: boolean) => void) | undefined;
   onFirstLayout?: (() => void) | undefined;
   onInitialLoadComplete?: (() => void) | undefined;
   onInitialLoadStateChange?: ((state: ChatInitialLoadState) => void) | undefined;
@@ -366,6 +381,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     onMessagePress,
     onMessageLongPress,
     onScrolledUpChange,
+    onDragPastNewestChange,
     onFirstLayout,
     onInitialLoadComplete,
     onInitialLoadStateChange,
@@ -2433,6 +2449,61 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     setViewportAnchorFromVisibleTail,
   ]);
 
+  // Only built into the list when `onDragPastNewestChange` is set, so every
+  // other caller keeps the plain scroll handlers.
+  const dragPastNewestRef = useRef({ dragging: false, isPast: false, beginOffsetY: 0 });
+  const reportDragPastNewest = useCallback(
+    (event?: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      if (!onDragPastNewestChange) return;
+      const drag = dragPastNewestRef.current;
+      let isPast = false;
+      if (drag.dragging && !hasMoreAfter && event) {
+        const { contentOffset, layoutMeasurement, contentSize, contentInset } = event.nativeEvent;
+        // contentSize already holds the reserved composer padding; the inset is the keyboard and composer growth.
+        const pastEnd =
+          contentOffset.y +
+          layoutMeasurement.height -
+          contentSize.height -
+          (contentInset?.bottom ?? 0);
+        // Android does not bounce, so being at the end while dragging is as far as it
+        // goes; only a drag that has not moved back toward older messages counts.
+        isPast =
+          Platform.OS === 'ios'
+            ? pastEnd > 1
+            : pastEnd >= -1 && contentOffset.y >= drag.beginOffsetY;
+      }
+      if (isPast === drag.isPast) return;
+      drag.isPast = isPast;
+      onDragPastNewestChange(isPast);
+    },
+    [hasMoreAfter, onDragPastNewestChange],
+  );
+  const handleDragTrackedScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      reportDragPastNewest(event);
+      onScroll();
+    },
+    [onScroll, reportDragPastNewest],
+  );
+  const handleDragTrackedBeginDrag = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>): void => {
+      const drag = dragPastNewestRef.current;
+      drag.dragging = true;
+      // Android has no overscroll to read, so the drag's direction decides, and
+      // that is only known from the scroll events after this one.
+      if (Platform.OS === 'ios') reportDragPastNewest(event);
+      else drag.beginOffsetY = event.nativeEvent.contentOffset.y;
+      handleScrollBeginDrag();
+    },
+    [handleScrollBeginDrag, reportDragPastNewest],
+  );
+  const handleDragTrackedSettled = useCallback((): void => {
+    dragPastNewestRef.current.dragging = false;
+    reportDragPastNewest();
+    handleScrollSettled();
+  }, [handleScrollSettled, reportDragPastNewest]);
+  const tracksDragPastNewest = onDragPastNewestChange !== undefined;
+
   const markInitialLoadComplete = useCallback((): void => {
     if (notifiedInitialLoadIdentityRef.current === openIdentityKey) return;
     const wasListInstanceLoaded = listInstanceLoadedRef.current;
@@ -2547,6 +2618,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       }
       const animateEntrance = rowEntranceController.getPending().has(item.id);
       const MessageRowComponent = renderers?.MessageRow ?? ChatMessageListRow;
+      const previousPaint = hasCustomMessageRow ? previousPaintByRowId.get(item.id) : undefined;
       return (
         <MessageRowComponent
           item={item}
@@ -2555,7 +2627,14 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
           {...(targetConversationId !== undefined ? { targetConversationId } : {})}
           currentUser={currentUser}
           conversation={conversationsById.get(item.paint.conversationId)}
-          {...(hasCustomMessageRow ? { previousPaint: previousPaintByRowId.get(item.id) } : {})}
+          {...(hasCustomMessageRow
+            ? {
+                previousPaint,
+                previousConversation: previousPaint
+                  ? conversationsById.get(previousPaint.conversationId)
+                  : undefined,
+              }
+            : {})}
           presentationStore={rowPresentationStore}
           handleTargetRowReady={handleTargetRowReady}
           isRichRenderingEnabled={isRichRenderingEnabled}
@@ -2918,6 +2997,10 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
     startUnreadBoundaryJump,
     unreadJumpTargetRowId,
   ]);
+  const FloatingDateComponent = renderers?.FloatingDate ?? DatePill;
+  const SkeletonComponent = renderers?.Skeleton ?? ConversationSkeleton;
+  const ListNotice = renderers?.ListNotice;
+  const ListEmpty = renderers?.ListEmpty;
   const keyboardAwareList = (
     <KeyboardAwareLegendList
       ref={listRef}
@@ -2944,10 +3027,10 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       maintainVisibleContentPosition={maintainVisibleContentPosition}
       onItemSizeChanged={handleItemSizeChanged}
       onLoad={handleListLoad}
-      onScroll={onScroll}
-      onScrollBeginDrag={handleScrollBeginDrag}
-      onScrollEndDrag={handleScrollSettled}
-      onMomentumScrollEnd={handleScrollSettled}
+      onScroll={tracksDragPastNewest ? handleDragTrackedScroll : onScroll}
+      onScrollBeginDrag={tracksDragPastNewest ? handleDragTrackedBeginDrag : handleScrollBeginDrag}
+      onScrollEndDrag={tracksDragPastNewest ? handleDragTrackedSettled : handleScrollSettled}
+      onMomentumScrollEnd={tracksDragPastNewest ? handleDragTrackedSettled : handleScrollSettled}
       scrollEventThrottle={SCROLL_EVENT_THROTTLE_MS}
       onStartReached={onStartReached}
       onStartReachedThreshold={1.5}
@@ -2972,19 +3055,29 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
             className='absolute inset-0 items-center justify-center gap-3 px-8'
             style={composerErrorOverlayStyle}
           >
-            <Text className='text-center text-base font-medium text-foreground'>
-              Couldn&apos;t load messages
-            </Text>
-            <Text className='text-center text-sm text-muted-foreground'>
-              Check your connection and try again.
-            </Text>
-            <Pressable
-              accessibilityRole='button'
-              className='rounded-full bg-primary px-5 py-2.5'
-              onPress={retryInitialLoad}
-            >
-              <Text className='font-medium text-primary-foreground'>Try again</Text>
-            </Pressable>
+            {ListNotice ? (
+              <ListNotice
+                title="Couldn't load messages"
+                detail='Check your connection and try again.'
+                onRetry={retryInitialLoad}
+              />
+            ) : (
+              <>
+                <Text className='text-center text-base font-medium text-foreground'>
+                  Couldn&apos;t load messages
+                </Text>
+                <Text className='text-center text-sm text-muted-foreground'>
+                  Check your connection and try again.
+                </Text>
+                <Pressable
+                  accessibilityRole='button'
+                  className='rounded-full bg-primary px-5 py-2.5'
+                  onPress={retryInitialLoad}
+                >
+                  <Text className='font-medium text-primary-foreground'>Try again</Text>
+                </Pressable>
+              </>
+            )}
           </Animated.View>
         ) : null}
 
@@ -2994,9 +3087,17 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
             className='absolute inset-0 items-center justify-center px-6'
             style={composerErrorOverlayStyle}
           >
-            <Text className='text-center text-base font-medium text-foreground'>
-              {messageId ? 'This message is unavailable.' : 'This conversation is unavailable.'}
-            </Text>
+            {ListNotice ? (
+              <ListNotice
+                title={
+                  messageId ? 'This message is unavailable.' : 'This conversation is unavailable.'
+                }
+              />
+            ) : (
+              <Text className='text-center text-base font-medium text-foreground'>
+                {messageId ? 'This message is unavailable.' : 'This conversation is unavailable.'}
+              </Text>
+            )}
           </Animated.View>
         ) : null}
 
@@ -3006,9 +3107,27 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
             className='absolute inset-0 items-center justify-center px-6'
             style={composerErrorOverlayStyle}
           >
-            <Text className='text-center text-base font-medium text-foreground'>
-              Couldn&apos;t position this message.
-            </Text>
+            {ListNotice ? (
+              <ListNotice title="Couldn't position this message." />
+            ) : (
+              <Text className='text-center text-base font-medium text-foreground'>
+                Couldn&apos;t position this message.
+              </Text>
+            )}
+          </Animated.View>
+        ) : null}
+
+        {ListEmpty &&
+        initialLoadState === 'ready' &&
+        displayRows.length === 0 &&
+        !isRouteAnchorUnavailable &&
+        !isRouteAnchorPlacementUnavailable ? (
+          <Animated.View
+            pointerEvents='none'
+            className='absolute inset-0 items-center justify-center px-8'
+            style={composerErrorOverlayStyle}
+          >
+            <ListEmpty surface='channel' />
           </Animated.View>
         ) : null}
 
@@ -3030,7 +3149,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
             ]}
           >
             {OPEN_PLACEHOLDER_ROW_KEYS.map(key => (
-              <ConversationSkeleton key={key} />
+              <SkeletonComponent key={key} />
             ))}
           </Animated.View>
         ) : null}
@@ -3049,7 +3168,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
               pillAnimatedStyle,
             ]}
           >
-            <DatePill
+            <FloatingDateComponent
               dateText={floatingDateText}
               onLayout={layout =>
                 recordDateSeparatorLayout(

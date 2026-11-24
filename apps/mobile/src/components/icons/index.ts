@@ -19,3 +19,4 @@ export { default as HuddleIcon } from './huddle-icon';
 export { default as MentionIcon } from './mention-icon';
 export { default as TicketBadgeIcon } from './ticket-badge-icon';
 export { default as ArrowForwardIcon } from './arrow-forward-icon';
+export { default as Spark4Icon } from './spark4-icon';

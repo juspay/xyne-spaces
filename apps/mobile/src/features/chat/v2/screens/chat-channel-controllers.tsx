@@ -14,7 +14,10 @@ import {
 import type { SharedValue } from 'react-native-reanimated';
 import type { ChannelScopeType } from '@xyne/shared';
 
-import { ChatComposerScrollToBottomButton } from '@/src/features/chat/v2/components/chat/chat-composer-dock';
+import {
+  ChatComposerScrollToBottomButton,
+  type ChatComposerScrollToBottomButtonProps,
+} from '@/src/features/chat/v2/components/chat/chat-composer-dock';
 import { type ConversationItem } from '@/src/features/chat/v2/components/conversation-composer';
 import type { ChatInputEditingMessage } from '@/src/components/input-composer/input-composer.types';
 import {
@@ -35,15 +38,18 @@ export type ScrollToBottomButtonControllerProps = {
   composerHeight: SharedValue<number>;
   enabled: boolean;
   onPress: () => void;
+  /** Optional replacement for the button this controller shows. Unset keeps the classic one. */
+  button?: ComponentType<ChatComposerScrollToBottomButtonProps> | undefined;
 };
 
 export const ScrollToBottomButtonController = forwardRef<
   ScrollToBottomButtonControllerHandle,
   ScrollToBottomButtonControllerProps
 >(function ScrollToBottomButtonController(
-  { composerHeight, enabled, onPress },
+  { composerHeight, enabled, onPress, button },
   ref,
 ): ReactElement | null {
+  const Button = button ?? ChatComposerScrollToBottomButton;
   const [visible, setVisible] = useState(false);
   useImperativeHandle(
     ref,
@@ -58,12 +64,7 @@ export const ScrollToBottomButtonController = forwardRef<
   );
 
   return (
-    <ChatComposerScrollToBottomButton
-      composerHeight={composerHeight}
-      enabled={enabled}
-      onPress={onPress}
-      visible={visible}
-    />
+    <Button composerHeight={composerHeight} enabled={enabled} onPress={onPress} visible={visible} />
   );
 });
 
