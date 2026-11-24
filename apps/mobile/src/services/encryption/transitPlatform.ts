@@ -21,26 +21,22 @@ const toResponse = (status: number, data?: unknown): TransitResponse => ({
   json: async () => data,
 });
 
-/** Transit and manifest calls over the app's mTLS client, with the session's bearer token. */
-function mobileTransitHttp(getToken: () => string | null): TransitHttp {
-  return {
-    async request(path, { method = 'GET', body } = {}): Promise<TransitResponse> {
-      const token = getToken();
-      try {
-        const data = await mtlsRequestJson<unknown>(path, {
-          method,
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        });
-        return toResponse(200, data);
-      } catch (error) {
-        if (isMtlsRequestError(error)) return toResponse(error.statusCode);
-        throw error;
-      }
-    },
-  };
-}
+/** Transit and manifest calls over the app's mTLS client; the session cookie authenticates them. */
+const mobileTransitHttp: TransitHttp = {
+  async request(path, { method = 'GET', body } = {}): Promise<TransitResponse> {
+    try {
+      const data = await mtlsRequestJson<unknown>(path, {
+        method,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return toResponse(200, data);
+    } catch (error) {
+      if (isMtlsRequestError(error)) return toResponse(error.statusCode);
+      throw error;
+    }
+  },
+};
 
-export function installMobileTransitPlatform(getToken: () => string | null): void {
-  setTransitPlatform({ crypto: nobleTransitCrypto, http: mobileTransitHttp(getToken) });
+export function installMobileTransitPlatform(): void {
+  setTransitPlatform({ crypto: nobleTransitCrypto, http: mobileTransitHttp });
 }

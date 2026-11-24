@@ -9,6 +9,7 @@ import { stateMachineActor } from '@xyne/shared/machines';
 import { ZERO_SERVER_URL } from '@/src/config';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { ProtectedStartupScreen } from '@/src/components/startup/ProtectedStartupScreen';
+import { TransitKeyModuleMissingError } from '@/src/services/encryption/transitKeyStores';
 import { mutators } from '../zero/mutators';
 import { initializeMtlsTransport } from '../utils/mtlsTransport';
 import {
@@ -68,7 +69,11 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const { user, token } = useAuth();
   // Zero opens only once the transit key is registered and its cookie set (never on a failed
   // setup): the sync proxy reads the key once, when the websocket connects.
-  const { isReady: encryptionReady } = useEncryptionBootstrap();
+  const {
+    isReady: encryptionReady,
+    error: encryptionError,
+    reset: resetEncryption,
+  } = useEncryptionBootstrap();
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
   const unsubscribeConnectionTimingRef = useRef<(() => void) | null>(null);
@@ -312,6 +317,19 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   if (!zero || !zeroMatchesCurrentWorkspace) {
     if (user && isWorkspaceSwitchInProgress()) {
       return <ProtectedStartupScreen label='Preparing your workspace' progress={0.15} />;
+    }
+
+    // Zero stays closed while encryption setup has failed; show why instead of a blank screen.
+    if (user && encryptionError) {
+      return encryptionError instanceof TransitKeyModuleMissingError ? (
+        <ProtectedStartupScreen label='Update the app to continue' progress={0.15} />
+      ) : (
+        <ProtectedStartupScreen
+          label="Couldn't set up a secure connection"
+          progress={0.15}
+          action={{ label: 'Try again', onPress: resetEncryption }}
+        />
+      );
     }
 
     return null;

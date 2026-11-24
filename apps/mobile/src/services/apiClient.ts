@@ -5,7 +5,15 @@ import {
   mtlsRequestJson,
   mtlsRequestText,
 } from './MtlsApiService';
-import { decryptTransitFields } from '@xyne/shared';
+import {
+  CLIENT_MANIFEST_STALE_CODE,
+  decryptTransitFields,
+  encryptBodyWithRule,
+  encryptField,
+  findRequestRule,
+  getClientManifest,
+  refetchClientManifest,
+} from '@xyne/shared';
 import { getActiveKeyring } from './encryption/activeKeyring';
 
 type RequestExtras = {
@@ -25,6 +33,41 @@ function withAuthHeaders(token?: string, headers?: Record<string, string>): Reco
   };
 }
 
+type RequestBody = Exclude<MtlsRequestOptions['body'], undefined>;
+
+/** Encrypts the body's `client: true` fields by the route's manifest rule, as the dashboard does. */
+async function encryptBodyByRule(
+  path: string,
+  method: MtlsRequestOptions['method'],
+  body: RequestBody,
+): Promise<RequestBody> {
+  const keyring = getActiveKeyring();
+  const manifest = getClientManifest();
+  if (!keyring || !manifest || !method || !['POST', 'PUT', 'PATCH'].includes(method)) return body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+  const rule = findRequestRule(manifest, method, path);
+  if (!rule) return body;
+  const encrypted = await encryptBodyWithRule(body, rule, (value, field) =>
+    encryptField(value, keyring, field),
+  );
+  return encrypted.body as RequestBody;
+}
+
+/** The server's latest manifest when it rejected the body for a stale one (409). */
+function staleManifest(error: unknown): { latestVersion?: number; environment?: string } | null {
+  if (!isMtlsRequestError(error) || error.statusCode !== 409) return null;
+  try {
+    const data = JSON.parse(error.responseBody) as {
+      code?: string;
+      latestVersion?: number;
+      environment?: string;
+    };
+    return data.code === CLIENT_MANIFEST_STALE_CODE ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function apiRequest<T>(
   path: string,
   options?: MtlsRequestOptions & { token?: string },
@@ -41,10 +84,23 @@ export async function apiRequest<T>(
   if (options?.method !== undefined) {
     requestOptions.method = options.method;
   }
-  if (options?.body !== undefined) {
-    requestOptions.body = options.body;
+  // Encrypted from the caller's plaintext on every send, so the stale-manifest retry re-encrypts.
+  const send = async (): Promise<T> => {
+    if (options?.body !== undefined) {
+      requestOptions.body = await encryptBodyByRule(path, options.method, options.body);
+    }
+    return mtlsRequestJson<T>(path, requestOptions);
+  };
+  let data: T;
+  try {
+    data = await send();
+  } catch (error) {
+    const stale = staleManifest(error);
+    if (!stale || !(await refetchClientManifest(stale.latestVersion, stale.environment))) {
+      throw error;
+    }
+    data = await send();
   }
-  const data = await mtlsRequestJson<T>(path, requestOptions);
   // Fields the backend encrypted for this device's transit key.
   const keyring = getActiveKeyring();
   return keyring ? ((await decryptTransitFields(data, keyring)) as T) : data;

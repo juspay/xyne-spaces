@@ -57,7 +57,7 @@ const sortDesc = (rows: DmStatsPageResult): DmStatsPageResult =>
 const getLatestActivityAt = (rows: DmStatsPageResult): number =>
   rows.reduce((latest, row) => Math.max(latest, row.lastActivityAt), 0);
 
-const areDmRowsEquivalent = (a: DmStatsPageResult, b: DmStatsPageResult): boolean => {
+export const areDmRowsEquivalent = (a: DmStatsPageResult, b: DmStatsPageResult): boolean => {
   if (a.length !== b.length) {
     return false;
   }

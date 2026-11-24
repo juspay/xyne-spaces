@@ -11,12 +11,19 @@ import { useAuth } from '../contexts/AuthContext';
 import { getAuthSessionGeneration } from '../services/authSessionLifecycle';
 import { setActiveKeyring } from '../services/encryption/activeKeyring';
 import { setSyncProxyTransitKey } from '../services/encryption/syncProxyKeyCookie';
-import { transitKeyStore } from '../services/encryption/transitKeyStores';
+import {
+  TransitKeyModuleMissingError,
+  transitKeyStore,
+} from '../services/encryption/transitKeyStores';
 import { installMobileTransitPlatform } from '../services/encryption/transitPlatform';
 import { Event, logger } from '../utils/logger';
 
 /** Auth session the key was last registered for; process-wide, like the shared bootstrap cache. */
 let registeredGeneration: number | null = null;
+
+/** Timed retry of a failed setup: 1 s, doubling, at most every 30 s. */
+const RETRY_BASE_MS = 1000;
+const RETRY_MAX_MS = 30_000;
 
 /**
  * Transit encryption for the app, as the dashboard has it: the Keystore key is registered with
@@ -25,12 +32,10 @@ let registeredGeneration: number | null = null;
  */
 export function EncryptionBootstrapProvider({ children }: { children: ReactNode }): ReactElement {
   const { user, token } = useAuth();
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
 
   const installed = useRef(false);
   if (!installed.current) {
-    installMobileTransitPlatform(() => tokenRef.current);
+    installMobileTransitPlatform();
     installed.current = true;
   }
 
@@ -98,8 +103,18 @@ export function EncryptionBootstrapProvider({ children }: { children: ReactNode 
   // comes back to the foreground or the network comes back (not on any online report: NetInfo
   // fires one on subscribe, and a server error would then retry in a loop).
   const failed = value.error !== null;
+  const needsAppUpdate = value.error instanceof TransitKeyModuleMissingError;
+  const retryAttempt = useRef(0);
+  useEffect(() => {
+    if (value.isReady) retryAttempt.current = 0;
+  }, [value.isReady]);
   useEffect(() => {
     if (!failed) return;
+    // Also retry on a timer, for errors while online and in the foreground; a binary without
+    // the native key module never succeeds, so it waits for the update screen instead.
+    const delay = Math.min(RETRY_BASE_MS * 2 ** retryAttempt.current, RETRY_MAX_MS);
+    retryAttempt.current += 1;
+    const timer = needsAppUpdate ? undefined : setTimeout(reset, delay);
     const appState = AppState.addEventListener('change', next => {
       if (next === 'active') reset();
     });
@@ -114,10 +129,11 @@ export function EncryptionBootstrapProvider({ children }: { children: ReactNode 
       }
     });
     return (): void => {
+      clearTimeout(timer);
       appState.remove();
       unsubscribeNetInfo();
     };
-  }, [failed, reset]);
+  }, [failed, needsAppUpdate, reset]);
 
   return <SharedProvider value={value}>{children}</SharedProvider>;
 }

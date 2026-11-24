@@ -22,9 +22,17 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return Promise.race([promise, timedOut]).finally(() => clearTimeout(timer));
 }
 
+/** This binary was built before the native module, so only an app update can give it a key. */
+export class TransitKeyModuleMissingError extends Error {
+  constructor() {
+    super('The transit key module is not in this build');
+    this.name = 'TransitKeyModuleMissingError';
+  }
+}
+
 async function getOrCreate(): Promise<TransitKeyPair> {
   const module = LotusTransitKey;
-  if (!module) throw new Error('The transit key module is not in this build');
+  if (!module) throw new TransitKeyModuleMissingError();
   const { publicKey, storage } = await withTimeout(module.getPublicKey(), KEY_TIMEOUT_MS);
   logger.info(Event.ENCRYPTION_KEY_GENERATED, { type: 'transit_key', storage });
   return {
