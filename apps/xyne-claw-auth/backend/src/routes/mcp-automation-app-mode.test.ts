@@ -17,12 +17,14 @@ const serverSrc = readFileSync(
 // bearing pieces of that design so a refactor can't silently revert to the
 // old post-hoc swap/de-dup or lose the explicit dispatch flag.
 
+const helper = () =>
+  mcpSrc.slice(mcpSrc.indexOf("async function resolveAppModeSwap("), mcpSrc.indexOf("async function backingServerType("));
+const swapGate = () =>
+  mcpSrc.slice(mcpSrc.indexOf("const appMode = await resolveAppModeSwap("), mcpSrc.indexOf("Virtual xyne-spaces entry"));
+
 describe("automation detection", () => {
   it("gates on the explicit isAutomation flag with the legacy proxy as fallback", () => {
-    const gate = mcpSrc.slice(
-      mcpSrc.indexOf("const isAutomationRun ="),
-      mcpSrc.indexOf("let automationAppSwap"),
-    );
+    const gate = helper();
     expect(gate).toContain("runCtx?.isAutomation === true");
     // Sessions dispatched before the flag existed carry only the proxy pair.
     expect(gate).toContain("runCtx?.resolveMentions === true");
@@ -41,10 +43,7 @@ describe("automation detection", () => {
 describe("entry-stage swap", () => {
   it("removes xyne-spaces entries before any listing is built", () => {
     // The splice targets `entries` (pre-listing), not `data` (post-listing).
-    const swap = mcpSrc.slice(
-      mcpSrc.indexOf("let automationAppSwap"),
-      mcpSrc.indexOf("Virtual xyne-spaces entry"),
-    );
+    const swap = swapGate();
     expect(swap).toContain("entries.splice(i, 1)");
     expect(swap).not.toContain("data.splice");
   });
@@ -52,19 +51,12 @@ describe("entry-stage swap", () => {
   it("keeps the user server when the app token cannot resolve", () => {
     // Swapping without app creds would strip Spaces access entirely and
     // silently break the run — the gate must require both preconditions.
-    const swap = mcpSrc.slice(
-      mcpSrc.indexOf("let automationAppSwap"),
-      mcpSrc.indexOf("Virtual xyne-spaces entry"),
-    );
-    expect(swap).toContain("if (appCreds && appToolsRow)");
-    expect(swap).toContain("automation app-mode SKIPPED");
+    expect(helper()).toContain("swap: hasAppCreds && hasAppToolsRow");
+    expect(swapGate()).toContain("automation app-mode SKIPPED");
   });
 
   it("checks the app token of the run's agent, not of the run user", () => {
-    const swap = mcpSrc.slice(
-      mcpSrc.indexOf("let automationAppSwap"),
-      mcpSrc.indexOf("Virtual xyne-spaces entry"),
-    );
+    const swap = helper();
     // The run's app user first, then the session agent's bot (no run context), then the user.
     expect(swap).toContain("runCtx?.spacesAppUserId ||");
     expect(swap).toContain("where: { spacesAppId }, select: { spacesAppUserId: true }");
@@ -78,6 +70,19 @@ describe("entry-stage swap", () => {
     expect(mcpSrc).toContain('new Map([["xyne-spaces-app-tools", "xyne-spaces"]])');
     const uses = mcpSrc.match(/automationAppSwap \? APP_SWAP_CONFIGURED_AS : undefined/g) ?? [];
     expect(uses.length).toBe(2);
+  });
+
+  it("lists app-tools as xyne-spaces and routes xyne-spaces calls back to it under the swap", () => {
+    // The runner matches grants and "configured but unresolved" by the type the agent
+    // config names, so the swap's server is presented as xyne-spaces …
+    expect(mcpSrc).toContain('data[appToolsIdx] = { ...data[appToolsIdx]!, serverType: "xyne-spaces", serverName: "Xyne Spaces" }');
+    expect(mcpSrc.indexOf('serverType: "xyne-spaces", serverName: "Xyne Spaces"')).toBeLessThan(
+      mcpSrc.indexOf("findUnresolvedConfiguredServers({"),
+    );
+    // … and its calls and signed write actions run against app-tools again.
+    expect(mcpSrc).toContain('return (await resolveAppModeSwap(userId, sessionId, spacesAppId)).swap ? "xyne-spaces-app-tools" : serverType;');
+    const reroutes = mcpSrc.match(/serverType = await backingServerType\(serverType, userId, req\.params\.sessionId, spacesAppId\);/g) ?? [];
+    expect(reroutes.length).toBe(2);
   });
 
   it("suppresses the app-token xyne-spaces fallback listing under the swap", () => {
