@@ -117,11 +117,10 @@ test('a message that cannot be decrypted is not delivered: the socket closes so 
   }
 });
 
-test('after three resyncs in a row the message is delivered as it is and reported; a whole applied poke resets the count', async () => {
+test('after three resyncs in a row the message is delivered as it is; a whole applied poke resets the count', async () => {
   const ring = await keyring();
   let source = () => null;
-  let reported = 0;
-  const Socket = createDecryptingWebSocket(FakeSocket, () => source(), undefined, () => reported++);
+  const Socket = createDecryptingWebSocket(FakeSocket, () => source());
   const encrypted = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField('Chennai', ring) } }] }]);
   const pokeEnd = JSON.stringify(['pokeEnd', { pokeID: 'p1' }]);
   const connect = async (...frames) => {
@@ -138,11 +137,9 @@ test('after three resyncs in a row the message is delivered as it is and reporte
     assert.deepEqual(seen, [], `attempt ${attempt}`);
     assert.equal(ws.closed, 1, `attempt ${attempt}`);
   }
-  assert.equal(reported, 0);
   const fourth = await connect(encrypted);
   assert.deepEqual(fourth.seen, [encrypted]);
   assert.equal(fourth.ws.closed, undefined);
-  assert.equal(reported, 1);
 
   source = () => ring;
   const good = await connect(encrypted, pokeEnd);
@@ -155,8 +152,7 @@ test('after three resyncs in a row the message is delivered as it is and reporte
 
 test('a poke part that decrypts does not reset the count while a later part keeps failing', async () => {
   const ring = await keyring();
-  let reported = 0;
-  const Socket = createDecryptingWebSocket(FakeSocket, () => ring, undefined, () => reported++);
+  const Socket = createDecryptingWebSocket(FakeSocket, () => ring);
   const good = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField('Chennai', ring) } }] }]);
   const bad = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: 'ENC:v1|tk-1|bm90LXJlYWwtY2lwaGVydGV4dC1ieXRlcw==' } }] }]);
   const closes = [];
@@ -168,7 +164,6 @@ test('a poke part that decrypts does not reset the count while a later part keep
     closes.push(ws.closed ?? 0);
   }
   assert.deepEqual(closes, [1, 1, 1, 0]);
-  assert.equal(reported, 1);
 });
 
 test('with client encryption off, ciphertext passes through without a resync', async () => {

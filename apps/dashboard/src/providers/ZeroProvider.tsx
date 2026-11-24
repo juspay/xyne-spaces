@@ -15,34 +15,6 @@ interface ZeroProviderProps {
   children: ReactNode;
 }
 
-// Set when sync gave up decrypting and stored ciphertext; the next Zero start drops the local
-// store so those rows sync again. Kept in localStorage so it survives a reload.
-const STORE_HOLDS_CIPHERTEXT_KEY = 'xyne:zero-store-holds-ciphertext';
-
-const markStoreHoldsCiphertext = (): void => {
-  try {
-    localStorage.setItem(STORE_HOLDS_CIPHERTEXT_KEY, '1');
-  } catch {
-    // Storage unavailable: the rows stay as they are until they next change.
-  }
-};
-
-const readStoreHoldsCiphertext = (): boolean => {
-  try {
-    return localStorage.getItem(STORE_HOLDS_CIPHERTEXT_KEY) === '1';
-  } catch {
-    return false;
-  }
-};
-
-const clearStoreHoldsCiphertext = (): void => {
-  try {
-    localStorage.removeItem(STORE_HOLDS_CIPHERTEXT_KEY);
-  } catch {
-    // Ignore
-  }
-};
-
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
   const { isReady: encryptionReady, keyring, config: encryptionConfig } = useEncryptionBootstrap();
@@ -57,10 +29,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   // Zero filters its local store, so encrypted fields are decrypted as they arrive (the wire
   // still carries ciphertext). Declared before the effect that creates Zero, so it runs first.
   useEffect(() => {
-    installSyncDecryption(
-      () => (encryptionConfig?.clientEncryptionEnabled ? keyring : 'disabled'),
-      markStoreHoldsCiphertext,
-    );
+    installSyncDecryption(() => (encryptionConfig?.clientEncryptionEnabled ? keyring : 'disabled'));
   }, [encryptionConfig, keyring]);
 
   useEffect(() => {
@@ -97,14 +66,11 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
 
     const initZero = async (): Promise<void> => {
       // If workspaceId changed, drop all local databases to prevent stale cross-workspace cache
-      const workspaceChanged = prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId;
-      const storeHoldsCiphertext = readStoreHoldsCiphertext();
-      if (workspaceChanged || storeHoldsCiphertext) {
+      if (prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId) {
         // Close first: an open instance keeps its databases in use.
         await zeroRef.current?.close();
         try {
           await dropAllDatabases();
-          if (storeHoldsCiphertext) clearStoreHoldsCiphertext();
         } catch {
           // Ignore errors during drop
         }

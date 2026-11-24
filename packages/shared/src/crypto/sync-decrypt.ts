@@ -20,7 +20,6 @@ const ZERO_SYNC_PATH = /\/sync\/v\d+\/connect/;
 /** `null` while the keys are not ready yet; `'disabled'` when client encryption is off. */
 export type SyncKeyring = TransitKeyring | null | 'disabled';
 type KeyringSource = () => SyncKeyring;
-type LeftEncryptedListener = () => void;
 
 /**
  * Tables decrypted as they sync: those the client filters on. Other tables keep the decrypt
@@ -151,7 +150,6 @@ export function createDecryptingWebSocket(
   Base: typeof WebSocket,
   getKeyring: KeyringSource,
   tables: readonly string[] = SYNC_DECRYPTED_TABLES,
-  onLeftEncrypted: LeftEncryptedListener = () => {},
 ): typeof WebSocket {
   const released = new WeakSet<Event>();
   // Zero's frames are compact JSON, so a frame with rows from these tables contains this text.
@@ -219,7 +217,6 @@ export function createDecryptingWebSocket(
     #resync(failed: number): boolean {
       if (resyncAttempts >= MAX_RESYNC_ATTEMPTS) {
         getCryptoLogger().error(LogEvent.ENCRYPTION_WS_MESSAGE_DECRYPT, { outcome: 'left_encrypted', failed, attempts: resyncAttempts });
-        onLeftEncrypted();
         return false;
       }
       resyncAttempts += 1;
@@ -261,24 +258,15 @@ export function createDecryptingWebSocket(
 
 let installed = false;
 let currentKeyring: KeyringSource = () => null;
-let currentOnLeftEncrypted: LeftEncryptedListener = () => {};
 
 /**
  * Swaps the browser's WebSocket for one that decrypts Zero's sync messages. Zero looks up the
  * global WebSocket each time it connects, so call this before the Zero instance is created.
- * Each call replaces the keyring source and listener; the WebSocket is swapped only once.
- * `onLeftEncrypted` runs when a message is let through as ciphertext after the resyncs ran out,
- * so the host can drop the local store once the keys work again.
+ * Each call replaces the keyring source; the WebSocket is swapped only once.
  */
-export function installSyncDecryption(getKeyring: KeyringSource, onLeftEncrypted: LeftEncryptedListener = () => {}): void {
+export function installSyncDecryption(getKeyring: KeyringSource): void {
   currentKeyring = getKeyring;
-  currentOnLeftEncrypted = onLeftEncrypted;
   if (installed || typeof globalThis.WebSocket !== 'function') return;
-  globalThis.WebSocket = createDecryptingWebSocket(
-    globalThis.WebSocket,
-    () => currentKeyring(),
-    SYNC_DECRYPTED_TABLES,
-    () => currentOnLeftEncrypted(),
-  );
+  globalThis.WebSocket = createDecryptingWebSocket(globalThis.WebSocket, () => currentKeyring(), SYNC_DECRYPTED_TABLES);
   installed = true;
 }
