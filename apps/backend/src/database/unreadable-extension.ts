@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { UnreadableString, reveal } from '@xyne/shared';
 import { UNREADABLE_COLUMNS } from '@/zero/unreadableColumns';
+import { isInUnreadableScope } from '@/services/encryption/unreadableScope';
 
 type UnreadableTable = keyof typeof UNREADABLE_COLUMNS;
 
@@ -149,43 +150,79 @@ function unwrapArgs(model: string, operation: string, args: unknown): unknown {
   return next ?? args;
 }
 
+/** Throws when `what` runs outside an unreadable scope (a request of an encryptedRoute route). */
+function assertInScope(what: string): void {
+  if (!isInUnreadableScope()) {
+    throw new Error(`${what} outside an unreadable route; mount encryptedRoute(contract) on the route`);
+  }
+}
+
 /**
- * The Prisma counterpart of zero/unreadableTransaction.ts, for `unreadableDb`:
+ * Writes, on the main client (`db`), so every repository's `this.db.<model>.create(...)` takes
+ * an `UnreadableString` for a field in UNREADABLE_COLUMNS and stores the value it holds:
+ * the REST counterpart of `unwrapForWrite` in zero/unreadableTransaction.ts. An
+ * `UnreadableString` anywhere else in the arguments (another field, a nested write, a filter)
+ * is refused rather than stored or compared as "<redacted>".
  *
- * - every read returns the fields in UNREADABLE_COLUMNS as `UnreadableString`, including on
- *   rows reached through `include` / `select` of a relation and on rows a write returns;
- * - a write takes an `UnreadableString` for those fields and stores the value it holds;
- * - an `UnreadableString` anywhere else in the arguments (another field, a nested write, a
- *   filter) is refused rather than stored or compared as "<redacted>".
- *
- * Raw SQL queries bypass it: they return plain values.
+ * Only inside an unreadable scope, the one place an `UnreadableString` can come from (the
+ * route's body, or a read through `unreadableDb`); every other query goes straight through.
+ * Outermost on the client, so it unwraps before the encryption extension sees the value.
  */
-export const unreadableExtension = Prisma.defineExtension({
-  name: 'unreadable-fields',
-  result: buildResultConfig(),
+export const unreadableWritesExtension = Prisma.defineExtension({
+  name: 'unreadable-writes',
   query: {
     $allModels: {
       async $allOperations({ model, operation, args, query }) {
+        if (!isInUnreadableScope()) return query(args);
         return query(unwrapArgs(model, operation, args) as typeof args);
       },
     },
   },
 });
 
-/** `client` with unreadable fields (see `unreadableExtension`); extends the ACL-wrapped client, so scoping still applies. */
-export function withUnreadableFields(client: PrismaClient) {
-  return client.$extends(unreadableExtension);
+/**
+ * Reads, for `unreadableDb` only: every read returns the fields in UNREADABLE_COLUMNS as
+ * `UnreadableString`, including on rows reached through `include` / `select` of a relation and
+ * on rows a write returns. Opt-in per route: a query through it outside an unreadable scope
+ * throws, so only the routes moved to unreadable values read this way; the rest of the backend
+ * keeps reading text through `db` until it moves.
+ *
+ * Raw SQL queries bypass it: they return plain values.
+ */
+export const unreadableReadsExtension = Prisma.defineExtension({
+  name: 'unreadable-reads',
+  result: buildResultConfig(),
+  query: {
+    $allModels: {
+      async $allOperations({ model, operation, args, query }) {
+        assertInScope(`unreadableDb.${model}.${operation}`);
+        return query(args);
+      },
+    },
+  },
+});
+
+/** `client` with unreadable writes (see `unreadableWritesExtension`). */
+export function withUnreadableWrites(client: PrismaClient) {
+  return client.$extends(unreadableWritesExtension);
+}
+
+/** `client` with unreadable reads (see `unreadableReadsExtension`); extends the ACL-wrapped client, so scoping still applies. */
+export function withUnreadableReads(client: PrismaClient) {
+  return client.$extends(unreadableReadsExtension);
 }
 
 /** The client `unreadableDb` is: Prisma's, with the unreadable fields typed as `UnreadableString`. */
-export type UnreadableDb = ReturnType<typeof withUnreadableFields>;
+export type UnreadableDb = ReturnType<typeof withUnreadableReads>;
 
 /**
  * An unreadable value typed as the string a Prisma write argument declares, for a write
- * through `unreadableDb`: the extension above unwraps it right before the query, so the code
- * writing it never reads it. Only for a field in UNREADABLE_COLUMNS (anything else is refused
- * at runtime), and only through `unreadableDb` (the plain client gets an object, not a string).
+ * through `db` or `unreadableDb`: `unreadableWritesExtension` unwraps it right before the
+ * query, so the code writing it never reads it. Only for a field in UNREADABLE_COLUMNS
+ * (anything else is refused), and only inside an unreadable scope (outside one nothing would
+ * unwrap it, so it throws here instead of storing "<redacted>").
  */
 export function unreadableWriteValue(value: UnreadableString): string {
+  assertInScope('unreadableWriteValue');
   return value as unknown as string;
 }

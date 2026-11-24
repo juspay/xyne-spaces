@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import type { UnreadableDb } from '@/database/unreadable-extension';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
 
 export abstract class BaseRepository<T, CreateInput, UpdateInput> {
@@ -9,6 +10,15 @@ export abstract class BaseRepository<T, CreateInput, UpdateInput> {
   constructor(modelName: string) {
     this.db = DatabaseClient.getInstance();
     this.modelName = modelName;
+  }
+
+  /**
+   * `db` with the unreadable fields read as `UnreadableString`, for a route moved to unreadable
+   * values (behind encryptedRoute; throws anywhere else). Writes through either client take an
+   * `UnreadableString` for those fields.
+   */
+  protected get unreadable(): UnreadableDb {
+    return DatabaseClient.getUnreadableInstance();
   }
 
   abstract create(data: CreateInput): Promise<T>;

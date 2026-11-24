@@ -12,10 +12,12 @@ import { config } from '@/config/env';
 import {
   getEncryptionProvider,
   isDekPassthrough,
+  runInUnreadableScope,
   runWithDekPassthrough,
 } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
 import { makeRequestUnreadable } from './unreadableRequest';
+import { unwrapUnreadableResponse } from './unreadableResponse';
 import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } from './decryptionMiddleware';
 
 /**
@@ -28,10 +30,14 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  *    plaintext of a MASTER_DEK field.
  * 3. makeBodyUnreadable: a source field that arrived as plaintext gets its facts derived here
  *    (ciphertext got them in step 2), then the contract's `unreadableString()` fields are
- *    wrapped in `UnreadableString`, whatever they hold (see makeRequestUnreadable). The handler
- *    decides on facts and never reads them.
+ *    wrapped in `UnreadableString`, whatever they hold (see makeRequestUnreadable). The rest
+ *    of the request runs in an unreadable scope: the handler and everything it calls read the
+ *    facts through `requestFacts(contract, field)` and never the text, and the database
+ *    client stores `UnreadableString` values as they are held (database/unreadable-extension.ts).
  * 4. transformResponse: the JSON response's storage ciphertext becomes transit ciphertext
  *    for the caller (encryption service /internal/transit/transform-response).
+ * 5. unwrapUnreadableResponse: an `UnreadableString` in the response goes out as the value it
+ *    holds (storage ciphertext for step 4, or plaintext with encryption off), not "<redacted>".
  *
  * The manifest is the encryption service's alone: it picks the rule for the request and
  * runs every check against it; this file forwards the request and relays its verdict.
@@ -40,7 +46,13 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  *   router.post(path, uploadMultiple, ...encryptedRoute(contract, { resolveWorkspaceId }), handler)
  */
 export function encryptedRoute(contract: RequestContract, options: Omit<EncryptedRouteOptions, 'contract'>) {
-  return [enterDekPassthrough, transformRequest({ contract, ...options }), makeBodyUnreadable(contract), transformResponse];
+  return [
+    enterDekPassthrough,
+    transformRequest({ contract, ...options }),
+    makeBodyUnreadable(contract),
+    transformResponse,
+    unwrapUnreadableResponse,
+  ];
 }
 
 export type EncryptedRouteOptions = {
@@ -65,7 +77,7 @@ function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): 
 function makeBodyUnreadable(contract: RequestContract) {
   return function makeBodyUnreadableMiddleware(req: Request, _res: Response, next: NextFunction): void {
     makeRequestUnreadable(contract, req);
-    next();
+    runInUnreadableScope({ contract, derived: req.derived }, () => next());
   };
 }
 

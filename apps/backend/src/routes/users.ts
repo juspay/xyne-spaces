@@ -1,13 +1,21 @@
 import { Router } from 'express';
+import { createDmClient } from '@xyne/shared';
 import { ChannelController } from '../controllers/channelController';
 import { userManagementController } from '../controllers/userManagementController';
 import { uploadConfig } from '../middleware/upload';
 import { affinityController } from '../controllers/affinityController';
 import { validateZod } from '../middleware/validation';
 import { AddGroupDmParticipantsSchema } from '../validators/channelValidator';
+import { encryptedRoute } from '../middleware/encryptedRoute';
 
 const router = Router();
 const channelController = new ChannelController();
+
+// The first message of a new DM is unreadable to the handler (see createDmClient and
+// middleware/encryptedRoute.ts).
+const encryptedCreateDm = encryptedRoute(createDmClient, {
+  resolveWorkspaceId: async (req) => req.user!.workspaceId,
+});
 
 // User search and listing routes (no ACL required, just auth)
 // Note: Specific routes must come before parameterized routes
@@ -30,7 +38,7 @@ router.get('/', userManagementController.getAllUsers); // Get all users (must co
 router.get('/:id', userManagementController.getUserById); // Get user by ID
 
 // DM Routes
-router.post('/me/dms', channelController.createNewDM); // Create new DM (1-on-1 or group)
+router.post('/me/dms', ...encryptedCreateDm, channelController.createNewDM); // Create new DM (1-on-1 or group)
 router.get('/me/dms/:channelId/history-preview', channelController.getDmHistoryPreview); // Preview history that would be shared
 router.post('/me/dms/:channelId/add', validateZod(AddGroupDmParticipantsSchema), channelController.addGroupDmParticipants); // Add participants to DM/GROUP_DM
 

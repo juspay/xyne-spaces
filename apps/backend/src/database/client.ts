@@ -15,7 +15,7 @@ import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
 import { pingDatabase } from '@/bypassAcl/healthServices';
-import { type UnreadableDb, withUnreadableFields } from './unreadable-extension';
+import { type UnreadableDb, withUnreadableReads, withUnreadableWrites } from './unreadable-extension';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -95,7 +95,10 @@ export class DatabaseClient {
       // Apply zero field encryption extension (public build: pass-through)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
       DatabaseClient.instance = DatabaseClient.instance.$extends(auditExtension) as unknown as PrismaClient;
-      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
+      // Outermost: an UnreadableString in a write is unwrapped before any other extension sees it.
+      DatabaseClient.wrappedInstance = withUnreadableWrites(
+        withWorkspaceStamp(withAclExtension(DatabaseClient.instance)),
+      ) as unknown as PrismaClient;
     }
 
     return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;
@@ -103,11 +106,11 @@ export class DatabaseClient {
 
   /**
    * The same client as `getInstance()`, except the fields in UNREADABLE_COLUMNS come back as
-   * `UnreadableString` (see unreadable-extension.ts). Code moves to it once it no longer
-   * reads those fields as text.
+   * `UnreadableString` (see unreadable-extension.ts). Only inside an encryptedRoute request:
+   * a route moves to it once its handler no longer reads those fields as text.
    */
   static getUnreadableInstance(): UnreadableDb {
-    DatabaseClient.unreadableInstance ??= withUnreadableFields(DatabaseClient.getInstance());
+    DatabaseClient.unreadableInstance ??= withUnreadableReads(DatabaseClient.getInstance());
     return DatabaseClient.unreadableInstance;
   }
 
@@ -174,4 +177,3 @@ export class DatabaseClient {
 
 export const db = DatabaseClient.getInstance();
 export const readReplicaDb = DatabaseClient.getReadReplicaInstance();
-export const unreadableDb = DatabaseClient.getUnreadableInstance();

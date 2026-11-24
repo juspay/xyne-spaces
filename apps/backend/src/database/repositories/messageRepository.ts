@@ -3,7 +3,6 @@ import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { getMessageContentLength, isEncryptedField, MAX_MESSAGE_CONTENT_LENGTH, MessageType, type UnreadableString } from '@xyne/shared';
-import { DatabaseClient } from '@/database/client';
 import { unreadableWriteValue } from '@/database/unreadable-extension';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
@@ -207,10 +206,11 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   }
 
   /**
-   * `create` for content the caller holds as `UnreadableString` (see unreadableDb): it is
-   * stored as it is held (ciphertext, or plaintext untrimmed), and the required and length
-   * checks come from its facts instead of its text. No markdown sanitizing, so it takes no
-   * metadata. The row comes back with `content` unreadable.
+   * `create` for content the caller holds as `UnreadableString`, on a route behind
+   * encryptedRoute: it is stored as it is held (ciphertext, or plaintext untrimmed), and the
+   * required and length checks come from its facts instead of its text. Takes no metadata, so
+   * no markdown sanitizing applies (create sanitizes only `contentFormat: 'markdown'`). The row
+   * comes back with `content` unreadable.
    */
   async createUnreadable(
     data: Omit<CreateMessageInput, 'content' | 'contentLength' | 'metadata'> & {
@@ -231,7 +231,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     }
 
     const workspaceId = await this.resolveMessageWorkspaceId(data);
-    return DatabaseClient.getUnreadableInstance().message.create({
+    return this.unreadable.message.create({
       data: {
         ...(data.messageId && { messageId: data.messageId }),
         conversationId: data.conversationId,
