@@ -12,7 +12,6 @@ import { config } from '@/config/env';
 import {
   getEncryptionProvider,
   isDekPassthrough,
-  manifestEnvironmentForRequest,
   runWithDekPassthrough,
 } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
@@ -136,7 +135,6 @@ async function transformRequestBody(
       ...caller,
       method: req.method,
       path: req.originalUrl,
-      environment: manifestEnvironmentForRequest(req),
       ...contract,
       entityId: await options.resolveWorkspaceId(req),
       entityType: WORKSPACE_ENTITY_TYPE,

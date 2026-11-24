@@ -121,7 +121,6 @@ export const Event = {
   ENCRYPTION_WS_MESSAGE_DECRYPT: 'encryption_ws_message_decrypt',
   ENCRYPTION_CACHE_HIT: 'encryption_cache_hit',
   ENCRYPTION_CACHE_MISS: 'encryption_cache_miss',
-  ENCRYPTION_MANIFEST_REJECTED: 'encryption_manifest_rejected',
   THREAD_CONTEXT_BUTTON_CLICKED: 'thread_context_button_clicked',
   THREAD_CONTEXT_SUBMITTED: 'thread_context_submitted',
   KANBAN_ENTITY_LOADED: 'kanban_entity_loaded',

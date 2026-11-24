@@ -28,16 +28,15 @@ router.post('/verify-token', authenticateApp, (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/internal/transit-proxy/client-manifest?tag=&environment=: the manifest for a proxy,
+ * GET /api/internal/transit-proxy/client-manifest?tag=: the manifest for a proxy,
  * encrypted by the encryption service to the proxy key named by `x-xyne-transit-proxy`.
  * The backend relays ciphertext it cannot read or change.
  */
 router.get('/client-manifest', async (req: Request, res: Response) => {
   const proxyClient = parseTransitProxyHeader(req.headers[TRANSIT_PROXY_HEADER]);
   const tag = typeof req.query.tag === 'string' ? req.query.tag : '';
-  const environment = typeof req.query.environment === 'string' ? req.query.environment : '';
-  if (!proxyClient || !tag || !environment) {
-    res.status(400).json({ error: 'Bad request', message: `${TRANSIT_PROXY_HEADER}, tag and environment are required` });
+  if (!proxyClient || !tag) {
+    res.status(400).json({ error: 'Bad request', message: `${TRANSIT_PROXY_HEADER} and tag are required` });
     return;
   }
   if (!config.enc.apiClientEncryptionEnabled) {
@@ -45,9 +44,9 @@ router.get('/client-manifest', async (req: Request, res: Response) => {
     return;
   }
   try {
-    const result = await getEncryptionProvider().getTransitClientManifest({ tag, environment, proxyClient });
+    const result = await getEncryptionProvider().getTransitClientManifest({ tag, proxyClient });
     if (!result) {
-      res.status(404).json({ error: 'Not found', message: 'No client encryption manifest for this tag and environment' });
+      res.status(404).json({ error: 'Not found', message: 'No client encryption manifest for this tag' });
       return;
     }
     res.set('Cache-Control', 'no-store');
@@ -55,7 +54,6 @@ router.get('/client-manifest', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('[transit-proxy] failed to fetch client manifest', {
       tag,
-      environment,
       error: err instanceof Error ? err.message : String(err),
     });
     res.status(502).json({ error: 'Encryption service unavailable' });

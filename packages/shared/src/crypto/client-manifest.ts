@@ -1,7 +1,5 @@
 import { API_BASE_URL } from '../config.js';
-import { Event } from '../logger/events.js';
 import type { ClientEncryptionManifest } from '../enc-contracts/manifest.js';
-import { getCryptoLogger } from './crypto-logger.js';
 import { decryptField, isEncryptedField } from './field-decrypt.js';
 import type { TransitKeyring } from './keyring.js';
 
@@ -22,17 +20,6 @@ let inFlight: Promise<ClientEncryptionManifest | null> | null = null;
 /** Decrypts the manifest, which the backend sends encrypted with the transit key. */
 let keyring: TransitKeyring | null = null;
 
-/**
- * Environments this build accepts a manifest for: production builds 'production' and
- * 'playground' (the server picks the lane per request), sandbox only 'sandbox', local only
- * 'development'. `null` = any.
- */
-let allowedEnvironments: readonly string[] | null = null;
-
-export function setAllowedManifestEnvironments(environments: readonly string[] | null): void {
-  allowedEnvironments = environments && environments.length > 0 ? [...environments] : null;
-}
-
 /** The keyring the manifest response is decrypted with; set at bootstrap. */
 export function setClientManifestKeyring(next: TransitKeyring | null): void {
   keyring = next;
@@ -48,7 +35,6 @@ function isManifest(value: unknown): value is ClientEncryptionManifest {
   return (
     typeof m.version === 'number' &&
     typeof m.tag === 'string' &&
-    typeof m.environment === 'string' &&
     Array.isArray(m.rules)
   );
 }
@@ -63,13 +49,6 @@ async function parseManifest(raw: unknown): Promise<ClientEncryptionManifest | n
   }
   const manifest: unknown = JSON.parse(json);
   if (!isManifest(manifest)) throw new Error('Client manifest response is malformed');
-  if (allowedEnvironments && !allowedEnvironments.includes(manifest.environment)) {
-    getCryptoLogger().warn(Event.ENCRYPTION_MANIFEST_REJECTED, {
-      message: `[encryptionlog] Client manifest for "${manifest.environment}" not accepted by this build`,
-      reason: 'wrong_environment',
-    });
-    return null;
-  }
   return manifest;
 }
 
@@ -105,23 +84,17 @@ export function refreshClientManifest(): Promise<ClientEncryptionManifest | null
 const MANIFEST_REFETCH_DELAYS_MS = [0, 500, 1000, 2000, 4000, 4000];
 
 /**
- * Refetches until the manifest is the version and environment the server asked for (any
- * freshly fetched manifest when neither is given). Shared by the REST retry and the Zero
+ * Refetches until the manifest is the version the server asked for (any freshly fetched
+ * manifest when none is given). Shared by the REST retry and the Zero
  * mutation retry after ENC_MANIFEST_STALE.
  */
-export async function refetchClientManifest(version?: number, environment?: string): Promise<boolean> {
+export async function refetchClientManifest(version?: number): Promise<boolean> {
   for (const delay of MANIFEST_REFETCH_DELAYS_MS) {
     if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
     const manifest = await refreshClientManifest().catch(() => undefined);
-    // 404 or a wrong-environment manifest: retrying will not change it.
+    // 404: retrying will not change it.
     if (manifest === null) return false;
-    if (
-      manifest &&
-      (version === undefined || manifest.version === version) &&
-      (environment === undefined || manifest.environment === environment)
-    ) {
-      return true;
-    }
+    if (manifest && (version === undefined || manifest.version === version)) return true;
   }
   return false;
 }

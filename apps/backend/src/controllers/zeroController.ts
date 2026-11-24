@@ -10,17 +10,15 @@ import {
 import { redisService } from '../services/redisService.js';
 import { websocketService } from '../services/websocketService.js';
 import { logger } from '@/utils/logger';
-import { manifestEnvironmentForRequest } from '@/services/encryption';
 import { transitCaller } from '@/middleware/decryptionMiddleware';
 import type { MutationEncryptionContext } from '@/zero/encryptedMutation';
 
 /**
  * Whom a push's mutations encrypted by their manifest rule are for (transitCaller: the access
- * token, whose session's registered transit key the encryption service uses) and the manifest
- * lane the push was made under.
+ * token, whose session's registered transit key the encryption service uses).
  */
 function mutationEncryptionContext(req: Request): MutationEncryptionContext {
-  return { ...transitCaller(req), environment: manifestEnvironmentForRequest(req) };
+  return transitCaller(req);
 }
 
 function handleZeroError(res: Response, error: unknown, rateLimitMessage: string): void {

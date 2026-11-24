@@ -21,7 +21,6 @@ export {
   getClientManifest,
   refreshClientManifest,
   clearClientManifest,
-  setAllowedManifestEnvironments,
   setClientManifestKeyring,
   refetchClientManifest,
   CLIENT_MANIFEST_STALE_CODE,

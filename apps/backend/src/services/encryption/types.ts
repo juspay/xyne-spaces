@@ -99,8 +99,6 @@ export type TransformRequestInput<T> = TransitCaller & {
   method?: string;
   path?: string;
   mutator?: string;
-  /** The request's manifest lane (manifestEnvironmentForRequest). */
-  environment: string;
   /**
    * The route's request contract, compared with the rule: its field names, which of them
    * the client encrypts, and the extractors its handler reads.
@@ -161,7 +159,7 @@ export interface EncryptionProvider {
    * The manifest for a client, encrypted with its transit key, as a string to send as is.
    * `null` when there is no manifest (404).
    */
-  getTransitClientManifest(params: { tag: string; environment: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
+  getTransitClientManifest(params: { tag: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
   /**
    * Seal an outbound app event for the egress transit proxy: the encryption service signs
    * `event` with the app's signing secret and encrypts `{ url, body, signature }` to the
