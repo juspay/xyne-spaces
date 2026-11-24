@@ -453,9 +453,10 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
     if (axios.isAxiosError(error) && error.response) {
       return toFetchResponse(error.response.status, error.response.data, error.response);
     }
-    const failed = error as { status?: unknown; responseData?: unknown; message?: unknown };
+    const failed = error as { status?: unknown; responseData?: unknown };
     if (typeof failed.status !== 'number') throw error;
-    return toFetchResponse(failed.status, failed.responseData ?? { error: String(failed.message ?? '') });
+    const message = error instanceof Error ? error.message : '';
+    return toFetchResponse(failed.status, failed.responseData ?? { error: message });
   }
 }
 
