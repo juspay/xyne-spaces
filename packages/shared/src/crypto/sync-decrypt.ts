@@ -17,7 +17,10 @@ import { Event as LogEvent } from '../logger/events.js';
 /** Zero's sync socket, e.g. `wss://host/sync/v51/connect?...`. Other sockets pass untouched. */
 const ZERO_SYNC_PATH = /\/sync\/v\d+\/connect/;
 
-type KeyringSource = () => TransitKeyring | null;
+/** `null` while the keys are not ready yet; `'disabled'` when client encryption is off. */
+export type SyncKeyring = TransitKeyring | null | 'disabled';
+type KeyringSource = () => SyncKeyring;
+type LeftEncryptedListener = () => void;
 
 /**
  * Tables decrypted as they sync: those the client filters on. Other tables keep the decrypt
@@ -28,16 +31,22 @@ export const SYNC_DECRYPTED_TABLES: readonly string[] = ['form_entity_values'];
 
 /** How many times in a row an undecryptable message closes the socket for a resync before it is let through. */
 const MAX_RESYNC_ATTEMPTS = 3;
+/** A frame whose decrypt hasn't settled by then counts as failed, so it can't hold up sync. */
+const DECRYPT_TIMEOUT_MS = 10_000;
+const RETRY_DELAY_MS = 300;
 
 /** `ENC:v1|tk-N|…`: encrypted for this client. Other ciphertext can't be decrypted here and is left alone. */
 const isTransitCiphertext = (value: unknown): value is string =>
   isEncryptedField(value) && parseTransitKeyId(value.split('|')[1] ?? '') !== null;
 
-// Retried once before the message is refused.
+// A key lookup that failed (e.g. the refetch after a rotation) is retried once. A failed AES-GCM
+// check (OperationError) is final: retrying can't change it.
 const decryptValue = async (ciphertext: string, keyring: TransitKeyring): Promise<string> => {
   try {
     return await decryptField(ciphertext, keyring);
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'OperationError') throw error;
+    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
     return decryptField(ciphertext, keyring);
   }
 };
@@ -119,7 +128,11 @@ async function decryptFrame(data: string, keyring: TransitKeyring | null, tables
   } catch {
     return { data, failed: 0 };
   }
-  const { message, failed } = await decryptPoke(parsed, keyring, tables);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<PokeDecryption>(resolve => {
+    timer = setTimeout(() => resolve({ message: null, failed: 1 }), DECRYPT_TIMEOUT_MS);
+  });
+  const { message, failed } = await Promise.race([decryptPoke(parsed, keyring, tables), timedOut]).finally(() => clearTimeout(timer));
   return { data: message === null ? data : JSON.stringify(message), failed };
 }
 
@@ -138,6 +151,7 @@ export function createDecryptingWebSocket(
   Base: typeof WebSocket,
   getKeyring: KeyringSource,
   tables: readonly string[] = SYNC_DECRYPTED_TABLES,
+  onLeftEncrypted: LeftEncryptedListener = () => {},
 ): typeof WebSocket {
   const released = new WeakSet<Event>();
   // Zero's frames are compact JSON, so a frame with rows from these tables contains this text.
@@ -167,19 +181,31 @@ export function createDecryptingWebSocket(
       const data: unknown = event.data;
       // A pong carries no rows and must not wait: Zero drops the connection if it is late.
       if (typeof data === 'string' && data.startsWith('["pong"')) return;
-      const encrypted = typeof data === 'string' && data.includes('"ENC:') && tableMarkers.some(marker => data.includes(marker));
-      if (!encrypted && this.#pending === 0) return;
+      const keyring = getKeyring();
+      const encrypted =
+        keyring !== 'disabled' &&
+        typeof data === 'string' &&
+        data.includes('"ENC:') &&
+        tableMarkers.some(marker => data.includes(marker));
+      // Only a whole poke applied counts as recovered; a part that decrypts fine says nothing
+      // about the part after it.
+      const pokeEnd = typeof data === 'string' && data.startsWith('["pokeEnd"');
+      if (!encrypted && !pokeEnd && this.#pending === 0) return;
+      if (!encrypted && this.#pending === 0) {
+        resyncAttempts = 0;
+        return;
+      }
 
       event.stopImmediatePropagation();
       // Decrypts start at once (frames overlap); delivery stays in arrival order.
       const ready: Promise<FrameDecryption> = encrypted
-        ? decryptFrame(data as string, getKeyring(), tables).catch(() => ({ data: data as string, failed: 1 }))
+        ? decryptFrame(data as string, keyring, tables).catch(() => ({ data: data as string, failed: 1 }))
         : Promise.resolve({ data: data as string, failed: 0 });
       this.#deliverInOrder(async () => {
         const frame = await ready;
         if (this.#resyncing) return null;
         if (frame.failed > 0 && this.#resync(frame.failed)) return null;
-        if (encrypted && frame.failed === 0) resyncAttempts = 0;
+        if (pokeEnd) resyncAttempts = 0;
         return new MessageEvent('message', { data: frame.data, origin: event.origin, lastEventId: event.lastEventId });
       });
     }
@@ -193,6 +219,7 @@ export function createDecryptingWebSocket(
     #resync(failed: number): boolean {
       if (resyncAttempts >= MAX_RESYNC_ATTEMPTS) {
         getCryptoLogger().error(LogEvent.ENCRYPTION_WS_MESSAGE_DECRYPT, { outcome: 'left_encrypted', failed, attempts: resyncAttempts });
+        onLeftEncrypted();
         return false;
       }
       resyncAttempts += 1;
@@ -234,15 +261,24 @@ export function createDecryptingWebSocket(
 
 let installed = false;
 let currentKeyring: KeyringSource = () => null;
+let currentOnLeftEncrypted: LeftEncryptedListener = () => {};
 
 /**
  * Swaps the browser's WebSocket for one that decrypts Zero's sync messages. Zero looks up the
  * global WebSocket each time it connects, so call this before the Zero instance is created.
- * Each call replaces the keyring source; the WebSocket is swapped only once.
+ * Each call replaces the keyring source and listener; the WebSocket is swapped only once.
+ * `onLeftEncrypted` runs when a message is let through as ciphertext after the resyncs ran out,
+ * so the host can drop the local store once the keys work again.
  */
-export function installSyncDecryption(getKeyring: KeyringSource): void {
+export function installSyncDecryption(getKeyring: KeyringSource, onLeftEncrypted: LeftEncryptedListener = () => {}): void {
   currentKeyring = getKeyring;
+  currentOnLeftEncrypted = onLeftEncrypted;
   if (installed || typeof globalThis.WebSocket !== 'function') return;
-  globalThis.WebSocket = createDecryptingWebSocket(globalThis.WebSocket, () => currentKeyring(), SYNC_DECRYPTED_TABLES);
+  globalThis.WebSocket = createDecryptingWebSocket(
+    globalThis.WebSocket,
+    () => currentKeyring(),
+    SYNC_DECRYPTED_TABLES,
+    () => currentOnLeftEncrypted(),
+  );
   installed = true;
 }

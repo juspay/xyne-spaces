@@ -30,7 +30,7 @@ class FakeSocket extends EventTarget {
   }
 }
 
-const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+const settle = () => new Promise(resolve => setTimeout(resolve, 400));
 
 test('decryptPokeMessage decrypts put and update rows, leaves the rest as they are', async () => {
   const ring = await keyring();
@@ -117,36 +117,79 @@ test('a message that cannot be decrypted is not delivered: the socket closes so 
   }
 });
 
-test('after three resyncs in a row the message is delivered as it is; a good one resets the count', async () => {
+test('after three resyncs in a row the message is delivered as it is and reported; a whole applied poke resets the count', async () => {
   const ring = await keyring();
   let source = () => null;
-  const Socket = createDecryptingWebSocket(FakeSocket, () => source());
+  let reported = 0;
+  const Socket = createDecryptingWebSocket(FakeSocket, () => source(), undefined, () => reported++);
   const encrypted = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField('Chennai', ring) } }] }]);
-  const connect = async () => {
+  const pokeEnd = JSON.stringify(['pokeEnd', { pokeID: 'p1' }]);
+  const connect = async (...frames) => {
     const ws = new Socket(SYNC_URL);
     const seen = [];
     ws.addEventListener('message', event => seen.push(event.data));
-    ws.receive(encrypted);
+    for (const frame of frames) ws.receive(frame);
     await settle();
     return { ws, seen };
   };
 
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const { ws, seen } = await connect();
+    const { ws, seen } = await connect(encrypted);
     assert.deepEqual(seen, [], `attempt ${attempt}`);
     assert.equal(ws.closed, 1, `attempt ${attempt}`);
   }
-  const fourth = await connect();
+  assert.equal(reported, 0);
+  const fourth = await connect(encrypted);
   assert.deepEqual(fourth.seen, [encrypted]);
   assert.equal(fourth.ws.closed, undefined);
+  assert.equal(reported, 1);
 
   source = () => ring;
-  const good = await connect();
+  const good = await connect(encrypted, pokeEnd);
   assert.equal(JSON.parse(good.seen[0])[1].rowsPatch[0].value.textValue, 'Chennai');
   source = () => null;
-  const afterReset = await connect();
+  const afterReset = await connect(encrypted);
   assert.deepEqual(afterReset.seen, []);
   assert.equal(afterReset.ws.closed, 1);
+});
+
+test('a poke part that decrypts does not reset the count while a later part keeps failing', async () => {
+  const ring = await keyring();
+  let reported = 0;
+  const Socket = createDecryptingWebSocket(FakeSocket, () => ring, undefined, () => reported++);
+  const good = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField('Chennai', ring) } }] }]);
+  const bad = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: 'ENC:v1|tk-1|bm90LXJlYWwtY2lwaGVydGV4dC1ieXRlcw==' } }] }]);
+  const closes = [];
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const ws = new Socket(SYNC_URL);
+    ws.receive(good);
+    ws.receive(bad);
+    await settle();
+    closes.push(ws.closed ?? 0);
+  }
+  assert.deepEqual(closes, [1, 1, 1, 0]);
+  assert.equal(reported, 1);
+});
+
+test('with client encryption off, ciphertext passes through without a resync', async () => {
+  const ring = await keyring();
+  const encrypted = JSON.stringify(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { textValue: await encryptField('x', ring) } }] }]);
+  const Socket = createDecryptingWebSocket(FakeSocket, () => 'disabled');
+  const ws = new Socket(SYNC_URL);
+  const seen = [];
+  ws.addEventListener('message', event => seen.push(event.data));
+  ws.receive(encrypted);
+  assert.deepEqual(seen, [encrypted]);
+  assert.equal(ws.closed, undefined);
+});
+
+test('a failed authentication check is not retried', async () => {
+  const ring = await keyring();
+  let lookups = 0;
+  const counting = { forKeyId: keyId => { lookups++; return ring.forKeyId(keyId); } };
+  const bad = 'ENC:v1|tk-1|bm90LXJlYWwtY2lwaGVydGV4dC1ieXRlcw==';
+  await decryptPokeMessage(['pokePart', { rowsPatch: [{ op: 'put', tableName: 'form_entity_values', value: { a: bad } }] }], counting);
+  assert.equal(lookups, 1);
 });
 
 test('a close that arrives behind a held message is delivered after it, with its code', async () => {
