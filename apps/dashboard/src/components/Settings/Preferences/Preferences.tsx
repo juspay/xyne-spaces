@@ -600,8 +600,8 @@ const MeetTranscriptsToggle: FC = () => {
         <p className='text-xs text-muted-foreground mt-0.5'>
           For Google Meet meetings you organize, Xyne turns on Meet&apos;s transcription and adds
           the transcript to the call afterwards. Everyone in the meeting sees that it is being
-          transcribed. If you connected your calendar before turning this on, disconnect and
-          connect it again to grant access.
+          transcribed. If you connected your calendar before turning this on, disconnect and connect
+          it again to grant access.
         </p>
       </div>
       <Switch

@@ -31,7 +31,8 @@ export const useMeetTranscripts = (): {
     onMutate: async (enabled: boolean) => {
       await queryClient.cancelQueries({ queryKey: QUERY_KEY });
       const previous = queryClient.getQueryData<MeetTranscriptsSetting>(QUERY_KEY);
-      if (previous) queryClient.setQueryData<MeetTranscriptsSetting>(QUERY_KEY, { ...previous, enabled });
+      if (previous)
+        queryClient.setQueryData<MeetTranscriptsSetting>(QUERY_KEY, { ...previous, enabled });
       return { previous };
     },
     onError: (_error, _enabled, context) => {
