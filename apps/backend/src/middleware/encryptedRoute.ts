@@ -5,7 +5,6 @@ import { logger } from '@/utils/logger';
 import {
   derivedFactsSchema,
   derivedNames,
-  makeUnreadable,
   sourceFieldNames,
 } from '@xyne/shared';
 import type { RequestContract } from '@xyne/shared';
@@ -17,6 +16,7 @@ import {
 } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
 import { revealUnreadableResponse } from './revealUnreadableResponse';
+import { makeRequestUnreadable } from './unreadableRequest';
 import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } from './decryptionMiddleware';
 
 /**
@@ -27,9 +27,10 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  * 2. transformRequest: transit ciphertext (CEK) in the body becomes workspace-DEK ciphertext
  *    (encryption service /internal/transit/transform-request); the handler never sees
  *    plaintext of a MASTER_DEK field.
- * 3. makeBodyUnreadable: the contract's `unreadableString()` fields are wrapped in
- *    `UnreadableString`, whatever they hold by now (ciphertext or plaintext), so the handler
- *    reads them only through reveal().
+ * 3. makeBodyUnreadable: a source field that arrived as plaintext gets its facts derived here
+ *    (ciphertext got them in step 2), then the contract's `unreadableString()` fields are
+ *    wrapped in `UnreadableString`, whatever they hold (see makeRequestUnreadable). The handler
+ *    decides on facts and never reads them.
  * 4. transformResponse: the JSON response's storage ciphertext becomes transit ciphertext
  *    for the caller (encryption service /internal/transit/transform-response).
  * 5. revealUnreadableResponse: `UnreadableString`s in the response (rows read through
@@ -74,9 +75,7 @@ function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): 
 /** Last step before the handler, on every path through transformRequest (encryption on or off). */
 function makeBodyUnreadable(contract: RequestContract) {
   return function makeBodyUnreadableMiddleware(req: Request, _res: Response, next: NextFunction): void {
-    if (contract.unreadableFields.length > 0 && req.body && typeof req.body === 'object') {
-      req.body = makeUnreadable(contract, req.body);
-    }
+    makeRequestUnreadable(contract, req);
     next();
   };
 }

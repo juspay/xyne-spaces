@@ -1,9 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { UnreadableString, reveal, runExtractors } from '@xyne/shared';
-import type { DerivedSpec, ExtractorName, FieldDerived, FieldFacts } from '@xyne/shared';
-import { config } from '@/config/env';
-import { getEncryptionProvider } from '@/services/encryption';
-import { logger } from '@/utils/logger';
+import { UnreadableString, reveal } from '@xyne/shared';
 import { UNREADABLE_FIELDS, type UnreadableField, type UnreadableModel, unreadableFieldsOf } from './unreadableFields';
 
 type Scalars<M extends Prisma.ModelName> = Prisma.TypeMap['model'][M]['payload']['scalars'];
@@ -121,71 +117,6 @@ export const unreadableExtension = Prisma.defineExtension({
   },
 });
 
-/** The facts a read asks for, per unreadable field of model `M`: `{ content: { textIsEmpty: derive.textIsEmpty } }`. */
-export type FieldFactsSpec<M> = { readonly [F in UnreadableField<M>]?: DerivedSpec };
-
-/** `S`, with any key that is not an unreadable field of `M` a compile error. */
-type OnlyUnreadableFields<M, S> = S & { readonly [K in Exclude<keyof S, UnreadableField<M>>]: never };
-
-/** Per row (in order), per field, the facts asked for. A field's facts are absent when it is null or not selected. */
-export type RowFacts<S> = { [F in keyof S]?: FieldDerived<S, F> };
-
-/**
- * The facts `spec` asks for from rows read through `unreadableDb`, so a handler decides on
- * facts instead of the text (the Prisma counterpart of `tx.read`). With DB encryption on, one
- * encryption-service call for all of them (a value may be workspace-DEK ciphertext); off,
- * extracted here from the plaintext. This module is where the values are revealed for it.
- */
-export async function readFacts<M extends UnreadableModel, const S extends FieldFactsSpec<M>>(
-  model: M,
-  rows: readonly object[],
-  spec: OnlyUnreadableFields<M, S>,
-  workspaceId: string,
-): Promise<RowFacts<S>[]> {
-  const fields = unreadableFieldsOf(model);
-  const wanted: [string, ExtractorName[]][] = [];
-  for (const [field, derived] of Object.entries(spec as Record<string, DerivedSpec | undefined>)) {
-    if (!fields.includes(field)) throw new Error(`readFacts: ${model}.${field} is not an unreadable field`);
-    const names = Object.values(derived ?? {}).flatMap(d => (d ? [d.name] : []));
-    if (names.length > 0) wanted.push([field, names]);
-  }
-
-  const items: { row: number; field: string; value: string; derive: ExtractorName[] }[] = [];
-  rows.forEach((row, index) => {
-    for (const [field, names] of wanted) {
-      const value = (row as Record<string, unknown>)[field];
-      if (value instanceof UnreadableString) items.push({ row: index, field, value: reveal(value), derive: names });
-      else if (typeof value === 'string') items.push({ row: index, field, value, derive: names });
-    }
-  });
-
-  const facts: Record<string, FieldFacts>[] = rows.map(() => ({}));
-  if (items.length === 0) return facts as RowFacts<S>[];
-
-  let results: FieldFacts[];
-  if (config.enc.enableDbEncryption) {
-    results = await getEncryptionProvider().deriveFacts({
-      items: items.map(({ value, derive }) => ({ value, derive })),
-      entityId: workspaceId,
-      entityType: 'WORKSPACE',
-    });
-    if (results.length !== items.length) {
-      throw new Error('readFacts: the encryption service returned facts for a different number of values');
-    }
-  } else {
-    results = items.map(({ field, value, derive }) => {
-      if (value.startsWith('ENC:')) throw new Error(`readFacts: ${model}.${field} is ciphertext and DB encryption is off`);
-      return runExtractors(value, derive);
-    });
-  }
-  logger.info(`[unreadableDb] ${model}: derived facts extracted via ${config.enc.enableDbEncryption ? 'encryption-service' : 'local'}`);
-
-  items.forEach(({ row, field }, index) => {
-    facts[row][field] = results[index];
-  });
-  return facts as RowFacts<S>[];
-}
-
 /** `client` with unreadable fields (see `unreadableExtension`); extends the ACL-wrapped client, so scoping still applies. */
 export function withUnreadableFields(client: PrismaClient) {
   return client.$extends(unreadableExtension);
@@ -193,3 +124,13 @@ export function withUnreadableFields(client: PrismaClient) {
 
 /** The client `unreadableDb` is: Prisma's, with the unreadable fields typed as `UnreadableString`. */
 export type UnreadableDb = ReturnType<typeof withUnreadableFields>;
+
+/**
+ * An unreadable value typed as the string a Prisma write argument declares, for a write
+ * through `unreadableDb`: the extension above unwraps it right before the query, so the code
+ * writing it never reads it. Only for a field in UNREADABLE_FIELDS (anything else is refused
+ * at runtime), and only through `unreadableDb` (the plain client gets an object, not a string).
+ */
+export function unreadableWriteValue(value: UnreadableString): string {
+  return value as unknown as string;
+}

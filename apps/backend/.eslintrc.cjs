@@ -107,16 +107,15 @@ module.exports = {
     {
       // The files allowed to reveal an UnreadableString: the Zero transaction wrapper, which
       // unwraps right before the database write, and the REST reply handler, which still reads
-      // the text until its route has a write/read wrapper of its own. Their Prisma counterparts:
-      // the Prisma extension (unwraps before a write, reveals for readFacts), the response step
-      // that reveals a body on its way to its client, and the create-DM handler, which still
-      // reads its first message for the same reason as the reply handler.
+      // the text until its route has a write/read wrapper of its own. Their REST counterparts:
+      // the Prisma extension, which unwraps right before the database write, and
+      // revealUnreadable, which reveals a payload on its way to its client (a response or a
+      // broadcast). Handlers never reveal: they decide on facts.
       files: [
         'src/zero/unreadableTransaction.ts',
         'src/controllers/conversationController.ts',
         'src/database/unreadable-extension.ts',
-        'src/middleware/revealUnreadableResponse.ts',
-        'src/controllers/channelController.ts',
+        'src/utils/revealUnreadable.ts',
       ],
       rules: {
         'no-restricted-imports': ['error', { paths: GCS_IMPORT_PATHS, patterns: GCS_IMPORT_PATTERNS }],

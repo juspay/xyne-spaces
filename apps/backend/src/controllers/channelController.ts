@@ -37,15 +37,14 @@ import {
   normalizeHistoryScope,
   type AddGroupDmParticipantsRequest,
   type AddGroupDmParticipantsResponse,
-  isEncryptedField,
-  makeUnreadable,
-  reveal,
   createDmClient,
   type CreateDmRequest,
   type UnreadableString,
 } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import type { ContractRequest } from '../types/express';
+import { makeRequestUnreadable } from '../middleware/unreadableRequest';
+import { revealUnreadable } from '@/utils/revealUnreadable';
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
 import { notificationService } from '../services/notificationService';
@@ -68,7 +67,10 @@ import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
-import { extractAllUsersForNotification, extractAllUsersForNotificationFromDerived, extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { extractAllUsersForNotification, extractAllUsersForNotificationFromDerived, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+
+/** The facts of a new DM's first message (createDmClient): what the handler decides on instead of its text. */
+type DmMessageFacts = NonNullable<NonNullable<CreateDmRequest['derived']>['fields']['message']>;
 import { mentionActivities, mentionRecipients, notifyMentioned } from '@/zero/side-effects/tables/mention-delivery';
 import { formatDmChannelName } from '@/zero/side-effects/tables/messages-handler';
 import { activityService } from '@/services/activity/activityService';
@@ -347,12 +349,12 @@ export class ChannelController {
     channelId: string,
     senderId: string,
     message: UnreadableString,
-    facts?: NonNullable<CreateDmRequest['derived']>['fields']['message']
+    facts: DmMessageFacts
   ): Promise<{
     conversationId: string;
     initialMessage: {
       messageId: string;
-      content: string;
+      content: UnreadableString;
       msgType: MessageType;
       hasAttachment: boolean;
       attachments: any[];
@@ -370,23 +372,16 @@ export class ChannelController {
 
       const conversation = await this.conversationRepository.create(conversationData);
 
-      // The one place the first message's text is read: it is stored, and parsed for the
-      // notification only when it arrived as plaintext (ciphertext is decided on its facts).
-      const messageContent = reveal(message);
-      // Ciphertext is stored as sent, with the visible length its text fact measured.
-      const isEncrypted = Boolean(messageContent && isEncryptedField(messageContent));
-
-      // Create initial message
-      const messageData: CreateMessageInput = {
+      // Create initial message. The text is never read here: it is stored as sent (ciphertext or
+      // plaintext) and checked through its facts.
+      const createdMessage = await this.messageRepository.createUnreadable({
         conversationId: conversation.conversationId,
         senderId: senderId,
-        content: isEncrypted ? messageContent : messageContent.trim(),
+        content: message,
         msgType: MessageType.USER,
         hasAttachment: false,
-        ...(isEncrypted && { contentLength: facts?.textLength }),
-      };
-
-      const createdMessage = await this.messageRepository.create(messageData);
+        facts,
+      });
 
       // Update conversation with real initial message ID
       await this.conversationRepository.update(conversation.conversationId, {
@@ -421,10 +416,8 @@ export class ChannelController {
         .map(p => p.userId)
         .filter(userId => userId !== senderId);
 
-      // Extract clean content for notification. Ciphertext has no preview to show.
-      const cleanContent = isEncrypted
-        ? 'Sent a message'
-        : messageContent.replace(/<[^>]*>/g, '').trim() || 'Sent a message';
+      // The notification shows no preview: building one would read the text.
+      const cleanContent = 'Sent a message';
 
       // Fetch workspaceId for notification URL
       const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
@@ -437,20 +430,14 @@ export class ChannelController {
         // channel-wide mention notification. This REST path bypasses the Zero
         // mutator pipeline, so the MessagesSideEffectHandler (which normally
         // handles special mentions) never runs — replicate its GROUP_DM branch here.
-        const { hasChannel, hasHere } = isEncrypted
-          ? { hasChannel: facts?.mentionsChannel ?? false, hasHere: facts?.mentionsHere ?? false }
-          : extractSpecialMentions(messageContent);
+        const { mentionsChannel: hasChannel, mentionsHere: hasHere } = facts;
         const mentionType = hasChannel ? '@channel' : hasHere ? '@here' : undefined;
 
         if (isGroupDm && mentionType) {
           const channel = await this.channelRepository.findById(channelId);
           // Personally mentioned members are sent without mentionType so the
           // @channel/@here toggle can't suppress their mention.
-          const mentioned = isEncrypted
-            ? facts
-              ? await extractAllUsersForNotificationFromDerived(facts, workspaceId)
-              : []
-            : await extractAllUsersForNotification(messageContent, workspaceId);
+          const mentioned = await extractAllUsersForNotificationFromDerived(facts, workspaceId);
           const personalIds = mentionRecipients(
             mentioned,
             { participantIds: new Set(recipientIds), senderId },
@@ -546,8 +533,10 @@ export class ChannelController {
         createdAt: createdMessage.createdAt,
       };
 
-      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
-      await redisService.broadcastMessageToSession(channelId, conversationMessage);
+      // Both go to the channel's clients, so the content is revealed for them as it is stored.
+      const outboundMessage = revealUnreadable(conversationMessage);
+      await websocketService.broadcastToSession(channelId, 'new_conversation', outboundMessage);
+      await redisService.broadcastMessageToSession(channelId, outboundMessage);
 
       return {
         conversationId: conversation.conversationId,
@@ -2162,25 +2151,21 @@ export class ChannelController {
     try {
       const currentUserId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
-      // The route is not behind encryptedRoute yet, which is what wraps the contract's
-      // unreadableString() fields, so they are wrapped here; a no-op once it is.
-      const body = makeUnreadable(createDmClient, req.body);
-      const { participantIds, forwardedMessage, silent, message } = body;
-      // `message` is opaque when the client encrypted it (workspace-DEK ciphertext after
-      // encryptedRoute); its facts stand in for parsing it. Encrypted content is stored only
-      // with the visible length the encryption service measured, so a rule that leaves out
-      // `textLength` is a configuration error.
+      // The route is not behind encryptedRoute yet, which does this; a no-op once it is. After
+      // it, `message` is unreadable and has facts whether it arrived as ciphertext or plaintext.
+      makeRequestUnreadable(createDmClient, req);
+      const { participantIds, forwardedMessage, silent, message } = req.body;
       const messageFacts = req.derived?.fields.message;
-      const messageText: string | undefined = message ? reveal(message) : undefined;
-      const messageIsEncrypted = Boolean(messageText && isEncryptedField(messageText));
-      if (messageIsEncrypted && messageFacts === undefined) {
+      // A message with no facts had no text to derive them from (empty), unless it is
+      // ciphertext the encryption service returned none for: a configuration error.
+      if (message && !messageFacts) {
         res.status(400).json({
-          error: 'Encrypted message arrived without its derived length',
+          error: 'Message arrived without its derived facts',
           code: 'ENC_DERIVED_INVALID',
         });
         return;
       }
-      const hasMessage = messageIsEncrypted ? !messageFacts!.textIsEmpty : Boolean(messageText?.trim());
+      const hasMessage = Boolean(messageFacts && !messageFacts.textIsEmpty);
 
       // When a DM is auto-created without an initial message, keep it hidden from
       // the creator's list until the first message is actually sent.
@@ -2269,7 +2254,7 @@ export class ChannelController {
           let initialConversation = null;
           if (forwardedMessage) {
             initialConversation = await this.sendForwardedMessage(existingSelfDm.id, currentUserId, forwardedMessage);
-          } else if (message && hasMessage) {
+          } else if (message && messageFacts && hasMessage) {
             initialConversation = await this.sendInitialMessage(existingSelfDm.id, currentUserId, message, messageFacts);
           }
 
@@ -2321,7 +2306,7 @@ export class ChannelController {
         let initialConversation = null;
         if (forwardedMessage) {
           initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
-        } else if (message && hasMessage) {
+        } else if (message && messageFacts && hasMessage) {
           initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message, messageFacts);
         }
 
@@ -2384,7 +2369,7 @@ export class ChannelController {
           let initialConversation = null;
           if (forwardedMessage) {
             initialConversation = await this.sendForwardedMessage(existingDM.id, currentUserId, forwardedMessage);
-          } else if (message && hasMessage) {
+          } else if (message && messageFacts && hasMessage) {
             initialConversation = await this.sendInitialMessage(existingDM.id, currentUserId, message, messageFacts);
           }
 
@@ -2445,7 +2430,7 @@ export class ChannelController {
         let initialConversation = null;
         if (forwardedMessage) {
           initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
-        } else if (message && hasMessage) {
+        } else if (message && messageFacts && hasMessage) {
           initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message, messageFacts);
         }
 
@@ -2508,7 +2493,7 @@ export class ChannelController {
           let initialConversation = null;
           if (forwardedMessage) {
             initialConversation = await this.sendForwardedMessage(existingGroupDM.id, currentUserId, forwardedMessage);
-          } else if (message && hasMessage) {
+          } else if (message && messageFacts && hasMessage) {
             initialConversation = await this.sendInitialMessage(existingGroupDM.id, currentUserId, message, messageFacts);
           }
 
@@ -2582,7 +2567,7 @@ export class ChannelController {
         let initialConversation = null;
         if (forwardedMessage) {
           initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
-        } else if (message && hasMessage) {
+        } else if (message && messageFacts && hasMessage) {
           initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message, messageFacts);
         }
 
