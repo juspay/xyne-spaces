@@ -1,5 +1,6 @@
 export { encryptField, decryptField, isEncryptedField } from './field-decrypt.js';
 export { decryptionCache } from './decryption-cache.js';
+export { decryptPokeMessage, createDecryptingWebSocket, installSyncDecryption, SYNC_DECRYPTED_TABLES } from './sync-decrypt.js';
 export { getCryptoLogger, setCryptoLogger } from './crypto-logger.js';
 export {
   fetchEncryptionConfig,

@@ -3,7 +3,7 @@ import { ZeroProvider as ZeroReactProvider } from '@rocicorp/zero/react';
 import { dropAllDatabases, UpdateNeededReason, Zero } from '@rocicorp/zero';
 import { useAuth } from './AuthProvider';
 import { mutators } from '../zero/mutators';
-import { schema } from '@xyne/shared';
+import { installSyncDecryption, schema } from '@xyne/shared';
 import { VITE_ZERO_SERVER } from '../config';
 import { createBatchViewUpdatesWithMetrics } from '../services/otel';
 import { useSelector } from '@xstate/react';
@@ -17,13 +17,20 @@ interface ZeroProviderProps {
 
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
-  const { isReady: encryptionReady } = useEncryptionBootstrap();
+  const { isReady: encryptionReady, keyring, config: encryptionConfig } = useEncryptionBootstrap();
   const isRefreshing = useRef(false);
   const isRecoveringRef = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
+  const zeroRef = useRef<Zero | null>(null);
 
   const [zero, setZero] = useState<Zero | null>(null);
+
+  // Zero filters its local store, so encrypted fields are decrypted as they arrive (the wire
+  // still carries ciphertext). Declared before the effect that creates Zero, so it runs first.
+  useEffect(() => {
+    installSyncDecryption(() => (encryptionConfig?.clientEncryptionEnabled ? keyring : 'disabled'));
+  }, [encryptionConfig, keyring]);
 
   useEffect(() => {
     if (!user || !encryptionReady) {
@@ -60,6 +67,8 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     const initZero = async (): Promise<void> => {
       // If workspaceId changed, drop all local databases to prevent stale cross-workspace cache
       if (prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId) {
+        // Close first: an open instance keeps its databases in use.
+        await zeroRef.current?.close();
         try {
           await dropAllDatabases();
         } catch {
@@ -91,6 +100,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
         onClientStateNotFound: handleClientStateNotFound,
       });
 
+      zeroRef.current = zeroObj;
       setZero(prev => {
         void prev?.close();
         return zeroObj;
