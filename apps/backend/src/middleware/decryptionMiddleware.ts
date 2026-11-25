@@ -31,8 +31,8 @@ function hasEncryptedFields(obj: unknown): boolean {
 }
 
 /**
- * Decrypt `ENC:v1|tk-<version>|…` fields with the keys derived for the caller's transit
- * public key (header or `xk` cookie). Runs after authentication: the auth middlewares call
+ * Decrypt `ENC:v1|tk-<version>|…` fields with the keys derived for the transit public key
+ * the caller's session registered. Runs after authentication: the auth middlewares call
  * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
  */
 export async function decryptRequestBodyMiddleware(
