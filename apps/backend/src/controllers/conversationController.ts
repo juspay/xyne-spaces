@@ -1063,8 +1063,8 @@ export class ConversationController {
       // Content that arrived as workspace-DEK ciphertext is opaque here; the encryption
       // service's extracted command (req.derived) stands in for parsing it.
       const derived = req.derived;
-      // The reply route runs unencrypted today (contract `sourceToDerived: {}`), so no facts
-      // arrive; once `content` is listed in its contract they appear under `fields.content`.
+      // The facts replyToConversationClient lists for `content`; none for plaintext content
+      // from a caller the manifest does not cover.
       const facts: FieldFacts | undefined = (derived?.fields as Record<string, FieldFacts> | undefined)?.content;
       // Encrypted content is stored only with the visible length the encryption service measured;
       // a rule whose extraction policy leaves out `text` cannot be accepted (policy lives in the
