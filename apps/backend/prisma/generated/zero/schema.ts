@@ -1515,9 +1515,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     deskAppIds: string().optional(),
     callConnectionId: string().optional(),
     callIsDefault: boolean(),
-    callRoutingKeys: json<string[]>(),
-    callTicketRules: json().optional(),
-    callPhoneFieldNames: json<string[]>(),
+    callSettings: json().optional(),
   })
   .primaryKey("channelId");
 

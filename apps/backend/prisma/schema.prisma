@@ -2613,9 +2613,7 @@ model EmailChannelPreference {
   // Telephony (CALL and APP desks). Server-only: not in the Zero client schema.
   callConnectionId       String?  // ExternalSource.id of the desk's call connection; null = none
   callIsDefault          Boolean  @default(false) // CALL desks: takes the connection's calls no routing key claims
-  callRoutingKeys        String[] @default([]) // CALL desks: provider routing keys (Ozonetel campaigns)
-  callTicketRules        Json?    // CALL desks: { createTicketOnEvent, callTypes, subjectTemplate }
-  callPhoneFieldNames    String[] @default([]) // APP desks: ticket fields holding dialable numbers
+  callSettings           Json?    // CALL: { routingKeys, ticketRules }; APP: { phoneFieldNames }. Read whole, never queried
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
