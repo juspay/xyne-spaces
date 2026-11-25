@@ -11,8 +11,8 @@ import { isMtlsRequestError, mtlsRequestJson } from '../MtlsApiService';
  */
 const nobleTransitCrypto: TransitCrypto = {
   deriveKey: async (secret, salt, info) => hkdf(sha256, new Uint8Array(secret), salt, info, 32),
-  encrypt: async (key, iv, data) => gcm(key as Uint8Array, iv).encrypt(data),
-  decrypt: async (key, iv, data) => gcm(key as Uint8Array, iv).decrypt(data),
+  encrypt: async (key, iv, data, aad) => gcm(key as Uint8Array, iv, aad).encrypt(data),
+  decrypt: async (key, iv, data, aad) => gcm(key as Uint8Array, iv, aad).decrypt(data),
 };
 
 const toResponse = (status: number, data?: unknown): TransitResponse => ({

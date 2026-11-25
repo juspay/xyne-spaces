@@ -15,7 +15,7 @@ class MockMtlsRequestError extends Error {
 }
 
 const mockRequestJson = jest.fn<(path: string, options?: unknown) => Promise<unknown>>();
-const mockRefetchManifest = jest.fn<(version?: number, env?: string) => Promise<boolean>>();
+const mockRefetchManifest = jest.fn<(version?: number) => Promise<boolean>>();
 let mockKeyring: object | null = null;
 let mockManifest: object | null = null;
 
@@ -37,7 +37,7 @@ jest.mock('@xyne/shared', () => ({
   decryptTransitFields: async (data: Record<string, unknown>) => ({ ...data, decrypted: true }),
   encryptField: async (value: string) => `ENC(${value})`,
   getClientManifest: () => mockManifest,
-  refetchClientManifest: (version?: number, env?: string) => mockRefetchManifest(version, env),
+  refetchClientManifest: (version?: number) => mockRefetchManifest(version),
   findRequestRule: (_manifest: unknown, method: string, path: string) =>
     method === 'POST' && path === '/notes' ? RULE : undefined,
   encryptBodyWithRule: async (
@@ -109,11 +109,7 @@ describe('apiRequest body encryption', () => {
   it('refreshes a stale manifest and re-sends once, encrypted from the original body', async () => {
     mockKeyring = {};
     mockManifest = {};
-    const stale = JSON.stringify({
-      code: 'ENC_MANIFEST_STALE',
-      latestVersion: 3,
-      environment: 'sandbox',
-    });
+    const stale = JSON.stringify({ code: 'ENC_MANIFEST_STALE', latestVersion: 3 });
     mockRequestJson
       .mockRejectedValueOnce(new MockMtlsRequestError('Conflict', 409, stale))
       .mockResolvedValueOnce({ ok: true });
@@ -124,7 +120,7 @@ describe('apiRequest body encryption', () => {
       decrypted: true,
     });
 
-    expect(mockRefetchManifest).toHaveBeenCalledWith(3, 'sandbox');
+    expect(mockRefetchManifest).toHaveBeenCalledWith(3);
     expect(mockRequestJson).toHaveBeenCalledTimes(2);
     expect(sentBody(1)).toEqual({ text: 'ENC(secret)' });
   });

@@ -54,14 +54,10 @@ async function encryptBodyByRule(
 }
 
 /** The server's latest manifest when it rejected the body for a stale one (409). */
-function staleManifest(error: unknown): { latestVersion?: number; environment?: string } | null {
+function staleManifest(error: unknown): { latestVersion?: number } | null {
   if (!isMtlsRequestError(error) || error.statusCode !== 409) return null;
   try {
-    const data = JSON.parse(error.responseBody) as {
-      code?: string;
-      latestVersion?: number;
-      environment?: string;
-    };
+    const data = JSON.parse(error.responseBody) as { code?: string; latestVersion?: number };
     return data.code === CLIENT_MANIFEST_STALE_CODE ? data : null;
   } catch {
     return null;
@@ -96,7 +92,7 @@ export async function apiRequest<T>(
     data = await send();
   } catch (error) {
     const stale = staleManifest(error);
-    if (!stale || !(await refetchClientManifest(stale.latestVersion, stale.environment))) {
+    if (!stale || !(await refetchClientManifest(stale.latestVersion))) {
       throw error;
     }
     data = await send();

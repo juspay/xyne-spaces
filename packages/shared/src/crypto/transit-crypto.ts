@@ -8,17 +8,23 @@ export interface TransitCrypto {
     salt: Uint8Array<ArrayBuffer>,
     info: Uint8Array<ArrayBuffer>,
   ): Promise<TransitAesKey>;
+  /** `aad` is authenticated but not encrypted (file chunks bind their header and position). */
   encrypt(
     key: TransitAesKey,
     iv: Uint8Array<ArrayBuffer>,
     data: Uint8Array<ArrayBuffer>,
+    aad?: Uint8Array<ArrayBuffer>,
   ): Promise<Uint8Array>;
   decrypt(
     key: TransitAesKey,
     iv: Uint8Array<ArrayBuffer>,
     data: Uint8Array<ArrayBuffer>,
+    aad?: Uint8Array<ArrayBuffer>,
   ): Promise<Uint8Array>;
 }
+
+const aesGcm = (iv: Uint8Array<ArrayBuffer>, aad?: Uint8Array<ArrayBuffer>): AesGcmParams =>
+  aad ? { name: 'AES-GCM', iv, additionalData: aad } : { name: 'AES-GCM', iv };
 
 export const webCryptoTransitCrypto: TransitCrypto = {
   async deriveKey(secret, salt, info) {
@@ -31,10 +37,10 @@ export const webCryptoTransitCrypto: TransitCrypto = {
       ['encrypt', 'decrypt'],
     );
   },
-  async encrypt(key, iv, data) {
-    return new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key as CryptoKey, data));
+  async encrypt(key, iv, data, aad) {
+    return new Uint8Array(await crypto.subtle.encrypt(aesGcm(iv, aad), key as CryptoKey, data));
   },
-  async decrypt(key, iv, data) {
-    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key as CryptoKey, data));
+  async decrypt(key, iv, data, aad) {
+    return new Uint8Array(await crypto.subtle.decrypt(aesGcm(iv, aad), key as CryptoKey, data));
   },
 };
