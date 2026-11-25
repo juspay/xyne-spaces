@@ -164,6 +164,7 @@ import { tagRoutes } from '@/tags';
 // import { tagGenerationPipeline } from '@/tags/pipeline';
 import { automationRoutes, initializeAutomations } from '@/automations';
 import { handleClawCallback } from '@/automations/routes/claw-callback.handler';
+import { handleWorkflowClawCallback } from '@/workflowsV2/agents/callback';
 import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInternal';
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
@@ -763,6 +764,14 @@ export class App {
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,
       handleClawCallback,
+    );
+    // Claw's completion callback for a parked RUN_AGENT step. The node path and
+    // attempt in the query string say which gate it answers and whether that
+    // gate is still current.
+    this.app.post(
+      '/api/internal/workflows-v2/claw-callback/:executionId',
+      validateS2SKey,
+      handleWorkflowClawCallback,
     );
     this.app.post(
       '/api/internal/email/autodraft-callback/:conversationId/:channelId',

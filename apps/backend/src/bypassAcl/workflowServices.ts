@@ -22,6 +22,22 @@ export function executionWorkspacesQuery(ids: readonly string[]): Promise<Array<
 }
 
 /**
+ * Relocated from workflowsV2/agents/callback.ts. Resolve which tenant to become BEFORE opening
+ * a scope — a callback arrives with nothing but an id, same ordering constraint as the worker.
+ */
+export function findWorkflowExecutionForCallback(executionId: string) {
+  return asSystem(
+    ['WorkflowExecution'],
+    'callback arrives with only an execution id — workspace must be resolved before a scope can open',
+    () =>
+      db.workflowExecution.findFirst({
+        where: { id: executionId, workflowType: WORKFLOWS_TYPE },
+        select: { workspaceId: true, createdBy: true },
+      }),
+  );
+}
+
+/**
  * Relocated from workflowsV2/adapters/persistence.ts's findActiveWorkflows. SYSTEM event
  * routing, not user authorization. A dispatched event has no caller, so this must not be
  * reduced to anyone's workspace by the ambient scope. The event's origin workspace arrives in
