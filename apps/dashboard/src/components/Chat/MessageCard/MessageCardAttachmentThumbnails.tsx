@@ -327,7 +327,7 @@ export function MessageCardAttachmentThumbnails({
             ) : (
               <span
                 className={cn(
-                  'h-5 w-5 rounded-md flex items-center justify-center flex-shrink-0 text-[9px] font-bold',
+                  'h-5 w-5 rounded-md flex items-center justify-center shrink-0 text-[9px] font-bold',
                   badgeClassName,
                 )}
               >

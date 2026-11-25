@@ -54,7 +54,7 @@ export function RecentSearches(props: RecentSearchesProps): ReactElement | null 
               data-track-category='SEARCH'
               data-track-name='RECENT_SEARCH_SELECT'
             >
-              <Clock size={16} className='text-muted-foreground flex-shrink-0' />
+              <Clock size={16} className='text-muted-foreground shrink-0' />
               {/* Names are pre-resolved by the hook (live by id, snapshot fallback); render as-is. */}
               <span className='flex flex-1 min-w-0 items-center flex-wrap gap-1'>
                 <QueryFilterChips mentions={entry.filterChips} currentUserID={currentUserID} />
@@ -66,7 +66,7 @@ export function RecentSearches(props: RecentSearchesProps): ReactElement | null 
               </span>
               {/* The tab this recent replays to — shown only when it isn't All (tab-switch cue). */}
               {entry.tab !== TabType.ALL && (
-                <span className='flex-shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground'>
+                <span className='shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground'>
                   {getTabLabel(entry.tab)}
                 </span>
               )}
@@ -75,7 +75,7 @@ export function RecentSearches(props: RecentSearchesProps): ReactElement | null 
                 aria-label='Remove recent search'
                 onClick={event => handleRemove(event, identityKey, onRemove)}
                 onMouseDown={event => event.stopPropagation()}
-                className='flex-shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground'
+                className='shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground'
                 data-track-category='SEARCH'
                 data-track-name='RECENT_SEARCH_REMOVE'
               >

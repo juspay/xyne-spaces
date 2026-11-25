@@ -47,12 +47,7 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
 
   const statusIndicator = (
     <div
-      className={cn(
-        'inline-flex items-center justify-center',
-        'flex-shrink-0',
-        sizeClass,
-        className,
-      )}
+      className={cn('inline-flex items-center justify-center', 'shrink-0', sizeClass, className)}
       title={showOnHover ? undefined : `${status.content}`}
     >
       <span className='leading-none'>{renderEmoji(status.emoji)}</span>

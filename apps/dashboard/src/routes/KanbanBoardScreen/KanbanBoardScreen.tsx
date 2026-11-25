@@ -5467,9 +5467,9 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                     data-track-metadata={JSON.stringify({ groupKey: group.key, isExpanded })}
                   >
                     {isExpanded ? (
-                      <ChevronDownIcon className='w-4 h-4 text-muted-foreground flex-shrink-0' />
+                      <ChevronDownIcon className='w-4 h-4 text-muted-foreground shrink-0' />
                     ) : (
-                      <ChevronRight className='w-4 h-4 text-muted-foreground flex-shrink-0' />
+                      <ChevronRight className='w-4 h-4 text-muted-foreground shrink-0' />
                     )}
                     <div className='flex items-center gap-4 flex-1'>
                       <div className='flex items-center gap-2'>
@@ -5479,7 +5479,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                         )}
                         {/* Show group icon for group assignees */}
                         {group.entityType === 'group' && (
-                          <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center flex-shrink-0'>
+                          <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center shrink-0'>
                             <User className='w-3 h-3 text-muted-foreground' />
                           </div>
                         )}
@@ -5627,7 +5627,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                             )}
                             {/* Show group icon for group assignees */}
                             {group.entityType === 'group' && (
-                              <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center flex-shrink-0'>
+                              <div className='w-5 h-5 rounded-full bg-muted-foreground/50 flex items-center justify-center shrink-0'>
                                 <User className='w-3 h-3 text-muted-foreground' />
                               </div>
                             )}

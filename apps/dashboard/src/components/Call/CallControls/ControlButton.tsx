@@ -50,7 +50,7 @@ export function controlClassName({
   inactive?: boolean | undefined;
 }): string {
   const base =
-    'relative inline-flex flex-shrink-0 items-center justify-center rounded-full transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314]';
+    'relative inline-flex shrink-0 items-center justify-center rounded-full transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314]';
 
   if (!sizing.isFullView) {
     // Mini window: every control is a small disc sized from the window width.
@@ -135,7 +135,7 @@ export function ControlButton({
         sizing.isFullView ? 'max-w-64' : 'max-w-44',
       )}
     >
-      <span className='inline-flex flex-shrink-0'>
+      <span className='inline-flex shrink-0'>
         <button
           type='button'
           aria-label={label}

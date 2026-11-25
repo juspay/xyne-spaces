@@ -197,7 +197,7 @@ export const PreviewThreadPanel: React.FC<{
 }> = ({ onClose, channelId, conversationId, threadMessages, loading }) => (
   <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
     {/* Thread header with close button */}
-    <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
+    <div className='flex items-center justify-between p-4 border-b border-border h-14 shrink-0'>
       <h3 className='font-semibold text-foreground'>Threads</h3>
       <button
         onClick={onClose}

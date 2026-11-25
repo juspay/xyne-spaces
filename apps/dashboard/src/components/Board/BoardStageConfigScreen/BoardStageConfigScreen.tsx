@@ -379,7 +379,7 @@ const LinearStageCard = ({
                     data-track-category='board_config'
                     data-track-name='edit_condition'
                   >
-                    <GitBranch size={14} className='text-muted-foreground flex-shrink-0' />
+                    <GitBranch size={14} className='text-muted-foreground shrink-0' />
                     <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
                       {condition.name || `Condition ${condIdx + 1}`}
                     </span>
@@ -421,7 +421,7 @@ const LinearStageCard = ({
                         onClick={() => void handleOpenEditForm(stage.tempId, stage.formId!)}
                         variant='ghost'
                         size='iconSm'
-                        className='text-muted-foreground hover:text-foreground flex-shrink-0 h-5 w-5 p-0.5'
+                        className='text-muted-foreground hover:text-foreground shrink-0 h-5 w-5 p-0.5'
                         data-track-category='board_config'
                         data-track-name='edit_stage_form'
                       >
@@ -432,7 +432,7 @@ const LinearStageCard = ({
                         onClick={() => handleRemoveStageForm(stage.tempId)}
                         variant='ghost'
                         size='iconSm'
-                        className='text-muted-foreground hover:text-red-500 flex-shrink-0'
+                        className='text-muted-foreground hover:text-red-500 shrink-0'
                         data-track-category='board_config'
                         data-track-name='remove_stage_form'
                       >
@@ -2627,7 +2627,7 @@ const BoardStageConfigScreen = ({
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         {/* ── Header ── */}
-        <div className='flex items-center justify-between px-[18px] py-4 flex-shrink-0 border-b border-border'>
+        <div className='flex items-center justify-between px-[18px] py-4 shrink-0 border-b border-border'>
           <div className='flex items-center gap-2'>
             <Button
               aria-label='Go back'
@@ -2683,7 +2683,7 @@ const BoardStageConfigScreen = ({
             <div className='flex items-center justify-between gap-4'>
               {/* Left: label + context */}
               <div className='flex items-center gap-2 min-w-0'>
-                <Clock size={14} className='text-muted-foreground flex-shrink-0' />
+                <Clock size={14} className='text-muted-foreground shrink-0' />
                 <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
                   Enable Priority-based SLA
                 </span>
@@ -2716,7 +2716,7 @@ const BoardStageConfigScreen = ({
             <div className='px-6 py-3 border-t border-border'>
               <div className='flex items-center justify-between gap-4'>
                 <div className='flex items-center gap-2 min-w-0'>
-                  <Pencil size={14} className='text-muted-foreground flex-shrink-0' />
+                  <Pencil size={14} className='text-muted-foreground shrink-0' />
                   <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
                     Prefillable forms
                   </span>
@@ -2741,7 +2741,7 @@ const BoardStageConfigScreen = ({
           <div className='px-6 py-3 border-t border-border'>
             <div className='flex items-center justify-between gap-4'>
               <div className='flex items-center gap-2 min-w-0'>
-                <GitBranch size={14} className='text-muted-foreground flex-shrink-0' />
+                <GitBranch size={14} className='text-muted-foreground shrink-0' />
                 <span className='text-[13px] font-medium text-foreground whitespace-nowrap'>
                   Non-Linear Board
                 </span>

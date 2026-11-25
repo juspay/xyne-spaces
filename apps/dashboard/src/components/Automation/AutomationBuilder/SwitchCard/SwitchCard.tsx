@@ -231,7 +231,7 @@ export function SwitchCard({
               return (
                 <div
                   key={caseIndex}
-                  className='w-[320px] min-w-[320px] flex-shrink-0 flex flex-col gap-2'
+                  className='w-[320px] min-w-[320px] shrink-0 flex flex-col gap-2'
                 >
                   <div className='flex items-center justify-between gap-2'>
                     <span className='text-xs font-medium text-foreground'>
@@ -297,7 +297,7 @@ export function SwitchCard({
             })}
 
             {/* Default branch */}
-            <div className='w-[320px] min-w-[320px] flex-shrink-0 flex flex-col gap-2'>
+            <div className='w-[320px] min-w-[320px] shrink-0 flex flex-col gap-2'>
               <div className='flex min-h-7 items-center'>
                 <span className='text-xs font-medium text-foreground'>Default</span>
               </div>

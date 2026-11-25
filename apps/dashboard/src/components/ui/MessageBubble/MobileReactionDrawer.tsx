@@ -266,7 +266,7 @@ export default function MobileReactionDrawer({
                           data-track-name='SWITCH_REACTION_TAB'
                           className='flex items-start gap-3 px-2 py-2 w-full text-left hover:bg-accent active:bg-accent rounded-lg transition-colors'
                         >
-                          <span className='*:text-2xl flex-shrink-0'>
+                          <span className='*:text-2xl shrink-0'>
                             {renderEmoji(group.emojiName)}
                           </span>
                           <p className='text-sm self-center text-foreground line-clamp-3'>

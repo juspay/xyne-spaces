@@ -74,7 +74,7 @@ function MessageItem({ msg, showHeader }: { msg: ChatMessage; showHeader: boolea
       )}
     >
       {/* Left: Avatar or time gutter */}
-      <div className='w-8 flex-shrink-0 flex items-start justify-center pt-0.5'>
+      <div className='w-8 shrink-0 flex items-start justify-center pt-0.5'>
         {showHeader ? (
           <div
             className={cn(
@@ -250,7 +250,7 @@ export function CallChatPanel({
             data-track-category='CALLS'
             data-track-name='SEND_CALL_CHAT_MESSAGE'
             className={cn(
-              'p-2 rounded-lg transition-colors flex-shrink-0',
+              'p-2 rounded-lg transition-colors shrink-0',
               input.trim() && !isSending
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground cursor-not-allowed',

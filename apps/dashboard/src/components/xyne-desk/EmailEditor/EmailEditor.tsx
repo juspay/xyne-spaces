@@ -444,7 +444,7 @@ export const EmailEditor = ({
       {bubbleToolbar ? (
         <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} bubble />
       ) : (
-        <div className='flex-shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
+        <div className='shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
           <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} />
         </div>
       )}

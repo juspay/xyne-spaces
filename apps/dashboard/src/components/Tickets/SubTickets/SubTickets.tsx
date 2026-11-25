@@ -42,7 +42,7 @@ export function SubTicketsToggle({
         // Enter and Space on the chip must not also open the ticket it sits on.
         onKeyDown={event => event.stopPropagation()}
         className={cn(
-          'flex h-[22px] flex-shrink-0 items-center gap-1 rounded-md border px-1.5 text-xs tabular-nums transition-colors',
+          'flex h-[22px] shrink-0 items-center gap-1 rounded-md border px-1.5 text-xs tabular-nums transition-colors',
           open
             ? 'border-border bg-muted text-foreground'
             : 'border-transparent text-muted-foreground',
@@ -146,7 +146,7 @@ export function SubTicketsTree(props: SubTicketsTreeProps): ReactElement | null 
   if (props.layout === 'list') {
     const { renderItem, renderListLine } = props;
     const connector = (continues: boolean): ReactElement => (
-      <span aria-hidden className='relative w-5 flex-shrink-0 self-stretch'>
+      <span aria-hidden className='relative w-5 shrink-0 self-stretch'>
         <span
           className={cn(
             TREE_LINE,

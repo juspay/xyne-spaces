@@ -327,7 +327,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
       )}
       {/* Header with file info */}
       <div
-        className={`flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg flex-shrink-0 ${showChrome ? '' : 'hidden'}`}
+        className={`flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg shrink-0 ${showChrome ? '' : 'hidden'}`}
       >
         <div className='flex items-center gap-4 min-w-0 flex-1'>
           {language && (
@@ -339,7 +339,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
             • {lines.length.toLocaleString()} lines
           </span>
         </div>
-        <div className='flex items-center gap-2 flex-shrink-0'>
+        <div className='flex items-center gap-2 shrink-0'>
           <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
             • {fileSizeMB.toFixed(2)}MB
           </span>
@@ -393,7 +393,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
                   data-index={virtualRow.index}
                   className='flex w-full'
                 >
-                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none leading-5'>
+                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 shrink-0 select-none leading-5'>
                     {virtualRow.index + 1}
                   </span>
                   <span
@@ -414,7 +414,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
           <div>
             {lines.map((line, index) => (
               <div key={index} className='flex min-h-[20px]'>
-                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none leading-5'>
+                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 shrink-0 select-none leading-5'>
                   {index + 1}
                 </span>
                 <span

@@ -452,7 +452,7 @@ export function MiniCallView({
               <CallStateTransition connectionState={connectionState} machineState={machineState}>
                 <div className='h-full px-3 py-1 flex items-center justify-between gap-3'>
                   <div className='flex items-center gap-2 min-w-0'>
-                    <div className='relative visual-regression-hide flex-shrink-0'>
+                    <div className='relative visual-regression-hide shrink-0'>
                       <div className='w-2 h-2 bg-green-500 rounded-full'></div>
                       <div className='absolute inset-0 w-2 h-2 bg-green-500 rounded-full animate-ping'></div>
                     </div>
@@ -460,7 +460,7 @@ export function MiniCallView({
                       Call Active
                     </span>
                   </div>
-                  <div className='flex items-center gap-1 flex-shrink-0'>
+                  <div className='flex items-center gap-1 shrink-0'>
                     <HeaderActionButton
                       callId={callId}
                       label={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
@@ -587,7 +587,7 @@ export function MiniCallView({
                       {participantCount} participant{participantCount !== 1 ? 's' : ''}
                     </span>
                   </div>
-                  <div className='flex items-center gap-1 flex-shrink-0'>
+                  <div className='flex items-center gap-1 shrink-0'>
                     <HeaderActionButton
                       callId={callId}
                       label='Switch to line view'

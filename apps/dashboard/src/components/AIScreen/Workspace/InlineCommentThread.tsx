@@ -194,7 +194,7 @@ export function InlineCommentThread({
             onClick={reply}
             disabled={!draft.trim() || busy}
             aria-label='Reply'
-            className='grid h-7 w-7 flex-shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-40'
+            className='grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground disabled:opacity-40'
             data-track-category='AskAI'
             data-track-name='inline-comment-reply'
           >

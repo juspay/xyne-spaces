@@ -325,7 +325,7 @@ const AttachmentCitationPreviewInner: React.FC = () => {
           onEscapeKeyDown={e => e.preventDefault()}
         >
           {/* Header */}
-          <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0'>
+          <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0'>
             <div className='flex flex-col min-w-0'>
               <Dialog.Title className='text-sm font-semibold text-gray-900 dark:text-gray-100 truncate'>
                 {ref?.fileName ?? 'File Preview'}
@@ -336,7 +336,7 @@ const AttachmentCitationPreviewInner: React.FC = () => {
                 </span>
               )}
             </div>
-            <div className='flex items-center gap-2 flex-shrink-0'>
+            <div className='flex items-center gap-2 shrink-0'>
               <button
                 onClick={handleDownload}
                 className='p-1.5 rounded-md text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'

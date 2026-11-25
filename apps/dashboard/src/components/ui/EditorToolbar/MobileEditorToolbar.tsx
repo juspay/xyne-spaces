@@ -159,7 +159,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
   );
 
   const buttonClass = (active: boolean): string =>
-    `p-1.5 rounded transition duration-200 ease-in-out flex-shrink-0 ${
+    `p-1.5 rounded transition duration-200 ease-in-out shrink-0 ${
       active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
     }`;
 
@@ -171,7 +171,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         onClick={onClose}
         data-track-category='MOBILE_EDITOR_TOOLBAR'
         data-track-name='CLOSE_TOOLBAR'
-        className='p-2 rounded-full bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors flex items-center justify-center flex-shrink-0 mr-1'
+        className='p-2 rounded-full bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors flex items-center justify-center shrink-0 mr-1'
         aria-label='Close formatting toolbar'
         onMouseDown={e => e.preventDefault()}
       >
@@ -265,7 +265,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         </button>
 
         {/* Separator */}
-        <div className='h-4 w-px bg-border mx-1 flex-shrink-0' aria-hidden='true' />
+        <div className='h-4 w-px bg-border mx-1 shrink-0' aria-hidden='true' />
 
         {/* Code Block */}
         <button
@@ -296,7 +296,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         </button>
 
         {/* Separator */}
-        <div className='h-4 w-px bg-border mx-1 flex-shrink-0' aria-hidden='true' />
+        <div className='h-4 w-px bg-border mx-1 shrink-0' aria-hidden='true' />
 
         {/* Blockquote */}
         <button
@@ -349,7 +349,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         data-track-name='SEND_MESSAGE'
         disabled={disabled || isSending || !hasContent}
         className={`
-          p-2 rounded-full transition-all duration-300 flex items-center justify-center flex-shrink-0 ml-1
+          p-2 rounded-full transition-all duration-300 flex items-center justify-center shrink-0 ml-1
           ${
             hasContent
               ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30 transform hover:scale-105 active:scale-95'

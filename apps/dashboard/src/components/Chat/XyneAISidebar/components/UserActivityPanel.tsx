@@ -237,7 +237,7 @@ export const UserActivityPanel = ({
   return (
     <div className='flex-1 overflow-hidden flex flex-col bg-background h-full rounded-xl'>
       {/* Header */}
-      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-border flex-shrink-0'>
+      <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-border shrink-0'>
         <div className='flex items-center gap-2'>
           <button
             aria-label='Close activity panel'
@@ -311,7 +311,7 @@ export const UserActivityPanel = ({
               <div className='px-4 py-4 space-y-3'>
                 {Array.from({ length: 3 }, (_, i) => (
                   <div key={i} className='flex items-start gap-3'>
-                    <div className='w-4 h-4 bg-muted rounded animate-pulse flex-shrink-0 mt-0.5' />
+                    <div className='w-4 h-4 bg-muted rounded animate-pulse shrink-0 mt-0.5' />
                     <div className='flex-1 space-y-2'>
                       <div className='h-4 bg-muted rounded animate-pulse w-3/4' />
                       <div className='h-3 bg-muted rounded animate-pulse w-1/2' />
@@ -340,7 +340,7 @@ export const UserActivityPanel = ({
 
       {/* Footer with Add to Chat button */}
       {selectedCount > 0 && (
-        <div className='p-4 border-t border-border flex-shrink-0'>
+        <div className='p-4 border-t border-border shrink-0'>
           <button
             onClick={handleAddToChat}
             data-track-category='XYNE_AI_SIDEBAR'

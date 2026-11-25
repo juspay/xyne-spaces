@@ -238,7 +238,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                     strokeWidth='2'
                     strokeLinecap='round'
                     strokeLinejoin='round'
-                    className='text-muted-foreground ml-2 opacity-70 flex-shrink-0'
+                    className='text-muted-foreground ml-2 opacity-70 shrink-0'
                   >
                     <path d='m6 9 6 6 6-6' />
                   </svg>

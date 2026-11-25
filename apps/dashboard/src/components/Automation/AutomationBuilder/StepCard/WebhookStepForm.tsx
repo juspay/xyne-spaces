@@ -489,7 +489,7 @@ function AuthEditor({
                 data-track-category='automation-builder'
                 data-track-name='webhook-toggle-password-visibility'
                 className={cn(
-                  'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-border',
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border',
                   'text-muted-foreground hover:text-foreground hover:bg-accent/40',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
                 )}

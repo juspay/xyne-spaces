@@ -2318,7 +2318,7 @@ export const EmailComposer = ({
         {showSendConfirm && (
           <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-foreground/30 p-4 backdrop-blur-sm'>
             <div className='flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl'>
-              <div className='flex flex-shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4'>
+              <div className='flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4'>
                 <div className='flex flex-col gap-0.5'>
                   <h2 className='text-base font-semibold leading-tight text-foreground'>
                     Review &amp; send
@@ -2330,7 +2330,7 @@ export const EmailComposer = ({
                 <button
                   type='button'
                   onClick={() => setShowSendConfirm(false)}
-                  className='-mr-1.5 flex size-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                  className='-mr-1.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
                   aria-label='Close review dialog'
                   data-track-category='Support'
                   data-track-name='CloseTwoStepSendReview'
@@ -2346,7 +2346,7 @@ export const EmailComposer = ({
               <div className='min-h-0 flex-1 overflow-y-auto overflow-x-hidden'>
                 <div className='divide-y divide-border/60 border-b border-border'>
                   <div className='flex gap-3 px-5 py-2.5'>
-                    <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                    <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                       To
                     </span>
                     <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
@@ -2355,7 +2355,7 @@ export const EmailComposer = ({
                   </div>
                   {ccEmails.length > 0 && (
                     <div className='flex gap-3 px-5 py-2.5'>
-                      <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                      <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Cc
                       </span>
                       <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
@@ -2365,7 +2365,7 @@ export const EmailComposer = ({
                   )}
                   {bccEmails.length > 0 && (
                     <div className='flex gap-3 px-5 py-2.5'>
-                      <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                      <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Bcc
                       </span>
                       <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
@@ -2375,7 +2375,7 @@ export const EmailComposer = ({
                   )}
                   {(isComposeMode ? composeSubject.trim() : ticketSubject?.trim()) && (
                     <div className='flex gap-3 px-5 py-2.5'>
-                      <span className='w-12 flex-shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                      <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Subject
                       </span>
                       <span className='flex-1 break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]'>
@@ -2431,7 +2431,7 @@ export const EmailComposer = ({
                 )}
               </div>
 
-              <div className='flex flex-shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/30 px-5 py-3.5'>
+              <div className='flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/30 px-5 py-3.5'>
                 <span className='text-xs text-muted-foreground'>
                   {toEmails.length} recipient{toEmails.length === 1 ? '' : 's'}
                 </span>
@@ -2476,7 +2476,7 @@ export const EmailComposer = ({
         )}
         {isExpanded && features.showResizeGrip && (
           <div
-            className='h-4 flex-shrink-0 flex items-center justify-center cursor-row-resize touch-none'
+            className='h-4 shrink-0 flex items-center justify-center cursor-row-resize touch-none'
             onPointerDown={handleComposerResizePointerDown}
             onKeyDown={e => {
               if (!isExpanded || isSending) return;
@@ -2519,8 +2519,8 @@ export const EmailComposer = ({
                 draftEmailId: draftId,
               })}
             >
-              <ReplyAll size={16} className='text-foreground flex-shrink-0' />
-              <span className='text-sm text-foreground font-medium flex-shrink-0'>Reply to</span>
+              <ReplyAll size={16} className='text-foreground shrink-0' />
+              <span className='text-sm text-foreground font-medium shrink-0'>Reply to</span>
               <div className='flex items-center gap-1.5 flex-wrap flex-1 min-w-0'>
                 {collapsedDisplay.visibleEmails.map(raw => {
                   const parsed = parseFromField(raw);
@@ -2533,7 +2533,7 @@ export const EmailComposer = ({
                       className='inline-flex items-center gap-1.5 bg-muted/60 rounded-md px-1.5 py-0.5 max-w-full'
                       title={tooltip}
                     >
-                      <span className='w-4 h-4 rounded-[3px] bg-border flex items-center justify-center flex-shrink-0'>
+                      <span className='w-4 h-4 rounded-[3px] bg-border flex items-center justify-center shrink-0'>
                         <span className='text-[9px] font-medium text-muted-foreground'>
                           {initial}
                         </span>
@@ -2614,7 +2614,7 @@ export const EmailComposer = ({
                   <button
                     type='button'
                     onClick={() => setIsExpanded(false)}
-                    className='flex-shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
+                    className='shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
                     title='Collapse'
                     aria-label='Collapse'
                     data-track-category='Support'
@@ -2887,7 +2887,7 @@ export const EmailComposer = ({
 
         {features.showSubject && (
           <div className='flex items-center gap-2 px-3 py-1.5'>
-            <span className='text-sm text-foreground font-medium flex-shrink-0'>Subject</span>
+            <span className='text-sm text-foreground font-medium shrink-0'>Subject</span>
             <input
               type='text'
               value={composeSubject}
@@ -2926,7 +2926,7 @@ export const EmailComposer = ({
                     })();
                   }}
                   disabled={isSending || !hasEmailBody || subjectAI.isGenerating}
-                  className='size-7 flex-shrink-0 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                  className='size-7 shrink-0 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                   aria-label='Suggest subject with AI'
                   data-track-category='Support'
                   data-track-name='SuggestComposeSubject'
@@ -3006,7 +3006,7 @@ export const EmailComposer = ({
                     <button
                       type='button'
                       onClick={() => setAiPaneOpen(true)}
-                      className='flex items-center gap-2 self-start pl-1 pr-3 py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors flex-shrink-0'
+                      className='flex items-center gap-2 self-start pl-1 pr-3 py-1 rounded-full border border-border bg-background hover:bg-muted transition-colors shrink-0'
                       aria-label='Open AI draft'
                       data-track-category='Support'
                       data-track-name='ExpandAIDraft'

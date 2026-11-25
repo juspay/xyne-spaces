@@ -298,7 +298,7 @@ function PendingRow({
           row so they know what's in flight. The data-row-stop attr keeps
           clicks here from bubbling up and triggering the card's onOpen. */}
         {isAdmin ? (
-          <div data-row-stop className='flex flex-shrink-0 items-center gap-2'>
+          <div data-row-stop className='flex shrink-0 items-center gap-2'>
             <Button
               variant='outline'
               size='sm'

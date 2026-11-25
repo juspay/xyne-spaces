@@ -69,7 +69,7 @@ export const ConversationHistory = ({
   return (
     <div className='flex-1 overflow-hidden flex flex-col h-full'>
       {/* Header */}
-      <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border flex-shrink-0'>
+      <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border shrink-0'>
         {isSearchExpanded ? (
           <>
             <button
@@ -81,7 +81,7 @@ export const ConversationHistory = ({
               className={
                 isMobile
                   ? 'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
-                  : 'p-1 hover:bg-accent rounded transition-colors flex-shrink-0'
+                  : 'p-1 hover:bg-accent rounded transition-colors shrink-0'
               }
               data-track-category='XyneAI'
               data-track-name='CloseSearch'
@@ -466,7 +466,7 @@ const ConversationItem = ({
           height='4'
           viewBox='0 0 4 4'
           fill='none'
-          className='flex-shrink-0'
+          className='shrink-0'
         >
           <circle cx='2' cy='2' r='2' fill='hsl(var(--destructive))' />
         </svg>

@@ -45,7 +45,7 @@ export const SearchResultsV2: React.FC<SearchResultsV2Props> = ({
               aria-hidden
               className='flex items-center gap-3 rounded-lg border border-border bg-secondary px-3.5 py-2.5'
             >
-              <div className='h-7 w-7 flex-shrink-0 animate-pulse rounded-md bg-muted' />
+              <div className='h-7 w-7 shrink-0 animate-pulse rounded-md bg-muted' />
               <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
                 <div className='h-2.5 w-1/2 animate-pulse rounded-full bg-muted' />
                 <div className='h-2 w-1/3 animate-pulse rounded-full bg-muted' />

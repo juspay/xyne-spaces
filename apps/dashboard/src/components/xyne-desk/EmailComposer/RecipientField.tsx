@@ -115,7 +115,7 @@ export const RecipientField = ({
         className,
       )}
     >
-      <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>{label}</span>
+      <span className='text-sm text-foreground font-medium shrink-0 mt-1'>{label}</span>
 
       <div
         ref={rowRef}
@@ -226,7 +226,7 @@ export const RecipientField = ({
         />
       </div>
 
-      {actions && <div className='flex items-center gap-1 flex-shrink-0 mt-0.5'>{actions}</div>}
+      {actions && <div className='flex items-center gap-1 shrink-0 mt-0.5'>{actions}</div>}
     </div>
   );
 };

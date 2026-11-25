@@ -483,7 +483,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
   return (
     <div className='relative w-full h-full flex flex-col bg-gray-100 dark:bg-[#1E1E1E]'>
       {/* Navigation / zoom toolbar */}
-      <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 pt-[65px] border-b border-gray-200 dark:border-gray-700 w-full flex-shrink-0'>
+      <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 pt-[65px] border-b border-gray-200 dark:border-gray-700 w-full shrink-0'>
         <div className='flex items-center justify-center'>
           <div className='flex items-center bg-muted dark:bg-gray-700 rounded-lg px-4 py-2 shadow-sm'>
             {/* Previous page */}

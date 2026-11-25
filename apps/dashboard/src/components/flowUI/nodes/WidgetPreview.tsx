@@ -65,7 +65,7 @@ export const WidgetPreview: React.FC<WidgetPreviewProps> = ({
         {description ?? `${label} details`}
       </Dialog.Description>
       <div className='flex h-full flex-col bg-background'>
-        <div className='flex h-14 flex-shrink-0 items-center justify-between border-b border-border px-5'>
+        <div className='flex h-14 shrink-0 items-center justify-between border-b border-border px-5'>
           <span className='font-mono text-sm leading-[18px] tracking-[0.2px] text-muted-foreground'>
             {label}
           </span>
@@ -86,7 +86,7 @@ export const WidgetPreview: React.FC<WidgetPreviewProps> = ({
           <div className='mx-auto flex max-w-3xl flex-col gap-5'>{children}</div>
         </div>
         {footer && (
-          <div className='flex-shrink-0 border-t border-border bg-foreground/[0.03] px-6 py-3'>
+          <div className='shrink-0 border-t border-border bg-foreground/[0.03] px-6 py-3'>
             {footer}
           </div>
         )}

@@ -221,7 +221,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
         >
           <div className='p-6'>
             <div className='flex items-start gap-3 mb-4'>
-              <AlertTriangle className='w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5' />
+              <AlertTriangle className='w-6 h-6 text-amber-500 shrink-0 mt-0.5' />
               <div>
                 <p className='text-foreground font-medium mb-2'>
                   Before enabling collaborative mode

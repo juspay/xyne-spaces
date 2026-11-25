@@ -81,7 +81,7 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
         rel='noopener noreferrer'
         className='flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline w-fit'
       >
-        <SiYoutube size={18} className='flex-shrink-0 text-[#FF0000]' aria-hidden />
+        <SiYoutube size={18} className='shrink-0 text-[#FF0000]' aria-hidden />
         <span>YouTube</span>
       </a>
 

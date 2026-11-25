@@ -74,7 +74,7 @@ const TicketView = (): ReactElement => {
       >
         {/* Header with Ticket Sequence ID */}
         {ticket && (
-          <div className='flex justify-between items-center px-6 py-3 border-b border-border bg-background flex-shrink-0'>
+          <div className='flex justify-between items-center px-6 py-3 border-b border-border bg-background shrink-0'>
             <div className='flex items-center gap-2'>
               <ChevronLeft
                 size={16}

@@ -677,7 +677,7 @@ export const BoardForm = ({
             return (
               <div key={stage.tempId} className='border rounded-md p-3 border-border bg-muted'>
                 <div className='flex items-start gap-2'>
-                  <div className='flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-100 text-blue-700'>
+                  <div className='shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-100 text-blue-700'>
                     {stage.sequenceNumber}
                   </div>
                   <div className='flex-1 space-y-2'>
@@ -839,7 +839,7 @@ export const BoardForm = ({
                       aria-label={`Remove stage ${stage.name || index + 1}`}
                       onClick={() => removeStage(index)}
                       disabled={isLoading}
-                      className='flex-shrink-0 text-red-500 hover:text-red-700 p-1'
+                      className='shrink-0 text-red-500 hover:text-red-700 p-1'
                       type='button'
                       data-track-category='Board_Form'
                       data-track-name='Remove_Stage'

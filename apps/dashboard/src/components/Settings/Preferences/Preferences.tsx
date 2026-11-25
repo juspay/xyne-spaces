@@ -510,14 +510,14 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
         >
           {state.isCurrentlyUnavailable ? (
             <div className='flex items-center gap-2 min-w-0 flex-1'>
-              <PauseCircle className='size-4 flex-shrink-0 text-muted-foreground' />
+              <PauseCircle className='size-4 shrink-0 text-muted-foreground' />
               <span className='text-sm font-medium text-foreground'>
                 Paused from ticket assignment
               </span>
             </div>
           ) : (
             <div className='flex items-center gap-2 text-muted-foreground'>
-              <PauseCircle className='size-4 flex-shrink-0' />
+              <PauseCircle className='size-4 shrink-0' />
               <span className='text-sm'>Pause from ticket assignment</span>
             </div>
           )}
@@ -525,7 +525,7 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
             <Button
               variant='ghost'
               size='lg'
-              className='flex-shrink-0 p-1 h-auto hover:bg-accent'
+              className='shrink-0 p-1 h-auto hover:bg-accent'
               title='Resume assignment'
               aria-label='Resume assignment'
               onClick={state.resumeAssignment}
@@ -1838,13 +1838,13 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                       data-track-category='PREFERENCES'
                       data-track-name={`Open_${item.id}`}
                     >
-                      <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0 text-muted-foreground'>
+                      <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border shrink-0 text-muted-foreground'>
                         {item.icon}
                       </div>
                       <div className='flex-1 min-w-0'>
                         <p className='text-sm font-medium text-foreground'>{item.label}</p>
                       </div>
-                      <ChevronRight className='size-4 text-muted-foreground flex-shrink-0' />
+                      <ChevronRight className='size-4 text-muted-foreground shrink-0' />
                     </button>
                   ))
                 )}

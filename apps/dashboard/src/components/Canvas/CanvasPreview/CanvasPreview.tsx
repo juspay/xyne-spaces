@@ -115,7 +115,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
       return (
         <div className='relative flex flex-col bg-card rounded-2xl border border-border w-full max-w-[460px] overflow-hidden animate-pulse'>
           <div className='flex items-start gap-3 p-3 pr-8 border-b border-border'>
-            <div className='flex-shrink-0 p-2 bg-muted rounded-lg'>
+            <div className='shrink-0 p-2 bg-muted rounded-lg'>
               <FileText size={18} className='text-muted-foreground/30' />
             </div>
             <div className='flex-1 min-w-0 space-y-2 py-1'>
@@ -145,7 +145,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
             <X size={12} className='text-muted-foreground' />
           </button>
         )}
-        <div className='flex-shrink-0 p-2 bg-muted rounded-md text-muted-foreground'>
+        <div className='shrink-0 p-2 bg-muted rounded-md text-muted-foreground'>
           <FileText size={20} />
         </div>
         <div className='flex-1 min-w-0 mr-4'>
@@ -187,7 +187,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
             <X size={14} className='text-muted-foreground' />
           </button>
         )}
-        <div className='flex-shrink-0 p-2 bg-status-success rounded-lg text-white'>
+        <div className='shrink-0 p-2 bg-status-success rounded-lg text-white'>
           <FileText size={18} />
         </div>
         <div className='flex-1 min-w-0'>
@@ -245,7 +245,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
 
       {/* Header Section */}
       <div className='flex items-start gap-3 p-3 pr-8 border-b border-border'>
-        <div className='flex-shrink-0 p-2 bg-status-success rounded-lg text-white'>
+        <div className='shrink-0 p-2 bg-status-success rounded-lg text-white'>
           <FileText size={18} />
         </div>
         <div className='flex-1 min-w-0'>

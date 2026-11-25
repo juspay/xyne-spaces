@@ -195,7 +195,7 @@ export const ActivityConfigDialog = ({
               {/* Warning if updating existing alias */}
               {hasExistingAlias && (
                 <div className='flex items-start gap-2 p-3 bg-muted rounded-md border border-border'>
-                  <AlertTriangle className='w-4 h-4 text-status-pending mt-0.5 flex-shrink-0' />
+                  <AlertTriangle className='w-4 h-4 text-status-pending mt-0.5 shrink-0' />
                   <div className='text-sm text-status-pending'>
                     This will overwrite the existing alias. The new name will be shown for all
                     users.

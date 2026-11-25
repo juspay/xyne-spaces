@@ -251,7 +251,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           </span>
         )}
         <Check
-          className={`w-4 h-4 text-action-primary flex-shrink-0 ${isSelected ? 'opacity-100' : 'opacity-0'}`}
+          className={`w-4 h-4 text-action-primary shrink-0 ${isSelected ? 'opacity-100' : 'opacity-0'}`}
         />
       </button>
     );
@@ -273,13 +273,13 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
       >
         {/* Icon: Show selected option's icon or nothing */}
         {selectedOption?.icon ? (
-          <span className='flex-shrink-0 flex items-center justify-center text-foreground'>
+          <span className='shrink-0 flex items-center justify-center text-foreground'>
             {selectedOption.icon}
           </span>
         ) : inputIcon ? (
           <span
             className={cn(
-              'flex-shrink-0 flex items-center justify-center',
+              'shrink-0 flex items-center justify-center',
               !selectedOption && 'text-muted-foreground',
             )}
           >
@@ -303,12 +303,12 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             onClick={handleClear}
             data-track-category={trackCategory}
             data-track-name={clearTrackName}
-            className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
+            className='shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
           </button>
         ) : showIndicator ? (
-          <ChevronRight className='ml-auto w-4 h-4 text-muted-foreground flex-shrink-0' />
+          <ChevronRight className='ml-auto w-4 h-4 text-muted-foreground shrink-0' />
         ) : null}
       </button>
     );
@@ -339,13 +339,13 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
       >
         {/* Icon: Show selected option's icon or nothing */}
         {selectedOption?.icon ? (
-          <span className='flex-shrink-0 flex items-center justify-center visual-regression-hide text-foreground'>
+          <span className='shrink-0 flex items-center justify-center visual-regression-hide text-foreground'>
             {selectedOption.icon}
           </span>
         ) : inputIcon ? (
           <span
             className={cn(
-              'flex-shrink-0 flex items-center justify-center visual-regression-hide',
+              'shrink-0 flex items-center justify-center visual-regression-hide',
               !selectedOption && 'text-muted-foreground',
             )}
           >
@@ -403,12 +403,12 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             onClick={handleClear}
             data-track-category={trackCategory}
             data-track-name={clearTrackName}
-            className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
+            className='shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
           </button>
         ) : showIndicator ? (
-          <ChevronRight className='ml-auto w-4 h-4 text-muted-foreground flex-shrink-0' />
+          <ChevronRight className='ml-auto w-4 h-4 text-muted-foreground shrink-0' />
         ) : null}
       </div>
     );

@@ -99,7 +99,7 @@ export const Funnel: React.FC<FunnelProps> = ({
                       {item.label}
                     </span>
                     {showDropoff && index > 0 && (
-                      <span className='text-red-500 font-semibold flex-shrink-0'>
+                      <span className='text-red-500 font-semibold shrink-0'>
                         -{dropoff?.toFixed(0)}%
                       </span>
                     )}

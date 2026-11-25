@@ -179,7 +179,7 @@ export function RunHistory({
           <div className='flex flex-col'>
             {Array.from({ length: SKELETON_ROWS }).map((_, i) => (
               <div key={i} className='flex items-center gap-3 border-b border-border px-6 py-3'>
-                <Skeleton className='h-4 w-4 rounded-full flex-shrink-0' />
+                <Skeleton className='h-4 w-4 rounded-full shrink-0' />
                 <Skeleton className='h-3.5 w-40' />
                 <Skeleton className='h-3.5 w-14 ml-2' />
                 <div className='flex-1' />

@@ -620,7 +620,7 @@ const RecapPanel = (): ReactElement => {
     return (
       <div className='h-full flex flex-col overflow-hidden'>
         {/* Header Section - fixed at top */}
-        <div className='text-center p-5 pb-4 flex-shrink-0'>
+        <div className='text-center p-5 pb-4 shrink-0'>
           <h2 className={`${isMobile ? 'text-lg' : 'text-2xl'} font-semibold text-foreground mb-1`}>
             {isHistoricalView ? 'Historical Recap' : greeting}
           </h2>
@@ -747,7 +747,7 @@ const RecapPanel = (): ReactElement => {
             ${showThreadPanel ? (isMobile ? 'hidden' : 'w-1/2') : 'w-full'}`}
         >
           {/* Header */}
-          <div className='p-4 bg-background border-b border-border flex-shrink-0'>
+          <div className='p-4 bg-background border-b border-border shrink-0'>
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-2'>
                 {selectedDate && (

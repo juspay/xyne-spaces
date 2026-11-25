@@ -116,7 +116,7 @@ export function RecordingCanvasPane({
       {/* Notes Sub-header */}
       <div className='flex-none flex items-center justify-between pt-3 pb-2 px-5'>
         <div className='flex items-center gap-1.5 min-w-0'>
-          <Layers className='size-4 text-muted-foreground flex-shrink-0' />
+          <Layers className='size-4 text-muted-foreground shrink-0' />
           <div className='relative flex items-center gap-2'>
             <input
               ref={titleInputRef}
@@ -150,7 +150,7 @@ export function RecordingCanvasPane({
               data-track-name='edit_notes_canvas_title_input'
             />
             {isSavingTitle && (
-              <Loader2 className='size-3 flex-shrink-0 animate-spin text-muted-foreground' />
+              <Loader2 className='size-3 shrink-0 animate-spin text-muted-foreground' />
             )}
             <span className='text-xs text-muted-foreground whitespace-nowrap'>
               {isSavingTitle ? 'Saving...' : canvasTitle !== DEFAULT_NOTES_TITLE ? 'Edited' : null}

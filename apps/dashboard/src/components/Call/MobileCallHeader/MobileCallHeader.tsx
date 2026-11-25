@@ -75,7 +75,7 @@ export function MobileCallHeader({
           variant='ghost'
           size='icon'
           className={cn(
-            'flex-shrink-0 hover:bg-muted rounded-full',
+            'shrink-0 hover:bg-muted rounded-full',
             isMicEnabled ? 'bg-muted' : 'bg-destructive/10 hover:bg-destructive/20',
           )}
           title={isMicEnabled ? 'Mute' : 'Unmute'}
@@ -113,7 +113,7 @@ export function MobileCallHeader({
           }}
           variant='destructive'
           size='icon'
-          className='flex-shrink-0 rounded-full'
+          className='shrink-0 rounded-full'
           title='End call'
           aria-label='End call'
           data-track-category='CALLS'

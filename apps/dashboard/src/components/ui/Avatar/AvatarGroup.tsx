@@ -150,7 +150,7 @@ const AvatarGroup = ({
     return (
       <div
         data-slot='avatar-group'
-        className={cn('relative w-10 h-10 flex-shrink-0', className)}
+        className={cn('relative w-10 h-10 shrink-0', className)}
         {...props}
       >
         {backUserId && (

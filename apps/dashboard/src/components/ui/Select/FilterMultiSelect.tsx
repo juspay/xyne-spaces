@@ -153,7 +153,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
           </span>
           <ChevronDownIcon
             className={cn(
-              'size-4 text-muted-foreground opacity-50 transition-transform flex-shrink-0',
+              'size-4 text-muted-foreground opacity-50 transition-transform shrink-0',
               open && 'rotate-180',
             )}
           />

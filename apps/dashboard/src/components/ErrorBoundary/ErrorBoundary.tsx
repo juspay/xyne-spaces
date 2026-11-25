@@ -84,7 +84,7 @@ const ErrorUI = ({ error, errorInfo }: ErrorFallbackProps): ReactElement => {
 
         <button
           onClick={handleBackToHome}
-          className='flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-800 transition-colors flex-shrink-0'
+          className='flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-800 transition-colors shrink-0'
           data-track-category='ErrorBoundary'
           data-track-name='Back_To_Home'
         >

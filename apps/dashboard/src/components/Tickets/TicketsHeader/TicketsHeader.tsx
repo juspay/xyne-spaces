@@ -85,7 +85,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
       : `${ticketCount} ${ticketCount === 1 ? noun.singular : noun.plural}`;
 
   return (
-    <div className='flex-shrink-0 border-b border-border/60 bg-background'>
+    <div className='shrink-0 border-b border-border/60 bg-background'>
       <div className='flex flex-wrap items-center justify-end gap-x-2.5 gap-y-2.5 px-5 pb-2.5 pt-3'>
         <div className='flex min-w-0 shrink items-center gap-2.5'>
           {startSlot}

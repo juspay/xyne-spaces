@@ -423,7 +423,7 @@ export function CallControls({
   // ── Individual controls ────────────────────────────────────────────────────
 
   const deviceChevronClass =
-    'flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-l-full pl-1 text-[#e3e3e3] transition-colors hover:bg-white/10';
+    'flex h-11 w-8 shrink-0 items-center justify-center rounded-l-full pl-1 text-[#e3e3e3] transition-colors hover:bg-white/10';
 
   const micControl = (
     <div className='relative' ref={micMenuRef}>
@@ -924,7 +924,7 @@ export function CallControls({
   const moreMenu = (
     <DropdownMenu modal={false}>
       <Tooltip content='More options' side='top' sideOffset={10}>
-        <span className='inline-flex flex-shrink-0'>
+        <span className='inline-flex shrink-0'>
           <DropdownMenuTrigger asChild>
             <button
               type='button'

@@ -165,7 +165,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
                     data-track-name='run-shortcut'
                     className='w-full h-auto flex items-start justify-start gap-3 px-2 py-2 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50'
                   >
-                    <div className='flex-shrink-0 w-7 h-7 rounded bg-primary/10 flex items-center justify-center mt-0.5'>
+                    <div className='shrink-0 w-7 h-7 rounded bg-primary/10 flex items-center justify-center mt-0.5'>
                       <Zap className='w-3.5 h-3.5 text-primary' />
                     </div>
                     <div className='flex-1 min-w-0'>

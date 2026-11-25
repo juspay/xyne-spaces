@@ -256,7 +256,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
           <p className='text-sm font-medium text-foreground'>Ozonetel</p>
 
           <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-            <PhoneDefault size={14} className='flex-shrink-0' />
+            <PhoneDefault size={14} className='shrink-0' />
             <span className='truncate text-xs' title={`${connectionSummary} • ${bindingLabel}`}>
               {connectionSummary} • {bindingLabel}
             </span>

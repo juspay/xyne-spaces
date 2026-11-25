@@ -360,7 +360,7 @@ const BoardConfigCopyScreen = ({
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-background flex flex-col w-[90vw] max-w-3xl h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
-        <header className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
+        <header className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
           <div className='flex items-center gap-2 min-w-0'>
             {step === 'remap' && (
               <Button
@@ -507,7 +507,7 @@ const BoardConfigCopyScreen = ({
           )}
         </div>
 
-        <footer className='flex items-center justify-end gap-2 px-4 py-3 border-t border-border flex-shrink-0'>
+        <footer className='flex items-center justify-end gap-2 px-4 py-3 border-t border-border shrink-0'>
           {step === 'result' ? (
             <Button
               variant='secondary'

@@ -1755,7 +1755,7 @@ function SummaryRow({
     >
       <span
         aria-hidden='true'
-        className='mt-1.5 size-1 flex-shrink-0 rounded-full bg-muted-foreground'
+        className='mt-1.5 size-1 shrink-0 rounded-full bg-muted-foreground'
       />
       <span className='leading-relaxed'>{children}</span>
     </li>
@@ -1805,7 +1805,7 @@ function BuilderSection({
         <span
           aria-hidden='true'
           className={cn(
-            'flex size-6 flex-shrink-0 items-center justify-center rounded-full',
+            'flex size-6 shrink-0 items-center justify-center rounded-full',
             'bg-foreground text-background text-[11px] font-semibold',
           )}
         >

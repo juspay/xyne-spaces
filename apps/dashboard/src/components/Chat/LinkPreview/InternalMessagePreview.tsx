@@ -110,11 +110,7 @@ const MetadataFooter: React.FC<{
   isDM: boolean;
 }> = ({ channelName, isDM }) => (
   <div className='mt-2 flex items-center gap-1.5 text-xs text-muted-foreground'>
-    {isDM ? (
-      <Lock size={11} className='flex-shrink-0' />
-    ) : (
-      <Hash size={11} className='flex-shrink-0' />
-    )}
+    {isDM ? <Lock size={11} className='shrink-0' /> : <Hash size={11} className='shrink-0' />}
     <span className='truncate'>{isDM ? 'Direct message' : channelName}</span>
   </div>
 );

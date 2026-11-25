@@ -106,7 +106,7 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
                         <span className='text-sm text-foreground dark:text-muted group-hover:text-foreground dark:group-hover:text-gray-100 transition-colors'>
                           {description}
                         </span>
-                        <div className='flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end'>
+                        <div className='flex items-center gap-1.5 shrink-0 flex-wrap justify-end'>
                           {keyList.map((key, idx) => (
                             <kbd
                               key={idx}

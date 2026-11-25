@@ -214,7 +214,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         rel='noopener noreferrer'
         className='flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline min-w-0 w-fit'
       >
-        <span className='flex-shrink-0 w-3.5 h-3.5 rounded overflow-hidden flex items-center justify-center'>
+        <span className='shrink-0 w-3.5 h-3.5 rounded overflow-hidden flex items-center justify-center'>
           {faviconUrl ? (
             <img
               src={faviconUrl}

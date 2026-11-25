@@ -131,7 +131,7 @@ export function AgentCard({
       className='flex items-center gap-3 rounded-xl border border-border px-3 py-2.5'
       data-testid='agent-card'
     >
-      <div className='relative flex-shrink-0'>
+      <div className='relative shrink-0'>
         <img
           src='/images/xyne_logo.png'
           alt=''
@@ -156,7 +156,7 @@ export function AgentCard({
         </p>
       </div>
 
-      <div className='flex flex-shrink-0 items-center gap-1'>
+      <div className='flex shrink-0 items-center gap-1'>
         {/* Disabled (LLM) */}
         {/*
         {showTalkBack && (

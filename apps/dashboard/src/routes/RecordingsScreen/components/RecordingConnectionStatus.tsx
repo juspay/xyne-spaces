@@ -67,7 +67,7 @@ export function RecordingConnectionWarningModal({
       {/* Panel */}
       <div className='relative bg-background dark:bg-gray-800 rounded-xl shadow-2xl border border-border dark:border-gray-700 w-full max-w-sm mx-4 p-6 animate-in zoom-in-95 fade-in duration-200'>
         <div className='flex items-start gap-4'>
-          <div className='flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center'>
+          <div className='shrink-0 w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center'>
             <WifiOff className='w-5 h-5 text-amber-600 dark:text-amber-400' />
           </div>
           <div className='flex-1'>

@@ -1770,7 +1770,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {/* Message Preview */}
               <div className='bg-muted rounded-md p-3 border border-border'>
                 <div className='flex gap-3'>
-                  <div className='flex-shrink-0'>
+                  <div className='shrink-0'>
                     <Avatar userId={message.senderId} size='md' />
                   </div>
 

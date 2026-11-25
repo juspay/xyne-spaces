@@ -2656,7 +2656,7 @@ const XyneAISidebar = ({
             )}
 
             {hasBackgroundStreamingElsewhere && !hideBackgroundStreamNotice ? (
-              <div className='flex-shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
+              <div className='shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
                 <span>Another chat is still generating.</span>
                 <button
                   type='button'
@@ -2738,7 +2738,7 @@ const XyneAISidebar = ({
                   ) : aiOnboarding.isActive ? (
                     <div className='flex h-full flex-col px-3 py-6'>
                       <div className='flex items-start gap-2'>
-                        <div className='mt-0.5 flex-shrink-0'>
+                        <div className='mt-0.5 shrink-0'>
                           <XyneAIStar size={18} />
                         </div>
                         <p className='text-sm leading-relaxed text-foreground'>
@@ -2780,7 +2780,7 @@ const XyneAISidebar = ({
                       <div className={cn('max-w-full', roomyContent ? 'space-y-8' : 'space-y-4')}>
                         {aiOnboarding.isActive && (
                           <div className='mb-2 flex items-start gap-2'>
-                            <div className='mt-0.5 flex-shrink-0'>
+                            <div className='mt-0.5 shrink-0'>
                               <XyneAIStar size={18} />
                             </div>
                             <p className='text-sm leading-relaxed text-foreground'>

@@ -241,7 +241,7 @@ export type SelectionVariant = 'filled' | 'outline';
 
 const selectionTickClass = (variant: SelectionVariant): string =>
   cn(
-    'flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full',
+    'shrink-0 flex items-center justify-center w-4 h-4 rounded-full',
     variant === 'outline'
       ? 'border border-border text-muted-foreground'
       : 'bg-primary text-primary-foreground',
@@ -292,7 +292,7 @@ export const ChannelCommandItem = ({
       className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer mt-1.5 aria-selected:bg-accent ${!isMobile && 'hover:bg-accent'}`}
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
-      <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+      <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
         {getChannelIcon(channel)}
       </div>
       <div className='flex-1 min-w-0 flex items-center gap-1'>
@@ -535,7 +535,7 @@ function MentionShowMoreButton({
       data-track-category='SEARCH'
       data-track-name={trackName}
     >
-      <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
+      <span className='flex h-4 w-5 shrink-0 items-center justify-center'>
         <ChevronDown size={14} />
       </span>
       Show more
@@ -560,7 +560,7 @@ interface AtMentionCandidate {
 function UserGroupGlyph({ isDeactivated }: { isDeactivated?: boolean }): ReactElement {
   return (
     <span
-      className={`flex size-4 flex-shrink-0 items-center justify-center overflow-hidden rounded-sm border ${
+      className={`flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-sm border ${
         isDeactivated ? 'bg-muted border-muted-foreground/30' : 'bg-green-50 border-green-200'
       }`}
     >
@@ -4843,7 +4843,7 @@ const ChannelCommandMenuContent = ({
                   }
                 }
               }}
-              className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex-shrink-0 flex items-center justify-center focus-visible:outline-none focus-visible:ring-0'
+              className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 flex items-center justify-center focus-visible:outline-none focus-visible:ring-0'
               aria-label={search.trim() || searchText.trim() ? 'Clear search' : 'Search'}
               data-track-category='CHANNEL_SEARCH'
               data-track-name={search.trim() || searchText.trim() ? 'ClearSearch' : 'OpenSearch'}
@@ -4864,7 +4864,7 @@ const ChannelCommandMenuContent = ({
           {/* Three inline toggles instead of a filters popover (design 5a): every other
               filter is reachable by typing its prefix, and these three have no syntax —
               they're modes, so they need a control. Active = filled, per the design. */}
-          <div className='flex items-center gap-1 flex-shrink-0'>
+          <div className='flex items-center gap-1 shrink-0'>
             {/* Channel and bot scoping only shape message results; a ticket search keeps
                 just exact match. */}
             {(isInTicketView
@@ -4898,8 +4898,8 @@ const ChannelCommandMenuContent = ({
           </div>
           {canExpandToFullPage && (
             <>
-              <span className='w-px h-5 bg-border mx-1 flex-shrink-0' />
-              <div className='relative group/expandtip flex-shrink-0'>
+              <span className='w-px h-5 bg-border mx-1 shrink-0' />
+              <div className='relative group/expandtip shrink-0'>
                 <button
                   type='button'
                   aria-label='Expand to full page'
@@ -5237,7 +5237,7 @@ const ChannelCommandMenuContent = ({
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                  <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
@@ -5279,7 +5279,7 @@ const ChannelCommandMenuContent = ({
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                  <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
@@ -5332,7 +5332,7 @@ const ChannelCommandMenuContent = ({
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                  <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
@@ -5379,7 +5379,7 @@ const ChannelCommandMenuContent = ({
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                            <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                               {getChannelIcon(channel)}
                             </div>
                             <div className='flex-1 min-w-0'>
@@ -5425,7 +5425,7 @@ const ChannelCommandMenuContent = ({
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                              <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                 {getChannelIcon(channel)}
                               </div>
                               <div className='flex-1 min-w-0'>
@@ -5551,7 +5551,7 @@ const ChannelCommandMenuContent = ({
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                            <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                               <LayoutGrid size={16} />
                             </div>
                             <div className='flex-1 min-w-0'>
@@ -5604,7 +5604,7 @@ const ChannelCommandMenuContent = ({
                                 } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
-                                <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                   {target.type === ChipType.USER ? (
                                     <Avatar userId={target.id} size='xs' />
                                   ) : target.type === ChipType.USER_GROUP ? (
@@ -5660,7 +5660,7 @@ const ChannelCommandMenuContent = ({
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                            <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                               <CalendarDays size={16} />
                             </div>
                             <div className='flex-1 min-w-0'>
@@ -5703,7 +5703,7 @@ const ChannelCommandMenuContent = ({
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
                             <div
-                              className={`flex items-center justify-center h-4 w-5 flex-shrink-0 ${
+                              className={`flex items-center justify-center h-4 w-5 shrink-0 ${
                                 PRIORITY_ICON_COLOR[priority.id] ?? 'text-muted-foreground'
                               }`}
                             >
@@ -5779,13 +5779,10 @@ const ChannelCommandMenuContent = ({
                                   (item.isPrivate ? (
                                     <Lock02Close
                                       size={16}
-                                      className='text-muted-foreground flex-shrink-0'
+                                      className='text-muted-foreground shrink-0'
                                     />
                                   ) : (
-                                    <Hashtag
-                                      size={16}
-                                      className='text-muted-foreground flex-shrink-0'
-                                    />
+                                    <Hashtag size={16} className='text-muted-foreground shrink-0' />
                                   ))}
                                 <span className='flex-1 min-w-0 text-left text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                   {item.title}

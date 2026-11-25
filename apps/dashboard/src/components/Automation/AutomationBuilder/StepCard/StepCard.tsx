@@ -363,7 +363,7 @@ function PeekColumn({
               className='flex items-center justify-between gap-2 text-[11px] text-foreground'
             >
               <span className='truncate font-mono'>{l.path}</span>
-              <span className='flex-shrink-0 rounded border border-border px-1 py-0 text-[10px] font-mono text-muted-foreground'>
+              <span className='shrink-0 rounded border border-border px-1 py-0 text-[10px] font-mono text-muted-foreground'>
                 {l.type}
               </span>
             </li>

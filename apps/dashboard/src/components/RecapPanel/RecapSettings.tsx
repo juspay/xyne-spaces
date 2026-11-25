@@ -75,9 +75,9 @@ const ChannelListItem = ({
 
   const getIcon = (): ReactElement => {
     return channel.visibility === ChannelVisibility.PRIVATE ? (
-      <Lock size={14} className='text-muted-foreground flex-shrink-0' />
+      <Lock size={14} className='text-muted-foreground shrink-0' />
     ) : (
-      <Hash size={14} className='text-muted-foreground flex-shrink-0' />
+      <Hash size={14} className='text-muted-foreground shrink-0' />
     );
   };
 
@@ -100,7 +100,7 @@ const ChannelListItem = ({
           data-track-name='TOGGLE_CHANNEL'
         >
           <div
-            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0 ${
+            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
               isSelected
                 ? 'bg-blue-500 border-blue-500 text-white'
                 : 'border-gray-300 hover:border-gray-400'
@@ -130,7 +130,7 @@ const ChannelListItem = ({
             trigger={
               <button
                 type='button'
-                className='p-3 rounded transition-colors flex-shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent'
+                className='p-3 rounded transition-colors shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent'
                 title={customPrompt ? 'Edit custom recap prompt' : 'Add custom recap prompt'}
                 aria-label={customPrompt ? 'Edit custom recap prompt' : 'Add custom recap prompt'}
                 data-track-category='RECAP_SETTINGS'
@@ -149,7 +149,7 @@ const ChannelListItem = ({
           >
             <div className='p-4 w-80'>
               <div className='flex items-center gap-2 mb-3'>
-                <Sparkles size={14} className='text-blue-500 flex-shrink-0' />
+                <Sparkles size={14} className='text-blue-500 shrink-0' />
                 <span className='text-sm font-semibold text-foreground'>Custom Recap Prompt</span>
               </div>
               <textarea

@@ -412,7 +412,7 @@ const Preview: React.FC<{
       />
     ) : (
       isVideo && (
-        <div className='absolute inset-0 flex items-center justify-center bg-black bg-opacity-30'>
+        <div className='absolute inset-0 flex items-center justify-center bg-black/30'>
           <Video
             height={fixedHeight}
             width={imageWidth || 300}
@@ -1464,7 +1464,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         </div>
 
         {/* Hover overlay for better UX feedback */}
-        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition duration-200 pointer-events-none' />
+        <div className='absolute inset-0 bg-black/0 group-hover/attachment:bg-black/5 transition duration-200 pointer-events-none' />
       </div>
     </>
   );

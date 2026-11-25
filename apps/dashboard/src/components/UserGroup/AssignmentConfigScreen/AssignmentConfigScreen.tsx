@@ -1035,11 +1035,11 @@ export const AssignmentConfigScreen = ({
                 </div>
                 {isUnavailable && (
                   <Tooltip content={unavailableTooltip}>
-                    <PauseCircle className='size-3.5 text-muted-foreground flex-shrink-0' />
+                    <PauseCircle className='size-3.5 text-muted-foreground shrink-0' />
                   </Tooltip>
                 )}
                 {willReassignOnSave(user.id) && (
-                  <span className='flex-shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground'>
+                  <span className='shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground'>
                     Tickets will be reassigned
                   </span>
                 )}

@@ -612,7 +612,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <span
-                          className={`w-2 h-2 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-status-success' : 'bg-muted-foreground/30'}`}
+                          className={`w-2 h-2 rounded-full shrink-0 ${skill.enabled ? 'bg-status-success' : 'bg-muted-foreground/30'}`}
                         />
                         <span className='text-sm font-medium text-foreground truncate'>
                           {skill.name}

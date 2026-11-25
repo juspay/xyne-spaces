@@ -94,7 +94,7 @@ export function MessageCard({
         className,
       )}
     >
-      <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-visible'>
+      <div className='flex h-8 w-8 shrink-0 items-center justify-center overflow-visible'>
         {recipientAvatar}
       </div>
 
@@ -104,7 +104,7 @@ export function MessageCard({
           {!isTimestampFloating && (
             <div
               className={cn(
-                'flex-shrink-0 text-xs text-muted-foreground ml-2 transition-opacity duration-150',
+                'shrink-0 text-xs text-muted-foreground ml-2 transition-opacity duration-150',
                 hasActions && 'group-hover:opacity-0 group-focus-within:opacity-0',
                 timestampClassName,
               )}

@@ -277,7 +277,7 @@ export const OnCallRotationModal = ({
           {sets.map(set => (
             <div
               key={set.setNumber}
-              className={`flex-shrink-0 w-[350px] flex flex-col rounded-xl shadow-sm bg-background transition-all ${
+              className={`shrink-0 w-[350px] flex flex-col rounded-xl shadow-sm bg-background transition-all ${
                 set.isActive ? 'ring-2 ring-[#6276BE] border-transparent' : 'border border-border'
               }`}
             >
@@ -352,7 +352,7 @@ export const OnCallRotationModal = ({
         {/* Error Toast */}
         {hasEmptySet && (
           <div className='mx-6 mb-4 p-3 bg-red-600 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium shadow-lg'>
-            <AlertCircle className='w-4 h-4 flex-shrink-0' />
+            <AlertCircle className='w-4 h-4 shrink-0' />
             Every set must have at least one user assigned.
           </div>
         )}

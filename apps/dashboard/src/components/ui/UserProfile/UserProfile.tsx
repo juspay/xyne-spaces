@@ -565,7 +565,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
               {hasStatus ? (
                 <div className='flex items-center justify-between gap-1 w-full'>
                   <div className='flex items-center gap-2 min-w-0 flex-1'>
-                    <div className='flex-shrink-0'>
+                    <div className='shrink-0'>
                       <StatusIndicator
                         statusEmoji={user?.statusEmoji}
                         statusContent={user?.statusContent}
@@ -584,7 +584,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                     onClick={handleClearStatus}
                     data-track-category='USER_PROFILE'
                     data-track-name='CLEAR_STATUS'
-                    className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
+                    className='shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                     title='Clear status'
                     aria-label='Clear status'
                   >
@@ -593,7 +593,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 </div>
               ) : (
                 <div className='flex items-center gap-2 text-muted-foreground'>
-                  <SmilePlus className='size-4 flex-shrink-0' />
+                  <SmilePlus className='size-4 shrink-0' />
                   <span className='text-sm truncate'>Update your status</span>
                 </div>
               )}
@@ -701,7 +701,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
         <div className='space-y-4'>
           {/* User ID */}
           <div className='flex items-start gap-3'>
-            <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+            <div className='p-2 bg-muted rounded-lg shrink-0'>
               <Hash className='size-4 text-muted-foreground' />
             </div>
             <div className='flex-1'>
@@ -729,7 +729,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           {/* Email Address — blank for community members (masked in useUsers) */}
           {user.email && (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <div className='p-2 bg-muted rounded-lg shrink-0'>
                 <Mail className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
@@ -744,7 +744,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           {/* Display Name */}
           {userProfile?.displayName || isOwnProfile ? (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <div className='p-2 bg-muted rounded-lg shrink-0'>
                 <UserIcon className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
@@ -821,7 +821,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           {/* Phone Number */}
           {userProfile?.phoneNumber || isOwnProfile ? (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <div className='p-2 bg-muted rounded-lg shrink-0'>
                 <Phone className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
@@ -898,7 +898,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           {/* Start Date */}
           {userProfile?.joinedOn && (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <div className='p-2 bg-muted rounded-lg shrink-0'>
                 <Calendar className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
@@ -922,7 +922,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           {/* Birth Date */}
           {userProfile?.dob || isOwnProfile ? (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <div className='p-2 bg-muted rounded-lg shrink-0'>
                 <Cake className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>
@@ -1008,7 +1008,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           {(employeeLocationDetailsViaMettle?.current_location ||
             employeeLocationDetailsViaMettle?.current_landmark) && (
             <div className='flex items-start gap-3'>
-              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <div className='p-2 bg-muted rounded-lg shrink-0'>
                 <MapPin className='size-4 text-muted-foreground' />
               </div>
               <div className='flex-1'>

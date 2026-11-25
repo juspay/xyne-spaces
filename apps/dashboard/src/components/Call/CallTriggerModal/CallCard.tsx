@@ -150,7 +150,7 @@ export const CallCard: React.FC<CallCardProps> = ({
         )}
       >
         {/* Avatars */}
-        <div className='flex-shrink-0'>
+        <div className='shrink-0'>
           {participantUserIds.length > 0 ? (
             <AvatarGroup
               userIds={participantUserIds}
@@ -206,14 +206,14 @@ export const CallCard: React.FC<CallCardProps> = ({
           </div>
           <div className='flex items-center gap-3'>
             <div className='text-xs text-muted-foreground'>{initiatorName}</div>
-            <span className='w-1 h-1 bg-gray-600 rounded-full flex-shrink-0' />
+            <span className='w-1 h-1 bg-gray-600 rounded-full shrink-0' />
             <div className='text-xs text-muted-foreground flex items-center gap-1'>
               <Users className='w-3 h-3' />
               {participantCount}
             </div>
             {!isCurrentCall && (
               <>
-                <span className='w-1 h-1 bg-gray-600 rounded-full flex-shrink-0' />
+                <span className='w-1 h-1 bg-gray-600 rounded-full shrink-0' />
                 <div className='text-xs text-muted-foreground'>
                   {callDuration ? `Live ${callDuration}` : 'Just started'}
                 </div>
@@ -223,7 +223,7 @@ export const CallCard: React.FC<CallCardProps> = ({
         </div>
 
         {/* Action button */}
-        <div className='flex-shrink-0 flex items-center gap-4'>
+        <div className='shrink-0 flex items-center gap-4'>
           {isCurrentCall ? (
             <>
               {!isMobileLiveCall && callDuration && (

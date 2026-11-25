@@ -48,7 +48,7 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
           )}
           aria-disabled='true'
         >
-          <span className='flex-shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
+          <span className='shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
             <XCircle size={ICON_SIZE} strokeWidth={1.8} aria-hidden='true' />
           </span>
           <div className='flex-1 min-w-0 flex flex-col gap-[2px]'>
@@ -75,7 +75,7 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
             'hover:border-[var(--cc-t6)] hover:shadow-none',
           )}
         >
-          <span className='flex-shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
+          <span className='shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
             <Calendar size={ICON_SIZE} strokeWidth={1.6} aria-hidden='true' />
           </span>
           <span className='flex-1 min-w-0 text-[13.5px] font-semibold tracking-[-0.2px] text-[var(--cc-t4)] whitespace-nowrap overflow-hidden text-ellipsis'>
@@ -122,13 +122,13 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
       >
         {isActive ? (
           <span
-            className='flex-shrink-0 self-start mt-[7px] w-[7px] h-[7px] rounded-full bg-[var(--cc-call)]'
+            className='shrink-0 self-start mt-[7px] w-[7px] h-[7px] rounded-full bg-[var(--cc-call)]'
             aria-hidden='true'
           />
         ) : (
           <span
             className={cn(
-              'flex-shrink-0 inline-flex self-start mt-[1px]',
+              'shrink-0 inline-flex self-start mt-[1px]',
               state === 'ENDED' && 'text-[var(--cc-t5)]',
               state === 'CANCELLED' && 'text-[var(--cc-t6)]',
               state === 'SCHEDULED' && 'text-[var(--cc-t4)]',
@@ -175,7 +175,7 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
           type='button'
           onClick={isReschedule ? openInCalls : isOpenSummary ? openSummary : handleJoin}
           className={cn(
-            'flex-shrink-0 inline-flex items-center justify-center gap-2 h-[30px] px-[13px]',
+            'shrink-0 inline-flex items-center justify-center gap-2 h-[30px] px-[13px]',
             'border rounded-md text-[13px] font-semibold tracking-[-0.1px] cursor-pointer whitespace-nowrap',
             'transition-[background,border-color,opacity] duration-[120ms]',
             'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cc-call)]',

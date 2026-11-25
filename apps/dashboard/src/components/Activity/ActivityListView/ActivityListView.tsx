@@ -861,7 +861,7 @@ const ActivityListView = (): ReactElement => {
         <div className='flex-1 flex flex-col px-4 py-4 gap-3 overflow-hidden'>
           {Array.from({ length: 15 }).map((_, i) => (
             <div key={i} className='flex items-start gap-3 py-2'>
-              <Skeleton className='h-8 w-8 rounded-full flex-shrink-0' />
+              <Skeleton className='h-8 w-8 rounded-full shrink-0' />
               <div className='flex-1 flex flex-col gap-2 min-w-0'>
                 <div className='flex items-center gap-2'>
                   <Skeleton className='h-4 w-24' />

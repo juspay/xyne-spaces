@@ -375,7 +375,7 @@ function TriggerPickerContent({
   return (
     <>
       <div className='flex items-center gap-2 border-b border-border px-3 py-2'>
-        <Search className='size-4 flex-shrink-0 text-muted-foreground' aria-hidden='true' />
+        <Search className='size-4 shrink-0 text-muted-foreground' aria-hidden='true' />
         <input
           ref={searchRef}
           type='search'
@@ -428,7 +428,7 @@ function TriggerPickerContent({
                   >
                     <span
                       className={cn(
-                        'flex size-6 flex-shrink-0 items-center justify-center rounded-md',
+                        'flex size-6 shrink-0 items-center justify-center rounded-md',
                         style.iconTint,
                       )}
                     >

@@ -203,7 +203,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                     this row is the rename target. */}
                 {editingId === e.id && onRenameCommit && onRenameCancel ? (
                   <div className='flex min-w-0 items-center gap-3'>
-                    <span className='flex-shrink-0 pr-1'>
+                    <span className='shrink-0 pr-1'>
                       {e.type === 'FOLDER' ? (
                         <div className='relative flex h-7 w-7 items-center justify-center'>
                           <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />
@@ -246,7 +246,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                       data-track-category='knowledge-base'
                       data-track-name='open-entry'
                     >
-                      <span className='flex-shrink-0 pr-1'>
+                      <span className='shrink-0 pr-1'>
                         {e.type === 'FOLDER' ? (
                           <div className='relative flex h-7 w-7 items-center justify-center'>
                             <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />

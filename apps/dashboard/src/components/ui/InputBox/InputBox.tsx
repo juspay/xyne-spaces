@@ -1676,7 +1676,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     return (
-      <div className={`flex-shrink-0 relative ${className}`} data-input-id={id}>
+      <div className={`shrink-0 relative ${className}`} data-input-id={id}>
         {features.mentions && (
           <MentionSelector
             editor={editor}

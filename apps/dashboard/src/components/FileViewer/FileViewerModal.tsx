@@ -683,7 +683,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
         {files!.map((file, index) => (
           <div
             key={file.attachmentId || `file-${index}-${file.fileName}`}
-            className='flex-shrink-0 w-full h-full flex items-center justify-center [scroll-snap-align:center] [scroll-snap-stop:always]'
+            className='shrink-0 w-full h-full flex items-center justify-center [scroll-snap-align:center] [scroll-snap-stop:always]'
           >
             {mountedSlides.has(index) ? (
               <SlideContent
@@ -1455,7 +1455,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {files.map((file, index) => (
           <div
             key={file.attachmentId || file.fileUrl}
-            className='flex-shrink-0 w-full h-full flex items-center justify-center'
+            className='shrink-0 w-full h-full flex items-center justify-center'
             style={{ scrollSnapAlign: 'center' }}
           >
             {mountedSlides.has(index) ? (

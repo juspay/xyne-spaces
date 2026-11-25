@@ -149,7 +149,7 @@ export const CallCard = ({
     if (call.title === null && isChannelCall) {
       return (
         <span className='flex items-center gap-1'>
-          <Hashtag size={14} className='flex-shrink-0' />
+          <Hashtag size={14} className='shrink-0' />
           {channel.name}
         </span>
       );

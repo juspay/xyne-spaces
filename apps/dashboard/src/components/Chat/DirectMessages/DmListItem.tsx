@@ -323,7 +323,7 @@ const DmListItemComponent = ({
         isUnread,
       })}
     >
-      <div className='relative flex-shrink-0'>
+      <div className='relative shrink-0'>
         {isGroupDMChannel(channel.scopeType) ? (
           <AvatarGroup userIds={otherParticipantIds} size='sm' isGroupDMAvatar className='size-9' />
         ) : (
@@ -352,12 +352,12 @@ const DmListItemComponent = ({
                 statusExpiryAt={targetUser?.statusExpiryAt}
                 activityStatus={targetUser?.activityStatus}
                 size='sm'
-                className='flex-shrink-0 text-[14px]'
+                className='shrink-0 text-[14px]'
               />
             )}
           </div>
 
-          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
+          <span className='shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
             {lastMessage ? formatTime(lastMessage.createdAt) : null}
           </span>
         </div>

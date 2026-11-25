@@ -483,7 +483,7 @@ function SortDropdown({
         size='sm'
         data-track-category='automations-list'
         data-track-name='open-sort-menu'
-        className='h-8 flex-shrink-0 gap-1.5 text-xs'
+        className='h-8 shrink-0 gap-1.5 text-xs'
         aria-label='Sort automations'
       >
         <ChevronSortVertical className='size-3.5' aria-hidden='true' />
@@ -521,7 +521,7 @@ function PaginationBar({
   onPageSizeChange: (pageSize: number) => void;
 }): React.ReactElement {
   return (
-    <div className='flex flex-shrink-0 items-center justify-between border-t border-border pt-3'>
+    <div className='flex shrink-0 items-center justify-between border-t border-border pt-3'>
       <div className='flex items-center gap-2'>
         <span className='text-xs text-muted-foreground'>Rows per page</span>
         <Select value={String(pageSize)} onValueChange={v => onPageSizeChange(Number(v))}>
@@ -701,7 +701,7 @@ function AutomationRow({
         <div className='flex items-start gap-3'>
           <div
             aria-hidden='true'
-            className='flex size-9 flex-shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400'
+            className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400'
           >
             <TriggerIcon className='size-4' />
           </div>

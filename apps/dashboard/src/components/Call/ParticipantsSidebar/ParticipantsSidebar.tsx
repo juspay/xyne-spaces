@@ -261,17 +261,11 @@ function ParticipantItem({
       )}
     >
       {isExternal ? (
-        <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-orange-400 text-sm font-medium text-white'>
+        <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-400 text-sm font-medium text-white'>
           {fallbackInitial}
         </div>
       ) : (
-        <Avatar
-          userId={userId}
-          size='md'
-          rounded
-          showActiveStatus={false}
-          className='flex-shrink-0'
-        />
+        <Avatar userId={userId} size='md' rounded showActiveStatus={false} className='shrink-0' />
       )}
       <div className='min-w-0 flex-1'>
         <div className='flex items-center gap-1.5'>
@@ -298,7 +292,7 @@ function ParticipantItem({
         {statusLine && <p className='truncate text-xs text-muted-foreground'>{statusLine}</p>}
       </div>
 
-      <div className='flex flex-shrink-0 items-center gap-1'>
+      <div className='flex shrink-0 items-center gap-1'>
         {isRaised && (
           <span
             className='flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-white'
@@ -816,7 +810,7 @@ export function ParticipantsSidebar({
           )}
 
           <label className='flex items-center gap-2 rounded-lg border border-border px-3 py-2 focus-within:border-[#0b57d0] focus-within:ring-1 focus-within:ring-[#0b57d0] dark:focus-within:border-[#a8c7fa] dark:focus-within:ring-[#a8c7fa]'>
-            <Search size={18} className='flex-shrink-0 text-muted-foreground' />
+            <Search size={18} className='shrink-0 text-muted-foreground' />
             <input
               type='text'
               value={searchQuery}

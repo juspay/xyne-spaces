@@ -1488,7 +1488,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             )}
             {bannerScheduledFor !== null && (
               <div className='mx-3 mb-2 mt-2 flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground animate-in slide-in-from-bottom-2 duration-200'>
-                <Clock size={14} className='flex-shrink-0 text-muted-foreground' />
+                <Clock size={14} className='shrink-0 text-muted-foreground' />
                 <span className='min-w-0'>
                   Your message will be sent at {format(new Date(bannerScheduledFor), 'h:mm a')} on{' '}
                   {format(new Date(bannerScheduledFor), 'MMM d')}.{' '}

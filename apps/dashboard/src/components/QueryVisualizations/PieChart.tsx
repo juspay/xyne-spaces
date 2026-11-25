@@ -140,12 +140,12 @@ export const PieChart: React.FC<PieChartProps> = ({
                 >
                   <div className='flex items-center gap-3 min-w-0 flex-1'>
                     <div
-                      className='w-3 h-3 rounded-full flex-shrink-0 shadow-md'
+                      className='w-3 h-3 rounded-full shrink-0 shadow-md'
                       style={{ backgroundColor: color, boxShadow: `0 2px 8px ${color}60` }}
                     />
                     <span className='text-foreground/80 font-medium truncate'>{item.label}</span>
                   </div>
-                  <span className='font-bold text-foreground/90 ml-2 flex-shrink-0 bg-gradient-to-r from-primary/20 to-primary/10 px-2 py-0.5 rounded'>
+                  <span className='font-bold text-foreground/90 ml-2 shrink-0 bg-gradient-to-r from-primary/20 to-primary/10 px-2 py-0.5 rounded'>
                     {percentage}%
                   </span>
                 </div>

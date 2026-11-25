@@ -342,7 +342,7 @@ export const DraftCard = ({
         </div>
       )}
       <div className='flex flex-col h-full min-h-0'>
-        <div className='flex items-center justify-between px-4 py-2.5 min-h-[3rem] flex-shrink-0 border-b border-border'>
+        <div className='flex items-center justify-between px-4 py-2.5 min-h-[3rem] shrink-0 border-b border-border'>
           <div className='flex items-center gap-2.5'>
             <div
               className='relative flex items-center justify-center w-6 h-6 rounded-lg'
@@ -433,7 +433,7 @@ export const DraftCard = ({
         </div>
 
         {!!selectedText && (
-          <div className='px-4 pb-2 flex-shrink-0'>
+          <div className='px-4 pb-2 shrink-0'>
             {selectedText && (
               <div className='mb-2 rounded-xl border border-red-200/70 bg-red-50/60 px-3 py-2 text-left dark:border-red-900/60 dark:bg-red-950/20'>
                 <div className='flex items-start justify-between gap-3'>
@@ -470,7 +470,7 @@ export const DraftCard = ({
           </div>
         )}
 
-        <div className='flex items-center gap-1.5 px-3 py-2.5 border-t border-border flex-shrink-0'>
+        <div className='flex items-center gap-1.5 px-3 py-2.5 border-t border-border shrink-0'>
           <div className='relative' ref={refineMenuRef}>
             <button
               type='button'

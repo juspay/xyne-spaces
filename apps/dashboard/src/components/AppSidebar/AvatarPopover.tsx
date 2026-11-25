@@ -112,7 +112,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                     variant='ghost'
                     size='sm'
                     onClick={handleClearStatus}
-                    className='flex-shrink-0 p-1 h-auto'
+                    className='shrink-0 p-1 h-auto'
                     title='Clear status'
                     aria-label='Clear status'
                     data-track-category='App_Sidebar_Avatar_Popover'

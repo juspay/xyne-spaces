@@ -110,7 +110,7 @@ export function LocalDiffActions({ artifact }: { artifact: ConversationArtifact 
   };
 
   return (
-    <span className='flex flex-shrink-0 items-center gap-0.5'>
+    <span className='flex shrink-0 items-center gap-0.5'>
       <button
         type='button'
         onClick={copy}
@@ -214,15 +214,15 @@ function CoverageBar({
   return (
     <div
       className={cn(
-        'flex-shrink-0 border-b px-3 py-2 text-xs',
+        'shrink-0 border-b px-3 py-2 text-xs',
         complete ? 'border-border bg-secondary/20' : 'border-amber-500/40 bg-amber-500/10',
       )}
     >
       <div className='flex items-center gap-2'>
         {complete ? (
-          <ShieldCheck className='h-3.5 w-3.5 flex-shrink-0 text-emerald-500' aria-hidden='true' />
+          <ShieldCheck className='h-3.5 w-3.5 shrink-0 text-emerald-500' aria-hidden='true' />
         ) : (
-          <AlertTriangle className='h-3.5 w-3.5 flex-shrink-0 text-amber-500' aria-hidden='true' />
+          <AlertTriangle className='h-3.5 w-3.5 shrink-0 text-amber-500' aria-hidden='true' />
         )}
         <span className='min-w-0 flex-1 text-foreground'>
           {complete
@@ -241,7 +241,7 @@ function CoverageBar({
             onClick={() => setOpen(value => !value)}
             data-track-category='AskAI'
             data-track-name='review-coverage-toggle'
-            className='flex-shrink-0 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+            className='shrink-0 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           >
             {open ? 'Hide' : 'Show'}
           </button>
@@ -274,7 +274,7 @@ function CoverageBar({
                 {row.file}
               </button>
               {row.note ? (
-                <span className='flex-shrink-0 text-[11px] text-muted-foreground'>{row.note}</span>
+                <span className='shrink-0 text-[11px] text-muted-foreground'>{row.note}</span>
               ) : null}
             </div>
           ))}
@@ -296,7 +296,7 @@ function ReviewHeader({
   if (!guide.summary && !guide.verdict && guide.order.length === 0) return null;
   const known = new Set(files.map(file => file.path));
   return (
-    <div className='flex-shrink-0 border-b border-border bg-secondary/20 px-3 py-2.5'>
+    <div className='shrink-0 border-b border-border bg-secondary/20 px-3 py-2.5'>
       {guide.verdict ? (
         <p className='text-xs font-semibold text-foreground'>{guide.verdict}</p>
       ) : null}
@@ -344,8 +344,8 @@ function CommentNav({ comments }: { comments: AnchoredComment[] }): ReactElement
   };
 
   return (
-    <div className='flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1.5'>
-      <span className='flex-shrink-0 pr-1 text-[11px] text-muted-foreground'>
+    <div className='flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1.5'>
+      <span className='shrink-0 pr-1 text-[11px] text-muted-foreground'>
         {comments.length} comment{comments.length === 1 ? '' : 's'}
       </span>
       <button
@@ -354,7 +354,7 @@ function CommentNav({ comments }: { comments: AnchoredComment[] }): ReactElement
         aria-label='Previous comment'
         data-track-category='AskAI'
         data-track-name='review-comment-prev'
-        className='grid h-6 w-6 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+        className='grid h-6 w-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
       >
         <ChevronLeft className='h-3.5 w-3.5' />
       </button>
@@ -364,7 +364,7 @@ function CommentNav({ comments }: { comments: AnchoredComment[] }): ReactElement
         aria-label='Next comment'
         data-track-category='AskAI'
         data-track-name='review-comment-next'
-        className='grid h-6 w-6 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+        className='grid h-6 w-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
       >
         <ChevronRight className='h-3.5 w-3.5' />
       </button>
@@ -381,7 +381,7 @@ function CommentNav({ comments }: { comments: AnchoredComment[] }): ReactElement
             data-track-name='review-comment-dot'
             title={`${comment.title} · ${comment.file}`}
             className={cn(
-              'flex-shrink-0 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors',
+              'shrink-0 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors',
               SEVERITY_STYLES[comment.severity],
               at === index ? 'ring-1 ring-ring' : '',
             )}
@@ -429,11 +429,11 @@ function FileSection({
         className='sticky top-0 z-[1] flex w-full min-w-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-left hover:bg-secondary/40'
       >
         {file.lines.length === 0 ? (
-          <span className='h-3.5 w-3.5 flex-shrink-0' />
+          <span className='h-3.5 w-3.5 shrink-0' />
         ) : open ? (
-          <ChevronDown className='h-3.5 w-3.5 flex-shrink-0 text-muted-foreground' />
+          <ChevronDown className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
         ) : (
-          <ChevronRight className='h-3.5 w-3.5 flex-shrink-0 text-muted-foreground' />
+          <ChevronRight className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
         )}
         <span
           className='min-w-0 flex-1 truncate font-mono text-xs text-foreground'
@@ -442,31 +442,25 @@ function FileSection({
           {file.path}
         </span>
         {comments.length > 0 ? (
-          <span className='flex-shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-foreground'>
+          <span className='shrink-0 rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-foreground'>
             {comments.map(comment => comment.id).join(' ')}
           </span>
         ) : null}
         {coverage === 'missing' ? (
-          <span className='flex-shrink-0 rounded border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400'>
+          <span className='shrink-0 rounded border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400'>
             not reviewed
           </span>
         ) : coverage === 'skipped' ? (
-          <span className='flex-shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground'>
+          <span className='shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground'>
             skipped
           </span>
         ) : null}
         {file.lines.length === 0 ? (
-          <span className='flex-shrink-0 text-[11px] text-muted-foreground'>
-            no textual changes
-          </span>
+          <span className='shrink-0 text-[11px] text-muted-foreground'>no textual changes</span>
         ) : (
           <>
-            <span className='flex-shrink-0 font-mono text-[11px] text-emerald-500'>
-              +{file.added}
-            </span>
-            <span className='flex-shrink-0 font-mono text-[11px] text-rose-500'>
-              -{file.removed}
-            </span>
+            <span className='shrink-0 font-mono text-[11px] text-emerald-500'>+{file.added}</span>
+            <span className='shrink-0 font-mono text-[11px] text-rose-500'>-{file.removed}</span>
           </>
         )}
       </button>
@@ -481,13 +475,13 @@ function FileSection({
               {file.lines.map((line, index) => (
                 <div key={index}>
                   <div className={cn('flex whitespace-pre', lineClass(line.kind))}>
-                    <span className='w-10 flex-shrink-0 select-none pr-2 text-right text-muted-foreground/60'>
+                    <span className='w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60'>
                       {line.oldLine ?? ''}
                     </span>
-                    <span className='w-10 flex-shrink-0 select-none pr-2 text-right text-muted-foreground/60'>
+                    <span className='w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60'>
                       {line.newLine ?? ''}
                     </span>
-                    <span className='w-4 flex-shrink-0 select-none text-muted-foreground'>
+                    <span className='w-4 shrink-0 select-none text-muted-foreground'>
                       {marker(line.kind)}
                     </span>
                     <span className='pr-3'>{line.text === '' ? ' ' : line.text}</span>

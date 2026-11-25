@@ -63,7 +63,7 @@ export function TableHeader<TData extends Record<string, unknown>>({
                   <SortIcon
                     size={12}
                     className={cn(
-                      'flex-shrink-0',
+                      'shrink-0',
                       isActive ? 'text-foreground' : 'text-muted-foreground/50',
                     )}
                   />

@@ -22,7 +22,7 @@ interface CallPrivacyIndicatorProps {
 /** Robot glyph with a diagonal slash, used on the "Remove Xyne Automatic" action. */
 export function SlashedBot({ className }: { className?: string }): React.ReactElement {
   return (
-    <span className='relative inline-flex flex-shrink-0'>
+    <span className='relative inline-flex shrink-0'>
       <Bot className={className} />
       <span className='pointer-events-none absolute inset-0 flex items-center justify-center'>
         <span className='h-[1.5px] w-[130%] rotate-45 rounded-full bg-current' />
@@ -47,7 +47,7 @@ function ActivityRow({
     <div className='flex items-center gap-3 px-3 py-2.5'>
       <span
         className={cn(
-          'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full',
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
           isOn ? 'bg-[#dc362e]/15 text-[#f2b8b5]' : 'bg-white/5 text-[#9aa0a6]',
         )}
       >
@@ -59,7 +59,7 @@ function ActivityRow({
       </div>
       <span
         className={cn(
-          'flex flex-shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold',
+          'flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold',
           isOn ? 'bg-[#dc362e]/15 text-[#f2b8b5]' : 'bg-white/5 text-[#9aa0a6]',
         )}
       >
@@ -141,7 +141,7 @@ export function CallPrivacyIndicator({
           isOpen ? 'bg-[#a8c7fa] text-[#062e6f]' : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
         )}
       >
-        <span className='relative flex h-2.5 w-2.5 flex-shrink-0'>
+        <span className='relative flex h-2.5 w-2.5 shrink-0'>
           {status === 'transcribing' && (
             <span className='absolute inset-0 animate-ping rounded-full bg-[#f28b82] opacity-60' />
           )}
@@ -172,7 +172,7 @@ export function CallPrivacyIndicator({
         >
           {/* Header */}
           <div className='flex items-center gap-3 px-4 pb-3 pt-4'>
-            <div className='relative flex-shrink-0'>
+            <div className='relative shrink-0'>
               <img
                 src='/images/xyne_logo.png'
                 alt=''
@@ -262,7 +262,7 @@ export function CallPrivacyIndicator({
               </button>
             ) : (
               <p className='flex items-start gap-2 text-xs leading-relaxed text-[#9aa0a6]'>
-                <Info className='mt-0.5 h-3.5 w-3.5 flex-shrink-0' />
+                <Info className='mt-0.5 h-3.5 w-3.5 shrink-0' />
                 <span>
                   Only <span className='font-medium text-[#e3e3e3]'>{hostName ?? 'the host'}</span>{' '}
                   (host) can control transcription.

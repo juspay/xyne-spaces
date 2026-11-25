@@ -1021,7 +1021,7 @@ export const AttachmentPreview = ({
           data-track-category='XyneAI'
           data-track-name='attachment-download'
         >
-          <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
+          <div className='shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
             <FileDocumentIcon color='currentColor' size={20} className='text-muted-foreground' />
           </div>
           <div className='flex flex-col overflow-hidden text-left'>
@@ -1038,7 +1038,7 @@ export const AttachmentPreview = ({
       ) : (
         // File attachment without ID - show only
         <div className='flex items-center gap-2'>
-          <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
+          <div className='shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
             <FileDocumentIcon color='currentColor' size={20} className='text-muted-foreground' />
           </div>
           <div className='flex flex-col overflow-hidden'>
@@ -1079,7 +1079,7 @@ const SelectionContextPreview = ({
       data-track-category='XyneAI'
       data-track-name='SELECTION_CONTEXT_CLICK'
     >
-      <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-background rounded'>
+      <div className='shrink-0 w-8 h-8 flex items-center justify-center bg-background rounded'>
         <FileDocumentIcon color='currentColor' size={20} className='text-primary' />
       </div>
       <div className='flex flex-col overflow-hidden flex-1'>
@@ -2657,7 +2657,7 @@ const ParticipantAvatar: React.FC<{ participant: Participant }> = ({ participant
       .join('') || '?';
 
   return (
-    <div className='w-6 h-6 rounded-lg overflow-hidden ring-2 ring-background flex-shrink-0 bg-muted flex items-center justify-center'>
+    <div className='w-6 h-6 rounded-lg overflow-hidden ring-2 ring-background shrink-0 bg-muted flex items-center justify-center'>
       {pictureUrl ? (
         <img src={pictureUrl} alt={participant.name} className='w-full h-full object-cover' />
       ) : (
@@ -2733,7 +2733,7 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
         ))}
         {remaining > 0 && (
           <div
-            className='w-6 h-6 rounded-lg bg-muted ring-2 ring-background flex items-center justify-center text-xs font-medium text-muted-foreground flex-shrink-0'
+            className='w-6 h-6 rounded-lg bg-muted ring-2 ring-background flex items-center justify-center text-xs font-medium text-muted-foreground shrink-0'
             title={`${remaining} more participant${remaining > 1 ? 's' : ''}`}
           >
             +{remaining}

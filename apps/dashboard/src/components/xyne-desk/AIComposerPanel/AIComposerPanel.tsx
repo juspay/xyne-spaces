@@ -78,7 +78,7 @@ export const AIComposerPanel = ({
       transition={{ duration: 0.2 }}
     >
       {/* Top bar */}
-      <div className='flex items-center justify-between px-3 py-2 flex-shrink-0'>
+      <div className='flex items-center justify-between px-3 py-2 shrink-0'>
         <div className='flex items-center gap-2'>
           <div className='relative flex items-center justify-center w-5 h-5 rounded-md bg-red-400'>
             <Sparkles size={11} className='text-white' />
@@ -132,7 +132,7 @@ export const AIComposerPanel = ({
       </div>
 
       {/* Animated border input */}
-      <div className='flex-shrink-0 px-3 pb-3'>
+      <div className='shrink-0 px-3 pb-3'>
         <div className='xyne-ai-prompt-border-wrap'>
           <div className='rounded-full bg-background flex items-end gap-1.5 px-3.5 py-2'>
             <textarea

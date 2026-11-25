@@ -44,13 +44,13 @@ const noop = (): void => {};
 function iconForSource(source: CitationDoc['source']): ReactElement {
   switch (source) {
     case 'thread':
-      return <MessageSquare className='h-3.5 w-3.5 flex-shrink-0' />;
+      return <MessageSquare className='h-3.5 w-3.5 shrink-0' />;
     case 'ticket':
-      return <Ticket className='h-3.5 w-3.5 flex-shrink-0' />;
+      return <Ticket className='h-3.5 w-3.5 shrink-0' />;
     case 'canvas':
-      return <SquarePen className='h-3.5 w-3.5 flex-shrink-0' />;
+      return <SquarePen className='h-3.5 w-3.5 shrink-0' />;
     default:
-      return <FileText className='h-3.5 w-3.5 flex-shrink-0' />;
+      return <FileText className='h-3.5 w-3.5 shrink-0' />;
   }
 }
 
@@ -176,11 +176,11 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
 
   return (
     <div className='flex h-full w-full flex-col bg-background'>
-      <div className='flex h-10 flex-shrink-0 items-center justify-between gap-3 border-b border-border px-3'>
+      <div className='flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border px-3'>
         <span className='min-w-0 truncate text-sm font-medium text-foreground' title={doc.title}>
           {doc.title}
         </span>
-        <div className='flex flex-shrink-0 items-center gap-1 rounded-md bg-muted p-0.5'>
+        <div className='flex shrink-0 items-center gap-1 rounded-md bg-muted p-0.5'>
           <button
             type='button'
             onClick={() => setMode('raw')}
@@ -249,7 +249,7 @@ function CitationGenericView({ doc }: { doc: CitationKbFileDoc }): ReactElement 
 
   return (
     <div className='flex h-full w-full flex-col bg-background'>
-      <div className='flex h-10 flex-shrink-0 items-center border-b border-border px-3'>
+      <div className='flex h-10 shrink-0 items-center border-b border-border px-3'>
         <span className='truncate text-sm font-medium text-foreground' title={doc.title}>
           {doc.title}
         </span>
@@ -392,7 +392,7 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
           onClick={() => setCollapsed(false)}
           aria-label='Expand documents panel'
           title='Expand'
-          className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           data-track-category='AskAI'
           data-track-name='citation-docs-expand'
         >
@@ -406,12 +406,12 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
   return (
     <div className='flex h-full w-full flex-col border-l border-border bg-background'>
       {/* Header — open-doc count dropdown, the tab strip, then collapse / close-all. */}
-      <div className='flex h-9 flex-shrink-0 items-center gap-1 border-b border-border pl-2 pr-1'>
+      <div className='flex h-9 shrink-0 items-center gap-1 border-b border-border pl-2 pr-1'>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type='button'
-              className='flex h-7 flex-shrink-0 items-center gap-0.5 rounded px-1.5 text-[12px] font-medium text-foreground hover:bg-secondary/60'
+              className='flex h-7 shrink-0 items-center gap-0.5 rounded px-1.5 text-[12px] font-medium text-foreground hover:bg-secondary/60'
               aria-label='List open documents'
               data-track-category='AskAI'
               data-track-name='citation-docs-list-open'
@@ -432,7 +432,7 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
                   <span className='truncate'>{doc.title}</span>
                 </span>
                 {doc.source === 'kb-file' && typeof doc.chunkIndex === 'number' && (
-                  <span className='flex-shrink-0 text-xs text-muted-foreground'>
+                  <span className='shrink-0 text-xs text-muted-foreground'>
                     ch {doc.chunkIndex}
                   </span>
                 )}
@@ -449,7 +449,7 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
                 key={doc.id}
                 ref={isActive ? activeTabRef : undefined}
                 className={cn(
-                  'flex h-7 max-w-[220px] flex-shrink-0 items-center rounded pr-1 transition-colors',
+                  'flex h-7 max-w-[220px] shrink-0 items-center rounded pr-1 transition-colors',
                   isActive ? 'bg-secondary' : 'hover:bg-secondary/60',
                 )}
               >
@@ -472,7 +472,7 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
                   type='button'
                   aria-label={`Close ${doc.title}`}
                   onClick={() => closeDoc(doc.id)}
-                  className='grid h-4 w-4 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10'
+                  className='grid h-4 w-4 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10'
                   data-track-category='AskAI'
                   data-track-name='citation-doc-tab-close'
                 >
@@ -483,14 +483,14 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
           })}
         </div>
 
-        <div className='flex flex-shrink-0 items-center gap-0.5 pl-1'>
+        <div className='flex shrink-0 items-center gap-0.5 pl-1'>
           {activeDoc?.sourceUrl && (
             <button
               type='button'
               onClick={openActiveSource}
               aria-label='Jump to Source'
               title='Jump to Source'
-              className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+              className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
               data-track-category='AskAI'
               data-track-name='citation-docs-open-source'
             >
@@ -503,7 +503,7 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
               onClick={() => setCollapsed(true)}
               aria-label='Collapse panel'
               title='Collapse'
-              className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+              className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
               data-track-category='AskAI'
               data-track-name='citation-docs-collapse'
             >
@@ -515,7 +515,7 @@ export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): Re
             onClick={closeAll}
             aria-label='Close all documents'
             title='Close all'
-            className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+            className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='citation-docs-close-all'
           >

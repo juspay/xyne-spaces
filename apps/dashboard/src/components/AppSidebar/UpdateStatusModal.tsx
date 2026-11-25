@@ -413,7 +413,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             <div className='relative flex items-center gap-2 px-3 py-2 rounded-lg border border-input bg-background'>
               <Popover.Root open={emojiPickerOpen} modal={true} onOpenChange={setEmojiPickerOpen}>
                 <Popover.Trigger asChild>
-                  <button className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'>
+                  <button className='shrink-0 text-muted-foreground hover:text-muted-foreground'>
                     {selectedEmoji ? (
                       <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
                     ) : (
@@ -467,7 +467,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 <button
                   onClick={handleClearStatus}
                   data-ph-capture-attribute-track-id='clear_user_status'
-                  className='h-auto p-0 flex-shrink-0 flex items-center gap-1 text-muted-foreground hover:text-muted-foreground hover:bg-transparent'
+                  className='h-auto p-0 shrink-0 flex items-center gap-1 text-muted-foreground hover:text-muted-foreground hover:bg-transparent'
                   data-track-category='Update_User_Status_Modal'
                   data-track-name='Clear_Status_In_Modal'
                 >

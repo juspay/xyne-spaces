@@ -66,7 +66,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
   );
 
   return (
-    <aside className='w-[380px] flex-shrink-0 h-full border-l border-border bg-muted/40 flex flex-col overflow-y-auto'>
+    <aside className='w-[380px] shrink-0 h-full border-l border-border bg-muted/40 flex flex-col overflow-y-auto'>
       <div className='flex items-center justify-between border-b border-border bg-[hsl(var(--flow-decision-bg))] px-4 py-3'>
         <span className='flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[hsl(var(--flow-decision-fg))]'>
           <GitFork size={13} /> Configure decision

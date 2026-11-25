@@ -351,7 +351,7 @@ export const FormFieldEditor = ({ field, nested, ctx }: FormFieldEditorProps): R
                           onClick={() => ctx.onToggleOptionPanel(option.id)}
                           aria-expanded={ctx.isOptionPanelOpen(option.id)}
                           className={cn(
-                            'text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap flex-shrink-0',
+                            'text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap shrink-0',
                             count > 0
                               ? 'bg-[#6276be]/10 text-[#6276be] hover:bg-[#6276be] hover:text-white'
                               : 'border border-dashed border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be] hover:bg-[#6276be]/10',

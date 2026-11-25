@@ -346,7 +346,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
                 alt={getFileName(file)}
                 className='w-full h-full object-cover'
               />
-              <div className='absolute inset-0 flex items-center justify-center bg-black bg-opacity-30'>
+              <div className='absolute inset-0 flex items-center justify-center bg-black/30'>
                 <Video className='h-8 w-8 text-white drop-shadow-lg' />
               </div>
             </div>
@@ -409,7 +409,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
     return (
       <div className='flex items-center justify-between w-full p-3 rounded-lg border border-input bg-muted'>
         <div className='flex gap-3 items-center w-full'>
-          <span className='size-8 flex-shrink-0 rounded-lg overflow-hidden'>
+          <span className='size-8 shrink-0 rounded-lg overflow-hidden'>
             {category === 'image' && imagePreviewUrl ? (
               <img
                 src={imagePreviewUrl}

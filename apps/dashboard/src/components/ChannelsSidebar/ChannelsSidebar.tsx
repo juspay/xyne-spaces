@@ -72,7 +72,7 @@ const ChannelsSidebar = ({
       className='h-full flex flex-col bg-sidebar outline-none'
     >
       {/* Header - matches ProjectSidebar structure */}
-      <div className='flex-shrink-0 h-14 sticky top-0 z-50 bg-sidebar border-b border-border flex items-center'>
+      <div className='shrink-0 h-14 sticky top-0 z-50 bg-sidebar border-b border-border flex items-center'>
         <div className='px-4 flex items-center justify-between w-full'>
           <h2 className='text-foreground font-inter text-base font-semibold leading-normal'>
             Desks

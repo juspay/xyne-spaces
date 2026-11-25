@@ -6,17 +6,17 @@ import type { DisplayEntityType } from '../../../types/search';
 const entityIcon = (type: DisplayEntityType): React.ReactElement => {
   switch (type) {
     case 'channel':
-      return <Hash size={12} className='flex-shrink-0 text-muted-foreground' />;
+      return <Hash size={12} className='shrink-0 text-muted-foreground' />;
     case 'conversation':
-      return <MessageSquare size={12} className='flex-shrink-0 text-muted-foreground' />;
+      return <MessageSquare size={12} className='shrink-0 text-muted-foreground' />;
     case 'ticket':
-      return <Ticket size={12} className='flex-shrink-0 text-muted-foreground' />;
+      return <Ticket size={12} className='shrink-0 text-muted-foreground' />;
     case 'attachment':
-      return <Paperclip size={12} className='flex-shrink-0 text-muted-foreground' />;
+      return <Paperclip size={12} className='shrink-0 text-muted-foreground' />;
     case 'user':
-      return <User size={12} className='flex-shrink-0 text-muted-foreground' />;
+      return <User size={12} className='shrink-0 text-muted-foreground' />;
     case 'collection':
-      return <Paperclip size={12} className='flex-shrink-0 text-gray-500' />;
+      return <Paperclip size={12} className='shrink-0 text-gray-500' />;
   }
 };
 
@@ -32,7 +32,7 @@ const ContextItemRow = ({
     <span className='flex-1 min-w-0 text-xs text-foreground truncate'>{item.title}</span>
     <button
       onClick={() => onRemove(item.id)}
-      className='flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground rounded'
+      className='shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground rounded'
       aria-label={`Remove ${item.title}`}
       data-track-category='THREAD_CONTEXT'
       data-track-name='REMOVE_CONTEXT_ITEM'
@@ -53,7 +53,7 @@ const ThreadContextPanel = ({
   };
 
   return (
-    <div className='flex flex-col h-full border-l border-border w-56 flex-shrink-0 bg-background'>
+    <div className='flex flex-col h-full border-l border-border w-56 shrink-0 bg-background'>
       {/* Header */}
       <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
         <div className='flex items-center gap-1.5'>

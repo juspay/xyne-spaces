@@ -49,7 +49,7 @@ export const ShareLinkModal = ({
           <button
             aria-label='Close share link dialog'
             onClick={onClose}
-            className='p-1 hover:bg-muted rounded transition-colors flex-shrink-0'
+            className='p-1 hover:bg-muted rounded transition-colors shrink-0'
             data-track-category='knowledge-base'
             data-track-name='close-share-link-modal'
           >
@@ -60,7 +60,7 @@ export const ShareLinkModal = ({
         <div className='mb-6'>
           <div className='block text-sm font-medium text-foreground mb-2'>General access</div>
           <div className='flex items-center gap-3 rounded-md border border-border bg-muted/40 p-3'>
-            <div className='flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border text-muted-foreground'>
+            <div className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border text-muted-foreground'>
               <Globe size={16} />
             </div>
             <div className='flex-1 min-w-0'>

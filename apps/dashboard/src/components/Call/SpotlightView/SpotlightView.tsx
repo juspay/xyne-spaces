@@ -281,7 +281,7 @@ export function SpotlightView({
                 }
               }}
               className={cn(
-                'aspect-video flex-shrink-0',
+                'aspect-video shrink-0',
                 compact ? 'min-h-[60px]' : 'min-h-[80px] sm:min-h-[120px]',
               )}
               avatarSize={compact ? 'small' : 'medium'}

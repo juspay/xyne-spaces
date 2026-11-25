@@ -158,9 +158,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
         data-track-metadata={JSON.stringify({ linkId: link.id, url: link.url, title: link.title })}
       >
         {link.favicon ? (
-          <img src={link.favicon} alt='' className='w-4 h-4 flex-shrink-0 mt-0.5' />
+          <img src={link.favicon} alt='' className='w-4 h-4 shrink-0 mt-0.5' />
         ) : (
-          <LinkIcon size={16} className='text-muted-foreground flex-shrink-0 mt-0.5' />
+          <LinkIcon size={16} className='text-muted-foreground shrink-0 mt-0.5' />
         )}
 
         <div className='flex-1 min-w-0'>
@@ -484,9 +484,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
             <div className='bg-muted rounded-lg p-4 mb-6'>
               <div className='flex items-start gap-3'>
                 {linkToDelete.favicon ? (
-                  <img src={linkToDelete.favicon} alt='' className='w-4 h-4 flex-shrink-0 mt-0.5' />
+                  <img src={linkToDelete.favicon} alt='' className='w-4 h-4 shrink-0 mt-0.5' />
                 ) : (
-                  <LinkIcon size={16} className='text-muted-foreground flex-shrink-0 mt-0.5' />
+                  <LinkIcon size={16} className='text-muted-foreground shrink-0 mt-0.5' />
                 )}
                 <div className='flex-1 min-w-0'>
                   <div className='font-medium text-sm text-foreground truncate'>

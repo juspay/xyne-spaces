@@ -700,7 +700,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
               <AlertCircle
                 size={16}
-                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+                className='mt-0.5 shrink-0 text-amber-600 dark:text-amber-400'
               />
               <div className='text-sm text-foreground'>
                 <div className='font-medium'>Workspace shared mailbox not configured</div>
@@ -760,7 +760,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3'>
               <AlertCircle
                 size={16}
-                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+                className='mt-0.5 shrink-0 text-amber-600 dark:text-amber-400'
               />
               <div className='text-sm text-foreground'>
                 <div className='font-medium'>Ozonetel is not configured yet</div>
@@ -795,7 +795,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
               <AlertCircle
                 size={16}
-                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+                className='mt-0.5 shrink-0 text-amber-600 dark:text-amber-400'
               />
               <div className='text-sm text-foreground'>
                 <div className='font-medium'>No Slack channels found</div>
@@ -855,7 +855,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
               <AlertCircle
                 size={16}
-                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+                className='mt-0.5 shrink-0 text-amber-600 dark:text-amber-400'
               />
               <div className='text-sm text-foreground'>
                 <div className='font-medium'>No eligible apps found</div>
@@ -912,7 +912,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='flex items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
               <AlertCircle
                 size={16}
-                className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
+                className='mt-0.5 shrink-0 text-amber-600 dark:text-amber-400'
               />
               <div className='text-sm text-foreground'>
                 <div className='font-medium'>No installed apps</div>

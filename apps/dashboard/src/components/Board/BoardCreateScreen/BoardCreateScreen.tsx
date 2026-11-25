@@ -233,9 +233,7 @@ const BoardCreateScreen = ({
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Created by</div>
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Automations</div>
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Custom Fields</div>
-                      <div className='w-[200px] flex-shrink-0 text-[14px] font-semibold'>
-                        Actions
-                      </div>
+                      <div className='w-[200px] shrink-0 text-[14px] font-semibold'>Actions</div>
                     </div>
 
                     {/* Table Rows */}

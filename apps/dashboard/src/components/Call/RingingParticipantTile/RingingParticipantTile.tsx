@@ -112,7 +112,7 @@ export function RingingParticipantTile({
       >
         <StatusIcon
           className={cn(
-            'flex-shrink-0',
+            'shrink-0',
             isBusy ? 'text-amber-300' : 'text-white/80',
             isRinging && 'animate-pulse',
             compact ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5',

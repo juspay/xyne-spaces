@@ -1627,7 +1627,7 @@ export const ThreadMessages = ({
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
             <div className='flex gap-2 items-center min-w-0 px-0.5'>
-              <ArrowTurnDownRight size={16} className='flex-shrink-0' />
+              <ArrowTurnDownRight size={16} className='shrink-0' />
               <h3
                 className={cn(
                   'text-[17px] font-semibold overflow-hidden min-w-0',
@@ -1665,7 +1665,7 @@ export const ThreadMessages = ({
                   aria-label={`Copy ticket ID ${ticket.xyneId}`}
                   data-track-category='THREAD_PANEL'
                   data-track-name='COPY_TICKET_ID'
-                  className='text-xs font-medium text-muted-foreground bg-muted hover:bg-muted/70 px-2 py-0.5 rounded flex-shrink-0 cursor-pointer select-text transition-colors'
+                  className='text-xs font-medium text-muted-foreground bg-muted hover:bg-muted/70 px-2 py-0.5 rounded shrink-0 cursor-pointer select-text transition-colors'
                 >
                   {ticket.xyneId}
                 </button>

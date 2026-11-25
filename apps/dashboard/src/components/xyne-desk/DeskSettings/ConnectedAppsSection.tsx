@@ -181,10 +181,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
           </div>
         ) : !eligibleApps?.length ? (
           <div className='flex w-full max-w-[500px] items-start gap-2 rounded-lg border border-border bg-muted/50 p-3'>
-            <AlertCircle
-              size={16}
-              className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
-            />
+            <AlertCircle size={16} className='mt-0.5 shrink-0 text-amber-600 dark:text-amber-400' />
             <div className='text-sm text-foreground'>
               <div className='font-medium'>No eligible apps found</div>
               <div className='mt-1 text-xs text-muted-foreground'>

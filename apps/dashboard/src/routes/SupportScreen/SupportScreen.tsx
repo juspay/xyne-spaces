@@ -3262,7 +3262,7 @@ const SupportScreen = (): ReactElement => {
           <Badge
             variant='secondary'
             className={cn(
-              'flex-shrink-0 border-transparent px-1.5 py-0 text-[10px] font-medium leading-tight',
+              'shrink-0 border-transparent px-1.5 py-0 text-[10px] font-medium leading-tight',
               deskSource.className,
             )}
           >
@@ -3462,7 +3462,7 @@ const SupportScreen = (): ReactElement => {
         {!ticketId && (
           <Panel id='main'>
             <div className='h-full flex flex-col relative bg-background'>
-              <div className='flex-shrink-0 relative border-b border-border'>
+              <div className='shrink-0 relative border-b border-border'>
                 <div
                   className={cn(
                     'flex flex-col w-full transition-opacity duration-150',
@@ -4736,7 +4736,7 @@ const SupportScreen = (): ReactElement => {
                     <>
                       {/* Drafts banner — visible when there are saved-but-closed drafts */}
                       {savedDrafts.length > 0 && userID && (
-                        <div className='flex-shrink-0 border-b border-border'>
+                        <div className='shrink-0 border-b border-border'>
                           <div className='px-4 py-2 flex items-center gap-1.5'>
                             <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1'>
                               Drafts
@@ -6053,7 +6053,7 @@ export const SupportTicketDetail = ({
           maxSize={isRightPanelOpen ? '70%' : '100%'}
         >
           <div className='h-full flex flex-col overflow-hidden relative'>
-            <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
+            <div className='w-full px-6 py-4 flex flex-col gap-2.5 shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
               <div className='flex flex-wrap items-center gap-2 min-w-0 overflow-hidden'>
                 {/* Hidden in the search-results pane (showAdjacentNav=false): it hosts the ticket
                     with its own close header and has no ticket list to return to. */}
@@ -6428,7 +6428,7 @@ export const SupportTicketDetail = ({
                   </DropdownMenu>
                 </div>
               </div>
-              <div className='flex flex-col gap-1 flex-shrink-0'>
+              <div className='flex flex-col gap-1 shrink-0'>
                 <div className='pl-9 flex items-center gap-0 flex-wrap'>
                   <TicketMetaRow ticket={ticket} />
                   {initiator && (

@@ -61,7 +61,7 @@ export function CallNotesPanel({
     <div className='flex flex-col h-full bg-background text-foreground'>
       <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
         <div className='flex items-center gap-2 min-w-0'>
-          <NotebookPen size={20} className='text-muted-foreground flex-shrink-0' />
+          <NotebookPen size={20} className='text-muted-foreground shrink-0' />
           <div className='min-w-0'>
             <h2 className='text-lg font-semibold'>Notes</h2>
             {state.status === 'ready' && state.isSeriesCanvas && (

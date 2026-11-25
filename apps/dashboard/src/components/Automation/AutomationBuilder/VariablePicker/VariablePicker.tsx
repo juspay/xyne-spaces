@@ -109,7 +109,7 @@ export function VariablePicker({
       className={cn('w-[340px] max-h-[400px] flex flex-col overflow-hidden')}
     >
       <div className='flex items-center gap-2 px-3 py-2 border-b border-border'>
-        <Search className='size-4 text-muted-foreground flex-shrink-0' />
+        <Search className='size-4 text-muted-foreground shrink-0' />
         <input
           ref={searchRef}
           type='text'
@@ -186,7 +186,7 @@ export function VariablePicker({
                             <Tooltip content={entry.path} side='top' delayDuration={500}>
                               <span className='truncate'>{entry.path}</span>
                             </Tooltip>
-                            <span className='ml-2 flex-shrink-0 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground'>
+                            <span className='ml-2 shrink-0 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground'>
                               {entry.leafType}
                             </span>
                           </button>

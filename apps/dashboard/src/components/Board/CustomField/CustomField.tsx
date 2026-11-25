@@ -395,7 +395,7 @@ export const CustomField = ({
     <div ref={containerRef} className='border border-border rounded-[12px] shadow-md p-4'>
       <div className='flex items-center justify-between mb-4'>
         {/* Grip icon placeholder for alignment */}
-        <div className='w-4 flex-shrink-0'>
+        <div className='w-4 shrink-0'>
           <GripVertical size={16} className='text-xyne-gray-300' />
         </div>
 
@@ -482,7 +482,7 @@ export const CustomField = ({
               aria-label='Required'
               aria-pressed={fieldRequired}
               onClick={() => setFieldRequired(!fieldRequired)}
-              className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+              className={`w-[28px] h-[18px] rounded-full transition-colors relative shrink-0 ${
                 fieldRequired ? 'bg-xyne-primary-500' : 'bg-gray-600'
               }`}
               data-track-category='form'
@@ -582,7 +582,7 @@ export const CustomField = ({
                     >
                       <GripVertical
                         size={16}
-                        className='text-muted-foreground flex-shrink-0 cursor-grab'
+                        className='text-muted-foreground shrink-0 cursor-grab'
                       />
                       <input
                         type='text'
@@ -604,7 +604,7 @@ export const CustomField = ({
                             e.stopPropagation();
                             toggleBranchPanel(option.id);
                           }}
-                          className={`text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap flex-shrink-0 ${
+                          className={`text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap shrink-0 ${
                             branchFields.length > 0
                               ? 'bg-[#6276be]/10 text-[#6276be] hover:bg-[#6276be] hover:text-white'
                               : 'border border-dashed border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be] hover:bg-[#6276be]/10'
@@ -694,7 +694,7 @@ export const CustomField = ({
                                       childField.id,
                                     );
                                   }}
-                                  className={`w-6 h-3.5 rounded-full transition-colors relative flex-shrink-0 ${
+                                  className={`w-6 h-3.5 rounded-full transition-colors relative shrink-0 ${
                                     childField.required ? 'bg-[#6276BE]' : 'bg-gray-600'
                                   }`}
                                   data-track-category='form'
@@ -727,7 +727,7 @@ export const CustomField = ({
                                       childField.id,
                                     );
                                   }}
-                                  className={`w-6 h-3.5 rounded-full transition-colors relative flex-shrink-0 ${
+                                  className={`w-6 h-3.5 rounded-full transition-colors relative shrink-0 ${
                                     childField.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
                                   }`}
                                   data-track-category='form'

@@ -105,7 +105,7 @@ export const ApproverSelector = ({
         className='self-start'
       />
 
-      <div className='relative flex-shrink-0'>
+      <div className='relative shrink-0'>
         <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
         <input
           type='text'

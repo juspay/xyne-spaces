@@ -89,7 +89,7 @@ export function useAnnotation({
       aria-label={picking ? 'Stop picking' : 'Annotate'}
       aria-pressed={picking}
       className={cn(
-        'grid size-7 flex-shrink-0 place-items-center self-center rounded-md',
+        'grid size-7 shrink-0 place-items-center self-center rounded-md',
         picking
           ? 'bg-primary text-primary-foreground'
           : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground',
@@ -126,7 +126,7 @@ export function useAnnotation({
           type='button'
           onClick={clear}
           aria-label='Cancel'
-          className='grid h-5 w-5 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          className='grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           data-track-category='AskAI'
           data-track-name='workspace-page-annotate-cancel'
         >

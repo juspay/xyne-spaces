@@ -198,7 +198,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
               strokeLinecap='round'
               strokeLinejoin='round'
               className={cn(
-                'ml-2 flex-shrink-0 text-muted-foreground transition-transform',
+                'ml-2 shrink-0 text-muted-foreground transition-transform',
                 isOpen ? 'rotate-180' : '',
               )}
             >
@@ -277,7 +277,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                     >
                       {/* Optional Icon */}
                       {option.icon && (
-                        <div className='flex-shrink-0 size-6 flex items-center justify-center'>
+                        <div className='shrink-0 size-6 flex items-center justify-center'>
                           {option.icon}
                         </div>
                       )}
@@ -319,7 +319,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                           strokeWidth='2'
                           strokeLinecap='round'
                           strokeLinejoin='round'
-                          className='flex-shrink-0 text-action-primary'
+                          className='shrink-0 text-action-primary'
                         >
                           <polyline points='20 6 9 17 4 12'></polyline>
                         </svg>

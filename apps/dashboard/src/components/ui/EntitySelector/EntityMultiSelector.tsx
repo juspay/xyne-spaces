@@ -123,7 +123,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
       {inputIcon ? (
         <span
           className={cn(
-            'flex-shrink-0 flex items-center justify-center',
+            'shrink-0 flex items-center justify-center',
             selectedValues.length === 0 && 'text-muted-foreground',
           )}
         >
@@ -315,7 +315,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                           >
                             <span
                               className={cn(
-                                'flex-shrink-0 flex items-center justify-center size-3.5 rounded border transition-colors',
+                                'shrink-0 flex items-center justify-center size-3.5 rounded border transition-colors',
                                 isSelected
                                   ? 'bg-primary border-primary'
                                   : 'border-border bg-background',

@@ -442,7 +442,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
         <Popover.Root open={emojiPickerOpen} modal={true} onOpenChange={setEmojiPickerOpen}>
           <Popover.Trigger asChild>
             <button
-              className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
+              className='shrink-0 text-muted-foreground hover:text-muted-foreground'
               data-track-category='STATUS'
               data-track-name='OpenEmojiPicker'
             >
@@ -497,7 +497,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           <button
             aria-label='Clear status'
             onClick={handleClearStatus}
-            className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
+            className='shrink-0 text-muted-foreground hover:text-muted-foreground'
             data-track-category='STATUS'
             data-track-name='ClearStatus'
           >

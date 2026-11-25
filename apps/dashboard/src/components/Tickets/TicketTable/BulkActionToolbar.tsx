@@ -87,7 +87,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
         <div className='flex items-center gap-2 pb-2 sm:pb-0 sm:pr-4 flex-1 sm:flex-none min-w-0'>
           <button
             onClick={onClearSelection}
-            className='p-1 text-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
+            className='p-1 text-foreground hover:text-muted-foreground transition-colors shrink-0'
             title='Clear selection'
             aria-label='Clear selection'
             data-track-category='Tickets'
@@ -101,7 +101,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
           {onSelectAll && (
             <button
               onClick={onSelectAll}
-              className='text-xs sm:text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap flex-shrink-0'
+              className='text-xs sm:text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap shrink-0'
               data-track-category='Tickets'
               data-track-name='ToggleSelectAll'
             >
@@ -179,7 +179,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               data-track-category='Tickets'
               data-track-name='ToggleDueDateMenu'
             >
-              <Calendar className='size-4 text-foreground flex-shrink-0' />
+              <Calendar className='size-4 text-foreground shrink-0' />
               <span className='text-xs sm:text-sm font-semibold text-foreground'>Due Date</span>
             </button>
 
@@ -232,7 +232,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               data-track-category='Tickets'
               data-track-name='ToggleTagsMenu'
             >
-              <Tag className='size-4 text-foreground flex-shrink-0' />
+              <Tag className='size-4 text-foreground shrink-0' />
               <span className='text-xs sm:text-sm font-semibold text-foreground'>Labels</span>
             </button>
 

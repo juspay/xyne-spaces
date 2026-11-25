@@ -59,7 +59,7 @@ function MessageItem({ msg, showHeader }: { msg: CallChatMessage; showHeader: bo
         showHeader && 'mt-3 first:mt-0',
       )}
     >
-      <div className='w-8 flex-shrink-0 flex items-start justify-center pt-0.5'>
+      <div className='w-8 shrink-0 flex items-start justify-center pt-0.5'>
         {showHeader ? (
           <div
             className={cn(

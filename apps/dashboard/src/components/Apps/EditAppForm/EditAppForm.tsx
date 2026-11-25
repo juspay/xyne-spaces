@@ -297,7 +297,7 @@ const ShortcutRow = ({
   readOnly = false,
 }: ShortcutRowProps): ReactElement => (
   <div className='flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30 group'>
-    <div className='flex-shrink-0 w-6 h-6 rounded bg-primary/10 flex items-center justify-center'>
+    <div className='shrink-0 w-6 h-6 rounded bg-primary/10 flex items-center justify-center'>
       <Zap className='w-3.5 h-3.5 text-primary' />
     </div>
     <div className='flex-1 min-w-0'>
@@ -1593,7 +1593,7 @@ export const EditAppForm = ({
                         {botChannels.map(channel => (
                           <SelectItem key={channel.id} value={channel.id}>
                             <span className='inline-flex items-center gap-1'>
-                              <span className='w-3.5 flex-shrink-0 flex items-center justify-center'>
+                              <span className='w-3.5 shrink-0 flex items-center justify-center'>
                                 {channel.visibility === 'PRIVATE' ? <Lock size={12} /> : '#'}
                               </span>
                               {channel.name}
@@ -1735,7 +1735,7 @@ export const EditAppForm = ({
                         size='sm'
                         onClick={() => void handleRenameWebhook(webhook.id)}
                         disabled={!editingName.trim()}
-                        className='h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-foreground'
+                        className='h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-foreground'
                         data-track-category='INCOMING_WEBHOOKS'
                         data-track-name='Confirm_Rename_Webhook'
                       >
@@ -1750,7 +1750,7 @@ export const EditAppForm = ({
                           setEditingWebhookId(null);
                           setEditingName('');
                         }}
-                        className='h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-foreground'
+                        className='h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-foreground'
                         data-track-category='INCOMING_WEBHOOKS'
                         data-track-name='Cancel_Rename_Webhook'
                       >
@@ -1772,7 +1772,7 @@ export const EditAppForm = ({
                             : 'Message'}
                         </span>
                         <span className='text-xs text-muted-foreground inline-flex items-center gap-0.5'>
-                          <span className='w-3 flex-shrink-0 flex items-center justify-center'>
+                          <span className='w-3 shrink-0 flex items-center justify-center'>
                             {webhook.channelVisibility === 'PRIVATE' ? <Lock size={10} /> : '#'}
                           </span>
                           {webhook.channelName}

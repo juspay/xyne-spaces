@@ -103,7 +103,7 @@ function Section({
         className='flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-secondary/50'
       >
         <ChevronRight
-          className={`h-3 w-3 flex-shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
           aria-hidden
           strokeWidth={2}
         />
@@ -212,9 +212,7 @@ function StringList({ items }: { items: string[] }): React.ReactElement {
     <ol className='space-y-0.5 font-mono text-[11.5px] text-foreground/85'>
       {items.map((item, index) => (
         <li key={`${index}-${item.slice(0, 16)}`} className='flex items-baseline gap-2'>
-          <span className='flex-shrink-0 text-[10px] text-muted-foreground tabular-nums'>
-            {index}
-          </span>
+          <span className='shrink-0 text-[10px] text-muted-foreground tabular-nums'>{index}</span>
           <span className='break-words'>{item}</span>
         </li>
       ))}
@@ -333,7 +331,7 @@ export const VespaDocView: React.FC<{ itemId: string; name: string }> = ({ itemI
         </div>
         <dl className='mt-1 grid grid-cols-1 gap-y-0.5 font-mono text-[10.5px]'>
           <div className='flex min-w-0 gap-1'>
-            <dt className='flex-shrink-0 text-muted-foreground'>docId</dt>
+            <dt className='shrink-0 text-muted-foreground'>docId</dt>
             <dd className='truncate text-foreground/85' title={doc.docId}>
               {doc.docId}
             </dd>

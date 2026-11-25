@@ -244,7 +244,7 @@ const OnboardingScreen: React.FC = () => {
                   migratedChannels?.slice(0, 5).map(channel => (
                     <div key={channel.id} className='w-full flex items-center'>
                       {/* Channel Icon */}
-                      <div className='w-3 h-3 relative overflow-hidden flex-shrink-0'>
+                      <div className='w-3 h-3 relative overflow-hidden shrink-0'>
                         <div className='w-2 h-0 left-[2px] top-[4.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
                         <div className='w-2 h-0 left-[2px] top-[7.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
                         <div className='w-px h-2 left-[4px] top-[1.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />

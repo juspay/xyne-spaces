@@ -160,12 +160,12 @@ export function GlobalUploadProgress(): React.ReactElement | null {
         <div className='flex items-center gap-2 min-w-0 flex-1'>
           {isComplete ? (
             hasErrors ? (
-              <AlertTriangle size={16} className='text-amber-500 flex-shrink-0' />
+              <AlertTriangle size={16} className='text-amber-500 shrink-0' />
             ) : (
-              <CheckCircle2 size={16} className='text-green-500 flex-shrink-0' />
+              <CheckCircle2 size={16} className='text-green-500 shrink-0' />
             )
           ) : (
-            <Loader2 size={16} className='text-blue-500 animate-spin flex-shrink-0' />
+            <Loader2 size={16} className='text-blue-500 animate-spin shrink-0' />
           )}
           <span className='text-sm font-medium text-gray-800 truncate'>
             {isComplete
@@ -176,7 +176,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
           </span>
         </div>
 
-        <div className='flex items-center gap-0.5 flex-shrink-0 ml-2'>
+        <div className='flex items-center gap-0.5 shrink-0 ml-2'>
           <Tooltip content={isExpanded ? 'Minimize' : 'Expand'} side='top'>
             <button
               aria-label={isExpanded ? 'Minimize' : 'Expand'}
@@ -254,10 +254,10 @@ export function GlobalUploadProgress(): React.ReactElement | null {
                 <FileStatusIcon status={file.status} />
                 <span className='text-xs text-gray-700 truncate flex-1'>{file.name}</span>
                 {file.status === 'skipped' && (
-                  <span className='text-[10px] text-gray-400 flex-shrink-0'>duplicate</span>
+                  <span className='text-[10px] text-gray-400 shrink-0'>duplicate</span>
                 )}
                 {file.status === 'failed' && file.error && (
-                  <span className='text-[10px] text-red-400 truncate max-w-[100px] flex-shrink-0'>
+                  <span className='text-[10px] text-red-400 truncate max-w-[100px] shrink-0'>
                     {file.error}
                   </span>
                 )}
@@ -286,13 +286,13 @@ function FileStatusIcon({
   switch (status) {
     case 'uploaded':
     case 'skipped':
-      return <CheckCircle2 size={12} className='text-green-500 flex-shrink-0' />;
+      return <CheckCircle2 size={12} className='text-green-500 shrink-0' />;
     case 'failed':
-      return <XCircle size={12} className='text-red-500 flex-shrink-0' />;
+      return <XCircle size={12} className='text-red-500 shrink-0' />;
     case 'uploading':
-      return <Loader2 size={12} className='text-blue-500 animate-spin flex-shrink-0' />;
+      return <Loader2 size={12} className='text-blue-500 animate-spin shrink-0' />;
     default:
-      return <div className='w-3 h-3 rounded-full border-2 border-gray-300 flex-shrink-0' />;
+      return <div className='w-3 h-3 rounded-full border-2 border-gray-300 shrink-0' />;
   }
 }
 

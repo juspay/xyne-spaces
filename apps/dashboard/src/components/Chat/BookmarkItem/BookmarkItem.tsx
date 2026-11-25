@@ -435,13 +435,13 @@ export const BookmarkItem = ({
                   <span
                     className={
                       isReminderOverdue
-                        ? 'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold bg-red-600 text-white dark:bg-red-500 flex-shrink-0'
-                        : 'text-xs font-medium text-red-600 dark:text-red-300 flex-shrink-0'
+                        ? 'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold bg-red-600 text-white dark:bg-red-500 shrink-0'
+                        : 'text-xs font-medium text-red-600 dark:text-red-300 shrink-0'
                     }
                   >
                     {reminderDueInLabel}
                   </span>
-                  <span className='text-xs text-muted-foreground flex-shrink-0'>&bull;</span>
+                  <span className='text-xs text-muted-foreground shrink-0'>&bull;</span>
                 </>
               )}
               <span
@@ -461,7 +461,7 @@ export const BookmarkItem = ({
 
         {/* Avatar */}
         {!showChannelName && (
-          <div className='flex-shrink-0'>
+          <div className='shrink-0'>
             <Avatar userId={message.senderId || ''} size='md' />
           </div>
         )}
@@ -471,7 +471,7 @@ export const BookmarkItem = ({
           {showChannelName && (
             <div className='flex gap-3'>
               {/* Avatar */}
-              <div className='flex-shrink-0'>
+              <div className='shrink-0'>
                 <Avatar userId={message.senderId || ''} size='md' />
               </div>
 
@@ -497,7 +497,7 @@ export const BookmarkItem = ({
                 <span className='text-sm font-semibold text-foreground truncate'>
                   {sender?.name || 'Unknown User'}
                 </span>
-                <span className='text-xs text-muted-foreground flex-shrink-0 ml-auto'>
+                <span className='text-xs text-muted-foreground shrink-0 ml-auto'>
                   {formatDateWithTime(message.createdAt)}
                 </span>
               </div>

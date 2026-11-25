@@ -152,16 +152,16 @@ export const DateRangeFilter = ({
             : 'border-border bg-background text-foreground hover:bg-muted'
         }`}
       >
-        <Calendar className='w-4 h-4 flex-shrink-0' />
+        <Calendar className='w-4 h-4 shrink-0' />
         <span className='truncate min-w-0 flex-1 text-left'>
           <span className='font-medium'>{label}:</span> {getDisplayText()}
         </span>
         {hasSelection && (
-          <span className='bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full flex-shrink-0'>
+          <span className='bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full shrink-0'>
             1
           </span>
         )}
-        <ChevronDown className='w-4 h-4 flex-shrink-0' />
+        <ChevronDown className='w-4 h-4 shrink-0' />
       </button>
 
       {/* Clear Button */}

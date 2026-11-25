@@ -45,7 +45,7 @@ export const StatusBadgeV2: React.FC<StatusBadgeV2Props> = ({ name, size = 'md' 
     <span
       aria-hidden
       className={cn(
-        'grid flex-shrink-0 place-items-center font-semibold uppercase tracking-wide',
+        'grid shrink-0 place-items-center font-semibold uppercase tracking-wide',
         size === 'sm' ? 'h-4 w-4 rounded text-[5px]' : 'h-7 w-7 rounded-md text-[8.5px]',
         tone,
       )}

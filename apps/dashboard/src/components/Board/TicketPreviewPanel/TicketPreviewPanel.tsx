@@ -41,7 +41,7 @@ export const TicketPreviewPanel = ({
         )}
       </div>
       {/* Bottom Navigation */}
-      <div className='flex items-center justify-center gap-[6px] px-[20px] py-[16px] bg-card flex-shrink-0 rounded-[12px]'>
+      <div className='flex items-center justify-center gap-[6px] px-[20px] py-[16px] bg-card shrink-0 rounded-[12px]'>
         <div className='inline-flex rounded-[10px] bg-muted p-[4px] gap-[6px]'>
           <Button
             onClick={() => setPreviewMode('ticket')}

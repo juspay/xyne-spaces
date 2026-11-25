@@ -202,7 +202,7 @@ export function RecordingOverlay(): React.ReactElement | null {
               className='no-scrollbar overflow-y-auto h-[96px] text-center flex flex-col justify-end rec-overlay-transcript-mask'
             >
               {transcripts.length > 0 ? (
-                <div className='space-y-1 mx-auto flex-shrink-0'>
+                <div className='space-y-1 mx-auto shrink-0'>
                   {transcripts.map(entry => (
                     <p
                       key={entry.id}

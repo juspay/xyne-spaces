@@ -140,7 +140,7 @@ function RowAvatar({ item }: { item: RelatedItem }): ReactElement {
   const Icon = KINDS[item.kind].icon;
   const senderId = item.kind === 'thread' ? item.result.searchContext?.senderId : undefined;
   return (
-    <div className='relative flex-shrink-0 pt-px'>
+    <div className='relative shrink-0 pt-px'>
       {senderId ? (
         <UserAvatar userId={senderId} size={AvatarSize.REGULAR} showActiveStatus={false} />
       ) : (

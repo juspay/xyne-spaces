@@ -228,7 +228,7 @@ function renderCallItem({
         {/* Left: Icon + Name + Info */}
         <div className='flex items-center gap-3 flex-1 min-w-0'>
           {/* Call Type Icon */}
-          <div className={`flex-shrink-0 ${iconColorClass}`}>{getCallIcon()}</div>
+          <div className={`shrink-0 ${iconColorClass}`}>{getCallIcon()}</div>
 
           {/* Name and Details */}
           <div className='flex-1 min-w-0'>
@@ -239,7 +239,7 @@ function renderCallItem({
               ) : isChannelCall ? (
                 // If channel call, show channel name
                 <span className='flex items-center gap-1 visual-regression-hide'>
-                  <Hash size={14} className='flex-shrink-0' />
+                  <Hash size={14} className='shrink-0' />
                   {channel?.name || 'Unknown Channel'}
                 </span>
               ) : (
@@ -276,7 +276,7 @@ function renderCallItem({
         </div>
 
         {/* Right: Participant Avatars */}
-        <div className='flex items-center gap-3 flex-shrink-0'>
+        <div className='flex items-center gap-3 shrink-0'>
           <div
             role='button'
             tabIndex={0}

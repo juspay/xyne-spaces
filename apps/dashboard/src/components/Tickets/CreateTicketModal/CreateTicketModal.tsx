@@ -2446,7 +2446,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     >
       {/* Drag overlay */}
       {isDraggingOverModal && (
-        <div className='absolute inset-0 bg-blue-50 bg-opacity-90 rounded-lg flex items-center justify-center z-50 pointer-events-none'>
+        <div className='absolute inset-0 bg-blue-50/90 rounded-lg flex items-center justify-center z-50 pointer-events-none'>
           <div className='text-center'>
             <Paperclip className='w-12 h-12 text-blue-500 mx-auto mb-2' />
             <p className='text-blue-700 font-medium'>Drop files to attach</p>

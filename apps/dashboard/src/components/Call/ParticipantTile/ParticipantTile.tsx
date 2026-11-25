@@ -297,7 +297,7 @@ export function ParticipantTile({
                       testId: 'remove-agent-menu-item-disabled',
                       customContent: (
                         <div className='flex max-w-[16rem] items-start gap-2.5 px-3 py-2'>
-                          <SlashedBot className='mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground' />
+                          <SlashedBot className='mt-0.5 h-4 w-4 shrink-0 text-muted-foreground' />
                           <div className='min-w-0 text-xs leading-snug text-muted-foreground'>
                             Please ask{' '}
                             <span className='font-semibold text-foreground'>

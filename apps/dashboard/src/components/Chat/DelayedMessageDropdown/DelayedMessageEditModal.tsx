@@ -90,7 +90,7 @@ export const DelayedMessageEditModal = ({
 
         {/* Scheduled time (read-only) */}
         <div className='flex items-center gap-2 px-3 py-2 bg-muted rounded-md'>
-          <Clock size={14} className='text-muted-foreground flex-shrink-0' />
+          <Clock size={14} className='text-muted-foreground shrink-0' />
           <span className='text-sm text-muted-foreground'>
             Scheduled for{' '}
             <span className='font-medium text-foreground'>

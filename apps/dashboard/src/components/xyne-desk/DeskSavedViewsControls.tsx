@@ -347,7 +347,7 @@ export function DeskSavedViewsControls({
           </span>
           <button
             onClick={() => onActiveViewChange(null)}
-            className='flex-shrink-0 ml-0.5 rounded hover:bg-foreground/10 p-0.5 transition-colors text-muted-foreground hover:text-foreground'
+            className='shrink-0 ml-0.5 rounded hover:bg-foreground/10 p-0.5 transition-colors text-muted-foreground hover:text-foreground'
             title='Exit view'
             data-track-category={trackCategory}
             data-track-name='ExitDeskView'
@@ -655,7 +655,7 @@ export function DeskSavedViewsControls({
         {viewToDelete && (
           <div className='flex flex-col'>
             <div className='flex items-start gap-4 px-6 pt-6 pb-5'>
-              <div className='flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-destructive/10'>
+              <div className='shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-destructive/10'>
                 <AlertTriangle size={20} className='text-destructive' />
               </div>
               <div className='flex flex-col gap-1 min-w-0'>

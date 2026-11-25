@@ -56,7 +56,7 @@ export const EmailTagWithAvatar = ({
             className='!size-4 !text-[9px] !rounded-[3px]'
           />
         ) : (
-          <div className='flex-shrink-0 flex items-center justify-center overflow-hidden bg-border w-4 h-4 rounded-[3px] aspect-square'>
+          <div className='shrink-0 flex items-center justify-center overflow-hidden bg-border w-4 h-4 rounded-[3px] aspect-square'>
             <span className='text-[9px] font-medium text-muted-foreground'>{initialLetter}</span>
           </div>
         )}

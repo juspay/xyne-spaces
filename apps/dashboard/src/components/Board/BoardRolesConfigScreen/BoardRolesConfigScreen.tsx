@@ -485,7 +485,7 @@ const BoardRolesConfigScreen = ({
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         {/* ── Top bar ── */}
-        <header className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
+        <header className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
           <div className='flex items-center gap-2 min-w-0'>
             <Button
               variant='ghost'
@@ -520,7 +520,7 @@ const BoardRolesConfigScreen = ({
         </header>
 
         {showAutoRecomputeToggle && (
-          <div className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
+          <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
             <div className='min-w-0'>
               <h3 className='text-sm font-medium text-foreground mb-0.5'>
                 Automatic ETA management
@@ -542,7 +542,7 @@ const BoardRolesConfigScreen = ({
         )}
 
         {boardType === BoardType.NON_LINEAR && (
-          <div className='px-4 py-3 border-b border-border flex-shrink-0'>
+          <div className='px-4 py-3 border-b border-border shrink-0'>
             <div className='flex items-start justify-between gap-4 mb-3'>
               <div className='min-w-0'>
                 <h3 className='text-sm font-medium text-foreground mb-0.5'>Standard Path</h3>

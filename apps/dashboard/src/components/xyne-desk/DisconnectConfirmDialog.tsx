@@ -38,7 +38,7 @@ export const DisconnectConfirmDialog = ({
   <Dialog open={open} onOpenChange={onOpenChange} title={title}>
     <div className='p-5 flex flex-col gap-3'>
       <div className='flex gap-3'>
-        <AlertTriangle size={18} className='flex-shrink-0 text-amber-500 mt-0.5' />
+        <AlertTriangle size={18} className='shrink-0 text-amber-500 mt-0.5' />
         <div className='flex flex-col gap-2 text-sm'>
           <p className='text-foreground'>{prompt}</p>
           <ul className='text-muted-foreground list-disc pl-4 space-y-1 text-xs'>

@@ -672,7 +672,7 @@ export default function RecordingsScreen(): ReactElement {
                           >
                             <div className='flex items-start gap-4'>
                               {/* Icon */}
-                              <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50  flex items-center justify-center group-hover:bg-blue-100  transition-colors'>
+                              <div className='shrink-0 w-10 h-10 rounded-full bg-blue-50  flex items-center justify-center group-hover:bg-blue-100  transition-colors'>
                                 <AudioLines className='w-5 h-5 text-blue-600 ' />
                               </div>
 
@@ -738,11 +738,11 @@ export default function RecordingsScreen(): ReactElement {
                               stopPropagation
                               trackCategory='RecordingsScreen'
                               showToastOnError
-                              className='flex-shrink-0 pr-4'
+                              className='shrink-0 pr-4'
                             />
                           )}
                           {/* Selection checkbox — toggles bulk-action selection */}
-                          <label className='flex-shrink-0 flex items-center pr-4 cursor-pointer'>
+                          <label className='shrink-0 flex items-center pr-4 cursor-pointer'>
                             <input
                               type='checkbox'
                               checked={selectedIds.has(recording.externalId)}
@@ -794,7 +794,7 @@ export default function RecordingsScreen(): ReactElement {
                       isPaused={recordingStatus === 'paused'}
                     />
                   </Panel>
-                  <Separator className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
+                  <Separator className='group relative w-2 shrink-0 bg-border/40 transition-colors hover:bg-border'>
                     <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/50' />
                     <div className='absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-primary/50' />
                   </Separator>
@@ -812,7 +812,7 @@ export default function RecordingsScreen(): ReactElement {
                       isPaused={recordingStatus === 'paused'}
                     />
                   </Panel>
-                  <Separator className='group relative w-2 flex-shrink-0 bg-border/40 transition-colors hover:bg-border'>
+                  <Separator className='group relative w-2 shrink-0 bg-border/40 transition-colors hover:bg-border'>
                     <div className='absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors group-hover:bg-primary/50' />
                     <div className='absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/30 opacity-80 transition-colors group-hover:bg-primary/50' />
                   </Separator>

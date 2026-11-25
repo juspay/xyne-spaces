@@ -115,7 +115,7 @@ export const ComposeEmailModal = ({
 
   return (
     <div
-      className='flex-shrink-0 pointer-events-auto bg-background border border-border rounded-t-2xl shadow-xl flex flex-col self-end transition-[width] duration-200'
+      className='shrink-0 pointer-events-auto bg-background border border-border rounded-t-2xl shadow-xl flex flex-col self-end transition-[width] duration-200'
       style={{
         width: minimized ? '260px' : `${COMPOSE_WINDOW_WIDTH_PX}px`,
         ...(minimized ? {} : { height: `${heightVh}vh` }),
@@ -128,7 +128,7 @@ export const ComposeEmailModal = ({
       {!minimized && (
         <button
           type='button'
-          className='group h-2.5 w-full cursor-row-resize flex-shrink-0 flex items-center justify-center hover:bg-primary/10 transition-colors p-0 border-0 bg-transparent'
+          className='group h-2.5 w-full cursor-row-resize shrink-0 flex items-center justify-center hover:bg-primary/10 transition-colors p-0 border-0 bg-transparent'
           onMouseDown={e => {
             e.preventDefault();
             startResize(e.clientY, heightVh);

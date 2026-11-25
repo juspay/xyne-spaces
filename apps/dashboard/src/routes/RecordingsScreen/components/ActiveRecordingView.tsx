@@ -81,7 +81,7 @@ function TranscriptSearchBar({
           transition={{ duration: 0.15, ease: 'easeOut' }}
           className='flex items-center gap-3 h-10 px-3.5 border border-border bg-background rounded-xl'
         >
-          <Search className='size-4 text-muted-foreground/70 flex-shrink-0' strokeWidth={1.5} />
+          <Search className='size-4 text-muted-foreground/70 shrink-0' strokeWidth={1.5} />
           <input
             ref={inputRef}
             type='text'
