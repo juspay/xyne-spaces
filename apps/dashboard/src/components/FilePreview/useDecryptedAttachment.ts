@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { createPreviewUrl } from '../../services/clients/fileFetchService';
-import { fileEncryptionActive } from '../../services/fileEncryptionInterceptors';
+import {
+  fileEncryptionActive,
+  fileStreamWorkerReady,
+} from '../../services/fileEncryptionInterceptors';
 import type { PreviewFile } from './types';
 
 export interface DecryptedAttachment {
@@ -13,18 +16,22 @@ export interface DecryptedAttachment {
 }
 
 /**
- * A streaming previewer's file while file encryption is on: the stream route serves a stored
- * file a range at a time, which an encrypted file cannot be, so the whole file is downloaded
- * from the attachment's download route (decrypted by the file encryption interceptor) instead.
- * A file with its own address, or any file while encryption is off, streams as before.
+ * A streaming player's file while file encryption is on and no service worker can stream it:
+ * the service worker (public/sw.js) decrypts range reads of the stream route, but where there
+ * is none (the desktop app's custom protocol, a first load before it takes control) the whole
+ * file is downloaded from the attachment's download route (decrypted by the file encryption
+ * interceptor) instead. A file with its own address, or any file while encryption is off,
+ * streams as before.
  */
 export function useDecryptedAttachment(
-  file: Pick<PreviewFile, 'id' | 'streamUrl'>,
+  file: { id?: string | undefined } & Pick<PreviewFile, 'streamUrl'>,
 ): DecryptedAttachment {
-  const decrypting = !file.streamUrl && fileEncryptionActive();
+  const id = file.id ?? '';
+  const decrypting =
+    id !== '' && !file.streamUrl && fileEncryptionActive() && !fileStreamWorkerReady();
   const query = useQuery({
-    queryKey: ['decrypted-attachment', file.id],
-    queryFn: () => createPreviewUrl(file.id),
+    queryKey: ['decrypted-attachment', id],
+    queryFn: () => createPreviewUrl(id),
     enabled: decrypting,
     staleTime: 10 * 60 * 1000,
   });

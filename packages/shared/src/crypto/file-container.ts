@@ -40,10 +40,17 @@ export const CLIENT_ENCRYPTED_FILE_ROUTES: ReadonlyArray<{ method: 'GET' | 'POST
   { method: 'POST', path: '/tickets' },
   { method: 'POST', path: '/users/me/picture' },
   { method: 'POST', path: '/apps/upload-picture/:appId' },
+  // Bot uploads through the transit proxy (ingress), which encrypts their files
+  { method: 'POST', path: '/apps/files/filesUpload' },
+  { method: 'POST', path: '/apps/ticket/appDeskInbound' },
   // Downloads
   { method: 'GET', path: '/attachments/:attachmentId/download' },
   { method: 'GET', path: '/attachments/:attachmentId/thumbnail' },
+  // Range reads for media players (decrypted by the dashboard's service worker, public/sw.js)
+  { method: 'GET', path: '/attachments/:attachmentId/stream' },
   { method: 'GET', path: '/users/:id/picture' },
+  // Bot downloads through the transit proxy, which decrypts them
+  { method: 'GET', path: '/apps/files/download/:attachmentId' },
 ];
 
 const CLIENT_ENCRYPTED_FILE_PATTERNS = CLIENT_ENCRYPTED_FILE_ROUTES.map(({ method, path }) => ({

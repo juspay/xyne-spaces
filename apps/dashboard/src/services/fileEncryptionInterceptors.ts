@@ -104,3 +104,37 @@ export async function fileEncryptionResponseInterceptor(
       : new Blob([plaintext], { type: contentType });
   return response;
 }
+
+/** Whether a service worker can stream encrypted attachments for this page (public/sw.js). */
+export function fileStreamWorkerReady(): boolean {
+  return typeof navigator !== 'undefined' && Boolean(navigator.serviceWorker?.controller);
+}
+
+/**
+ * Answers the service worker that streams encrypted attachments (public/sw.js): whether file
+ * encryption is on, and the transit key for a key id. The key goes over as the keyring's
+ * non-extractable CryptoKey, so it never leaves the browser and cannot be read as bytes.
+ */
+export function answerFileStreamWorker(): void {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    const port = event.ports[0];
+    const data = event.data as { type?: unknown; keyId?: unknown } | null;
+    if (!port || !data) return;
+    if (data.type === 'file-encryption-state') {
+      port.postMessage({ active: fileEncryptionActive() });
+      return;
+    }
+    if (data.type === 'file-encryption-key' && typeof data.keyId === 'string') {
+      const { keyring } = getEncryptionState();
+      if (!fileEncryptionActive() || !keyring) {
+        port.postMessage({ key: null });
+        return;
+      }
+      keyring.forKeyId(data.keyId).then(
+        key => port.postMessage({ key }),
+        () => port.postMessage({ key: null }),
+      );
+    }
+  });
+}
