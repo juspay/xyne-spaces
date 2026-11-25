@@ -10,8 +10,6 @@ import { BitbucketWebhookEnvelope, BitbucketPullRequest } from '@/routes/webhook
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
-import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
-import { VCSProviderType } from '@xyne/shared';
 import { runBitbucketWebhook } from '@/bypassAcl/webhookIngestServices';
 import { forwardPrCardStatus } from '@/services/prCardStatusForwarder';
 // Disabled (LLM)
@@ -98,27 +96,7 @@ export class BitbucketWebhookService {
       // Extract PR context
       const context = this.extractPRContext(payload, workspaceId);
 
-      // Release sync is BRANCH-scoped, not gated on PR-title validation: fire on
-      // merge BEFORE the validation gate so a hotfix whose dev ticket doesn't
-      // exist yet still syncs. Fire-and-forget — analysis can outlast the webhook
-      // timeout and syncReleaseOnPRMerge handles its own errors.
       if (eventKey === BitbucketPREventType.PR_MERGED) {
-        // No latestCommit fallback: if mergeCommit.id is absent, leave it
-        // undefined so syncReleaseOnPRMerge does a plain re-run rather than
-        // inventing a hotfix delta from the destination-branch tip.
-        if (!context.pr.properties?.mergeCommit?.id) {
-          logger.warn(`[Bitbucket-Webhook] PR #${context.prId} merged with no mergeCommit.id — hotfix delta will fall back to a plain re-run`);
-        }
-        syncReleaseOnPRMerge({
-          workspaceId: context.workspace,
-          provider: VCSProviderType.BITBUCKET_SERVER,
-          projectKey: context.projectName,
-          repoSlug: context.pr.toRef.repository.slug,
-          baseBranch: context.destinationBranch,
-          mergeCommitSha: context.pr.properties?.mergeCommit?.id,
-          source: 'Bitbucket-Webhook',
-        }).catch(err => logger.error('[Bitbucket-Webhook] release sync failed:', err));
-
         // Radar asks about this PR ("review/merge #42") are settled by the merge
         // whether or not its title names a ticket, so this also fires before the
         // gate. Fire-and-forget, like the GitHub hook. The raw self link, not

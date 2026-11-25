@@ -219,7 +219,6 @@ import {
   upsertManyFormEntityValuesArgs,
   writeFormEntityValueCreate,
   writeFormEntityValueUpdate,
-  type FormEntityValueWrite,
   deleteFormEntityValue,
   moveFormEntityValue,
 } from './formsMutatorHelpers';
@@ -246,7 +245,6 @@ import type { CallEncryptionState } from '@/database/repositories/callRepository
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
-import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { releaseDevTicketNotifyService } from '@/services/release/releaseDevTicketNotifyService';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
@@ -1209,25 +1207,6 @@ export function createMutators(
     ) {
       throw new Error('This endpoint requires administrator or owner privileges');
     }
-  };
-
-  // A ticket's releaseVersion form value drives its release mapping; resync once per ticket
-  // after the form write commits.
-  const queueReleaseMappingSyncForFormWrites = (writes: readonly FormEntityValueWrite[]): void => {
-    const ticketIds = new Set(
-      writes
-        .filter(write => write.entityType === FormEntityType.TICKET && write.fieldName === 'releaseVersion')
-        .map(write => write.entityId),
-    );
-    ticketIds.forEach(entityId => {
-      asyncTasks.push(async () => {
-        try {
-          await versionReleaseMappingService.syncTicketById(entityId);
-        } catch (error) {
-          logger.error('release_mapping_sync_failed', { entityId, error });
-        }
-      });
-    });
   };
 
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
@@ -7192,26 +7171,6 @@ export function createMutators(
             }
           }
 
-          if (
-            params.statusV2 === TicketStatusV2.COMPLETED
-            && ticket.statusV2 !== TicketStatusV2.COMPLETED
-            && isReleaseTicket(ticket.ticketType as BaseTicketType | null)
-          ) {
-            const completionTimestamp = new Date(params.updatedAt);
-            asyncTasks.push(async () => {
-              try {
-                await versionReleaseMappingService.updateDeployedVersionOnCompletion(
-                  params.id,
-                  completionTimestamp,
-                );
-              } catch (error) {
-                logger.error(
-                  `[VersionReleaseMapping] failed to update deployedVersion for ticket ${params.id}:`,
-                  error,
-                );
-              }
-            });
-          }
 
           // Mirror every release-ticket status change into the bundled dev
           // tickets' threads. Keyed on the canonical statusV2 (never on board
@@ -13475,7 +13434,6 @@ export function createMutators(
             workspaceId: authData.workspaceId,
           });
           await assertFormEntityValueWrites(tx, [write]);
-          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       createV2: defineMutator(
@@ -13493,7 +13451,6 @@ export function createMutators(
         async ({ tx, args }) => {
           const write = await writeFormEntityValueCreate(tx, { ...args, workspaceId: authData.workspaceId });
           await assertFormEntityValueWrites(tx, [write]);
-          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       update: defineMutator(
@@ -13506,15 +13463,13 @@ export function createMutators(
         async ({ tx, args }) => {
           const write = await writeFormEntityValueUpdate(tx, args);
           await assertFormEntityValueWrites(tx, [write]);
-          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       // Saves a whole form (e.g. a stage form) in one transaction. Use this instead of one
       // createV2/update per field whenever several values change together: branch fields are
       // validated after every value is written, so their order doesn't matter.
       upsertMany: defineMutator(upsertManyFormEntityValuesArgs, async ({ tx, args }) => {
-        const writes = await upsertManyFormEntityValues(tx, authData.workspaceId, args);
-        queueReleaseMappingSyncForFormWrites(writes);
+        await upsertManyFormEntityValues(tx, authData.workspaceId, args);
       }),
     },
     dashboard: {

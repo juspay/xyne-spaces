@@ -10,7 +10,6 @@ import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { getApiErrorMessage } from '../../../utils/apiError';
 import { htmlToPlainText } from '../../../utils/sanitizer';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
@@ -207,35 +206,6 @@ export function useSdlcReleases(repos: readonly SdlcReleaseRepo[]): {
   };
 }
 
-export function useRerunReleaseAnalysis(releaseId: string): {
-  rerunning: boolean;
-  rerun: () => Promise<void>;
-} {
-  const [rerunning, setRerunning] = useState(false);
-
-  const rerun = useCallback(async (): Promise<void> => {
-    setRerunning(true);
-    try {
-      const response = await apiInstance.post<{ success: boolean; error?: string }>(
-        `/commits/analyze/re-run/${releaseId}`,
-        {},
-      );
-      if (response.data?.success) {
-        refreshReleaseRepositories(releaseId);
-        toast.success('Re-running analysis — this release updates when it finishes.');
-      } else {
-        toast.error(response.data?.error ?? 'Re-run failed');
-      }
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Re-run failed'));
-    } finally {
-      setRerunning(false);
-    }
-  }, [releaseId]);
-
-  return { rerunning, rerun };
-}
-
 const FIELD_AUTOSAVE_MS = 600;
 
 export function useReleaseFieldEditor(
@@ -312,12 +282,6 @@ export function useAssignReleaseQa(): (artIds: readonly string[], userId: string
 
 /** release_repositories is not synced through Zero, so it comes over REST along with the
  *  release's analysis canvas id. */
-const releaseRepositoryListeners = new Set<(releaseId: string) => void>();
-
-const refreshReleaseRepositories = (releaseId: string): void => {
-  releaseRepositoryListeners.forEach(listener => listener(releaseId));
-};
-
 export function useReleaseRepositories(releaseId: string): {
   repos: ReleaseRepositoryRow[];
   analysisCanvasId: string | null;
@@ -329,17 +293,6 @@ export function useReleaseRepositories(releaseId: string): {
     repos: [],
     analysisCanvasId: null,
   });
-  const [version, setVersion] = useState(0);
-
-  useEffect(() => {
-    const listener = (changedId: string): void => {
-      if (changedId === releaseId) setVersion(value => value + 1);
-    };
-    releaseRepositoryListeners.add(listener);
-    return (): void => {
-      releaseRepositoryListeners.delete(listener);
-    };
-  }, [releaseId]);
 
   useEffect(() => {
     let active = true;
@@ -363,7 +316,7 @@ export function useReleaseRepositories(releaseId: string): {
     return (): void => {
       active = false;
     };
-  }, [releaseId, version]);
+  }, [releaseId]);
 
   return state;
 }

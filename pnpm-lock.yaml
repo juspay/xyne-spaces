@@ -285,6 +285,9 @@ importers:
       '@xyne/cache':
         specifier: workspace:*
         version: link:../../packages/cache
+      '@xyne/connector-sdk':
+        specifier: 0.1.6
+        version: 0.1.6(@xyne/workflow-sdk@3.2.69(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(typebox@1.1.38))
       '@xyne/secrets-vault':
         specifier: workspace:*
         version: link:../../packages/secrets-vault
@@ -10070,6 +10073,12 @@ packages:
 
   '@xyflow/system@0.0.79':
     resolution: {integrity: sha512-czLyOh91NF0hIzbNzwi8I6GlqG23BHh2435OddfI6uiaLH3xdrdygO93gqgH1Bv9mhy8XPFQJOBn1FTq4LvEWA==}
+
+  '@xyne/connector-sdk@0.1.6':
+    resolution: {integrity: sha512-eVSRFr/P/kg39lQHu3S0JXl/qGagKACLXh9aX/irVmLbwlqHIb0LThlu53PGZPMsclf7FJM1TNmdTOhVuGiE8A==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      '@xyne/workflow-sdk': 3.2.39
 
   '@xyne/spaces-sdk@0.2.0-next.0':
     resolution: {integrity: sha512-UncMUfpmczG5IqvQ5sH1mU5ynwewwIKebv+9eXzEbsM03q5nX5KNNL/zY6btBt12PejBegi/FKL9QX7Ns4hmvQ==}
@@ -29824,6 +29833,11 @@ snapshots:
       d3-interpolate: 3.0.1
       d3-selection: 3.0.0
       d3-zoom: 3.0.0
+
+  '@xyne/connector-sdk@0.1.6(@xyne/workflow-sdk@3.2.69(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(typebox@1.1.38))':
+    dependencies:
+      '@xyne/workflow-sdk': 3.2.69(@earendil-works/pi-agent-core@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-ai@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(@earendil-works/pi-coding-agent@0.80.7(@modelcontextprotocol/sdk@1.32.0(@cfworker/json-schema@4.1.1)(zod@4.6.6))(ws@8.21.1)(zod@4.6.6))(typebox@1.1.38)
+      zod: 4.6.6
 
   '@xyne/spaces-sdk@0.2.0-next.0': {}
 
