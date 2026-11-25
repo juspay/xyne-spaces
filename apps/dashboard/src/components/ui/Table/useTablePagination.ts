@@ -60,12 +60,12 @@ export function useTablePagination<TData>(
     if (serverSidePagination) return data;
 
     // No pagination configured
-    if (!pagination && !internalPage) return data;
+    if (!pagination) return data;
 
     const start = (currentPage - 1) * pageSize;
     const end = start + pageSize;
     return data.slice(start, end);
-  }, [data, currentPage, pageSize, serverSidePagination, pagination, internalPage]);
+  }, [data, currentPage, pageSize, serverSidePagination, pagination]);
 
   return {
     paginatedData,

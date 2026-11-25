@@ -51,7 +51,7 @@ const handle = (route: string, fn: (req: Request) => Promise<unknown>) => async 
 usageRouter.get("/summary", handle("/summary", async (req) => fetchUsageSummary(await resolveUsageQuery(req))));
 
 usageRouter.get("/series", handle("/series", async (req) =>
-  fetchUsageSeries(await resolveUsageQuery(req), parseGroupBy(req.query["groupBy"], "agent"), parseIntParam(req.query["top"], 5, 1, 12))));
+  fetchUsageSeries(await resolveUsageQuery(req), parseGroupBy(req.query["groupBy"], "agent"), parseIntParam(req.query["top"], 5, 1, 12), req.query["metric"] === "tokens" ? "tokens" : "cost")));
 
 usageRouter.get("/breakdown", handle("/breakdown", async (req) =>
   fetchUsageBreakdown(await resolveUsageQuery(req), parseGroupBy(req.query["groupBy"], "agent"), {
@@ -79,7 +79,7 @@ async function requirePriceAdmin(req: Request): Promise<string> {
 
 usageRouter.get("/prices", handle("/prices", async (req) => {
   const q = await resolveUsageQuery(req);
-  const [prices, unpriced, history] = await Promise.all([listPrices(), fetchUnpricedModels(q.orgId), q.isAdmin ? listPriceHistory() : null]);
+  const [prices, unpriced, history] = await Promise.all([listPrices(), q.isAdmin ? fetchUnpricedModels(q.orgId) : null, q.isAdmin ? listPriceHistory() : null]);
   return { canEdit: await isClawAdmin(String(req.headers["x-user-id"])), prices, unpriced, history };
 }));
 

@@ -196,7 +196,8 @@ interface FormState {
   /** YYYY-MM-DD, empty = from the start. */
   effectiveDay: string;
   /** An edited row's exact effectiveFrom, so an unchanged date updates that row. */
-  original?: { day: string; iso: string };
+  /** effectiveFrom of the row being edited, which keys it. */
+  original?: string;
   locked: boolean;
 }
 
@@ -283,11 +284,8 @@ const PriceDialog = ({
       slabs.push({ overPromptTokens: over, ...slabRates });
     }
     const effectiveFrom =
-      form.original && form.original.day === form.effectiveDay
-        ? form.original.iso
-        : form.effectiveDay
-          ? new Date(`${form.effectiveDay}T00:00:00`).toISOString()
-          : undefined;
+      form.original ??
+      (form.effectiveDay ? new Date(`${form.effectiveDay}T00:00:00`).toISOString() : undefined);
     setError(null);
     try {
       const res = await save.mutateAsync({
@@ -393,6 +391,7 @@ const PriceDialog = ({
                 id='price-effective'
                 type='date'
                 value={form.effectiveDay}
+                disabled={!!form.original}
                 onChange={e => set({ effectiveDay: e.target.value })}
                 data-track-category={TRACK}
                 data-track-name='price-effective-from'
@@ -400,8 +399,9 @@ const PriceDialog = ({
             </Field>
           </div>
           <p className='text-xs text-muted-foreground'>
-            Leave the date empty to price every call, past and future. A date starts a new price
-            period and keeps earlier calls on the earlier price.
+            {form.original
+              ? 'To start a new price period on another date, add a price for this model.'
+              : 'Leave the date empty to price every call, past and future. A date starts a new price period and keeps earlier calls on the earlier price.'}
           </p>
           <div role='group' aria-label='Prompt-size slabs' className='flex flex-col gap-2'>
             <div className='flex items-center justify-between gap-2'>
@@ -579,14 +579,7 @@ const ControlPanelSettingsScreen = (): ReactElement => {
       })),
       effectiveDay:
         existing && !isEpoch(existing.effectiveFrom) ? toDay(new Date(existing.effectiveFrom)) : '',
-      ...(existing
-        ? {
-            original: {
-              day: isEpoch(existing.effectiveFrom) ? '' : toDay(new Date(existing.effectiveFrom)),
-              iso: existing.effectiveFrom,
-            },
-          }
-        : {}),
+      ...(existing ? { original: existing.effectiveFrom } : {}),
       locked: true,
     });
 

@@ -559,6 +559,8 @@ export const BreakdownCard = ({
 
   const clickable = groupBy === 'session' || groupBy === 'pr' || !!FILTER_FOR[groupBy];
   const onRowClick = (r: Row): void => {
+    // Rows still showing from the previous grouping would apply the wrong filter.
+    if (query.isPlaceholderData) return;
     if (groupBy === 'session') {
       if (r.key) {
         void navigate(

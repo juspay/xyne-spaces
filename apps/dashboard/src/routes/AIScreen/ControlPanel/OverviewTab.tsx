@@ -389,8 +389,9 @@ const DailyChart = ({ cp, isAdmin }: { cp: ControlPanel; isAdmin: boolean }): Re
   const stacked = split !== 'none';
   // Any grouping sums to the day's total; agent shares its cache with the agent split.
   const seriesBy = split === 'none' ? 'agent' : split;
-  const series = useUsageSeries(cp.params, seriesBy);
   const metric = view.metric;
+  // The total line is the same for either ranking, so it keeps one cache entry.
+  const series = useUsageSeries(cp.params, seriesBy, stacked ? metric : 'cost');
   const fmt = metric === 'cost' ? formatUsd : formatTokens;
   const splitOptions = SPLIT_OPTIONS.filter(o => !o.adminOnly || isAdmin);
   const splitLabel = splitOptions.find(o => o.value === split)?.label.toLowerCase() ?? split;

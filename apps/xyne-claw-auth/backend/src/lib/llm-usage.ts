@@ -171,19 +171,14 @@ export async function ingestLlmCalls(raw: unknown[]): Promise<{ inserted: number
 
 // ── Pricing ───────────────────────────────────────────────────────────────────
 
-const PRICE_TTL_MS = 60_000;
-let priceCache: { at: number; rows: LlmModelPrice[] } | null = null;
-
 const RATE_KEYS = ["inputPerMTok", "outputPerMTok", "cacheReadPerMTok", "cacheWritePerMTok"] as const;
 /** One entry of llm_model_prices.slabs; rates are decimal strings. */
 type PriceSlab = Record<(typeof RATE_KEYS)[number], string> & { overPromptTokens: number };
 const slabsOf = (p: LlmModelPrice): PriceSlab[] => (Array.isArray(p.slabs) ? (p.slabs as unknown as PriceSlab[]) : []);
 
-async function loadPrices(force = false): Promise<LlmModelPrice[]> {
-  if (!force && priceCache && Date.now() - priceCache.at < PRICE_TTL_MS) return priceCache.rows;
-  const rows = await prisma.llmModelPrice.findMany({ orderBy: { effectiveFrom: "desc" } });
-  priceCache = { at: Date.now(), rows };
-  return rows;
+/** Read per batch, never cached: a cache would keep other servers pricing new calls at a changed rate. */
+function loadPrices(): Promise<LlmModelPrice[]> {
+  return prisma.llmModelPrice.findMany({ orderBy: { effectiveFrom: "desc" } });
 }
 
 interface PricedCall {
@@ -333,7 +328,7 @@ export async function listPriceHistory(limit = 100) {
 
 /** Recomputes stored cost for every call a price row for this model can apply to. */
 async function repriceCalls(key: { provider: string; model: string; serviceTier: string }): Promise<number> {
-  const prices = await loadPrices(true);
+  const prices = await loadPrices();
   const where: Prisma.LlmCallUsageWhereInput = {
     provider: key.provider,
     serviceTier: key.serviceTier,
@@ -402,10 +397,11 @@ function tzOffsetMs(utcMs: number, tz: string): number {
 export function zonedDayStart(day: string, tz: string): Date {
   const [y, m, d] = day.split("-").map(Number) as [number, number, number];
   const guess = Date.UTC(y, m - 1, d);
-  let t = guess - tzOffsetMs(guess, tz);
-  const corrected = guess - tzOffsetMs(t, tz);
-  if (corrected !== t) t = corrected;
-  return new Date(t);
+  const first = guess - tzOffsetMs(guess, tz);
+  const second = guess - tzOffsetMs(first, tz);
+  // The estimates differ only across a DST change, where midnight itself may not exist.
+  const onDay = [Math.min(first, second), Math.max(first, second)].find((t) => localDay(new Date(t), tz) === day);
+  return new Date(onDay ?? second);
 }
 
 function localDay(at: Date, tz: string): string {
@@ -614,7 +610,7 @@ export async function fetchUsageSummary(q: UsageQuery): Promise<UsageSummary> {
 export interface UsageSeries {
   days: string[];
   groupBy: GroupBy;
-  /** Top keys by cost (then tokens), then "__other__" when more groups exist. */
+  /** Top keys by the charted metric, then "__other__" when more groups exist. */
   keys: Array<{ key: string; label: string }>;
   points: Array<{ day: string; key: string; costUsd: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; calls: number }>;
 }
@@ -622,9 +618,10 @@ export interface UsageSeries {
 export const OTHER_KEY = "__other__";
 
 type SeriesRow = UsageSeries["points"][number];
+export type SeriesMetric = "cost" | "tokens";
 
-/** Keeps the top `top` keys by cost (tokens break ties) and folds the rest into OTHER_KEY. */
-export function foldSeries(rows: SeriesRow[], top: number): { keys: string[]; points: SeriesRow[] } {
+/** Keeps the top `top` keys by the charted metric (the other breaks ties) and folds the rest into OTHER_KEY. */
+export function foldSeries(rows: SeriesRow[], top: number, metric: SeriesMetric = "cost"): { keys: string[]; points: SeriesRow[] } {
   const rank = new Map<string, { cost: number; tokens: number }>();
   for (const r of rows) {
     const t = rank.get(r.key) ?? { cost: 0, tokens: 0 };
@@ -632,7 +629,8 @@ export function foldSeries(rows: SeriesRow[], top: number): { keys: string[]; po
     t.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheWriteTokens;
     rank.set(r.key, t);
   }
-  const ordered = [...rank.entries()].sort((a, b) => b[1].cost - a[1].cost || b[1].tokens - a[1].tokens).map(([k]) => k);
+  const [first, second] = metric === "tokens" ? (["tokens", "cost"] as const) : (["cost", "tokens"] as const);
+  const ordered = [...rank.entries()].sort((a, b) => b[1][first] - a[1][first] || b[1][second] - a[1][second]).map(([k]) => k);
   const kept = new Set(ordered.slice(0, top));
   const folded = new Map<string, SeriesRow>();
   for (const r of rows) {
@@ -654,7 +652,7 @@ export function foldSeries(rows: SeriesRow[], top: number): { keys: string[]; po
   return { keys, points: [...folded.values()].sort((a, b) => a.day.localeCompare(b.day) || a.key.localeCompare(b.key)) };
 }
 
-export async function fetchUsageSeries(q: UsageQuery, groupBy: GroupBy, top: number): Promise<UsageSeries> {
+export async function fetchUsageSeries(q: UsageQuery, groupBy: GroupBy, top: number, metric: SeriesMetric = "cost"): Promise<UsageSeries> {
   const key = groupBy === "pr" ? GROUP_KEY.session : GROUP_KEY[groupBy];
   const rows = await runAnalytics<SeriesRow>(Prisma.sql`
     SELECT to_char((u."startedAt" AT TIME ZONE 'UTC') AT TIME ZONE ${q.tz}, 'YYYY-MM-DD') AS day,
@@ -667,7 +665,7 @@ export async function fetchUsageSeries(q: UsageQuery, groupBy: GroupBy, top: num
            COUNT(*)::int AS calls
     FROM llm_call_usage u WHERE ${filterSql(q)} AND ${windowSql(q)}
     GROUP BY 1, 2`);
-  const { keys, points } = foldSeries(rows, top);
+  const { keys, points } = foldSeries(rows, top, metric);
   const labels = await labelsFor(q, groupBy, keys.filter((k) => k !== OTHER_KEY));
   return {
     days: dayList(q.from, q.to),

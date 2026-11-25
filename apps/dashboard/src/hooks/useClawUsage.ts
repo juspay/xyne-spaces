@@ -49,11 +49,13 @@ export const useUsageSummary = (p: UsageFilterParams): UseQueryResult<UsageSumma
 export const useUsageSeries = (
   p: UsageFilterParams,
   groupBy: GroupBy,
+  /** Picks which keys make the top five when the chart is split. */
+  metric: 'cost' | 'tokens',
 ): UseQueryResult<UsageSeries, Error> => {
   const { user } = useAuth();
   return useQuery({
-    queryKey: [CLAW_USAGE_KEY, 'series', p, groupBy, user?.id],
-    queryFn: () => fetchUsageSeries(user!.id, p, groupBy),
+    queryKey: [CLAW_USAGE_KEY, 'series', p, groupBy, metric, user?.id],
+    queryFn: () => fetchUsageSeries(user!.id, p, groupBy, metric),
     enabled: !!user?.id,
     ...shared,
   });

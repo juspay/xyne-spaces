@@ -86,6 +86,10 @@ describe("ranges", () => {
     expect(zonedDayStart("2026-11-19", "Asia/Kolkata").toISOString()).toBe("2026-11-18T18:30:00.000Z");
     expect(zonedDayStart("2026-03-08", "America/New_York").toISOString()).toBe("2026-03-08T05:00:00.000Z");
     expect(zonedDayStart("2026-03-09", "America/New_York").toISOString()).toBe("2026-03-09T04:00:00.000Z");
+    // DST starts at midnight here, so the day begins at 01:00 local.
+    expect(zonedDayStart("2026-09-06", "America/Santiago").toISOString()).toBe("2026-09-06T04:00:00.000Z");
+    expect(zonedDayStart("2026-03-08", "America/Havana").toISOString()).toBe("2026-03-08T05:00:00.000Z");
+    expect(zonedDayStart("2026-04-05", "America/Santiago").toISOString()).toBe("2026-04-05T04:00:00.000Z");
   });
   it("defaults to the last 30 days in the viewer's zone and validates bounds", () => {
     expect(parseRange({}, "Asia/Kolkata", new Date("2026-11-19T20:00:00Z"))).toEqual({ from: "2026-10-22", to: "2026-11-20" });
@@ -101,6 +105,10 @@ describe("foldSeries", () => {
     const { keys, points } = foldSeries([p("d1", "a", 5), p("d1", "b", 1), p("d1", "c", 2), p("d2", "b", 1, 10), p("d2", "c", 0.5)], 1);
     expect(keys).toEqual(["a", OTHER_KEY]);
     expect(points).toEqual([{ ...p("d1", OTHER_KEY, 3), calls: 2 }, p("d1", "a", 5), { ...p("d2", OTHER_KEY, 1.5, 10), calls: 2 }]);
+  });
+
+  it("ranks by tokens on the tokens chart, so a free model with heavy use is kept", () => {
+    expect(foldSeries([p("d1", "paid", 5, 10), p("d1", "free", 0, 9000)], 1, "tokens").keys).toEqual(["free", OTHER_KEY]);
   });
 });
 

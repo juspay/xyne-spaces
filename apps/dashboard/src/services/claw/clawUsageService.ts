@@ -218,7 +218,8 @@ export interface PriceChange {
 export interface UsagePrices {
   canEdit: boolean;
   prices: ModelPrice[];
-  unpriced: UnpricedModel[];
+  /** null when the viewer isn't an admin. */
+  unpriced: UnpricedModel[] | null;
   /** null when the viewer isn't an admin. */
   history: PriceChange[] | null;
 }
@@ -259,6 +260,7 @@ export const PURPOSE_LABELS: Record<string, string> = {
   probe: 'Provider checks',
   prompt_tools: 'Prompt and tool suggestions',
   eval: 'Evals',
+  xor: 'Decision checks',
 };
 
 export const BILLING_LABELS: Record<string, string> = {
@@ -308,8 +310,9 @@ export const fetchUsageSeries = (
   userId: string,
   p: UsageFilterParams,
   groupBy: GroupBy,
+  metric: 'cost' | 'tokens',
   top = 5,
-): Promise<UsageSeries> => get(userId, `/series${query(p, { groupBy, top })}`);
+): Promise<UsageSeries> => get(userId, `/series${query(p, { groupBy, metric, top })}`);
 
 export interface BreakdownOptions {
   groupBy: GroupBy;
