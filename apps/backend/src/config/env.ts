@@ -591,6 +591,13 @@ const envSchema = Joi.object({
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Ingress transit proxy for the Xyne Apps API. true: bots reach /api/apps only through the
+  // proxy, so chat/postMessage and chat/updateMessage always go through their encryption
+  // contract and a bot that calls the backend directly is refused (TRANSIT_KEY_REQUIRED).
+  // false (default, no proxy deployed): those routes take plaintext as before, and a request
+  // that came through the proxy is refused (TRANSIT_PROXY_NOT_ENABLED) rather than stored as
+  // transit ciphertext the backend cannot use.
+  TRANSIT_PROXY_INGRESS_ENABLED: Joi.boolean().default(false),
   // Egress transit proxy for app event webhooks. Set: external deliveries are sealed by the
   // encryption service and posted by the proxy, never by the backend. Empty = direct (default).
   TRANSIT_PROXY_EGRESS_URL: Joi.string().uri().allow('').default(''),
@@ -1510,6 +1517,7 @@ export const config = {
   internal: {
     encryptionS2sKey: envVars.ENC_S2S_KEY as string,
     encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
+    transitProxyIngressEnabled: envVars.TRANSIT_PROXY_INGRESS_ENABLED as boolean,
     transitProxyEgressUrl: (envVars.TRANSIT_PROXY_EGRESS_URL as string).trim().replace(/\/+$/, ''),
     transitProxyEgressKeyVersion: envVars.TRANSIT_PROXY_EGRESS_KEY_VERSION as number,
     transitProxyEgressTimeoutMs: envVars.TRANSIT_PROXY_EGRESS_TIMEOUT_MS as number,
