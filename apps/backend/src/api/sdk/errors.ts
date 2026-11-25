@@ -28,6 +28,9 @@ export const ERROR_CODES = [
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
+/** MutationEncryptionError codes that are the server's fault, not the request's. */
+const SERVER_ENCRYPTION_FAULTS = new Set(['ENC_NOT_PREPARED', 'ENC_DERIVED_MISSING', 'ENC_DERIVED_INVALID']);
+
 export interface ErrorDefinition {
   readonly status: number;
   /** Safe to replay the identical request? */
@@ -174,12 +177,17 @@ export function toSdkApiError(err: unknown): SdkApiError {
 
   // Transit-encryption verdicts on a client-encrypted mutation. The service's code is the
   // `reason`, so a client can tell a stale manifest (refetch it and resend) from a missing
-  // transit key (register again) without parsing the message.
+  // transit key (register again) without parsing the message. Faults on the server's side
+  // (a mutation left untransformed, missing or invalid derived facts, a 5xx from the service)
+  // are `internal`, not the client's to fix.
   if (err instanceof MutationEncryptionError) {
-    return new SdkApiError(err.code === 'ENC_NOT_CONFIGURED' ? 'unavailable' : 'validation_failed', err.message, {
-      reason: err.code,
-      cause: err,
-    });
+    const code: ErrorCode =
+      err.code === 'ENC_NOT_CONFIGURED'
+        ? 'unavailable'
+        : SERVER_ENCRYPTION_FAULTS.has(err.code) || (err.status ?? 0) >= 500
+          ? 'internal'
+          : 'validation_failed';
+    return new SdkApiError(code, err.message, { reason: err.code, cause: err });
   }
 
   // @rocicorp/zero's ApplicationError carries a structured `details` payload.
