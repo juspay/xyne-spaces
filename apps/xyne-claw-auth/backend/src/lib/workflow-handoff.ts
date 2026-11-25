@@ -49,19 +49,17 @@ export async function downloadRootAttachments(
   for (const ref of refs) {
     const id = encodeURIComponent(ref.attachmentId);
     let buffer: Buffer | null = null;
-    for (const path of [`/api/apps/attachments/${id}/download`, `/api/attachments/${id}/download`]) {
-      try {
-        const res = await fetch(`${CONFIG.spacesInternalUrl}${path}`, {
-          headers: { Authorization: `Bearer ${opts.appToken}` },
-          signal: AbortSignal.timeout(CONFIG.attachmentDownloadTimeoutMs),
-        });
-        if (res.ok) {
-          buffer = Buffer.from(await res.arrayBuffer());
-          break;
-        }
-      } catch (err) {
-        log.warn(`[handoff] download ${ref.attachmentId} via ${path} failed: ${errMsg(err)}`);
-      }
+    // The app token works only on the app route; the user route reads only a user's session.
+    const path = `/api/apps/files/download/${id}`;
+    try {
+      const res = await fetch(`${CONFIG.spacesInternalUrl}${path}`, {
+        headers: { Authorization: `Bearer ${opts.appToken}` },
+        signal: AbortSignal.timeout(CONFIG.attachmentDownloadTimeoutMs),
+      });
+      if (res.ok) buffer = Buffer.from(await res.arrayBuffer());
+      else log.warn(`[handoff] download ${ref.attachmentId} via ${path} failed: HTTP ${res.status}`);
+    } catch (err) {
+      log.warn(`[handoff] download ${ref.attachmentId} via ${path} failed: ${errMsg(err)}`);
     }
     if (!buffer) {
       failed.push(ref.fileName);

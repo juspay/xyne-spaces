@@ -44,15 +44,15 @@ describe("downloadRootAttachments", () => {
       attachments: [{ fileName: pdf.fileName, mimeType: pdf.mimeType, data: Buffer.from("%PDF").toString("base64") }],
       failed: [],
     });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://spaces/api/apps/attachments/att-pdf/download");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://spaces/api/apps/files/download/att-pdf");
     expect((fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> }).headers.Authorization).toBe("Bearer app-tok");
   });
 
-  it("falls back to the user route, parks bytes in run storage when enabled, and reports files it cannot fetch", async () => {
+  it("uses only the app route, parks bytes in run storage when enabled, and reports files it cannot fetch", async () => {
     runAttachmentRefsEnabled.mockReturnValue(true);
-    fetchMock.mockResolvedValueOnce(miss).mockResolvedValueOnce(ok("%PDF")).mockResolvedValueOnce(miss).mockRejectedValueOnce(new Error("timeout"));
+    fetchMock.mockResolvedValueOnce(ok("%PDF")).mockResolvedValueOnce(miss);
     const out = await downloadRootAttachments([pdf, { attachmentId: "att-2", fileName: "spec.docx", mimeType: "application/msword" }], { appToken: "t", scopeId: "conv-1" });
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://spaces/api/attachments/att-pdf/download");
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(["http://spaces/api/apps/files/download/att-pdf", "http://spaces/api/apps/files/download/att-2"]);
     expect(out.attachments).toEqual([{ fileName: pdf.fileName, mimeType: pdf.mimeType, gcsRef: "runs/att-pdf", sizeBytes: 4 }]);
     expect(out.failed).toEqual(["spec.docx"]);
   });

@@ -89,6 +89,106 @@ function userTokenCookie(token: string): string | null {
   return typeof workspaceId === "string" && workspaceId ? `xyne_ws_${workspaceId}_token=${token}` : null;
 }
 
+/** An agent's app token (it names an `appId`), not a user's session JWT. */
+export function isAppToken(token: string): boolean {
+  const appId = readTokenClaims(token).appId;
+  return typeof appId === "string" && appId.length > 0;
+}
+
+/**
+ * Routes an app token can't use, and the app-token routes that do the same thing
+ * (same Spaces handler or controller): attachment download, desk email reply, ticket
+ * by id (`/api/tickets/claw` mounts the same router as `/api/tickets`).
+ */
+const APP_ROUTE_REWRITES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^\/api\/attachments\/([^/?]+)\/download(\?.*)?$/, "/api/apps/files/download/$1$2"],
+  [/^\/api\/email\/([^/?]+)\/reply$/, "/api/apps/email/$1/reply"],
+  [/^\/api\/tickets\/(?!claw(?:[/?]|$))([^/?]+)(\?.*)?$/, "/api/tickets/claw/$1$2"],
+];
+
+/**
+ * Spaces mounts that accept an app token: the `/api/apps/*` routes (authenticateApp)
+ * and the dual-auth `/claw` mounts (authenticateUserOrApp). Everything else reads only
+ * the user's session cookie.
+ */
+const APP_ROUTE_MOUNTS = [
+  "/api/apps",
+  "/api/query/claw",
+  "/api/tickets/claw",
+  "/api/conversations/claw",
+  "/api/calls/claw",
+  "/api/canvas/claw",
+  "/api/vespaSearch/claw",
+  "/api/dashboard/claw",
+  "/api/desk-metrics/claw",
+  "/api/memory/claw",
+];
+
+/** A route that reads only a user's session, called with an app token. */
+export class AppTokenRouteError extends SpacesApiError {
+  constructor(path: string) {
+    super(403, `Spaces route ${path.split("?")[0]} accepts only a user's session; it is not available to an agent running as an app.`);
+    this.name = "AppTokenRouteError";
+  }
+}
+
+/**
+ * The path to call with an app token: rewritten to its app-token route when there is
+ * one, refused when the route reads only a user's session (rather than letting Spaces
+ * answer TOKEN_MISSING).
+ */
+export function appTokenPath(path: string): string {
+  let p = path;
+  for (const [from, to] of APP_ROUTE_REWRITES) {
+    if (from.test(p)) {
+      p = p.replace(from, to);
+      break;
+    }
+  }
+  const route = p.split("?")[0] ?? p;
+  if (!APP_ROUTE_MOUNTS.some((m) => route === m || route.startsWith(`${m}/`))) throw new AppTokenRouteError(path);
+  return p;
+}
+
+/**
+ * Credentials for one Spaces request. An app token goes as `Authorization: Bearer`
+ * (Spaces reads app tokens only there) to a route that accepts it; a user token goes in
+ * the workspace cookie Spaces reads user sessions from. Internal routes authenticate by
+ * the S2S key.
+ */
+function spacesRequestAuth(
+  path: string,
+  token: string,
+  sessionId: string,
+  workspaceId: string,
+  s2sKey: string | undefined,
+): { path: string; headers: Record<string, string> } {
+  if (token && isAppToken(token) && !s2sKey) {
+    return {
+      path: appTokenPath(path),
+      headers: { Authorization: `Bearer ${token}`, ...(workspaceId ? { "x-workspace-id": workspaceId } : {}) },
+    };
+  }
+  const cookieParts: string[] = [];
+  if (sessionId) {
+    cookieParts.push(`xyne_session=${sessionId}`);
+    cookieParts.push(`user_session_id=${sessionId}`);
+  }
+  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  const tokenCookie = token ? userTokenCookie(token) : null;
+  if (tokenCookie) cookieParts.push(tokenCookie);
+  const cookieHeader = cookieParts.join("; ");
+  return {
+    path,
+    headers: {
+      ...(sessionId ? { "x-session-id": sessionId } : {}),
+      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
+      ...(s2sKey ? { "x-s2s-key": s2sKey } : {}),
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    },
+  };
+}
+
 const DEFAULT_TOKEN = process.env["XYNE_SPACES_TOKEN"] ?? "";
 
 export const CURRENT_USER_ID = extractUserIdFromToken(DEFAULT_TOKEN);
@@ -107,23 +207,11 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
     throw new Error("Spaces auth token is missing for this request.");
   }
 
-  // Spaces reads the user JWT only from the `xyne_ws_<workspaceId>_token` cookie.
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const tokenCookie = token ? userTokenCookie(token) : null;
-  if (tokenCookie) cookieParts.push(tokenCookie);
-  const cookieHeader = cookieParts.join("; ");
-
+  const request = spacesRequestAuth(path, token, sessionId, workspaceId, auth?.s2sKey);
+  const appToken = request.headers["Authorization"] !== undefined;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(sessionId ? { "x-session-id": sessionId } : {}),
-    ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-    ...(auth?.s2sKey ? { "x-s2s-key": auth.s2sKey } : {}),
-    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    ...request.headers,
     ...(init?.headers as Record<string, string> | undefined),
   };
 
@@ -152,7 +240,7 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
     }
   };
 
-  let res = await attempt(path);
+  let res = await attempt(request.path);
 
   // Resilience: the `/claw` endpoints are newer and may not exist (or be
   // method-mismatched) in every environment / deploy. Fall back to the original
@@ -169,10 +257,12 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
   // (validation/auth) the original would return identically. Strips the `/claw`
   // segment wherever it sits, e.g. /api/query/claw → /api/query,
   // /api/memory/claw/search → /api/memory/search.
-  const clawless = path.replace(/\/claw(?=\/|$)/, "");
+  // Not for an app token: the route without `/claw` reads only a user's session.
+  const clawless = request.path.replace(/\/claw(?=\/|$)/, "");
   if (
     !res.ok &&
-    clawless !== path &&
+    !appToken &&
+    clawless !== request.path &&
     (res.status === null ||
       res.status === 404 ||
       res.status === 405 ||
@@ -209,23 +299,10 @@ export async function spacesFetchBuffer(
   if (!baseUrl) throw new Error("Spaces base URL not configured");
   if (!token) throw new Error("Spaces auth token missing");
 
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const tokenCookie = token ? userTokenCookie(token) : null;
-  if (tokenCookie) cookieParts.push(tokenCookie);
-  const cookieHeader = cookieParts.join("; ");
-
-  const url = new URL(path, `${baseUrl}/`).toString();
+  const request = spacesRequestAuth(path, token, sessionId, workspaceId, auth?.s2sKey);
+  const url = new URL(request.path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
-    headers: {
-      ...(sessionId ? { "x-session-id": sessionId } : {}),
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-    },
+    headers: request.headers,
     signal: AbortSignal.timeout(30_000),
   });
 
@@ -246,23 +323,10 @@ export async function spacesFetchText(path: string, auth?: SpacesAuthContext): P
   if (!baseUrl) throw new Error("Spaces base URL not configured");
   if (!token) throw new Error("Spaces auth token missing");
 
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const tokenCookie = token ? userTokenCookie(token) : null;
-  if (tokenCookie) cookieParts.push(tokenCookie);
-  const cookieHeader = cookieParts.join("; ");
-
-  const url = new URL(path, `${baseUrl}/`).toString();
+  const request = spacesRequestAuth(path, token, sessionId, workspaceId, auth?.s2sKey);
+  const url = new URL(request.path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
-    headers: {
-      ...(sessionId ? { "x-session-id": sessionId } : {}),
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-    },
+    headers: request.headers,
     signal: AbortSignal.timeout(30_000),
   });
 
