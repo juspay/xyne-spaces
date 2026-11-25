@@ -261,7 +261,11 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   async update(id: string, data: UpdateMessageInput): Promise<Message> {
     if (data.content) {
       await this.validateString(data.content, 'content');
-      this.validateContentLength(data.content); // Max 10k visible characters
+      // As on create: ciphertext has no visible length to measure (its own length is not the
+      // text's), so it is not checked here.
+      if (!isEncryptedField(data.content)) {
+        this.validateContentLength(data.content); // Max 10k visible characters
+      }
     }
 
     if (data.msgType) {

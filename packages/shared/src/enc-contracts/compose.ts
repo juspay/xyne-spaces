@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { UnreadableString, isUnreadableSchema, reveal, unreadableString } from './unreadable-string.js';
 import { buildForwardedMessageContent, createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
+import { SlackBlockKitParser } from '../slack/blockKitParser.js';
+import { applySlackMentions, type SlackMentionTargets } from '../slack/mentions.js';
+import type { SlackAttachment, SlackBlock } from '../slack/blockKitTypes.js';
 
 /**
  * A value the server stores encrypted but cannot build itself, because it is made from values it
@@ -100,10 +103,61 @@ export const forwardedMessageEditTemplate = defineComposeTemplate({
   },
 });
 
+const slackUserTargetSchema = z.union([
+  z.object({ id: z.string(), name: z.string(), email: z.string().optional(), picture: z.string().optional() }),
+  z.object({ unknownName: z.string() }),
+]);
+const slackGroupTargetSchema = z.union([
+  z.object({ id: z.string(), name: z.string(), alias: z.string().optional(), description: z.string().optional() }),
+  z.object({ unknownName: z.string() }),
+]);
+const slackChannelTargetSchema = z.union([
+  z.object({ id: z.string(), name: z.string(), isPrivate: z.boolean() }),
+  z.object({ unknownName: z.string() }),
+]);
+
+/** What the Slack ids a message mentions refer to, as the backend looked them up (SlackMentionTargets). */
+export const slackMentionTargetsSchema = z.object({
+  users: z.record(z.string(), slackUserTargetSchema),
+  groups: z.record(z.string(), slackGroupTargetSchema),
+  channels: z.record(z.string(), slackChannelTargetSchema),
+});
+
+/**
+ * A Xyne Apps message's content (HTML) from Slack-format input: `text` (mrkdwn), `attachments`
+ * and `blocks` (Block Kit), with Slack mentions turned into Xyne mention spans first, then
+ * Block Kit converted to HTML (SlackBlockKitParser). What the chat controller and the
+ * Slack-compatible API build when they parse a bot's message; here so the encryption service
+ * can build it from `text` it holds encrypted. `mentions` is what the backend looked up for the
+ * ids the `slackMention*` facts found. `attachments` and `blocks` are plain for now (the ingress
+ * transit proxy encrypts top-level strings only).
+ */
+export const slackMessageContentTemplate = defineComposeTemplate({
+  name: 'slackMessageContent',
+  inputs: z.object({
+    text: unreadableString().nullable(),
+    attachments: z.array(z.any()).nullable(),
+    blocks: z.array(z.any()).nullable(),
+    mentions: slackMentionTargetsSchema,
+  }),
+  build: inputs => {
+    const mentions = inputs.mentions as SlackMentionTargets;
+    const text = inputs.text ? applySlackMentions(inputs.text, mentions, false) : undefined;
+    const attachments = inputs.attachments?.length
+      ? (JSON.parse(applySlackMentions(JSON.stringify(inputs.attachments), mentions, true)) as SlackAttachment[])
+      : undefined;
+    const blocks = inputs.blocks?.length
+      ? (JSON.parse(applySlackMentions(JSON.stringify(inputs.blocks), mentions, true)) as SlackBlock[])
+      : undefined;
+    return new SlackBlockKitParser().parse({ text, attachments, blocks });
+  },
+});
+
 /** Every compose template, by name: the names the encryption service and the transformer accept. */
 export const COMPOSE_TEMPLATES = {
   forwardedMessage: forwardedMessageTemplate,
   forwardedMessageEdit: forwardedMessageEditTemplate,
+  slackMessageContent: slackMessageContentTemplate,
 } as const;
 
 export type ComposeTemplateName = keyof typeof COMPOSE_TEMPLATES;

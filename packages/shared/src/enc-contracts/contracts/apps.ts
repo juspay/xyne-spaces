@@ -3,6 +3,19 @@ import { defineRequestContract, type RequestOf } from '../define.js';
 import { defineRoute } from '../api-route.js';
 import { MESSAGE_DELIVERY } from '../../validation/flowSchema.js';
 import { conversationsSendClient } from './conversations.js';
+import { derive } from '../extractors.js';
+
+/**
+ * The facts asked of a bot's Slack-format `text` (mrkdwn, `<@U…>` mentions): the Slack ids it
+ * mentions. The backend looks them up and the encryption service builds the message HTML from
+ * the encrypted text with them (compose template slackMessageContent), so the backend never
+ * parses, or reads, the text.
+ */
+const slackTextFacts = {
+  slackMentionUserIds: derive.slackMentionUserIds,
+  slackMentionGroupIds: derive.slackMentionGroupIds,
+  slackMentionChannels: derive.slackMentionChannels,
+} as const;
 
 /**
  * Xyne Apps `POST /apps/chat/postMessage`, sent by bots through the transit proxy, which
@@ -11,11 +24,18 @@ import { conversationsSendClient } from './conversations.js';
  * content (mentions, `@channel` / `@here`, link preview, PR links, Meet links, bot command):
  * the same facts, under the same names, as the dashboard's `conversations.send`, because both
  * end in the same message insert job (`derived.fields.content`).
- * `text` stays plaintext for now: the handler resolves Slack mentions and parses BlockKit in
- * it, which cannot run on ciphertext until that processing moves into the extractor.
+ * `text` is encrypted too: its Slack mentions are found by the encryption service
+ * (`slackMention*` facts), looked up by the backend, and the HTML is built from the encrypted
+ * text by the compose template slackMessageContent. `flow` and `attachments` stay plaintext
+ * (the ingress proxy encrypts top-level strings only).
  */
 export const appsChatPostMessageClient = defineRequestContract({
-  sourceToDerived: { markdownText: conversationsSendClient.sourceToDerived.content },
+  sourceToDerived: {
+    markdownText: conversationsSendClient.sourceToDerived.content,
+    // `text` is either Slack format (built into HTML by compose; the result's facts are derived
+    // then) or, with contentFormat markdown, the content itself: hence both sets of facts.
+    text: { ...conversationsSendClient.sourceToDerived.content, ...slackTextFacts },
+  },
   schema: z.object({
     channelId: z.string().optional(),
     channelName: z.string().optional(),
@@ -32,10 +52,10 @@ export type AppsChatPostMessageRequest = RequestOf<typeof appsChatPostMessageCli
 /**
  * Xyne Apps `POST /apps/chat/updateMessage`: same treatment as postMessage. The ingress
  * proxy encrypts `markdownText`; the handler stores the workspace-DEK ciphertext as-is.
- * `text` and `flowJSON` stay plaintext (mentions, BlockKit and flow HTML are built from them).
+ * `text` is encrypted and built into HTML the same way; `flowJSON` stays plaintext.
  */
 export const appsChatUpdateMessageClient = defineRequestContract({
-  sourceToDerived: { markdownText: {} },
+  sourceToDerived: { markdownText: {}, text: slackTextFacts },
   schema: z.object({
     messageId: z.string(),
     channelId: z.string().optional(),
@@ -55,11 +75,11 @@ export type AppsChatUpdateMessageRequest = RequestOf<typeof appsChatUpdateMessag
  * postMessage, so the backend and Redis never hold it in the clear. The message is never
  * stored: the backend relays the ciphertext to the recipient's sockets, re-encrypting it per
  * socket for that tab's transit key (websocketService.handleUserEvent), and the browser
- * decrypts it (useEphemeralMessages). Nothing is derived (no insert job reads facts). `text`
- * and `flow` stay plaintext, as for postMessage.
+ * decrypts it (useEphemeralMessages). Nothing is derived from markdownText (no insert job reads
+ * facts); `text` is encrypted and built into HTML as for postMessage. `flow` stays plaintext.
  */
 export const appsChatPostEphemeralClient = defineRequestContract({
-  sourceToDerived: { markdownText: {} },
+  sourceToDerived: { markdownText: {}, text: slackTextFacts },
   schema: z.object({
     channelId: z.string().optional(),
     channelName: z.string().optional(),

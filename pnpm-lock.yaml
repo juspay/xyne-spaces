@@ -2084,6 +2084,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@clearfeed-ai/slack-to-html':
+        specifier: 1.2.7
+        version: 1.2.7
       '@rocicorp/zero':
         specifier: 1.9.0
         version: 1.9.0(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))

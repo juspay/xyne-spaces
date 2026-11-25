@@ -35,6 +35,7 @@ api.routes(API.apps.chat, (serve) => ({
         resolvedChannelId: access.channel.dm ? access.channel.channelId : undefined,
         appId: app?.appId,
         markdownFacts: derived?.fields.markdownText,
+        textFacts: derived?.fields.text,
         isPostAsUser: false,
       }),
   }),
@@ -45,20 +46,21 @@ api.routes(API.apps.chat, (serve) => ({
     access: { permission: appPermission('chat:write'), channel: botChannel({ allowDm: false }) },
     encryption: encryptUnderBotWorkspace,
     successStatus: 201,
-    handle: ({ body, user, app }) =>
+    handle: ({ body, derived, user, app }) =>
       chatController.sendEphemeral({
         body,
         sender: user ? { id: user.id, name: user.name } : undefined,
         workspaceId: user?.workspaceId,
         appId: app?.appId,
+        textFacts: derived?.fields.text,
       }),
   }),
   updateMessage: serve('updateMessage', {
     auth: 'app',
     access: { permission: appPermission('chat:write'), channel: botChannel({ allowDm: false }) },
     encryption: encryptUnderBotWorkspace,
-    handle: ({ body, user, app }) =>
-      chatController.editMessage({ body, workspaceId: user?.workspaceId, appId: app?.appId }),
+    handle: ({ body, derived, user, app }) =>
+      chatController.editMessage({ body, workspaceId: user?.workspaceId, appId: app?.appId, textFacts: derived?.fields.text }),
   }),
   // Ids only: no encryption contract. Only the app's own BOT messages (removeMessage).
   deleteMessage: serve('deleteMessage', {

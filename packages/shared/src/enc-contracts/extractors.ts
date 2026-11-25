@@ -36,6 +36,9 @@ export const EXTRACTORS = [
   'forwardedOptionalTextLength',
   'forwardedHasOptionalText',
   'rawLength',
+  'slackMentionUserIds',
+  'slackMentionGroupIds',
+  'slackMentionChannels',
 ] as const;
 export type ExtractorName = (typeof EXTRACTORS)[number];
 
@@ -121,6 +124,16 @@ export interface ExtractorOutput {
   forwardedOptionalTextLength: number;
   /** Forwarded message: it carries optional text. */
   forwardedHasOptionalText: boolean;
+  /**
+   * Slack-format text (bots on the Slack-compatible or native Xyne Apps API): the Slack user ids
+   * it mentions, `<@U…>`, each once (findSlackMentionIds). The backend looks them up and the
+   * compose template slackMessageContent turns them into Xyne mention spans.
+   */
+  slackMentionUserIds: string[];
+  /** Slack-format text: the Slack user group ids it mentions, `<!subteam^S…>`, each once. */
+  slackMentionGroupIds: string[];
+  /** Slack-format text: the channels it mentions, `<#C…|name>`, each once, with the link's name if any. */
+  slackMentionChannels: { id: string; name?: string }[];
 }
 
 /**
@@ -190,6 +203,9 @@ export const fieldFactsSchema: z.ZodType<FieldFacts> = z.object({
   forwardedOptionalTextGroupIds: z.array(z.string()).optional(),
   forwardedOptionalTextLength: z.number().optional(),
   forwardedHasOptionalText: z.boolean().optional(),
+  slackMentionUserIds: z.array(z.string()).optional(),
+  slackMentionGroupIds: z.array(z.string()).optional(),
+  slackMentionChannels: z.array(z.object({ id: z.string(), name: z.string().optional() })).optional(),
 });
 
 export const derivedFactsSchema: z.ZodType<DerivedFacts> = z.object({

@@ -1,5 +1,16 @@
 import { UserRepository } from '../../../../database/repositories/users';
-import { AuthProvider, ChannelScopeType } from '@xyne/shared';
+import {
+  AuthProvider,
+  ChannelScopeType,
+  NO_SLACK_MENTION_TARGETS,
+  applySlackMentions,
+  findSlackMentionIds,
+  type SlackChannelTarget,
+  type SlackGroupTarget,
+  type SlackMentionIds,
+  type SlackMentionTargets,
+  type SlackUserTarget,
+} from '@xyne/shared';
 import { UserGroupRepository } from '../../../../database/repositories/userGroups';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository';
 import { DatabaseClient } from '../../../../database/client';
@@ -32,39 +43,8 @@ function buildTokenFallbackList(primaryToken: string): string[] {
   return tokens;
 }
 
-function escapeHtml(text: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  };
-  return text.replace(/[&<>"']/g, (char) => map[char]);
-}
-
-function buildMentionAttrs(
-  id: string,
-  name: string,
-  isGroup: boolean = false,
-  quote: string = '"',
-  alias?: string,
-  description?: string,
-  email?: string,
-  picture?: string
-): string[] {
-  const attrs = [
-    `data-mention`,
-    `data-mention-type=${quote}${isGroup ? 'group' : 'user'}${quote}`,
-    `data-${isGroup ? 'group' : 'user'}-id=${quote}${escapeHtml(id)}${quote}`,
-    `data-${isGroup ? 'group-' : 'user'}name=${quote}${escapeHtml(name)}${quote}`,
-  ];
-  if (email) attrs.push(`data-email=${quote}${escapeHtml(email)}${quote}`);
-  if (picture) attrs.push(`data-picture=${quote}${escapeHtml(picture)}${quote}`);
-  if (description) attrs.push(`data-description=${quote}${escapeHtml(description)}${quote}`);
-  if (alias) attrs.push(`data-group-alias=${quote}${escapeHtml(alias)}${quote}`);
-  return attrs;
-}
+// Moved to @xyne/shared (src/slack/mentions.ts); re-exported for existing importers.
+export { extractAllSlackIds, extractAllSlackChannelIds } from '@xyne/shared';
 
 export interface SlackUserInfo {
   id: string;
@@ -89,27 +69,6 @@ export interface SlackGroupInfo {
 // Slack-native IDs are uppercase (e.g. U099FJD9QC8); xyne DB CUIDs are lowercase (e.g. cmp4d91bd005uvldnmch36fll)
 function isSlackNativeId(id: string): boolean {
   return /^[A-Z][A-Z0-9]+$/.test(id);
-}
-
-export function extractAllSlackIds(text: string, isUser: boolean): string[] {
-  const regex = isUser ? /<@([^>|]+)(?:\|[^>]*)?>/g : /<!subteam\^([^>|]+)(?:\|[^>]*)?>/g;
-  const matches = text.matchAll(new RegExp(regex, 'g'));
-  const ids = Array.from(matches, (match) => match[1]);
-  return [...new Set(ids)];
-}
-
-export function extractAllSlackChannelIds(text: string): { id: string; name?: string }[] {
-  const matches = text.matchAll(/<#([^>|]+)(?:\|([^>]*))?>/g);
-  const seen = new Set<string>();
-  const results: { id: string; name?: string }[] = [];
-  for (const match of matches) {
-    const id = match[1];
-    if (!seen.has(id)) {
-      seen.add(id);
-      results.push({ id, name: match[2] || undefined });
-    }
-  }
-  return results;
 }
 
 /**
@@ -596,90 +555,58 @@ export async function resolveSlackIds(
 }
 
 
-function resolveSpecialMentions(text: string, isStringified: boolean = false): string {
-  const broadcastRegex = /<!channel>|<!here>|<!everyone>|@channel|@here|@everyone/g;
-  const quote = isStringified ? "'" : '"';
-  text = text.replace(broadcastRegex, (match: string) => {
-    const display = match.startsWith('<!') ? `@${match.slice(2, -1)}` : match;
-    const mentionType = display.slice(1);
-    return `<span class=${quote}chat-input-special-mention${quote} data-mention-type=${quote}${mentionType}${quote}>${display}</span>`;
-  });
-
-  return text;
-}
-
-function buildChannelMentionSpan(
-  channel: { id: string; name: string; visibility?: string | null; scopeType?: string | null },
-  quote: string,
-): string {
-  const isPrivate = channel.visibility === 'PRIVATE' || channel.scopeType === ChannelScopeType.DM || channel.scopeType === ChannelScopeType.GROUP_DM;
-  const channelName = channel.name || channel.id;
-  return `<span data-channel-mention=${quote}${quote} data-channel-id=${quote}${escapeHtml(channel.id)}${quote} data-channel-name=${quote}${escapeHtml(channelName)}${quote} data-is-private=${quote}${String(isPrivate)}${quote} class=${quote}chat-input-channel-mention${quote}>#${escapeHtml(channelName)}</span>`;
-}
-
-function replaceSlackUserMention(currentText: string, slackId: string, newValue: string): string {
-  return currentText.replace(new RegExp(`<@${escapeRegExp(slackId)}(?:\\|[^>]*)?>`, 'g'), newValue);
-}
-
-function replaceSlackGroupMention(currentText: string, slackId: string, newValue: string): string {
-  return currentText.replace(new RegExp(`<!subteam\\^${escapeRegExp(slackId)}(?:\\|[^>]*)?>`, 'g'), newValue);
-}
-
-function replaceSlackChannelMention(currentText: string, channelId: string, newValue: string): string {
-  return currentText.replace(new RegExp(`<#${escapeRegExp(channelId)}(?:\\|[^>]*)?>`, 'g'), newValue);
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
- * Resolves each `<#C…>` channel mention to its replacement HTML, concurrently.
- * The DB read (and Slack `conversations.info` fallback) for each channel is
- * independent, so they run in parallel; the caller applies the replacements after.
+ * What each `<#C…>` channel mention refers to, concurrently: the Xyne channel, else the name
+ * Slack put in the link, else the channel's Slack name, else its raw id. The caller builds the
+ * HTML (applySlackMentions in @xyne/shared).
  */
-async function resolveChannelReplacements(
+async function resolveChannelTargets(
   channelIds: { id: string; name?: string }[],
   channelRepo: ChannelRepository,
   botOauthToken: string,
-  quote: string,
-): Promise<{ channelId: string; html: string }[]> {
-  return Promise.all(
-    channelIds.map(async ({ id: channelId, name: slackChannelName }) => {
+): Promise<Record<string, SlackChannelTarget>> {
+  const entries = await Promise.all(
+    channelIds.map(async ({ id: channelId, name: slackChannelName }): Promise<[string, SlackChannelTarget]> => {
       const channel = await channelRepo.findById(channelId);
       if (channel) {
-        return { channelId, html: buildChannelMentionSpan(channel, quote) };
+        const isPrivate =
+          channel.visibility === 'PRIVATE' ||
+          channel.scopeType === ChannelScopeType.DM ||
+          channel.scopeType === ChannelScopeType.GROUP_DM;
+        return [channelId, { id: channel.id, name: channel.name, isPrivate }];
       }
       if (slackChannelName) {
-        return { channelId, html: `<span>#${escapeHtml(slackChannelName)}</span>` };
+        return [channelId, { unknownName: slackChannelName }];
       }
       if (botOauthToken) {
         const slackChannel = await fetchSlackChannelInfo(channelId, botOauthToken);
         if (slackChannel) {
-          return { channelId, html: `<span>#${escapeHtml(slackChannel.name)}</span>` };
+          return [channelId, { unknownName: slackChannel.name }];
         }
       }
-      return { channelId, html: `<span>#${escapeHtml(channelId)}</span>` };
+      return [channelId, { unknownName: channelId }];
     }),
   );
+  return Object.fromEntries(entries);
 }
 
-export async function resolveSlackMentions(
-  text: string,
+/**
+ * What the Slack ids a message mentions refer to in Xyne (users, user groups, channels): the
+ * database first, then the Slack API with the bot token. Plain profile data, no message text,
+ * so it can be looked up for text the backend only holds encrypted (its ids come from the
+ * encryption service's `slackIds` fact).
+ */
+export async function resolveSlackMentionTargets(
+  ids: SlackMentionIds,
   botOauthToken: string = '',
-  isStringified: boolean = false,
   workspaceId?: string,
-): Promise<string> {
-  const userIds = extractAllSlackIds(text, true);
-  const groupIds = extractAllSlackIds(text, false);
-  const channelIds = extractAllSlackChannelIds(text);
-  if (userIds.length === 0 && groupIds.length === 0 && channelIds.length === 0) {
-    return resolveSpecialMentions(text, isStringified);
+): Promise<SlackMentionTargets> {
+  if (ids.users.length === 0 && ids.groups.length === 0 && ids.channels.length === 0) {
+    return NO_SLACK_MENTION_TARGETS;
   }
 
   // Use provided workspaceId or fall back to default
   const resolvedWorkspaceId = workspaceId ?? config.defaultWorkspaceId;
-  const quote = isStringified ? "'" : '"'
   const userRepo = new UserRepository();
   const groupRepo = new UserGroupRepository();
   const channelRepo = new ChannelRepository();
@@ -687,14 +614,14 @@ export async function resolveSlackMentions(
   // Users, groups and channels are independent — resolve them concurrently instead
   // of one phase after another. (resolveSlackIds only writes for groups; user
   // resolution is read-only, so there is no cross-write race between these.)
-  const [userMapper, groupMapper, channelReplacements] = await Promise.all([
-    resolveSlackIds(userIds, botOauthToken, 'user', resolvedWorkspaceId),
-    resolveSlackIds(groupIds, botOauthToken, 'group', resolvedWorkspaceId),
-    resolveChannelReplacements(channelIds, channelRepo, botOauthToken, quote),
+  const [userMapper, groupMapper, channels] = await Promise.all([
+    resolveSlackIds(ids.users, botOauthToken, 'user', resolvedWorkspaceId),
+    resolveSlackIds(ids.groups, botOauthToken, 'group', resolvedWorkspaceId),
+    resolveChannelTargets(ids.channels, channelRepo, botOauthToken),
   ]);
 
   // Batch-load every resolved user/group row in a single query each, instead of a
-  // per-entity findById in the render loops below.
+  // per-entity findById in the loops below.
   const userDbIds = userMapper
     ? [...userMapper.values()].map((v) => v.dbId).filter((id): id is string => !!id)
     : [];
@@ -708,30 +635,37 @@ export async function resolveSlackMentions(
   const userById = new Map(userRows.map((u) => [u.id, u]));
   const groupById = new Map(groupRows.map((g) => [g.id, g]));
 
+  const users: Record<string, SlackUserTarget> = {};
   if (userMapper) {
     for (const [slackId, { dbId, displayName }] of userMapper.entries()) {
       const user = dbId ? userById.get(dbId) : undefined;
-      if (user) {
-        text = replaceSlackUserMention(text, slackId, `<span ${buildMentionAttrs(user.id, user.name, false, quote, undefined, undefined, user.email, user.picture || undefined).join(' ')}>@${escapeHtml(user.name)}</span>`);
-      } else {
-        const name = displayName ?? 'unknown user';
-        text = replaceSlackUserMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
-      }
+      users[slackId] = user
+        ? { id: user.id, name: user.name, email: user.email || undefined, picture: user.picture || undefined }
+        : { unknownName: displayName ?? 'unknown user' };
     }
   }
+  const groups: Record<string, SlackGroupTarget> = {};
   if (groupMapper) {
     for (const [slackId, { dbId, displayName }] of groupMapper.entries()) {
       const group = dbId ? groupById.get(dbId) : undefined;
-      if (group) {
-        text = replaceSlackGroupMention(text, slackId, `<span ${buildMentionAttrs(group.id, group.name, true, quote, group.alias || undefined, group.description || undefined).join(' ')}>@${escapeHtml(group.alias || group.name)}</span>`);
-      } else {
-        const name = displayName ?? 'unknown group';
-        text = replaceSlackGroupMention(text, slackId, `<span>@${escapeHtml(name)}</span>`);
-      }
+      groups[slackId] = group
+        ? { id: group.id, name: group.name, alias: group.alias || undefined, description: group.description || undefined }
+        : { unknownName: displayName ?? 'unknown group' };
     }
   }
-  for (const { channelId, html } of channelReplacements) {
-    text = replaceSlackChannelMention(text, channelId, html);
-  }
-  return resolveSpecialMentions(text, isStringified);
+  return { users, groups, channels };
+}
+
+/**
+ * `text` with its Slack mentions turned into Xyne mention spans: find the ids, look them up,
+ * apply them (findSlackMentionIds / applySlackMentions in @xyne/shared).
+ */
+export async function resolveSlackMentions(
+  text: string,
+  botOauthToken: string = '',
+  isStringified: boolean = false,
+  workspaceId?: string,
+): Promise<string> {
+  const targets = await resolveSlackMentionTargets(findSlackMentionIds(text), botOauthToken, workspaceId);
+  return applySlackMentions(text, targets, isStringified);
 }

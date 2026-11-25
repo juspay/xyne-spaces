@@ -12,6 +12,14 @@ import {
   MessageType,
   appsChatPostMessageFields,
   refineAppsChatPostMessage,
+  conversationsSendClient,
+  derivedNames,
+  findSlackMentionIds,
+  isCiphertextValue,
+  mergeSlackMentionIds,
+  slackMessageContentTemplate,
+  UnreadableString,
+  type ExtractorName,
   type DerivedFacts,
   type FieldFacts,
   type appsChatPostMessageBodySchema,
@@ -26,6 +34,8 @@ import { ContractError } from '@/framework/api';
 import { validateFlowDefinition, formatValidationErrors, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
 import { checkBotMessageDelete } from '../core/botMessageDelete';
+import { composeForStorage, deriveStoredFacts } from '@/services/encryption/compose';
+import { resolveSlackMentionTargets } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { ContentFormat, type ChatActionResponse } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
@@ -82,6 +92,9 @@ const ConversationAttachmentsQuerySchema = z.object({
 
 // The checked body. Plain or ciphertext: the typed route hands over its fields branded as
 // ciphertext (RouteBody), the internal postAsUser route plain ones; both are strings here.
+/** The facts the message insert side effects read from the content (as for conversations.send). */
+const MESSAGE_CONTENT_FACTS = (derivedNames(conversationsSendClient).content ?? []) as ExtractorName[];
+
 type AppsChatPostMessageBody = z.output<typeof appsChatPostMessageBodySchema> & { userId?: string };
 type AppsChatUpdateMessageBody = z.output<typeof appsChatUpdateMessageBodySchema>;
 type AppsChatPostEphemeralBody = z.output<typeof appsChatPostEphemeralBodySchema>;
@@ -174,6 +187,43 @@ export class ChatController {
     });
   }
 
+  /**
+   * processMessageContent for Slack-format `text` that arrived encrypted (through the ingress
+   * transit proxy): the encryption service found its Slack mentions (`textFacts`), they are
+   * looked up here (plain ids and profile data), and the encryption service builds the HTML from
+   * the encrypted text (compose template slackMessageContent, the same mention and Block Kit
+   * code). The result is what is stored, ciphertext under the workspace key: the backend never
+   * reads the text.
+   */
+  private async buildEncryptedSlackContent(
+    text: string,
+    attachments: SlackAttachment[] | undefined,
+    workspaceId: string | undefined,
+    textFacts: FieldFacts | undefined,
+  ): Promise<string> {
+    if (!workspaceId) throw new Error('Workspace is required to build encrypted message content');
+    if (!textFacts) {
+      logger.warn('[ChatController] encrypted text arrived without its Slack mention facts; mentions stay unresolved');
+    }
+    const ids = mergeSlackMentionIds([
+      {
+        users: textFacts?.slackMentionUserIds ?? [],
+        groups: textFacts?.slackMentionGroupIds ?? [],
+        channels: textFacts?.slackMentionChannels ?? [],
+      },
+      // attachments are plaintext (the proxy encrypts top-level strings only): found here.
+      ...(attachments?.length ? [findSlackMentionIds(JSON.stringify(attachments))] : []),
+    ]);
+    const mentions = await resolveSlackMentionTargets(ids, config.slackBotToken, workspaceId);
+    return composeForStorage(
+      {
+        template: slackMessageContentTemplate,
+        inputs: { text: UnreadableString.make(text), attachments: attachments ?? null, blocks: null, mentions },
+      },
+      { workspaceId },
+    );
+  }
+
 
   /**
    * Post a message to a channel or conversation
@@ -243,6 +293,8 @@ export class ChatController {
     appId: unknown;
     /** Facts the encryption service extracted from the encrypted `markdownText`. */
     markdownFacts?: FieldFacts;
+    /** Facts the encryption service extracted from the encrypted `text` (Slack mentions, content facts). */
+    textFacts?: FieldFacts;
     isPostAsUser: boolean;
   }): Promise<ChatActionResponse> => {
     try {
@@ -271,6 +323,8 @@ export class ChatController {
         input.resolvedChannelId ?? (await resolveChannelId(channelId, conversationId, channelName));
 
       let content: string;
+      /** Facts of `content` when it is stored encrypted, for the insert side effects. */
+      let contentFacts: FieldFacts | undefined;
       let isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
 
       if (flow) {
@@ -310,18 +364,22 @@ export class ChatController {
         isMarkdown = false;
       } else if (markdownText) {
         content = sanitizeMessageContent(markdownText);
+        contentFacts = input.markdownFacts;
       } else if (contentFormat === ContentFormat.MARKDOWN) {
         content = sanitizeMessageContent(text || '');
+        if (text && isCiphertextValue(text)) contentFacts = input.textFacts;
+      } else if (text && isCiphertextValue(text)) {
+        content = await this.buildEncryptedSlackContent(text, attachments, input.workspaceId, input.textFacts);
+        contentFacts = await deriveStoredFacts(content, MESSAGE_CONTENT_FACTS, { workspaceId: input.workspaceId! });
       } else {
           content = await this.processMessageContent(text, attachments, input.workspaceId);
       }
 
-      // Through the transit proxy `markdownText` arrives encrypted, so the content stored is
-      // ciphertext; the encryption service extracted its facts (appsChatPostMessageClient). The
-      // insert side effects read them as the message content's facts, as for conversations.send.
-      // Only when the content is markdownText: a flow message's content is the flow, not it.
-      const markdownFacts = !flow && markdownText ? input.markdownFacts : undefined;
-      const derived: DerivedFacts | undefined = markdownFacts ? { version: 2, fields: { content: markdownFacts } } : undefined;
+      // Through the transit proxy the content arrives encrypted (markdownText, or text and the
+      // HTML built from it), so what is stored is ciphertext and the encryption service extracted
+      // its facts (appsChatPostMessageClient). The insert side effects read them as the message
+      // content's facts, as for conversations.send. Never for a flow: its content is the flow.
+      const derived: DerivedFacts | undefined = contentFacts ? { version: 2, fields: { content: contentFacts } } : undefined;
 
       // Messages posted via the internal /api/internal/postAsUser route are authored
       // on behalf of a real human user (Digital Twin approvals), so they must be
@@ -375,6 +433,8 @@ export class ChatController {
     workspaceId: string | undefined;
     /** Verified token appId (authenticateApp): safe to sign into the flow's capability. */
     appId: string | undefined;
+    /** Facts the encryption service extracted from the encrypted `text` (Slack mentions). */
+    textFacts?: FieldFacts;
   }): Promise<AppsChatPostEphemeralResponse> => {
     try {
       const {
@@ -409,6 +469,8 @@ export class ChatController {
           content = sanitizeMessageContent(markdownText);
         } else if (contentFormat === ContentFormat.MARKDOWN) {
           content = sanitizeMessageContent(text || '');
+        } else if (text && isCiphertextValue(text)) {
+          content = await this.buildEncryptedSlackContent(text, attachments, input.workspaceId, input.textFacts);
         } else {
           content = await this.processMessageContent(text, attachments, input.workspaceId);
         }
@@ -482,6 +544,8 @@ export class ChatController {
     body: AppsChatUpdateMessageBody;
     workspaceId: string | undefined;
     appId: unknown;
+    /** Facts the encryption service extracted from the encrypted `text` (Slack mentions). */
+    textFacts?: FieldFacts;
   }): Promise<ChatActionResponse> => {
     try {
       const { messageId, text, markdownText, flowJSON, attachments } = input.body;
@@ -508,6 +572,8 @@ export class ChatController {
         content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId as string)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
       } else if (markdownText) {
         content = sanitizeMessageContent(markdownText);
+      } else if (text && isCiphertextValue(text)) {
+        content = await this.buildEncryptedSlackContent(text, attachments, input.workspaceId, input.textFacts);
       } else {
           content = await this.processMessageContent(text, attachments, input.workspaceId);
       }

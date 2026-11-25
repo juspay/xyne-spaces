@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./slack": {
+      "types": "./dist/slack/index.d.ts",
+      "import": "./dist/slack/index.js",
+      "default": "./dist/slack/index.js"
+    },
     "./sdlc": {
       "types": "./dist/sdlc.d.ts",
       "import": "./dist/sdlc.js",
@@ -104,6 +109,7 @@
     "prepare": "pnpm run build"
   },
   "dependencies": {
+    "@clearfeed-ai/slack-to-html": "1.2.7",
     "@rocicorp/zero": "1.9.0",
     "@standard-schema/spec": "1.1.0",
     "fast-xml-parser": "5.10.1",

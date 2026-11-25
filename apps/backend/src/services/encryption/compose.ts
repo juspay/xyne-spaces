@@ -3,7 +3,10 @@ import {
   isCiphertextValue,
   reveal,
   runComposeTemplate,
+  runExtractors,
   type ComposeInputs,
+  type ExtractorName,
+  type FieldFacts,
   type ComposeResult,
   type ComposeTemplate,
 } from '@xyne/shared';
@@ -106,4 +109,43 @@ function composeLocally(item: { template: string; inputs: Record<string, unknown
   }
   const value = runComposeTemplate(item.template, item.inputs);
   return item.current === value ? { unchanged: true } : { unchanged: false, value };
+}
+
+/**
+ * `compose` for a value written through a service that takes the stored string rather than a
+ * Zero mutation (e.g. a Xyne Apps message through conversationService): the built value exactly
+ * as it is stored, ciphertext under `workspaceId`'s key while DB encryption is on. The caller
+ * never reads it; it hands it to the write and to `deriveStoredFacts`.
+ */
+export async function composeForStorage<T extends ComposeTemplate>(
+  request: Omit<ComposeRequest<T>, 'current'>,
+  options: { workspaceId: string },
+): Promise<string> {
+  const result = await compose(request as ComposeRequest<T>, options);
+  if (result.unchanged) throw new Error(`compose ${request.template.name}: no current value, yet unchanged`);
+  return reveal(result.value);
+}
+
+/**
+ * The named facts of a value as it is stored (`composeForStorage`'s result): from the encryption
+ * service while DB encryption is on (it decrypts the value next to the extractors), else run
+ * here on the plaintext.
+ */
+export async function deriveStoredFacts(
+  value: string,
+  names: readonly ExtractorName[],
+  options: { workspaceId: string },
+): Promise<FieldFacts> {
+  if (names.length === 0) return {};
+  if (!config.enc.enableDbEncryption) {
+    if (isCiphertextValue(value)) throw new Error('deriveStoredFacts: the value is ciphertext and DB encryption is off');
+    return runExtractors(value, names);
+  }
+  const [facts] = await getEncryptionProvider().deriveFacts({
+    items: [{ value, derive: [...names] }],
+    entityId: options.workspaceId,
+    entityType: WORKSPACE_ENTITY_TYPE,
+  });
+  if (!facts) throw new Error('deriveStoredFacts: the encryption service returned no facts');
+  return facts;
 }
