@@ -4,7 +4,9 @@ import { MessageType, buildInitialMessageMd } from '@xyne/shared';
 import type { FlowDefinition } from '@xyne/shared';
 import type { Conversation } from '../machines/stateMachine';
 import { websocketService } from '../services/clients/socketClient';
+import { decryptSocketPayload } from '../services/encryptionInterceptors';
 import { authActor } from '../machines/authMachine';
+import { logger } from '../utils/logger';
 
 /**
  * Ephemeral messages posted via chat.postEphemeral.
@@ -85,6 +87,22 @@ function add(event: EphemeralEvent): void {
   notify();
 }
 
+/**
+ * Socket handler. With client encryption on, the message content arrives as transit
+ * ciphertext for this tab's key (the backend re-encrypts it per socket, never sending it in
+ * the clear): decrypt it first. A message that cannot be decrypted is dropped, never shown
+ * as ciphertext; delivery is best-effort anyway.
+ */
+function receive(event: EphemeralEvent): void {
+  void decryptSocketPayload(event)
+    .then(add)
+    .catch(error => {
+      logger.error('[ephemeral] Failed to decrypt ephemeral message; not shown', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+}
+
 export function dismissEphemeralMessage(messageId: string): void {
   const next = items.filter(m => m.messageId !== messageId);
   if (next.length === items.length) return;
@@ -146,16 +164,16 @@ export function useEphemeralMessageBridge(): void {
       .connect()
       .then(() => {
         if (!active) return;
-        websocketService.on('ephemeral_message', add);
-        websocketService.on('open_screen_message', add);
+        websocketService.on('ephemeral_message', receive);
+        websocketService.on('open_screen_message', receive);
         websocketService.on('connect', handleConnect);
       })
       .catch(() => {});
 
     return (): void => {
       active = false;
-      websocketService.removeListener('ephemeral_message', add);
-      websocketService.removeListener('open_screen_message', add);
+      websocketService.removeListener('ephemeral_message', receive);
+      websocketService.removeListener('open_screen_message', receive);
       websocketService.removeListener('connect', handleConnect);
     };
   }, []);

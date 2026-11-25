@@ -98,7 +98,7 @@ export function requestClawAgentCancel(params: {
  * Read-side of the ephemeral "agent is working" signal.
  *
  * xyne-claw-auth writes one hash field per running agent to
- * `agent_progress:conversation:<id>` (see chatController.agentProgress). This
+ * `agent_progress:conversation:<id>` (see chatController.publishAgentProgress). This
  * module is the single reader of that hash, shared by the HTTP rehydrate
  * endpoint (old clients) and the socket snapshot (`agent_progress_sync`), so
  * the two can never disagree on what "running" means.

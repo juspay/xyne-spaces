@@ -438,6 +438,9 @@ importers:
       partial-json:
         specifier: 0.1.7
         version: 0.1.7
+      path-to-regexp:
+        specifier: 0.1.13
+        version: 0.1.13
       pdf-lib:
         specifier: 1.17.1
         version: 1.17.1
