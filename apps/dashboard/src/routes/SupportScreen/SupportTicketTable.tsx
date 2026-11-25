@@ -251,6 +251,8 @@ export const SupportTicketTable = ({
         isLoadingMore={isLoadingMore}
         isLoading={!isSettled && supportTickets.length === 0}
         onLoadMore={loadMore}
+        layout='columns'
+        {...(dynamicFieldColumns ? { dynamicFieldColumns } : {})}
       />
     </div>
   );

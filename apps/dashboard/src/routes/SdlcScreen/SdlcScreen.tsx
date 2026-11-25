@@ -3565,6 +3565,7 @@ export default function SdlcScreen(): ReactElement {
           <KanbanBoardScreen
             channelId={channel.id}
             trackId={selectedTrack.id}
+            tableLayout='list'
             // The track's discussions, beside New ticket as Chat sits beside New on the
             // Files tab — the one way to them from here once the panel is closed.
             headerEndSlot={
@@ -4449,6 +4450,7 @@ export default function SdlcScreen(): ReactElement {
                         <KanbanBoardScreen
                           channelId={channel.id}
                           noun={ISSUE_NOUN}
+                          tableLayout='list'
                           onOpenTicket={ticket => openPanelTicket(ticket.id)}
                         />
                       </section>
