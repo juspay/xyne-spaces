@@ -1,4 +1,4 @@
-import type { Transaction } from '@rocicorp/zero';
+import type { Query, Row, Transaction } from '@rocicorp/zero';
 import type { Schema } from './schema.js';
 import { zql } from './builder.js';
 import { SDLC_FOLDER_FLAT_RELATION } from '../sdlc.js';
@@ -9,8 +9,27 @@ import { planSdlcFolderEdges, type SdlcTreeItemType } from '../sdlcFolderAncestr
  * where it is now filed. Called in the same mutator that writes or removes its
  * containment edge, after that write, so the two cannot drift.
  */
+type SdlcEdgeRow = Row<Schema['tables']['sdlc_entity_links']>;
+
+/**
+ * What refileSdlcFolderEdges needs of a transaction: reading and writing folder edges, a table
+ * with no encrypted columns. Zero's transaction fits, and so does the server's transaction for
+ * mutators with unreadable values.
+ */
+export type SdlcFolderEdgeTx = {
+  run(query: Query<'sdlc_entity_links', Schema, any>): Promise<unknown>;
+  mutate: {
+    sdlc_entity_links: Pick<Transaction<Schema>['mutate']['sdlc_entity_links'], 'insert' | 'delete'>;
+  };
+};
+
+/** The edges a query on `sdlc_entity_links` returns: plain rows, the table has no encrypted columns. */
+async function edgesOf(tx: SdlcFolderEdgeTx, query: Query<'sdlc_entity_links', Schema, any>): Promise<readonly SdlcEdgeRow[]> {
+  return (await tx.run(query)) as readonly SdlcEdgeRow[];
+}
+
 export async function refileSdlcFolderEdges(
-  tx: Transaction<Schema>,
+  tx: SdlcFolderEdgeTx,
   input: {
     channelId: string;
     workspaceId: string;
@@ -36,18 +55,17 @@ export async function refileSdlcFolderEdges(
       ? [
           parent.id,
           ...(
-            await tx.run(folderEdges.where('targetType', 'FOLDER').where('targetId', parent.id))
+            await edgesOf(tx, folderEdges.where('targetType', 'FOLDER').where('targetId', parent.id))
           ).map(edge => edge.sourceId),
         ]
       : [];
   const descendants =
     item.type === 'FOLDER'
       ? (
-          await tx.run(folderEdges.where('sourceType', 'FOLDER').where('sourceId', item.id))
+          await edgesOf(tx, folderEdges.where('sourceType', 'FOLDER').where('sourceId', item.id))
         ).map(edge => ({ type: edge.targetType, id: edge.targetId }))
       : [];
-  const existing = await tx.run(
-    folderEdges.where(({ cmp }) =>
+  const existing = await edgesOf(tx, folderEdges.where(({ cmp }) =>
       cmp('targetId', 'IN', [item.id, ...descendants.map(descendant => descendant.id)]),
     ),
   );

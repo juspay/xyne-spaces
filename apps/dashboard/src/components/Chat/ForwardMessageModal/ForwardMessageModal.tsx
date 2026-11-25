@@ -241,6 +241,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             mutators.conversations.forwardMessage({
               targetChannelId: firstTarget.id,
               originalMessageId: message.messageId,
+              // Only what the forwarder wrote; the server builds the forward from the original.
               optionalMessage: value.optionalMessageText.trim()
                 ? value.optionalMessageHtml
                 : undefined,

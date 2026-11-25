@@ -1,25 +1,76 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
+import { defineMutator } from '@rocicorp/zero';
+import type { DefaultContext, DefaultWrappedTransaction, MutatorDefinition, ReadonlyJSONValue } from '@rocicorp/zero';
+import type { z } from 'zod';
 import {
+  conversationsForwardMessageClient,
+  messagesUpdateClient,
+  messagesSendClient,
+  ticketUpdateClient,
+  markChannelAsViewedClient,
+  markThreadActivitiesAsReadV2Client,
+  recapSetCustomRecapPromptClient,
+  userPresenceUpsertClient,
+  draftCreateAttachmentsClient,
+  sdlcAddSdlcFolderItemClient,
+  sdlcCreateTrackClient,
+  sdlcUpdateTrackClient,
+  channelUpdateCallSummaryPromptClient,
+  emailChannelPreferenceUpsertClassificationClient,
+  emailChannelPreferenceUpsertPriorityClassificationClient,
+  workspaceUpdateClient,
+  canvasCreateClient,
+  canvasUpdateClient,
+  coeCreateClient,
+  coeUpdateClient,
+  impactCreateClient,
+  impactUpdateClient,
+  rcaCreateClient,
+  rcaUpdateClient,
+  dashboardUpsertClient,
+  delayedMessagesCreateClient,
+  delayedMessagesEditClient,
+  draftMessagesEditClient,
+  subTicketCreateClient,
+  emailDraftUpsertClient,
+  emailDraftUpsertComposeDraftClient,
+  canvasCommentCreateThreadClient,
+  canvasCommentReplyClient,
+  canvasCommentUpdateClient,
+  collectionCreateClient,
+  collectionUpdateClient,
   conversationsSendClient,
+  emailSignatureCreateClient,
+  emailSignatureUpdateClient,
+  linksCreateClient,
+  linksUpdateClient,
+  roleCreateClient,
+  roleUpdateClient,
   deriveFactsFromPlaintext,
   derivedFactsSchema,
   derivedNames,
-  sourceFieldNames,
+  makeUnreadable,
+  UnreadableString,
+  CLIENT_MANIFEST_STALE_CODE,
+  isCiphertextValue,
 } from '@xyne/shared';
-import type { DerivedFacts, FieldDerived, RequestContract } from '@xyne/shared';
+import type { DerivedFacts, FieldDerived, RequestContract, UnreadableBody } from '@xyne/shared';
 import { config } from '@/config/env';
-import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
+import { getEncryptionProvider, isDekPassthrough, runWithDekPassthrough } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
+import { type UnreadableTransaction, unreadableTransaction } from './unreadableTransaction';
+import { recordContractApplied, recordFactsDerived, recordFactsError, recordUnreadableWrapped } from './zeroMetrics';
 
 /**
  * The Zero-mutation counterpart of middleware/encryptedRoute.ts. Every mutation the
- * encryption service has a MUTATOR rule for is sent to it; it picks the rule by name, checks
- * the args against it (409 when they follow another manifest), runs every check,
- * turns transit ciphertext into workspace-DEK ciphertext and extracts facts; the mutator then
- * runs with DEK passthrough on and reads those facts from getMutationDerived().
+ * encryption service has a MUTATOR rule for is sent to it; it picks the rule by name, turns the
+ * transit ciphertext of every field the rule does not list as plaintext into workspace-DEK
+ * ciphertext and extracts facts; the mutator then runs with DEK passthrough on and reads those
+ * facts from getMutationDerived(). Each arg is checked against its type in the contract when
+ * the mutator starts (assertArgsMatchContract).
  *
  * Two steps, so no encryption-service call is made while a database transaction holds a
  * connection: prepareEncryptedMutations transforms a push's rule-encrypted mutations before
@@ -40,7 +91,57 @@ const PREPARED_ARG = '_encPrepared';
 /** Mutators with a request contract, by Zero mutator name. */
 const MUTATION_CONTRACTS: Record<string, RequestContract> = {
   'conversations.send': conversationsSendClient,
+  'canvasComment.createThread': canvasCommentCreateThreadClient,
+  'canvasComment.reply': canvasCommentReplyClient,
+  'canvasComment.updateComment': canvasCommentUpdateClient,
+  'role.create': roleCreateClient,
+  'role.update': roleUpdateClient,
+  'collection.createCollection': collectionCreateClient,
+  'collection.updateCollection': collectionUpdateClient,
+  'emailSignature.create': emailSignatureCreateClient,
+  'emailSignature.update': emailSignatureUpdateClient,
+  'links.create': linksCreateClient,
+  'links.update': linksUpdateClient,
+  'emailDraft.upsert': emailDraftUpsertClient,
+  'emailDraft.upsertComposeDraft': emailDraftUpsertComposeDraftClient,
+  'dashboard.upsert': dashboardUpsertClient,
+  'delayedMessages.create': delayedMessagesCreateClient,
+  'delayedMessages.edit': delayedMessagesEditClient,
+  'draftMessages.edit': draftMessagesEditClient,
+  'subTicket.create': subTicketCreateClient,
+  'canvas.create': canvasCreateClient,
+  'canvas.update': canvasUpdateClient,
+  'rca.create': rcaCreateClient,
+  'rca.update': rcaUpdateClient,
+  'impact.create': impactCreateClient,
+  'impact.update': impactUpdateClient,
+  'coe.create': coeCreateClient,
+  'coe.update': coeUpdateClient,
+  'channel.updateCallSummaryPrompt': channelUpdateCallSummaryPromptClient,
+  'emailChannelPreference.upsertClassificationConfig': emailChannelPreferenceUpsertClassificationClient,
+  'emailChannelPreference.upsertPriorityClassificationConfig': emailChannelPreferenceUpsertPriorityClassificationClient,
+  'workspace.update': workspaceUpdateClient,
+  'sdlc.createTrack': sdlcCreateTrackClient,
+  'sdlc.updateTrack': sdlcUpdateTrackClient,
+  'sdlc.addSdlcFolderItem': sdlcAddSdlcFolderItemClient,
+  'draft.createAttachments': draftCreateAttachmentsClient,
+  'channel.markChannelAsViewed': markChannelAsViewedClient,
+  'activities.markThreadActivitiesAsReadV2': markThreadActivitiesAsReadV2Client,
+  'recap.setCustomRecapPrompt': recapSetCustomRecapPromptClient,
+  'userPresence.upsert': userPresenceUpsertClient,
+  'ticket.update': ticketUpdateClient,
+  'messages.send': messagesSendClient,
+  'messages.update': messagesUpdateClient,
+  'conversations.forwardMessage': conversationsForwardMessageClient,
 };
+
+/** Whether `value` holds transit ciphertext (`ENC:v<n>|tk-<version>|…`) anywhere. */
+function hasTransitCiphertext(value: unknown): boolean {
+  if (typeof value === 'string') return /^ENC:v\d+\|tk-/.test(value);
+  if (Array.isArray(value)) return value.some(hasTransitCiphertext);
+  if (value && typeof value === 'object') return Object.values(value).some(hasTransitCiphertext);
+  return false;
+}
 
 /** Who is mutating, for the encryption service: the transit caller (transitCaller). */
 export type MutationEncryptionContext = TransitCaller;
@@ -67,6 +168,11 @@ function deriveLocally(mutatorName: string, args: Record<string, unknown>): Deri
 }
 
 const mutationDerivedContext = new AsyncLocalStorage<DerivedFacts | undefined>();
+
+/** The arg fields `derived` has facts for. */
+function fieldsWithFacts(derived: DerivedFacts | undefined): string[] {
+  return Object.entries(derived?.fields ?? {}).flatMap(([field, facts]) => (Object.keys(facts).length > 0 ? [field] : []));
+}
 
 /** Logs that a mutation got its derived facts and where they came from. */
 function logDerivedFacts(mutatorName: string, source: 'local' | 'encryption-service', derived: DerivedFacts | undefined): void {
@@ -108,6 +214,106 @@ export function requireMutationFacts<C extends RequestContract, F extends Extrac
   return facts;
 }
 
+type ContractMutatorFn<TArgs> = (options: {
+  tx: UnreadableTransaction;
+  ctx: DefaultContext;
+  args: TArgs;
+}) => Promise<void>;
+
+/**
+ * `defineMutator` with unreadable values: the one place a mutator's args and reads are made
+ * unreadable.
+ *
+ * - Args: with a contract, each arg is first checked against its type in the contract
+ *   (assertArgsMatchContract), then the contract's `unreadableString()` fields come in as
+ *   `UnreadableString`, every other field as validated. Without one, the args pass through.
+ *   The wrapping happens after Zero has validated the args against `validator`, because a
+ *   mutator's validated args must be JSON and an `UnreadableString` is not.
+ * - Reads: `tx.run` returns the columns in UNREADABLE_COLUMNS as `UnreadableString`, every
+ *   other column as stored; `tx.read(query, facts)` also returns the facts asked for from
+ *   those columns (see unreadableTransaction).
+ *
+ * The body reads an unreadable value only through reveal().
+ */
+export function defineContractMutator<
+  C extends RequestContract,
+  TInput extends ReadonlyJSONValue | undefined,
+  TOutput extends ReadonlyJSONValue & object,
+>(
+  contract: C,
+  validator: z.ZodType<TOutput, TInput>,
+  mutator: ContractMutatorFn<UnreadableBody<C, TOutput>>,
+): MutatorDefinition<TInput, TOutput, DefaultContext, DefaultWrappedTransaction>;
+export function defineContractMutator<
+  TInput extends ReadonlyJSONValue | undefined,
+  TOutput extends ReadonlyJSONValue | undefined,
+>(
+  validator: z.ZodType<TOutput, TInput>,
+  mutator: ContractMutatorFn<TOutput>,
+): MutatorDefinition<TInput, TOutput, DefaultContext, DefaultWrappedTransaction>;
+export function defineContractMutator(
+  ...params:
+    | [RequestContract, z.ZodType<ReadonlyJSONValue, ReadonlyJSONValue>, ContractMutatorFn<never>]
+    | [z.ZodType<ReadonlyJSONValue, ReadonlyJSONValue>, ContractMutatorFn<never>]
+) {
+  const [contract, validator, mutator] = params.length === 3 ? params : [undefined, ...params];
+  return defineMutator(validator, ({ tx, ctx, args }) => {
+    let body: unknown = args;
+    if (contract) {
+      assertArgsMatchContract(contract, args as Record<string, unknown>);
+      body = makeUnreadable(contract, args as object);
+      recordContractApplied();
+      recordUnreadableWrapped({
+        side: 'args',
+        // Validated args are JSON, so every UnreadableString here was wrapped just now.
+        columns: Object.entries(body as object).flatMap(([field, value]) => (value instanceof UnreadableString ? [field] : [])),
+      });
+    }
+    return mutator({
+      tx: unreadableTransaction(tx, ctx.workspaceId),
+      ctx,
+      // The overloads tie the args type to the contract; here it is the value either way.
+      args: body as never,
+    });
+  });
+}
+
+/**
+ * Refuses args whose form does not match their type in the contract, before they are made
+ * unreadable. The encryption service only turns the transit ciphertext of every field the
+ * mutator's rule does not list as plaintext (enc_contract_entries) into workspace-DEK
+ * ciphertext; this is where the rule and the contract are held to agree:
+ *
+ * - ciphertext in a field the contract keeps plaintext: the field is missing from the rule's
+ *   plaintext list (a new non-sensitive field nobody listed), so the client encrypted it;
+ * - plaintext in an `unreadableString()` field of args the encryption service transformed: the
+ *   rule lists the field as plaintext (a sensitive field listed by mistake). Args the client
+ *   sent without a manifest (DB or client encryption off) are plaintext throughout and are
+ *   encrypted at rest on write, so this side is checked only under DEK passthrough.
+ *
+ * Empty strings are never encrypted and pass. A client whose manifest predates the rule sends
+ * the same mismatch, so the refusal is ENC_MANIFEST_STALE: it refetches the manifest and resends
+ * once; a mismatch that survives that is drift between the rule and the contract.
+ */
+function assertArgsMatchContract(contract: RequestContract, args: Record<string, unknown>): void {
+  const transformed = isDekPassthrough();
+  for (const [field, value] of Object.entries(args)) {
+    if (typeof value !== 'string' || value.length === 0) continue;
+    const unreadable = contract.unreadableFields.includes(field);
+    let problem: string | undefined;
+    if (!unreadable && isCiphertextValue(value)) {
+      problem = 'is plaintext in the contract but arrived encrypted: list it as plaintext in its manifest rule, or mark it unreadableString()';
+    } else if (unreadable && transformed && !isCiphertextValue(value)) {
+      problem = 'is unreadableString() in the contract but arrived as plaintext: remove it from its manifest rule\'s plaintext fields';
+    }
+    if (!problem) continue;
+    const mutator = Object.entries(MUTATION_CONTRACTS).find(([, c]) => c === contract)?.[0] ?? 'a contracted mutator';
+    logger.error('[encryptedMutation] arg does not match its type in the contract', { mutator, field, problem });
+    getCryptoOperations().add(1, { operation: 'mutation_arg_form', status: 'error', reason: transformed ? 'transformed' : 'plaintext' });
+    throw new MutationEncryptionError(CLIENT_MANIFEST_STALE_CODE, `${mutator}: "${field}" ${problem}`);
+  }
+}
+
 /** An encryption-service verdict on the mutation (stale manifest, rule violation, drift). */
 export class MutationEncryptionError extends Error {
   constructor(
@@ -139,7 +345,7 @@ async function transformMutationArgs(
   if (!enc?.authToken && !enc?.clientKey) {
     throw new MutationEncryptionError('TRANSIT_KEY_REQUIRED', 'Client-encrypted mutation without a transit key');
   }
-  // The contract only feeds the drift check; a rule mutator without one is still transformed.
+  // The contract only names the facts to extract; a rule mutator without one is still transformed.
   const contract = MUTATION_CONTRACTS[mutatorName];
 
   let transformed: { body: unknown; derived?: unknown };
@@ -149,13 +355,9 @@ async function transformMutationArgs(
       ...(enc.authToken ? { authToken: enc.authToken } : {}),
       ...(enc.clientKey ? { clientKey: enc.clientKey } : {}),
       mutator: mutatorName,
-      ...(contract
-        ? {
-            contractFields: Object.keys(contract.schema.shape),
-            contractEncrypted: sourceFieldNames(contract),
-            contractDerived: derivedNames(contract),
-          }
-        : {}),
+      // Mutator rules list their plaintext fields; the args are checked against the contract
+      // here (assertArgsMatchContract), so only the facts to extract go along.
+      ...(contract ? { contractDerived: derivedNames(contract) } : {}),
       entityId: workspaceId,
       entityType: 'WORKSPACE',
     });
@@ -220,8 +422,30 @@ export async function prepareEncryptedMutations(
       if (!ruled.has(String(m?.name))) {
         // PREPARED_ARG is set here only; one the client sent is dropped.
         const { [PREPARED_ARG]: _forged, ...plain } = args as Record<string, unknown>;
+        // No rule: the args are plaintext. Transit ciphertext here comes from a client still
+        // encrypting every arg (an old tab); it is refused, never decrypted or stored.
+        if (hasTransitCiphertext(plain)) {
+          const key = randomUUID();
+          getCryptoOperations().add(1, { operation: 'mutation_args', status: 'error', reason: 'transit_without_rule' });
+          logger.warn('[encryptedMutation] transit ciphertext in a mutation without a manifest rule', { mutator: String(m!.name) });
+          prepared.set(key, {
+            error: new MutationEncryptionError(
+              'TRANSIT_WITHOUT_RULE',
+              `${String(m!.name)} has no manifest rule, so its args must be sent as plaintext; reload the page`,
+            ),
+          });
+          set({ ...plain, [PREPARED_ARG]: key });
+          return;
+        }
         // Plaintext args of a contracted mutator: extract the facts here, no passthrough.
-        const derived = deriveLocally(String(m!.name), plain);
+        let derived: DerivedFacts | undefined;
+        try {
+          derived = deriveLocally(String(m!.name), plain);
+        } catch (error) {
+          recordFactsError({ mutator: String(m!.name), side: 'args', source: 'local' });
+          throw error;
+        }
+        recordFactsDerived({ mutator: String(m!.name), side: 'args', source: 'local', columns: fieldsWithFacts(derived) });
         if (derived) {
           logDerivedFacts(String(m!.name), 'local', derived);
           const key = randomUUID();
@@ -243,9 +467,11 @@ export async function prepareEncryptedMutations(
           workspaceId,
         );
         logDerivedFacts(String(m!.name), 'encryption-service', derived);
+        recordFactsDerived({ mutator: String(m!.name), side: 'args', source: 'enc-rust', columns: fieldsWithFacts(derived) });
         prepared.set(key, { derived, dekPassthrough: true });
         next = { ...transformed, [PREPARED_ARG]: key };
       } catch (error) {
+        recordFactsError({ mutator: String(m!.name), side: 'args', source: 'enc-rust' });
         prepared.set(key, { error: error instanceof Error ? error : new Error(String(error)) });
         next = { ...(args as Record<string, unknown>), [PREPARED_ARG]: key };
       }

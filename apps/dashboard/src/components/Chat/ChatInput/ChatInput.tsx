@@ -1079,6 +1079,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           const result = zero.mutate(
             mutators.messages.update({
               messageId,
+              // For a forward, only its new optional text: the server rebuilds the forward around it.
               content: processedHtml,
             }),
           );
@@ -1350,7 +1351,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               id,
               channelId,
               ...(conversationId ? { conversationId } : {}),
-              content: processedHtml,
+              content: processedHtml.trim(),
               scheduledFor,
               timestamp: now,
             }),

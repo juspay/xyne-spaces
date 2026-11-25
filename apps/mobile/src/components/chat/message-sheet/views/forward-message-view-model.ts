@@ -378,6 +378,7 @@ export function useForwardMessageViewModel({
           mutators.conversations.forwardMessage({
             targetChannelId: firstTarget.id,
             originalMessageId: target.initialMessage?.messageId ?? '',
+            // Only what the forwarder wrote; the server builds the forward from the original.
             optionalMessage: optionalMessage.trim() || undefined,
             conversationId,
             messageId,

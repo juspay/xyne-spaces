@@ -718,7 +718,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         void z.mutate(
           mutators.messages.send({
             conversationId: state.conversationId,
-            content: contentWithLink,
+            // Trimmed here: the server stores the content as received (it may be encrypted).
+            content: contentWithLink.trim(),
             type: MessageType.USER,
             timestamp: Date.now(),
             messageId: uuidv4(),
@@ -732,7 +733,8 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
         void z.mutate(
           mutators.conversations.send({
             channelId: state.channelId,
-            content: contentWithLink,
+            // Trimmed here: the server stores the content as received (it may be encrypted).
+            content: contentWithLink.trim(),
             type: MessageType.USER,
             conversationId: uuidv4(),
             messageId: uuidv4(),

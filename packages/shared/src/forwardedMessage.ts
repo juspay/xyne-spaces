@@ -7,6 +7,7 @@
  */
 
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+import { MessageType } from './zero/types.js';
 
 /**
  * Data structure for a forwarded message
@@ -142,4 +143,44 @@ export function isForwardedMessageXml(content: string): boolean {
   if (!content) return false;
   const trimmed = content.trim();
   return trimmed.startsWith('<ForwardedMessage>') && trimmed.endsWith('</ForwardedMessage>');
+}
+
+/**
+ * The content of a forward of `original`: its ForwardedMessage XML. Re-forwarding a forward
+ * forwards its optional text when it has one, else what it forwarded. The stored one is built
+ * next to the plaintext by the encryption service (`forwardedMessageTemplate`), from the original
+ * the server read; clients build it only for their local, not-yet-synced row.
+ */
+export function buildForwardedMessageContent(input: {
+  original: {
+    messageId: string;
+    senderId: string;
+    content: string;
+    createdAt: number;
+    conversationId: string;
+    msgType?: string | null;
+  };
+  /** The original sender's `name`. */
+  originalSenderName: string | null | undefined;
+  /** The channel of the original message's conversation. */
+  originalChannelId: string | null | undefined;
+  optionalText: string | null | undefined;
+}): string {
+  const { original } = input;
+  let forwardedContent = original.content;
+  if (original.msgType === MessageType.FORWARDED) {
+    const parsed = parseForwardedMessageXml(original.content);
+    if (parsed?.optionalText) forwardedContent = parsed.optionalText;
+    else if (parsed?.content) forwardedContent = parsed.content;
+  }
+  return createForwardedMessageXml({
+    originalMessageId: original.messageId,
+    originalSenderId: original.senderId,
+    originalSenderName: input.originalSenderName || 'Unknown User',
+    originalCreatedAt: original.createdAt,
+    originalChannelId: input.originalChannelId || null,
+    originalConversationId: original.conversationId,
+    optionalText: input.optionalText || null,
+    content: forwardedContent,
+  });
 }

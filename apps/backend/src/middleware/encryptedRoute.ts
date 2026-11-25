@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import {
   derivedFactsSchema,
   derivedNames,
+  makeUnreadable,
   sourceFieldNames,
 } from '@xyne/shared';
 import type { RequestContract } from '@xyne/shared';
@@ -25,7 +26,10 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  * 2. transformRequest: transit ciphertext (CEK) in the body becomes workspace-DEK ciphertext
  *    (encryption service /internal/transit/transform-request); the handler never sees
  *    plaintext of a MASTER_DEK field.
- * 3. transformResponse: the JSON response's storage ciphertext becomes transit ciphertext
+ * 3. makeBodyUnreadable: the contract's `unreadableString()` fields are wrapped in
+ *    `UnreadableString`, whatever they hold by now (ciphertext or plaintext), so the handler
+ *    reads them only through reveal().
+ * 4. transformResponse: the JSON response's storage ciphertext becomes transit ciphertext
  *    for the caller (encryption service /internal/transit/transform-response).
  *
  * The manifest is the encryption service's alone: it picks the rule for the request and
@@ -35,7 +39,7 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  *   router.post(path, uploadMultiple, ...encryptedRoute(contract, { resolveWorkspaceId }), handler)
  */
 export function encryptedRoute(contract: RequestContract, options: Omit<EncryptedRouteOptions, 'contract'>) {
-  return [enterDekPassthrough, transformRequest({ contract, ...options }), transformResponse];
+  return [enterDekPassthrough, transformRequest({ contract, ...options }), makeBodyUnreadable(contract), transformResponse];
 }
 
 export type EncryptedRouteOptions = {
@@ -54,6 +58,16 @@ function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): 
     return;
   }
   next();
+}
+
+/** Last step before the handler, on every path through transformRequest (encryption on or off). */
+function makeBodyUnreadable(contract: RequestContract) {
+  return function makeBodyUnreadableMiddleware(req: Request, _res: Response, next: NextFunction): void {
+    if (contract.unreadableFields.length > 0 && req.body && typeof req.body === 'object') {
+      req.body = makeUnreadable(contract, req.body);
+    }
+    next();
+  };
 }
 
 /**

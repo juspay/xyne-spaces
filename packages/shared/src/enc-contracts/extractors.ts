@@ -27,6 +27,15 @@ export const EXTRACTORS = [
   'forwardedSenderId',
   'fileExtension',
   'isHeic',
+  'spanMentionUserIds',
+  'fileExtensionAsIs',
+  'spanMentionGroupIds',
+  'slashArtifactCommand',
+  'forwardedOptionalTextUserIds',
+  'forwardedOptionalTextGroupIds',
+  'forwardedOptionalTextLength',
+  'forwardedHasOptionalText',
+  'rawLength',
 ] as const;
 export type ExtractorName = (typeof EXTRACTORS)[number];
 
@@ -64,6 +73,11 @@ export interface ExtractorOutput {
   textLength: number;
   /** The text is blank once trimmed. */
   textIsEmpty: boolean;
+  /**
+   * The stored string's length (`text.length`, markup included): what a storage limit checks,
+   * where `textLength` (visible characters) would let mostly-markup text through.
+   */
+  rawLength: number;
   /** The message carries FlowJSON (a card, a plan, a slash-command artifact). */
   flowJsonPresent: boolean;
   /** Forwarded message: the original message id; null when the content is not a forward. */
@@ -78,6 +92,35 @@ export interface ExtractorOutput {
   fileExtension: string | null;
   /** File name source: a HEIC/HEIF image by its extension. */
   isHeic: boolean;
+  /**
+   * Users mentioned, by the rule participant cleanup uses (`extractAllMentions`): span tags with
+   * `data-mention-type="user"` and `data-user-id`, code regions excluded. Unlike `userIds`, it
+   * ignores `<userid:…>` tokens and needs neither `data-username` nor a closing tag.
+   */
+  spanMentionUserIds: string[];
+  /**
+   * File name source: the extension after the last dot, as written (case kept), no dot; null
+   * when there is none. The rule a rename keeps the extension by (`withKeptExtension`).
+   */
+  fileExtensionAsIs: string | null;
+  /** Groups mentioned, by the same rule as `spanMentionUserIds` (`extractAllMentions`). */
+  spanMentionGroupIds: string[];
+  /**
+   * The registered slash-command artifact the message is (its FlowJSON card's command, e.g.
+   * `sev2`); null when it is not one.
+   */
+  slashArtifactCommand: string | null;
+  /**
+   * Forwarded message: users mentioned in its optional text (the forwarder's own words), by the
+   * `extractAllMentions` rule; empty when not a forward. The forwarded body is not looked at.
+   */
+  forwardedOptionalTextUserIds: string[];
+  /** Forwarded message: groups mentioned in its optional text, same rule. */
+  forwardedOptionalTextGroupIds: string[];
+  /** Forwarded message: the optional text's visible length (as `textLength`); 0 when none. */
+  forwardedOptionalTextLength: number;
+  /** Forwarded message: it carries optional text. */
+  forwardedHasOptionalText: boolean;
 }
 
 /**
@@ -131,6 +174,7 @@ export const fieldFactsSchema: z.ZodType<FieldFacts> = z.object({
   commandArgs: z.string().nullable().optional(),
   textLength: z.number().int().nonnegative().optional(),
   textIsEmpty: z.boolean().optional(),
+  rawLength: z.number().int().nonnegative().optional(),
   flowJsonPresent: z.boolean().optional(),
   forwardedMessageId: z.string().nullable().optional(),
   forwardedConversationId: z.string().nullable().optional(),
@@ -138,6 +182,14 @@ export const fieldFactsSchema: z.ZodType<FieldFacts> = z.object({
   forwardedSenderId: z.string().nullable().optional(),
   fileExtension: z.string().nullable().optional(),
   isHeic: z.boolean().optional(),
+  spanMentionUserIds: z.array(z.string()).optional(),
+  fileExtensionAsIs: z.string().nullable().optional(),
+  spanMentionGroupIds: z.array(z.string()).optional(),
+  slashArtifactCommand: z.string().nullable().optional(),
+  forwardedOptionalTextUserIds: z.array(z.string()).optional(),
+  forwardedOptionalTextGroupIds: z.array(z.string()).optional(),
+  forwardedOptionalTextLength: z.number().optional(),
+  forwardedHasOptionalText: z.boolean().optional(),
 });
 
 export const derivedFactsSchema: z.ZodType<DerivedFacts> = z.object({

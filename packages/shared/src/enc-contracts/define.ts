@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import type { Derivable, ExtractorName, ExtractorOutput } from './extractors.js';
+import { UnreadableString, isUnreadableSchema } from './unreadable-string.js';
 
 declare const encryptedBrand: unique symbol;
 /** A field value the client encrypts: the handler only ever sees it as ciphertext. */
@@ -40,6 +41,8 @@ export interface RequestContract<S extends z.ZodObject = z.ZodObject, D extends 
   kind: 'REQUEST';
   schema: S;
   sourceToDerived: D;
+  /** The fields the schema marks `unreadableString()`: handlers get them as `UnreadableString`, see `makeUnreadable`. */
+  unreadableFields: readonly string[];
 }
 
 export function defineRequestContract<
@@ -50,6 +53,9 @@ export function defineRequestContract<
     kind: 'REQUEST',
     schema: contract.schema,
     sourceToDerived: (contract.sourceToDerived ?? {}) as D,
+    unreadableFields: Object.entries(contract.schema.shape)
+      .filter(([, field]) => isUnreadableSchema(field))
+      .map(([name]) => name),
   };
 }
 
@@ -68,15 +74,58 @@ export function derivedNames(contract: RequestContract): Record<string, Extracto
   );
 }
 
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+/** The names of the fields a schema marks `unreadableString()`. */
+type UnreadableFieldName<S extends z.ZodObject> = {
+  [K in keyof z.output<S>]: IsAny<z.output<S>[K]> extends true
+    ? never
+    : [NonNullable<z.output<S>[K]>] extends [UnreadableString]
+      ? K
+      : never;
+}[keyof z.output<S>];
+
+/** `T` as an `UnreadableString`, keeping `null` / `undefined` as they are. */
+type Unreadable<T> = UnreadableString | Extract<T, null | undefined>;
+
 /**
  * The body as the client sends it (the schema's input type, before transforms such as
- * `'true'` → `true`), with the source fields branded so a handler cannot treat them as text.
- * Handlers see this type because the body is validated against the schema only while API
- * client encryption is on and is never replaced by the parsed value.
+ * `'true'` → `true`), with the `unreadableString()` fields wrapped in `UnreadableString` so a handler
+ * cannot read them without `reveal()`, and the other source fields branded as ciphertext. Handlers see
+ * this type because the body is validated against the schema only while API client encryption
+ * is on and is never replaced by the parsed value; `makeUnreadable` does the wrapping.
  */
 export type RequestBody<C> = C extends RequestContract<infer S, infer D>
-  ? { [K in keyof z.input<S>]: K extends keyof D ? Encrypted<z.input<S>[K]> : z.input<S>[K] }
+  ? {
+      [K in keyof z.input<S>]: K extends UnreadableFieldName<S>
+        ? Unreadable<z.input<S>[K]>
+        : K extends keyof D
+          ? Encrypted<z.input<S>[K]>
+          : z.input<S>[K];
+    }
   : never;
+
+/** `B` with the contract's `unreadableString()` fields wrapped; every other field keeps `B`'s own type. */
+export type UnreadableBody<C, B> = C extends RequestContract<infer S, SourceToDerived>
+  ? { [K in keyof B]: K extends UnreadableFieldName<S> ? Unreadable<B[K]> : B[K] }
+  : never;
+
+/**
+ * A copy of `body` with the contract's `unreadableString()` fields wrapped in `UnreadableString`. Run it where
+ * the body enters handler code (the route middleware, the first line of a mutator), so the
+ * handler never holds those fields as plain values. Absent and null fields stay as they are.
+ */
+export function makeUnreadable<C extends RequestContract, B extends object>(contract: C, body: B): UnreadableBody<C, B> {
+  const wrapped = { ...body } as Record<string, unknown>;
+  for (const field of contract.unreadableFields) {
+    const value = wrapped[field];
+    if (value !== undefined && value !== null && !(value instanceof UnreadableString)) {
+      // The schema says string; whatever arrived is wrapped as it is, never left readable.
+      wrapped[field] = UnreadableString.make(value as string);
+    }
+  }
+  return wrapped as UnreadableBody<C, B>;
+}
 
 /** The facts of one source field: exactly the names its contract entry lists, each with its `ExtractorOutput` type. */
 export type FieldDerived<D, F extends keyof D> = {

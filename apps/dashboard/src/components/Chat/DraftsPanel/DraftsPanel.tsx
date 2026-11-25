@@ -98,7 +98,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
           id: draft.id,
           channelId: draft.channelId,
           ...(draft.conversationId ? { conversationId: draft.conversationId } : {}),
-          content: draft.content,
+          content: draft.content.trim(),
           scheduledFor,
           timestamp: Date.now(),
         }),

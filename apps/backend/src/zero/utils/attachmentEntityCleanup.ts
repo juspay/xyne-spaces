@@ -1,25 +1,28 @@
-import type { Transaction } from '@rocicorp/zero';
-import { AttachmentEntityType, type Schema } from '@xyne/shared';
+import { AttachmentEntityType, derive } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
 import { deleteVideoRenditions, isVideoMimetype } from '@/services/videoRenditionService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { zql } from '../queries';
+import type { UnreadableTransaction } from '../unreadableTransaction';
 
 async function deleteEntityAttachmentsByType(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   asyncTasks: Array<() => Promise<void>>,
   entityId: string,
   entityType: AttachmentEntityType,
 ): Promise<void> {
-  const attachments = await tx.run(
+  const attachments = await tx.read(
     zql.message_attachments.where('entityId', entityId).where('entityType', entityType),
+    { originalFilename: { isHeic: derive.isHeic } },
   );
 
-  for (const attachment of attachments) {
+  for (const { row: attachment, facts } of attachments) {
     const url = attachment.url;
     const thumbnailUrl = attachment.thumbnailUrl;
+    // isHeicAttachment's rule: the MIME type, else the file name's extension (the fact).
+    const isHeic = isHeicAttachment(attachment.mimetype, '') || (facts.originalFilename?.isHeic ?? false);
     await tx.mutate.message_attachments.delete({ id: attachment.id });
     asyncTasks.push(async () => {
       try {
@@ -28,7 +31,7 @@ async function deleteEntityAttachmentsByType(
           if (thumbnailUrl) {
             await storageService.deleteFile(thumbnailUrl);
           }
-          if (isHeicAttachment(attachment.mimetype, attachment.originalFilename)) {
+          if (isHeic) {
             await deleteHeicRenditions(url);
           }
           if (isVideoMimetype(attachment.mimetype)) {
@@ -47,7 +50,7 @@ async function deleteEntityAttachmentsByType(
  * and enqueue best-effort GCS deletes after commit.
  */
 export async function deleteDraftEntityAttachments(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   asyncTasks: Array<() => Promise<void>>,
   entityId: string,
 ): Promise<void> {
@@ -58,7 +61,7 @@ export async function deleteDraftEntityAttachments(
  * Delete all DELAYED_MESSAGE-entity attachments for a delayed_messages row id.
  */
 export async function deleteDelayedMessageEntityAttachments(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   asyncTasks: Array<() => Promise<void>>,
   entityId: string,
 ): Promise<void> {

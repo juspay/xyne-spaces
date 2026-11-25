@@ -74,7 +74,7 @@ export function EditScheduledMessageComposer({
         const result = await zero.mutate(
           mutators.delayedMessages.edit({
             id: activeRow.id,
-            content,
+            content: content.trim(),
             updatedAt: activeRow.updatedAt,
           }),
         ).client;

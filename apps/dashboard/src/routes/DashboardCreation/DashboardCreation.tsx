@@ -34,7 +34,7 @@ export const DashboardCreation: React.FC = () => {
       mutators.dashboard.upsert({
         id: dashboardId,
         name: formData.name,
-        description: formData.description || undefined,
+        description: formData.description ? formData.description.trim() : undefined,
         createdBy: user?.id || '',
         timestamp: Date.now(),
       }),

@@ -12,6 +12,7 @@ import {
   parseReactionsMd,
   ReactionsData,
   parseTicketMd,
+  readSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import {
   formatFullTimestamp,
@@ -564,6 +565,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showLinkPreview, setShowLinkPreview] = useState(true);
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
+  const slashCommandArtifactClosed = readSlashCommandArtifactClosed(message.metadata);
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
   const previewResult = parsePreviewMd(message.link_preview_md);
@@ -1644,6 +1646,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                                   senderId: message.senderId,
                                   createdAt: message.createdAt,
                                   surface: context === 'thread' ? 'thread' : 'channel',
+                                  ...(slashCommandArtifactClosed && {
+                                    closed: slashCommandArtifactClosed,
+                                  }),
                                 }}
                               />
                             </div>

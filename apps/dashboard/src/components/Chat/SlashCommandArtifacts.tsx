@@ -569,12 +569,14 @@ export const SlashCommandArtifactNode: React.FC<{
   const props = parsedProps.success ? parsedProps.data : null;
   const definition = props ? getSlashCommandArtifactDefinition(props.command) : null;
   if (!props || !definition) return null;
+  // Closes are recorded in the message's metadata; cards closed before carry it in their FlowJSON.
+  const closedSummary = messageContext?.closed ?? props.closed;
 
   return (
     <SlashCommandArtifactCard
       definition={definition}
       {...(props.endedCall && { endedCallSummary: props.endedCall })}
-      {...(props.closed && { closedSummary: props.closed })}
+      {...(closedSummary && { closedSummary })}
       messageId={messageId}
       conversationId={conversationId}
       {...(messageContext?.channelId && { channelId: messageContext.channelId })}

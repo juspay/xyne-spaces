@@ -7,6 +7,11 @@ import { extractText } from './text.js';
 import { extractForwardedRefs } from './forwarded.js';
 import { extractFlowJsonPresent } from './flow.js';
 import { extractFileExtension, extractIsHeic } from './files.js';
+import { extractAllMentions } from '../utils/mentionParser.js';
+import { keptExtensionOf } from '../sdlc.js';
+import { parseSlashCommandArtifactMessage } from '../utils/slashCommandArtifact.js';
+import { parseForwardedMessageXml } from '../forwardedMessage.js';
+import { getMessageContentLength } from '../utils/messageContent.js';
 
 export { extractMentions, extractSpecialMentionFlags } from './mentions.js';
 export {
@@ -71,6 +76,7 @@ const EXTRACTOR_FNS: { [K in ExtractorName]: (g: Groups) => ExtractorOutput[K] }
   commandArgs: g => g.command()?.args ?? null,
   textLength: g => g.text().length,
   textIsEmpty: g => g.text().isEmpty,
+  rawLength: g => g.raw.length,
   flowJsonPresent: g => extractFlowJsonPresent(g.raw),
   forwardedMessageId: g => g.forwarded().messageId,
   forwardedConversationId: g => g.forwarded().conversationId,
@@ -78,7 +84,20 @@ const EXTRACTOR_FNS: { [K in ExtractorName]: (g: Groups) => ExtractorOutput[K] }
   forwardedSenderId: g => g.forwarded().senderId,
   fileExtension: g => extractFileExtension(g.raw),
   isHeic: g => extractIsHeic(g.raw),
+  spanMentionUserIds: g => extractAllMentions(g.raw).userIds,
+  fileExtensionAsIs: g => keptExtensionOf(g.raw),
+  spanMentionGroupIds: g => extractAllMentions(g.raw).groupIds,
+  slashArtifactCommand: g => parseSlashCommandArtifactMessage(g.raw)?.definition.command ?? null,
+  forwardedOptionalTextUserIds: g => extractAllMentions(forwardedOptionalTextOf(g.raw)).userIds,
+  forwardedOptionalTextGroupIds: g => extractAllMentions(forwardedOptionalTextOf(g.raw)).groupIds,
+  forwardedOptionalTextLength: g => getMessageContentLength(forwardedOptionalTextOf(g.raw)),
+  forwardedHasOptionalText: g => forwardedOptionalTextOf(g.raw) !== '',
 };
+
+/** A forwarded message's optional text ('' when none, or when the text is not a forward). */
+function forwardedOptionalTextOf(text: string): string {
+  return parseForwardedMessageXml(text)?.optionalText ?? '';
+}
 
 /**
  * Computes the named facts for ONE field's plaintext. Pure (no I/O), so the encryption service

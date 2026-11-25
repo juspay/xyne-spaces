@@ -208,6 +208,10 @@ const formatGuestVisibility = (value: unknown): string | null => {
   return hidden ? `hidden: ${hidden}` : null;
 };
 
+/** 'Set' or null: an encrypted prompt's presence, so the audit never stores (or compares) its text. */
+const formatPromptPresence = (value: unknown): string | null =>
+  value === null || value === undefined || value === '' ? null : 'Set';
+
 export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
   boards: {
     resolveScope: async row => boardScope(row),
@@ -516,6 +520,9 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
         formatSet(parseJsonText(value), name => (name === FRT_EMAIL_REPLY ? 'Email reply' : name)) ??
         'Email reply',
       metricsGuestVisibility: value => formatGuestVisibility(value),
+      // The prompts are encrypted: the audit records only whether one is set, never its text.
+      classificationPrompt: value => formatPromptPresence(value),
+      priorityClassificationPrompt: value => formatPromptPresence(value),
       duplicateScopeConfig: (value, res) => formatDuplicateScope(value, res),
       priorityClassificationThreshold: value =>
         typeof value === 'number' ? `${Math.round(value * 100)}%` : null,

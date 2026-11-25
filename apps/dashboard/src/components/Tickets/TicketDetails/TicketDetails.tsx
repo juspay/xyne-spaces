@@ -2567,11 +2567,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleSaveDescription = (): void => {
-    if (descriptionValue !== resolveTicketDescription(ticket)) {
+    const nextDescription = descriptionValue.trim();
+    // Send it only when it changed: the server treats a sent description as changed (it
+    // cannot compare encrypted text), so the comparison happens here, on what is sent.
+    if (nextDescription !== resolveTicketDescription(ticket)) {
       void applyTicketUpdate(
         {
           id: ticket.id,
-          description: descriptionValue.trim(),
+          description: nextDescription,
           updatedAt: Date.now(),
         },
         'Failed to update description',

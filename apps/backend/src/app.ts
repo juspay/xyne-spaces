@@ -245,7 +245,8 @@ import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
-import { EXTRACTORS, runExtractors, type ExtractorName } from '@xyne/shared';
+import { EXTRACTORS, isComposeTemplateName, runComposeTemplate, runExtractors, type ExtractorName } from '@xyne/shared';
+import type { ZodError } from 'zod';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';
 // Disabled (Claw)
@@ -584,24 +585,84 @@ export class App {
       void new ReactionController().reactAsUser(req, res);
     });
     // TEMPORARY (XYNE-67075): content extraction for the encryption service's
-    // transform-request (the REST reply route and the conversations.send mutator), until the
-    // extractor runs as a sidecar container in the encryption-api pod (apps/encryption-extractor
-    // in the private repo; switch back by pointing EXTRACTOR_URL at it and deleting this
-    // route). It cannot be switched off before then: client-encrypted writes need it. The body
-    // carries message plaintext: never log it (morgan and requestLogger log the request line
-    // only).
+    // transform-request (the REST reply route and the conversations.send mutator) and
+    // derive-facts (tx.read), until the extractor runs as a sidecar container in the
+    // encryption-api pod (apps/encryption-extractor in the private repo; switch back by
+    // pointing EXTRACTOR_URL at it and deleting these routes). They cannot be switched off
+    // before then: client-encrypted writes need them. The bodies carry message plaintext:
+    // never log them (morgan and requestLogger log the request line only).
+    const knownExtractors = new Set<string>(EXTRACTORS);
+    const isExtractItem = (item: unknown): item is { text: string; extractors: ExtractorName[] } => {
+      const { text, extractors } = (item ?? {}) as { text?: unknown; extractors?: unknown };
+      return (
+        typeof text === 'string' &&
+        Array.isArray(extractors) &&
+        extractors.every((name): name is ExtractorName => typeof name === 'string' && knownExtractors.has(name))
+      );
+    };
+    // Single value: what the encryption service called before extract-batch; kept until every
+    // encryption deployment calls extract-batch, then delete.
     this.app.post('/api/internal/content/extract', validateS2SKey, (req: Request, res: Response) => {
-      const { text, extractors } = (req.body ?? {}) as { text?: unknown; extractors?: unknown };
-      const known = new Set<string>(EXTRACTORS);
-      if (
-        typeof text !== 'string' ||
-        !Array.isArray(extractors) ||
-        !extractors.every((name): name is ExtractorName => typeof name === 'string' && known.has(name))
-      ) {
+      if (!isExtractItem(req.body)) {
         res.status(400).json({ error: 'Bad request', message: 'text must be a string and extractors known extractor names' });
         return;
       }
-      res.json(runExtractors(text, extractors));
+      res.json(runExtractors(req.body.text, req.body.extractors));
+    });
+    // `{ items: [{ text, extractors }] }` → `{ results: [<facts per item, in order>] }`: all of
+    // a request's values in one call. A bad item fails the whole call, naming its `index`.
+    this.app.post('/api/internal/content/extract-batch', validateS2SKey, (req: Request, res: Response) => {
+      const { items } = (req.body ?? {}) as { items?: unknown };
+      if (!Array.isArray(items)) {
+        res.status(400).json({ error: 'Bad request', message: 'items must be an array' });
+        return;
+      }
+      const index = items.findIndex(item => !isExtractItem(item));
+      if (index !== -1) {
+        res.status(400).json({
+          error: 'Bad request',
+          message: `items[${index}]: text must be a string and extractors known extractor names`,
+          index,
+        });
+        return;
+      }
+      const valid = items as { text: string; extractors: ExtractorName[] }[];
+      res.json({ results: valid.map(({ text, extractors }) => runExtractors(text, extractors)) });
+    });
+    // TEMPORARY (XYNE-67075), like extract-batch: the transformer the encryption service calls
+    // with decrypted inputs to build a value the backend stores but cannot build itself (a
+    // forward's XML; see COMPOSE_TEMPLATES). `{ items: [{ template, inputs }] }` →
+    // `{ results: [<built value per item, in order>] }`. A bad item fails the whole call, naming
+    // its `index`; the message names the template or the input path, never a value.
+    this.app.post('/api/internal/content/compose-batch', validateS2SKey, (req: Request, res: Response) => {
+      const { items } = (req.body ?? {}) as { items?: unknown };
+      if (!Array.isArray(items)) {
+        res.status(400).json({ error: 'Bad request', message: 'items must be an array' });
+        return;
+      }
+      const results: string[] = [];
+      for (const [index, item] of items.entries()) {
+        const { template, inputs } = (item ?? {}) as { template?: unknown; inputs?: unknown };
+        if (!isComposeTemplateName(template)) {
+          res.status(400).json({ error: 'Bad request', message: `items[${index}]: unknown compose template`, index });
+          return;
+        }
+        try {
+          results.push(runComposeTemplate(template, inputs));
+        } catch (error) {
+          // The input paths of a shape mismatch; otherwise the template refused inputs of the
+          // right shape (a forward edit of content that is not a forward). Never the error's own
+          // message: it could quote an input.
+          // Checked by shape, not instanceof: @xyne/shared's zod may be another module instance.
+          const issues = (error as Partial<ZodError> | null)?.name === 'ZodError' ? (error as ZodError).issues : undefined;
+          const message = issues
+            ? `inputs do not match template ${template} (${issues.map(issue => issue.path.join('.') || '(root)').join(', ')})`
+            : `template ${template} cannot be built from these inputs`;
+          res.status(400).json({ error: 'Bad request', message: `items[${index}]: ${message}`, index });
+          return;
+        }
+      }
+      res.json({ results });
     });
     this.app.post('/api/internal/getOrCreateDm', validateS2SKey, async (req: Request, res: Response) => {
       try {

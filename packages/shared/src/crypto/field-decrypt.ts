@@ -67,3 +67,19 @@ export async function decryptField(encoded: string, keyring: TransitKeyring): Pr
 export function isEncryptedField(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('ENC:');
 }
+
+/**
+ * `ENC:v<n>|<keyId>|<base64>`, the base64 at least an empty AES-GCM ciphertext (IV + tag):
+ * exactly what encryption writes. Text that merely starts with `ENC:` (a title such as
+ * "ENC: plan") is not ciphertext. Use this wherever plain text and ciphertext can both appear
+ * and mistaking one for the other has a cost (refusing a write, failing a read).
+ */
+const CIPHERTEXT_VALUE = /^ENC:v\d+\|[A-Za-z0-9_-]+\|([A-Za-z0-9+/]+={0,2})$/;
+/** Base64 length of IV (12) + AES-GCM tag (16): the shortest ciphertext, of an empty text. */
+const MIN_CIPHERTEXT_BASE64_LENGTH = 40;
+
+export function isCiphertextValue(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const data = CIPHERTEXT_VALUE.exec(value)?.[1];
+  return data !== undefined && data.length >= MIN_CIPHERTEXT_BASE64_LENGTH;
+}

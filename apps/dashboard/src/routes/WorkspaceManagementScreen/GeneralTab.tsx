@@ -115,10 +115,8 @@ export const GeneralTab = ({ isActive = false }: GeneralTabProps): ReactElement 
       mutators.workspace.update({
         workspaceId,
         timestamp: Date.now(),
-        updates: {
-          name: name.trim(),
-          description: description.trim() || undefined,
-        },
+        name: name.trim(),
+        description: description.trim() || undefined,
       }),
     );
     toast.success('Workspace settings saved');

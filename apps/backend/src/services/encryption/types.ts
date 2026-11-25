@@ -1,6 +1,7 @@
 import type {
   DerivedFacts,
   EncryptedTableConfig,
+  FieldFacts,
 } from '@xyne/shared';
 
 export type EncryptedFieldConfig = EncryptedTableConfig;
@@ -122,6 +123,32 @@ export type TransformRequestResult<T> = {
   derived?: DerivedFacts;
 };
 
+/** One stored value and the facts wanted from it (extractor names). */
+export type DeriveFactsItem = { value: string; derive: string[] };
+
+export type DeriveFactsInput = {
+  items: DeriveFactsItem[];
+  /** Owner of the rows read: workspace-DEK ciphertext in `items` must be under its key. */
+  entityId: string;
+  entityType: string;
+};
+
+/**
+ * One value to compose (see COMPOSE_TEMPLATES in @xyne/shared): the template, its inputs with
+ * the encrypted ones as they are stored, and the stored value it would replace, if any.
+ */
+export type ComposeItem = { template: string; inputs: Record<string, unknown>; current?: string | null };
+
+export type ComposeInput = {
+  items: ComposeItem[];
+  /** Owner of the value: every encrypted input must be under its key, and the result is encrypted under it. */
+  entityId: string;
+  entityType: string;
+};
+
+/** Per item: the built value encrypted under the entity's key, or `unchanged` when it equals `current`. */
+export type ComposeItemResult = { unchanged: true } | { unchanged: false; value: string };
+
 export type TransitEncryptResult<T> = {
   body: T;
 };
@@ -174,6 +201,18 @@ export interface EncryptionProvider {
    * facts extracted from that plaintext, when the rule asks for any.
    */
   transformRequest<T>(input: TransformRequestInput<T>): Promise<TransformRequestResult<T>>;
+  /**
+   * Facts from values read from the database: each item's value is workspace-DEK ciphertext
+   * (decrypted for extraction only, never returned) or, while reads still come back
+   * decrypted, plaintext. One `FieldFacts` per item, in order.
+   */
+  deriveFacts(input: DeriveFactsInput): Promise<FieldFacts[]>;
+  /**
+   * Values the backend stores but cannot build, because it holds their parts only encrypted:
+   * the encryption service decrypts the inputs, builds each template and returns the result
+   * encrypted (or `unchanged`). The backend never sees the plaintext. One result per item, in order.
+   */
+  compose(input: ComposeInput): Promise<ComposeItemResult[]>;
   /**
    * DEK-to-transit counterpart of encryptResponse: storage ciphertext (ENC:v1|<dekId>|…) in
    * `body` comes back as transit ciphertext (ENC:v1|tk-…|…) for the client of `caller`;

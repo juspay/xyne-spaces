@@ -1,6 +1,7 @@
 import type { Transaction } from '@rocicorp/zero';
 import { ChannelVisibility, GuestEntity, Schema } from '@xyne/shared';
 import { zql } from '../../queries';
+import type { AnyTransaction } from '../../unreadableTransaction';
 import type { QueryContext } from './types';
 import { MutationACLError } from './types';
 
@@ -12,7 +13,7 @@ export type TicketScope = {
 
 export async function hasGuestChannelAccess(
   ctx: QueryContext,
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   channelId: string,
 ): Promise<boolean> {
   return hasGuestChannelAccessForUser(ctx, tx, ctx.userID, channelId);
@@ -20,7 +21,7 @@ export async function hasGuestChannelAccess(
 
 export async function hasGuestChannelAccessForUser(
   ctx: QueryContext,
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   userId: string,
   channelId: string,
 ): Promise<boolean> {
@@ -52,7 +53,7 @@ export async function hasGuestChannelAccessForUser(
 
 export async function hasGuestTicketAccess(
   ctx: QueryContext,
-  tx: Transaction<Schema>,
+  tx: AnyTransaction,
   ticket: TicketScope,
 ): Promise<boolean> {
   if (ticket.workspaceId !== ctx.workspaceId) {

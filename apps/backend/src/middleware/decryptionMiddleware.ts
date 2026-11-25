@@ -44,27 +44,14 @@ export async function decryptRequestBodyMiddleware(
 }
 
 /**
- * Takes the Zero mutations that have a MUTATOR rule out of a push body for the whole-body
- * decrypt; `restore` puts them back at their positions.
+ * Zero pushes, which this middleware leaves alone: a mutator with a manifest rule is transformed
+ * by the encryption service before it runs, and one without a rule takes plaintext args
+ * (zero/encryptedMutation.ts prepareEncryptedMutations refuses transit ciphertext in them).
  */
-async function holdRuleEncryptedMutations(body: unknown): Promise<{ restore: (body: unknown) => void }> {
-  const mutations = (body as { mutations?: unknown } | null)?.mutations;
-  if (!Array.isArray(mutations)) return { restore: () => undefined };
-  const ruled = new Set(await getEncryptionProvider().getClientEncryptedMutators());
-  const held = new Map<number, unknown>();
-  mutations.forEach((mutation, index) => {
-    if (ruled.has(String((mutation as { name?: unknown } | null)?.name))) {
-      held.set(index, mutation);
-      mutations[index] = null;
-    }
-  });
-  return {
-    restore: (target) => {
-      const out = (target as { mutations?: unknown[] } | null)?.mutations;
-      if (!Array.isArray(out)) return;
-      for (const [index, mutation] of held) out[index] = mutation;
-    },
-  };
+const ZERO_PUSH_PATHS = new Set(['/api/zero/push', '/api/zero/push-fallback']);
+
+function isZeroPush(req: Request): boolean {
+  return ZERO_PUSH_PATHS.has((req.originalUrl ?? '').split('?')[0]);
 }
 
 export async function decryptRequestBody(req: Request, next: NextFunction): Promise<void> {
@@ -75,11 +62,7 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
       return next();
     }
 
-    // Zero pushes: mutations with a manifest rule are transformed one by one before their
-    // mutator runs (zero/encryptedMutation.ts), so leave them as sent.
-    const held = await holdRuleEncryptedMutations(req.body);
-    if (!hasEncryptedFields(req.body)) {
-      held.restore(req.body);
+    if (isZeroPush(req) || !hasEncryptedFields(req.body)) {
       return next();
     }
 
@@ -105,7 +88,6 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
     });
 
     req.body = await getEncryptionProvider().decryptRequest(req.body, caller);
-    held.restore(req.body);
 
     logger.info('[decryptionMiddleware] request body decrypted successfully', {
       method: sanitizeForLog(method),
