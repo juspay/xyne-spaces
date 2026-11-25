@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { UnreadableString, isUnreadableSchema, reveal, unreadableString } from './unreadable-string.js';
 import { buildForwardedMessageContent, createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
+import { buildInitialMessageMd } from '../utils/activityMetadataParser.js';
+import type { MessageType } from '../zero/schema';
 
 /**
  * A value the server stores encrypted but cannot build itself, because it is made from values it
@@ -100,10 +102,47 @@ export const forwardedMessageEditTemplate = defineComposeTemplate({
   },
 });
 
+/**
+ * A conversation's `initial_message_md`: its first message, serialized (`buildInitialMessageMd`), for the
+ * channel list. Composed when the server holds that message's content only encrypted (a bot's post through
+ * the ingress transit proxy, under DEK passthrough): built here from the content as stored, it would embed
+ * that ciphertext in a block the database then encrypts again, and the client could open only the outer
+ * layer. Every other field is plain data, as the message row holds it.
+ */
+export const initialMessageMdTemplate = defineComposeTemplate({
+  name: 'initialMessageMd',
+  inputs: z.object({
+    messageId: z.string(),
+    conversationId: z.string(),
+    workspaceId: z.string().nullable(),
+    senderId: z.string(),
+    content: unreadableString(),
+    msgType: z.string(),
+    hasAttachment: z.boolean(),
+    edited: z.boolean(),
+    isDeleted: z.boolean(),
+    showInChannel: z.boolean(),
+    visibleTo: z.string().nullable(),
+    createdAt: z.number(),
+    metadata: z.unknown(),
+    nudgeCount: z.number().nullable(),
+    isSent: z.boolean(),
+    reactions_md: z.string().nullable(),
+    link_preview_md: z.string().nullable(),
+    childConversationId: z.string().nullable(),
+  }),
+  build: inputs => {
+    const md = buildInitialMessageMd({ ...inputs, msgType: inputs.msgType as MessageType });
+    if (md === null) throw new Error('initialMessageMd: nothing to serialize');
+    return md;
+  },
+});
+
 /** Every compose template, by name: the names the encryption service and the transformer accept. */
 export const COMPOSE_TEMPLATES = {
   forwardedMessage: forwardedMessageTemplate,
   forwardedMessageEdit: forwardedMessageEditTemplate,
+  initialMessageMd: initialMessageMdTemplate,
 } as const;
 
 export type ComposeTemplateName = keyof typeof COMPOSE_TEMPLATES;
