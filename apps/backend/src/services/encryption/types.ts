@@ -30,6 +30,12 @@ export type TransitServerKeys = {
   keys: TransitServerKey[];
 };
 
+export type YSweetSocketKey = {
+  nonce: string;
+  keyVersion: number;
+  wrappedKey: string;
+};
+
 export type EncryptBatchItem = {
   value: string;
   entityId: string;
@@ -142,6 +148,11 @@ export interface EncryptionProvider {
   registerTransitClientKey(sessionId: string, clientKey: string): Promise<TransitServerKeys>;
   /** The transit public key the auth session's client registered; `undefined` when none. */
   transitClientKey(sessionId: string): Promise<string | undefined>;
+  /**
+   * A canvas socket key for the session's registered client key: the client derives it from
+   * `nonce` and `keyVersion`, y-sweet unwraps `wrappedKey`. The backend can read neither.
+   */
+  mintYSweetSocketKey(sessionId: string, docId: string): Promise<YSweetSocketKey>;
   encryptBatch(items: EncryptBatchItem[]): Promise<string[]>;
   decryptBatch(values: string[]): Promise<string[]>;
   /**

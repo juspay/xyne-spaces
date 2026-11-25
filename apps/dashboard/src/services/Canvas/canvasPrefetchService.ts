@@ -87,13 +87,11 @@ class CanvasPrefetchService {
         syncResolve = resolve;
       });
 
-      const encryption = withFrameEncryption(
-        wsHandshakeHash =>
-          canvasService.getYSweetTicket(
-            { docId: canvasId, ...(options?.channelId ? { channelId: options.channelId } : {}) },
-            wsHandshakeHash,
-          ),
-        authToken.wsPublicKey,
+      const encryption = withFrameEncryption(() =>
+        canvasService.getYSweetTicket({
+          docId: canvasId,
+          ...(options?.channelId ? { channelId: options.channelId } : {}),
+        }),
       );
 
       const provider = createYjsProvider(doc, actualDocId, encryption.getAuthToken, {

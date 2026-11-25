@@ -14,6 +14,7 @@ import type {
   TransitCaller,
   TransitEncryptResult,
   TransitServerKeys,
+  YSweetSocketKey,
 } from './types';
 
 function unsupported(operation: string): never {
@@ -53,6 +54,10 @@ const provider: EncryptionProvider = {
   async transitClientKey(_sessionId: string): Promise<string | undefined> {
     if (!config.enc.clientEncryptionEnabled && !config.enc.apiClientEncryptionEnabled) return undefined;
     return unsupported('transitClientKey');
+  },
+
+  async mintYSweetSocketKey(_sessionId: string, _docId: string): Promise<YSweetSocketKey> {
+    return unsupported('mintYSweetSocketKey');
   },
 
   async encryptBatch(items: EncryptBatchItem[]): Promise<string[]> {
