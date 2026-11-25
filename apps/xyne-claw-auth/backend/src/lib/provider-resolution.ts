@@ -2,7 +2,6 @@ import {
   userAgentConfigRepository,
   userProviderCredentialsRepository,
   agentProviderCredentialsRepository,
-  userSubagentConfigRepository,
 } from "../repositories/index.js";
 import {
   resolveSubagentProviderMode,
@@ -41,7 +40,6 @@ export interface ProviderResolution {
   runtimeProviderOrder: string[];
   providerConfigs: Record<string, ProviderConfig>;
   providerScope: Record<string, "user" | "agent">;
-  subagentProviders: Record<string, string>;
   subagentProviderMode: SubagentProviderMode;
   userDeferredToAgent: boolean;
   personalProvider?: string | undefined;
@@ -83,9 +81,6 @@ export async function resolveProvidersForDispatch(
     : [];
   const agentCredsByProvider = new Map(agentCreds.map((c) => [c.provider, c] as const));
 
-  const subagentConfigs = await userSubagentConfigRepository.listByUser(targetUserId).catch(() => []);
-  const subagentProviders: Record<string, string> = {};
-  for (const s of subagentConfigs) subagentProviders[s.subagentName] = s.provider;
   const subagentProviderMode = resolveSubagentProviderMode(agentRow?.config);
 
   const providerConfigs: Record<string, ProviderConfig> = {};
@@ -137,14 +132,13 @@ export async function resolveProvidersForDispatch(
   }
   const resolvedParentProvider = runtimeProviderOrder[0];
 
-  log.info(`Provider resolution: parent=${resolvedParentProvider ?? "spaces"} scope=${resolvedParentProvider ? (providerScope[resolvedParentProvider] ?? "fallback") : "platform"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${runtimeProviderOrder.join(",")}] subagentOverrides=${JSON.stringify(subagentProviders)} subagentProviderMode=${subagentProviderMode}`);
+  log.info(`Provider resolution: parent=${resolvedParentProvider ?? "spaces"} scope=${resolvedParentProvider ? (providerScope[resolvedParentProvider] ?? "fallback") : "platform"} creds=[${Object.keys(providerConfigs).join(",")}] order=[${runtimeProviderOrder.join(",")}] subagentProviderMode=${subagentProviderMode}`);
 
   return {
     resolvedParentProvider,
     runtimeProviderOrder,
     providerConfigs,
     providerScope,
-    subagentProviders,
     subagentProviderMode,
     userDeferredToAgent,
     personalProvider,

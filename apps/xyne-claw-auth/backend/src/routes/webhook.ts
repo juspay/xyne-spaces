@@ -1192,7 +1192,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       resolvedParentProvider,
       runtimeProviderOrder,
       providerConfigs,
-      subagentProviders,
       subagentProviderMode,
       rawPersonalProvider,
     } = await resolveProvidersForDispatch({
@@ -1431,7 +1430,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
-      ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
       subagentProviderMode,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
       ...(pendingGoalStart?.providerOverride ? { providerOverride: pendingGoalStart.providerOverride } : {}),

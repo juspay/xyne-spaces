@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   AlertCircle,
-  Bot,
   CheckCircle2,
   ChevronRight,
   Code2,
@@ -34,7 +33,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { invalidateClawSettings, useClawSettings } from '@/hooks/useClawSettings';
 import {
   deleteProviderCredential,
-  deleteSubagentRouting,
   exchangeClaudeOauth,
   exchangeCodexOauth,
   initiateCopilotGitHubLogin,
@@ -48,7 +46,6 @@ import {
   type ClaudeOauthFlow,
   type CredentialHealth,
   upsertProviderCredential,
-  upsertSubagentRouting,
 } from '@/services/claw/clawSettingsService';
 import { userCredentialScope } from '@/routes/AIScreen/library/agents/detail/persona/credentials/credentialScope';
 import {
@@ -111,18 +108,6 @@ const DEFAULT_BASE_URL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
 };
 /* eslint-enable @typescript-eslint/naming-convention */
 const EMPTY_CREDENTIALS: ProviderCredential[] = [];
-const EMPTY_ROUTING: Array<{ subagentName: string; provider: string }> = [];
-const EMPTY_SUBAGENTS: string[] = [];
-
-const SUBAGENT_NAMES: Record<string, string> = {
-  spaces: 'Spaces Agent',
-  bitbucket: 'Bitbucket Agent',
-  grafana: 'Grafana Agent',
-  deepwiki: 'DeepWiki Agent',
-  context7: 'Context7 Agent',
-  pgm: 'PGM Agent',
-};
-
 const DEFAULT_REASONING: ReasoningEffort = 'medium';
 
 /** Stands in for "no model chosen" — Radix Select rejects an empty value. */
@@ -1082,159 +1067,6 @@ const AuthMethodOption = ({
   </button>
 );
 
-const AgentAssignmentSection = ({
-  subagents,
-  routingMap,
-  defaultProvider,
-  availableProviders,
-  loading,
-  saving,
-  userId,
-  onMutate,
-  onSaving,
-}: {
-  subagents: string[];
-  routingMap: Map<string, string>;
-  defaultProvider: string | null;
-  availableProviders: Array<{ value: string; label: string }>;
-  loading: boolean;
-  saving: string | null;
-  userId: string;
-  onMutate: () => Promise<void>;
-  onSaving: (key: string | null) => void;
-}): ReactElement => (
-  <section>
-    <SectionHeader
-      icon={Bot}
-      title='Agent Model Assignment'
-      description='Choose which AI model powers specific agents.'
-    />
-
-    {loading ? (
-      <div className='divide-y divide-border rounded-2xl border border-border bg-muted/30'>
-        {[1, 2, 3].map(index => (
-          <div key={index} className='flex items-center justify-between gap-4 px-4 py-3.5'>
-            <div className='flex items-center gap-3'>
-              <Skeleton className='size-8 rounded-md' />
-              <div className='space-y-1.5'>
-                <Skeleton className='h-4 w-32' />
-                <Skeleton className='h-3 w-48' />
-              </div>
-            </div>
-            <Skeleton className='h-9 w-48' />
-          </div>
-        ))}
-      </div>
-    ) : (
-      <div className='divide-y divide-border rounded-2xl border border-border bg-muted/30'>
-        {subagents.map(name => (
-          <AgentAssignmentRow
-            key={name}
-            name={name}
-            displayName={
-              SUBAGENT_NAMES[name] ?? `${name.charAt(0).toUpperCase()}${name.slice(1)} Agent`
-            }
-            currentProvider={routingMap.get(name) ?? 'default'}
-            defaultProviderName={defaultProvider ? providerDisplayName(defaultProvider) : null}
-            availableProviders={availableProviders}
-            disabled={saving === `sa:${name}`}
-            onChange={provider => {
-              void (async (): Promise<void> => {
-                onSaving(`sa:${name}`);
-                try {
-                  if (provider === 'default') {
-                    await deleteSubagentRouting(userId, name);
-                  } else {
-                    await upsertSubagentRouting(userId, name, provider);
-                  }
-                  await onMutate();
-                  toast.success('Agent assignment saved');
-                } catch (err) {
-                  toast.error(errMsg(err, 'Save failed'));
-                } finally {
-                  onSaving(null);
-                }
-              })();
-            }}
-          />
-        ))}
-      </div>
-    )}
-  </section>
-);
-
-const AgentAssignmentRow = ({
-  name,
-  displayName,
-  currentProvider,
-  defaultProviderName,
-  availableProviders,
-  disabled,
-  onChange,
-}: {
-  name: string;
-  displayName: string;
-  currentProvider: string;
-  defaultProviderName: string | null;
-  availableProviders: Array<{ value: string; label: string }>;
-  disabled: boolean;
-  onChange: (provider: string) => void;
-}): ReactElement => {
-  const availableValues = useMemo(
-    () => new Set(availableProviders.map(provider => provider.value)),
-    [availableProviders],
-  );
-  const selectValue = availableValues.has(currentProvider) ? currentProvider : 'default';
-  const isInherited = selectValue === 'default';
-  const selectedProvider = isInherited ? null : providerDisplayName(selectValue);
-
-  return (
-    <div
-      data-testid={`claw-settings-agent-row-${name}`}
-      className={cn(
-        'flex items-center justify-between gap-4 px-4 py-3.5 transition-colors',
-        isInherited ? 'bg-transparent' : 'bg-[var(--claw-ai-surface)]/60',
-      )}
-    >
-      <div className='flex min-w-0 flex-1 items-center gap-3'>
-        <div className='flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground'>
-          <Bot className='size-4' />
-        </div>
-        <div className='min-w-0'>
-          <p className='truncate text-sm font-medium text-foreground'>{displayName}</p>
-          {isInherited && defaultProviderName && (
-            <p className='text-xs text-muted-foreground'>
-              Inherited from Main Agent{' '}
-              <span className='font-medium text-foreground'>({defaultProviderName})</span>
-            </p>
-          )}
-          {isInherited && !defaultProviderName && (
-            <p className='text-xs text-muted-foreground'>No default provider connected</p>
-          )}
-          {!isInherited && selectedProvider && (
-            <p className='text-xs text-[var(--claw-ai-fg)]'>Uses {selectedProvider}</p>
-          )}
-        </div>
-      </div>
-
-      <div className='w-56 shrink-0'>
-        <Select value={selectValue} onValueChange={onChange} disabled={disabled}>
-          <SelectTrigger size='sm' className='w-full bg-background'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {availableProviders.map(provider => (
-              <SelectItem key={provider.value} value={provider.value}>
-                {provider.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    </div>
-  );
-};
-
 const AdvancedSettingsSection = (): ReactElement => {
   const [expanded, setExpanded] = useState(false);
 
@@ -1399,33 +1231,14 @@ const ClawSettingsScreen = (): ReactElement => {
   const userId = user?.id ?? '';
   const queryClient = useQueryClient();
   const { data, isLoading, isError, error } = useClawSettings();
-  const [saving, setSaving] = useState<string | null>(null);
 
   const credentials = data?.credentials ?? EMPTY_CREDENTIALS;
-  const routing = data?.routing ?? EMPTY_ROUTING;
-  const subagents = data?.subagents ?? EMPTY_SUBAGENTS;
-
-  const routingMap = useMemo(
-    () => new Map(routing.map(route => [route.subagentName, route.provider])),
-    [routing],
-  );
   const connectedProviders = useMemo(
     () =>
       credentials.filter(credential => credential.hasApiKey).map(credential => credential.provider),
     [credentials],
   );
   const defaultProvider = connectedProviders[0] ?? null;
-  const availableProviders = useMemo(
-    () => [
-      { value: 'default', label: 'Uses Main Agent Model' },
-      ...connectedProviders.map(provider => ({
-        value: provider,
-        label: providerDisplayName(provider),
-      })),
-    ],
-    [connectedProviders],
-  );
-
   const invalidateSettings = async (): Promise<void> => {
     await invalidateClawSettings(queryClient, userId);
     await queryClient.invalidateQueries({
@@ -1439,7 +1252,7 @@ const ClawSettingsScreen = (): ReactElement => {
       <div className='mb-6 flex flex-col gap-1'>
         <h1 className='text-lg font-semibold text-foreground'>Settings</h1>
         <p className='text-sm text-muted-foreground'>
-          Connect this machine, configure AI providers, and assign agent models.
+          Connect this machine and configure AI providers.
         </p>
       </div>
 
@@ -1457,17 +1270,6 @@ const ClawSettingsScreen = (): ReactElement => {
           loading={isLoading}
           userId={userId}
           onMutate={invalidateSettings}
-        />
-        <AgentAssignmentSection
-          subagents={subagents}
-          routingMap={routingMap}
-          defaultProvider={defaultProvider}
-          availableProviders={availableProviders}
-          loading={isLoading}
-          saving={saving}
-          userId={userId}
-          onMutate={invalidateSettings}
-          onSaving={setSaving}
         />
         <AdvancedSettingsSection />
       </div>

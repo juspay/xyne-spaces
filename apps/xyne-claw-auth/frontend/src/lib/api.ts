@@ -4223,11 +4223,6 @@ export interface ProviderCredential {
   hasApiKey: boolean;
 }
 
-export interface SubagentRouting {
-  subagentName: string;
-  provider: string;
-}
-
 export async function listProviderCredentials(userId: string): Promise<ProviderCredential[]> {
   const data = await request<{ success: boolean; data: ProviderCredential[] }>(
     `${AUTH_API_URL}/api/v1/settings/provider-credentials`,
@@ -4277,33 +4272,6 @@ export async function listLitellmModelsForUser(
 export async function deleteProviderCredential(userId: string, provider: string): Promise<void> {
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/settings/provider-credentials/${encodeURIComponent(provider)}`,
-    { method: "DELETE", headers: { "x-user-id": userId } },
-  );
-}
-
-export async function listSubagentRouting(userId: string): Promise<SubagentRouting[]> {
-  const data = await request<{ success: boolean; data: SubagentRouting[] }>(
-    `${AUTH_API_URL}/api/v1/settings/subagent-routing`,
-    { headers: { "x-user-id": userId } },
-  );
-  return data.data;
-}
-
-export async function upsertSubagentRouting(
-  userId: string,
-  subagentName: string,
-  provider: string,
-): Promise<SubagentRouting> {
-  const data = await request<{ success: boolean; data: SubagentRouting }>(
-    `${AUTH_API_URL}/api/v1/settings/subagent-routing/${encodeURIComponent(subagentName)}`,
-    { method: "PUT", headers: { "x-user-id": userId }, body: JSON.stringify({ provider }) },
-  );
-  return data.data;
-}
-
-export async function deleteSubagentRouting(userId: string, subagentName: string): Promise<void> {
-  await request<{ success: boolean }>(
-    `${AUTH_API_URL}/api/v1/settings/subagent-routing/${encodeURIComponent(subagentName)}`,
     { method: "DELETE", headers: { "x-user-id": userId } },
   );
 }

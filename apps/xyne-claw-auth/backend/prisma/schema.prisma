@@ -991,6 +991,7 @@ model LocalHarnessSession {
   @@map("local_harness_sessions")
 }
 
+/// Legacy Settings overrides; no longer read or written. Retained for rollback safety.
 model UserSubagentConfig {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)

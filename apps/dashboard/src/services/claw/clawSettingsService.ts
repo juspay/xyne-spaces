@@ -6,7 +6,6 @@ import type {
   ProviderCredential,
   ProviderCredentialPayload,
   ProviderModelOption,
-  SubagentRouting,
 } from './clawSettingsTypes';
 
 const USER_ID_HEADER = 'x-user-id';
@@ -42,40 +41,6 @@ export async function upsertProviderCredential(
 export async function deleteProviderCredential(userId: string, provider: string): Promise<void> {
   await clawRequest<{ success: boolean }>(
     `/api/v1/settings/provider-credentials/${encodeURIComponent(provider)}`,
-    {
-      method: 'DELETE',
-      headers: { [USER_ID_HEADER]: userId },
-    },
-  );
-}
-
-export async function listSubagentRouting(userId: string): Promise<SubagentRouting[]> {
-  const data = await clawRequest<{ success: boolean; data: SubagentRouting[] }>(
-    '/api/v1/settings/subagent-routing',
-    withUser(userId),
-  );
-  return data.data;
-}
-
-export async function upsertSubagentRouting(
-  userId: string,
-  subagentName: string,
-  provider: string,
-): Promise<SubagentRouting> {
-  const data = await clawRequest<{ success: boolean; data: SubagentRouting }>(
-    `/api/v1/settings/subagent-routing/${encodeURIComponent(subagentName)}`,
-    {
-      method: 'PUT',
-      headers: { [USER_ID_HEADER]: userId },
-      body: JSON.stringify({ provider }),
-    },
-  );
-  return data.data;
-}
-
-export async function deleteSubagentRouting(userId: string, subagentName: string): Promise<void> {
-  await clawRequest<{ success: boolean }>(
-    `/api/v1/settings/subagent-routing/${encodeURIComponent(subagentName)}`,
     {
       method: 'DELETE',
       headers: { [USER_ID_HEADER]: userId },
