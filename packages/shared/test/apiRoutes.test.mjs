@@ -166,3 +166,61 @@ test('compose slackMessageContent: mentions applied, then Block Kit to HTML', ()
   assert.ok(html.includes("data-user-id='u_1'") || html.includes('data-user-id="u_1"'));
   assert.throws(() => runComposeTemplate('slackMessageContent', { text: 'x' }), 'missing inputs are refused');
 });
+
+test('Slack chat.postMessage / postEphemeral / update: text encrypted, fields as the manifest rules list them', () => {
+  const { chatPostMessage, chatPostEphemeral, chatUpdate } = API.apps.slack;
+  const keys = (c) => Object.keys(c.encryption.schema.shape).sort();
+  assert.deepEqual(keys(chatPostMessage), ['attachments', 'blocks', 'channel', 'metadata', 'mrkdwn', 'text', 'thread_ts', 'username']);
+  assert.deepEqual(keys(chatPostEphemeral), ['attachments', 'blocks', 'channel', 'metadata', 'mrkdwn', 'text', 'thread_ts', 'user', 'username']);
+  assert.deepEqual(keys(chatUpdate), ['attachments', 'blocks', 'channel', 'text', 'ts']);
+  for (const route of [chatPostMessage, chatPostEphemeral, chatUpdate]) {
+    assert.deepEqual(sourceFieldNames(route.encryption), ['text']);
+    assert.deepEqual(derivedNames(route.encryption).text, [...SLACK_TEXT_FACTS, 'rawLength']);
+  }
+});
+
+test('Slack chat.postMessage body: form-encoded values parsed, content required, mrkdwn defaults to true', () => {
+  const body = API.apps.slack.chatPostMessage.body;
+  assert.equal(body.safeParse({ channel: 'C1' }).success, false, 'no content');
+  const form = body.safeParse({ channel: 'C1', blocks: '[{"type":"divider"}]', mrkdwn: 'false', metadata: '{"a":1}' });
+  assert.equal(form.success, true);
+  assert.deepEqual(form.data.blocks, [{ type: 'divider' }]);
+  assert.equal(form.data.mrkdwn, false);
+  assert.deepEqual(form.data.metadata, { a: 1 });
+  assert.equal(body.safeParse({ text: 'hi' }).data.mrkdwn, true);
+});
+
+test('handle tokens: found, rewritten by the backend\'s decisions; ids inside Slack JSON text found', async () => {
+  const { findSlackMentionTokens, applySlackHandleMentions, findSlackIdsInText } = await import('../dist/slack/index.js');
+  assert.deepEqual(findSlackMentionTokens('<@harry.s> <@U1|x> <@harry.s>'), ['harry.s', 'U1']);
+  assert.equal(
+    applySlackHandleMentions('hi <@harry.s|Harry> and <@ghost.x> and <@U1>', { 'harry.s': '<@cuid1>', 'ghost.x': '@ghost.x' }),
+    'hi <@cuid1> and @ghost.x and <@U1>',
+  );
+  const json = JSON.stringify({
+    text: 'x <@U1>',
+    blocks: [{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [{ type: 'user', user_id: 'U9' }] }] }],
+  });
+  const ids = findSlackIdsInText(json);
+  assert.ok(ids.users.includes('U1') && ids.users.includes('U9'), JSON.stringify(ids));
+});
+
+test('compose slackChatContent: plain text (mrkdwn false), HTML, flow card, handles first', () => {
+  const none = { users: {}, groups: {}, channels: {} };
+  const base = { attachments: null, blocks: null, handles: {}, mentions: none, idMaps: { users: {}, groups: {} }, screenId: 's1' };
+  const mentions = { users: { cuid1: { id: 'cuid1', name: 'Harry' } }, groups: {}, channels: {} };
+
+  assert.equal(
+    runComposeTemplate('slackChatContent', { ...base, text: '*hi* <@harry.s>', mrkdwn: false, handles: { 'harry.s': '<@cuid1>' }, mentions }),
+    '*hi* <span data-mention data-mention-type="user" data-user-id="cuid1" data-username="Harry">@Harry</span>',
+  );
+  assert.match(runComposeTemplate('slackChatContent', { ...base, text: '*hi*', mrkdwn: true }), /<strong class="slack_bold">hi<\/strong>/);
+  const card = runComposeTemplate('slackChatContent', {
+    ...base,
+    text: 'fallback',
+    mrkdwn: true,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'in a block' } }],
+  });
+  assert.match(card, /^<div data-flow-json="\{&quot;version&quot;:&quot;2.0&quot;,&quot;screenId&quot;:&quot;s1&quot;/);
+  assert.equal(runComposeTemplate('slackChatContent', { ...base, text: null, mrkdwn: true }), '');
+});

@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { UnreadableString, isUnreadableSchema, reveal, unreadableString } from './unreadable-string.js';
 import { buildForwardedMessageContent, createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import { SlackBlockKitParser } from '../slack/blockKitParser.js';
-import { applySlackMentions, type SlackMentionTargets } from '../slack/mentions.js';
+import { applySlackHandleMentions, applySlackMentions, type SlackMentionTargets } from '../slack/mentions.js';
+import { buildFlowFromBlockKit } from '../slack/flow.js';
+import { flowFallbackLabel } from '../utils/flowCardLabel.js';
 import type { SlackAttachment, SlackBlock } from '../slack/blockKitTypes.js';
 
 /**
@@ -153,11 +155,80 @@ export const slackMessageContentTemplate = defineComposeTemplate({
   },
 });
 
+function encodeHtmlAttr(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** `value` with `replacements` applied to its JSON (stringified blocks / attachments); unchanged when empty. */
+function mapJson<T>(value: T[] | undefined, apply: (json: string) => string): T[] | undefined {
+  return value?.length ? (JSON.parse(apply(JSON.stringify(value))) as T[]) : undefined;
+}
+
+/**
+ * A Slack-compatible message's content (`chat.postMessage` / `chat.update` / `chat.postEphemeral`
+ * on /apps/slack): what the Slack adapter's processContent builds, step by step, so the
+ * encryption service can build it from `text` it holds encrypted.
+ *
+ * 1. Legacy handle mentions (`<@harry.sharma>`) rewritten by `handles` (postMessage only; `{}`
+ *    elsewhere), in text, blocks and attachments.
+ * 2. With blocks or attachments: a flow card (`<div data-flow-json>`) built with `idMaps`, else
+ *    HTML (SlackBlockKitParser) with mentions applied.
+ * 3. Text only: with `mrkdwn` not true, the text with mentions applied (no formatting); else the
+ *    text as HTML.
+ *
+ * `handles`, `mentions` and `idMaps` are what the backend looked up for the ids the
+ * `slackMention*` facts found; `screenId` is the flow card's id (given, so the build is pure).
+ */
+export const slackChatContentTemplate = defineComposeTemplate({
+  name: 'slackChatContent',
+  inputs: z.object({
+    text: unreadableString().nullable(),
+    attachments: z.array(z.any()).nullable(),
+    blocks: z.array(z.any()).nullable(),
+    mrkdwn: z.boolean().nullable(),
+    handles: z.record(z.string(), z.string()),
+    mentions: slackMentionTargetsSchema,
+    idMaps: z.object({ users: z.record(z.string(), z.string()), groups: z.record(z.string(), z.string()) }),
+    screenId: z.string(),
+  }),
+  build: inputs => {
+    const mentions = inputs.mentions as SlackMentionTargets;
+    const handles = inputs.handles;
+    const text = inputs.text ? applySlackHandleMentions(inputs.text, handles) : undefined;
+    const blocks = mapJson(inputs.blocks as SlackBlock[] | null ?? undefined, json => applySlackHandleMentions(json, handles));
+    const attachments = mapJson(inputs.attachments as SlackAttachment[] | null ?? undefined, json => applySlackHandleMentions(json, handles));
+
+    if (blocks?.length || attachments?.length) {
+      const flow = buildFlowFromBlockKit({ text, blocks, attachments }, inputs.idMaps, inputs.screenId);
+      if (flow) {
+        const escapedJSON = JSON.stringify(flow).replace(/"/g, '&quot;');
+        return `<div data-flow-json="${escapedJSON}">${encodeHtmlAttr(flowFallbackLabel(flow))}</div>`;
+      }
+      return new SlackBlockKitParser().parse({
+        text: text ? applySlackMentions(text, mentions, false) : undefined,
+        blocks: mapJson(blocks, json => applySlackMentions(json, mentions, true)),
+        attachments: mapJson(attachments, json => applySlackMentions(json, mentions, true)),
+      });
+    }
+
+    // mrkdwn:false disables formatting but Slack still resolves mention tokens
+    if (inputs.mrkdwn !== true && text) return applySlackMentions(text, mentions, false);
+    if (text) return new SlackBlockKitParser().parse({ text: applySlackMentions(text, mentions, false) });
+    return '';
+  },
+});
+
 /** Every compose template, by name: the names the encryption service and the transformer accept. */
 export const COMPOSE_TEMPLATES = {
   forwardedMessage: forwardedMessageTemplate,
   forwardedMessageEdit: forwardedMessageEditTemplate,
   slackMessageContent: slackMessageContentTemplate,
+  slackChatContent: slackChatContentTemplate,
 } as const;
 
 export type ComposeTemplateName = keyof typeof COMPOSE_TEMPLATES;

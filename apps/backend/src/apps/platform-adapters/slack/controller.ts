@@ -6,14 +6,10 @@ import type { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { logger } from "@/utils/logger";
-import { config } from "@/config/env";
-import { outageAlertService } from "@/services/outageAlertService";
-import { extractMentionsFromContent } from "@/utils/mentionUtils";
 import {
 	findOrCreateConversation,
 	getChannelHistory,
 	getConversationReplies,
-	updateConversation,
 } from "@/apps/core/conversationUtils";
 import { ingestAttachment } from "@/apps/core/fileUtils";
 import { getAllUserGroups } from "@/apps/core/userGroupUtils";
@@ -26,19 +22,13 @@ import {
 } from "@/services/fileUploadService";
 import { redisService } from "@/services/redisService";
 import { classifyUpload, screenUploadBuffer, MAX_FILE_SIZE_BYTES } from "@/middleware/upload";
-import { deliverEphemeralMessage } from "@/apps/core/ephemeralDelivery";
 import { wrapSlackHandler } from "./error-transformer";
+import { resolveSlackThreadConversationId } from "./chatWrite";
 import {
 	getResolvedChannelId,
 	getSlackAuthContext,
 	resolveSlackChannel,
-	resolveSlackUserId,
 } from "./middleware";
-import {
-	transformPostMessage,
-	transformUpdate,
-	transformPostEphemeral,
-} from "./request-transformers/chat";
 import {
 	transformHistory,
 	transformList,
@@ -50,11 +40,6 @@ import {
 	transformUsersInfo,
 	transformUsersLookupByEmail,
 } from "./request-transformers/users";
-import {
-	transformPostMessageResponse,
-	transformUpdateResponse,
-	transformPostEphemeralResponse,
-} from "./response-transformers/chat";
 import {
 	transformHistoryResponse,
 	transformInfoResponse,
@@ -89,108 +74,11 @@ const SlackBooleanSchema = z.preprocess((value) => {
 	return value;
 }, z.boolean().optional());
 
-const SlackArraySchema = z.preprocess(
-	parseJsonString,
-	z.array(z.any()).optional(),
-);
-const SlackRecordSchema = z.preprocess(
-	parseJsonString,
-	z.record(z.string(), z.unknown()).optional(),
-);
 const SlackOptionalStringSchema = z
 	.string()
 	.nullable()
 	.optional()
 	.transform((value) => value ?? undefined);
-
-const XYNE_MESSAGE_CONTENT_MAX_LENGTH = 10000;
-
-async function resolveSlackThreadConversationId(
-	threadTs: string | undefined,
-	channelId: string,
-): Promise<{ conversationId?: string; error?: "thread_not_found" }> {
-	if (!threadTs) {
-		return {};
-	}
-
-	const parentMsg = await repositories.messages.findById(threadTs);
-	if (!parentMsg) {
-		return { error: "thread_not_found" };
-	}
-
-	const parentConversation = await repositories.conversations.findById(
-		parentMsg.conversationId,
-	);
-	if (!parentConversation || parentConversation.channelId !== channelId) {
-		return { error: "thread_not_found" };
-	}
-
-	return { conversationId: parentMsg.conversationId };
-}
-
-const PostMessageSchema = z
-	.object({
-		channel: z.string().min(1, "channel is required"),
-		text: z.string().optional(),
-		blocks: SlackArraySchema,
-		attachments: SlackArraySchema,
-		thread_ts: SlackOptionalStringSchema,
-		mrkdwn: SlackBooleanSchema.default(true),
-		metadata: SlackRecordSchema,
-		username: SlackOptionalStringSchema,
-	})
-	.refine(
-		(data) =>
-			!!data.text ||
-			(data.blocks && data.blocks.length > 0) ||
-			(data.attachments && data.attachments.length > 0),
-		{
-			message: "Either text, blocks, or attachments is required",
-			path: ["text"],
-		},
-	);
-
-const PostEphemeralSchema = z
-	.object({
-		channel: z.string().min(1, "channel is required"),
-		user: z.string().min(1, "user is required"),
-		text: z.string().optional(),
-		blocks: SlackArraySchema,
-		attachments: SlackArraySchema,
-		thread_ts: SlackOptionalStringSchema,
-		mrkdwn: SlackBooleanSchema.default(true),
-		metadata: SlackRecordSchema,
-		username: SlackOptionalStringSchema,
-	})
-	.refine(
-		(data) =>
-			!!data.text ||
-			(data.blocks && data.blocks.length > 0) ||
-			(data.attachments && data.attachments.length > 0),
-		{
-			message: "Either text, blocks, or attachments is required",
-			path: ["text"],
-		},
-	);
-
-const UpdateSchema = z
-	.object({
-		channel: z.string().min(1, "channel is required"),
-		ts: z.string().min(1, "ts is required"),
-		text: z.string().optional(),
-		blocks: SlackArraySchema,
-		attachments: SlackArraySchema,
-	})
-	.refine(
-		(data) =>
-			!!data.text ||
-			(data.blocks && data.blocks.length > 0) ||
-			(data.attachments && data.attachments.length > 0),
-		{
-			message: "Either text, blocks, or attachments is required",
-			path: ["text"],
-		},
-	);
 
 const HistorySchema = z.object({
 	channel: z.string().min(1, "channel is required"),
@@ -339,220 +227,6 @@ export class SlackController {
 
 		res.status(200).json(response);
 	});
-
-	chatPostMessage = wrapSlackHandler(async (req: Request, res: Response) => {
-		logger.info("[SLACK-POST-MESSAGE] Received request", { body: req.body, query: req.query, headers: req.headers });
-		const parsed = PostMessageSchema.safeParse(req.body);
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
-			res.status(200).json({ ok: false, error: "msg_too_long" });
-			return;
-		}
-		const context = getSlackAuthContext(req);
-		const channelId = getResolvedChannelId(req);
-		const args = await transformPostMessage(
-			{ ...parsed.data, channel: channelId },
-			context,
-		);
-
-		const threadResolution = await resolveSlackThreadConversationId(
-			args.conversationId,
-			channelId,
-		);
-		if (threadResolution.error) {
-			res.status(200).json({ ok: false, error: threadResolution.error });
-			return;
-		}
-
-		const result = await findOrCreateConversation(
-			args.channelId,
-			args.userId,
-			args.content,
-			args.isMarkdown,
-			threadResolution.conversationId,
-			undefined,
-			MessageType.BOT,
-			args.metadata,
-		);
-
-		const slackResponse = transformPostMessageResponse(
-			result,
-			channelId,
-			parsed.data.text ?? "",
-			context.appId,
-			parsed.data.username,
-		);
-		res.status(200).json(slackResponse);
-
-		// Outage Alert Verification - Process async after responding
-		if (config.outageVerification.channelId && channelId === config.outageVerification.channelId && result.conversationId) {
-			void (async () => {
-				try {
-					const alertText = args.content || parsed.data.text || "";
-					const verificationResult = await outageAlertService.processOutageAlert(
-						alertText,
-						result.conversationId,
-					);
-
-					if (!verificationResult.uploadedFile) return;
-
-					const mentions = await extractMentionsFromContent(alertText);
-
-					const escapeHtml = (str: string): string =>
-						str.replace(/&/g, "&amp;")
-							.replace(/</g, "&lt;")
-							.replace(/>/g, "&gt;")
-							.replace(/"/g, "&quot;")
-							.replace(/'/g, "&#039;");
-
-					const reportMessage = mentions.length
-						? `${mentions
-								.map((m) => {
-									const escapedUsername = escapeHtml(m.username);
-									return `<span class="chat-input-mention" data-mention="" data-mention-type="user" data-user-id="${m.userId}" data-username="${escapedUsername}">@${escapedUsername}</span>`;
-								})
-								.join(" ")} False Outage Report`
-						: "False Outage Report";
-
-					await findOrCreateConversation(
-						channelId,
-						context.userId,
-						reportMessage,
-						false,
-						result.conversationId,
-						[verificationResult.uploadedFile],
-						MessageType.BOT,
-						{},
-					);
-
-					logger.info("[SLACK-POST-MESSAGE] False outage report posted", { sessionId: verificationResult.sessionId });
-				} catch (err) {
-					logger.error("[SLACK-POST-MESSAGE] Outage alert processing failed", { err });
-				}
-			})();
-		}
-	});
-
-
-	chatPostEphemeral = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = PostEphemeralSchema.safeParse(req.body);
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
-			res.status(200).json({ ok: false, error: "msg_too_long" });
-			return;
-		}
-
-		const context = getSlackAuthContext(req);
-		const channelId = getResolvedChannelId(req);
-
-		const recipientId = await resolveSlackUserId(
-			parsed.data.user,
-			context.workspaceId ?? "",
-		);
-		if (!recipientId) {
-			res.status(200).json({ ok: false, error: "user_not_found" });
-			return;
-		}
-
-		const threadResolution = await resolveSlackThreadConversationId(
-			parsed.data.thread_ts,
-			channelId,
-		);
-		if (threadResolution.error) {
-			res.status(200).json({ ok: false, error: threadResolution.error });
-			return;
-		}
-
-		const args = await transformPostEphemeral(
-			{ ...parsed.data, channel: channelId, recipientId },
-			context,
-		);
-
-		const sender = await repositories.users.findById(context.userId);
-
-		const result = await deliverEphemeralMessage({
-			channelId,
-			conversationId: threadResolution.conversationId,
-			recipientId: args.recipientId,
-			senderId: context.userId,
-			senderName: sender?.name,
-			messageDelivery: "EPHEMERAL",
-			...(args.flow && { appId: context.appId, flow: args.flow }),
-			content: args.content,
-			isMarkdown: args.isMarkdown,
-			metadata: args.metadata,
-		});
-
-		if (!result.ok) {
-			res.status(200).json({
-				ok: false,
-				error:
-					result.reason === "not_in_channel"
-						? "user_not_in_channel"
-						: "invalid_arguments",
-			});
-			return;
-		}
-
-		res.status(200).json(transformPostEphemeralResponse(result.messageId));
-	});
-
-	chatUpdate = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = UpdateSchema.safeParse(req.body);
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		if (JSON.stringify(req.body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH) {
-			res.status(200).json({ ok: false, error: "msg_too_long" });
-			return;
-		}
-		const context = getSlackAuthContext(req);
-		const args = await transformUpdate(parsed.data, context);
-		const channelId = getResolvedChannelId(req);
-
-		const existingMessage = await repositories.messages.findById(args.messageId);
-		if (!existingMessage) {
-			res.status(200).json({ ok: false, error: "message_not_found" });
-			return;
-		}
-		if (existingMessage.senderId !== context.userId) {
-			res.status(200).json({ ok: false, error: "cant_update_message" });
-			return;
-		}
-
-		const existingConversation = await repositories.conversations.findById(
-			existingMessage.conversationId,
-		);
-		if (!existingConversation) {
-			res.status(200).json({ ok: false, error: "thread_not_found" });
-			return;
-		}
-		if (existingConversation.channelId !== channelId) {
-			res.status(200).json({ ok: false, error: "message_not_found" });
-			return;
-		}
-
-		const result = await updateConversation(args.messageId, args.content);
-
-		const slackResponse = transformUpdateResponse(
-			result,
-			channelId,
-			parsed.data.text ?? "",
-			context.userId,
-		);
-		res.status(200).json(slackResponse);
-	});
-
 
 	conversationsHistory = wrapSlackHandler(
 		async (req: Request, res: Response) => {

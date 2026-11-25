@@ -13,6 +13,12 @@ import { appPermission } from "@/apps/access";
 import { checkBotMessageDelete } from "@/apps/core/botMessageDelete";
 import { deleteConversationMessage } from "@/apps/core/conversationUtils";
 import { slackChannel, slackError, slackHandle } from "./access";
+import { slackChatPostEphemeral, slackChatPostMessage, slackChatUpdate } from "./chatWrite";
+
+/** The bot's workspace: whose key the encrypted `text` is stored under. */
+const encryptUnderBotWorkspace = {
+	resolveWorkspaceId: async (req: { user?: { workspaceId: string } }) => req.user!.workspaceId,
+};
 import { transformDeleteResponse } from "./response-transformers/chat";
 
 const router = Router();
@@ -30,27 +36,6 @@ router.use(slackAuthenticateApp);
 
 router.get("/auth.test", controller.authTest);
 router.post("/auth.test", controller.authTest);
-
-router.post(
-	"/chat.postMessage",
-	requirePermission("chat:write"),
-	slackChannelValidation("body"),
-	controller.chatPostMessage,
-);
-
-router.post(
-	"/chat.postEphemeral",
-	requirePermission("chat:write"),
-	slackChannelValidation("body"),
-	controller.chatPostEphemeral,
-);
-
-router.post(
-	"/chat.update",
-	requirePermission("chat:write"),
-	slackChannelValidation("body"),
-	controller.chatUpdate,
-);
 
 // ─── Typed routes (contracts in @xyne/shared, API.apps.slack) ──────────────────
 // Served by the API router behind the contract gate, not by this router.
@@ -74,6 +59,32 @@ api.routes(API.apps.slack, (serve) => ({
 				const result = await deleteConversationMessage(body.ts, userId);
 				return transformDeleteResponse(result, channelId);
 			}),
+	}),
+	// `text` encrypted by the ingress proxy: the content is built by the encryption service
+	// (chatWrite.ts). Plain `text` takes the old transformers, unchanged.
+	chatPostMessage: serve("chatPostMessage", {
+		auth: "slack-app",
+		invalidRequest: () => slackError("invalid_arguments"),
+		access: { permission: appPermission("chat:write"), channel: slackChannel() },
+		encryption: encryptUnderBotWorkspace,
+		handle: ({ body, user, app, access, derived }) =>
+			slackHandle(() => slackChatPostMessage({ body, user, app, channel: access.channel, textFacts: derived?.fields.text })),
+	}),
+	chatPostEphemeral: serve("chatPostEphemeral", {
+		auth: "slack-app",
+		invalidRequest: () => slackError("invalid_arguments"),
+		access: { permission: appPermission("chat:write"), channel: slackChannel() },
+		encryption: encryptUnderBotWorkspace,
+		handle: ({ body, user, app, access, derived }) =>
+			slackHandle(() => slackChatPostEphemeral({ body, user, app, channel: access.channel, textFacts: derived?.fields.text })),
+	}),
+	chatUpdate: serve("chatUpdate", {
+		auth: "slack-app",
+		invalidRequest: () => slackError("invalid_arguments"),
+		access: { permission: appPermission("chat:write"), channel: slackChannel() },
+		encryption: encryptUnderBotWorkspace,
+		handle: ({ body, user, app, access, derived }) =>
+			slackHandle(() => slackChatUpdate({ body, user, app, channel: access.channel, textFacts: derived?.fields.text })),
 	}),
 }));
 

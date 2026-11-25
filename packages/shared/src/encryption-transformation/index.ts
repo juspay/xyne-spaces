@@ -12,7 +12,7 @@ import { keptExtensionOf } from '../sdlc.js';
 import { parseSlashCommandArtifactMessage } from '../utils/slashCommandArtifact.js';
 import { parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getMessageContentLength } from '../utils/messageContent.js';
-import { findSlackMentionIds } from '../slack/mentions.js';
+import { findSlackIdsInText } from '../slack/flow.js';
 
 export { extractMentions, extractSpecialMentionFlags } from './mentions.js';
 export {
@@ -93,9 +93,9 @@ const EXTRACTOR_FNS: { [K in ExtractorName]: (g: Groups) => ExtractorOutput[K] }
   forwardedOptionalTextGroupIds: g => extractAllMentions(forwardedOptionalTextOf(g.raw)).groupIds,
   forwardedOptionalTextLength: g => getMessageContentLength(forwardedOptionalTextOf(g.raw)),
   forwardedHasOptionalText: g => forwardedOptionalTextOf(g.raw) !== '',
-  slackMentionUserIds: g => findSlackMentionIds(g.raw).users,
-  slackMentionGroupIds: g => findSlackMentionIds(g.raw).groups,
-  slackMentionChannels: g => findSlackMentionIds(g.raw).channels,
+  slackMentionUserIds: g => findSlackIdsInText(g.raw).users,
+  slackMentionGroupIds: g => findSlackIdsInText(g.raw).groups,
+  slackMentionChannels: g => findSlackIdsInText(g.raw).channels,
 };
 
 /** A forwarded message's optional text ('' when none, or when the text is not a forward). */

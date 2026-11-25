@@ -1,5 +1,6 @@
 import { UserRepository } from "@/database/repositories/users";
 import { logger } from "@/utils/logger";
+import { applySlackHandleMentions, findSlackMentionTokens } from "@xyne/shared";
 import type { SlackAttachment, SlackBlock } from "@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes";
 
 /**
@@ -19,9 +20,6 @@ import type { SlackAttachment, SlackBlock } from "@/integrations/adapters/slack-
  * only, not by the ephemeral/update transformers and not by the webhook-ticket or
  * migration paths that share the downstream resolvers.
  */
-
-/** `<@token>` or `<@token|label>`. Loose like `extractAllSlackIds`; the token is classified below. */
-const USER_MENTION_REGEX = /<@([^<>|\s]+)(?:\|[^<>]*)?>/g;
 
 /** Slack-native ids are uppercase (U099FJD9QC8, W…, B…); Xyne CUIDs are lowercase. */
 function isSlackNativeId(token: string): boolean {
@@ -91,21 +89,21 @@ async function resolveToken(
 }
 
 /**
- * Build the replacement for every distinct `<@…>` token in `source`.
- * Tokens resolving to `skip` are omitted, so the caller leaves them alone.
+ * The replacement for each `<@token>` that is a handle: `<@xyneUserId>` when it names exactly
+ * one user, `@handle` when it is a definite handle that names none (or several). Tokens to leave
+ * as they are (Slack ids, CUIDs, unmatched plain words) are omitted. Database lookups only, no
+ * message text: the tokens come from the text here, or from the encryption service's
+ * `slackMentionUserIds` fact when the text is encrypted.
  */
-async function buildReplacements(
-	source: string,
+export async function resolveSlackHandleReplacements(
+	tokens: readonly string[],
 	workspaceId: string,
-): Promise<Map<string, string>> {
-	const tokens = new Set(
-		Array.from(source.matchAll(USER_MENTION_REGEX), (match) => match[1]),
-	);
-	if (tokens.size === 0) return new Map();
+): Promise<Record<string, string>> {
+	if (tokens.length === 0) return {};
 
 	const userRepo = new UserRepository();
 	const resolutions = await Promise.all(
-		[...tokens].map(async (token) => {
+		[...new Set(tokens)].map(async (token) => {
 			try {
 				return [token, await resolveToken(token, workspaceId, userRepo)] as const;
 			} catch (error) {
@@ -115,19 +113,12 @@ async function buildReplacements(
 		}),
 	);
 
-	const replacements = new Map<string, string>();
+	const replacements: Record<string, string> = {};
 	for (const [token, resolution] of resolutions) {
-		if (resolution.kind === "id") replacements.set(token, `<@${resolution.userId}>`);
-		else if (resolution.kind === "text") replacements.set(token, `@${token}`);
+		if (resolution.kind === "id") replacements[token] = `<@${resolution.userId}>`;
+		else if (resolution.kind === "text") replacements[token] = `@${token}`;
 	}
 	return replacements;
-}
-
-function applyReplacements(source: string, replacements: Map<string, string>): string {
-	if (replacements.size === 0) return source;
-	return source.replace(USER_MENTION_REGEX, (whole, token: string) => {
-		return replacements.get(token) ?? whole;
-	});
 }
 
 export type HandleResolvableParts = {
@@ -161,21 +152,21 @@ export async function resolveSlackHandleMentions<T extends HandleResolvableParts
 	if (!combined.includes("<@")) return parts;
 
 	try {
-		const replacements = await buildReplacements(combined, workspaceId);
-		if (replacements.size === 0) return parts;
+		const replacements = await resolveSlackHandleReplacements(findSlackMentionTokens(combined), workspaceId);
+		if (Object.keys(replacements).length === 0) return parts;
 
 		const rewritten: T = { ...parts };
 		if (parts.text) {
-			rewritten.text = applyReplacements(parts.text, replacements);
+			rewritten.text = applySlackHandleMentions(parts.text, replacements);
 		}
 		if (serialisedBlocks) {
 			rewritten.blocks = JSON.parse(
-				applyReplacements(serialisedBlocks, replacements),
+				applySlackHandleMentions(serialisedBlocks, replacements),
 			) as SlackBlock[];
 		}
 		if (serialisedAttachments) {
 			rewritten.attachments = JSON.parse(
-				applyReplacements(serialisedAttachments, replacements),
+				applySlackHandleMentions(serialisedAttachments, replacements),
 			) as SlackAttachment[];
 		}
 		return rewritten;

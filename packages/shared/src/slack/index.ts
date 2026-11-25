@@ -11,7 +11,21 @@ export {
   extractAllSlackIds,
   findSlackMentionIds,
   mergeSlackMentionIds,
+  findSlackMentionTokens,
+  applySlackHandleMentions,
 } from './mentions.js';
+export {
+  buildFlowFromBlockKit,
+  findSlackIdsInText,
+  collectAllSlackGroupIds,
+  collectAllSlackUserIds,
+  mrkdwnToFlowComponent,
+  parseBlockKitInput,
+  slackAttachmentToFlowComponent,
+  slackBlockElementToFlowComponent,
+  slackBlockToFlowComponent,
+} from './flow.js';
+export type { BlockKitInput, ParsedBlockKitInput, SlackIdMaps } from './flow.js';
 export type {
   SlackChannelTarget,
   SlackGroupTarget,

@@ -135,6 +135,25 @@ export function mergeSlackMentionIds(all: SlackMentionIds[]): SlackMentionIds {
 }
 
 /**
+ * Slack legacy handle mentions (`<@harry.sharma>`, `<@harry@example.com>`) — tokens the
+ * `slackMentionUserIds` fact reports alongside real ids. The backend decides what each one
+ * is (resolveSlackHandleReplacements: the Xyne user by email, or plain text); this applies its
+ * decision: `<@token>` / `<@token|label>` → the replacement, others left as they are.
+ */
+const USER_MENTION_TOKEN = /<@([^<>|\s]+)(?:\|[^<>]*)?>/g;
+
+/** The distinct `<@token>` tokens in `text` (the handle resolver's own, slightly stricter, rule). */
+export function findSlackMentionTokens(text: string): string[] {
+  return [...new Set(Array.from(text.matchAll(USER_MENTION_TOKEN), (match) => match[1]))];
+}
+
+/** `text` with each `<@token>` in `replacements` replaced (e.g. `<@xyneUserId>` or `@handle`). */
+export function applySlackHandleMentions(text: string, replacements: Record<string, string>): string {
+  if (Object.keys(replacements).length === 0) return text;
+  return text.replace(USER_MENTION_TOKEN, (whole, token: string) => replacements[token] ?? whole);
+}
+
+/**
  * `text` with every mention of an id in `targets` replaced by its Xyne mention span, and
  * `<!here>` / `<!channel>` / `<!everyone>` (and `@here`…) by special-mention spans.
  * `isStringified`: `text` is JSON (stringified blocks / attachments), so attribute quotes are `'`.
