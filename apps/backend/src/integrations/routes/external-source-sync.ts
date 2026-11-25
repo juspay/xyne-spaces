@@ -25,7 +25,6 @@ import { db } from '@/database/client';
 import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
 import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
-import { callConnectionService } from '@/services/telephony/callConnectionService';
 import { isCallProviderSourceType } from '@/services/telephony/callProviderIds';
 import { deskCallSettingsService } from '@/services/telephony/deskCallSettingsService';
 
@@ -76,8 +75,7 @@ export async function resolveChannelMailbox(
       select: { workspaceId: true, type: true },
     });
     if (channel?.type === ChannelType.CALL && channel.workspaceId) {
-      // A call desk fetches through the call connection it is bound to (old routing moved first).
-      await callConnectionService.moveLegacyRouting(channel.workspaceId);
+      // A call desk fetches through the call connection it is bound to.
       const callSettings = await deskCallSettingsService.get(channel.workspaceId, channelId);
       mailbox = callSettings
         ? await db.externalSource.findFirst({

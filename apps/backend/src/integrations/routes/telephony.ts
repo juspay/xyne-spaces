@@ -106,16 +106,26 @@ function providerView(provider: CallProvider): Record<string, unknown> {
   };
 }
 
-function summaryView(connection: CallConnection, desks: DeskCallSettingsView[]): Record<string, unknown> {
+/** Desks the viewer can't see are only counted, so their ids and campaigns aren't exposed. */
+function summaryView(
+  connection: CallConnection,
+  desks: DeskCallSettingsView[],
+  visibleDeskIds: ReadonlySet<string>,
+): Record<string, unknown> {
+  const bound = desks.filter(desk => desk.connectionId === connection.id);
+  const visible = bound.filter(desk => visibleDeskIds.has(desk.channelId));
   return {
     id: connection.id,
     provider: connection.provider.id,
     providerName: connection.provider.displayName,
     name: connection.name,
     hasSoftphone: callConnectionService.softphoneUrl(connection) !== null,
-    desks: desks
-      .filter(desk => desk.connectionId === connection.id)
-      .map(desk => ({ channelId: desk.channelId, isDefault: desk.isDefault, routingKeys: desk.routingKeys })),
+    desks: visible.map(desk => ({
+      channelId: desk.channelId,
+      isDefault: desk.isDefault,
+      routingKeys: desk.routingKeys,
+    })),
+    privateDeskCount: bound.length - visible.length,
   };
 }
 
@@ -191,10 +201,21 @@ router.get(
   '/connections',
   supportReadAuth,
   handle(async (_req, res, workspaceId) => {
-    // Sequential: listing connections can first move old routing onto desks.
-    const connections = await callConnectionService.list(workspaceId);
-    const desks = await deskCallSettingsService.listForWorkspace(workspaceId);
-    res.json({ connections: connections.map(connection => summaryView(connection, desks)) });
+    const [connections, desks] = await Promise.all([
+      callConnectionService.list(workspaceId),
+      deskCallSettingsService.listForWorkspace(workspaceId),
+    ]);
+    // Request-scoped, so only desks the caller can see.
+    const visibleDesks = desks.length
+      ? await db.channel.findMany({
+          where: { workspaceId, id: { in: desks.map(desk => desk.channelId) } },
+          select: { id: true },
+        })
+      : [];
+    const visibleDeskIds = new Set(visibleDesks.map(desk => desk.id));
+    res.json({
+      connections: connections.map(connection => summaryView(connection, desks, visibleDeskIds)),
+    });
   }),
 );
 
@@ -225,12 +246,13 @@ router.patch(
   handle(async (req, res, workspaceId) => {
     const parsed = updateConnectionSchema.safeParse(req.body);
     if (!parsed.success) return invalidRequest(res, parsed.error);
-    const connection = await callConnectionService.update(
+    const { connection, credentialsChanged } = await callConnectionService.update(
       workspaceId,
       String(req.params.connectionId),
       parsed.data,
     );
-    const subscribe = await trySubscribe(connection);
+    // The webhook URL never changes, so only new credentials need registering again.
+    const subscribe = credentialsChanged ? await trySubscribe(connection) : null;
     res.json({ connection: detailsView(connection), subscribe });
   }),
 );
@@ -277,8 +299,6 @@ router.get(
   handle(async (req, res, workspaceId) => {
     const channelId = String(req.params.channelId);
     if (!(await authorizeAppDeskManager(channelId, req.user!.id, workspaceId, res))) return;
-    // Right after deploy, old workspace routing may not be on the desks yet.
-    await callConnectionService.moveLegacyRouting(workspaceId);
     res.json({ settings: await deskCallSettingsService.get(workspaceId, channelId) });
   }),
 );
@@ -290,8 +310,6 @@ router.put(
     const parsed = deskSettingsSchema.safeParse(req.body);
     if (!parsed.success) return invalidRequest(res, parsed.error);
     if (!(await authorizeAppDeskManager(channelId, req.user!.id, workspaceId, res))) return;
-    // So a save can't pre-empt the move and have this desk's old routing skipped later.
-    await callConnectionService.moveLegacyRouting(workspaceId);
     const settings = await deskCallSettingsService.save(workspaceId, channelId, parsed.data);
     logger.info('[telephony] desk_call_settings_saved', {
       workspaceId,

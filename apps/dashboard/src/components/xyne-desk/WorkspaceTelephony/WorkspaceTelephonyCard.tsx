@@ -68,7 +68,7 @@ export const WorkspaceTelephonyCard = (): ReactElement => {
   };
 
   const summary = (connection: CallConnectionSummary): string => {
-    const count = connection.desks.length;
+    const count = connection.desks.length + connection.privateDeskCount;
     if (count === 0) return 'Not used by any desk yet';
     const defaultDesk = connection.desks.find(desk => desk.isDefault);
     return `${count} desk${count === 1 ? '' : 's'}${defaultDesk ? ` · default: ${deskName(defaultDesk.channelId)}` : ''}`;
@@ -154,7 +154,10 @@ export const WorkspaceTelephonyCard = (): ReactElement => {
         onOpenChange={open => setDialog(current => ({ ...current, open }))}
         connectionId={dialog.connectionId}
         providers={providers}
-        deskNames={(editing?.desks ?? []).map(desk => deskName(desk.channelId))}
+        deskNames={[
+          ...(editing?.desks ?? []).map(desk => deskName(desk.channelId)),
+          ...Array.from({ length: editing?.privateDeskCount ?? 0 }, () => 'Private desk'),
+        ]}
       />
       <ConfirmDialog />
     </>

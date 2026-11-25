@@ -31,7 +31,7 @@ export interface CallConnection {
   credentials: CallProviderCredentials;
 }
 
-/** Workspace-wide routing saved before desk settings existed; moved onto the desks on first read. */
+/** Workspace-wide routing saved before desk settings existed; a one-time backfill moves it onto the desks. */
 interface LegacyTicketRules {
   defaultChannelId?: string;
   campaignRouting?: Record<string, string>;
@@ -89,8 +89,15 @@ function encryptStored(
   credentials: CallProviderCredentials,
   webhookSecret: string,
   agentMapping: CallAgentMapping,
+  ticketRules?: LegacyTicketRules,
 ): string {
-  return encrypt(JSON.stringify({ ...credentials, webhookSecret, agentMapping }));
+  return encrypt(
+    JSON.stringify({ ...credentials, webhookSecret, agentMapping, ...(ticketRules ? { ticketRules } : {}) }),
+  );
+}
+
+function sameCredentials(a: CallProviderCredentials, b: CallProviderCredentials): boolean {
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].every(key => a[key] === b[key]);
 }
 
 function normalizeName(raw: string): string {
@@ -185,7 +192,7 @@ async function migrateLegacyTicketRules(
 }
 
 export const callConnectionService = {
-  /** Decrypts an active call connection; null for other or unreadable sources. */
+  /** Decrypts an active call connection; null for other or unreadable sources. Read-only. */
   async fromSource(source: ExternalSource): Promise<CallConnection | null> {
     const provider = getCallProvider(source.sourceType);
     if (!provider || !source.isActive) return null;
@@ -193,34 +200,19 @@ export const callConnectionService = {
     const webhookSecret = typeof stored?.webhookSecret === 'string' ? stored.webhookSecret : '';
     if (!stored || !webhookSecret) return null;
 
-    const { agentMapping, ticketRules } = stored;
+    const { agentMapping } = stored;
     const credentials: CallProviderCredentials = { ...stored };
     delete credentials.webhookSecret;
     delete credentials.agentMapping;
     delete credentials.ticketRules;
-    if (ticketRules) {
-      try {
-        await migrateLegacyTicketRules(source, provider, stored, ticketRules);
-      } catch (error) {
-        // The rules stay in the credentials, so the next read retries.
-        logger.error(`${TAG} moving workspace routing to desk settings failed`, {
-          connectionId: source.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    const sourceName = sourceNameFor(provider.id, source.workspaceId, webhookSecret);
-    if (source.name !== sourceName) {
-      await db.externalSource.update({ where: { id: source.id }, data: { name: sourceName } });
-    }
 
     return {
       id: source.id,
       workspaceId: source.workspaceId,
       provider,
       name: source.displayName,
-      sourceName,
+      // The webhook path the provider posts to.
+      sourceName: source.name,
       webhookSecret,
       agentMapping: agentMapping && typeof agentMapping === 'object' ? agentMapping : {},
       credentials,
@@ -248,9 +240,18 @@ export const callConnectionService = {
     return connections.filter((connection): connection is CallConnection => connection !== null);
   },
 
-  /** Moves any pre-desk-settings routing onto the desks (no-op once done); run before reading desk settings. */
-  async moveLegacyRouting(workspaceId: string): Promise<void> {
-    await this.list(workspaceId);
+  /** For the one-time backfill: true while the connection still holds routing saved before desk settings. */
+  hasLegacyRouting(source: ExternalSource): boolean {
+    return !!readStored(source)?.ticketRules;
+  },
+
+  /** For the one-time backfill: moves that routing onto the desks; false if there is none. Safe to repeat. */
+  async migrateLegacyRouting(source: ExternalSource): Promise<boolean> {
+    const provider = getCallProvider(source.sourceType);
+    const stored = readStored(source);
+    if (!provider || !stored?.ticketRules) return false;
+    await migrateLegacyTicketRules(source, provider, stored, stored.ticketRules);
+    return true;
   },
 
   /** Names must be unique, and one provider account backs at most one connection. */
@@ -332,9 +333,12 @@ export const callConnectionService = {
       credentials?: Record<string, unknown>;
       agentMapping?: CallAgentMapping;
     },
-  ): Promise<CallConnection> {
-    const existing = await this.get(workspaceId, connectionId);
-    if (!existing) throw new CallConfigError('Call connection not found', 404);
+  ): Promise<{ connection: CallConnection; credentialsChanged: boolean }> {
+    const source = await db.externalSource.findFirst({
+      where: { id: connectionId, workspaceId, ...CALL_SOURCE_WHERE },
+    });
+    const existing = source ? await this.fromSource(source) : null;
+    if (!source || !existing) throw new CallConfigError('Call connection not found', 404);
 
     const name = input.name === undefined ? existing.name : normalizeName(input.name);
     const credentials = input.credentials
@@ -343,15 +347,20 @@ export const callConnectionService = {
     const agentMapping = input.agentMapping ?? existing.agentMapping;
     await this.assertUnique(workspaceId, existing.provider, credentials, name, existing.id);
 
+    // Old routing stays on the connection until the backfill moves it.
+    const legacyTicketRules = readStored(source)?.ticketRules;
     await db.externalSource.update({
       where: { id: existing.id },
       data: {
         displayName: name,
-        credentials: encryptStored(credentials, existing.webhookSecret, agentMapping),
+        credentials: encryptStored(credentials, existing.webhookSecret, agentMapping, legacyTicketRules),
       },
     });
     logger.info(`${TAG} updated`, { workspaceId, connectionId });
-    return { ...existing, name, credentials, agentMapping };
+    return {
+      connection: { ...existing, name, credentials, agentMapping },
+      credentialsChanged: !sameCredentials(existing.credentials, credentials),
+    };
   },
 
   /** Deactivates the connection; refused while a live desk still uses it. */
