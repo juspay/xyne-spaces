@@ -25,6 +25,7 @@ export interface TransitKeyStore {
 
 const TRANSIT_KEY_ID_PREFIX = 'tk-';
 const DERIVE_INFO = 'transit/v1';
+const SOCKET_DERIVE_INFO = 'ysweet-ws/v1';
 const ECDH = { name: 'ECDH', namedCurve: 'P-256' } as const;
 
 export function transitKeyId(version: number): string {
@@ -70,6 +71,33 @@ export async function deriveTransitKey(
   pair: TransitKeyPair,
   serverPublicKey: string,
 ): Promise<CryptoKey> {
+  return deriveFromShared(pair, serverPublicKey, new TextEncoder().encode(DERIVE_INFO));
+}
+
+/**
+ * The canvas WebSocket key for one socket: the same ECDH secret and salt as the transit key,
+ * with info "ysweet-ws/v1" || nonce || docId. The encryption service derives the same key.
+ */
+export async function deriveSocketKey(
+  pair: TransitKeyPair,
+  serverPublicKey: string,
+  nonce: Uint8Array,
+  docId: string,
+): Promise<CryptoKey> {
+  const label = new TextEncoder().encode(SOCKET_DERIVE_INFO);
+  const doc = new TextEncoder().encode(docId);
+  const info = new Uint8Array(label.length + nonce.length + doc.length);
+  info.set(label, 0);
+  info.set(nonce, label.length);
+  info.set(doc, label.length + nonce.length);
+  return deriveFromShared(pair, serverPublicKey, info);
+}
+
+async function deriveFromShared(
+  pair: TransitKeyPair,
+  serverPublicKey: string,
+  info: Uint8Array<ArrayBuffer>,
+): Promise<CryptoKey> {
   const clientPoint = fromBase64(pair.publicKey);
   const serverPoint = fromBase64(serverPublicKey);
   const serverKey = await crypto.subtle.importKey('raw', serverPoint, ECDH, false, []);
@@ -83,7 +111,7 @@ export async function deriveTransitKey(
   salt.set(clientPoint, 0);
   salt.set(serverPoint, clientPoint.length);
   return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(DERIVE_INFO) },
+    { name: 'HKDF', hash: 'SHA-256', salt, info },
     hkdfKey,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -133,6 +161,17 @@ export class TransitKeyring {
 
   clear(): void {
     this.derived.clear();
+  }
+
+  /** The key for one canvas socket, from the nonce and server key version the ticket carries. */
+  async socketKey(version: number, nonce: string, docId: string): Promise<CryptoKey> {
+    if (!this.has(version)) {
+      await this.refetch();
+      if (!this.has(version))
+        throw new Error(`Server transit key version ${version} is not available`);
+    }
+    const server = this.serverKeys.keys.find(k => k.version === version)!;
+    return deriveSocketKey(this.pair, server.publicKey, fromBase64(nonce), docId);
   }
 
   private has(version: number): boolean {

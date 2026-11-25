@@ -223,6 +223,7 @@ import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
 import { appRoutes } from '@/apps';
+import { requireTransitProxyIngress } from '@/apps/middelware/requireTransitProxy';
 import transitProxyInternalRoutes from '@/routes/transitProxyInternal';
 import { ChatController } from '@/apps/controllers/chatController';
 import { ReactionController } from '@/controllers/reactionController';
@@ -559,7 +560,8 @@ export class App {
     this.app.use('/api/tts', authMiddleware.authenticate, ttsLimiter, ttsRoutes);
 
     // App routes
-    this.app.use('/api/apps', appRoutes);
+    // With the ingress transit proxy deployed, every /api/apps call must come through it.
+    this.app.use('/api/apps', requireTransitProxyIngress, appRoutes);
     // Xyne transit proxy only (token pre-check, manifest relay); infra restricts the callers.
     this.app.use('/api/internal/transit-proxy', transitProxyInternalRoutes);
 

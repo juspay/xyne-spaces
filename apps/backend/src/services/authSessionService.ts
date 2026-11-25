@@ -11,6 +11,7 @@ import {
   rotateAuthSessionTokenTx,
 } from '@/bypassAcl/transactions/authSessionStore';
 import { redisService } from '@/services/redisService';
+import { YSweetHttpError, ysweetCloseSessions } from '@/utils/ysweetUtils';
 import { logger as baseLogger } from '../utils/logger';
 
 const logger = baseLogger.child({ module: 'AuthSessionService' });
@@ -418,6 +419,16 @@ export class AuthSessionService {
   /** Deny access JWTs carrying these sids until the longest-lived one has expired. Never throws. */
   private async markSessionsRevoked(sessionIds: string[]): Promise<void> {
     await Promise.all(sessionIds.map(sessionId => this.markSessionRevoked(sessionId)));
+    if (sessionIds.length === 0) return;
+    // Open canvas sockets outlive the JWT check, so y-sweet closes them itself.
+    // 404: a y-sweet without close-sessions (older image).
+    ysweetCloseSessions(sessionIds).catch(error => {
+      const level = error instanceof YSweetHttpError && error.status === 404 ? 'debug' : 'error';
+      logger[level]('[AUTH-SESSION] Failed to close canvas sockets of revoked sessions', {
+        sessionIds,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   private async markSessionRevoked(sessionId: string): Promise<void> {

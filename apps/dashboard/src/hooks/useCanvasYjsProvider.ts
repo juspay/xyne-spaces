@@ -262,26 +262,34 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     }
   }, [authTokenData]);
 
-  const getTicket = useCallback(
-    async (wsHandshakeHash?: string): Promise<YSweetAuthToken> => {
-      if (errorCountRef.current >= 5) {
-        throw new Error('Authentication retry limit reached');
+  const getTicket = useCallback(async (): Promise<YSweetAuthToken> => {
+    if (errorCountRef.current >= 5) {
+      throw new Error('Authentication retry limit reached');
+    }
+    try {
+      const ticket = await canvasService.getYSweetTicket({
+        docId: canvasId,
+        ...(channelId ? { channelId } : {}),
+      });
+      permissionReadOnlyRef.current = ticket.authorization === 'read-only';
+      return ticket;
+    } catch (error) {
+      // Access is gone: the metadata refetch fails too, and the authError effect stops the canvas.
+      if (isAxiosError(error) && error.response?.status === 403) void refetch();
+      // Retrying gets the same answer: stop at the next error, with this toast in place of "Connection Issue".
+      if (
+        isAxiosError<{ code?: string }>(error) &&
+        error.response?.data?.code === 'SOCKET_KEY_UNAVAILABLE'
+      ) {
+        errorCountRef.current = 5;
+        lastNotificationStatusRef.current = 'error';
+        toast.error('Something went wrong', {
+          description: 'This canvas could not connect. Try again later.',
+        });
       }
-      try {
-        const ticket = await canvasService.getYSweetTicket(
-          { docId: canvasId, ...(channelId ? { channelId } : {}) },
-          wsHandshakeHash,
-        );
-        permissionReadOnlyRef.current = ticket.authorization === 'read-only';
-        return ticket;
-      } catch (error) {
-        // Access is gone: the metadata refetch fails too, and the authError effect stops the canvas.
-        if (isAxiosError(error) && error.response?.status === 403) void refetch();
-        throw error;
-      }
-    },
-    [canvasId, channelId, refetch],
-  );
+      throw error;
+    }
+  }, [canvasId, channelId, refetch]);
 
   useEffect(() => {
     if (prefetchedCanvas?.provider && !prefetchedProviderDestroyedRef.current) {
@@ -387,7 +395,7 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     errorCountRef.current = 0;
     setConnectionFailed(false);
 
-    const encryption = withFrameEncryption(getTicket, authTokenData.wsPublicKey);
+    const encryption = withFrameEncryption(getTicket);
     const provider = createYjsProvider(doc, actualDocId, encryption.getAuthToken, {
       offlineSupport: true,
       warnOnClose: true,
