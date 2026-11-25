@@ -6,6 +6,7 @@ import { notificationService } from '@/services/notificationService';
 import { config } from '@/config/env';
 
 const CALL_TIMEOUT_QUEUE_NAME = 'call-timeout-queue';
+const MAX_TIMEOUT_JOB_AGE_MS = 10 * 60 * 1000;
 
 export class CallTimeoutWorker {
   private queue: Bull.Queue;
@@ -26,8 +27,8 @@ export class CallTimeoutWorker {
     this.queue = new Bull(CALL_TIMEOUT_QUEUE_NAME, {
       redis: redisConfig,
       defaultJobOptions: {
-        removeOnComplete: false,
-        removeOnFail: false,
+        removeOnComplete: true,
+        removeOnFail: 1000,
       }
     });
   }
@@ -41,8 +42,8 @@ export class CallTimeoutWorker {
     await this.queue.add(data, {
       delay,
       jobId, // Unique ID to allow removal
-      removeOnComplete: false,
-      removeOnFail: false
+      removeOnComplete: true,
+      removeOnFail: 1000
     });
     this.logger.info(`Added call timeout job for participant ${participantId} with delay ${delay}ms`);
   }
@@ -87,19 +88,25 @@ export class CallTimeoutWorker {
   }
 
   private async processJob(job: Bull.Job) {
-    const { callId, participantId, invitedByUserId } = job.data;
+    const { callId, participantId } = job.data;
     this.logger.info(`Processing timeout for participant ${participantId} in call ${callId}`);
+
+    if (typeof job.timestamp !== 'number' || Date.now() - job.timestamp > MAX_TIMEOUT_JOB_AGE_MS) {
+        this.logger.warn(`Call timeout job for participant ${participantId} is stale or malformed, skipping`);
+        return;
+    }
 
     try {
         // 1. Fetch Participant
-        const participant = await db.callParticipant.findUnique({
-            where: { id: participantId },
+        const participant = await db.callParticipant.findFirst({
+            where: { id: participantId, callId },
         });
 
         if (!participant) {
-            this.logger.warn(`Participant ${participantId} not found, skipping timeout processing`);
+            this.logger.warn(`Participant ${participantId} not found in call ${callId}, skipping timeout processing`);
             return;
         }
+        const invitedByUserId = participant.invitedBy;
 
         if (participant.isExternal) {
             this.logger.info(`Participant ${participantId} is external, skipping timeout notification`);

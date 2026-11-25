@@ -23,12 +23,11 @@ router.get(
 router.get('/:callId', requirePermission('calls:read'), callController.getCall);
 router.get('/:callId/transcript', requirePermission('calls:read'), callController.getTranscript);
 router.get('/:callId/summary', requirePermission('summaries:read'), callController.getSummary);
-// Disabled (LLM)
-// router.post(
-//   '/:callId/regenerate-summary',
-//   requirePermission('summaries:write'),
-//   callController.regenerateSummary,
-// );
+router.post(
+  '/:callId/regenerate-summary',
+  requirePermission('summaries:write'),
+  callController.regenerateSummary,
+);
 router.patch('/:callId', requirePermission('calls:write'), callController.updateScheduledCall);
 router.delete('/:callId', requirePermission('calls:write'), callController.cancelScheduledCall);
 

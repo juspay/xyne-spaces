@@ -298,7 +298,7 @@ export class TicketStageTransitionService {
     // ── 8. Execute transition ───────────────────────────────────────────────
     // Resolved outside the transaction: a stable bot-user lookup, not part of the
     // transactional state, and best kept off the held connection.
-    const systemActorId = await getTicketBotActorId(ticket.workspaceId);
+    const systemActorId = await getTicketBotActorId(ticket.workspaceId, userId);
 
     const result = await transitionTicketTx(currentStage, ticketId, userId, targetStage, transition, ticket, formValues, toStageName, systemActorId);
 

@@ -117,9 +117,13 @@ const handleResultEvent = async (event: DoclingResultEvent) => {
   if (!event.resultKey) {
     throw new Error(`Missing result_key for event ${event.id}`)
   }
-  const payload = await getResultPayload(event.resultKey)
+  const expectedResultKey = `${sched().resultKeyPrefix}:${jobId}`
+  if (event.resultKey !== expectedResultKey || (event.fileId && event.fileId !== part.fileId)) {
+    throw new Error(`OCR result event ${event.id} does not match job ${jobId}`)
+  }
+  const payload = await getResultPayload(expectedResultKey)
   if (!payload) {
-    throw new Error(`Missing OCR result payload at ${event.resultKey}`)
+    throw new Error(`Missing OCR result payload at ${expectedResultKey}`)
   }
 
   const doclingResponse = JSON.parse(payload) as DoclingResponse

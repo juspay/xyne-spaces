@@ -65,22 +65,25 @@ export type DecisionEngine = (typeof DECISION_ENGINES)[number];
 export type ClassifierEngine = Exclude<DecisionEngine, 'llm'>;
 
 /** Decided through `decide()`: the feature's own LLM prompt, or the configured engine when its CAC switch is on. */
-export type TaskFeature = 'email_category' | 'email_priority';
+export const TASK_FEATURES = ['email_category', 'email_priority'] as const;
+export type TaskFeature = (typeof TASK_FEATURES)[number];
 
 /** Typed questions answered by the configured engine through `askDecision()`. */
-export type QuestionFeature =
-  | 'search_intent'
-  | 'related_context_gate'
-  | 'related_context_verdict'
-  | 'discussion_title'
-  | 'assistant_route'
-  | 'ticket_duplicate'
-  | 'desk_tags'
-  | 'radar_dedup'
-  | 'automation_step'
-  | 'summary_template'
-  | 'ticket_fields'
-  | 'agent_proactivity';
+export const QUESTION_FEATURES = [
+  'search_intent',
+  'related_context_gate',
+  'related_context_verdict',
+  'discussion_title',
+  'assistant_route',
+  'ticket_duplicate',
+  'desk_tags',
+  'radar_dedup',
+  'automation_step',
+  'summary_template',
+  'ticket_fields',
+  'agent_proactivity',
+] as const;
+export type QuestionFeature = (typeof QUESTION_FEATURES)[number];
 
 export type DecisionFeature = TaskFeature | QuestionFeature;
 

@@ -30,6 +30,7 @@ class EntityExtractionQueue {
 
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
+    if (!config.entityExtraction.enabled) return;
     try {
       this.queue = new Bull<EntityExtractionJobData>('entity-extraction', {
         redis: { ...redisService.getRedisConfig(), lazyConnect: false },

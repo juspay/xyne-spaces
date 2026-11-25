@@ -54,7 +54,7 @@ class CallTranscriptionQueue {
         },
         timeout: JOB_TIMEOUT_MS,
         removeOnComplete: true,
-        removeOnFail: false,
+        removeOnFail: 500,
       },
       // A job can hold for ~45 min, so a rolling
       // deploy can stall the same job more than once. Bull's default of 1 would fail it.

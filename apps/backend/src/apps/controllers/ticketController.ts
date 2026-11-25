@@ -8,9 +8,7 @@ import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-// Disabled (LLM)
-// import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
-import { type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import {
@@ -426,7 +424,7 @@ const transferTicketToBoard = async (params: {
 
   // Resolved outside the transaction: a stable bot-user lookup, not part of the
   // transactional state, and best kept off the held connection.
-  const systemActorId = await getTicketBotActorId(currentTicket.workspaceId);
+  const systemActorId = await getTicketBotActorId(currentTicket.workspaceId, updatedBy);
 
   const txResult = await transferTicketToBoardTx(targetBoardId, ticketId, now, updatedBy, currentTicket, systemActorId);
 
@@ -636,11 +634,10 @@ export class TicketController {
         return;
       }
 
-      // Disabled (LLM)
-      // const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
-      //   customFieldValues && customFieldValues.fieldValues.length > 0
-      //     ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.value }))
-      //     : undefined;
+      const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.value }))
+          : undefined;
 
       // Resolve channelId from channelName if not provided
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
@@ -722,25 +719,24 @@ export class TicketController {
         customFieldValues,
       });
 
-      // Disabled (LLM)
-      // // Check for duplicate tickets and persist references
-      // if (result.ticketId) {
-      //   ticketDuplicateService.persistDuplicateReferences({
-      //     ticketId: result.ticketId,
-      //     ticketCreatedBy: userId,
-      //     title,
-      //     description,
-      //     projectId,
-      //     userId,
-      //     channelId: resolvedChannelId,
-      //     scopeFieldValues: duplicateScopeValues,
-      //   }).catch(error => {
-      //     logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
-      //       ticketId: result.ticketId,
-      //       error,
-      //     });
-      //   });
-      // }
+      // Check for duplicate tickets and persist references
+      if (result.ticketId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: result.ticketId,
+          ticketCreatedBy: userId,
+          title,
+          description,
+          projectId,
+          userId,
+          channelId: resolvedChannelId,
+          scopeFieldValues: duplicateScopeValues,
+        }).catch(error => {
+          logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
+            ticketId: result.ticketId,
+            error,
+          });
+        });
+      }
 
       if (pendingFullRoleAssignment && userGroupId && result.ticketId) {
         try {

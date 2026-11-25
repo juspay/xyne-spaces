@@ -4,13 +4,17 @@ import { config as appConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { tagRepository } from '@/database/repositories/tagRepository';
+import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from './generators/llm';
 import { buildQuestions, generateJevTags, runShadowTagGeneration } from './generators/xorShadow';
 import { AgentsConfig } from '@/agents/config';
 import { isPrivateDecisionEngineConfigured } from '@/services/decision/targets';
+import { isLlmDecisionConfigured } from '@/services/decision/llmDecision';
 import { TagsConfigShapeSchema } from './schema';
 import { tagService } from './service';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
+
+const emailRepository = new EmailRepository();
 import type {
   CategoryConfig,
   ContextBuilderFn,
@@ -27,16 +31,16 @@ export type GeneratorMethod = 'llm';
 // Config is the same for every email in a channel — cache it per worker job cycle
 // to avoid hitting Postgres once per email during bulk ingestion.
 const CONFIG_CACHE_TTL_SECONDS = 120;
-const configCacheKey = (key: string) => `tag-config:${key}`;
+const configCacheKey = (key: string, workspaceId: string) => `tag-config:${workspaceId}:${key}`;
 
 function getDefaultConfig(sourceType: string): TagsConfigShape | null {
   if (sourceType === DESK_EMAIL_SOURCE_TYPE) return DEFAULT_DESK_EMAIL_CONFIG;
   return null;
 }
 
-export async function invalidateTagConfigCache(configKey: string): Promise<void> {
+export async function invalidateTagConfigCache(configKey: string, workspaceId: string): Promise<void> {
   try {
-    await redisService.del(configCacheKey(configKey));
+    await redisService.del(configCacheKey(configKey, workspaceId));
   } catch (err) {
     logger.warn(`[TAG][PIPELINE] Failed to invalidate config cache for "${configKey}":`, err);
   }
@@ -46,9 +50,9 @@ export async function invalidateTagConfigCache(configKey: string): Promise<void>
 // Also warms the Redis cache so the first worker job reads from cache rather
 // than hitting the DB. Returns false (and caches 'null') for opted-out channels
 // so the caller can skip enqueuing entirely.
-async function hasActiveConfig(configKey: string, sourceType: string): Promise<boolean> {
+async function hasActiveConfig(configKey: string, sourceType: string, workspaceId: string): Promise<boolean> {
   try {
-    const cached = await redisService.get(configCacheKey(configKey));
+    const cached = await redisService.get(configCacheKey(configKey, workspaceId));
     if (cached === 'null') return false;
     if (cached) {
       const parsed = TagsConfigShapeSchema.safeParse(JSON.parse(cached));
@@ -60,12 +64,12 @@ async function hasActiveConfig(configKey: string, sourceType: string): Promise<b
     logger.warn(`[TAG][PIPELINE] Redis cache read failed for "${configKey}", falling through to DB:`, err);
   }
 
-  const configRow = await tagRepository.getActiveConfigByKey(configKey);
+  const configRow = await tagRepository.getActiveConfigByKey(configKey, undefined, workspaceId);
   if (configRow) {
     const parsed = TagsConfigShapeSchema.safeParse(configRow.config);
     if (parsed.success && Object.values(parsed.data.categories).some(c => c.method !== 'manual')) {
       try {
-        await redisService.set(configCacheKey(configKey), JSON.stringify(parsed.data), CONFIG_CACHE_TTL_SECONDS);
+        await redisService.set(configCacheKey(configKey, workspaceId), JSON.stringify(parsed.data), CONFIG_CACHE_TTL_SECONDS);
       } catch (err) {
         logger.warn(`[TAG][PIPELINE] Failed to cache config for "${configKey}":`, err);
       }
@@ -73,7 +77,7 @@ async function hasActiveConfig(configKey: string, sourceType: string): Promise<b
     }
     // Row exists but empty, all-manual, or corrupted — treat as opted out, cache sentinel.
     try {
-      await redisService.set(configCacheKey(configKey), 'null', CONFIG_CACHE_TTL_SECONDS);
+      await redisService.set(configCacheKey(configKey, workspaceId), 'null', CONFIG_CACHE_TTL_SECONDS);
     } catch (err) {
       logger.warn(`[TAG][PIPELINE] Failed to cache sentinel for "${configKey}":`, err);
     }
@@ -84,7 +88,7 @@ async function hasActiveConfig(configKey: string, sourceType: string): Promise<b
   if (defaultConfig) {
     // No DB row but source type has a default — warm cache with default so the worker reads it from Redis.
     try {
-      await redisService.set(configCacheKey(configKey), JSON.stringify(defaultConfig), CONFIG_CACHE_TTL_SECONDS);
+      await redisService.set(configCacheKey(configKey, workspaceId), JSON.stringify(defaultConfig), CONFIG_CACHE_TTL_SECONDS);
     } catch (err) {
       logger.warn(`[TAG][PIPELINE] Failed to cache default config for "${configKey}":`, err);
     }
@@ -92,7 +96,7 @@ async function hasActiveConfig(configKey: string, sourceType: string): Promise<b
   }
 
   try {
-    await redisService.set(configCacheKey(configKey), 'null', CONFIG_CACHE_TTL_SECONDS);
+    await redisService.set(configCacheKey(configKey, workspaceId), 'null', CONFIG_CACHE_TTL_SECONDS);
   } catch (err) {
     logger.warn(`[TAG][PIPELINE] Failed to cache sentinel for "${configKey}":`, err);
   }
@@ -213,7 +217,7 @@ export class TagGenerationPipeline extends EventEmitter {
       throw new Error(`[TAG][PIPELINE] No context builder registered for sourceType "${data.sourceType}"`);
     }
 
-    if (!(await hasActiveConfig(data.configKey, data.sourceType))) {
+    if (!(await hasActiveConfig(data.configKey, data.sourceType, data.workspaceId))) {
       logger.info(`[TAG][PIPELINE] Skipping job — no active config for "${data.configKey}"`);
       return '';
     }
@@ -243,7 +247,7 @@ export class TagGenerationPipeline extends EventEmitter {
     // All items in a bulk call share the same channel/configKey — check once before
     // building the job list to avoid enqueueing when the channel is opted out.
     const firstItem = items[0];
-    if (firstItem && !(await hasActiveConfig(firstItem.configKey, firstItem.sourceType))) {
+    if (firstItem && !(await hasActiveConfig(firstItem.configKey, firstItem.sourceType, firstItem.workspaceId))) {
       logger.info(`[TAG][PIPELINE] Skipping bulk jobs — no active config for "${firstItem.configKey}"`);
       return 0;
     }
@@ -336,10 +340,18 @@ export class TagGenerationPipeline extends EventEmitter {
       throw new Error(`[TAG][PIPELINE] No context builder registered for sourceType "${sourceType}"`);
     }
 
+    if (sourceType === DESK_EMAIL_SOURCE_TYPE) {
+      const sourceEmail = await emailRepository.findById(sourceId);
+      if (!sourceEmail || sourceEmail.workspaceId !== workspaceId) {
+        logger.warn(`[TAG][PIPELINE] Email "${sourceId}" is not in workspace ${workspaceId}, skipping job`);
+        return { jobId, sourceId, sourceType, tags: [] };
+      }
+    }
+
     // During bulk ingestion every email in a channel shares the same config.
     // Read from Redis first to avoid N identical Postgres queries; fall through
     // to DB on a miss and repopulate the cache for the next job.
-    const cacheKey = configCacheKey(configKey);
+    const cacheKey = configCacheKey(configKey, workspaceId);
     let configShape: TagsConfigShape | null = null;
 
     try {
@@ -360,7 +372,7 @@ export class TagGenerationPipeline extends EventEmitter {
     }
 
     if (!configShape) {
-      const configRow = await tagRepository.getActiveConfigByKey(configKey);
+      const configRow = await tagRepository.getActiveConfigByKey(configKey, undefined, workspaceId);
       if (configRow) {
         const parsedConfig = TagsConfigShapeSchema.safeParse(configRow.config);
         if (!parsedConfig.success) {
@@ -398,7 +410,9 @@ export class TagGenerationPipeline extends EventEmitter {
     let consumeJev = false;
     if (sourceType === DESK_EMAIL_SOURCE_TYPE && isPrivateDecisionEngineConfigured()) {
       const cacConfig = await AgentsConfig.fetch();
-      consumeJev = cacConfig.shadowTagGenerationEnabled && cacConfig.tagGenerationJevEnabled;
+      consumeJev =
+        (cacConfig.shadowTagGenerationEnabled && cacConfig.tagGenerationJevEnabled) ||
+        !isLlmDecisionConfigured();
     }
 
     const generated: GeneratedTag[] = [];
@@ -416,6 +430,10 @@ export class TagGenerationPipeline extends EventEmitter {
 
     for (const [method, group] of Object.entries(byMethod)) {
       if (method === 'manual') continue;
+      if (method === 'llm' && !isLlmDecisionConfigured()) {
+        logger.info(`[TAG][PIPELINE] No LLM configured; skipping ${Object.keys(group).length} category(ies) for ${sourceId}`);
+        continue;
+      }
 
       const generator = this.getGenerator(method as GeneratorMethod);
       if (!generator) {
@@ -443,7 +461,7 @@ export class TagGenerationPipeline extends EventEmitter {
         undefined,
       );
       // Config changed — evict cache so subsequent jobs read the updated vocabulary.
-      await invalidateTagConfigCache(configKey);
+      await invalidateTagConfigCache(configKey, workspaceId);
     }
 
     // Replacement clears every category passed in, so keep Jev's unanswered ones out of it.

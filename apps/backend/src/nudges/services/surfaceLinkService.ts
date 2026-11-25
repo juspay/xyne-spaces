@@ -63,10 +63,10 @@ class SurfaceLinkService {
     }
   }
 
-  async deleteLinksForSource(sourceType: SurfaceAreaType, sourceId: string): Promise<void> {
+  async deleteLinksForSource(sourceType: SurfaceAreaType, sourceId: string, workspaceId?: string): Promise<void> {
     try {
       const result = await db.surfaceLink.deleteMany({
-        where: { sourceType, sourceId },
+        where: { sourceType, sourceId, ...(workspaceId ? { workspaceId } : {}) },
       });
 
       if (result.count > 0) {

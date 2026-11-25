@@ -63,9 +63,7 @@ import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stag
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
-// Disabled (LLM)
-// import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { suggestTicketFields, type TicketFieldSuggestionInput } from '@/services/ticketFieldSuggestions';
 import { AgentsConfig } from '@/agents/config';
@@ -119,27 +117,26 @@ type MyTicketBoardOption = {
   projectId?: string;
 };
 
-// Disabled (LLM)
-// const MAX_DUPLICATE_DECISIONS = 20;
+const MAX_DUPLICATE_DECISIONS = 20;
 
-// const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: string[] } => {
-//   let value = raw;
-//   if (typeof value === 'string') {
-//     try {
-//       value = JSON.parse(value);
-//     } catch {
-//       return { sameAs: null, notSame: [] };
-//     }
-//   }
-//   if (!value || typeof value !== 'object') return { sameAs: null, notSame: [] };
-//   const { sameAs, notSame } = value as { sameAs?: unknown; notSame?: unknown };
-//   return {
-//     sameAs: typeof sameAs === 'string' && sameAs.length > 0 ? sameAs : null,
-//     notSame: (Array.isArray(notSame) ? notSame : [])
-//       .filter((id): id is string => typeof id === 'string' && id.length > 0)
-//       .slice(0, MAX_DUPLICATE_DECISIONS),
-//   };
-// };
+const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: string[] } => {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return { sameAs: null, notSame: [] };
+    }
+  }
+  if (!value || typeof value !== 'object') return { sameAs: null, notSame: [] };
+  const { sameAs, notSame } = value as { sameAs?: unknown; notSame?: unknown };
+  return {
+    sameAs: typeof sameAs === 'string' && sameAs.length > 0 ? sameAs : null,
+    notSame: (Array.isArray(notSame) ? notSame : [])
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .slice(0, MAX_DUPLICATE_DECISIONS),
+  };
+};
 
 export class TicketController {
   ticketRepository: TicketRepository;
@@ -303,21 +300,20 @@ export class TicketController {
     // not be published before the transaction above commits.
     void emitTicketCreated(ticket, undefined, createdBy);
 
-    // Disabled (LLM)
-    // ticketDuplicateService.persistDuplicateReferences({
-    //   ticketId: ticket.id,
-    //   ticketCreatedBy: ticket.createdBy,
-    //   title,
-    //   description,
-    //   projectId,
-    //   userId: createdBy,
-    //   channelId: ticket.channelId,
-    // }).catch((error: Error) => {
-    //   logger.error('Failed to persist duplicate references for ticket', {
-    //     ticketId: ticket.id,
-    //     error,
-    //   });
-    // });
+    ticketDuplicateService.persistDuplicateReferences({
+      ticketId: ticket.id,
+      ticketCreatedBy: ticket.createdBy,
+      title,
+      description,
+      projectId,
+      userId: createdBy,
+      channelId: ticket.channelId,
+    }).catch((error: Error) => {
+      logger.error('Failed to persist duplicate references for ticket', {
+        ticketId: ticket.id,
+        error,
+      });
+    });
 
     return ticket;
   }
@@ -893,8 +889,7 @@ export class TicketController {
       }
 
       let formFieldChangesForEmit: FormFieldChanges | undefined;
-      // Disabled (LLM)
-      // let duplicateScopeValues: DuplicateScopeFieldValue[] | undefined;
+      let duplicateScopeValues: DuplicateScopeFieldValue[] | undefined;
       if (formFields.length > 0) {
         const fieldsWithValues = formFields
           .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
@@ -905,8 +900,7 @@ export class TicketController {
           }));
         if (fieldsWithValues.length > 0) {
           formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
-          // Disabled (LLM)
-          // duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.value }));
+          duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.value }));
         }
       }
 
@@ -1135,27 +1129,26 @@ export class TicketController {
         userName: req.user?.name ?? null,
       });
 
-      // Disabled (LLM)
-      // const duplicateDecisions = duplicateDecisionsOf(req.body.duplicateDecisions);
-      // if (!duplicateDecisions.sameAs) {
-      //   ticketDuplicateService.persistDuplicateReferences({
-      //     ticketId: ticket.id,
-      //     ticketCreatedBy: ticket.createdBy,
-      //     title,
-      //     description,
-      //     projectId,
-      //     userId,
-      //     parentTicketId,
-      //     channelId: ticket.channelId,
-      //     scopeFieldValues: duplicateScopeValues,
-      //     excludeTicketIds: duplicateDecisions.notSame,
-      //   }).catch(error => {
-      //     logger.error('Failed to persist duplicate references for ticket', {
-      //       ticketId: ticket.id,
-      //       error,
-      //     });
-      //   });
-      // }
+      const duplicateDecisions = duplicateDecisionsOf(req.body.duplicateDecisions);
+      if (!duplicateDecisions.sameAs) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: ticket.id,
+          ticketCreatedBy: ticket.createdBy,
+          title,
+          description,
+          projectId,
+          userId,
+          parentTicketId,
+          channelId: ticket.channelId,
+          scopeFieldValues: duplicateScopeValues,
+          excludeTicketIds: duplicateDecisions.notSame,
+        }).catch(error => {
+          logger.error('Failed to persist duplicate references for ticket', {
+            ticketId: ticket.id,
+            error,
+          });
+        });
+      }
 
       const response: GetTicketDetailsResponse = {
         id: ticket.id,

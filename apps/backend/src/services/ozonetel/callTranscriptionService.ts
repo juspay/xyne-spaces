@@ -1,6 +1,7 @@
 import { AttachmentEntityType } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { db } from '@/database/client';
 import { storageService } from '@/services/storage';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { telephonyEmailService } from './telephonyEmailService';
@@ -56,6 +57,10 @@ export class CallTranscriptionService {
 
     const email = await telephonyEmailService.getCallEmailWithPayload(emailId, workspaceId);
     if (!email) {
+      return this.fail(data, 'Call not found.');
+    }
+    const requester = await db.user.findFirst({ where: { id: userId, workspaceId }, select: { id: true } });
+    if (!requester) {
       return this.fail(data, 'Call not found.');
     }
 
@@ -147,12 +152,11 @@ export class CallTranscriptionService {
         ` | provider=${result.provider} | elapsed=${Date.now() - t0}ms`,
     );
 
-    // Disabled (LLM)
-    // const summary = await this.generateSummary(emailId, workspaceId, text);
-    // if (summary) {
-    //   await this.safeSetState(data, { status: 'done', attachmentId: attachment.id, summary });
-    //   logger.info(`${TAG} summary stored | emailId=${emailId} | chars=${summary.length} | elapsed=${Date.now() - t0}ms`);
-    // }
+    const summary = await this.generateSummary(emailId, workspaceId, text);
+    if (summary) {
+      await this.safeSetState(data, { status: 'done', attachmentId: attachment.id, summary });
+      logger.info(`${TAG} summary stored | emailId=${emailId} | chars=${summary.length} | elapsed=${Date.now() - t0}ms`);
+    }
 
     return { status: 'done', attachmentId: attachment.id };
   }

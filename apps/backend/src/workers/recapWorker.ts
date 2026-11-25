@@ -2,6 +2,7 @@ import { logger } from '@/utils/logger';
 import { recapGenerationService } from '@/services/recapGenerationService';
 import { redisService } from '@/services/redisService';
 import { db } from '@/database/client';
+import { config } from '@/config/env';
 import Bull from 'bull';
 import { RecapEntityType } from '@xyne/shared';
 
@@ -74,7 +75,10 @@ export class RecapWorker {
     logger.info(`[RECAP_WORKER] Processing cleanup job ${job.id || 'manual'}...`);
 
     try {
-      const retentionDays = job.data.retentionDays || 30;
+      const retentionDays = Math.max(1, Math.floor(Number(config.recapScheduler.retentionDays) || 30));
+      if (job.data.retentionDays !== undefined && job.data.retentionDays !== retentionDays) {
+        logger.warn(`[RECAP_WORKER] Ignoring retentionDays=${String(job.data.retentionDays)} from job; using configured ${retentionDays}`);
+      }
       const cutoffDate = new Date();
       cutoffDate.setUTCDate(cutoffDate.getUTCDate() - retentionDays);
       cutoffDate.setUTCHours(0, 0, 0, 0);

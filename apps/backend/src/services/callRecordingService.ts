@@ -1,6 +1,6 @@
 import { EgressClient, EgressStatus, SegmentedFileOutput, SegmentedFileProtocol, GCPUpload, S3Upload, EgressInfo } from 'livekit-server-sdk';
 import { type Call, type CallRecording } from '@prisma/client';
-import { promises as fs } from 'fs';
+import { promises as fs, createReadStream } from 'fs';
 import os from 'os';
 import path from 'path';
 import { config } from '@/config/env';
@@ -13,6 +13,10 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { MessageType, AttachmentEntityType, RecordingType } from '@xyne/shared';
 import { isRecording } from '@/utils/callTypeUtils';
 import type { CreateMessageAttachmentInput } from '@/database/repositories/messageAttachmentRepository';
+
+const SEGMENT_DOWNLOAD_CONCURRENCY = 8;
+const SEGMENT_DOWNLOAD_ATTEMPTS = 3;
+const SEGMENT_PREFIX = /^recordings\/[^/]+\/[^/]+\/$/;
 
 /** HLS segment length. Smaller = more frequent uploads (less data lost on crash). */
 const SEGMENT_DURATION_SECONDS = 6;
@@ -325,15 +329,18 @@ class CallRecordingService {
       await stitchHlsToMp4(path.join(workDir, path.basename(paths.playlistPath)), localOut);
 
       const mimetype = recordingMimetype(recording.recordingType);
-      const buffer = await fs.readFile(localOut);
-      await this.storageService.uploadFileV2(buffer, { path: paths.mp4Path, contentType: mimetype });
+      const { size: mp4Size } = await fs.stat(localOut);
+      await this.storageService.uploadStreamToPath(createReadStream(localOut), {
+        path: paths.mp4Path,
+        contentType: mimetype,
+      });
       if (!(await this.waitForFileExists(paths.mp4Path))) {
         throw new Error(`stitched MP4 not found at ${paths.mp4Path}`);
       }
 
       // Before markUploaded, so a recording is never reported playable without its attachment.
       if (isRecording(call)) {
-        await this.attachNoteTakerRecording(call, recording, paths.mp4Path, buffer.length);
+        await this.attachNoteTakerRecording(call, recording, paths.mp4Path, mp4Size);
       }
 
       await repositories.callRecordings.markUploaded(recordingId, { storagePath: paths.mp4Path });
@@ -373,14 +380,34 @@ class CallRecordingService {
   private async downloadSegments(segmentPrefix: string, destDir: string): Promise<void> {
     const files = await this.storageService.listFiles(segmentPrefix);
     if (files.length === 0) throw new Error(`no segments under ${segmentPrefix}`);
-    await Promise.all(files.map(async (f) => {
-      const buffer = await this.storageService.getFileBuffer(f.name);
-      await fs.writeFile(path.join(destDir, path.basename(f.name)), buffer);
-    }));
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < files.length) {
+        const name = files[next++].name;
+        await this.downloadWithRetry(name, path.join(destDir, path.basename(name)));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(SEGMENT_DOWNLOAD_CONCURRENCY, files.length) }, worker));
+  }
+
+  private async downloadWithRetry(name: string, dest: string): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.storageService.downloadFile(name, dest);
+        return;
+      } catch (err) {
+        if (attempt >= SEGMENT_DOWNLOAD_ATTEMPTS) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** (attempt - 1)));
+      }
+    }
   }
 
   /** Remove all HLS segments + playlist once the MP4 is safely stored. */
   private async deleteSegments(segmentPrefix: string): Promise<void> {
+    if (!SEGMENT_PREFIX.test(segmentPrefix)) {
+      logger.error('[CallRecording] refusing to delete a non-recording prefix', { segmentPrefix });
+      return;
+    }
     try {
       const files = await this.storageService.listFiles(segmentPrefix);
       await Promise.all(files.map((f) => this.storageService.deleteFile(f.name).catch((e) =>

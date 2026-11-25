@@ -1,5 +1,5 @@
 import { type Call } from '@prisma/client';
-import { CallType } from '@xyne/shared';
+import { CallOrigin, CallType } from '@xyne/shared';
 import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared/sdlc';
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
@@ -9,6 +9,7 @@ import { emitCallStarted } from '@/automations/triggers/call.trigger';
 import { validateOwnerInChannel, resolveItemTrackId, resolveInheritedOwner } from '@/sdlc/entityLinkService';
 import { activityService } from '@/services/activity/activityService';
 import { callSideEffectService } from '@/services/callSideEffectService';
+import { transcriptService } from '@/services/transcriptService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { logger } from '@/utils/logger';
 
@@ -265,21 +266,20 @@ class CallActivationService {
 
     logger.info(`[CallActivation] Successfully activated call ${roomName} for its first participant`);
 
-    // Disabled (LLM)
-    // // Generate title from thread call
-    // if (callOrigin === CallOrigin.CONVERSATION && existingConversationId && call) {
-    //   const callIdForUpdate = call.id;
-    //   transcriptService.generateCallTitleFromConversation(existingConversationId)
-    //     .then(async (generatedTitle) => {
-    //       if (generatedTitle) {
-    //         await repositories.calls.update(callIdForUpdate, { title: generatedTitle });
-    //         logger.info(`[CallActivation] Generated and saved title "${generatedTitle}" for call ${roomName}`);
-    //       }
-    //     })
-    //     .catch((error) => {
-    //       logger.error(`[CallActivation] Failed to generate title for call ${roomName}:`, error);
-    //     });
-    // }
+    // Generate title from thread call
+    if (callOrigin === CallOrigin.CONVERSATION && existingConversationId && call) {
+      const callIdForUpdate = call.id;
+      transcriptService.generateCallTitleFromConversation(existingConversationId)
+        .then(async (generatedTitle) => {
+          if (generatedTitle) {
+            await repositories.calls.update(callIdForUpdate, { title: generatedTitle });
+            logger.info(`[CallActivation] Generated and saved title "${generatedTitle}" for call ${roomName}`);
+          }
+        })
+        .catch((error) => {
+          logger.error(`[CallActivation] Failed to generate title for call ${roomName}:`, error);
+        });
+    }
 
     // Trigger notifications for invited participants
     if (result.invitedParticipantIds.length > 0) {

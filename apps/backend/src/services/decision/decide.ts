@@ -2,6 +2,7 @@ import type { AgentsConfig } from '@/agents/config';
 import { recordRun } from '@/services/otel/decisionMetrics';
 import { runEngine } from './engines';
 import { evaluateInBackground } from './evaluation';
+import { isLlmDecisionConfigured } from './llmDecision';
 import { primaryEngine } from './routes';
 import type { DecisionTask, EngineRun } from './types';
 
@@ -20,7 +21,7 @@ export async function decide<T>(task: DecisionTask<T>, { agentsConfig, evaluate 
   const primary = primaryEngine(task.feature, agentsConfig);
 
   const runs: EngineRun<T>[] = [await runEngine(primary, task)];
-  if (runs[0].answer === null && primary !== 'llm') {
+  if (runs[0].answer === null && primary !== 'llm' && isLlmDecisionConfigured()) {
     runs.push(await runEngine('llm', task));
   }
   for (const run of runs) {

@@ -4,8 +4,7 @@ import { validateZod } from '@/middleware/validation';
 import {
   CreateTagBodySchema,
   CreateTagsConfigBodySchema,
-  // Disabled (LLM)
-  // ConfirmTagBodySchema,
+  ConfirmTagBodySchema,
   DeleteTagBodySchema,
   SetManualTagsBodySchema,
   UpdateTagBodySchema,
@@ -16,8 +15,7 @@ import {
   createTag,
   updateTag,
   deleteTag,
-  // Disabled (LLM)
-  // confirmTag,
+  confirmTag,
   setManualTags,
   getCategoriesCatalog,
   getUniqueTagValues,
@@ -40,8 +38,7 @@ tagRoutes.get('/', authMiddleware.authenticate, listTags);
 tagRoutes.post('/', authMiddleware.authenticate, validateZod(CreateTagBodySchema), createTag);
 tagRoutes.put('/', authMiddleware.authenticate, validateZod(SetManualTagsBodySchema), setManualTags);
 tagRoutes.patch('/', authMiddleware.authenticate, validateZod(UpdateTagBodySchema), updateTag);
-// Disabled (LLM)
-// tagRoutes.patch('/confirm', authMiddleware.authenticate, validateZod(ConfirmTagBodySchema), confirmTag);
+tagRoutes.patch('/confirm', authMiddleware.authenticate, validateZod(ConfirmTagBodySchema), confirmTag);
 tagRoutes.delete('/', authMiddleware.authenticate, validateZod(DeleteTagBodySchema), deleteTag);
 
 const tagsConfigRoutes = Router();

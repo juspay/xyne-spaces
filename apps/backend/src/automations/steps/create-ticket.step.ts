@@ -111,12 +111,8 @@ export class CreateTicketStep extends BaseActionStep<
       if (!plainDescription) {
         throw new Error('[CREATE_TICKET] Description must contain text to generate a title');
       }
-      // Disabled (LLM)
-      // title =
-      //   (await generateTitleWithRetry(plainDescription, createdBy)) ??
-      //   truncateForTitle(plainDescription);
       title =
-        ((false as boolean) ? await generateTitleWithRetry(plainDescription, createdBy) : null) ??
+        (await generateTitleWithRetry(plainDescription, createdBy)) ??
         truncateForTitle(plainDescription);
     }
 

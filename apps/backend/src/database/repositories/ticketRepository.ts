@@ -407,7 +407,7 @@ export class TicketRepository {
     const now = new Date();
     // Resolved outside the transaction: a stable bot-user lookup, not part of the
     // transactional state, and best kept off the held connection.
-    const systemActorId = await getTicketBotActorId(currentTicket.workspaceId);
+    const systemActorId = await getTicketBotActorId(currentTicket.workspaceId, updatedBy);
 
     // Everything below that mutates TicketStageEta, the ticket row (stage/status/eta/
     // metadata), and TicketActivity rows must commit atomically - previously this ran as a

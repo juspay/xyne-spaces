@@ -46,10 +46,9 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { AttachmentUploadError } from '@/integrations/core/baseMailReplySender';
 import { extractEmailAddress } from '@/utils/email';
 import { emailService } from '@/services/emailService';
-// Disabled (LLM)
-// import { config as appConfig } from '@/config/env';
-// import { tagGenerationPipeline } from '@/tags/pipeline';
-// import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
+import { config as appConfig } from '@/config/env';
+import { tagGenerationPipeline } from '@/tags/pipeline';
+import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { v4 as uuidv4 } from 'uuid';
@@ -533,19 +532,18 @@ export class EmailController {
         newEmail.createdAt,
       );
 
-      // Disabled (LLM)
-      // if (appConfig.enableTagGenerationPipeline && channel.workspaceId) {
-      //   void tagGenerationPipeline.addGenerationJob({
-      //     sourceId: newEmail.id,
-      //     sourceType: DESK_EMAIL_SOURCE_TYPE,
-      //     workspaceId: channel.workspaceId,
-      //     configKey: deskEmailConfigKey(conversation.channelId),
-      //   }, 2).then((jobId) => {
-      //     logger.info(`[TagFramework] Enqueued tag generation job ${jobId} for reply email ${newEmail.id}`);
-      //   }).catch((err: unknown) => {
-      //     logger.error(`[TagFramework] Failed to enqueue tag generation for reply email ${newEmail.id}`, err);
-      //   });
-      // }
+      if (appConfig.enableTagGenerationPipeline && channel.workspaceId) {
+        void tagGenerationPipeline.addGenerationJob({
+          sourceId: newEmail.id,
+          sourceType: DESK_EMAIL_SOURCE_TYPE,
+          workspaceId: channel.workspaceId,
+          configKey: deskEmailConfigKey(conversation.channelId),
+        }, 2).then((jobId) => {
+          logger.info(`[TagFramework] Enqueued tag generation job ${jobId} for reply email ${newEmail.id}`);
+        }).catch((err: unknown) => {
+          logger.error(`[TagFramework] Failed to enqueue tag generation for reply email ${newEmail.id}`, err);
+        });
+      }
 
       void (async (): Promise<void> => {
         try {

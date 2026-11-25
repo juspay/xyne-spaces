@@ -7,8 +7,7 @@ import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, computeCanvasPermissions } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
-// Disabled (LLM)
-// import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
+import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
 import { config } from '@/config/env';
 import { validateVespaJob } from '@/zero/vespa-injection/core/jobValidation';
 import { SubApp } from '@/vespa/src/types';
@@ -191,23 +190,22 @@ export class VespaFileWorker {
 			// scheduler (if enabled). When routed, the scheduler owns processing —
 			// skip synchronous parsing. The name-only feed never parses content, so
 			// it must not be routed to the scheduler.
-			// Disabled (LLM)
-			// if (
-			// 	jobType === 'feed' &&
-			// 	schema === fileSchema &&
-			// 	!job.data.nameOnly &&
-			// 	(app === SubApp.COLLECTIONS ||
-			// 		app === SubApp.CHAT_ATTACHMENT ||
-			// 		app === SubApp.TICKET_ATTACHMENT)
-			// ) {
-			// 	const routed = await routePdfToScheduler(docId, app);
-			// 	if (routed) {
-			// 		logger.info(
-			// 			`[VESPA_FILE_WORKER] Routed ${docId} (${app}) to async OCR scheduler; skipping sync processing`,
-			// 		);
-			// 		return;
-			// 	}
-			// }
+			if (
+				jobType === 'feed' &&
+				schema === fileSchema &&
+				!job.data.nameOnly &&
+				(app === SubApp.COLLECTIONS ||
+					app === SubApp.CHAT_ATTACHMENT ||
+					app === SubApp.TICKET_ATTACHMENT)
+			) {
+				const routed = await routePdfToScheduler(docId, app);
+				if (routed) {
+					logger.info(
+						`[VESPA_FILE_WORKER] Routed ${docId} (${app}) to async OCR scheduler; skipping sync processing`,
+					);
+					return;
+				}
+			}
 
 			// Check if file indexing is enabled
 			if (jobType === 'feed' && schema === fileSchema) {

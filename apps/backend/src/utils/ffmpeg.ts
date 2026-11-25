@@ -5,17 +5,31 @@ import { spawn } from 'child_process';
  * (fast, lossless); `+faststart` moves the moov atom to the front for web
  * playback. Works for audio-only and A/V segments alike.
  */
+const FFMPEG_TIMEOUT_MS = 30 * 60 * 1000;
+const STDERR_TAIL_BYTES = 4000;
+
 export function stitchHlsToMp4(playlistPath: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = ['-y', '-i', playlistPath, '-c', 'copy', '-movflags', '+faststart', outputPath];
-    const proc = spawn('ffmpeg', args);
+    const args = [
+      '-y',
+      '-nostdin',
+      '-protocol_whitelist', 'file',
+      '-allowed_extensions', 'ts,m4s,mp4,m3u8,aac',
+      '-i', playlistPath,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outputPath,
+    ];
+    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const timer = setTimeout(() => proc.kill('SIGKILL'), FFMPEG_TIMEOUT_MS);
 
     let stderr = '';
-    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
+    proc.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-STDERR_TAIL_BYTES); });
+    proc.on('error', (err) => { clearTimeout(timer); reject(err); });
+    proc.on('close', (code, signal) => {
+      clearTimeout(timer);
       if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-2000)}`));
+      else reject(new Error(`ffmpeg exited with code ${code}${signal ? ` (${signal})` : ''}: ${stderr.slice(-2000)}`));
     });
   });
 }

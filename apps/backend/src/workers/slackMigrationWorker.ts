@@ -265,9 +265,50 @@ async function cleanupExpiredJobs(): Promise<void> {
 
 // ─── Job Processor ────────────────────────────────────────────────────────────
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Re-reads the job's sheet row and checks the job against it; returns the row's own settings. */
+async function verifyJobAgainstSheet(
+  data: SlackMigrationJobData,
+): Promise<{ postNotification: boolean; isDaily: boolean }> {
+  const { rowIndex, slackChannelId, xyneChannelId, syncDate, syncEndDate } = data;
+  if (!Number.isInteger(rowIndex) || rowIndex < 2) {
+    throw new Error(`invalid sheet row index ${String(rowIndex)}`);
+  }
+  if (!ISO_DATE.test(syncDate) || (syncEndDate !== undefined && !ISO_DATE.test(syncEndDate))) {
+    throw new Error('invalid sync date in job');
+  }
+
+  const row = (await readSheetRows()).find((r) => r.rowIndex === rowIndex);
+  if (!row || row.slackChannelId !== slackChannelId) {
+    throw new Error(`sheet row ${rowIndex} does not list Slack channel ${slackChannelId}`);
+  }
+
+  if (row.xyneChannelId) {
+    if (row.xyneChannelId !== xyneChannelId) {
+      throw new Error(`sheet row ${rowIndex} targets a different Xyne channel`);
+    }
+  } else {
+    const project = row.projectId
+      ? await db.project.findUnique({ where: { id: row.projectId }, select: { workspaceId: true } })
+      : null;
+    const channel = project?.workspaceId
+      ? await db.channel.findFirst({
+          where: { id: xyneChannelId, workspaceId: project.workspaceId },
+          select: { id: true },
+        })
+      : null;
+    if (!channel) {
+      throw new Error(`Xyne channel ${xyneChannelId} is not in sheet row ${rowIndex}'s project workspace`);
+    }
+  }
+
+  return { postNotification: row.postNotification, isDaily: row.isDaily };
+}
+
 async function processJob(job: Bull.Job<SlackMigrationJobData>): Promise<void> {
-  const { rowIndex, slackChannelName, slackChannelId, xyneChannelId, syncDate, syncEndDate, postNotification, isDaily, runDate } =
-    job.data;
+  const { rowIndex, slackChannelName, slackChannelId, xyneChannelId, syncDate, syncEndDate, runDate } = job.data;
+  const { postNotification, isDaily } = await verifyJobAgainstSheet(job.data);
 
   logger.info(
     `[SLACK-MIGRATION-WORKER] Processing #${slackChannelName} (${slackChannelId}, row ${rowIndex}, syncDate ${syncDate})`,
@@ -335,14 +376,19 @@ class SlackMigrationWorker {
     // immediately re-enqueue via snapshotAndEnqueue() below, which is idempotent:
     // channels already marked "Migrated" are skipped, only pending ones get queued.
     try {
-      const redis = redisService.getClient();
-      const keys = await redis.keys('bull:slack-migration-nightly:*');
-      if (keys.length > 0) {
-        await redis.del(...keys);
-        logger.info(`[SLACK-MIGRATION-WORKER] Flushed ${keys.length} stale Redis key(s) on startup`);
+      const staleQueue = getSlackMigrationQueue();
+      const removed = (
+        await Promise.all(
+          (['wait', 'delayed', 'paused', 'failed', 'completed'] as const).map((status) =>
+            staleQueue.clean(0, status),
+          ),
+        )
+      ).reduce((total, jobs) => total + jobs.length, 0);
+      if (removed > 0) {
+        logger.info(`[SLACK-MIGRATION-WORKER] Removed ${removed} stale job(s) on startup`);
       }
     } catch (err) {
-      logger.warn('[SLACK-MIGRATION-WORKER] Could not flush stale Redis keys on startup:', err);
+      logger.warn('[SLACK-MIGRATION-WORKER] Could not clean stale jobs on startup:', err);
     }
 
     const redisConfig = { ...redisService.getRedisConfig(), lazyConnect: false };

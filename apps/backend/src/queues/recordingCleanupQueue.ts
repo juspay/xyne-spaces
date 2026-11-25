@@ -44,7 +44,7 @@ class RecordingCleanupQueue {
             delay: 2000,
           },
           removeOnComplete: true,
-          removeOnFail: false,
+          removeOnFail: 500,
         },
       });
 
