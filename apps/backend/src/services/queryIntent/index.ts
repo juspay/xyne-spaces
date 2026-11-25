@@ -1,4 +1,5 @@
 import type { JsonValue } from '@openfeature/server-sdk';
+import { superpositionDefault } from '@/config/env';
 import { superpositionClient, type SuperpositionContext } from '@/services/superpositionClient';
 import { askDecisionNouls } from '@/services/decision/ask';
 import { isDecisionEngineConfigured } from '@/services/decision/targets';
@@ -81,13 +82,18 @@ const DEFAULT_INTENT_CONFIG: IntentConfig = {
   threshold: AI_MODE_THRESHOLD,
 };
 
-/** The intent config from Superposition, or the defaults above (feature off). */
-const getIntentConfig = async (ctx: QueryIntentContext): Promise<IntentConfig> =>
-  (await superpositionClient.getObjectValue(
+/**
+ * The intent config from Superposition (or this stack's SUPERPOSITION_DEFAULTS), over the
+ * defaults above (feature off). A partial object, e.g. `{ "enabled": true }`, keeps the rest.
+ */
+const getIntentConfig = async (ctx: QueryIntentContext): Promise<IntentConfig> => ({
+  ...DEFAULT_INTENT_CONFIG,
+  ...((await superpositionClient.getObjectValue(
     INTENT_CONFIG_KEY,
-    DEFAULT_INTENT_CONFIG as unknown as JsonValue,
+    superpositionDefault(INTENT_CONFIG_KEY, DEFAULT_INTENT_CONFIG as unknown as JsonValue),
     { userId: ctx.userId, workspaceId: ctx.workspaceId, ...ctx.cac }
-  )) as unknown as IntentConfig;
+  )) as unknown as Partial<IntentConfig> | null),
+});
 
 /**
  * Decides whether a cmd+k query is a keyword lookup or needs AI.
@@ -103,7 +109,12 @@ export const classifyQueryIntent = async (
   const config = await getIntentConfig(ctx);
   if (!config.enabled) return null;
 
-  const answers = await askDecisionNouls('search_intent', query.trim(), { pAI: config.question }, TIMEOUT_MS);
+  const answers = await askDecisionNouls(
+    'search_intent',
+    query.trim(),
+    { pAI: config.question },
+    TIMEOUT_MS
+  );
   if (!answers) return null;
   const { pAI } = answers;
   return { mode: pAI > config.threshold ? 'ai' : 'lexical', pAI };

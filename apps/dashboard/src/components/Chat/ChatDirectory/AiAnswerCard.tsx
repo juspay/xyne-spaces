@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
 import { useCmdkAiAnswer } from '../../../hooks/useCmdkAiAnswer';
 import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
@@ -22,6 +22,8 @@ interface AiAnswerCardProps {
    * unmounting would throw away a good answer and pay for it again on the way back.
    */
   active: boolean;
+  /** A source link in the answer was clicked: close the palette so the source shows. */
+  onSourceOpen?: () => void;
 }
 
 // Borderless, like a search overview sitting on the palette, carrying the Ask AI star
@@ -67,7 +69,12 @@ const AnswerSkeleton = (): ReactElement => (
  *
  * Not a cmdk item: arrow keys and Enter keep working on the results underneath.
  */
-export const AiAnswerCard = ({ query, tab, active }: AiAnswerCardProps): ReactElement | null => {
+export const AiAnswerCard = ({
+  query,
+  tab,
+  active,
+  onSourceOpen,
+}: AiAnswerCardProps): ReactElement | null => {
   const { answer, ask } = useCmdkAiAnswer();
 
   useEffect(() => {
@@ -78,12 +85,25 @@ export const AiAnswerCard = ({ query, tab, active }: AiAnswerCardProps): ReactEl
 
   // Same citation pipeline as chat bubbles: inline `[clf-…#n]` markers become source
   // chips backed by the tool calls' citations.
+  // Stable, so the markdown components aren't rebuilt each time the palette re-renders.
+  const onSourceOpenRef = useRef(onSourceOpen);
+  onSourceOpenRef.current = onSourceOpen;
+  const handleSourceOpen = useCallback(() => onSourceOpenRef.current?.(), []);
+
   const citationCtx = useMemo(() => {
     const toolNumbers = buildClawCitationToolNumbers(answer.content);
     return toolNumbers.size > 0 && answer.toolInvocations.length > 0
-      ? { toolInvocations: answer.toolInvocations, toolNumbers }
+      ? {
+          toolInvocations: answer.toolInvocations,
+          toolNumbers,
+          // Cmd+K's own surface is z-[9999]; the default tooltip and source list (z-[60])
+          // would open behind it.
+          overlayClassName: 'z-[10001]',
+          // A source opens behind the palette, which stays open; close it so the source shows.
+          onSourceOpen: handleSourceOpen,
+        }
       : undefined;
-  }, [answer.content, answer.toolInvocations]);
+  }, [answer.content, answer.toolInvocations, handleSourceOpen]);
   const renderedContent = useMemo(
     () =>
       stripCitationMarks(

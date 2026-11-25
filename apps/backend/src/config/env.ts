@@ -452,6 +452,9 @@ const envSchema = Joi.object({
   SUPERPOSITION_LOTUS_WORKSPACE_ID: Joi.string().allow('').default('lotus'),
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
+  // JSON object of Superposition key -> value: the default a read gets when Superposition has no
+  // value for the key (see superpositionDefault). Unset keys keep the code's own default.
+  SUPERPOSITION_DEFAULTS: Joi.string().allow('').default(''),
   // Jenkins Configuration
   JENKINS_BASE_URL: Joi.string().uri().default(''),
   JENKINS_JOB_PATH: Joi.string().default(''),
@@ -845,6 +848,21 @@ const { error, value: envVars } = envSchema.validate({ ...process.env, ...getKms
 
 if (error) {
   throw new Error(`Config validation error: ${error.message}`);
+}
+
+/** SUPERPOSITION_DEFAULTS as a key -> value map; a malformed value stops the boot. */
+function parseSuperpositionDefaults(raw: string): Readonly<Record<string, unknown>> {
+  if (!raw.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Config validation error: SUPERPOSITION_DEFAULTS is not valid JSON (${(e as Error).message})`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Config validation error: SUPERPOSITION_DEFAULTS must be a JSON object of key -> value');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export const config = {
@@ -1302,6 +1320,7 @@ export const config = {
     lotusWorkspaceId: envVars.SUPERPOSITION_LOTUS_WORKSPACE_ID,
     pollingInterval: envVars.SUPERPOSITION_POLLING_INTERVAL,
     timeout: envVars.SUPERPOSITION_TIMEOUT,
+    defaults: parseSuperpositionDefaults(envVars.SUPERPOSITION_DEFAULTS as string),
   },
   jenkins: {
     baseUrl: envVars.JENKINS_BASE_URL,
@@ -1725,3 +1744,12 @@ export const config = {
     connectMaxDelayMs: envVars.CONNECT_RETRY_MAX_DELAY_MS as number,
   },
 };
+
+/**
+ * The default to pass a Superposition read for `key`: this stack's SUPERPOSITION_DEFAULTS value
+ * when it has the code default's type, else the code default itself.
+ */
+export function superpositionDefault<T>(key: string, codeDefault: T): T {
+  const value = config.superposition.defaults[key];
+  return value !== undefined && typeof value === typeof codeDefault ? (value as T) : codeDefault;
+}
