@@ -30,6 +30,8 @@ export interface MeetSpace {
   name: string;
   meetingUri?: string;
   meetingCode?: string;
+  /** The sitting in progress right now, if any: how a non-organiser learns its record id. */
+  activeConference?: { conferenceRecord?: string };
   config?: {
     accessType?: string;
     artifactConfig?: {
@@ -139,6 +141,11 @@ export async function enableMeetAutoTranscription(accessToken: string, meetingCo
 export function listMeetConferenceRecords(accessToken: string, meetingCode: string): Promise<MeetConferenceRecord[]> {
   const filter = encodeURIComponent(`space.meeting_code = "${meetingCode}"`);
   return listAll<MeetConferenceRecord>(accessToken, `conferenceRecords?filter=${filter}`, 'conferenceRecords', 25, 4);
+}
+
+/** One sitting by its resource name. Participants may read it, unlike the organiser-only list. */
+export function getMeetConferenceRecord(accessToken: string, conferenceRecord: string): Promise<MeetConferenceRecord> {
+  return meetFetch<MeetConferenceRecord>(accessToken, conferenceRecord);
 }
 
 export function listMeetTranscripts(accessToken: string, conferenceRecord: string): Promise<MeetTranscript[]> {

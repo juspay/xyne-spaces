@@ -3,6 +3,7 @@ import {
   type MeetTranscriptCall,
   asMeetTranscriptOwner,
   findCalendarMeetCallsEnded,
+  findCalendarMeetCallsLive,
   findCalendarMeetCallsStarting,
   findGoogleCalendarSourceId,
   findMeetTranscriptCall,
@@ -14,6 +15,8 @@ import {
   GoogleMeetApiError,
   type MeetConferenceRecord,
   enableMeetAutoTranscription,
+  getMeetConferenceRecord,
+  getMeetSpace,
   listMeetConferenceRecords,
   listMeetParticipants,
   listMeetTranscriptEntries,
@@ -38,9 +41,20 @@ import { logger } from '@/utils/logger';
  * 2. After it ends: reads Meet's transcript through the Meet REST API, stores it as
  *    the call's transcript and runs the usual transcript pipeline.
  *
- * Both use the organiser's own Google Calendar connection: Google only lets the
- * organiser change a meeting's settings and read its records. Progress is kept in
- * Redis, not on the call, because calendar sync rewrites the call's metadata.
+ * Both use the organiser's own Google Calendar connection: only the organiser may
+ * change a meeting's settings or list its records.
+ *
+ * Attendees (and co-hosts) who opted in get the transcript on their own calendar
+ * copy too, through their own connection. They cannot list the meeting's records,
+ * but participants may read a record they know, so:
+ *
+ * 3. While the meeting runs: reads the meeting space every couple of minutes and
+ *    keeps the id of the sitting in progress (`activeConference`).
+ * 4. After it ends: reads those sittings' transcripts, as in step 2.
+ *
+ * An attendee cannot turn transcription on; the organiser's setting or someone in the
+ * meeting must. Progress is kept in Redis, not on the call, because calendar sync
+ * rewrites the call's metadata.
  */
 
 const TAG = '[MEET-TRANSCRIPT]';
@@ -58,10 +72,16 @@ const EARLY_START_MS = 30 * MINUTE;
 const MAX_WAIT_MINUTES = 15;
 /** Meetings handled per pass, so one pass stays well inside its minute. */
 const MAX_PER_PASS = 25;
+/** How often an attendee's live meeting is checked for the sitting in progress. */
+const CAPTURE_EVERY_SECONDS = 2 * 60;
+/** How long captured sitting ids are kept: past the last fetch try for the meeting. */
+const RECORDS_TTL_SECONDS = 12 * 3600;
 
 const enableKey = (callId: string) => `meet-transcript:enable:${callId}`;
 const waitKey = (callId: string) => `meet-transcript:wait:${callId}`;
 const triesKey = (callId: string) => `meet-transcript:tries:${callId}`;
+const captureKey = (callId: string) => `meet-transcript:capture:${callId}`;
+const recordsKey = (callId: string) => `meet-transcript:records:${callId}`;
 
 interface CalendarCallMetadata {
   calendarOwnerEmail?: string;
@@ -101,7 +121,30 @@ export async function fetchMeetTranscript(
   meetingCode: string,
   call: Pick<MeetTranscriptCall, 'startsAt' | 'endsAt'>,
 ): Promise<MeetTranscriptFetch> {
-  const records = recordsOfEvent(await listMeetConferenceRecords(accessToken, meetingCode), call);
+  return readMeetTranscript(accessToken, recordsOfEvent(await listMeetConferenceRecords(accessToken, meetingCode), call));
+}
+
+/**
+ * Same, for an attendee: starts from the sittings captured while the meeting ran
+ * (an attendee cannot list them). A sitting that can no longer be read is skipped.
+ */
+export async function fetchMeetTranscriptByRecords(
+  accessToken: string,
+  recordNames: string[],
+  call: Pick<MeetTranscriptCall, 'startsAt' | 'endsAt'>,
+): Promise<MeetTranscriptFetch> {
+  const records: MeetConferenceRecord[] = [];
+  for (const name of recordNames) {
+    try {
+      records.push(await getMeetConferenceRecord(accessToken, name));
+    } catch (error) {
+      if (!(error instanceof GoogleMeetApiError && error.status === 404)) throw error;
+    }
+  }
+  return readMeetTranscript(accessToken, recordsOfEvent(records, call));
+}
+
+async function readMeetTranscript(accessToken: string, records: MeetConferenceRecord[]): Promise<MeetTranscriptFetch> {
   if (records.length === 0) return { state: 'waiting', reason: 'no_meeting' };
   if (records.some((record) => !record.endTime)) return { state: 'waiting', reason: 'still_running' };
 
@@ -139,21 +182,29 @@ class MeetTranscriptService {
   async runOnce(now = new Date()): Promise<{ enabled: number; saved: number }> {
     if (!this.enabled) return { enabled: 0, saved: 0 };
     const time = now.getTime();
-    const [starting, ended] = await Promise.all([
+    const [starting, live, ended] = await Promise.all([
       findCalendarMeetCallsStarting(new Date(time - ENABLE_AFTER_MS), new Date(time + ENABLE_BEFORE_MS)),
+      // From a sitting's earliest start before the event to its latest overrun after it.
+      findCalendarMeetCallsLive(new Date(time - FETCH_UNTIL_MS), new Date(time + EARLY_START_MS)),
       findCalendarMeetCallsEnded(new Date(time - FETCH_UNTIL_MS), new Date(time - FETCH_FROM_MS)),
     ]);
-    const organised = [...starting, ...ended].filter(organisesMeeting);
-    const optedIn = await findMeetTranscriptUserIds([...new Set(organised.map((call) => call.createdByUserId))]);
-    const mine = (calls: MeetTranscriptCall[]) =>
-      calls.filter((call) => organisesMeeting(call) && optedIn.has(call.createdByUserId)).slice(0, MAX_PER_PASS);
+    const optedIn = await findMeetTranscriptUserIds([
+      ...new Set([...starting, ...live, ...ended].map((call) => call.createdByUserId)),
+    ]);
+    const pick = (calls: MeetTranscriptCall[], organiser: boolean | null) =>
+      calls
+        .filter((call) => optedIn.has(call.createdByUserId) && (organiser === null || organisesMeeting(call) === organiser))
+        .slice(0, MAX_PER_PASS);
 
     let enabled = 0;
-    for (const call of mine(starting)) {
+    for (const call of pick(starting, true)) {
       if (await this.enableTranscription(call)) enabled++;
     }
+    for (const call of pick(live, false)) {
+      await this.captureLiveConference(call);
+    }
     let saved = 0;
-    for (const call of mine(ended)) {
+    for (const call of pick(ended, null)) {
       if (await this.saveTranscript(call)) saved++;
     }
     return { enabled, saved };
@@ -194,34 +245,84 @@ class MeetTranscriptService {
     }
   }
 
+  /** The existing transcript pipeline for a saved transcript. Never rejects. */
+  private async runPipeline(
+    call: Parameters<typeof noteTakerTranscriptService.processTranscript>[0],
+    log: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await asMeetTranscriptOwner(call, () => noteTakerTranscriptService.processTranscript(call, true));
+    } catch (error) {
+      logger.error(`${TAG} process_failed`, { ...log, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /**
+   * For an attendee's meeting in progress: keeps the id of the sitting running now, so
+   * its transcript can be read after it ends. True when it found a new one.
+   */
+  private async captureLiveConference(call: MeetTranscriptCall): Promise<boolean> {
+    const code = meetCodeFrom(call.roomLink ?? '');
+    if (!code) return false;
+    if (!(await redisService.set(captureKey(call.id), 'checking', CAPTURE_EVERY_SECONDS, true))) return false;
+    const log = { callId: call.id, userId: call.createdByUserId, meetingCode: code, role: 'attendee' };
+    try {
+      const accessToken = await this.accessTokenFor(call.createdByUserId);
+      if (!accessToken) {
+        logger.warn(`${TAG} capture_skipped`, { ...log, reason: 'no_google_connection' });
+        return false;
+      }
+      const record = (await getMeetSpace(accessToken, code)).activeConference?.conferenceRecord;
+      if (!record) return false;
+      const added = await redisService.sadd(recordsKey(call.id), record);
+      await redisService.expire(recordsKey(call.id), RECORDS_TTL_SECONDS);
+      if (added > 0) logger.info(`${TAG} sitting_captured`, { ...log, record });
+      return added > 0;
+    } catch (error) {
+      // 403/404: Google won't show this user the meeting space (e.g. outside the
+      // organiser's Workspace). Retrying every couple of minutes won't change that.
+      const permanent = error instanceof GoogleMeetApiError && (error.status === 403 || error.status === 404);
+      if (permanent) await redisService.set(captureKey(call.id), 'failed', 6 * 3600);
+      logger.warn(`${TAG} capture_failed`, { ...log, permanent, error: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+  }
+
   /** Fetches and saves Meet's transcript of one ended meeting. True when it was saved. */
   private async saveTranscript(call: MeetTranscriptCall): Promise<boolean> {
     const code = meetCodeFrom(call.roomLink ?? '');
     if (!code) return false;
+    const organiser = organisesMeeting(call);
+    // An attendee can only read sittings captured while the meeting ran.
+    const recordNames = organiser ? [] : await redisService.smembers(recordsKey(call.id));
+    if (!organiser && recordNames.length === 0) return false;
     const tries = Number(await redisService.get(triesKey(call.id))) || 0;
     const waitMinutes = Math.min(2 ** (tries + 1), MAX_WAIT_MINUTES);
     // Claims this try and spaces out the next one.
     if (!(await redisService.set(waitKey(call.id), '1', waitMinutes * 60, true))) return false;
     await redisService.set(triesKey(call.id), String(tries + 1), 4 * 3600);
 
-    const log = { callId: call.id, userId: call.createdByUserId, meetingCode: code, tries: tries + 1 };
+    const log = { callId: call.id, userId: call.createdByUserId, meetingCode: code, tries: tries + 1, role: organiser ? 'organiser' : 'attendee' };
     try {
       const accessToken = await this.accessTokenFor(call.createdByUserId);
       if (!accessToken) {
         logger.warn(`${TAG} fetch_skipped`, { ...log, reason: 'no_google_connection' });
         return false;
       }
-      const result = await fetchMeetTranscript(accessToken, code, call);
+      const result = organiser
+        ? await fetchMeetTranscript(accessToken, code, call)
+        : await fetchMeetTranscriptByRecords(accessToken, recordNames, call);
       if (result.state === 'waiting') {
         logger.info(`${TAG} not_ready`, { ...log, reason: result.reason });
         return false;
       }
       const full = await findMeetTranscriptCall(call.id);
       if (!full || full.transcript) return false;
-      await asMeetTranscriptOwner(full, async () => {
-        await transcriptService.storeRawTranscript(full.externalId, result.entries);
-        await noteTakerTranscriptService.processTranscript(full, true);
-      });
+      await asMeetTranscriptOwner(full, () => transcriptService.storeRawTranscript(full.externalId, result.entries));
+      // Not awaited: the pipeline's AI outputs run on Claw and can take many
+      // minutes, which would hold up the next passes. It attaches the transcript
+      // first, so a later pass sees `full.transcript` and skips this meeting.
+      void this.runPipeline(full, log);
       logger.info(`${TAG} transcript_saved`, { ...log, lines: result.entries.length });
       return true;
     } catch (error) {

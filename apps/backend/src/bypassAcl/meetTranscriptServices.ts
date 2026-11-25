@@ -59,6 +59,19 @@ export function findCalendarMeetCallsEnded(from: Date, to: Date): Promise<MeetTr
   );
 }
 
+/** Synced Google Calendar events with a Meet link that may be running between `from` and `to`. */
+export function findCalendarMeetCallsLive(from: Date, to: Date): Promise<MeetTranscriptCall[]> {
+  return asSystem(
+    ['Call'],
+    'meet transcript worker has no user context; reads synced Google Calendar events that may be in progress',
+    async () =>
+      await db.call.findMany({
+        where: { ...GOOGLE_MEET_CALENDAR_EVENT, startsAt: { lte: to }, endsAt: { gte: from }, transcript: null },
+        select: CALL_FIELDS,
+      }),
+  );
+}
+
 /** Which of these users turned "Google Meet transcripts" on. */
 export async function findMeetTranscriptUserIds(userIds: string[]): Promise<Set<string>> {
   if (userIds.length === 0) return new Set();

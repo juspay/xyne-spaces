@@ -6,6 +6,7 @@ jest.mock('@/config/env', () => ({ config: { meetTranscripts: { enabled: true } 
 jest.mock('@/bypassAcl/meetTranscriptServices', () => ({
   findCalendarMeetCallsStarting: jest.fn(),
   findCalendarMeetCallsEnded: jest.fn(),
+  findCalendarMeetCallsLive: jest.fn(),
   findMeetTranscriptUserIds: jest.fn(),
   findGoogleCalendarSourceId: jest.fn(),
   findMeetTranscriptCall: jest.fn(),
@@ -15,6 +16,8 @@ jest.mock('@/services/calendarTokenRefresh', () => ({ getCalendarCredentialsBySo
 jest.mock('@/services/googleMeetApi', () => ({
   ...jest.requireActual('@/services/googleMeetApi'),
   enableMeetAutoTranscription: jest.fn(),
+  getMeetSpace: jest.fn(),
+  getMeetConferenceRecord: jest.fn(),
   listMeetConferenceRecords: jest.fn(),
   listMeetTranscripts: jest.fn(),
   listMeetTranscriptEntries: jest.fn(),
@@ -24,11 +27,14 @@ jest.mock('@/services/noteTakerTranscriptService', () => ({
   noteTakerTranscriptService: { processTranscript: jest.fn() },
 }));
 jest.mock('@/services/transcriptService', () => ({ transcriptService: { storeRawTranscript: jest.fn() } }));
-jest.mock('@/services/redisService', () => ({ redisService: { set: jest.fn(), get: jest.fn() } }));
+jest.mock('@/services/redisService', () => ({
+  redisService: { set: jest.fn(), get: jest.fn(), sadd: jest.fn(), smembers: jest.fn(), expire: jest.fn() },
+}));
 
 import {
   type MeetTranscriptCall,
   findCalendarMeetCallsEnded,
+  findCalendarMeetCallsLive,
   findCalendarMeetCallsStarting,
   findGoogleCalendarSourceId,
   findMeetTranscriptCall,
@@ -38,6 +44,8 @@ import { getCalendarCredentialsBySourceId } from '@/services/calendarTokenRefres
 import {
   GoogleMeetApiError,
   enableMeetAutoTranscription,
+  getMeetConferenceRecord,
+  getMeetSpace,
   listMeetConferenceRecords,
   listMeetParticipants,
   listMeetTranscriptEntries,
@@ -77,6 +85,9 @@ beforeEach(() => {
   jest.clearAllMocks();
   (findCalendarMeetCallsStarting as jest.Mock).mockResolvedValue([]);
   (findCalendarMeetCallsEnded as jest.Mock).mockResolvedValue([]);
+  (findCalendarMeetCallsLive as jest.Mock).mockResolvedValue([]);
+  (redisService.smembers as jest.Mock).mockResolvedValue([]);
+  (redisService.sadd as jest.Mock).mockResolvedValue(1);
   (findMeetTranscriptUserIds as jest.Mock).mockResolvedValue(new Set(['u1']));
   (findGoogleCalendarSourceId as jest.Mock).mockResolvedValue('src');
   (getCalendarCredentialsBySourceId as jest.Mock).mockResolvedValue({ accessToken: 'tok' });
@@ -147,7 +158,7 @@ describe('runOnce', () => {
     expect(enableMeetAutoTranscription).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves guests and users who did not opt in alone', async () => {
+  it('leaves users who did not opt in alone, and never changes settings for a guest', async () => {
     const guest = call({ id: 'g', metadata: { calendarOwnerEmail: 'me@juspay.in', organizer: { email: 'boss@other.com' } } });
     const notOptedIn = call({ id: 'n', createdByUserId: 'u2' });
     (findCalendarMeetCallsStarting as jest.Mock).mockResolvedValue([guest, notOptedIn]);
@@ -155,6 +166,38 @@ describe('runOnce', () => {
     await expect(meetTranscriptService.runOnce(NOW)).resolves.toEqual({ enabled: 0, saved: 0 });
     expect(enableMeetAutoTranscription).not.toHaveBeenCalled();
     expect(listMeetConferenceRecords).not.toHaveBeenCalled();
+  });
+
+  it("captures the sitting in progress for an attendee's live meeting", async () => {
+    const guest = call({ id: 'g', startsAt: at(-10), endsAt: at(20), metadata: { calendarOwnerEmail: 'me@juspay.in', organizer: { email: 'boss@other.com' } } });
+    (findCalendarMeetCallsLive as jest.Mock).mockResolvedValue([guest, call({ id: 'org', startsAt: at(-10), endsAt: at(20) })]);
+    (getMeetSpace as jest.Mock).mockResolvedValue({ name: 'spaces/s', activeConference: { conferenceRecord: 'conferenceRecords/live' } });
+    await meetTranscriptService.runOnce(NOW);
+    expect(getMeetSpace).toHaveBeenCalledTimes(1); // the organiser lists records instead
+    expect(redisService.sadd).toHaveBeenCalledWith('meet-transcript:records:g', 'conferenceRecords/live');
+  });
+
+  it("saves an attendee's transcript from the sittings captured during the meeting", async () => {
+    const guest = call({ id: 'g', metadata: { calendarOwnerEmail: 'me@juspay.in', organizer: { email: 'boss@other.com' } } });
+    const full = { ...guest, status: 'SCHEDULED' };
+    (findCalendarMeetCallsEnded as jest.Mock).mockResolvedValue([guest]);
+    (findMeetTranscriptCall as jest.Mock).mockResolvedValue(full);
+    (redisService.smembers as jest.Mock).mockResolvedValue(['conferenceRecords/r-60']);
+    (getMeetConferenceRecord as jest.Mock).mockResolvedValue(record(-60));
+    (listMeetTranscripts as jest.Mock).mockResolvedValue([{ name: 't1', state: 'ENDED' }]);
+    (listMeetTranscriptEntries as jest.Mock).mockResolvedValue([{ participant: 'p', text: 'hi', startTime: at(-55).toISOString() }]);
+
+    await expect(meetTranscriptService.runOnce(NOW)).resolves.toEqual({ enabled: 0, saved: 1 });
+    expect(listMeetConferenceRecords).not.toHaveBeenCalled();
+    expect(getMeetConferenceRecord).toHaveBeenCalledWith('tok', 'conferenceRecords/r-60');
+    expect(noteTakerTranscriptService.processTranscript).toHaveBeenCalledWith(full, true);
+  });
+
+  it('skips an attendee meeting whose sitting was never captured', async () => {
+    const guest = call({ id: 'g', metadata: { calendarOwnerEmail: 'me@juspay.in', organizer: { email: 'boss@other.com' } } });
+    (findCalendarMeetCallsEnded as jest.Mock).mockResolvedValue([guest]);
+    await expect(meetTranscriptService.runOnce(NOW)).resolves.toEqual({ enabled: 0, saved: 0 });
+    expect(getMeetConferenceRecord).not.toHaveBeenCalled();
   });
 
   it('stops trying a meeting Google refuses', async () => {

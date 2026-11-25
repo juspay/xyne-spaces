@@ -5,7 +5,7 @@ import { logger } from '@/utils/logger';
 // import { repositories } from '@/database/repositories';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 // import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
-// import { runCallAiTask } from '@/services/callAi/callAiGateway';
+import { runCallAiTask } from '@/services/callAi/callAiGateway';
 
 const DEFAULT_MODEL = 'glm-latest';
 
@@ -67,34 +67,105 @@ const failedResult = (status: string): ExtractedContent =>
     status,
   }) as ExtractedContent;
 
-// LLM framework removed; original kept below.
-// Neither the framework LLM client nor the Claw path is wired up; every call LLM task fails closed.
-export async function executeCallLlmWithRetry(
-  _createAgent: () => unknown,
-  _buildPrompt: () => string,
-  operation: string,
-  callId: string,
-  _buildSystemPrompt?: () => string | undefined,
-): Promise<ExtractedContent> {
+/** Map a Claw-engine result into the extracted-content shape. */
+const clawExtractedAdapter = {
+  ok: (content: string): ExtractedContent => ({ ok: true, content }),
+  fail: (reason: string): ExtractedContent => failedResult(`claw_${reason}`),
+};
+
+// The framework LLM client was removed (original kept at the bottom of this file),
+// so Claw is the only engine. These "legacy" results are what the gateway returns
+// when CALL_AI_USE_CLAW_AGENT is off, the task has no call behind it, or the Claw
+// run failed.
+function llmUnavailable(operation: string, callId: string | undefined): ExtractedContent {
   logger.warn(`[${callId || 'unknown'}] ${operation}_skipped`, { reason: 'llm_unavailable' });
   return failedResult('llm_unavailable');
 }
 
+/**
+ * Run a non-streaming call LLM task on the Claw agent (CALL_AI_USE_CLAW_AGENT,
+ * see services/callAi). Retries live in the Claw runner.
+ */
+export async function executeCallLlmWithRetry(
+  _createAgent: () => unknown,
+  buildPrompt: () => string,
+  operation: string,
+  callId: string,
+  buildSystemPrompt?: () => string | undefined,
+): Promise<ExtractedContent> {
+  const systemPrompt = buildSystemPrompt?.()?.trim();
+  return runCallAiTask(
+    {
+      operation,
+      userPrompt: buildPrompt(),
+      ...(systemPrompt ? { systemPrompt } : {}),
+      ...(callId && callId !== 'unknown' ? { callId } : {}),
+    },
+    clawExtractedAdapter,
+    async () => llmUnavailable(operation, callId),
+  );
+}
+
+/** Same as executeCallLlmWithRetry; kept for best-effort extras such as labels and tickets. */
 export async function executeCallLlmOnce(
   _createAgent: () => unknown,
-  _prompt: string,
+  prompt: string,
   operation: string,
   callId: string | undefined,
 ): Promise<ExtractedContent> {
-  logger.warn(`[${callId || 'unknown'}] ${operation}_skipped`, { reason: 'llm_unavailable' });
-  return failedResult('llm_unavailable');
+  return runCallAiTask(
+    {
+      operation,
+      userPrompt: prompt,
+      ...(callId && callId !== 'unknown' ? { callId } : {}),
+    },
+    clawExtractedAdapter,
+    async () => llmUnavailable(operation, callId),
+  );
 }
 
+/**
+ * Run a "streaming" call LLM task on the Claw agent. Claw runs do not stream text
+ * back, so `onDelta` fires once with the complete content.
+ */
 export async function executeStreamingLlmRequest(
   options: ExecuteStreamingLlmOptions,
 ): Promise<StreamingLlmResult> {
-  logger.warn(`[${options.callId || 'unknown'}] ${options.operation}_skipped`, { reason: 'llm_unavailable' });
-  return { ok: false, reason: 'litellm_credentials_missing' };
+  return runCallAiTask<StreamingLlmResult>(
+    {
+      operation: options.operation,
+      userPrompt: options.userPrompt,
+      ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+      ...(options.callId ? { callId: options.callId } : {}),
+      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    },
+    {
+      ok: async (content) => {
+        await emitFinalDelta(options, content);
+        return { ok: true, content };
+      },
+      fail: (reason, error) => ({
+        ok: false,
+        reason: reason === 'cancelled' || reason === 'empty_content' ? reason : 'exception',
+        error: `claw_${reason}${error ? `: ${error}` : ''}`,
+      }),
+    },
+    async () => {
+      logger.warn(`[${options.callId || 'unknown'}] ${options.operation}_skipped`, { reason: 'llm_unavailable' });
+      return { ok: false, reason: 'litellm_credentials_missing' };
+    },
+  );
+}
+
+async function emitFinalDelta(options: ExecuteStreamingLlmOptions, content: string): Promise<void> {
+  if (!options.onDelta) return;
+  try {
+    await options.onDelta(content);
+  } catch (error) {
+    logger.warn(`[${options.callId || 'unknown'}] ${options.operation}_on_delta_failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // import { Agent, LLMClient, createUserMessage } from '@framework';
