@@ -591,7 +591,7 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
  * joins). Opt-in, and hidden unless the feature is switched on.
  */
 const MeetTranscriptsToggle: FC = () => {
-  const { available, meetTranscripts, setMeetTranscripts } = useMeetTranscripts();
+  const { available, meetTranscripts, setMeetTranscripts, error } = useMeetTranscripts();
   if (!available) return null;
   return (
     <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
@@ -603,6 +603,11 @@ const MeetTranscriptsToggle: FC = () => {
           transcribed. If you connected your calendar before turning this on, disconnect and connect
           it again to grant access.
         </p>
+        {error && (
+          <p role='alert' className='text-xs text-destructive mt-1.5'>
+            {error}
+          </p>
+        )}
       </div>
       <Switch
         id='meet-transcripts'

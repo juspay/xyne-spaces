@@ -60,19 +60,30 @@ router.get('/provider', async (req, res) => {
   }
 });
 
+const CALENDAR_NOT_CONNECTED_MESSAGE = 'Please sync your calendar first';
+
+/** The user has a live Google Calendar connection: what the Meet transcript worker reads with. */
+async function hasGoogleCalendarConnection(userId: string): Promise<boolean> {
+  const source = await repositories.externalSources.findCalendarSourceByOwner(userId, 'GOOGLE');
+  return source?.isActive === true && hasCalendarRefreshToken(source);
+}
+
 // GET /meet-transcripts — the "Google Meet transcripts" setting of the current user.
 // `available`: the feature is on (GOOGLE_MEET_TRANSCRIPTS_ENABLED); `enabled`: they
-// turned it on (services/meetTranscriptService.ts).
+// turned it on (services/meetTranscriptService.ts); `calendarConnected`: they have a
+// Google Calendar connection, without which it cannot be turned on.
 router.get('/meet-transcripts', async (req, res) => {
   try {
-    const preference = await db.userPreference.findUnique({
-      where: { userId: req.user!.id },
-      select: { meetTranscripts: true },
-    });
+    const userId = req.user!.id;
+    const [preference, calendarConnected] = await Promise.all([
+      db.userPreference.findUnique({ where: { userId }, select: { meetTranscripts: true } }),
+      hasGoogleCalendarConnection(userId),
+    ]);
     return res.json({
       success: true,
       available: config.meetTranscripts.enabled,
       enabled: preference?.meetTranscripts === true,
+      calendarConnected,
     });
   } catch (err) {
     logger.error('[CALENDAR_SYNC][ROUTE] Failed to read Meet transcripts setting:', err);
@@ -92,6 +103,14 @@ router.put('/meet-transcripts', async (req, res) => {
     return res.status(400).json({ success: false, error: 'No workspace selected' });
   }
   try {
+    // Turning it off is always allowed; turning it on needs a calendar to work with.
+    if (enabled && !(await hasGoogleCalendarConnection(userId))) {
+      return res.status(400).json({
+        success: false,
+        error: 'calendar_not_connected',
+        message: CALENDAR_NOT_CONNECTED_MESSAGE,
+      });
+    }
     await db.userPreference.upsert({
       where: { userId },
       update: { meetTranscripts: enabled },

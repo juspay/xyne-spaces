@@ -24,12 +24,18 @@ export type MeetTranscriptsSetting = {
   available: boolean;
   /** I turned it on. */
   enabled: boolean;
+  /** I have a Google Calendar connection; it cannot be turned on without one. */
+  calendarConnected: boolean;
 };
 
 /** My "Google Meet transcripts" setting: Xyne fetches Meet's own transcript for meetings I organise. */
 export async function getMeetTranscriptsSetting(): Promise<MeetTranscriptsSetting> {
   const response = await apiInstance.get<MeetTranscriptsSetting>('/calendar/sync/meet-transcripts');
-  return { available: response.data.available === true, enabled: response.data.enabled === true };
+  return {
+    available: response.data.available === true,
+    enabled: response.data.enabled === true,
+    calendarConnected: response.data.calendarConnected === true,
+  };
 }
 
 export async function setMeetTranscriptsEnabled(enabled: boolean): Promise<void> {
