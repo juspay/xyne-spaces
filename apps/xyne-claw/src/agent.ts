@@ -1862,6 +1862,7 @@ export interface RunTaskOptions {
    * session skills these are not user supplied and are not deleted at exit. */
   extraSkillPaths?: string[] | undefined;
   skillTriggers?: import("./subagent-tools.js").SkillTrigger[] | undefined;
+  /** Internal code-owned reminders only; never populate from request/config fields. */
   promptInjections?: PromptInjection[] | undefined;
   /** Task-command contract (routes/run.ts parseTaskCommand): the run may not
    *  finish until this tool has run — enforced by a post-loop nudge pass. */

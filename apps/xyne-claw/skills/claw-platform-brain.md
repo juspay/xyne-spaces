@@ -60,7 +60,7 @@ config.tools = {
 `config.outputFormat` (`type: json|markdown`, `schema`, `template`,
 `requireToolsBeforeSubmit[]`), `config.memoryEnabled`, `config.memoryApprovalStrategy`,
 `config.verifyResponses`, `config.citationReflection`, `config.skillTriggers[]`,
-`config.sandboxRepo`, `config.promptInjection`, `config.provider` / `config.providerOrder`
+`config.sandboxRepo`, `config.provider` / `config.providerOrder`
 / `config.providerAlwaysOn` (see §3).
 
 Related tables: `AgentSkill` (skills), `AgentCollection` (KB grants),

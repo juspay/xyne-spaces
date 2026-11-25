@@ -2,7 +2,6 @@ import { useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/Button/index';
 import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
 import { useClawResearchAgentOptions } from '@/hooks/useClawResearchAgentOptions';
 import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
@@ -69,9 +68,6 @@ export function AgentBehaviourTabV2({
   const sandbox = readSandboxDraft(agent.config);
   const agentBuilding = readAgentBuilding(agent.config, agent.delegationTier);
 
-  const [reminders, setReminders] = useState(behaviour.promptInjection);
-  const remindersDirty = reminders.trim() !== behaviour.promptInjection.trim();
-
   const persist = async (config: Record<string, unknown>, message: string): Promise<boolean> => {
     if (saving) return false;
     setSaving(true);
@@ -132,64 +128,6 @@ export function AgentBehaviourTabV2({
 
   return (
     <div className='flex w-full flex-col gap-8'>
-      <DetailSection
-        label='Constant reminders'
-        info='Extra instructions injected on every single turn'
-        {...badge}
-      >
-        <DetailCard>
-          {lockNote}
-          <div className='flex w-full flex-col gap-3 p-4'>
-            <label
-              htmlFor='behaviour-reminders'
-              className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'
-            >
-              Description
-            </label>
-            <textarea
-              id='behaviour-reminders'
-              value={reminders}
-              readOnly={!editable}
-              onChange={e => setReminders(e.target.value)}
-              placeholder="eg. Always respond in the user's language"
-              data-track-category='Claw Agents'
-              data-track-name='Agent detail v2: reminders'
-              className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground read-only:opacity-70 focus:outline-none focus:ring-1 focus:ring-ring'
-            />
-            {editable && remindersDirty && (
-              <div className='flex items-center justify-end gap-3'>
-                <Button
-                  variant='ghost'
-                  onClick={() => setReminders(behaviour.promptInjection)}
-                  disabled={busy}
-                  className='h-auto rounded-xl px-3 py-2 text-sm'
-                  data-track-category='Claw Agents'
-                  data-track-name='Agent detail v2: discard reminders'
-                >
-                  Discard
-                </Button>
-                <Button
-                  onClick={() => {
-                    void saveBehaviour({ promptInjection: reminders }, 'Reminders updated').then(
-                      ok => {
-                        if (!ok) return;
-                        setReminders(reminders.trim());
-                      },
-                    );
-                  }}
-                  loading={busy}
-                  className='h-auto rounded-xl bg-foreground px-3 py-2 text-sm text-background hover:bg-foreground/90'
-                  data-track-category='Claw Agents'
-                  data-track-name='Agent detail v2: save reminders'
-                >
-                  Save
-                </Button>
-              </div>
-            )}
-          </div>
-        </DetailCard>
-      </DetailSection>
-
       <DetailSection label='Sandbox' info='Which code this agent can reach' {...badge}>
         <DetailCard>
           {lockNote}

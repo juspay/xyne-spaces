@@ -23,8 +23,6 @@ export const DEFAULT_PLAN_MODE_PROMPT = [
 ].join('\n');
 
 export interface BehaviourDraft {
-  /** Extra instructions injected on every turn (config.promptInjection). */
-  promptInjection: string;
   /** Offer a one-click "run autonomously" action (config.suggestGoal). */
   suggestGoal: boolean;
   /** Wrap every message as an autonomous /goal loop (config.autoGoal). */
@@ -72,7 +70,6 @@ interface OutputFormat {
 /** Read-side view of the config bag — named optional props (not an index
  *  signature) so dot access is allowed and no assertions are needed. */
 interface BehaviourConfigShape {
-  promptInjection?: unknown;
   suggestGoal?: unknown;
   autoGoal?: unknown;
   planMode?: unknown;
@@ -92,11 +89,9 @@ interface BehaviourConfigShape {
 export function readBehaviourDraft(config: ConfigBag): BehaviourDraft {
   const c = (config ?? {}) as BehaviourConfigShape;
   const of = c.outputFormat;
-  const promptInjection = c.promptInjection;
   const verifyResponseCriteria = c.verifyResponseCriteria;
   const outputFormatEnabled = of?.type === 'json' || of?.type === 'markdown';
   return {
-    promptInjection: typeof promptInjection === 'string' ? promptInjection : '',
     suggestGoal: c.suggestGoal === true,
     autoGoal: c.autoGoal === true,
     planMode: c.planMode === true,
@@ -171,8 +166,8 @@ export function applyBehaviour(config: ConfigBag, draft: BehaviourDraft): Record
     else delete next[key];
   };
 
-  const promptInjection = draft.promptInjection.trim();
-  setOrDelete('promptInjection', !!promptInjection, promptInjection);
+  delete next['promptInjection'];
+  delete next['promptInjections'];
   setOrDelete('suggestGoal', draft.suggestGoal);
   setOrDelete('autoGoal', draft.autoGoal);
   setOrDelete('planMode', draft.planMode);

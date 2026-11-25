@@ -204,7 +204,7 @@ export const agentRepository = {
    *                        path uses (mcp.ts parseToolsConfig, the agent-config
    *                        editor), so a clone without it runs tool-less.
    *                        Carries subagents, skillTriggers, planMode,
-   *                        promptInjection, sandbox repos, outputFormat, …
+   *                        sandbox repos, outputFormat, …
    *   4. tools           — AgentTool rows, including each tool's `permission`
    *   5. skills          — AgentSkill junction links
    *   6. knowledge base  — kbScope + every AgentCollection grant

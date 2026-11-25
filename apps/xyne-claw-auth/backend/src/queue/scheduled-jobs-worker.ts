@@ -80,7 +80,7 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
 
   // Look up the agent's JSONB config so xyne-claw can enable per-agent
   // features that read from it: memoryEnabled (memory-search tool),
-  // toolPermissions (per-tool deny/ask), skillTriggers, promptInjections,
+  // toolPermissions (per-tool deny/ask), skillTriggers,
   // and custom-tool config values. Without this, those features silently
   // default to "off"/"allow" for every cron/once run.
   // Lookup is best-effort — if the row is gone, we still fire without it

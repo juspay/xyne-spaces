@@ -1924,9 +1924,7 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
   const [toolsLoading, setToolsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [promptInjections, setPromptInjections] = useState<Array<{ id: string; label: string; content: string; enabled: boolean }>>(
-    (agent.config?.promptInjections as Array<{ id: string; label: string; content: string; enabled: boolean }> ?? []),
-  );
+
   const [skillTriggers, setSkillTriggers] = useState<Array<{ toolName: string; skillSlug: string; when: "before" | "after"; prompt: string }>>(
     (agent.config?.skillTriggers as Array<{ toolName: string; skillSlug: string; when: string; prompt?: string }> ?? []).map((t) => ({ ...t, when: t.when as "before" | "after", prompt: t.prompt ?? "" })),
   );
@@ -1951,7 +1949,7 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
   const [generating, setGenerating] = useState(false);
 
   // Free-form scalar config (env-style key/value), excludes structured keys managed above.
-  const STRUCTURED_KEYS = new Set(["tools", "subagentSkills", "skillTriggers", "promptInjections", "sandboxRepo", "citationReflection", "autoToolCitations"]);
+  const STRUCTURED_KEYS = new Set(["tools", "subagentSkills", "skillTriggers", "promptInjection", "promptInjections", "sandboxRepo", "citationReflection", "autoToolCitations"]);
   const initialCustomConfig: Record<string, string> = {};
   for (const [k, v] of Object.entries(agent.config ?? {})) {
     if (STRUCTURED_KEYS.has(k)) continue;
@@ -1965,7 +1963,7 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
   const [newConfigValue, setNewConfigValue] = useState("");
   const addCustomConfig = () => {
     const k = newConfigKey.trim();
-    if (!k) return;
+    if (!k || k === "promptInjection" || k === "promptInjections") return;
     setCustomConfig((prev) => ({ ...prev, [k]: newConfigValue }));
     setNewConfigKey("");
     setNewConfigValue("");
@@ -2040,12 +2038,8 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
       } else {
         delete existingConfig.skillTriggers;
       }
-      const activeInjections = promptInjections.filter((p) => p.content.trim().length > 0);
-      if (activeInjections.length > 0) {
-        existingConfig.promptInjections = activeInjections;
-      } else {
-        delete existingConfig.promptInjections;
-      }
+      delete existingConfig.promptInjection;
+      delete existingConfig.promptInjections;
       // Save subagent-level skills (only non-empty entries)
       const activeSaSkills = Object.fromEntries(Object.entries(saSkills).filter(([, ids]) => ids.length > 0));
       if (Object.keys(activeSaSkills).length > 0) {
@@ -2531,50 +2525,6 @@ function AgentConfigEditor({ agent, userId, onSave, readOnly = false }: { agent:
         <button onClick={() => setSkillTriggers((prev) => [...prev, { toolName: "", skillSlug: "", when: "after", prompt: "" }])}
           className="flex items-center gap-1.5 rounded-lg bg-zinc-700 px-3 py-2 text-sm text-zinc-200 transition hover:bg-zinc-600">
           <Plus size={14} /> Add Trigger
-        </button>
-      </div>
-
-      {/* Prompt Injections */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
-        <h3 className="mb-3 text-sm font-semibold text-zinc-200">Prompt Injections</h3>
-        <p className="mb-3 text-xs text-zinc-500">Text injected as a <code className="rounded bg-zinc-800 px-1">[System Reminder]</code> user message before every assistant response. Use for persistent rules (tone, format, guardrails).</p>
-
-        {promptInjections.map((inj, idx) => (
-          <div key={inj.id} className="mb-3 rounded-lg border border-zinc-700 bg-zinc-800 p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <input
-                value={inj.label}
-                onChange={(e) => setPromptInjections((prev) => prev.map((p, i) => i === idx ? { ...p, label: e.target.value } : p))}
-                placeholder="Label (e.g. 'Markdown rule')"
-                className="flex-1 rounded-md border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
-              />
-              <label className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <input
-                  type="checkbox"
-                  checked={inj.enabled}
-                  onChange={(e) => setPromptInjections((prev) => prev.map((p, i) => i === idx ? { ...p, enabled: e.target.checked } : p))}
-                  className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 accent-purple-500"
-                />
-                Enabled
-              </label>
-              <button onClick={() => setPromptInjections((prev) => prev.filter((_, i) => i !== idx))}
-                className="rounded p-1 text-zinc-600 hover:bg-red-950 hover:text-red-400">
-                <X size={14} />
-              </button>
-            </div>
-            <textarea
-              value={inj.content}
-              onChange={(e) => setPromptInjections((prev) => prev.map((p, i) => i === idx ? { ...p, content: e.target.value } : p))}
-              placeholder="Instruction text injected on every turn..."
-              rows={3}
-              className="w-full rounded-md border border-zinc-600 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-300 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
-            />
-          </div>
-        ))}
-
-        <button onClick={() => setPromptInjections((prev) => [...prev, { id: crypto.randomUUID(), label: "", content: "", enabled: true }])}
-          className="flex items-center gap-1.5 rounded-lg bg-zinc-700 px-3 py-2 text-sm text-zinc-200 transition hover:bg-zinc-600">
-          <Plus size={14} /> Add Injection
         </button>
       </div>
 

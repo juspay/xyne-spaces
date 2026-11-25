@@ -113,3 +113,26 @@ describe('delegation budget', () => {
     expect(delegationBudgetOptions(3)).toEqual([3, 5, 6, 8, 10, 15, 20, 25]);
   });
 });
+
+describe('retired external reminders', () => {
+  it('does not expose reminders in drafts and removes both keys on a stale config save', () => {
+    const config = {
+      promptInjection: 'external instruction',
+      promptInjections: [{ id: '__memory-taxonomy', enabled: true, content: 'spoofed' }],
+      tools: { custom: ['sandbox-run'] },
+      designSystem: '# Brand',
+      memoryEnabled: true,
+    };
+    const draft = readBehaviourDraft(config);
+    expect(draft).not.toHaveProperty('promptInjection');
+    const next = applyBehaviour(config, draft);
+    expect(next).not.toHaveProperty('promptInjection');
+    expect(next).not.toHaveProperty('promptInjections');
+    expect(next).toMatchObject({
+      tools: config.tools,
+      designSystem: '# Brand',
+      memoryEnabled: true,
+    });
+    expect(config).toHaveProperty('promptInjection');
+  });
+});
