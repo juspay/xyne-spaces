@@ -91,6 +91,43 @@ export type TransitCaller = {
   allowExpiredAuthToken?: boolean;
 };
 
+/** One chunk of a chunked encrypted file container (`@xyne/shared` file-container). */
+export type FileChunk = {
+  index: number;
+  last: boolean;
+  data: Buffer;
+};
+
+export type SealFileChunksInput = TransitCaller & {
+  /** Workspace whose storage key the file goes under. */
+  workspaceId: string;
+  /** The file's storage header (base64) from its first call; omitted on the first call. */
+  header?: string;
+  /**
+   * The caller's transit container header (base64) when `chunks` are its transit
+   * ciphertext; omitted for plaintext chunks.
+   */
+  sourceHeader?: string;
+  /** Plaintext bytes per chunk, for the first call of a plaintext file. */
+  chunkSize?: number;
+  chunks: FileChunk[];
+};
+
+export type OpenFileChunksInput = TransitCaller & {
+  workspaceId: string;
+  /** The stored file's header (base64). */
+  header: string;
+  /** The transit header (base64) from the file's first call; omitted on the first call. */
+  transitHeader?: string;
+  chunks: FileChunk[];
+};
+
+/** Re-encrypted chunks, in request order, and the header of the container they belong to. */
+export type FileChunksResult = {
+  header: string;
+  chunks: Buffer[];
+};
+
 export type TransformRequestInput<T> = TransitCaller & {
   body: T;
   /**
@@ -182,6 +219,14 @@ export interface EncryptionProvider {
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;
   generateStorageKey(input: GenerateStorageKeyInput): Promise<StorageObjectKey>;
   unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]>;
+  /**
+   * Chunks of a file into its workspace storage container: plaintext chunks (server-side
+   * files), or the caller's transit container chunks (`sourceHeader`), which the encryption
+   * service opens itself, so the backend never holds their plaintext.
+   */
+  sealFileChunks(input: SealFileChunksInput): Promise<FileChunksResult>;
+  /** Chunks of a stored file re-encrypted for the caller's transit key. */
+  openFileChunksForTransit(input: OpenFileChunksInput): Promise<FileChunksResult>;
   /**
    * The manifest for a client, encrypted with its transit key, as a string to send as is.
    * `null` when there is no manifest (404).

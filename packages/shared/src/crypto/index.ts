@@ -39,3 +39,21 @@ export {
   encryptFormDataWithRule,
 } from './manifest-encrypt.js';
 export type { FieldEncryptor } from './manifest-encrypt.js';
+export {
+  FILE_CONTAINER_MAGIC,
+  FILE_ENCRYPTION_HEADER,
+  FILE_ENCRYPTION_HEADER_VALUE,
+  FILE_CHUNK_OVERHEAD,
+  MIN_FILE_CHUNK_SIZE,
+  MAX_FILE_CHUNK_SIZE,
+  isValidFileChunkSize,
+  encodeFileHeader,
+  hasFileContainerMagic,
+  parseFileHeader,
+  fileChunkAad,
+  fileContainerLength,
+  filePlaintextLength,
+  encryptFileForUpload,
+  decryptDownloadedFile,
+} from './file-container.js';
+export type { FileContainerHeader } from './file-container.js';
