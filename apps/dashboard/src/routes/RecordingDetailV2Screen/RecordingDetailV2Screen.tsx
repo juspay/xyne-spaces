@@ -2033,7 +2033,7 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
         [&_.thin-scrollbar]:pt-2!
         [&_.bn-editor]:px-0!
         [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:text-base!
-        [&_.bn-suggestion-menu]:w-auto! [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:max-h-60! [&_.bn-suggestion-menu]:max-w-[calc(100vw-2rem)]!
+        [&_.bn-suggestion-menu]:w-auto! [&_.bn-suggestion-menu]:no-scrollbar! [&_.bn-suggestion-menu]:max-h-60! [&_.bn-suggestion-menu]:max-w-[calc(100vw-2rem)]!
         [&_.bn-suggestion-menu-item]:h-8! [&_.bn-suggestion-menu-item]:px-2! [&_.bn-suggestion-menu-item]:py-1!
         [&_.bn-mt-suggestion-menu-item-title]:text-sm! [&_.bn-mt-suggestion-menu-item-title]:leading-4!
         [&_.bn-mt-suggestion-menu-item-title]:whitespace-nowrap! [&_.bn-mt-suggestion-menu-item-title]:overflow-hidden! [&_.bn-mt-suggestion-menu-item-title]:text-ellipsis!
@@ -2072,7 +2072,7 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
         [&_.thin-scrollbar]:pt-0!
         [&_.bn-editor]:px-0!
         [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:text-base!
-        [&_.bn-suggestion-menu]:w-auto! [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:max-h-60! [&_.bn-suggestion-menu]:max-w-[calc(100vw-2rem)]!
+        [&_.bn-suggestion-menu]:w-auto! [&_.bn-suggestion-menu]:no-scrollbar! [&_.bn-suggestion-menu]:max-h-60! [&_.bn-suggestion-menu]:max-w-[calc(100vw-2rem)]!
         [&_.bn-suggestion-menu-item]:h-8! [&_.bn-suggestion-menu-item]:px-2! [&_.bn-suggestion-menu-item]:py-1!
         [&_.bn-mt-suggestion-menu-item-title]:text-sm! [&_.bn-mt-suggestion-menu-item-title]:leading-4!
         [&_.bn-mt-suggestion-menu-item-title]:whitespace-nowrap! [&_.bn-mt-suggestion-menu-item-title]:text-ellipsis!

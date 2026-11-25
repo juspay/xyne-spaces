@@ -1,6 +1,27 @@
 import tailwindcss from '@tailwindcss/postcss';
 import isPseudoClass from '@csstools/postcss-is-pseudo-class';
 
+const KEEP_OUTSIDE_LAYER = new Set(['charset', 'import']);
+
+export const vendorLayer = () => ({
+  postcssPlugin: 'vendor-css-layer',
+  Once(root, { result, AtRule }) {
+    if (!(result.opts.from ?? '').includes('/node_modules/')) return;
+    const layered = root.nodes.filter(
+      node =>
+        !(
+          node.type === 'atrule' &&
+          (KEEP_OUTSIDE_LAYER.has(node.name) || (node.name === 'layer' && !node.nodes))
+        ),
+    );
+    if (layered.length === 0) return;
+    const layer = new AtRule({ name: 'layer', params: 'vendor' });
+    layer.append(layered);
+    root.append(layer);
+  },
+});
+vendorLayer.postcss = true;
+
 // Our own stylesheet only: third-party CSS (BlockNote, pdf.js) is
 // shipped as-is and some of it nests `:is()` beyond what the plugin can parse.
 const onlyGlobalCss = plugin => ({
@@ -17,5 +38,6 @@ export default {
     // ancestor bloom filter can't see through `:is()`, so the unexpanded form walks
     // every ancestor of every candidate element on each style recalc.
     onlyGlobalCss(isPseudoClass({ preserve: false })),
+    vendorLayer,
   ],
 };

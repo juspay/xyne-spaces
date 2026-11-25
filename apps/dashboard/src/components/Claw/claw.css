@@ -1,76 +1,78 @@
-html.claw-overlay-active,
-html.claw-overlay-active body,
-html.claw-overlay-active #root,
-html.claw-overlay-active main {
-  background: transparent !important;
-  background-color: transparent !important;
-}
+@layer components {
+  html.claw-overlay-active,
+  html.claw-overlay-active body,
+  html.claw-overlay-active #root,
+  html.claw-overlay-active main {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
 
-html.claw-overlay-active .app-wallpaper-image,
-html.claw-overlay-active [data-slot="switch-loading-overlay"] {
-  display: none !important;
-}
+  html.claw-overlay-active .app-wallpaper-image,
+  html.claw-overlay-active [data-slot="switch-loading-overlay"] {
+    display: none !important;
+  }
 
-html.claw-overlay-active [data-id="error-fallback"] {
-  background: transparent !important;
-}
+  html.claw-overlay-active [data-id="error-fallback"] {
+    background: transparent !important;
+  }
 
-.claw-shell::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 1;
-  transition: opacity 200ms ease-out;
-  box-shadow:
-    0px 1px 1px 0px rgba(5, 5, 6, 0.09),
-    0px 2px 3px 0px rgba(5, 5, 6, 0.07);
-}
+  .claw-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 200ms ease-out;
+    box-shadow:
+      0px 1px 1px 0px rgba(5, 5, 6, 0.09),
+      0px 2px 3px 0px rgba(5, 5, 6, 0.07);
+  }
 
-.claw-shell--open::before {
-  opacity: 0;
-}
+  .claw-shell--open::before {
+    opacity: 0;
+  }
 
-.claw-shell::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0.55;
-  transition: opacity 200ms ease-out;
-  box-shadow:
-    0px 1px 2px 0px rgba(5, 5, 6, 0.04),
-    0px 2px 4px 0px rgba(5, 5, 6, 0.05),
-    0px 4px 8px 0px rgba(5, 5, 6, 0.06),
-    0px 8px 16px 0px rgba(5, 5, 6, 0.05),
-    0px 16px 32px 0px rgba(5, 5, 6, 0.04);
-}
+  .claw-shell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0.55;
+    transition: opacity 200ms ease-out;
+    box-shadow:
+      0px 1px 2px 0px rgba(5, 5, 6, 0.04),
+      0px 2px 4px 0px rgba(5, 5, 6, 0.05),
+      0px 4px 8px 0px rgba(5, 5, 6, 0.06),
+      0px 8px 16px 0px rgba(5, 5, 6, 0.05),
+      0px 16px 32px 0px rgba(5, 5, 6, 0.04);
+  }
 
-.claw-shell--open::after {
-  opacity: 1;
-}
+  .claw-shell--open::after {
+    opacity: 1;
+  }
 
-.claw-thinking-text {
-  color: #ed6252;
-  background: linear-gradient(
-    90deg,
-    #ed6252 0%,
-    #ff4f00 20%,
-    #ff8904 40%,
-    #ffd6a8 50%,
-    #ff8904 60%,
-    #ff4f00 80%,
-    #ed6252 100%
-  );
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: claw-thinking-text-fill 2.4s linear infinite;
+  .claw-thinking-text {
+    color: #ed6252;
+    background: linear-gradient(
+      90deg,
+      #ed6252 0%,
+      #ff4f00 20%,
+      #ff8904 40%,
+      #ffd6a8 50%,
+      #ff8904 60%,
+      #ff4f00 80%,
+      #ed6252 100%
+    );
+    background-size: 200% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: claw-thinking-text-fill 2.4s linear infinite;
+  }
 }
 
 @keyframes claw-thinking-text-fill {
@@ -83,19 +85,21 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .claw-thinking-text {
-    animation: none;
-    background-position: 50% 50%;
+@layer components {
+  @media (prefers-reduced-motion: reduce) {
+    .claw-thinking-text {
+      animation: none;
+      background-position: 50% 50%;
+    }
   }
-}
 
-.claw-mark--bob-slow {
-  animation: claw-mark-bob 3.6s ease-in-out infinite;
-}
+  .claw-mark--bob-slow {
+    animation: claw-mark-bob 3.6s ease-in-out infinite;
+  }
 
-.claw-mark--bob-fast {
-  animation: claw-mark-bob-fast 1.5s ease-in-out infinite;
+  .claw-mark--bob-fast {
+    animation: claw-mark-bob-fast 1.5s ease-in-out infinite;
+  }
 }
 
 @keyframes claw-mark-bob {
@@ -128,8 +132,10 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-.claw-eyes--glance {
-  animation: claw-eyes-glance 3.4s ease-in-out infinite;
+@layer components {
+  .claw-eyes--glance {
+    animation: claw-eyes-glance 3.4s ease-in-out infinite;
+  }
 }
 
 @keyframes claw-eyes-glance {
@@ -154,9 +160,11 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-.claw-think-dot {
-  opacity: 0;
-  animation: claw-think-dot 1.5s ease-in-out infinite;
+@layer components {
+  .claw-think-dot {
+    opacity: 0;
+    animation: claw-think-dot 1.5s ease-in-out infinite;
+  }
 }
 
 @keyframes claw-think-dot {
@@ -177,8 +185,10 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-.claw-eye--blink {
-  animation: claw-eye-blink 4.6s ease-in-out infinite;
+@layer components {
+  .claw-eye--blink {
+    animation: claw-eye-blink 4.6s ease-in-out infinite;
+  }
 }
 
 @keyframes claw-eye-blink {
@@ -193,8 +203,10 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-.claw-mouth--thinking {
-  animation: claw-mouth-think 1.5s ease-in-out infinite;
+@layer components {
+  .claw-mouth--thinking {
+    animation: claw-mouth-think 1.5s ease-in-out infinite;
+  }
 }
 
 @keyframes claw-mouth-think {
@@ -210,28 +222,30 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-.claw-mark-wrap {
-  display: inline-flex;
-  transform-origin: center 65%;
-  transition: transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
-  will-change: transform;
-}
+@layer components {
+  .claw-mark-wrap {
+    display: inline-flex;
+    transform-origin: center 65%;
+    transition: transform 280ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    will-change: transform;
+  }
 
-[data-slot="claw-pill"][role="button"] .claw-mark-wrap:hover {
-  transform: scale(1.14) rotate(-5deg);
-}
+  [data-slot="claw-pill"][role="button"] .claw-mark-wrap:hover {
+    transform: scale(1.14) rotate(-5deg);
+  }
 
-[data-slot="claw-pill"][role="button"] .claw-mark-wrap:active {
-  transform: scale(0.9);
-  transition-duration: 110ms;
-}
+  [data-slot="claw-pill"][role="button"] .claw-mark-wrap:active {
+    transform: scale(0.9);
+    transition-duration: 110ms;
+  }
 
-.claw-mark-blob {
-  transform-origin: 50% 100%;
-}
+  .claw-mark-blob {
+    transform-origin: 50% 100%;
+  }
 
-.claw-mark--hop {
-  animation: claw-mark-hop 1.7s ease-in-out infinite;
+  .claw-mark--hop {
+    animation: claw-mark-hop 1.7s ease-in-out infinite;
+  }
 }
 
 @keyframes claw-mark-hop {
@@ -257,8 +271,10 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-.claw-mark--wobble {
-  animation: claw-mark-wobble 2.6s ease-in-out infinite;
+@layer components {
+  .claw-mark--wobble {
+    animation: claw-mark-wobble 2.6s ease-in-out infinite;
+  }
 }
 
 @keyframes claw-mark-wobble {
@@ -276,28 +292,30 @@ html.claw-overlay-active [data-id="error-fallback"] {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .claw-mark--bob-slow,
-  .claw-mark--bob-fast,
-  .claw-mark--hop,
-  .claw-mark--wobble,
-  .claw-eye--blink,
-  .claw-eyes--glance,
-  .claw-mouth--thinking,
-  .claw-think-dot {
-    animation: none;
-  }
+@layer components {
+  @media (prefers-reduced-motion: reduce) {
+    .claw-mark--bob-slow,
+    .claw-mark--bob-fast,
+    .claw-mark--hop,
+    .claw-mark--wobble,
+    .claw-eye--blink,
+    .claw-eyes--glance,
+    .claw-mouth--thinking,
+    .claw-think-dot {
+      animation: none;
+    }
 
-  .claw-think-dot {
-    opacity: 0.8;
-  }
+    .claw-think-dot {
+      opacity: 0.8;
+    }
 
-  .claw-mark-wrap {
-    transition: none;
-  }
+    .claw-mark-wrap {
+      transition: none;
+    }
 
-  [data-slot="claw-pill"][role="button"] .claw-mark-wrap:hover,
-  [data-slot="claw-pill"][role="button"] .claw-mark-wrap:active {
-    transform: none;
+    [data-slot="claw-pill"][role="button"] .claw-mark-wrap:hover,
+    [data-slot="claw-pill"][role="button"] .claw-mark-wrap:active {
+      transform: none;
+    }
   }
 }
