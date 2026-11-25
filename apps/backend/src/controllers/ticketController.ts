@@ -68,7 +68,6 @@ import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { suggestTicketFields, type TicketFieldSuggestionInput } from '@/services/ticketFieldSuggestions';
 import { AgentsConfig } from '@/agents/config';
-import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
   FormContextType,
   FormEntityType,
@@ -1008,11 +1007,6 @@ export class TicketController {
           if (formEntityValuesData.length > 0) {
             await createFormEntityValues(prisma, formEntityValuesData);
             logger.info(`[Ticket Creation] Created ${formEntityValuesData.length} form entity values for ticket ${ticket.id}`);
-            if (Object.prototype.hasOwnProperty.call(dynamicFields, 'releaseVersion')) {
-                versionReleaseMappingService.syncTicketById(ticket.id).catch(error => {
-                  logger.error(`[Ticket Creation] Version release mapping failed for ticket ${ticket.xyneId}:`, error);
-                });
-              }
           }
         } catch (error) {
           logger.error('[Ticket Creation] Error creating form entity values:', error);

@@ -9,6 +9,8 @@ import { XyneRelease } from '@/services/release/xyne/xyneRelease';
 import { XyneChangeType } from '@/services/release/xyne/xyneReleaseForm';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 import { workspaceOf } from '../../xyne-spaces/context';
+import { ticketIssues } from '../../xyne-spaces/validation';
+import type { Checked, ConfigIssue } from '../../xyne-spaces/validation';
 
 const AddChangeUnderReleaseConfigSchema = z.object({
   ticket: variableRef(z.string().min(1)).describe("Ticket id or ID like PLAT-12 of a release's service ticket"),
@@ -40,6 +42,15 @@ export class AddChangeUnderReleaseStep extends BaseActionStep<typeof AddChangeUn
   readonly description = "Records an env or migration change from a file's diff under one of a release's service tickets.";
   readonly category = 'release';
   readonly icon = 'FileDiff';
+
+  async validateConfig(ctx: Checked<{ ticket?: string; sourceXyneId?: string }>): Promise<ConfigIssue[]> {
+    return (
+      await Promise.all([
+        ticketIssues(ctx, 'ticket', ctx.known.ticket),
+        ticketIssues(ctx, 'sourceXyneId', ctx.known.sourceXyneId),
+      ])
+    ).flat();
+  }
 
   async execute(config: AddChangeUnderReleaseConfig, ctx: StepExecutionContext): Promise<AddChangeUnderReleaseOutput> {
     const workspaceId = workspaceOf(ctx, this.type);
@@ -91,7 +102,7 @@ export class AddChangeUnderReleaseStep extends BaseActionStep<typeof AddChangeUn
     const fileChangeType =
       status === 'added' ? FileChangeType.ADDED : status === 'removed' ? FileChangeType.REMOVED : FileChangeType.MODIFIED;
 
-    const userId = await getAutomationsBotUserId(workspaceOf(ctx, this.type));
+    const userId = await getAutomationsBotUserId(workspaceId);
     const user = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
     const releaseContext = {
       releaseId: release.ticket.id,
@@ -104,50 +115,50 @@ export class AddChangeUnderReleaseStep extends BaseActionStep<typeof AddChangeUn
 
     const changeInstance = await releaseRepository.createReleaseChangeInstance(instance);
     try {
-    if (kind === XyneChangeType.ENV) {
-      const parsed = DiffParser.parseEnvDiff(diff, fileName);
-      const { formValues, payload, message } = xyneRelease.getChange({
-        type: XyneChangeType.ENV,
-        data: {
-          fileName,
-          filePath,
-          fileSlug: fileName.toUpperCase().replace(/[.-]/g, '_'),
-          changeType: fileChangeType,
-          oldValue: parsed.oldValue,
-          newValue: parsed.newValue,
-          description: parsed.changeSummary,
-        },
-      });
-      await releaseRepository.saveReleaseFormValues(
-        changeInstance.id,
-        payload,
-        message,
-        formValues,
-        FormContextType.RELEASE_CHANGE,
-        FormEntityType.RELEASE_ENV_FORM,
-        releaseContext,
-      );
-    } else {
-      const parsed = DiffParser.parseMigrationDiff(diff, fileName);
-      const { formValues, payload, message } = xyneRelease.getChange({
-        type: XyneChangeType.MIGRATION,
-        data: {
-          filePath,
-          changeLog: parsed.changeLog,
-          description: `Database migration file ${fileName} changed.`,
-          query: parsed.query,
-        },
-      });
-      await releaseRepository.saveReleaseFormValues(
-        changeInstance.id,
-        payload,
-        message,
-        formValues,
-        FormContextType.RELEASE_CHANGE,
-        FormEntityType.RELEASE_MIGRATION_FORM,
-        releaseContext,
-      );
-    }
+      if (kind === XyneChangeType.ENV) {
+        const parsed = DiffParser.parseEnvDiff(diff, fileName);
+        const { formValues, payload, message } = xyneRelease.getChange({
+          type: XyneChangeType.ENV,
+          data: {
+            fileName,
+            filePath,
+            fileSlug: fileName.toUpperCase().replace(/[.-]/g, '_'),
+            changeType: fileChangeType,
+            oldValue: parsed.oldValue,
+            newValue: parsed.newValue,
+            description: parsed.changeSummary,
+          },
+        });
+        await releaseRepository.saveReleaseFormValues(
+          changeInstance.id,
+          payload,
+          message,
+          formValues,
+          FormContextType.RELEASE_CHANGE,
+          FormEntityType.RELEASE_ENV_FORM,
+          releaseContext,
+        );
+      } else {
+        const parsed = DiffParser.parseMigrationDiff(diff, fileName);
+        const { formValues, payload, message } = xyneRelease.getChange({
+          type: XyneChangeType.MIGRATION,
+          data: {
+            filePath,
+            changeLog: parsed.changeLog,
+            description: `Database migration file ${fileName} changed.`,
+            query: parsed.query,
+          },
+        });
+        await releaseRepository.saveReleaseFormValues(
+          changeInstance.id,
+          payload,
+          message,
+          formValues,
+          FormContextType.RELEASE_CHANGE,
+          FormEntityType.RELEASE_MIGRATION_FORM,
+          releaseContext,
+        );
+      }
     } catch (error) {
       // Without its form the row would read as "already added" on the next run and stay empty.
       await db.releaseChangeType.delete({ where: { id: changeInstance.id } }).catch(() => undefined);

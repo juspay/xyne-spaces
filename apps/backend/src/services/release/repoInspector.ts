@@ -5,13 +5,20 @@
 import { config } from '@/config/env';
 import { resolveSecret } from '@/config/secretResolver';
 import { parseGitHubRepoUrl, parseBitbucketRepoUrl } from '@/utils/repoUrlParser';
-import { normalizeBitbucketApiBaseUrl } from '@/services/release/buildVcsClient';
 import { GitHubService } from '@/services/githubService';
 import { BitbucketService } from '@/services/bitbucketService';
 import { VCSProviderType } from '@xyne/shared';
 
 // Bound outbound VCS calls.
 const API_TIMEOUT_MS = 30_000;
+
+// Bitbucket REST base, tolerating a bare host or a full .../rest/api/latest.
+function normalizeBitbucketApiBaseUrl(baseUrl: string | undefined): string {
+  if (!baseUrl) {
+    throw new Error('BITBUCKET_BASE_URL is not configured');
+  }
+  return baseUrl.endsWith('/rest/api/latest') ? baseUrl : `${baseUrl}/rest/api/latest`;
+}
 
 export interface ConnectionTestResult {
   ok: boolean;
