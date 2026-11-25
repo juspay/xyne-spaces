@@ -323,7 +323,7 @@ export class App {
     // Open a request-backed tenant scope for every route, once, here. Auth-agnostic:
     // resolves req.user lazily at DB-call time so the workspaceId stamper can read it.
     this.app.use(tenantScopeMiddleware);
-    // Marks requests whose files travel as transit containers (CLIENT_ENCRYPTED_FILE_ROUTES).
+    // Marks requests whose files travel as transit containers (every route but PLAINTEXT_FILE_ROUTES).
     this.app.use(clientFileEncryption);
   }
 

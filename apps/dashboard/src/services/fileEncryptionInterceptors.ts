@@ -11,9 +11,10 @@ import {
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
 
 /**
- * Files to and from @xyne/shared's CLIENT_ENCRYPTED_FILE_ROUTES (the list the backend marks
- * requests by) travel as transit containers. Every other route keeps sending and receiving
- * plaintext files.
+ * Files travel as transit containers on every route but @xyne/shared's PLAINTEXT_FILE_ROUTES
+ * (the list the backend marks requests by): the files of a multipart upload are encrypted,
+ * and a file download (blob or arraybuffer response) is asked for as a container. JSON and
+ * other requests are left alone.
  */
 function pathOf(config: InternalAxiosRequestConfig): string {
   return new URL(config.url ?? '', 'http://localhost').pathname;
@@ -24,6 +25,15 @@ export function fileEncryptionActive(): boolean {
   if (!isEncryptionReady()) return false;
   const { keyring, apiClientEncryptionEnabled, fileChunkSize } = getEncryptionState();
   return keyring !== null && apiClientEncryptionEnabled && isValidFileChunkSize(fileChunkSize);
+}
+
+/** Whether `data` is a multipart body holding at least one file. */
+function hasFiles(data: FormData): boolean {
+  let found = false;
+  data.forEach(value => {
+    if (typeof value !== 'string') found = true;
+  });
+  return found;
 }
 
 /** The FormData with every file replaced by its transit container (same name and type). */
@@ -56,9 +66,10 @@ export async function fileEncryptionRequestInterceptor(
   const path = pathOf(config);
 
   if (
-    method === 'post' &&
+    (method === 'post' || method === 'put' || method === 'patch') &&
     config.data instanceof FormData &&
-    isClientEncryptedFileRoute('POST', path)
+    hasFiles(config.data) &&
+    isClientEncryptedFileRoute(method, path)
   ) {
     config.data = await encryptFormDataFiles(config.data);
     config.headers.set(FILE_ENCRYPTION_HEADER, FILE_ENCRYPTION_HEADER_VALUE);

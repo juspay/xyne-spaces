@@ -8,6 +8,8 @@ import { transitCaller } from './decryptionMiddleware';
 const CLIENT_FILE_ENCRYPTION = Symbol('clientFileEncryption');
 /** The ingress transit proxy's identity header (`TRANSIT_PROXY_HEADER` in apps/middelware/authenticator.ts). */
 const TRANSIT_PROXY_HEADER = 'x-xyne-transit-proxy';
+/** Bot file routes, whose files only the ingress transit proxy encrypts and decrypts. */
+const BOT_FILE_ROUTE = /^\/api\/apps\/(?:files|ticket)\//;
 /** 400 code for an encrypted upload while file encryption is off (the transit proxy retries plain). */
 const FILE_ENCRYPTION_DISABLED_CODE = 'FILE_ENCRYPTION_DISABLED';
 
@@ -24,12 +26,13 @@ const UNENCRYPTED_FILE_WRITES: ReadonlyArray<{ method: string; path: RegExp }> =
 ];
 
 /**
- * Mounted once, before the routes. On a route of @xyne/shared's CLIENT_ENCRYPTED_FILE_ROUTES
- * (the list the dashboard encrypts and decrypts by) whose request carries
- * `x-file-encryption: XEF1`, uploads are the client's transit containers (re-encrypted under
- * the workspace storage key by the encryption service) and encrypted downloads go back as
- * transit containers for the client to decrypt. Requests without the header (mobile, Electron)
- * and every other route keep sending and receiving plaintext.
+ * Mounted once, before the routes. On every route but @xyne/shared's PLAINTEXT_FILE_ROUTES
+ * (the list the dashboard encrypts and decrypts by), a request that carries
+ * `x-file-encryption: XEF1` has its uploads as the client's transit containers (re-encrypted
+ * under the workspace storage key by the encryption service) and gets encrypted downloads back
+ * as transit containers for the client to decrypt. The dashboard sends the header only with
+ * multipart uploads that hold files and with file downloads; requests without it (mobile,
+ * Electron, JSON calls) and the plaintext routes keep sending and receiving plaintext.
  */
 export function clientFileEncryption(req: Request, res: Response, next: NextFunction): void {
   const path = req.originalUrl.split('?')[0] ?? '';
@@ -37,12 +40,12 @@ export function clientFileEncryption(req: Request, res: Response, next: NextFunc
     next();
     return;
   }
-  // The same URL answers with plaintext or a transit container depending on the header.
-  res.vary(FILE_ENCRYPTION_HEADER);
-  // Bot traffic (/api/apps) is encrypted by the ingress transit proxy, which sets the header
-  // only with its own identity header; without that the header did not come from the proxy.
-  const appsWithoutProxy = path.startsWith('/api/apps/') && !req.headers[TRANSIT_PROXY_HEADER];
-  if (req.headers[FILE_ENCRYPTION_HEADER] !== FILE_ENCRYPTION_HEADER_VALUE || appsWithoutProxy) {
+  // A download URL answers with plaintext or a transit container depending on the header.
+  if (req.method === 'GET') res.vary(FILE_ENCRYPTION_HEADER);
+  // Bot files are encrypted by the ingress transit proxy, which sets the header only with its
+  // own identity header; without that the header did not come from the proxy.
+  const botWithoutProxy = BOT_FILE_ROUTE.test(path) && !req.headers[TRANSIT_PROXY_HEADER];
+  if (req.headers[FILE_ENCRYPTION_HEADER] !== FILE_ENCRYPTION_HEADER_VALUE || botWithoutProxy) {
     next();
     return;
   }
