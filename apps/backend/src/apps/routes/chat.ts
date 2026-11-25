@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { config } from '@/config/env';
 import { ChatController } from '../controllers/chatController';
 import { validateChannelAccessForGet, validateChannelAccessForPost, validateChannelAccessForPostWithDm } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
@@ -12,17 +13,19 @@ const chatController = new ChatController();
 // bot's DM with that user, matching the Slack adapter's chat.postMessage.
 // encryptedRoute: fields the transit proxy encrypted become workspace-DEK ciphertext (and the
 // reply goes back encrypted to the proxy); a no-op unless API client encryption is on.
-// Bots that call the backend directly (no transit proxy in front yet) post plaintext as
-// before; the Prisma extension still encrypts it at rest. Proxy traffic keeps the transit lane.
-const viaTransitProxy = (handlers: RequestHandler[]): RequestHandler[] =>
-  handlers.map((handler) => (req, res, next) => (req.proxyClient ? handler(req, res, next) : next()));
+// Only where the ingress transit proxy is deployed (TRANSIT_PROXY_INGRESS_ENABLED): there every
+// /api/apps call comes through it (requireTransitProxyIngress, app.ts, refuses any other).
+// Without the proxy these routes take plaintext as before; the Prisma extension still
+// encrypts it at rest.
+const whenTransitProxyIngress = (handlers: RequestHandler[]): RequestHandler[] =>
+  config.internal.transitProxyIngressEnabled ? handlers : [];
 
-const encryptedPostMessage = viaTransitProxy(encryptedRoute(appsChatPostMessageClient, {
+const encryptedPostMessage = whenTransitProxyIngress(encryptedRoute(appsChatPostMessageClient, {
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
 }));
 router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPostWithDm, ...encryptedPostMessage, chatController.postMessage);
 router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
-const encryptedUpdateMessage = viaTransitProxy(encryptedRoute(appsChatUpdateMessageClient, {
+const encryptedUpdateMessage = whenTransitProxyIngress(encryptedRoute(appsChatUpdateMessageClient, {
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
 }));
 router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, ...encryptedUpdateMessage, chatController.updateMessage);
