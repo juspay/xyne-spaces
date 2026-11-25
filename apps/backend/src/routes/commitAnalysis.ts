@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authorizePrivilegedOrResource } from '@/middleware/authorize';
-import { CommitAnalysisController } from '@/controllers/commitAnalysisController';
+import { ApplicationRepository } from '@/database/repositories/applicationRepository';
 import {
   testRepoConnection,
   // Disabled (LLM)
@@ -16,13 +16,25 @@ import { logger } from '@/utils/logger';
 // Disabled (LLM)
 // import { config } from '@/config/env';
 import { db } from '@/database/client';
-import { findAnalysisCanvasIdForConversation } from '@/utils/commitAnalysisCanvas';
+import { findReleaseNotesCanvasId } from '@/utils/releaseNotesCanvas';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 
 const router = Router();
-const commitAnalysisController = new CommitAnalysisController();
+const applicationRepository = new ApplicationRepository();
 
-router.get('/latest-deployed-commit', commitAnalysisController.getLatestDeployedCommitId);
+router.get('/latest-deployed-commit', async (req: Request, res: Response): Promise<void> => {
+  const mainReleaseBoardId = typeof req.query.mainReleaseBoardId === 'string' ? req.query.mainReleaseBoardId : null;
+  if (!mainReleaseBoardId) {
+    res.status(400).json({ error: 'mainReleaseBoardId is required' });
+    return;
+  }
+  try {
+    res.status(200).json({ latestCommitId: await applicationRepository.getLatestDeployedCommitId(mainReleaseBoardId) });
+  } catch (error) {
+    logger.error('Failed to get latest deployed commit ID:', error);
+    res.status(500).json({ error: 'Failed to get latest deployed commit ID' });
+  }
+});
 
 // Per (release ticket × repo) commit ranges for a release ticket. Read from the
 // non_zero schema (server-only, not Zero-replicated) and served over HTTP — the
@@ -44,14 +56,7 @@ router.get('/repos/:releaseId', async (req: Request, res: Response): Promise<voi
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
-    const ticket = await db.ticket.findFirst({
-      where: { id: releaseId, workspaceId },
-      select: { conversationId: true, channelId: true },
-    });
-    const analysisCanvasId = await findAnalysisCanvasIdForConversation(
-      ticket?.conversationId ?? undefined,
-      ticket?.channelId ?? undefined,
-    );
+    const analysisCanvasId = await findReleaseNotesCanvasId(releaseId, workspaceId);
 
     res.json({ repos, analysisCanvasId });
   } catch (e) {

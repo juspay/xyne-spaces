@@ -144,7 +144,6 @@ Services contain the core business logic. Located in `src/services/`.
 ### Release Management
 | Service | Purpose |
 |---------|---------|
-| `release/applicationBackfillService.ts` | Data backfilling |
 | `release/core/` | Core release logic, change detection, diff parsing |
 | `release/xyne/` | Xyne-specific release workflows |
 
@@ -192,7 +191,6 @@ User personalization.
 
 ### `release/`
 Release management.
-- `applicationBackfillService.ts` - Data backfilling
 - `core/` - Core release logic
 - `xyne/` - Xyne-specific release logic
 

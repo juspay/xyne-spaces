@@ -1,7 +1,9 @@
 import { BaseActionStep, variableRef } from '@xyne/workflow-sdk';
 import type { StepExecutionContext } from '@xyne/workflow-sdk';
 import { z } from 'zod/v3';
+import { ReleaseEventType } from '@xyne/shared';
 import { db } from '@/database/client';
+import { logger } from '@/utils/logger';
 import { workspaceOf } from '../../xyne-spaces/context';
 import { ticketIssues } from '../../xyne-spaces/validation';
 import type { Checked, ConfigIssue } from '../../xyne-spaces/validation';
@@ -44,18 +46,41 @@ export class WriteReleaseStep extends BaseActionStep<typeof WriteReleaseConfigSc
 
     const release = await db.ticket.findFirst({
       where: { workspaceId: workspaceOf(ctx, this.type), OR: [{ id: identifier }, { xyneId: identifier }] },
-      select: { id: true },
+      select: { id: true, channelId: true, conversationId: true },
     });
     if (!release) throw new Error(`Release ticket ${identifier} not found`);
 
     // The service ticket of each service: the release's sub-ticket on the service's board.
     const mappings = await db.ticketSubTicketMapping.findMany({
       where: { ticketId: release.id },
-      select: { subTicket: { select: { mappedTicket: { select: { id: true, boardId: true } } } } },
+      select: { subTicket: { select: { id: true, mappedTicket: { select: { id: true, boardId: true } } } } },
     });
     const ticketOfBoard = new Map(
       mappings.flatMap(({ subTicket }) => (subTicket.mappedTicket ? [[subTicket.mappedTicket.boardId, subTicket.mappedTicket.id] as const] : [])),
     );
+    const subTicketOfBoard = new Map(
+      mappings.flatMap(({ subTicket }) => (subTicket.mappedTicket ? [[subTicket.mappedTicket.boardId, subTicket.id] as const] : [])),
+    );
+    const workspaceId = workspaceOf(ctx, this.type);
+    // The release timeline. Best effort: a failed log line must not fail the release.
+    const logEvents = async (
+      events: Array<{ eventType: ReleaseEventType; eventName: string; message: string; applicationReleaseId?: string; payload?: Record<string, number> }>,
+    ): Promise<void> => {
+      try {
+        await db.releaseEvent.createMany({
+          data: events.map((e) => ({
+            ...e,
+            workspaceId,
+            releaseId: release.id,
+            userName: 'Release workflow',
+            channelId: release.channelId,
+            conversationId: release.conversationId,
+          })),
+        });
+      } catch (error) {
+        logger.warn(`[WriteRelease] could not log release events: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
     const missing = services.filter((s) => !ticketOfBoard.has(s.boardId)).map((s) => s.name);
     if (missing.length > 0) throw new Error(`No service ticket under the release for: ${missing.join(', ')}`);
 
@@ -99,7 +124,35 @@ export class WriteReleaseStep extends BaseActionStep<typeof WriteReleaseConfigSc
         });
       }
     }
-    if (failures.length > 0) throw new Error(`Release not fully written: ${failures.join('; ')}`);
+    if (failures.length > 0) {
+      await logEvents([
+        {
+          eventType: ReleaseEventType.SYSTEM,
+          eventName: 'RELEASE_WRITE_FAILED',
+          message: `Release not fully written: ${failures.length} item${failures.length === 1 ? '' : 's'} failed`,
+          payload: { failures: failures.length },
+        },
+      ]);
+      throw new Error(`Release not fully written: ${failures.join('; ')}`);
+    }
+
+    const envCount = services.reduce((n, s) => n + s.envChanges.length, 0);
+    const migrationCount = new Set(services.flatMap((s) => s.migrationChanges.map((c) => c.filePath))).size;
+    const plural = (n: number, word: string): string => `${String(n)} ${word}${n === 1 ? '' : 's'}`;
+    await logEvents([
+      ...services.map((s) => ({
+        eventType: ReleaseEventType.SUBTICKET,
+        eventName: 'SUBTICKET_PROVISIONED',
+        message: `Prepared ${s.name} (${plural(s.files.length, 'file')} matched)`,
+        applicationReleaseId: subTicketOfBoard.get(s.boardId),
+      })),
+      {
+        eventType: ReleaseEventType.RELEASE,
+        eventName: 'COMMIT_ANALYSIS_COMPLETED',
+        message: `Analysis complete: ${plural(services.length, 'app')} affected, ${plural(envCount, 'env change')}, ${plural(migrationCount, 'migration')}`,
+        payload: { affectedAppCount: services.length, envChangeCount: envCount, migrationCount },
+      },
+    ]);
     return { ticketsAdded, changesAdded };
   }
 }
