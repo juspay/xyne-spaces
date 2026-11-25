@@ -50,9 +50,7 @@ const CALL_SETTINGS_SELECT = {
   channelId: true,
   callConnectionId: true,
   callIsDefault: true,
-  callRoutingKeys: true,
-  callTicketRules: true,
-  callPhoneFieldNames: true,
+  callSettings: true,
 } satisfies Prisma.EmailChannelPreferenceSelect;
 
 type CallSettingsRow = Prisma.EmailChannelPreferenceGetPayload<{ select: typeof CALL_SETTINGS_SELECT }>;
@@ -61,10 +59,11 @@ type ConfiguredRow = CallSettingsRow & { callConnectionId: string };
 const NO_CALL_SETTINGS = {
   callConnectionId: null,
   callIsDefault: false,
-  callRoutingKeys: [],
-  callTicketRules: Prisma.DbNull,
-  callPhoneFieldNames: [],
+  callSettings: Prisma.DbNull,
 } satisfies Prisma.EmailChannelPreferenceUpdateManyMutationInput;
+
+/** The callSettings JSON: CALL desks keep routingKeys and ticketRules, APP desks phoneFieldNames. */
+type StoredCallSettings = Pick<DeskCallSettingsView, 'routingKeys' | 'ticketRules' | 'phoneFieldNames'>;
 
 function uniqueTrimmed(values: readonly unknown[]): string[] {
   const trimmed = values
@@ -73,11 +72,34 @@ function uniqueTrimmed(values: readonly unknown[]): string[] {
   return [...new Set(trimmed)];
 }
 
-function parseTicketRules(value: Prisma.JsonValue | null): DeskCallTicketRules {
-  const raw = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<
-    string,
-    unknown
-  >;
+function asRecord(value: unknown): Record<string, unknown> {
+  return (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
+}
+
+function readCallSettings(value: Prisma.JsonValue | null): StoredCallSettings {
+  const raw = asRecord(value);
+  return {
+    routingKeys: Array.isArray(raw.routingKeys) ? uniqueTrimmed(raw.routingKeys) : [],
+    ticketRules: parseTicketRules(raw.ticketRules),
+    phoneFieldNames: Array.isArray(raw.phoneFieldNames) ? uniqueTrimmed(raw.phoneFieldNames) : [],
+  };
+}
+
+/** Only the keys given are stored; reads default the rest. */
+function callSettingsJson(settings: {
+  routingKeys?: string[] | undefined;
+  ticketRules?: DeskCallTicketRules | undefined;
+  phoneFieldNames?: string[] | undefined;
+}): Prisma.InputJsonObject {
+  return {
+    ...(settings.routingKeys ? { routingKeys: settings.routingKeys } : {}),
+    ...(settings.ticketRules ? { ticketRules: settings.ticketRules } : {}),
+    ...(settings.phoneFieldNames ? { phoneFieldNames: settings.phoneFieldNames } : {}),
+  };
+}
+
+function parseTicketRules(value: unknown): DeskCallTicketRules {
+  const raw = asRecord(value);
   const subjectTemplate =
     typeof raw.subjectTemplate === 'string' ? raw.subjectTemplate.trim() : '';
   return {
@@ -114,9 +136,7 @@ function toView(row: ConfiguredRow): DeskCallSettingsView {
     channelId: row.channelId,
     connectionId: row.callConnectionId,
     isDefault: row.callIsDefault,
-    routingKeys: row.callRoutingKeys ?? [],
-    ticketRules: parseTicketRules(row.callTicketRules),
-    phoneFieldNames: row.callPhoneFieldNames ?? [],
+    ...readCallSettings(row.callSettings),
   };
 }
 
@@ -143,13 +163,18 @@ async function assertRoutingFree(params: {
   const { workspaceId, channelId, connectionId, routingKeys, isDefault, routingKeyLabel } = params;
   if (routingKeys.length === 0 && !isDefault) return;
 
-  const others = await db.emailChannelPreference.findMany({
+  const rows = await db.emailChannelPreference.findMany({
     where: { workspaceId, callConnectionId: connectionId, NOT: { channelId } },
     select: CALL_SETTINGS_SELECT,
   });
+  const others = rows.map(row => ({
+    channelId: row.channelId,
+    isDefault: row.callIsDefault,
+    routingKeys: readCallSettings(row.callSettings).routingKeys,
+  }));
   const wanted = new Set(routingKeys);
   const contenders = others.filter(
-    other => (isDefault && other.callIsDefault) || other.callRoutingKeys.some(key => wanted.has(key)),
+    other => (isDefault && other.isDefault) || other.routingKeys.some(key => wanted.has(key)),
   );
   if (contenders.length === 0) return;
 
@@ -176,7 +201,7 @@ async function assertRoutingFree(params: {
     if (!existing.has(other.channelId)) continue;
     const name = names.get(other.channelId);
     const deskName = name ? `"${name}"` : 'another desk';
-    const clash = other.callRoutingKeys.find(key => wanted.has(key));
+    const clash = other.routingKeys.find(key => wanted.has(key));
     if (clash) {
       throw new CallConfigError(`${routingKeyLabel} "${clash}" already routes to ${deskName}`, 409, {
         routingKeys: [`"${clash}" already routes to ${deskName}`],
@@ -283,9 +308,9 @@ export const deskCallSettingsService = {
     const data = {
       callConnectionId: connection.id,
       callIsDefault: isDefault,
-      callRoutingKeys: routingKeys,
-      callTicketRules: isCallDesk ? normalizeTicketRules(input.ticketRules, provider) : Prisma.DbNull,
-      callPhoneFieldNames: isCallDesk ? [] : uniqueTrimmed(input.phoneFieldNames ?? []),
+      callSettings: isCallDesk
+        ? callSettingsJson({ routingKeys, ticketRules: normalizeTicketRules(input.ticketRules, provider) })
+        : callSettingsJson({ phoneFieldNames: uniqueTrimmed(input.phoneFieldNames ?? []) }),
     };
     try {
       const row = await db.emailChannelPreference.upsert({
@@ -354,9 +379,11 @@ export const deskCallSettingsService = {
         const data = {
           callConnectionId: connectionId,
           callIsDefault: !hasDefault && desk.isDefault === true,
-          callRoutingKeys: desk.routingKeys ?? [],
-          callTicketRules: desk.ticketRules ?? Prisma.DbNull,
-          callPhoneFieldNames: desk.phoneFieldNames ?? [],
+          callSettings: callSettingsJson({
+            routingKeys: desk.routingKeys,
+            ticketRules: desk.ticketRules,
+            phoneFieldNames: desk.phoneFieldNames,
+          }),
         };
         const { count } = await db.emailChannelPreference.updateMany({
           where: { workspaceId, channelId: desk.channelId, callConnectionId: null },
