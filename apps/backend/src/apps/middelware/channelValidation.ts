@@ -4,7 +4,7 @@ import { repositories } from "@/database/repositories";
 import { openBotDmForUser } from "@/bypassAcl/appServices";
 import { logger } from "@/utils/logger";
 
-const ChannelValidationSchema = z.object({
+export const ChannelValidationSchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   conversationId: z.string().min(1, 'Conversation ID is required').trim().optional(),
@@ -24,16 +24,21 @@ function sendError(res: Response, status: number, error: string, message: string
   });
 }
 
+export type ChannelAccessResult =
+  | { ok: true; channelId: string }
+  | { ok: false; status: number; error: string; message: string };
+
 /**
- * Helper function to resolve and validate channel access
+ * Resolve the channel a request names (channelId, else channelName, else conversationId) and
+ * check the bot user is a participant. No req/res: the middlewares below and the typed routes'
+ * access checks (apps/access.ts) both use it.
  */
-async function resolveAndValidateChannel(
+export async function checkChannelAccess(
   channelId: string | undefined,
   channelName: string | undefined,
   conversationId: string | undefined,
   userId: string,
-  res: Response
-): Promise<string | null> {
+): Promise<ChannelAccessResult> {
   let resolvedChannelId = channelId;
 
   // Resolve channelId from channelName if not provided
@@ -41,8 +46,7 @@ async function resolveAndValidateChannel(
     const channel = await repositories.channels.findByName(channelName);
     if (!channel) {
       logger.warn(`[CHANNEL-VALIDATION] Channel with name "${channelName}" not found`);
-      sendError(res, 404, 'Not Found', 'Channel not found');
-      return null;
+      return { ok: false, status: 404, error: 'Not Found', message: 'Channel not found' };
     }
     resolvedChannelId = channel.id;
   }
@@ -52,24 +56,21 @@ async function resolveAndValidateChannel(
     const conversation = await repositories.conversations.findById(conversationId);
     if (!conversation) {
       logger.warn(`[CHANNEL-VALIDATION] Conversation ${conversationId} not found`);
-      sendError(res, 404, 'Not Found', 'Conversation not found');
-      return null;
+      return { ok: false, status: 404, error: 'Not Found', message: 'Conversation not found' };
     }
     resolvedChannelId = conversation.channelId;
   }
 
   if (!resolvedChannelId) {
     logger.warn('[CHANNEL-VALIDATION] Unable to resolve channelId from request');
-    sendError(res, 400, 'Bad Request', 'Channel ID is required');
-    return null;
+    return { ok: false, status: 400, error: 'Bad Request', message: 'Channel ID is required' };
   }
 
   // Validate channel exists
   const channel = await repositories.channels.findById(resolvedChannelId);
   if (!channel) {
     logger.warn(`[CHANNEL-VALIDATION] Channel ${resolvedChannelId} not found`);
-    sendError(res, 404, 'Not Found', 'Channel not found');
-    return null;
+    return { ok: false, status: 404, error: 'Not Found', message: 'Channel not found' };
   }
 
   // Validate user is a participant
@@ -80,11 +81,28 @@ async function resolveAndValidateChannel(
 
   if (!isParticipant) {
     logger.warn(`[CHANNEL-VALIDATION] User ${userId} does not have access to channel ${resolvedChannelId}`);
-    sendError(res, 403, 'Forbidden', 'Bot does not have channel access');
-    return null;
+    return { ok: false, status: 403, error: 'Forbidden', message: 'Bot does not have channel access' };
   }
 
-  return resolvedChannelId;
+  return { ok: true, channelId: resolvedChannelId };
+}
+
+/**
+ * Helper function to resolve and validate channel access
+ */
+async function resolveAndValidateChannel(
+  channelId: string | undefined,
+  channelName: string | undefined,
+  conversationId: string | undefined,
+  userId: string,
+  res: Response
+): Promise<string | null> {
+  const result = await checkChannelAccess(channelId, channelName, conversationId, userId);
+  if (!result.ok) {
+    sendError(res, result.status, result.error, result.message);
+    return null;
+  }
+  return result.channelId;
 }
 
 /**
@@ -251,7 +269,7 @@ export async function validateChannelAccessForPost(
  * when the value is not a user of the bot's own workspace, which leaves the
  * usual "Channel not found" response to the caller.
  */
-async function resolveBotDmChannelId(
+export async function resolveBotDmChannelId(
   channelId: string | undefined,
   botUserId: string,
   workspaceId: string | undefined,

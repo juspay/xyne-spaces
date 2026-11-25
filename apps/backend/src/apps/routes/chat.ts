@@ -1,31 +1,54 @@
 import { Router } from 'express';
+import { API } from '@xyne/shared';
+import { api } from '@/framework/api';
 import { ChatController } from '../controllers/chatController';
-import { validateChannelAccessForGet, validateChannelAccessForPost, validateChannelAccessForPostWithDm } from '../middelware/channelValidation';
+import { appPermission, botChannel } from '../access';
+import { validateChannelAccessForGet, validateChannelAccessForPost } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
-import { appsChatPostMessageClient, appsChatUpdateMessageClient } from '@xyne/shared';
-import { encryptedRoute } from '@/middleware/encryptedRoute';
 
 const router = Router();
 const chatController = new ChatController();
 
-// postMessage also accepts a user id as `channelId` — it then posts into the
-// bot's DM with that user, matching the Slack adapter's chat.postMessage.
-// encryptedRoute: fields the transit proxy encrypted become workspace-DEK ciphertext (and the
-// reply goes back encrypted to the proxy); a no-op unless API client encryption is on.
-// transitProxyIngress: only where the ingress transit proxy is deployed
-// (TRANSIT_PROXY_INGRESS_ENABLED); without it these routes take plaintext as before and the
-// Prisma extension still encrypts it at rest.
-const encryptedPostMessage = encryptedRoute(appsChatPostMessageClient, {
-  resolveWorkspaceId: async (req) => req.user!.workspaceId,
-  transitProxyIngress: true,
-});
-router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPostWithDm, ...encryptedPostMessage, chatController.postMessage);
+// ─── Typed routes (contracts in @xyne/shared, API.apps.chat) ───────────────────
+// Served by the API router (/api, app.ts) behind the contract gate, not by this router.
+// Encryption: fields the transit proxy encrypted become workspace-DEK ciphertext (and the
+// reply goes back encrypted to the proxy). Whether it runs for `app` routes is the framework's
+// call (runsEncryption in framework/api.ts), not these routes'.
+const encryptUnderBotWorkspace = {
+  resolveWorkspaceId: async (req: { user?: { workspaceId: string } }) => req.user!.workspaceId,
+};
+
+api.routes(API.apps.chat, (serve) => ({
+  // Also accepts a user id as `channelId`: it then posts into the bot's DM with that user,
+  // matching the Slack adapter's chat.postMessage.
+  postMessage: serve('postMessage', {
+    auth: 'app',
+    access: { permission: appPermission('chat:write'), channel: botChannel({ allowDm: true }) },
+    encryption: encryptUnderBotWorkspace,
+    successStatus: 201,
+    handle: ({ body, derived, user, app, access }) =>
+      chatController.sendMessage({
+        body,
+        senderUserId: user?.id,
+        workspaceId: user?.workspaceId,
+        // Only a DM target is handed over; any other channel is resolved by sendMessage as before.
+        resolvedChannelId: access.channel.dm ? access.channel.channelId : undefined,
+        appId: app?.appId,
+        markdownFacts: derived?.fields.markdownText,
+        isPostAsUser: false,
+      }),
+  }),
+  updateMessage: serve('updateMessage', {
+    auth: 'app',
+    access: { permission: appPermission('chat:write'), channel: botChannel({ allowDm: false }) },
+    encryption: encryptUnderBotWorkspace,
+    handle: ({ body, user, app }) =>
+      chatController.editMessage({ body, workspaceId: user?.workspaceId, appId: app?.appId }),
+  }),
+}));
+
+// ─── Untyped routes (still mounted by apps.ts under /api/apps/chat) ────────────
 router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
-const encryptedUpdateMessage = encryptedRoute(appsChatUpdateMessageClient, {
-  resolveWorkspaceId: async (req) => req.user!.workspaceId,
-  transitProxyIngress: true,
-});
-router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, ...encryptedUpdateMessage, chatController.updateMessage);
 router.post('/deleteMessage', requirePermission('chat:delete'), validateChannelAccessForPost, chatController.deleteMessage);
 router.post('/agentProgress', requirePermission('chat:write'), validateChannelAccessForPost, chatController.agentProgress);
 router.get('/channelHistory', requirePermission('channels:read'), validateChannelAccessForGet, chatController.channelHistory);

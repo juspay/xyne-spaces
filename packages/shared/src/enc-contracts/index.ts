@@ -28,3 +28,17 @@ export { recapSetCustomRecapPromptClient, userPresenceUpsertClient } from './con
 export { ticketUpdateClient } from './contracts/tickets.js';
 export { appsChatPostMessageClient, appsChatUpdateMessageClient } from './contracts/apps.js';
 export type { AppsChatPostMessageRequest, AppsChatUpdateMessageRequest } from './contracts/apps.js';
+export {
+  appsChatPostMessage,
+  appsChatUpdateMessage,
+  appsChatPostMessageBodySchema,
+  appsChatPostMessageFields,
+  appsChatUpdateMessageBodySchema,
+  appsChatActionResponseSchema,
+  appsContentFormatSchema,
+  appsFlowInputSchema,
+  refineAppsChatPostMessage,
+} from './contracts/apps.js';
+export { ROUTE_METHODS, defineRoute, routeContracts, routeSpecProblems } from './api-route.js';
+export type { AnyRouteContract, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteResponse } from './api-route.js';
+export { API } from './api.js';

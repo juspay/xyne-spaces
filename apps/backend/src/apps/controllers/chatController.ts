@@ -8,10 +8,19 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
-import { MessageType, type DerivedFacts } from '@xyne/shared';
+import {
+  MessageType,
+  appsChatPostMessageFields,
+  refineAppsChatPostMessage,
+  type DerivedFacts,
+  type FieldFacts,
+  type appsChatPostMessageBodySchema,
+  type appsChatUpdateMessageBodySchema,
+} from '@xyne/shared';
+import { ContractError } from '@/framework/api';
 import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
-import { ContentFormat } from '../types';
+import { ContentFormat, type ChatActionResponse } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
 import { redisService } from '@/services/redisService';
@@ -36,33 +45,10 @@ const ChatActionBodySchema = z.object({
   contentFormat: z.nativeEnum(ContentFormat).optional(),
 });
 
-const PostMessageBodySchema = ChatActionBodySchema.extend({
-  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
-  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
-  conversationId: z.string().trim().optional(),
-  // Flow-based UI support — v2 only
-  flow: z.object({
-    version: z.literal('2.0'),
-    screenId: z.string().optional(),
-    title: z.string().optional(),
-    components: z.array(z.record(z.string(), z.any())).optional(),
-    data: z.record(z.string(), z.unknown()).optional(),
-    state: z.object({
-      values: z.record(z.string(), z.unknown()),
-      touched: z.record(z.string(), z.boolean()),
-      errors: z.record(z.string(), z.string()),
-      submitting: z.boolean(),
-      submitted: z.boolean(),
-      history: z.array(z.string()),
-      loadingComponentIds: z.array(z.string()).optional(),
-    }),
-  }).optional(),
-}).refine(
-  data => !!data.text || !!data.markdownText || !!data.flow || (data.attachments && data.attachments.length > 0),
-  { message: 'Either text, markdownText, flow, or attachments is required', path: ['text'] }
-).refine(
-  data => !!data.channelId || !!data.channelName || !!data.conversationId,
-  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
+// The internal S2S postAsUser route's body: the bot route's (appsChatPostMessage in
+// @xyne/shared) plus the `userId` it posts as.
+const PostMessageBodySchema = refineAppsChatPostMessage(
+  z.object({ ...appsChatPostMessageFields, userId: ChatActionBodySchema.shape.userId }),
 );
 
 /**
@@ -112,16 +98,6 @@ const PostEphemeralBodySchema = ChatActionBodySchema.extend({
   { message: 'flow is required when messageDelivery is OPENSCREEN', path: ['flow'] }
 );
 
-const UpdateMessageBodySchema = ChatActionBodySchema.extend({
-  messageId: z.string().min(1, 'Message ID is required').trim(),
-  channelId: z.string().optional(),
-  channelName: z.string().trim().optional(),
-  flowJSON: z.record(z.string(), z.unknown()).optional(),
-}).refine(
-  data => !!data.text || !!data.markdownText || !!data.flowJSON || (data.attachments && data.attachments.length > 0),
-  { message: 'Either text, markdownText, flowJSON, or attachments is required', path: ['text'] }
-);
-
 const DeleteMessageBodySchema = z.object({
   messageId: z.string().min(1, 'Message ID is required').trim(),
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
@@ -169,6 +145,34 @@ const ConversationRepliesQuerySchema = z.object({
 const ConversationAttachmentsQuerySchema = z.object({
   conversationId: z.string().min(1, 'Conversation ID is required').trim(),
 });
+
+// The checked body. Plain or ciphertext: the typed route hands over its fields branded as
+// ciphertext (RouteBody), the internal postAsUser route plain ones; both are strings here.
+type AppsChatPostMessageBody = z.output<typeof appsChatPostMessageBodySchema> & { userId?: string };
+type AppsChatUpdateMessageBody = z.output<typeof appsChatUpdateMessageBodySchema>;
+
+/**
+ * postMessage's and updateMessage's error answers, as they have always been: ContractError
+ * passes through, a "not found" message is a 404, a "required" one a 400, anything else a 500.
+ */
+function toChatContractError(error: unknown, logMessage: string): ContractError {
+  if (error instanceof ContractError) return error;
+  logger.error(logMessage, error);
+  if (error instanceof Error) {
+    if (error.message.includes('not found')) {
+      return new ContractError(404, { error: error.message, code: 'NOT_FOUND' });
+    }
+    if (error.message.includes('required')) {
+      return new ContractError(400, { error: error.message, code: 'VALIDATION_ERROR' });
+    }
+  }
+  return new ContractError(500, { error: 'Internal server error' });
+}
+
+function chatErrorAnswer(error: unknown, logMessage: string): { status: number; body: unknown } {
+  const answer = toChatContractError(error, logMessage);
+  return { status: answer.status, body: answer.body };
+}
 
 export class ChatController {
   /**
@@ -250,18 +254,59 @@ export class ChatController {
    * - flow: object - v2 Flow UI definition
    */
   postMessage = async (req: Request, res: Response): Promise<void> => {
+    // Only the internal S2S /api/internal/postAsUser route still calls this; bots' postMessage is
+    // the typed route (apps/routes/chat.ts), which calls sendMessage directly.
+    const bodyResult = PostMessageBodySchema.safeParse(req.body);
+    if (!bodyResult.success) {
+      res.status(400).json({
+        error: `Validation error`,
+        code: 'VALIDATION_ERROR',
+        details: bodyResult.error.issues
+      });
+      return;
+    }
     try {
-      const bodyResult = PostMessageBodySchema.safeParse(req.body);
+      const result = await this.sendMessage({
+        body: bodyResult.data,
+        // App-token callers post as the authenticated bot user; the S2S postAsUser
+        // route has no req.user and passes the human user's id in the body.
+        senderUserId: req.user?.id ?? bodyResult.data.userId,
+        workspaceId: req.user?.workspaceId,
+        resolvedChannelId: req._resolvedChannelId,
+        // Verified token appId for app callers; the S2S postAsUser route may pass it in the body.
+        appId: (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId,
+        isPostAsUser: !!(req as Request & { isPostAsUser?: boolean }).isPostAsUser,
+      });
+      res.status(201).json(result);
+    } catch (error) {
+      const answer = chatErrorAnswer(error, 'Error posting message:');
+      res.status(answer.status).json(answer.body);
+    }
+  };
 
-      if (!bodyResult.success) {
-        res.status(400).json({
-          error: `Validation error`,
-          code: 'VALIDATION_ERROR',
-          details: bodyResult.error.issues
-        });
-        return;
-      }
-
+  /**
+   * Post a message to a channel or conversation: what POST /api/apps/chat/postMessage (and the
+   * internal S2S postAsUser route) run once the body is checked. Throws ContractError for the
+   * answers that are not the 201.
+   *
+   * The posting user is taken from the app token (req.user); only the internal
+   * S2S postAsUser route passes userId in the body.
+   *
+   * Body: channelId or channelName or conversationId; text (plain text or Slack BlockKit) or
+   * markdownText or flow (v2 Flow UI) or attachments; uploadedFiles; metadata.
+   */
+  sendMessage = async (input: {
+    body: AppsChatPostMessageBody;
+    senderUserId: string | undefined;
+    workspaceId: string | undefined;
+    /** A `channelId` that named a user, already turned into the bot's DM channel by validateChannelAccessForPostWithDm. */
+    resolvedChannelId: string | undefined;
+    appId: unknown;
+    /** Facts the encryption service extracted from the encrypted `markdownText`. */
+    markdownFacts?: FieldFacts;
+    isPostAsUser: boolean;
+  }): Promise<ChatActionResponse> => {
+    try {
       const {
         channelId,
         channelName,
@@ -270,36 +315,30 @@ export class ChatController {
         flow,
         conversationId,
         attachments,
-        userId,
         uploadedFiles,
         metadata,
         contentFormat,
-      } = bodyResult.data;
+      } = input.body;
 
-      // App-token callers post as the authenticated bot user; the S2S postAsUser
-      // route has no req.user and passes the human user's id in the body.
-      const senderUserId = req.user?.id ?? userId;
+      const senderUserId = input.senderUserId;
       if (!senderUserId) {
-        res.status(400).json({ error: 'userId is required', code: 'VALIDATION_ERROR' });
-        return;
+        throw new ContractError(400, { error: 'userId is required', code: 'VALIDATION_ERROR' });
       }
 
       // A `channelId` that names a user was turned into the bot's DM channel by
       // validateChannelAccessForPostWithDm; the internal S2S postAsUser route
       // skips that middleware and resolves here as before.
       const resolvedChannelId =
-        req._resolvedChannelId ?? (await resolveChannelId(channelId, conversationId, channelName));
+        input.resolvedChannelId ?? (await resolveChannelId(channelId, conversationId, channelName));
 
       let content: string;
       let isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
 
       if (flow) {
         const flowId = crypto.randomUUID();
-        // Verified token appId for app callers; the S2S postAsUser route may pass it in the body.
-        const appId = (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId;
+        const appId = input.appId;
         if (appId !== undefined && !isAlphanumericId(appId)) {
-          res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
-          return;
+          throw new ContractError(400, { error: 'Invalid appId', code: 'VALIDATION_ERROR' });
         }
         const flowJSON = {
           version: '2.0' as const,
@@ -316,12 +355,11 @@ export class ChatController {
         // Validate against the strict schema before storing
         const flowResult = validateFlowDefinition(flowJSON);
         if (!flowResult.success) {
-          res.status(400).json({
+          throw new ContractError(400, {
             error: 'Invalid flowJSON',
             code: 'VALIDATION_ERROR',
             details: formatValidationErrors(flowResult),
           });
-          return;
         }
 
         const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
@@ -329,21 +367,21 @@ export class ChatController {
         // isn't rendered). Prefer flow.data.fallbackText, then the flow title,
         // else a generic label — never worse than the old hardcoded "Flow JSON".
         const flowFallback = encodeHtmlAttr(flowFallbackLabel(flowResult.data));
-        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId as string)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
         isMarkdown = false;
       } else if (markdownText) {
         content = sanitizeMessageContent(markdownText);
       } else if (contentFormat === ContentFormat.MARKDOWN) {
         content = sanitizeMessageContent(text || '');
       } else {
-          content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
+          content = await this.processMessageContent(text, attachments, input.workspaceId);
       }
 
       // Through the transit proxy `markdownText` arrives encrypted, so the content stored is
       // ciphertext; the encryption service extracted its facts (appsChatPostMessageClient). The
       // insert side effects read them as the message content's facts, as for conversations.send.
       // Only when the content is markdownText: a flow message's content is the flow, not it.
-      const markdownFacts = !flow && markdownText ? req.derived?.fields.markdownText : undefined;
+      const markdownFacts = !flow && markdownText ? input.markdownFacts : undefined;
       const derived: DerivedFacts | undefined = markdownFacts ? { version: 2, fields: { content: markdownFacts } } : undefined;
 
       // Messages posted via the internal /api/internal/postAsUser route are authored
@@ -352,11 +390,9 @@ export class ChatController {
       // Xyne bot avatar/name instead of the user's profile picture. Every other
       // (app-token) caller stays BOT. Gated on the trusted S2S route marker so an
       // app token can never forge a message that appears to come from a human.
-      const messageType = (req as Request & { isPostAsUser?: boolean }).isPostAsUser
-        ? MessageType.USER
-        : MessageType.BOT;
+      const messageType = input.isPostAsUser ? MessageType.USER : MessageType.BOT;
 
-      const result = await findOrCreateConversation(
+      return await findOrCreateConversation(
         resolvedChannelId,
         senderUserId,
         content,
@@ -367,29 +403,8 @@ export class ChatController {
         { ...(isMarkdown && { contentFormat: ContentFormat.MARKDOWN }), ...metadata },
         derived,
       );
-
-      res.status(201).json(result);
     } catch (error) {
-      logger.error('Error posting message:', error);
-
-      if (error instanceof Error) {
-        if (error.message.includes('not found')) {
-          res.status(404).json({
-            error: error.message,
-            code: 'NOT_FOUND',
-          });
-          return;
-        }
-        if (error.message.includes('required')) {
-          res.status(400).json({
-            error: error.message,
-            code: 'VALIDATION_ERROR',
-          });
-          return;
-        }
-      }
-
-      res.status(500).json({ error: 'Internal server error' });
+      throw toChatContractError(error, 'Error posting message:');
     }
   };
 
@@ -532,79 +547,48 @@ export class ChatController {
   };
 
   /**
-   * Update a message in a conversation
-   * POST /api/external-event/chat/updateMessage
+   * Update a message in a conversation: what POST /api/apps/chat/updateMessage runs once the
+   * body is checked. Throws ContractError for the answers that are not the 200.
    */
-  updateMessage = async (req: Request, res: Response): Promise<void> => {
+  editMessage = async (input: {
+    body: AppsChatUpdateMessageBody;
+    workspaceId: string | undefined;
+    appId: unknown;
+  }): Promise<ChatActionResponse> => {
     try {
-      const bodyResult = UpdateMessageBodySchema.safeParse(req.body);
-
-      if (!bodyResult.success) {
-        res.status(400).json({
-          error: `Validation error`,
-          code: 'VALIDATION_ERROR',
-          details: bodyResult.error.issues
-        });
-        return;
-      }
-
-      const { messageId, text, markdownText, flowJSON, attachments } = bodyResult.data;
+      const { messageId, text, markdownText, flowJSON, attachments } = input.body;
 
       let content: string;
 
       if (flowJSON) {
         const flowResult = validateFlowDefinition(flowJSON);
         if (!flowResult.success) {
-          res.status(400).json({
+          throw new ContractError(400, {
             error: 'Invalid flowJSON',
             code: 'VALIDATION_ERROR',
             details: formatValidationErrors(flowResult),
           });
-          return;
         }
-        const appId = (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId;
+        const appId = input.appId;
         if (appId !== undefined && !isAlphanumericId(appId)) {
-          res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
-          return;
+          throw new ContractError(400, { error: 'Invalid appId', code: 'VALIDATION_ERROR' });
         }
         const flowId = (flowResult.data.screenId) ?? crypto.randomUUID();
         const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
-        // Inner text = notification/preview fallback (see postMessage above).
+        // Inner text = notification/preview fallback (see sendMessage above).
         const flowFallback = encodeHtmlAttr(flowFallbackLabel(flowResult.data));
-        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(appId as string)}" data-flow-id="${encodeHtmlAttr(flowId)}">${flowFallback}</div>`;
       } else if (markdownText) {
         content = sanitizeMessageContent(markdownText);
       } else {
-          content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
+          content = await this.processMessageContent(text, attachments, input.workspaceId);
       }
 
-      const result = await updateConversation(messageId, content);
-
-      res.status(200).json(result);
+      return await updateConversation(messageId, content);
     } catch (error) {
-      logger.error('Error updating message:', error);
-
-      if (error instanceof Error) {
-        if (error.message.includes('not found')) {
-          res.status(404).json({
-            error: error.message,
-            code: 'NOT_FOUND',
-          });
-          return;
-        }
-        if (error.message.includes('required')) {
-          res.status(400).json({
-            error: error.message,
-            code: 'VALIDATION_ERROR',
-          });
-          return;
-        }
-      }
-
-      res.status(500).json({ error: 'Internal server error' });
+      throw toChatContractError(error, 'Error updating message:');
     }
   };
-
 
   /**
    * Delete an app-authored bot message.

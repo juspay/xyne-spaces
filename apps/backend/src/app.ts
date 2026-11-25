@@ -1,18 +1,11 @@
 import express, { Application, Request, Response } from 'express';
 import { createServer, Server as HttpServer } from 'http';
-import cors from 'cors';
-import helmet from 'helmet';
-import compression from 'compression';
-import cookieParser from 'cookie-parser';
 import { ttsLimiter, webhookLimiter } from '@/middleware/rateLimiters';
-import morgan from 'morgan';
 
 import { config } from '@/config/env';
-import { logger, stream } from '@/utils/logger';
+import { logger } from '@/utils/logger';
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler';
-import { requestLogger } from '@/middleware/requestLogger';
-import { tenantScopeMiddleware, workspaceScopedRoute } from '@/database/tenant/context';
-import { redactSensitiveUrl } from '@/utils/redact';
+import { workspaceScopedRoute } from '@/database/tenant/context';
 import { aclMiddleware } from '@/middleware/acl';
 import { authMiddleware } from '@/middleware/auth';
 import { backfillMountGuard } from '@/middleware/backfillAdminAuth';
@@ -53,7 +46,6 @@ import { configSyncService } from '@/services/configSyncService';
 import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
 import { superpositionClient } from '@/services/superpositionClient';
-import { metricsMiddleware } from '@/middleware/metricsMiddleware';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { externalSourceSyncRoutes } from '@/integrations';
 import googleAuthRoutes from '@/integrations/routes/google-auth';
@@ -224,6 +216,7 @@ import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegist
 import emojiRoutes from '@/routes/emojis';
 import { appRoutes } from '@/apps';
 import { requireTransitProxyIngress } from '@/apps/middelware/requireTransitProxy';
+import { createApp } from '@/framework/createApp';
 import transitProxyInternalRoutes from '@/routes/transitProxyInternal';
 import { ChatController } from '@/apps/controllers/chatController';
 import { ReactionController } from '@/controllers/reactionController';
@@ -261,68 +254,12 @@ export class App {
   public httpServer: HttpServer;
 
   constructor() {
-    this.app = express();
+    // createApp installs the contract gate, what every request gets (security headers, CORS,
+    // logging, tenant scope...) and the typed routes; this file only adds the untyped routes.
+    this.app = createApp();
     this.httpServer = createServer(this.app);
-    this.initializeMiddlewares();
     this.initializeRoutes();
     this.initializeErrorHandling();
-  }
-
-  private initializeMiddlewares(): void {
-    // Security middleware
-    this.app.use(helmet());
-
-    // Cookie parser (must be before routes that use cookies)
-    this.app.use(cookieParser());
-
-    // CORS
-    this.app.use(
-      cors({
-        origin: config.cors.origin,
-        credentials: true,
-      })
-    );
-
-    // Rate limiting
-    // const limiter = rateLimit({
-    //   windowMs: config.rateLimit.windowMs,
-    //   max: config.rateLimit.max,
-    //   message: {
-    //     success: false,
-    //     error: 'Too many requests from this IP, please try again later.',
-    //     timestamp: new Date().toISOString(),
-    //   },
-    // });
-    // this.app.use(limiter);
-
-    // Compression - skip SSE endpoints to allow streaming
-    this.app.use(
-      compression({
-        filter: (req, res) => {
-          // Don't compress SSE responses - they need to stream immediately
-          if (req.headers.accept === 'text/event-stream') {
-            return false;
-          }
-          // Use default compression filter for other requests
-          return compression.filter(req, res);
-        },
-      })
-    );
-
-    this.app.use(metricsMiddleware);
-
-    // Logging
-    if (config.env !== 'test') {
-      morgan.token('url', req =>
-        redactSensitiveUrl((req as { originalUrl?: string; url?: string }).originalUrl ?? (req as { url?: string }).url),
-      );
-      this.app.use(morgan('combined', { stream }));
-    }
-    this.app.use(requestLogger);
-
-    // Open a request-backed tenant scope for every route, once, here. Auth-agnostic:
-    // resolves req.user lazily at DB-call time so the workspaceId stamper can read it.
-    this.app.use(tenantScopeMiddleware);
   }
 
   private initializeRoutes(): void {
@@ -561,6 +498,7 @@ export class App {
 
     // App routes
     // With the ingress transit proxy deployed, every /api/apps call must come through it.
+    // (Typed /apps routes get the same check from the framework.)
     this.app.use('/api/apps', requireTransitProxyIngress, appRoutes);
     // Xyne transit proxy only (token pre-check, manifest relay); infra restricts the callers.
     this.app.use('/api/internal/transit-proxy', transitProxyInternalRoutes);
