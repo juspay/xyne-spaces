@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/postcss';
 import isPseudoClass from '@csstools/postcss-is-pseudo-class';
 
-const KEEP_OUTSIDE_LAYER = new Set(['charset', 'import']);
+const KEEP_OUTSIDE_LAYER = new Set(['charset', 'import', 'font-face']);
 
 export const vendorLayer = () => ({
   postcssPlugin: 'vendor-css-layer',

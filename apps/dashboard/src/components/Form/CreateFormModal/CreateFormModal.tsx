@@ -223,7 +223,7 @@ export const CreateFormModal = ({
           </span>
           <Combobox
             // Match the sibling SelectTrigger box in this form
-            className='h-9 rounded-md px-3 shadow-2xs bg-transparent transition-[color,box-shadow] focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-2'
+            className='h-9 rounded-md px-3 shadow-xs bg-transparent transition-[color,box-shadow] focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-2'
             queryString={selectedProjectItem?.label ?? projectSearch}
             onInputValueChange={value => {
               if (value === '' && selectedProjectItem) return;

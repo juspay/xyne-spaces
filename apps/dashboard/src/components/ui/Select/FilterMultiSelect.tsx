@@ -112,7 +112,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
           disabled={disabled}
           data-slot='filter-multi-select-trigger'
           className={cn(
-            'flex h-8 w-fit items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-sm whitespace-nowrap shadow-2xs transition-[color,box-shadow] outline-hidden',
+            'flex h-8 w-fit items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-hidden',
             'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
             'disabled:cursor-not-allowed disabled:opacity-50',
             '[&_svg]:pointer-events-none [&_svg]:shrink-0',

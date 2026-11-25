@@ -67,7 +67,7 @@ export const VARIANT_STYLES: Record<LiveTranscriptVariant, VariantStyles> = {
     root: 'flex min-h-0 flex-1 flex-col',
     searchWrapper: 'shrink-0 p-2.5',
     searchField:
-      'flex h-8 items-center gap-1 rounded-lg border border-border bg-muted/30 px-2.5 text-muted-foreground shadow-2xs',
+      'flex h-8 items-center gap-1 rounded-lg border border-border bg-muted/30 px-2.5 text-muted-foreground shadow-xs',
     searchIconSize: 12,
     searchInput:
       'h-auto min-w-0 flex-1 rounded-none border-0 p-0 text-xs md:text-xs shadow-none placeholder:text-muted-foreground/75 focus-visible:border-transparent focus-visible:ring-0',

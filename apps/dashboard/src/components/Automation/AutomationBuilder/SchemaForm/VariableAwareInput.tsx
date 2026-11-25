@@ -115,7 +115,7 @@ export function VariableAwareInput({
         aria-invalid={ariaInvalid ?? undefined}
         className={cn(
           // Mirror ui/Input/Input.tsx baseline styling so swaps are 1-line.
-          'border-input flex h-9 w-full min-w-0 items-center gap-1 rounded-md border bg-transparent px-3 py-1 shadow-2xs transition-[color,box-shadow]',
+          'border-input flex h-9 w-full min-w-0 items-center gap-1 rounded-md border bg-transparent px-3 py-1 shadow-xs transition-[color,box-shadow]',
           'focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-2',
           'aria-invalid:ring-destructive/20 aria-invalid:border-destructive',
           disabled && 'pointer-events-none cursor-not-allowed opacity-50',

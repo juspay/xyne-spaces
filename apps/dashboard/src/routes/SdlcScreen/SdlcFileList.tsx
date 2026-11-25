@@ -1585,7 +1585,7 @@ export function SdlcFileList(props: {
                       onClick={() => discussRow(row)}
                       className={cn(
                         ROW_ACTION,
-                        discussing && 'bg-background text-foreground shadow-2xs',
+                        discussing && 'bg-background text-foreground shadow-xs',
                       )}
                       data-track-category='SdlcHub'
                       data-track-name='FilesRowChatOpened'

@@ -163,7 +163,7 @@ function RotateForm({ name }: { name: string }): ReactElement {
       </label>
       <textarea
         id={`rotate-value-${name}`}
-        className='min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-2xs outline-hidden focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-2'
+        className='min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-hidden focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-2'
         placeholder='Paste the new key/credential value — it will be verified before going live'
         value={value}
         onChange={e => setValue(e.target.value)}

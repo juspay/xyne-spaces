@@ -407,7 +407,7 @@ function PathTagsInput({
 
   return (
     <Field label={label} htmlFor={id} className='gap-1.5'>
-      <div className='flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input px-1.5 py-1 shadow-2xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/10'>
+      <div className='flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input px-1.5 py-1 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/10'>
         {values.map(value => (
           <span
             key={value}
