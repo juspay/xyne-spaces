@@ -6,13 +6,7 @@ import {
   PullRequestData,
 } from '../types/bitbucket.js';
 import { logger } from '@/utils/logger';
-import {
-  PullRequestDataPartial,
-  BitbucketChangesResponse,
-  ChangeEntry,
-  BitbucketCommitsResponse,
-  PullRequestInfo,
-} from '../types/bitbucket';
+import { PullRequestDataPartial } from '../types/bitbucket';
 
 export class BitbucketService {
   private config: BitbucketConfig;
@@ -28,13 +22,6 @@ export class BitbucketService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  buildCommitFileUrl(projectKey: string, repositorySlug: string, commitId: string, filePath: string): string {
-    // config.baseUrl is the REST API base (…/rest/api/latest). Strip the REST
-    // segment to get the browser host, then use Bitbucket's commit-diff shape.
-    const webBase = this.config.baseUrl.replace(/\/rest\/.*$/, '').replace(/\/+$/, '');
-    return `${webBase}/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}#${filePath}`;
   }
 
   /**
@@ -102,11 +89,9 @@ export class BitbucketService {
   /**
    * Make authenticated request to Bitbucket API with exponential backoff retry
    * @param endpoint - API endpoint
-   * @param responseType - Response type: 'json' (default) or 'text'
    */
-  private async makeRequest<T>(endpoint: string, responseType: 'json' | 'text' = 'json'): Promise<T> {
+  private async makeRequest<T>(endpoint: string): Promise<T> {
     const url = `${this.config.baseUrl}${endpoint}`;
-    const acceptHeader = responseType === 'text' ? 'text/plain' : 'application/json;charset=UTF-8';
 
     let lastError: Error | undefined;
 
@@ -115,16 +100,13 @@ export class BitbucketService {
         const response = await fetch(url, {
           method: 'GET',
           headers: {
-            Accept: acceptHeader,
+            Accept: 'application/json;charset=UTF-8',
             Authorization: this.getAuthHeader(),
           },
           signal: AbortSignal.timeout(this.REQUEST_TIMEOUT_MS),
         });
 
         if (response.ok) {
-          if (responseType === 'text') {
-            return (await response.text()) as T;
-          }
           return (await response.json()) as T;
         }
 
@@ -188,51 +170,6 @@ export class BitbucketService {
     // Exhausted all retries
     logger.error('Bitbucket API request failed after max retries:', lastError);
     throw lastError || new Error('Bitbucket API request failed after max retries');
-  }
-
-  /**
-   * Helper to fetch all pages of a paginated response
-   */
-  // Hard stop for runaway pagination, applied per fetchAllPages call (each
-  // paginated fetch gets its own budget): a single vendored/bulk commit can carry
-  // 20k+ changed files; without a cap, paging it exhausts the WAF request budget
-  // (~400-500 req/window) and fails the whole analysis. Results past the cap are
-  // dropped with a warn — analysis on such commits is best-effort by design.
-  // Effective caps: /changes @1000 → 25k files per commit; /commits @50 → 1,250.
-  private readonly MAX_PAGES_PER_FETCH = 25;
-
-  private async fetchAllPages<
-    T extends { values: unknown[]; isLastPage: boolean; nextPageStart?: number | null },
-  >(initialEndpoint: string, limit = 50): Promise<T['values'] extends Array<infer U> ? U[] : never> {
-    const allValues: unknown[] = [];
-    let start = 0;
-    let hasMore = true;
-    let pages = 0;
-
-    const separator = initialEndpoint.includes('?') ? '&' : '?';
-
-    while (hasMore) {
-      // The server clamps `limit` to its per-endpoint max; the loop follows
-      // isLastPage/nextPageStart, so a clamp just means more (smaller) pages.
-      const endpoint = `${initialEndpoint}${separator}start=${start}&limit=${limit}`;
-      const response = await this.makeRequest<T>(endpoint);
-
-      allValues.push(...response.values);
-      pages++;
-
-      if (response.isLastPage) {
-        hasMore = false;
-      } else if (pages >= this.MAX_PAGES_PER_FETCH) {
-        logger.warn(
-          `Bitbucket pagination truncated at ${pages} pages (${allValues.length} items) for ${initialEndpoint} — remaining results dropped`
-        );
-        hasMore = false;
-      } else {
-        start = response.nextPageStart ?? start + limit;
-      }
-    }
-
-    return allValues as T['values'] extends Array<infer U> ? U[] : never;
   }
 
   /**
@@ -349,237 +286,6 @@ export class BitbucketService {
 
     // Sort by date (newest first)
     return allPullRequests.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }
-
-  /**
-   * Get all pull requests for a specific merge commit hash
-   * Handles pagination automatically
-   *
-   * @param projectKey - Project key
-   * @param repositorySlug - Repository slug
-   * @param commitHash - Merge commit SHA
-   * @param state - Optional state filter ('OPEN', 'MERGED', 'DECLINED', 'ALL')
-   * @returns Array of pull requests with this merge commit hash
-   */
-  async getPullRequestsForCommit(
-    projectKey: string,
-    repositorySlug: string,
-    commitHash: string,
-  ): Promise<PullRequestData[]> {
-    const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitHash}/pull-requests`;
-
-    try {
-      const pullRequests = await this.fetchAllPages<BitbucketPullRequestsResponse>(endpoint);
-      return pullRequests as PullRequestData[];
-    } catch (error) {
-      // No pull requests found for this commit (not an error, just empty result)
-      logger.info(`No pull requests found for merge commit ${commitHash}`);
-      return [];
-    }
-  }
-
-  /**
-   * Get changes for a specific commit
-   * Bitbucket Server uses /commits/{commitId}/changes endpoint
-   * Returns file paths and change types (no line counts)
-   *
-   * @param projectKey - Project key
-   * @param repositorySlug - Repository slug
-   * @param commitId - Commit SHA
-   * @returns Array of change entries
-   */
-  async getCommitChanges(
-    projectKey: string,
-    repositorySlug: string,
-    commitId: string
-  ): Promise<ChangeEntry[]> {
-    const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}/changes`;
-
-    try {
-      // limit=1000 (the server's ceiling for /changes): a 21k-file bulk commit is
-      // ~22 requests instead of ~430 at the default 50 — the difference between
-      // fitting inside the WAF request budget and tripping it mid-run.
-      return await this.fetchAllPages<BitbucketChangesResponse>(endpoint, 1000);
-    } catch (error) {
-      logger.error(`Failed to fetch changes for commit ${commitId}:`, error as Error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get raw diff for a specific file in a commit
-   * Uses the commit diff endpoint which shows changes introduced by the commit
-   *
-   * @param projectKey - Project key
-   * @param repositorySlug - Repository slug
-   * @param commitId - Commit SHA
-   * @param filePath - Path to the file
-   * @returns Raw git-style diff as string
-   */
-  async getFileDiff(
-    projectKey: string,
-    repositorySlug: string,
-    commitId: string,
-    filePath: string
-  ): Promise<string> {
-    // Some Bitbucket deployments sit behind a WAF that 403s any URL containing
-    // ".env" (a common secret-scan probe), which breaks per-file diffs for env
-    // files. Fetch those from the whole-commit diff (file path not in the URL, so
-    // WAF-safe) and slice out the file. Also the fallback for any blocked path.
-    if (filePath.includes('.env')) {
-      return this.getFileDiffFromCommitDiff(projectKey, repositorySlug, commitId, filePath);
-    }
-    const endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}/diff/${filePath}?contextLines=0`;
-    try {
-      return await this.makeRequest<string>(endpoint, 'text');
-    } catch (error) {
-      logger.warn(`Per-file diff failed for ${filePath} in ${commitId}; falling back to whole-commit diff`);
-      return this.getFileDiffFromCommitDiff(projectKey, repositorySlug, commitId, filePath);
-    }
-  }
-
-  // Whole-commit diff (no file path in the URL → WAF-safe), returning only the
-  // section for `filePath` in the same unified format the per-file endpoint
-  // yields, so DiffParser handles it unchanged. '' if the file isn't present.
-  private async getFileDiffFromCommitDiff(
-    projectKey: string,
-    repositorySlug: string,
-    commitId: string,
-    filePath: string,
-  ): Promise<string> {
-    const full = await this.makeRequest<string>(
-      `/projects/${projectKey}/repos/${repositorySlug}/commits/${commitId}/diff?contextLines=0`,
-      'text',
-    );
-    for (const section of full.split(/^diff --git /m)) {
-      const firstLine = section.split('\n', 1)[0];
-      // standard `a/… b/…`; some Bitbucket Server emits `src://… dst://…`
-      if (firstLine.endsWith(` b/${filePath}`) || firstLine.endsWith(`dst://${filePath}`)) {
-        return `diff --git ${section}`;
-      }
-    }
-    return '';
-  }
-
-
-  async getMergedPullRequest(
-    projectKey: string,
-    repositorySlug: string,
-    commitHash: string,
-    branch?: string
-  ): Promise<PullRequestInfo | null> {
-    const allPRs = await this.getPullRequestsForCommit(
-      projectKey,
-      repositorySlug,
-      commitHash,
-    );
-
-    logger.info(
-      `Found ${allPRs.length} PR(s) for commit ${commitHash} in ${projectKey}/${repositorySlug}`
-    );
-
-    if (allPRs.length === 0) {
-      return null;
-    }
-    const mergedPRs = allPRs.filter((pr) => pr.state === 'MERGED');
-    if (mergedPRs.length === 0) {
-      logger.info(
-        `No merged PRs found for commit ${commitHash} (found ${allPRs.length} PR(s) in other states)`
-      );
-      return null;
-    }
-
-    const relevantPRs = mergedPRs.filter((pr) => {
-      const targetBranch = pr.toRef.displayId;
-      // TODO: branch name should be as per project
-      if (!branch || targetBranch === branch || targetBranch === 'main') {
-        return true;
-      }
-
-      return false;
-    });
-
-    if (relevantPRs.length === 0) {
-      logger.info(
-        `No relevant PRs found for commit ${commitHash} on branch ${branch} (filtered from ${allPRs.length} total)`
-      );
-      return null;
-    }
-
-    relevantPRs.sort((a, b) => {
-      const aTarget = a.toRef.displayId;
-      const bTarget = b.toRef.displayId;
-
-      // Prefer PRs targeting the current branch over main
-      if (branch) {
-        const aIsTargetBranch = aTarget === branch;
-        const bIsTargetBranch = bTarget === branch;
-        if (aIsTargetBranch && !bIsTargetBranch) return -1;
-        if (!aIsTargetBranch && bIsTargetBranch) return 1;
-      }
-      return b.createdDate - a.createdDate;
-    });
-
-    const pr = relevantPRs[0];
-
-    return {
-      id: pr.id,
-      title: pr.title,
-      description: pr.description,
-      state: pr.state,
-      url: pr.links.self[0]?.href || '',
-      mergedAt: new Date(pr.updatedDate).toISOString(),
-      author: {
-        displayName: pr.author.user.displayName,
-        id: pr.author.user.id,
-        emailAddress: pr.author.user.emailAddress,
-      },
-    };
-  }
-
-  /**
-   * Get all commits between two commit IDs
-   * Handles pagination automatically
-   *
-   * @param projectKey - Project key
-   * @param repositorySlug - Repository slug
-   * @param sinceCommitId - Starting commit ID (exclusive - not included in results)
-   * @param untilCommitId - Ending commit ID (inclusive - included in results)
-   * @param branch - Optional branch/ref to fetch commits from (e.g., 'refs/heads/main')
-   * @returns Array of commit IDs between the two commits
-   */
-
-  async getCommitsBetween(
-    projectKey: string,
-    repositorySlug: string,
-    sinceCommitId: string,
-    untilCommitId: string,
-    branch?: string
-  ): Promise<string[]> {
-    let endpoint = `/projects/${projectKey}/repos/${repositorySlug}/commits?since=${sinceCommitId}&until=${untilCommitId}`;
-
-    if (branch) {
-      endpoint += `&at=${encodeURIComponent(branch)}`;
-    }
-
-    try {
-      const commits = await this.fetchAllPages<BitbucketCommitsResponse>(endpoint);
-      const commitIds = commits.map((commit) => commit.id);
-
-      logger.info(
-        `Found ${commitIds.length} commit(s) between ${sinceCommitId} and ${untilCommitId}${branch ? ` on branch ${branch}` : ''} in ${projectKey}/${repositorySlug}`
-      );
-
-      return commitIds;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logger.error(
-        `Failed to fetch commits between ${sinceCommitId} and ${untilCommitId} in ${projectKey}/${repositorySlug}` +
-        (branch ? ` (branch=${branch})` : '') +
-        `: ${msg}`,
-      );
-      throw error;
-    }
   }
 
   /* Add user write permission to a specific repository

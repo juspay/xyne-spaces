@@ -1,9 +1,4 @@
 import { FormFieldType } from "@xyne/shared";
-// Import from the specific file rather than the `../core` barrel — the barrel
-// re-exports releaseService which transitively pulls in the repository
-// container, and that container's circular self-import crashes at module-init
-// time when this file is loaded by `tsx` scripts (vs. server boot, where Node's
-// import order tolerates it). Direct file import keeps scripts working.
 import { FormSchema, FormSchemaProvider, StrictFormValues } from "../core/releaseForm";
 export enum XyneChangeType {
     MIGRATION = "MIGRATION",

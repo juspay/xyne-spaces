@@ -8,7 +8,7 @@ import {
   type ReactElement,
   type SyntheticEvent,
 } from 'react';
-import { ArrowLeft, Clock, ListChecks, Plus, SearchX, Sparkles } from 'lucide-react';
+import { ArrowLeft, Clock, ListChecks, Plus, SearchX } from 'lucide-react';
 import {
   BoardType,
   ReleaseTrackingMode,
@@ -58,7 +58,6 @@ import {
   useAssignReleaseQa,
   useReleaseFieldEditor,
   useReleaseRepositories,
-  useRerunReleaseAnalysis,
 } from './useSdlcReleases';
 import { InfoCard, RepoPill } from './SdlcReleasePrimitives';
 import { SdlcReleaseChanges } from './SdlcReleaseChanges';
@@ -198,12 +197,10 @@ export function SdlcReleaseDetail({
         />
         {tab === 'tickets' &&
           (noTickets ? (
-            <NoTicketsCard releaseId={release.id} repo={repo} range={releaseRange} />
+            <NoTicketsCard repo={repo} range={releaseRange} />
           ) : (
             (ticketsLoaded || activeDevTickets.length > 0) && (
               <TicketsTab
-                releaseId={release.id}
-                canRerun={repo?.config?.mode !== ReleaseTrackingMode.VERSION}
                 tickets={activeDevTickets}
                 qaByTicketId={qaByTicketId}
                 projectId={release.projectId}
@@ -569,15 +566,11 @@ function DetailTabs({
 }
 
 function TicketsTab({
-  releaseId,
-  canRerun,
   tickets,
   qaByTicketId,
   projectId,
   onOpenTicket,
 }: {
-  releaseId: string;
-  canRerun: boolean;
   tickets: readonly { id: string; xyneId: string; title: string }[];
   qaByTicketId: ReadonlyMap<string, ReleaseTicketQa>;
   projectId: string;
@@ -599,7 +592,6 @@ function TicketsTab({
   const [showOverdueOnly, setShowOverdueOnly] = useState(false);
   const [tagQuery, setTagQuery] = useState('');
   const deferredFilters = useDeferredValue(filters);
-  const canManage = useCanManageRelease();
   const usersById = useUsersById();
   const userGroups = useUserGroups();
   const assignQa = useAssignReleaseQa();
@@ -697,7 +689,6 @@ function TicketsTab({
             setShowOverdueOnly(false);
           }}
         />
-        {canManage && canRerun && <RerunAnalysisButton releaseId={releaseId} className='ml-auto' />}
       </div>
       <div className='flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-border bg-background'>
         <div
@@ -785,15 +776,12 @@ function ReleaseQaPill({
 }
 
 function NoTicketsCard({
-  releaseId,
   repo,
   range,
 }: {
-  releaseId: string;
   repo: SdlcReleaseRepo | undefined;
   range: ReleaseRepositoryRow | undefined;
 }): ReactElement {
-  const canManage = useCanManageRelease();
   const isVersionRelease = repo?.config?.mode === ReleaseTrackingMode.VERSION;
 
   const facts: { label: string; value: string; mono?: boolean }[] = isVersionRelease
@@ -825,10 +813,9 @@ function NoTicketsCard({
           <span className='text-[13.5px] leading-normal text-muted-foreground'>
             {isVersionRelease
               ? "Dev tickets tagged with this release's version are added here automatically."
-              : "None of the commits in this range reference a ticket. Link commits to tickets, then re-run analysis to build what's in it, env and migration changes, and release notes."}
+              : "None of the commits in this range reference a ticket. Link commits to tickets to build what's in it, env and migration changes, and release notes."}
           </span>
         </div>
-        {canManage && !isVersionRelease && <RerunAnalysisButton releaseId={releaseId} />}
       </div>
       <div className='grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-6 gap-y-3.5 border-t border-border/70 bg-muted/30 px-5 py-3.5'>
         {facts.map(fact => (
@@ -846,29 +833,5 @@ function NoTicketsCard({
         ))}
       </div>
     </div>
-  );
-}
-
-function RerunAnalysisButton({
-  releaseId,
-  className,
-}: {
-  releaseId: string;
-  className?: string;
-}): ReactElement {
-  const { rerunning, rerun } = useRerunReleaseAnalysis(releaseId);
-  return (
-    <Button
-      variant='outline'
-      size='sm'
-      onClick={() => void rerun()}
-      disabled={rerunning}
-      className={cn('h-[30px] gap-1.5', className)}
-      data-track-category={TRACK_CATEGORY}
-      data-track-name='ReleaseReRunAnalysis'
-    >
-      <Sparkles className={cn('size-3.5 text-status-paused', rerunning && 'animate-pulse')} />
-      {rerunning ? 'Re-running…' : 'Re-run analysis'}
-    </Button>
   );
 }
