@@ -6,13 +6,20 @@ import { unreadableString } from '../unreadable-string.js';
 
 /**
  * Conversation reply API; attached to its route in the backend's routes/conversations.ts.
- * Runs unencrypted for now (`sourceToDerived: {}`, manifest rule revision 2): clients without
- * transit encryption still post here, and the handler parses the plaintext. To re-enable,
- * list `content` here with the facts the handler reads and ship a rule revision with
- * `content.client = true`.
+ * The client encrypts `content` (manifest version 3, rule revision 1: `content.client = true`).
+ * The handler stores it as received and decides on these facts instead of the text: the
+ * visible length for the length limit, the bot command, and Meet links for call detection.
  */
 export const replyToConversationClient = defineRequestContract({
-  sourceToDerived: {},
+  sourceToDerived: {
+    content: {
+      textLength: derive.textLength,
+      isBotCommand: derive.isBotCommand,
+      commandName: derive.commandName,
+      commandArgs: derive.commandArgs,
+      meetLinks: derive.meetLinks,
+    },
+  },
   schema: z.object({
     content: unreadableString().optional(),
     msgType: z.enum([MessageType.USER, MessageType.BOT]).optional(),

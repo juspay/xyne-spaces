@@ -2,12 +2,13 @@ import { Router } from 'express';
 import { replyToConversationClient } from '@xyne/shared';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
-import { encryptedRoute } from '../middleware/encryptedRoute';
+import { encryptedReadRoute, encryptedRoute } from '../middleware/encryptedRoute';
 
 const router = Router();
 const conversationController = new ConversationController();
 
 const encryptedReply = encryptedRoute(replyToConversationClient, {
+  route: 'POST /conversations/:conversationId/messages',
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
 });
 
@@ -24,8 +25,9 @@ router.get('/recent-visited', conversationController.getRecentVisitedConversatio
 // the request (CEK → DEK) and response (DEK → CEK) steps.
 router.post('/:conversationId/messages', uploadMultiple, ...encryptedReply, conversationController.replyToConversation);
 
-// Get a single conversation message by conversationId + messageId (for mobile background prefetch)
-router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);
+// Get a single conversation message by conversationId + messageId (for mobile background prefetch).
+// encryptedReadRoute: the message's content and attachment filenames go out DEK → CEK.
+router.get('/:conversationId/message/:messageId', ...encryptedReadRoute(), conversationController.getConversationMessage);
 
 // Get conversation by message ID (for mobile background prefetch, mirrors ZQL channelConversationsPaginatedV3)
 router.get('/by-message/:messageId', conversationController.getConversationByMessageId);

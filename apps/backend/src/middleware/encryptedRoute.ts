@@ -5,7 +5,6 @@ import { logger } from '@/utils/logger';
 import {
   derivedFactsSchema,
   derivedNames,
-  makeUnreadable,
   sourceFieldNames,
 } from '@xyne/shared';
 import type { RequestContract } from '@xyne/shared';
@@ -13,10 +12,19 @@ import { config } from '@/config/env';
 import {
   getEncryptionProvider,
   isDekPassthrough,
+  runInUnreadableScope,
   runWithDekPassthrough,
 } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
-import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } from './decryptionMiddleware';
+import { makeRequestUnreadable } from './unreadableRequest';
+import { unwrapUnreadableResponse } from './unreadableResponse';
+import {
+  decryptRequestBody,
+  hasTransitCaller,
+  registerRuleRoute,
+  sanitizeForLog,
+  transitCaller,
+} from './decryptionMiddleware';
 
 /**
  * Everything a route whose body is under a client manifest rule runs, in order:
@@ -26,25 +34,66 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
  * 2. transformRequest: transit ciphertext (CEK) in the body becomes workspace-DEK ciphertext
  *    (encryption service /internal/transit/transform-request); the handler never sees
  *    plaintext of a MASTER_DEK field.
- * 3. makeBodyUnreadable: the contract's `unreadableString()` fields are wrapped in
- *    `UnreadableString`, whatever they hold by now (ciphertext or plaintext), so the handler
- *    reads them only through reveal().
+ * 3. makeBodyUnreadable: a source field that arrived as plaintext gets its facts derived here
+ *    (ciphertext got them in step 2), then the contract's `unreadableString()` fields are
+ *    wrapped in `UnreadableString`, whatever they hold (see makeRequestUnreadable). The rest
+ *    of the request runs in an unreadable scope: the handler and everything it calls read the
+ *    facts through `requestFacts(contract, field)` and never the text, and the database
+ *    client stores `UnreadableString` values as they are held (database/unreadable-extension.ts).
  * 4. transformResponse: the JSON response's storage ciphertext becomes transit ciphertext
  *    for the caller (encryption service /internal/transit/transform-response).
+ * 5. unwrapUnreadableResponse: an `UnreadableString` in the response goes out as the value it
+ *    holds (storage ciphertext for step 4, or plaintext with encryption off), not "<redacted>".
  *
  * The manifest is the encryption service's alone: it picks the rule for the request and
  * runs every check against it; this file forwards the request and relays its verdict.
  *
  * Mount it after the upload middleware (multer fills req.body) and right before the handler:
- *   router.post(path, uploadMultiple, ...encryptedRoute(contract, { resolveWorkspaceId }), handler)
+ *   router.post(path, uploadMultiple, ...encryptedRoute(contract, { route, resolveWorkspaceId }), handler)
  */
 export function encryptedRoute(contract: RequestContract, options: Omit<EncryptedRouteOptions, 'contract'>) {
-  return [enterDekPassthrough, transformRequest({ contract, ...options }), makeBodyUnreadable(contract), transformResponse];
+  registerRuleRoute(options.route);
+  return [
+    enterDekPassthrough,
+    transformRequest({ contract, ...options }),
+    makeBodyUnreadable(contract),
+    transformResponse,
+    unwrapUnreadableResponse,
+  ];
+}
+
+/**
+ * encryptedRoute for a route that only reads unreadable fields and has no request body (a GET):
+ * no manifest rule and no request transform, only the response side. The handler reads the
+ * fields through `unreadableDb`, so it holds them as `UnreadableString`, and under DEK
+ * passthrough as their storage ciphertext:
+ *
+ * 1. enterDekPassthrough: the Prisma encryption extension leaves storage ciphertext in rows.
+ * 2. an unreadable scope with no contract: `unreadableDb` reads work; `requestFacts` has none.
+ * 3. transformResponse: storage ciphertext in the response becomes transit ciphertext for the
+ *    caller (encryption service /internal/transit/transform-response, which needs no rule).
+ * 4. unwrapUnreadableResponse: an `UnreadableString` goes out as the value it holds.
+ *
+ *   router.get(path, ...encryptedReadRoute(), handler)
+ */
+export function encryptedReadRoute() {
+  return [enterDekPassthrough, enterReadScope, transformResponse, unwrapUnreadableResponse];
+}
+
+function enterReadScope(_req: Request, _res: Response, next: NextFunction): void {
+  runInUnreadableScope({ contract: undefined, derived: undefined }, () => next());
 }
 
 export type EncryptedRouteOptions = {
   /** This route's request shape. */
   contract: RequestContract;
+  /**
+   * This route as its manifest rule's `value` names it: `METHOD /path`, without the `/api`
+   * prefix, `:param` for a path segment (`'POST /conversations/:conversationId/messages'`). The decrypt at
+   * authentication skips it (decryptionMiddleware.ts), so its body reaches transformRequest as
+   * the client sent it.
+   */
+  route: string;
   /** Workspace whose DEK the encrypted fields are stored under: the one the row belongs to. */
   resolveWorkspaceId: (req: Request) => Promise<string>;
 };
@@ -63,17 +112,15 @@ function enterDekPassthrough(req: Request, _res: Response, next: NextFunction): 
 /** Last step before the handler, on every path through transformRequest (encryption on or off). */
 function makeBodyUnreadable(contract: RequestContract) {
   return function makeBodyUnreadableMiddleware(req: Request, _res: Response, next: NextFunction): void {
-    if (contract.unreadableFields.length > 0 && req.body && typeof req.body === 'object') {
-      req.body = makeUnreadable(contract, req.body);
-    }
-    next();
+    makeRequestUnreadable(contract, req);
+    runInUnreadableScope({ contract, derived: req.derived }, () => next());
   };
 }
 
 /**
- * Per-route counterpart of decryptRequestBodyMiddleware. It runs after the upload
- * middleware: express.json() skips multipart, so `req.body` is still undefined when the
- * auth middleware runs and is only filled in by multer. Checks the body against the
+ * Per-route counterpart of decryptRequestBodyMiddleware, which skips this route (see
+ * EncryptedRouteOptions.route): the body arrives as the client sent it, whether express.json()
+ * parsed it before authentication or multer fills it in after. Checks the body against the
  * route's contract, then has the encryption service transform it. With DB encryption off
  * there is no DEK to re-encrypt under, so it decrypts to plaintext as before.
  */

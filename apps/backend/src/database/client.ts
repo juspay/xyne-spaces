@@ -15,12 +15,14 @@ import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
 import { pingDatabase } from '@/bypassAcl/healthServices';
+import { type UnreadableDb, installUnreadableWrites, withUnreadableReads } from './unreadable-extension';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
   private static wrappedInstance: PrismaClient | null = null;
   private static readReplicaInstance: PrismaClient | null = null;
   private static wrappedReplicaInstance: PrismaClient | null = null;
+  private static unreadableInstance: UnreadableDb | null = null;
   private static isConnected = false;
 
   static getReadReplicaInstance(): PrismaClient | null {
@@ -64,6 +66,10 @@ export class DatabaseClient {
         },
       });
 
+      // First: an UnreadableString in a write is unwrapped before any other middleware or
+      // extension sees it (see installUnreadableWrites).
+      installUnreadableWrites(DatabaseClient.instance);
+
       // TEMPORARY: UserSession change logging for debugging - remove after issue resolved
       if (config.logging.logUserSessionChanges) {
         setupUserSessionLogging(DatabaseClient.instance, true);
@@ -93,10 +99,22 @@ export class DatabaseClient {
       // Apply zero field encryption extension (public build: pass-through)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
       DatabaseClient.instance = DatabaseClient.instance.$extends(auditExtension) as unknown as PrismaClient;
-      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
+      DatabaseClient.wrappedInstance = withWorkspaceStamp(
+        withAclExtension(DatabaseClient.instance),
+      ) as unknown as PrismaClient;
     }
 
     return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;
+  }
+
+  /**
+   * The same client as `getInstance()`, except the fields in UNREADABLE_COLUMNS come back as
+   * `UnreadableString` (see unreadable-extension.ts). Only inside an encryptedRoute request:
+   * a route moves to it once its handler no longer reads those fields as text.
+   */
+  static getUnreadableInstance(): UnreadableDb {
+    DatabaseClient.unreadableInstance ??= withUnreadableReads(DatabaseClient.getInstance());
+    return DatabaseClient.unreadableInstance;
   }
 
   static async connect(): Promise<void> {
@@ -121,6 +139,7 @@ export class DatabaseClient {
         await DatabaseClient.instance.$disconnect();
         DatabaseClient.instance = null;
         DatabaseClient.wrappedInstance = null;
+        DatabaseClient.unreadableInstance = null;
         DatabaseClient.isConnected = false;
         logger.info('Database disconnected successfully');
       } catch (error) {

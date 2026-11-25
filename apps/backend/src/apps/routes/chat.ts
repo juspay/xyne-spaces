@@ -18,11 +18,13 @@ const viaTransitProxy = (handlers: RequestHandler[]): RequestHandler[] =>
   handlers.map((handler) => (req, res, next) => (req.proxyClient ? handler(req, res, next) : next()));
 
 const encryptedPostMessage = viaTransitProxy(encryptedRoute(appsChatPostMessageClient, {
+  route: 'POST /apps/chat/postMessage',
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
 }));
 router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPostWithDm, ...encryptedPostMessage, chatController.postMessage);
 router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
 const encryptedUpdateMessage = viaTransitProxy(encryptedRoute(appsChatUpdateMessageClient, {
+  route: 'POST /apps/chat/updateMessage',
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
 }));
 router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, ...encryptedUpdateMessage, chatController.updateMessage);

@@ -1,6 +1,18 @@
 import type { Message, MessageAttachment, SurfaceNudgeCount } from '@prisma/client';
+import type { UnreadableString } from '@xyne/shared';
 
 import { type SerializedAttachment, type SerializedNudgeCount } from './conversationV3Serializer';
+
+/**
+ * A row as `db` returns it (text) or as `unreadableDb` does (`UnreadableString` in its unreadable
+ * fields): the serializer only copies those fields, and unwrapUnreadableResponse sends an
+ * `UnreadableString` out as the value it holds.
+ */
+type MessageRow = Omit<Message, 'content'> & { content: string | UnreadableString };
+type AttachmentRow = Omit<MessageAttachment, 'originalFilename'> & { originalFilename: string | UnreadableString };
+type ConversationMessageAttachment = Omit<SerializedAttachment, 'originalFilename'> & {
+  originalFilename: string | UnreadableString;
+};
 
 function toEpochMs(d: Date): number {
   return d.getTime();
@@ -11,7 +23,7 @@ export interface SerializedConversationMessageRow {
   conversationId: string;
   childConversationId: string | null;
   senderId: string;
-  content: string;
+  content: string | UnreadableString;
   msgType: string;
   hasAttachment: boolean;
   edited: boolean;
@@ -24,11 +36,11 @@ export interface SerializedConversationMessageRow {
   isSent: boolean;
   reactions_md: string | null;
   link_preview_md: string | null;
-  attachments: SerializedAttachment[];
+  attachments: ConversationMessageAttachment[];
   nudgeCounts: SerializedNudgeCount[];
 }
 
-function serializeAttachment(attachment: MessageAttachment): SerializedAttachment {
+function serializeAttachment(attachment: AttachmentRow): ConversationMessageAttachment {
   return {
     id: attachment.id,
     entityType: attachment.entityType,
@@ -69,8 +81,8 @@ function serializeNudgeCount(nudgeCount: SurfaceNudgeCount): SerializedNudgeCoun
 }
 
 export function serializeConversationMessageRow(
-  message: Message,
-  attachments: MessageAttachment[],
+  message: MessageRow,
+  attachments: AttachmentRow[],
   nudgeCounts: SurfaceNudgeCount[]
 ): SerializedConversationMessageRow {
   return {

@@ -204,6 +204,11 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       return result;
   }
 
+  /** `findById` through `unreadableDb`: `content` comes back as `UnreadableString`. */
+  async findByIdUnreadable(id: string) {
+    return this.unreadable.message.findUnique({ where: { messageId: id } });
+  }
+
   async findById(id: string): Promise<Message | null> {
     return await this.db.message.findUnique({
       where: { messageId: id }
