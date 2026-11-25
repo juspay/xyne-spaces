@@ -62,7 +62,9 @@ export interface CallConnectionSummary {
   providerName: string;
   name: string;
   hasSoftphone: boolean;
+  /** Desks the viewer can see; the rest are only counted. */
   desks: CallConnectionDeskLink[];
+  privateDeskCount: number;
 }
 
 export interface CallConnectionDetails {
