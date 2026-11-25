@@ -291,6 +291,20 @@ export async function decryptResponseText(text: string): Promise<string> {
 }
 
 /**
+ * Decrypts the transit ciphertext in a payload that arrived outside axios, over the socket
+ * (e.g. an ephemeral message: the backend re-encrypts its stored ciphertext for this tab's
+ * transit key, per socket). Returns the payload unchanged when client encryption is off or not
+ * ready. Throws when a field cannot be decrypted, so the caller can drop the event instead of
+ * showing ciphertext.
+ */
+export async function decryptSocketPayload<T>(payload: T): Promise<T> {
+  if (!isEncryptionReady() || !getEncryptionState().apiClientEncryptionEnabled) {
+    return payload;
+  }
+  return (await decryptObject(payload)) as T;
+}
+
+/**
  * Retry once when the backend rejects a write for a stale client manifest (409
  * ENC_MANIFEST_STALE): refresh the manifest, then re-send through `resend` (the same
  * axios instance) so the request interceptor re-stamps the headers. Returns null when

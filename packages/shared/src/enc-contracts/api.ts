@@ -1,4 +1,10 @@
-import { appsChatPostMessage, appsChatUpdateMessage } from './contracts/apps.js';
+import {
+  appsChatAgentProgress,
+  appsChatDeleteMessage,
+  appsChatPostEphemeral,
+  appsChatPostMessage,
+  appsChatUpdateMessage,
+} from './contracts/apps.js';
 
 /**
  * Every REST API that has a route contract, grouped the way the backend serves them. The
@@ -11,7 +17,10 @@ export const API = {
   apps: {
     chat: {
       postMessage: appsChatPostMessage,
+      postEphemeral: appsChatPostEphemeral,
       updateMessage: appsChatUpdateMessage,
+      deleteMessage: appsChatDeleteMessage,
+      agentProgress: appsChatAgentProgress,
     },
   },
 } as const;

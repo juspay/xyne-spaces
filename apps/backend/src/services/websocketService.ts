@@ -1382,10 +1382,20 @@ class WebSocketService {
         return;
       }
 
-      this.io?.to(`user:${userId}`).emit(event.type, {
-        ...event.data,
-        timestamp: event.timestamp,
-      });
+      const roomName = `user:${userId}`;
+      const payload = { ...event.data, timestamp: event.timestamp };
+
+      // Storage ciphertext (an ephemeral message's content from a transit-proxied app, stored
+      // under the workspace DEK and never decrypted on the server) is re-encrypted per socket
+      // for that tab's transit key, as broadcastToSession does; a socket without one gets nothing.
+      if (this.io && this.requiresRecipientTransform(payload)) {
+        const socketIds = Array.from(this.io.sockets.adapter.rooms.get(roomName) ?? []);
+        await this.emitPerRecipient(socketIds, event.type, payload, (recipientPayload) => recipientPayload);
+        logger.info(`✅ [USER-EVENT] Broadcasted ${event.type} per recipient to room ${roomName}`);
+        return;
+      }
+
+      this.io?.to(roomName).emit(event.type, payload);
 
       logger.info(`✅ [USER-EVENT] Broadcasted ${event.type} to room user:${userId}`);
     } catch (error) {

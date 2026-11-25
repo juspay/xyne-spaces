@@ -3,7 +3,7 @@ import { API } from '@xyne/shared';
 import { api } from '@/framework/api';
 import { ChatController } from '../controllers/chatController';
 import { appPermission, botChannel } from '../access';
-import { validateChannelAccessForGet, validateChannelAccessForPost } from '../middelware/channelValidation';
+import { validateChannelAccessForGet } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
 
 const router = Router();
@@ -38,6 +38,21 @@ api.routes(API.apps.chat, (serve) => ({
         isPostAsUser: false,
       }),
   }),
+  // Shown to one user only, never stored. markdownText reaches the handler as workspace-DEK
+  // ciphertext, like postMessage; it is re-encrypted per recipient socket on delivery.
+  postEphemeral: serve('postEphemeral', {
+    auth: 'app',
+    access: { permission: appPermission('chat:write'), channel: botChannel({ allowDm: false }) },
+    encryption: encryptUnderBotWorkspace,
+    successStatus: 201,
+    handle: ({ body, user, app }) =>
+      chatController.sendEphemeral({
+        body,
+        sender: user ? { id: user.id, name: user.name } : undefined,
+        workspaceId: user?.workspaceId,
+        appId: app?.appId,
+      }),
+  }),
   updateMessage: serve('updateMessage', {
     auth: 'app',
     access: { permission: appPermission('chat:write'), channel: botChannel({ allowDm: false }) },
@@ -45,12 +60,21 @@ api.routes(API.apps.chat, (serve) => ({
     handle: ({ body, user, app }) =>
       chatController.editMessage({ body, workspaceId: user?.workspaceId, appId: app?.appId }),
   }),
+  // Ids only: no encryption contract. Only the app's own BOT messages (removeMessage).
+  deleteMessage: serve('deleteMessage', {
+    auth: 'app',
+    access: { permission: appPermission('chat:delete'), channel: botChannel({ allowDm: false }) },
+    handle: ({ body, user }) => chatController.removeMessage({ body, userId: user?.id }),
+  }),
+  // "Agent is working" signal, Redis pub/sub only. Not encrypted (decided 2026-11-25).
+  agentProgress: serve('agentProgress', {
+    auth: 'app',
+    access: { permission: appPermission('chat:write'), channel: botChannel({ allowDm: false }) },
+    handle: ({ body, user }) => chatController.publishAgentProgress({ body, userId: user!.id }),
+  }),
 }));
 
 // ─── Untyped routes (still mounted by apps.ts under /api/apps/chat) ────────────
-router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
-router.post('/deleteMessage', requirePermission('chat:delete'), validateChannelAccessForPost, chatController.deleteMessage);
-router.post('/agentProgress', requirePermission('chat:write'), validateChannelAccessForPost, chatController.agentProgress);
 router.get('/channelHistory', requirePermission('channels:read'), validateChannelAccessForGet, chatController.channelHistory);
 router.get('/conversationReplies', requirePermission('channels:read'), validateChannelAccessForGet, chatController.conversationReplies);
 router.get('/conversationAttachments', requirePermission('channels:read'), validateChannelAccessForGet, chatController.getConversationAttachments);

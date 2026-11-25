@@ -15,10 +15,15 @@ import {
   type DerivedFacts,
   type FieldFacts,
   type appsChatPostMessageBodySchema,
+  type appsChatPostEphemeralBodySchema,
+  type appsChatPostEphemeralResponseSchema,
   type appsChatUpdateMessageBodySchema,
+  type appsChatDeleteMessageBodySchema,
+  type appsChatAgentProgressBodySchema,
+  type appsChatAgentProgressResponseSchema,
 } from '@xyne/shared';
 import { ContractError } from '@/framework/api';
-import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY, flowFallbackLabel } from '@xyne/shared';
+import { validateFlowDefinition, formatValidationErrors, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
 import { ContentFormat, type ChatActionResponse } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
@@ -51,62 +56,6 @@ const PostMessageBodySchema = refineAppsChatPostMessage(
   z.object({ ...appsChatPostMessageFields, userId: ChatActionBodySchema.shape.userId }),
 );
 
-/**
- * chat.postEphemeral's body — postMessage's fields plus `user` (the single
- * recipient) and `messageDelivery`.
- *
- * Built from ChatActionBodySchema rather than PostMessageBodySchema because the
- * latter is a ZodEffects (it ends in .refine) and has no .extend. The channel /
- * flow fields are therefore repeated here rather than shared, which also keeps
- * postMessage's own schema untouched by this feature.
- */
-const EphemeralFlowInputSchema = z.object({
-  version: z.literal('2.0'),
-  screenId: z.string().optional(),
-  title: z.string().optional(),
-  components: z.array(z.record(z.string(), z.any())).optional(),
-  data: z.record(z.string(), z.unknown()).optional(),
-  state: z.object({
-    values: z.record(z.string(), z.unknown()),
-    touched: z.record(z.string(), z.boolean()),
-    errors: z.record(z.string(), z.string()),
-    submitting: z.boolean(),
-    submitted: z.boolean(),
-    history: z.array(z.string()),
-    loadingComponentIds: z.array(z.string()).optional(),
-  }),
-});
-
-const PostEphemeralBodySchema = ChatActionBodySchema.extend({
-  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
-  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
-  conversationId: z.string().trim().optional(),
-  user: z.string().min(1, 'user is required').trim(),
-  messageDelivery: z.enum(MESSAGE_DELIVERY).default('EPHEMERAL'),
-  flow: EphemeralFlowInputSchema.optional(),
-}).refine(
-  data => !!data.text || !!data.markdownText || !!data.flow || (data.attachments && data.attachments.length > 0),
-  { message: 'Either text, markdownText, flow, or attachments is required', path: ['text'] }
-).refine(
-  data => !!data.channelId || !!data.channelName || !!data.conversationId,
-  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
-).refine(
-  // A popup renders a screen; there is nothing to show without one. Rejecting
-  // here gives the app a 400 it can act on — otherwise it gets a 201 and the
-  // recipient gets an empty dialog, with no error anywhere to explain it.
-  data => data.messageDelivery !== 'OPENSCREEN' || !!data.flow,
-  { message: 'flow is required when messageDelivery is OPENSCREEN', path: ['flow'] }
-);
-
-const DeleteMessageBodySchema = z.object({
-  messageId: z.string().min(1, 'Message ID is required').trim(),
-  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
-  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
-}).refine(
-  data => !!data.channelId || !!data.channelName,
-  { message: 'Either channelId or channelName is required', path: ['channelId'] }
-);
-
 const ChannelHistoryQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
@@ -117,22 +66,6 @@ const ChannelHistoryQuerySchema = z.object({
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 );
-
-/**
- * Ephemeral agent progress signal — no DB write, just Redis pub/sub.
- * Published by xyne-claw-auth while an agent is running. Consumed by the dashboard
- * to render <AgentSpinner /> inline (same transport as the typing indicator).
- */
-const AgentProgressBodySchema = z.object({
-  conversationId: z.string().min(1).trim(),
-  channelId: z.string().min(1).trim().optional(),
-  agentSlug: z.string().min(1).trim().optional(),
-  agentName: z.string().min(1).trim().optional(),
-  toolLabel: z.string().optional(),
-  status: z.enum(['working', 'done']).default('working'),
-  triggeredByUserId: z.string().min(1).trim().optional(), // human who started the run — gates the Stop button
-  sessionId: z.string().min(1).trim().optional(),         // run id — scopes done-suppression so a straggler from a finished run can't resurrect the spinner
-});
 
 const ConversationRepliesQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
@@ -150,6 +83,11 @@ const ConversationAttachmentsQuerySchema = z.object({
 // ciphertext (RouteBody), the internal postAsUser route plain ones; both are strings here.
 type AppsChatPostMessageBody = z.output<typeof appsChatPostMessageBodySchema> & { userId?: string };
 type AppsChatUpdateMessageBody = z.output<typeof appsChatUpdateMessageBodySchema>;
+type AppsChatPostEphemeralBody = z.output<typeof appsChatPostEphemeralBodySchema>;
+type AppsChatPostEphemeralResponse = z.output<typeof appsChatPostEphemeralResponseSchema>;
+type AppsChatDeleteMessageBody = z.output<typeof appsChatDeleteMessageBodySchema>;
+type AppsChatAgentProgressBody = z.output<typeof appsChatAgentProgressBodySchema>;
+type AppsChatAgentProgressResponse = z.output<typeof appsChatAgentProgressResponseSchema>;
 
 /**
  * postMessage's and updateMessage's error answers, as they have always been: ContractError
@@ -410,8 +348,9 @@ export class ChatController {
 
   /**
    * Post an ephemeral message — relayed to a single user over their user room and
-   * never written to the messages table.
-   * POST /api/apps/chat/postEphemeral
+   * never written to the messages table. What POST /api/apps/chat/postEphemeral (typed route,
+   * apps/routes/chat.ts) runs once the body is checked; throws ContractError for the answers
+   * that are not the 201.
    *
    * Same body as postMessage plus:
    * - user: string            — recipient's Xyne user id
@@ -429,44 +368,34 @@ export class ChatController {
    * The minting and relaying live in core/ephemeralDelivery so this and the Slack
    * adapter's chat.postEphemeral cannot drift apart on authorization.
    */
-  postEphemeral = async (req: Request, res: Response): Promise<void> => {
+  sendEphemeral = async (input: {
+    body: AppsChatPostEphemeralBody;
+    sender: { id: string; name: string } | undefined;
+    workspaceId: string | undefined;
+    /** Verified token appId (authenticateApp): safe to sign into the flow's capability. */
+    appId: string | undefined;
+  }): Promise<AppsChatPostEphemeralResponse> => {
     try {
-      const bodyResult = PostEphemeralBodySchema.safeParse(req.body);
-
-      if (!bodyResult.success) {
-        res.status(400).json({
-          error: `Validation error`,
-          code: 'VALIDATION_ERROR',
-          details: bodyResult.error.issues,
-        });
-        return;
-      }
-
       const {
         channelId, channelName, conversationId, user, messageDelivery,
         text, markdownText, flow, attachments, metadata, contentFormat,
-      } = bodyResult.data;
+      } = input.body;
 
-      const sender = req.user;
+      const sender = input.sender;
       if (!sender) {
-        res.status(400).json({ error: 'userId is required', code: 'VALIDATION_ERROR' });
-        return;
+        throw new ContractError(400, { error: 'userId is required', code: 'VALIDATION_ERROR' });
       }
 
       const targetUser = await repositories.users.findById(user);
       if (!targetUser) {
-        res.status(404).json({ error: `User not found: ${user}`, code: 'NOT_FOUND' });
-        return;
+        throw new ContractError(404, { error: `User not found: ${user}`, code: 'NOT_FOUND' });
       }
 
       const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
 
-      // Verified token appId — authenticateApp sets req.auth from the validated
-      // token, so this is safe to sign into a capability.
-      const appId = (req as any).auth?.appId ?? (req.body as Record<string, unknown>).appId;
+      const appId = input.appId;
       if (flow && (typeof appId !== 'string' || !appId)) {
-        res.status(400).json({ error: 'Invalid appId', code: 'VALIDATION_ERROR' });
-        return;
+        throw new ContractError(400, { error: 'Invalid appId', code: 'VALIDATION_ERROR' });
       }
 
       let content: string | undefined;
@@ -474,11 +403,13 @@ export class ChatController {
 
       if (!flow) {
         if (markdownText) {
+          // Through the ingress proxy this is workspace-DEK ciphertext (appsChatPostEphemeralClient):
+          // delivery re-encrypts it per recipient socket, and the browser decrypts it.
           content = sanitizeMessageContent(markdownText);
         } else if (contentFormat === ContentFormat.MARKDOWN) {
           content = sanitizeMessageContent(text || '');
         } else {
-          content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
+          content = await this.processMessageContent(text, attachments, input.workspaceId);
         }
       }
 
@@ -510,21 +441,19 @@ export class ChatController {
 
       if (!result.ok) {
         if (result.reason === 'not_in_channel') {
-          res.status(403).json({
+          throw new ContractError(403, {
             error: 'Recipient is not a participant of this channel',
             code: 'USER_NOT_IN_CHANNEL',
           });
-          return;
         }
-        res.status(400).json({
+        throw new ContractError(400, {
           error: result.reason === 'invalid_app' ? 'Invalid appId' : 'Invalid flowJSON',
           code: 'VALIDATION_ERROR',
           ...(result.details && { details: result.details }),
         });
-        return;
       }
 
-      res.status(201).json({
+      return {
         messageId: result.messageId,
         channelId: resolvedChannelId,
         conversationId: conversationId ?? null,
@@ -533,16 +462,14 @@ export class ChatController {
         ephemeral: true,
         // Broadcast, not delivered: an offline recipient silently misses it.
         delivery: 'best-effort',
-      });
+      };
     } catch (error) {
+      if (error instanceof ContractError) throw error;
       logger.error('Error posting ephemeral message:', error);
-
       if (error instanceof Error && error.message.includes('not found')) {
-        res.status(404).json({ error: error.message, code: 'NOT_FOUND' });
-        return;
+        throw new ContractError(404, { error: error.message, code: 'NOT_FOUND' });
       }
-
-      res.status(500).json({ error: 'Internal server error' });
+      throw new ContractError(500, { error: 'Internal server error' });
     }
   };
 
@@ -591,72 +518,65 @@ export class ChatController {
   };
 
   /**
-   * Delete an app-authored bot message.
-   * POST /api/external-event/chat/deleteMessage
+   * Delete an app-authored bot message: what POST /api/apps/chat/deleteMessage (typed route,
+   * apps/routes/chat.ts) runs once the body is checked. Only the app's own BOT messages, in
+   * the channel the body names. Throws ContractError for the answers that are not the 200.
    */
-  deleteMessage = async (req: Request, res: Response): Promise<void> => {
+  removeMessage = async (input: {
+    body: AppsChatDeleteMessageBody;
+    /** The bot user of the app token (authenticateApp). */
+    userId: string | undefined;
+  }): Promise<ChatActionResponse> => {
     try {
-      const bodyResult = DeleteMessageBodySchema.safeParse(req.body);
-      if (!bodyResult.success) {
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.issues });
-        return;
-      }
-
-      const { messageId, channelId, channelName } = bodyResult.data;
-      const userId = req.user?.id;
+      const { messageId, channelId, channelName } = input.body;
+      const userId = input.userId;
       if (!userId) {
-        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
-        return;
+        throw new ContractError(401, { error: 'Unauthorized', code: 'UNAUTHORIZED' });
       }
 
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
       const message = await repositories.messages.findById(messageId);
       if (!message) {
-        res.status(404).json({ error: 'Message not found', code: 'NOT_FOUND' });
-        return;
+        throw new ContractError(404, { error: 'Message not found', code: 'NOT_FOUND' });
       }
 
       const conversation = await repositories.conversations.findById(message.conversationId);
       if (!conversation || conversation.channelId !== resolvedChannelId) {
-        res.status(404).json({ error: 'Message not found', code: 'NOT_FOUND' });
-        return;
+        throw new ContractError(404, { error: 'Message not found', code: 'NOT_FOUND' });
       }
 
       if (message.senderId !== userId || message.msgType !== MessageType.BOT) {
-        res.status(403).json({ error: 'You can only delete bot messages posted by this app', code: 'FORBIDDEN' });
-        return;
+        throw new ContractError(403, { error: 'You can only delete bot messages posted by this app', code: 'FORBIDDEN' });
       }
 
-      const result = await deleteConversationMessage(messageId, userId);
-      res.status(200).json(result);
+      return await deleteConversationMessage(messageId, userId);
     } catch (error) {
+      if (error instanceof ContractError) throw error;
       logger.error('Error deleting message:', error);
       if (error instanceof Error && error.message.includes('not found')) {
-        res.status(404).json({ error: error.message, code: 'NOT_FOUND' });
-        return;
+        throw new ContractError(404, { error: error.message, code: 'NOT_FOUND' });
       }
-      res.status(500).json({ error: 'Internal server error' });
+      throw new ContractError(500, { error: 'Internal server error' });
     }
   };
 
   /**
-   * Publish an ephemeral agent progress signal (no DB write).
-   * POST /api/apps/chat/agentProgress
+   * Publish an ephemeral agent progress signal (no DB write): what POST
+   * /api/apps/chat/agentProgress (typed route) runs once the body is checked.
    *
-   * Body: { conversationId, channelId?, agentSlug?, toolLabel?, status }
-   * The agent's spacesAppUserId comes from the app token (req.user) — it must be a channel participant.
+   * The agent's spacesAppUserId comes from the app token — it must be a channel participant
+   * (the route's channel access check).
    * Delivery: Redis pub/sub on `session:{channelId}:messages` — same channel as typing indicator,
    * so the dashboard WebSocket already subscribes. msgType=SYSTEM so it does not persist.
    */
-  agentProgress = async (req: Request, res: Response): Promise<void> => {
+  publishAgentProgress = async (input: {
+    body: AppsChatAgentProgressBody;
+    /** The agent's spacesAppUserId, from the verified app token. */
+    userId: string;
+  }): Promise<AppsChatAgentProgressResponse> => {
     try {
-      const parsed = AgentProgressBodySchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.issues });
-        return;
-      }
-      const { conversationId, channelId, agentSlug, agentName, toolLabel, status, triggeredByUserId, sessionId } = parsed.data;
-      const userId = req.user!.id; // agent's spacesAppUserId from the verified app token
+      const { conversationId, channelId, agentSlug, agentName, toolLabel, status, triggeredByUserId, sessionId } = input.body;
+      const userId = input.userId;
 
       // Resolve channelId if only conversationId was given — dashboard subscribes on channel.
       const resolvedChannelId = await resolveChannelId(channelId, conversationId);
@@ -675,8 +595,7 @@ export class ChatController {
       const doneSessionTtlSeconds = 120;
 
       if (status !== 'done' && doneSessionKey && (await redisService.get(doneSessionKey))) {
-        res.status(200).json({ success: true, suppressed: true });
-        return;
+        return { success: true, suppressed: true };
       }
 
       // Tool-label updates from the runner don't carry all presentation metadata;
@@ -732,10 +651,10 @@ export class ChatController {
       };
       await redisService.broadcastMessageToSession(resolvedChannelId, event);
 
-      res.status(200).json({ success: true });
+      return { success: true };
     } catch (error) {
       logger.error('[agentProgress] publish error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      throw new ContractError(500, { error: 'Internal server error' });
     }
   };
 

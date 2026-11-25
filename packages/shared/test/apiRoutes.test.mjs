@@ -45,6 +45,46 @@ test('apps chat routes: the encrypted fields are fields of the body, as the mani
   ]);
 });
 
+test('apps postEphemeral: markdownText encrypted, nothing derived, fields as its manifest rule lists them', () => {
+  const route = API.apps.chat.postEphemeral;
+  assert.equal(route.key, 'POST /apps/chat/postEphemeral');
+  assert.deepEqual(sourceFieldNames(route.encryption), ['markdownText']);
+  assert.deepEqual(route.encryption.sourceToDerived, { markdownText: {} });
+  // Must equal the fields of the private rule (enc_contract_entries, POST /apps/chat/postEphemeral).
+  assert.deepEqual(Object.keys(route.encryption.schema.shape).sort(), [
+    'attachments', 'channelId', 'channelName', 'conversationId', 'flow', 'markdownText', 'messageDelivery', 'text', 'user',
+  ]);
+});
+
+test('apps postEphemeral body keeps the controller checks', () => {
+  const body = API.apps.chat.postEphemeral.body;
+  assert.equal(body.safeParse({ channelId: 'c1', text: 'hi' }).success, false, 'no user');
+  assert.equal(body.safeParse({ channelId: 'c1', user: 'u1', text: 'hi', messageDelivery: 'OPENSCREEN' }).success, false, 'popup without flow');
+  const ok = body.safeParse({ channelId: 'c1', user: ' u1 ', markdownText: 'hi' });
+  assert.equal(ok.success, true);
+  assert.deepEqual(ok.data, { channelId: 'c1', user: 'u1', markdownText: 'hi', messageDelivery: 'EPHEMERAL' });
+});
+
+test('apps deleteMessage and agentProgress: typed, no encryption contract', () => {
+  const { deleteMessage, agentProgress } = API.apps.chat;
+  assert.equal(deleteMessage.key, 'POST /apps/chat/deleteMessage');
+  assert.equal(agentProgress.key, 'POST /apps/chat/agentProgress');
+  assert.equal(deleteMessage.encryption, undefined);
+  assert.equal(agentProgress.encryption, undefined);
+});
+
+test('apps deleteMessage and agentProgress bodies keep the controller checks', () => {
+  const del = API.apps.chat.deleteMessage.body;
+  assert.equal(del.safeParse({ messageId: 'm1' }).success, false, 'no channel');
+  assert.equal(del.safeParse({ channelId: 'c1' }).success, false, 'no messageId');
+  assert.deepEqual(del.safeParse({ messageId: ' m1 ', channelName: 'general' }).data, { messageId: 'm1', channelName: 'general' });
+
+  const progress = API.apps.chat.agentProgress.body;
+  assert.equal(progress.safeParse({ channelId: 'c1' }).success, false, 'no conversationId');
+  assert.equal(progress.safeParse({ conversationId: 'cv1', status: 'paused' }).success, false, 'unknown status');
+  assert.deepEqual(progress.safeParse({ conversationId: 'cv1' }).data, { conversationId: 'cv1', status: 'working' });
+});
+
 test('apps postMessage body keeps the controller checks', () => {
   const body = API.apps.chat.postMessage.body;
   assert.equal(body.safeParse({ channelId: 'c1' }).success, false, 'no content');

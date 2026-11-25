@@ -28,8 +28,18 @@ export { recapSetCustomRecapPromptClient, userPresenceUpsertClient } from './con
 export { ticketUpdateClient } from './contracts/tickets.js';
 export { appsChatPostMessageClient, appsChatUpdateMessageClient } from './contracts/apps.js';
 export type { AppsChatPostMessageRequest, AppsChatUpdateMessageRequest } from './contracts/apps.js';
+export { appsChatPostEphemeralClient } from './contracts/apps.js';
+export type { AppsChatPostEphemeralRequest } from './contracts/apps.js';
 export {
   appsChatPostMessage,
+  appsChatPostEphemeral,
+  appsChatDeleteMessage,
+  appsChatDeleteMessageBodySchema,
+  appsChatAgentProgress,
+  appsChatAgentProgressBodySchema,
+  appsChatAgentProgressResponseSchema,
+  appsChatPostEphemeralBodySchema,
+  appsChatPostEphemeralResponseSchema,
   appsChatUpdateMessage,
   appsChatPostMessageBodySchema,
   appsChatPostMessageFields,
