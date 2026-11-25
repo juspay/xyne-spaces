@@ -34,7 +34,7 @@ type TicketListRowProps = {
   treeConnector?: React.ReactNode;
 };
 
-const shortDate = (value: number | string | Date): string | null => {
+export const shortDate = (value: number | string | Date): string | null => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   const sameYear = date.getFullYear() === new Date().getFullYear();
@@ -45,7 +45,7 @@ const shortDate = (value: number | string | Date): string | null => {
   });
 };
 
-const fullTimestamp = (value: number | string | Date): string =>
+export const fullTimestamp = (value: number | string | Date): string =>
   new Date(value).toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',

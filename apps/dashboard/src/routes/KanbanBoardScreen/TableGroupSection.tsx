@@ -18,6 +18,7 @@ interface TableGroupSectionProps {
   availableTags: string[];
   renderRowExtras?: (ticket: Ticket) => ReactNode;
   bulkActionsContainer?: HTMLElement | null;
+  layout?: 'list' | 'columns';
 }
 
 type RowTagMapping = { id: string; tagName: string; ticketId: string; workspaceId: string };
@@ -36,6 +37,7 @@ export const TableGroupSection = ({
   availableTags,
   renderRowExtras,
   bulkActionsContainer,
+  layout,
 }: TableGroupSectionProps): ReactElement => {
   const { tickets, isLoading, isLoadingMore, hasMore, loadMore, isSearchMode } =
     useTableTicketsPage({ ...args, enabled, pageSize });
@@ -76,6 +78,7 @@ export const TableGroupSection = ({
       {...(bulkActionsContainer ? { bulkActionsContainer } : {})}
       {...(internalScroll ? {} : { scrollElement })}
       expandableSubTickets
+      {...(layout ? { layout } : {})}
     />
   );
 
