@@ -34,6 +34,7 @@ export type {
 export {
   findRequestRule,
   findMutatorRule,
+  clientEncryptsField,
   encryptBodyWithRule,
   encryptFormDataWithRule,
 } from './manifest-encrypt.js';

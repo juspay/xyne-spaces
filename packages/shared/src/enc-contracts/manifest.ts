@@ -10,11 +10,17 @@ export interface ClientManifestFieldRule {
   transform: ClientManifestTransform;
 }
 
+/**
+ * A rule names its fields one of two ways. `plaintextFields` (Zero mutators): the fields sent as
+ * plaintext; the client encrypts every other non-empty top-level string. `fields` (older
+ * rules): each field's treatment; a field it does not name is sent as it is.
+ */
 export interface ClientManifestRule {
   type: 'REQUEST' | 'MUTATOR';
   value: string;
   revision: number;
-  fields: Record<string, ClientManifestFieldRule>;
+  fields?: Record<string, ClientManifestFieldRule>;
+  plaintextFields?: string[];
 }
 
 export interface ClientEncryptionManifest {

@@ -19,7 +19,7 @@ import {
   getClientManifest,
   refetchClientManifest,
 } from '../crypto/client-manifest.js';
-import { findMutatorRule } from '../crypto/manifest-encrypt.js';
+import { clientEncryptsField, findMutatorRule } from '../crypto/manifest-encrypt.js';
 import type { TransitKeyring } from '../crypto/keyring.js';
 import { validateQueryWhereClause } from '../zero/query-validation.js';
 import { wasInterrupted } from './metricValidity.js';
@@ -264,8 +264,8 @@ export function useZero(): Zero {
               });
           };
 
-          // Mutators with a manifest rule: encrypt only the rule's client fields and say which
-          // manifest did it; the local (optimistic) run keeps the plaintext args.
+          // Mutators with a manifest rule: encrypt the fields the rule has the client encrypt
+          // (clientEncryptsField); the local (optimistic) run keeps the plaintext args.
           if (keyring && apiClientEncryptionEnabled && getClientManifest() && findMutatorRule(getClientManifest()!, mutationName)) {
             const plainArgs = mutationRequest.args;
             const originalFn = originalMutator.fn;
@@ -280,9 +280,8 @@ export function useZero(): Zero {
               let args: Record<string, ReadonlyJSONValue> = record;
               if (manifest && rule) {
                 args = { ...record };
-                for (const [field, fieldRule] of Object.entries(rule.fields)) {
-                  const value = record[field];
-                  if (fieldRule.client && typeof value === 'string' && value.length > 0) {
+                for (const [field, value] of Object.entries(record)) {
+                  if (clientEncryptsField(rule, field) && typeof value === 'string' && value.length > 0) {
                     args[field] = await encryptField(value, keyring);
                   }
                 }

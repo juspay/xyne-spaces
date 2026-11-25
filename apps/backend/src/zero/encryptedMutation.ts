@@ -52,11 +52,12 @@ import {
   derivedNames,
   makeUnreadable,
   UnreadableString,
-  sourceFieldNames,
+  CLIENT_MANIFEST_STALE_CODE,
+  isCiphertextValue,
 } from '@xyne/shared';
 import type { DerivedFacts, FieldDerived, RequestContract, UnreadableBody } from '@xyne/shared';
 import { config } from '@/config/env';
-import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
+import { getEncryptionProvider, isDekPassthrough, runWithDekPassthrough } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
@@ -65,10 +66,11 @@ import { recordContractApplied, recordFactsDerived, recordFactsError, recordUnre
 
 /**
  * The Zero-mutation counterpart of middleware/encryptedRoute.ts. Every mutation the
- * encryption service has a MUTATOR rule for is sent to it; it picks the rule by name, checks
- * the args against it (409 when they follow another manifest), runs every check,
- * turns transit ciphertext into workspace-DEK ciphertext and extracts facts; the mutator then
- * runs with DEK passthrough on and reads those facts from getMutationDerived().
+ * encryption service has a MUTATOR rule for is sent to it; it picks the rule by name, turns the
+ * transit ciphertext of every field the rule does not list as plaintext into workspace-DEK
+ * ciphertext and extracts facts; the mutator then runs with DEK passthrough on and reads those
+ * facts from getMutationDerived(). Each arg is checked against its type in the contract when
+ * the mutator starts (assertArgsMatchContract).
  *
  * Two steps, so no encryption-service call is made while a database transaction holds a
  * connection: prepareEncryptedMutations transforms a push's rule-encrypted mutations before
@@ -214,7 +216,8 @@ type ContractMutatorFn<TArgs> = (options: {
  * `defineMutator` with unreadable values: the one place a mutator's args and reads are made
  * unreadable.
  *
- * - Args: with a contract, the contract's `unreadableString()` fields come in as
+ * - Args: with a contract, each arg is first checked against its type in the contract
+ *   (assertArgsMatchContract), then the contract's `unreadableString()` fields come in as
  *   `UnreadableString`, every other field as validated. Without one, the args pass through.
  *   The wrapping happens after Zero has validated the args against `validator`, because a
  *   mutator's validated args must be JSON and an `UnreadableString` is not.
@@ -249,6 +252,7 @@ export function defineContractMutator(
   return defineMutator(validator, ({ tx, ctx, args }) => {
     let body: unknown = args;
     if (contract) {
+      assertArgsMatchContract(contract, args as Record<string, unknown>);
       body = makeUnreadable(contract, args as object);
       recordContractApplied();
       recordUnreadableWrapped({
@@ -264,6 +268,42 @@ export function defineContractMutator(
       args: body as never,
     });
   });
+}
+
+/**
+ * Refuses args whose form does not match their type in the contract, before they are made
+ * unreadable. The encryption service only turns the transit ciphertext of every field the
+ * mutator's rule does not list as plaintext (enc_contract_entries) into workspace-DEK
+ * ciphertext; this is where the rule and the contract are held to agree:
+ *
+ * - ciphertext in a field the contract keeps plaintext: the field is missing from the rule's
+ *   plaintext list (a new non-sensitive field nobody listed), so the client encrypted it;
+ * - plaintext in an `unreadableString()` field of args the encryption service transformed: the
+ *   rule lists the field as plaintext (a sensitive field listed by mistake). Args the client
+ *   sent without a manifest (DB or client encryption off) are plaintext throughout and are
+ *   encrypted at rest on write, so this side is checked only under DEK passthrough.
+ *
+ * Empty strings are never encrypted and pass. A client whose manifest predates the rule sends
+ * the same mismatch, so the refusal is ENC_MANIFEST_STALE: it refetches the manifest and resends
+ * once; a mismatch that survives that is drift between the rule and the contract.
+ */
+function assertArgsMatchContract(contract: RequestContract, args: Record<string, unknown>): void {
+  const transformed = isDekPassthrough();
+  for (const [field, value] of Object.entries(args)) {
+    if (typeof value !== 'string' || value.length === 0) continue;
+    const unreadable = contract.unreadableFields.includes(field);
+    let problem: string | undefined;
+    if (!unreadable && isCiphertextValue(value)) {
+      problem = 'is plaintext in the contract but arrived encrypted: list it as plaintext in its manifest rule, or mark it unreadableString()';
+    } else if (unreadable && transformed && !isCiphertextValue(value)) {
+      problem = 'is unreadableString() in the contract but arrived as plaintext: remove it from its manifest rule\'s plaintext fields';
+    }
+    if (!problem) continue;
+    const mutator = Object.entries(MUTATION_CONTRACTS).find(([, c]) => c === contract)?.[0] ?? 'a contracted mutator';
+    logger.error('[encryptedMutation] arg does not match its type in the contract', { mutator, field, problem });
+    getCryptoOperations().add(1, { operation: 'mutation_arg_form', status: 'error', reason: transformed ? 'transformed' : 'plaintext' });
+    throw new MutationEncryptionError(CLIENT_MANIFEST_STALE_CODE, `${mutator}: "${field}" ${problem}`);
+  }
 }
 
 /** An encryption-service verdict on the mutation (stale manifest, rule violation, drift). */
@@ -297,7 +337,7 @@ async function transformMutationArgs(
   if (!enc?.authToken && !enc?.clientKey) {
     throw new MutationEncryptionError('TRANSIT_KEY_REQUIRED', 'Client-encrypted mutation without a transit key');
   }
-  // The contract only feeds the drift check; a rule mutator without one is still transformed.
+  // The contract only names the facts to extract; a rule mutator without one is still transformed.
   const contract = MUTATION_CONTRACTS[mutatorName];
 
   let transformed: { body: unknown; derived?: unknown };
@@ -307,13 +347,9 @@ async function transformMutationArgs(
       ...(enc.authToken ? { authToken: enc.authToken } : {}),
       ...(enc.clientKey ? { clientKey: enc.clientKey } : {}),
       mutator: mutatorName,
-      ...(contract
-        ? {
-            contractFields: Object.keys(contract.schema.shape),
-            contractEncrypted: sourceFieldNames(contract),
-            contractDerived: derivedNames(contract),
-          }
-        : {}),
+      // Mutator rules list their plaintext fields; the args are checked against the contract
+      // here (assertArgsMatchContract), so only the facts to extract go along.
+      ...(contract ? { contractDerived: derivedNames(contract) } : {}),
       entityId: workspaceId,
       entityType: 'WORKSPACE',
     });
