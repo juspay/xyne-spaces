@@ -1,13 +1,18 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
 
 import { logger } from '@/utils/logger';
 
-const execAsync = promisify(exec);
+// execFile (not exec): arguments go straight to xcrun with no shell, so
+// metacharacters in a UDID or in the temp-file path can't run commands.
+const execFileAsync = promisify(execFile);
 
 const BUNDLE_ID = 'net.juspay.xynespaces';
+
+// CoreSimulator UDIDs are always UUIDs.
+const SIMULATOR_UDID_RE = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 
 type SimDevice = {
   udid: string;
@@ -27,7 +32,7 @@ export type LocalPushPayload = {
 };
 
 async function getIosSimulators(): Promise<SimDevice[]> {
-  const { stdout } = await execAsync('xcrun simctl list devices --json');
+  const { stdout } = await execFileAsync('xcrun', ['simctl', 'list', 'devices', '--json']);
   const parsed = JSON.parse(stdout) as {
     devices: Record<string, SimDevice[]>;
   };
@@ -87,8 +92,7 @@ export async function sendLocalIosPush(payload: LocalPushPayload, data: Record<s
     // Modified to create the temp directory in the current working directory
     tmpDir = await mkdtemp(join(process.cwd(), 'fcm-local-'));
     const apnsFile = join(tmpDir, 'notification.apns');
-    logger.info("filefile: ", apnsFile);
-    let record: Record<string, boolean> = {};
+    const record: Record<string, boolean> = {};
     
     await writeFile(apnsFile, JSON.stringify(apnsPayload, null, 2), 'utf8');
 
@@ -99,7 +103,14 @@ export async function sendLocalIosPush(payload: LocalPushPayload, data: Record<s
             logger.info('[FCM:local] Push already sent to this device in this batch, skipping', { device: device.name, udid: device.udid });
             return;
           }
-          await execAsync(`xcrun simctl push ${device.udid} ${BUNDLE_ID} ${apnsFile}`);
+          if (!SIMULATOR_UDID_RE.test(device.udid)) {
+            logger.warn('[FCM:local] Skipping simulator with unexpected UDID format', {
+              device: device.name,
+              udid: device.udid,
+            });
+            return;
+          }
+          await execFileAsync('xcrun', ['simctl', 'push', device.udid, BUNDLE_ID, apnsFile]);
           record[device.udid] = true;
 
           logger.info('[FCM:local] Push sent', { device: device.name, udid: device.udid, record });
