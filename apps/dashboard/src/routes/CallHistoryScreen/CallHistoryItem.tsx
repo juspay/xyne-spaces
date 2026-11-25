@@ -232,7 +232,7 @@ function renderCallItem({
 
           {/* Name and Details */}
           <div className='flex-1 min-w-0'>
-            <h3 className='text-sm font-medium text-foreground break-words'>
+            <h3 className='text-sm font-medium text-foreground wrap-break-word'>
               {call.title ? (
                 // If title exists, show title
                 <span className='text-foreground font-medium'>{call.title}</span>

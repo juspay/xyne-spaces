@@ -174,7 +174,7 @@ export function ThreadCitationModal(): ReactElement | null {
         <button
           type='button'
           aria-label='Close source preview'
-          className='fixed inset-0 z-[55] bg-black/40 backdrop-blur-[3px] cursor-default'
+          className='fixed inset-0 z-55 bg-black/40 backdrop-blur-[3px] cursor-default'
           onClick={close}
           data-track-category='AIDraft'
           data-track-name='CloseThreadCitationBackdrop'

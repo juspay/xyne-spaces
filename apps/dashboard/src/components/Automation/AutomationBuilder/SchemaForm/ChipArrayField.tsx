@@ -95,7 +95,7 @@ export function ChipArrayField({
         placeholder={value.length === 0 ? (placeholder ?? 'Type and press Enter') : ''}
         data-track-category='automation-builder'
         data-track-name='chip-array-input'
-        className='flex-1 min-w-[120px] bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+        className='flex-1 min-w-[120px] bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
       />
     </div>
   );

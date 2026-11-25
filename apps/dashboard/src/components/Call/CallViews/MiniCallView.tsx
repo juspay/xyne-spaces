@@ -575,7 +575,7 @@ export function MiniCallView({
               {/* Normal connected state - show call UI */}
               <div className='h-full flex flex-col'>
                 {/* Header - Draggable */}
-                <div className='cursor-grab active:cursor-grabbing bg-[#131314] px-3 py-1.5 flex items-center justify-between border-b border-white/[0.06]'>
+                <div className='cursor-grab active:cursor-grabbing bg-[#131314] px-3 py-1.5 flex items-center justify-between border-b border-white/6'>
                   <div className='flex items-center gap-2'>
                     <div className='relative visual-regression-hide'>
                       <div className='w-2 h-2 bg-green-500 rounded-full'></div>

@@ -116,16 +116,16 @@ const TAB_CLASS: Record<
 > = {
   pill: {
     tab: 'group relative flex h-8 max-w-[220px] shrink-0 items-center rounded-lg border text-[13px] transition-colors',
-    active: 'border-border bg-muted font-medium text-foreground shadow-sm',
-    idle: 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground has-[:focus-visible]:bg-muted has-[:focus-visible]:text-foreground',
+    active: 'border-border bg-muted font-medium text-foreground shadow-xs',
+    idle: 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground has-focus-visible:bg-muted has-focus-visible:text-foreground',
     dragging: 'z-10 border-border bg-muted text-foreground shadow-lg',
   },
   chrome: {
     tab: 'group relative flex h-[34px] min-w-[72px] flex-[0_1_232px] items-center rounded-t-[10px] text-[12.5px] transition-colors',
     // The curved feet: a corner either side, cut out of the strip in the toolbar's colour.
     active:
-      "z-[1] bg-background text-foreground before:pointer-events-none before:absolute before:-left-2.5 before:bottom-0 before:size-2.5 before:rounded-br-[10px] before:shadow-[5px_5px_0_5px_hsl(var(--background))] before:content-[''] after:pointer-events-none after:absolute after:-right-2.5 after:bottom-0 after:size-2.5 after:rounded-bl-[10px] after:shadow-[-5px_5px_0_5px_hsl(var(--background))] after:content-['']",
-    idle: 'text-muted-foreground hover:bg-background/50 hover:text-foreground has-[:focus-visible]:bg-background/50 has-[:focus-visible]:text-foreground',
+      "z-1 bg-background text-foreground before:pointer-events-none before:absolute before:-left-2.5 before:bottom-0 before:size-2.5 before:rounded-br-[10px] before:shadow-[5px_5px_0_5px_hsl(var(--background))] before:content-[''] after:pointer-events-none after:absolute after:-right-2.5 after:bottom-0 after:size-2.5 after:rounded-bl-[10px] after:shadow-[-5px_5px_0_5px_hsl(var(--background))] after:content-['']",
+    idle: 'text-muted-foreground hover:bg-background/50 hover:text-foreground has-focus-visible:bg-background/50 has-focus-visible:text-foreground',
     dragging: 'z-10 rounded-[10px] bg-background text-foreground shadow-lg',
   },
 };
@@ -255,7 +255,7 @@ export function TabStrip(props: {
       onScroll={fade.onScroll}
       style={fade.style}
       className={cn(
-        'scrollbar-none flex h-full min-w-0 overflow-x-auto outline-none',
+        'scrollbar-none flex h-full min-w-0 overflow-x-auto outline-hidden',
         variant === 'chrome' ? 'items-end px-2.5 pt-1.5' : 'items-center gap-0.5 px-0.5',
       )}
     >
@@ -316,7 +316,7 @@ export function TabStrip(props: {
                     // it comes over the end of the name on hover, so opening a tab
                     // never changes its width and moves the ones after it.
                     className={cn(
-                      'flex h-full min-w-0 flex-1 items-center text-left outline-none',
+                      'flex h-full min-w-0 flex-1 items-center text-left outline-hidden',
                       variant === 'chrome'
                         ? 'gap-2 rounded-t-[10px] pl-3 pr-1'
                         : 'gap-1.5 rounded-[7px] pl-2 pr-2.5',
@@ -374,7 +374,7 @@ export function TabStrip(props: {
                       // hover, the shade fading up and the button easing out to its size.
                       // Only the × takes a click: the shade lies over the name, and a short
                       // tab's middle would otherwise close it rather than open it.
-                      className='pointer-events-none absolute inset-y-0 right-0 flex items-center rounded-r-[7px] bg-gradient-to-l from-muted from-45% via-muted/80 via-60% to-transparent pl-6 pr-1 text-muted-foreground opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100 motion-reduce:transition-none [&>svg]:scale-75 [&>svg]:transition-[transform,background-color,color] [&>svg]:duration-200 [&>svg]:ease-out group-hover:[&>svg]:scale-100 [&>svg]:hover:bg-foreground/10 [&>svg]:hover:text-foreground motion-reduce:[&>svg]:transition-none [&>svg]:pointer-events-auto'
+                      className='pointer-events-none absolute inset-y-0 right-0 flex items-center rounded-r-[7px] bg-linear-to-l from-muted from-45% via-muted/80 via-60% to-transparent pl-6 pr-1 text-muted-foreground opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100 motion-reduce:transition-none [&>svg]:scale-75 [&>svg]:transition-[transform,background-color,color] [&>svg]:duration-200 [&>svg]:ease-out [&>svg]:group-hover:scale-100 hover:[&>svg]:bg-foreground/10 hover:[&>svg]:text-foreground motion-reduce:[&>svg]:transition-none [&>svg]:pointer-events-auto'
                       data-track-category={props.trackCategory}
                       data-track-name={props.trackNames.close}
                     >

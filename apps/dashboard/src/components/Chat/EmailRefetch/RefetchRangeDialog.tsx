@@ -235,7 +235,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                     value={customStartTime}
                     onChange={e => setCustomStartTime(e.target.value || '00:00')}
                     aria-label='Start time'
-                    className='h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30'
+                    className='h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground focus:outline-hidden focus:border-primary focus:ring-2 focus:ring-primary/30'
                     data-track-category='Support'
                     data-track-name='FetchRangeFromTime'
                   />
@@ -244,7 +244,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                     value={customEndTime}
                     onChange={e => setCustomEndTime(e.target.value || '23:59')}
                     aria-label='End time'
-                    className='h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30'
+                    className='h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground focus:outline-hidden focus:border-primary focus:ring-2 focus:ring-primary/30'
                     data-track-category='Support'
                     data-track-name='FetchRangeToTime'
                   />
@@ -358,7 +358,7 @@ const DateField: React.FC<DateFieldProps> = ({
             type='button'
             className={cn(
               'w-full h-9 px-2.5 rounded-md border border-border bg-background text-sm flex items-center justify-between gap-2',
-              'hover:border-muted-foreground/40 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors',
+              'hover:border-muted-foreground/40 focus:outline-hidden focus:border-primary focus:ring-2 focus:ring-primary/30 transition-colors',
               value ? 'text-foreground' : 'text-muted-foreground',
             )}
             data-track-category='Support'

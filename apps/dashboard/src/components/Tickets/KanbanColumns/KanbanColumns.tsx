@@ -832,7 +832,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
               <div
                 data-column-socket
                 aria-hidden
-                className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/2 opacity-0'
               />
               <div
                 onPointerDown={event => reorder.startPress(stage.id, event)}

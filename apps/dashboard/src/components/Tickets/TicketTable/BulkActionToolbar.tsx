@@ -123,7 +123,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'assignee'}
             onOpenChange={open => setActiveMenu(open ? 'assignee' : null)}
-            inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+            inputClassName='bg-transparent! placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
             inputIcon={<UserIcon className='size-4 text-foreground' />}
             showIndicator={false}
           />
@@ -142,7 +142,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               variant='inline'
               isOpen={activeMenu === 'status'}
               onOpenChange={open => setActiveMenu(open ? 'status' : null)}
-              inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+              inputClassName='bg-transparent! placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
               inputIcon={<CircleCheckBig className='size-4 text-foreground' />}
               showIndicator={false}
             />
@@ -161,7 +161,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'priority'}
             onOpenChange={open => setActiveMenu(open ? 'priority' : null)}
-            inputClassName='!bg-transparent text-foreground placeholder:text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+            inputClassName='bg-transparent! text-foreground placeholder:text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
             inputIcon={<Layers className='size-4 text-foreground' />}
             showIndicator={false}
           />
@@ -213,7 +213,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               variant='inline'
               isOpen={activeMenu === 'stage'}
               onOpenChange={open => setActiveMenu(open ? 'stage' : null)}
-              inputClassName='!bg-transparent text-foreground border-none placeholder:text-foreground hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+              inputClassName='bg-transparent! text-foreground border-none placeholder:text-foreground hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
               inputIcon={<TicketStatusIcon size={14} />}
               showIndicator={false}
             />

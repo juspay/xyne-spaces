@@ -165,7 +165,7 @@ export function DatabaseVisualizerDialog({
                 aria-label='Search tables'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Db_Viz_Search'
-                className='h-9 w-56 pl-9 pr-3 text-[13px] bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/15 transition-colors'
+                className='h-9 w-56 pl-9 pr-3 text-[13px] bg-card border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:border-ring focus:ring-2 focus:ring-ring/15 transition-colors'
               />
             </div>
             <button

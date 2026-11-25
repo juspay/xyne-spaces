@@ -39,7 +39,7 @@ const SUGGESTION_CHIP_CLASS_NAME = cn(
 const LOADING_CHIP_CLASS_NAME = 'h-6 w-14 shrink-0 animate-pulse rounded-lg bg-muted';
 
 const LIST_INHERITS_POPOVER_CLASS_NAME =
-  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
+  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:bg-transparent!';
 
 export function LabelChip({
   label,

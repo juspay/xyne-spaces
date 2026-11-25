@@ -445,7 +445,7 @@ function ReleaseNotes({
         <button
           type='button'
           onClick={() => onOpenCanvas(analysisCanvasId)}
-          className='flex w-full max-w-[420px] items-center gap-3 self-start rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm'
+          className='flex w-full max-w-[420px] items-center gap-3 self-start rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-xs'
           data-track-category={TRACK_CATEGORY}
           data-track-name='ReleaseCanvasOpened'
         >
@@ -638,7 +638,7 @@ function InsightList({
       {items.map(item => (
         <span key={item} className='flex gap-2.5 text-sm leading-normal text-foreground/85'>
           <span className={cn('mt-[9px] size-1 shrink-0 rounded-full', dotClassName)} />
-          <span className='min-w-0 [overflow-wrap:anywhere]'>{item}</span>
+          <span className='min-w-0 wrap-anywhere'>{item}</span>
         </span>
       ))}
       {items.length === 0 && emptyText && (

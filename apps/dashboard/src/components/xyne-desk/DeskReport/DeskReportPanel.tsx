@@ -181,15 +181,15 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
       title='Desk Report'
       className={cn(
         'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
-        'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
-        'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+        'data-[state=open]:zoom-in-100! data-[state=open]:slide-in-from-top-[0%]! data-[state=open]:slide-in-from-right-full!',
+        'data-[state=closed]:zoom-out-100! data-[state=closed]:slide-out-to-top-[0%]! data-[state=closed]:slide-out-to-right-full!',
       )}
     >
       <div className='relative h-full w-full'>
         <button
           type='button'
           onClick={onClose}
-          className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
+          className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground dark:border-border'
           aria-label='Close desk report'
           data-track-category='DeskReport'
           data-track-name='CloseButton'

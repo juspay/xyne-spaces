@@ -40,7 +40,7 @@ export const AliasManager = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-popover rounded-lg shadow-lg w-fit min-w-[56rem] max-w-[90vw] mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
+      <div className='bg-popover rounded-lg shadow-lg w-fit min-w-4xl max-w-[90vw] mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
         {/* Header */}
         <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
           <div>

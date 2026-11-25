@@ -179,7 +179,7 @@ export function RecordingOverlay(): React.ReactElement | null {
       <div
         ref={containerRef}
         className={cn(
-          'fixed z-[60] pointer-events-auto rec-overlay-container',
+          'fixed z-60 pointer-events-auto rec-overlay-container',
           isDragging && 'is-dragging',
         )}
         style={
@@ -206,7 +206,7 @@ export function RecordingOverlay(): React.ReactElement | null {
                   {transcripts.map(entry => (
                     <p
                       key={entry.id}
-                      className='text-sm leading-snug text-foreground text-center break-words'
+                      className='text-sm leading-snug text-foreground text-center wrap-break-word'
                     >
                       {entry.text}
                     </p>

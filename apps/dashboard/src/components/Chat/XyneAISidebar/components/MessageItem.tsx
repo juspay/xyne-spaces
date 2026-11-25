@@ -200,7 +200,7 @@ const ClawCitationChip = ({
   const chipClass =
     'claw-citation-chip ' +
     'inline-flex items-center gap-1 align-middle ' +
-    'px-1.5 h-[1.25rem] max-w-[180px] mx-[2px] rounded-xl ' +
+    'px-1.5 h-5 max-w-[180px] mx-[2px] rounded-xl ' +
     'text-[10px] font-medium leading-none ' +
     'bg-muted border border-border/50 ' +
     'hover:bg-accent hover:border-border ' +
@@ -376,7 +376,7 @@ const ImageWithDownload = ({
       <img src={src} alt={alt} className={className || 'max-w-full h-auto'} loading='lazy' />
       <button
         onClick={handleDownload}
-        className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
+        className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-xs border border-border shadow-xs opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
         title='Download image'
         aria-label='Download image'
         data-track-category='XyneAI'
@@ -405,7 +405,7 @@ const ImageWithDownload = ({
 const UserTagComponent = React.memo(({ userTag }: { userTag: UserTag }) => {
   const chipClass =
     'claw-citation-chip inline-flex items-center gap-1 align-middle ' +
-    'pl-0.5 pr-1.5 h-[1.25rem] max-w-[180px] mx-[1px] rounded-full ' +
+    'pl-0.5 pr-1.5 h-5 max-w-[180px] mx-px rounded-full ' +
     'text-[10px] font-medium leading-none cursor-pointer border transition-colors ' +
     'bg-muted border-border/50 text-foreground hover:bg-accent hover:border-border';
 
@@ -846,7 +846,7 @@ const AttachmentImagePreview = ({
       <button
         onClick={onDownload}
         disabled={isDownloading}
-        className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover/image:opacity-100 transition-all duration-200 hover:bg-background disabled:opacity-50'
+        className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-xs border border-border shadow-xs opacity-0 group-hover/image:opacity-100 transition-all duration-200 hover:bg-background disabled:opacity-50'
         title='Download image'
         aria-label='Download image'
         data-track-category='XyneAI'
@@ -1134,7 +1134,7 @@ const BranchNavigator = ({
     >
       <ChevronLeft size={14} />
     </button>
-    <span className='min-w-[2rem] text-center tabular-nums'>
+    <span className='min-w-8 text-center tabular-nums'>
       {index + 1}/{total}
     </span>
     <button
@@ -1340,7 +1340,7 @@ export const MessageItem = React.memo(
               message.type === 'user'
                 ? isEditing
                   ? 'rounded-2xl bg-accent p-3'
-                  : 'xyne-user-bubble flex flex-col items-start gap-3 overflow-hidden px-5 py-3 [border-radius:16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
+                  : 'xyne-user-bubble flex flex-col items-start gap-3 overflow-hidden px-5 py-3 rounded-[16px_16px_4px_16px] bg-accent text-foreground md:block md:w-fit'
                 : 'bg-transparent text-foreground max-w-full'
             }`}
           >
@@ -1401,7 +1401,7 @@ export const MessageItem = React.memo(
                       setIsEditing(false);
                     }
                   }}
-                  className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed"
+                  className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-hidden min-h-[60px] leading-relaxed"
                   rows={Math.max(2, editText.split('\n').length)}
                   data-track-category='XyneAI'
                   data-track-name='EDIT_TEXTAREA'
@@ -1459,7 +1459,7 @@ export const MessageItem = React.memo(
                     ))}
                   </div>
                 )}
-                <div className="xyne-message-text text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
+                <div className="xyne-message-text text-sm font-['Inter'] whitespace-pre-wrap wrap-break-word font-[450] tracking-normal md:leading-relaxed">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -2717,8 +2717,8 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
 
   // Dropdown content
   const dropdownContent = (
-    <div className='bg-popover border border-border rounded-lg shadow-xl py-2 px-3 w-64 z-[99999]'>
-      <div className='text-sm text-foreground break-words'>{displayNames}</div>
+    <div className='bg-popover border border-border rounded-lg shadow-xl py-2 px-3 w-64 z-99999'>
+      <div className='text-sm text-foreground wrap-break-word'>{displayNames}</div>
     </div>
   );
 
@@ -2921,7 +2921,7 @@ const MessageActions = ({
           rel='noopener noreferrer'
           data-track-category='XyneAI'
           data-track-name='open-searxng-attribution'
-          className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
+          className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-linear-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
         >
           <Globe className='w-2 h-2 text-primary-foreground' />
         </a>
@@ -2931,7 +2931,7 @@ const MessageActions = ({
     {/* Genius Icon */}
     {message.isGeniusResponse && (
       <Tooltip content='Powered By Genius' side='left'>
-        <div className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#9747FF] to-[#1B85FF]'>
+        <div className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-linear-to-br from-[#9747FF] to-[#1B85FF]'>
           <img src='/svgs/icons/genius-star-white.svg' alt='Genius' width='8' height='8' />
         </div>
       </Tooltip>

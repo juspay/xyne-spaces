@@ -195,7 +195,7 @@ export const InviteContactsStepPanel = ({
   const hasSelection = selectedEmails.size > 0;
 
   return (
-    <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-[100px] md:top-[276px] md:bottom-[38px] md:w-[calc(100%_-_96px)] lg:w-[calc(100%_-_200px)] md:max-w-[776px] md:justify-start'>
+    <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-[100px] md:top-[276px] md:bottom-[38px] md:w-[calc(100%-96px)] lg:w-[calc(100%-200px)] md:max-w-[776px] md:justify-start'>
       <h1 className='text-[28px] leading-[34px] font-bold text-[#242936]'>Bring your team along</h1>
       <p className='mt-2 flex items-center gap-1.5 text-[14px] leading-[22px] text-[#777B85]'>
         {provider === 'MICROSOFT' ? (
@@ -214,7 +214,7 @@ export const InviteContactsStepPanel = ({
           onChange={event => setContactsSearch(event.target.value)}
           placeholder='Search contacts'
           autoComplete='off'
-          className='h-[44px] w-full pl-[38px] pr-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[14px] text-[#272B35] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
+          className='h-[44px] w-full pl-[38px] pr-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[14px] text-[#272B35] placeholder:text-[#B2B6BE] focus:outline-hidden focus:border-[#AEB7C5] transition-colors'
           data-track-category='Questionnaire'
           data-track-name='InviteContactsSearch'
         />
@@ -254,12 +254,12 @@ export const InviteContactsStepPanel = ({
                 onClick={() => toggleContact(contact.email, !isSelected)}
                 onKeyDown={event => handleRowKeyDown(event, contact.email, isSelected)}
                 style={{ animationDelay: `${Math.min(index, 12) * 24}ms` }}
-                className='flex cursor-pointer select-none items-center gap-3 rounded-[10px] px-2 py-2 transition-colors hover:bg-[#F8FAFC] focus:outline-none focus-visible:bg-[#F8FAFC] animate-[fadeUp_.4s_ease-out_both]'
+                className='flex cursor-pointer select-none items-center gap-3 rounded-[10px] px-2 py-2 transition-colors hover:bg-[#F8FAFC] focus:outline-hidden focus-visible:bg-[#F8FAFC] animate-[fadeUp_.4s_ease-out_both]'
                 data-track-category='Questionnaire'
                 data-track-name='ToggleInviteContact'
               >
                 <span
-                  className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[13px] font-bold text-white ${avatarGradientFor(contact.email)}`}
+                  className={`flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-linear-to-br text-[13px] font-bold text-white ${avatarGradientFor(contact.email)}`}
                 >
                   {initialsFor(contact)}
                 </span>
@@ -378,7 +378,7 @@ export const InviteContactsPreview = ({ contacts, invitedEmails }: PreviewProps)
             {invited.slice(0, 5).map(contact => (
               <div key={contact.email} className='flex items-center gap-3 py-[7px]'>
                 <span
-                  className={`flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[13px] font-bold text-white ${avatarGradientFor(contact.email)}`}
+                  className={`flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-full bg-linear-to-br text-[13px] font-bold text-white ${avatarGradientFor(contact.email)}`}
                 >
                   {initialsFor(contact)}
                 </span>

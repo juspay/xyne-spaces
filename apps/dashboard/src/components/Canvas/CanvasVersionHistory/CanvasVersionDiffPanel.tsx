@@ -136,7 +136,7 @@ export const CanvasVersionDiffPanel = ({
               <div className='mb-1 text-[11px] font-medium uppercase text-muted-foreground'>
                 Change {hunkIndex + 1}
               </div>
-              <div className='whitespace-pre-wrap break-words'>
+              <div className='whitespace-pre-wrap wrap-break-word'>
                 {hunkParts.map((part, partIndex) => (
                   <span
                     key={`${part.type}-${hunkIndex}-${partIndex}`}

@@ -1344,7 +1344,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
       return (
         <MockFrame title={title}>
           <div className='p-2'>
-            <div className='rounded-xl border border-border bg-card p-3 space-y-2 shadow-sm'>
+            <div className='rounded-xl border border-border bg-card p-3 space-y-2 shadow-xs'>
               <div className='flex items-center gap-2'>
                 <div className='h-9 w-9 rounded-md bg-violet-500 flex items-center justify-center text-white text-[12px] font-bold shrink-0'>
                   AC

@@ -381,7 +381,7 @@ export function MentionRenderer({
         data-username={displayName}
         className={
           isCurrentUser
-            ? 'mention-text !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-current-user-color,var(--mention-color))]'
+            ? 'mention-text bg-(--mention-current-user-bg)! text-(--mention-current-user-color,var(--mention-color))!'
             : 'mention-text'
         }
       >
@@ -503,7 +503,7 @@ export function ChannelMentionRenderer({
         data-channel-id={channelId}
         data-channel-name={channelName}
         data-is-private={isPrivate.toString()}
-        className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-1 py-[2px] rounded-[4px] font-normal no-underline transition-colors duration-200 inline whitespace-nowrap align-baseline'
+        className='text-(--mention-color) bg-(--mention-channel-bg) hover:bg-(--mention-channel-hover-bg) px-1 py-[2px] rounded-[4px] font-normal no-underline transition-colors duration-200 inline whitespace-nowrap align-baseline'
       >
         {isPrivate ? <Lock className='h-3 w-3 inline-block mr-0.5 mb-1' /> : '#'}
         {channelName}
@@ -543,7 +543,7 @@ export function GroupMentionRenderer({
         data-group-alias={alias}
         className={
           isCurrentUserInGroup
-            ? 'mention-text cursor-pointer !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-current-user-color,var(--mention-color))]'
+            ? 'mention-text cursor-pointer bg-(--mention-current-user-bg)! text-(--mention-current-user-color,var(--mention-color))!'
             : 'mention-text cursor-pointer'
         }
         onClick={handleClick}
@@ -691,7 +691,7 @@ function MessageCodeBlock({
       <button
         type='button'
         onClick={handleCopy}
-        className='absolute right-2 top-2 z-10 flex items-center rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-100 shadow-sm transition-opacity hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
+        className='absolute right-2 top-2 z-10 flex items-center rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-100 shadow-xs transition-opacity hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
         aria-label='Copy code snippet'
         title='Copy code snippet'
         data-track-category='MESSAGE'

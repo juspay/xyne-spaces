@@ -215,7 +215,7 @@ const RecordingAskAIModal = ({
             onChange={event => setQuery(event.target.value)}
             placeholder='Search recordings, people or labels...'
             aria-label='Search recordings, people or labels'
-            className='w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            className='w-full bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
             data-track-category='RecordingsV2'
             data-track-name='search_ask_ai_context_recordings'
           />

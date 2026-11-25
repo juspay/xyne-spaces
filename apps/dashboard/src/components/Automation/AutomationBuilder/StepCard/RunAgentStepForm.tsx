@@ -118,7 +118,7 @@ export function RunAgentStepForm({
       <FieldRow label='Agent' error={issuesAt.get('agentSlug')} required>
         {selectedAgent ? (
           <div className='inline-flex max-w-full items-center gap-2 self-start rounded-full border border-border bg-accent/40 py-1 pl-2 pr-1 text-sm'>
-            <div className='flex size-5 items-center justify-center rounded-full bg-background shadow-sm'>
+            <div className='flex size-5 items-center justify-center rounded-full bg-background shadow-xs'>
               <Sparkles className='size-3' style={{ color: selectedAgent.color }} />
             </div>
             <span className='truncate font-medium text-foreground'>{selectedAgent.name}</span>

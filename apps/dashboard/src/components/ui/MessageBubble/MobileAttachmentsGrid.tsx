@@ -100,7 +100,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
           // For 3 attachments
           if (activeAttachments.length === 3) {
             return (
-              <div className='grid grid-cols-2 first:*:row-span-2 first:*:w-full gap-1 overflow-hidden'>
+              <div className='grid grid-cols-2 *:first:row-span-2 *:first:w-full gap-1 overflow-hidden'>
                 {activeAttachments.map(attachment => (
                   <div key={attachment.id} className='h-full aspect-square'>
                     <MessageAttachment

@@ -151,7 +151,7 @@ export function CallableAgentDetailPanel({
         <div className='flex w-full items-start gap-12'>
           <div className='flex min-w-0 flex-1 items-center gap-2.5'>
             <span
-              className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'
+              className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-xs'
               aria-hidden
             >
               <UserBot className='size-6' />
@@ -171,7 +171,7 @@ export function CallableAgentDetailPanel({
                 {owner && (
                   <>
                     Built by
-                    <span className='truncate text-[color:var(--mention-color)]'>
+                    <span className='truncate text-(--mention-color)'>
                       @{owner.replace(/^@+/, '')}
                     </span>
                     ·
@@ -236,7 +236,7 @@ export function CallableAgentDetailPanel({
           <Section label='Instructions' info='The system prompt this agent runs with'>
             {systemPrompt ? (
               <ScrollFadeBox height={PROMPT_MAX_HEIGHT} resetKeys={[entry.slug, systemPrompt]}>
-                <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+                <p className='whitespace-pre-wrap wrap-break-word text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
                   {systemPrompt}
                 </p>
               </ScrollFadeBox>

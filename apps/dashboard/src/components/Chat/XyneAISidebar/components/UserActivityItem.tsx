@@ -255,7 +255,7 @@ export const UserActivityItem = ({
   return (
     <div
       className={`
-        w-full transition-all outline-none
+        w-full transition-all outline-hidden
         ${isSelected ? 'bg-muted' : 'hover:bg-accent'}
         ${isExpanded ? 'bg-muted' : ''}
       `}

@@ -48,7 +48,7 @@ function GrantRow({
         {badge}
       </div>
       {reason && (
-        <p className='break-words rounded-md bg-muted/60 px-2.5 py-1.5 text-xs leading-4 text-muted-foreground'>
+        <p className='wrap-break-word rounded-md bg-muted/60 px-2.5 py-1.5 text-xs leading-4 text-muted-foreground'>
           {reason}
         </p>
       )}

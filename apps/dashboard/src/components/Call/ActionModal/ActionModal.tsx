@@ -65,14 +65,14 @@ export const ActionModal: React.FC<ActionModalProps> = ({
 
         {/* Subtitle */}
         {subtitle && (
-          <p className='text-[13px] text-muted-foreground leading-relaxed mb-5 break-words'>
+          <p className='text-[13px] text-muted-foreground leading-relaxed mb-5 wrap-break-word'>
             {subtitle}
           </p>
         )}
 
         {/* Optional Description */}
         {description && (
-          <p className='text-xs text-muted-foreground mb-4 break-words'>{description}</p>
+          <p className='text-xs text-muted-foreground mb-4 wrap-break-word'>{description}</p>
         )}
 
         {/* Optional custom content (e.g. the keep-transcript toggle) */}

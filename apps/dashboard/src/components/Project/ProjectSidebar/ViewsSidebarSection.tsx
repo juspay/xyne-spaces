@@ -111,9 +111,9 @@ function ViewRow({
       className={cn(
         'group/viewrow relative w-full flex items-center gap-2 px-3 py-2 rounded-[10px] cursor-pointer',
         'text-sm tracking-[-0.14px] transition-[background-color,box-shadow,color]',
-        'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        'focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50',
         isActive
-          ? 'bg-sidebar-accent shadow-sm font-semibold text-sidebar-accent-foreground'
+          ? 'bg-sidebar-accent shadow-xs font-semibold text-sidebar-accent-foreground'
           : 'font-medium text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
       )}
       data-track-category='Projects'
@@ -144,8 +144,8 @@ function ViewRow({
           data-track-category='Projects'
           data-track-name='RenameViewInput'
           className={cn(
-            'flex-1 min-w-0 -mx-1.5 -my-[3px] px-1.5 py-0.5 rounded-md text-left font-medium',
-            'bg-background text-foreground placeholder:text-muted-foreground outline-none',
+            'flex-1 min-w-0 -mx-1.5 my-[-3px] px-1.5 py-0.5 rounded-md text-left font-medium',
+            'bg-background text-foreground placeholder:text-muted-foreground outline-hidden',
             'border border-ring ring-[3px] ring-ring/30 cursor-text',
           )}
         />

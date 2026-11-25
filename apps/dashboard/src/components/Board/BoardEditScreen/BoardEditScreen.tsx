@@ -1570,7 +1570,7 @@ const BoardEditScreen = ({
                   type='text'
                   value={boardName}
                   onChange={e => setBoardName(e.target.value)}
-                  className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
+                  className={`text-[22px] font-semibold bg-transparent border-none focus:outline-hidden focus:ring-0 p-0 w-full ${
                     boardName ? 'text-foreground' : 'text-xyne-gray-300'
                   } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
                   placeholder='Enter Board Name'
@@ -1660,7 +1660,7 @@ const BoardEditScreen = ({
                                       }
                                     }}
                                     onBlur={saveFieldLabel}
-                                    className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
+                                    className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-hidden focus:ring-0'
                                     data-track-category='board_edit'
                                     data-track-name='edit_label_input'
                                   />
@@ -1983,7 +1983,7 @@ const BoardEditScreen = ({
                                 {/* Show delete button only for custom fields */}
                                 {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
                                   <>
-                                    <div className='w-[1px] h-[20px] bg-muted mx-1' />
+                                    <div className='w-px h-[20px] bg-muted mx-1' />
                                     <Button
                                       aria-label={`Delete ${field.label}`}
                                       onClick={e => {

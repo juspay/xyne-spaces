@@ -26,7 +26,7 @@ const ComboboxItemContent = ({ item }: { item: DropdownListItemType }) => {
       side='top'
       sideOffset={8}
       delayDuration={400}
-      className='z-[200]'
+      className='z-200'
       providerProps={{ disableHoverableContent: true, children: undefined }}
     >
       {content}
@@ -103,7 +103,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
             style={{
               fieldSizing: 'content',
             }}
-            className='text-[14px] w-full text-foreground font-normal bg-transparent pl-6 outline-none relative placeholder:text-muted-foreground'
+            className='text-[14px] w-full text-foreground font-normal bg-transparent pl-6 outline-hidden relative placeholder:text-muted-foreground'
           />
         </div>
         {hintText && <p className='text-xs text-muted-foreground mt-1.5'>{hintText}</p>}
@@ -111,11 +111,11 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
           <BaseCombobox.Positioner
             sideOffset={10}
             align='start'
-            className='z-[100] pointer-events-none'
+            className='z-100 pointer-events-none'
           >
             <BaseCombobox.Popup
               data-combobox-popup
-              className='border border-border w-[var(--anchor-width)] max-h-[14rem] rounded-md bg-background text-foreground transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 outline outline-1 outline-border shadow-lg pointer-events-auto'
+              className='border border-border w-(--anchor-width) max-h-56 rounded-md bg-background text-foreground transition duration-100 origin-(--transform-origin) data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 outline-solid outline-1 outline-border shadow-lg pointer-events-auto'
               onWheel={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}
               onTouchMove={e => e.stopPropagation()}
@@ -128,8 +128,8 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
                 className='
                     max-h-[min(14rem,var(--available-height))]
                     overflow-y-auto overscroll-contain
-                    py-1 outline-none cursor-pointer
-                    data-[empty]:p-0 space-y-1 '
+                    py-1 outline-hidden cursor-pointer
+                    data-empty:p-0 space-y-1 '
               >
                 {(item: DropdownListItemType) => (
                   <BaseCombobox.Item
@@ -139,7 +139,7 @@ export const Combobox = forwardRef<HTMLInputElement, ComboboxProps>(
                         relative flex justify-between
                         items-center
                         px-2 mx-1 py-1.5 leading-none
-                        data-[highlighted]:bg-accent rounded-md'
+                        data-highlighted:bg-accent rounded-md'
                   >
                     <ComboboxItemContent item={item} />
                   </BaseCombobox.Item>

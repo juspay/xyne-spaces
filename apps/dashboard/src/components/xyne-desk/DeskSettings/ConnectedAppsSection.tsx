@@ -115,7 +115,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
           No apps connected to this desk yet.
         </p>
       ) : (
-        <div className='flex w-full max-w-[480px] max-h-[240px] overflow-y-auto flex-col gap-[6px] rounded-[14px] border border-border bg-background p-[6px] shadow-sm'>
+        <div className='flex w-full max-w-[480px] max-h-[240px] overflow-y-auto flex-col gap-[6px] rounded-[14px] border border-border bg-background p-[6px] shadow-xs'>
           {connectedApps.map(app => {
             const rowPending =
               (disconnectMutation.isPending &&
@@ -213,7 +213,7 @@ export const ConnectedAppsSection: React.FC<ConnectedAppsSectionProps> = ({
                 if (selectedInstalledAppId) connectMutation.mutate(selectedInstalledAppId);
               }}
               disabled={!selectedInstalledAppId || connectMutation.isPending}
-              className='inline-flex h-[32px] shrink-0 items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+              className='inline-flex h-[32px] shrink-0 items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-xs transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
               data-track-category='DeskSettings'
               data-track-name='ConnectApp'
             >

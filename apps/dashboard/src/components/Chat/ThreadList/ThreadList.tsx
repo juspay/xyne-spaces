@@ -705,7 +705,7 @@ const ThreadList = ({
                         {threadMessages.length - 1}{' '}
                         {threadMessages.length - 1 === 1 ? 'reply' : 'replies'}
                       </span>
-                      <div className='flex-1 bg-border w-full h-[1px]'></div>
+                      <div className='flex-1 bg-border w-full h-px'></div>
                     </div>
                   )}
                 </div>
@@ -815,7 +815,7 @@ const ThreadList = ({
                         {visibleMessages.length - 1}{' '}
                         {visibleMessages.length - 1 === 1 ? 'reply' : 'replies'}
                       </span>
-                      <div className='flex-1 bg-border w-full h-[1px]'></div>
+                      <div className='flex-1 bg-border w-full h-px'></div>
                     </div>
                   )}
                 {/* Show collapse/expand button after first message when in collapsed mode */}
@@ -833,7 +833,7 @@ const ThreadList = ({
                         Show {hiddenCount} older {hiddenCount === 1 ? 'reply' : 'replies'}
                       </span>
                     </button>
-                    <div className='flex-1 bg-border h-[1px]'></div>
+                    <div className='flex-1 bg-border h-px'></div>
                   </div>
                 )}
               </div>
@@ -850,7 +850,7 @@ const ThreadList = ({
                 <ChevronUp className='w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground' />
                 <span>Collapse thread</span>
               </button>
-              <div className='flex-1 bg-border h-[1px]'></div>
+              <div className='flex-1 bg-border h-px'></div>
             </div>
           )}
         </div>

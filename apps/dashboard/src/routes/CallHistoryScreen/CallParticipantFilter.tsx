@@ -24,7 +24,7 @@ interface CallParticipantFilterProps {
 const TRIGGER_CLASS_NAME =
   'h-7 gap-1 rounded-lg border-border px-2.5 text-sm font-medium shadow-none';
 const LIST_INHERITS_POPOVER_CLASS_NAME =
-  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
+  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:bg-transparent!';
 
 /**
  * Participant filter for the Recents list. Selections are handed to the call search
@@ -98,7 +98,7 @@ export function CallParticipantFilter({
           type='button'
           variant='outline'
           className={cn(
-            selectedUserIds.length === 0 ? 'text-muted-foreground' : '!border-foreground',
+            selectedUserIds.length === 0 ? 'text-muted-foreground' : 'border-foreground!',
             TRIGGER_CLASS_NAME,
           )}
           aria-label={

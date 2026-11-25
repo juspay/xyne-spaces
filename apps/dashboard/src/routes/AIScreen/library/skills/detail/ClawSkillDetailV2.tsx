@@ -84,13 +84,13 @@ const ClawSkillDetailV2 = (props: {
                 data-track-category='Claw Agents'
                 data-track-name='Skill detail v2: toggle enabled'
                 className={cn(
-                  'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+                  'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
                   skill.enabled ? 'bg-foreground' : 'bg-border',
                 )}
               >
                 <span
                   className={cn(
-                    'inline-block size-4 rounded-full bg-background shadow-sm transition-transform',
+                    'inline-block size-4 rounded-full bg-background shadow-xs transition-transform',
                     skill.enabled ? 'translate-x-[18px]' : 'translate-x-0.5',
                   )}
                 />

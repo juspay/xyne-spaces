@@ -172,7 +172,7 @@ const FileLeafRow: React.FC<{
       <span className='w-3 shrink-0' aria-hidden='true' />
       <FileText size={16} className='shrink-0' />
     </span>
-    <Tooltip content={label} side='top' align='start' className='max-w-xs break-words'>
+    <Tooltip content={label} side='top' align='start' className='max-w-xs wrap-break-word'>
       <span className='block min-w-0 flex-1 truncate text-sm font-medium tracking-[-0.14px]'>
         <HighlightedText text={label} query={highlightQuery} />
       </span>

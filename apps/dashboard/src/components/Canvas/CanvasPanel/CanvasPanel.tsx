@@ -361,7 +361,7 @@ const CanvasPanel = (): ReactElement => {
         <Tooltip content='Show canvases' side='bottom' delayDuration={300}>
           <button
             type='button'
-            className='flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+            className='flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
             style={APP_NO_DRAG_STYLE}
             onClick={expandCanvasSidebar}
             aria-label='Show canvases panel'

@@ -217,7 +217,7 @@ export function ComposerGlow({
           opacity: 0,
         }}
       />
-      <div className='relative z-[1]'>{children}</div>
+      <div className='relative z-1'>{children}</div>
     </div>
   );
 }

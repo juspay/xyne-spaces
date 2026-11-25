@@ -46,7 +46,7 @@ export const TicketSearchInput = ({
         onChange={e => onChange(e.target.value)}
         placeholder='Search'
         aria-label='Search Tickets'
-        className='min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/60'
+        className='min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-hidden placeholder:text-muted-foreground/60'
         data-track-category='Tickets'
         data-track-name='SearchTickets'
       />
@@ -76,7 +76,7 @@ export const TicketSearchInput = ({
           className={cn(
             'shrink-0 rounded px-1 text-[11px] font-semibold leading-[18px] transition-colors',
             isExactSearch
-              ? 'bg-[var(--desk-accent-badge-bg)] text-[var(--ticket-accent)]'
+              ? 'bg-(--desk-accent-badge-bg) text-(--ticket-accent)'
               : 'text-muted-foreground/60 hover:text-foreground',
           )}
           data-track-category='Tickets'

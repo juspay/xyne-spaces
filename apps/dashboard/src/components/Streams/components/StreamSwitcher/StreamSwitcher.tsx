@@ -238,7 +238,7 @@ const StreamSwitcher = ({
           // Matches the trigger below — see the note there for why this dropped
           // out of the app's title size.
           'text-[13px] font-semibold text-foreground',
-          'bg-foreground/[0.06] outline-none ring-1 ring-inset ring-border',
+          'bg-foreground/6 outline-hidden ring-1 ring-inset ring-border',
           'placeholder:font-normal placeholder:text-muted-foreground',
         )}
         data-streams-input
@@ -280,14 +280,14 @@ const StreamSwitcher = ({
               // needs the weight. `13px` matches what a column title used to be,
               // which is the size swap this pair went through.
               'text-[13px] font-semibold text-foreground',
-              'outline-none transition-colors',
+              'outline-hidden transition-colors',
               // The alpha hover the header's icon buttons use, for the reason
               // given at `STREAM_ACTION_IDLE`: this bar can sit on a wallpaper, and
               // a solid grey swatch over a gradient reads as a patch stuck to the
               // screen rather than as the control lighting up. Fill only — the
               // text is already at full strength, so there is no colour to gain.
-              'hover:bg-foreground/[0.06]',
-              'data-[state=open]:bg-foreground/[0.06]',
+              'hover:bg-foreground/6',
+              'data-[state=open]:bg-foreground/6',
               'focus-visible:ring-2 focus-visible:ring-ring',
             )}
             aria-label={`Stream: ${current?.name ?? 'none'}. Switch stream`}
@@ -313,7 +313,7 @@ const StreamSwitcher = ({
 
       <DropdownMenuContent
         align='start'
-        className='w-56 origin-[var(--radix-dropdown-menu-content-transform-origin)]'
+        className='w-56 origin-(--radix-dropdown-menu-content-transform-origin)'
         // Only when Rename was the reason we closed. Every other close should
         // hand focus back to the trigger as usual; this one must not, because
         // the trigger is being replaced by the field that wants it.

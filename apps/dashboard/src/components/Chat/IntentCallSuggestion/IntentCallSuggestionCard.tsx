@@ -219,7 +219,7 @@ export const IntentCallSuggestionCard: React.FC<IntentCallSuggestionCardProps> =
       </button>
 
       {expanded && (
-        <div className='w-full max-w-[640px] rounded-2xl border bg-background px-5 pb-5 pt-4 shadow-sm'>
+        <div className='w-full max-w-[640px] rounded-2xl border bg-background px-5 pb-5 pt-4 shadow-xs'>
           <div className='flex items-center justify-between gap-2'>
             <span className='inline-flex items-center gap-1.5 text-sm text-muted-foreground'>
               <SparkleAi01 className='size-4 text-primary' />

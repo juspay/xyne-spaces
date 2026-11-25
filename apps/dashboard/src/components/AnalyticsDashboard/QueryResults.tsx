@@ -71,7 +71,7 @@ function QueryResultFallbackTable({
 
   return (
     <table className='min-w-full divide-y divide-border/60 text-xs'>
-      <thead className='bg-gradient-to-b from-muted to-muted/70 sticky top-0 z-10'>
+      <thead className='bg-linear-to-b from-muted to-muted/70 sticky top-0 z-10'>
         <tr>
           {columns.map(key => (
             <th
@@ -113,7 +113,7 @@ function ResizeCornerHandle(_axis: ResizeHandleAxis, ref: React.Ref<HTMLElement>
   return (
     <div
       ref={ref as React.Ref<HTMLDivElement>}
-      className='react-resizable-handle react-resizable-handle-se !w-5 !h-5 !right-0 !bottom-0 !bg-none !p-0 !m-0 opacity-50 hover:opacity-100 transition-opacity'
+      className='react-resizable-handle react-resizable-handle-se w-5! h-5! right-0! bottom-0! bg-none! p-0! m-0! opacity-50 hover:opacity-100 transition-opacity'
       data-track-category='ANALYTICS'
       data-track-name='Resize_Query_Card'
       aria-label='Resize'
@@ -374,7 +374,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
 
   if (queriesData.length === 0) {
     return (
-      <div className='flex flex-col items-center justify-center h-48 text-muted-foreground bg-gradient-to-b from-muted/20 to-transparent rounded-2xl border border-dashed border-border/60'>
+      <div className='flex flex-col items-center justify-center h-48 text-muted-foreground bg-linear-to-b from-muted/20 to-transparent rounded-2xl border border-dashed border-border/60'>
         <div className='w-12 h-12 rounded-xl bg-muted/50 flex items-center justify-center mb-3 shadow-inner'>
           <svg
             className='w-6 h-6 text-muted-foreground/50'
@@ -437,11 +437,11 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                 <div key={q.id} className='dashboard-grid-item h-full'>
                   <div
                     className={cn(
-                      'h-full group rounded-2xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/10 shadow-[0_2px_8px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.08),0_8px_24px_rgba(0,0,0,0.04)] hover:border-border/80 transition-all duration-300 ease-out overflow-hidden flex flex-col backdrop-blur-sm',
+                      'h-full group rounded-2xl border border-border/60 bg-linear-to-br from-card via-card to-muted/10 shadow-[0_2px_8px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.02)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.08),0_8px_24px_rgba(0,0,0,0.04)] hover:border-border/80 transition-all duration-300 ease-out overflow-hidden flex flex-col backdrop-blur-xs',
                       r.error && 'border-red-200 dark:border-red-800/60',
                     )}
                   >
-                    <div className='flex items-center justify-between px-4 py-3 border-b border-border/40 bg-gradient-to-r from-muted/30 via-muted/20 to-transparent shrink-0'>
+                    <div className='flex items-center justify-between px-4 py-3 border-b border-border/40 bg-linear-to-r from-muted/30 via-muted/20 to-transparent shrink-0'>
                       <div className='flex items-center gap-2 min-w-0 dashboard-grid-drag-handle cursor-grab active:cursor-grabbing touch-none'>
                         <div className='shrink-0 text-muted-foreground/40 hover:text-muted-foreground/80 transition-colors p-0.5 rounded'>
                           <GripVertical className='w-4 h-4' />
@@ -548,7 +548,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                       ) : r.visualType ? (
                         <div
                           className={cn(
-                            'flex-1 min-h-0 flex flex-col rounded-xl bg-gradient-to-b from-background/50 to-transparent overflow-hidden',
+                            'flex-1 min-h-0 flex flex-col rounded-xl bg-linear-to-b from-background/50 to-transparent overflow-hidden',
                             !isKPI && 'p-2',
                           )}
                         >

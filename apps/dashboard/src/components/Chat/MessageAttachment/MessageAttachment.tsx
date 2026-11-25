@@ -289,7 +289,7 @@ const Preview: React.FC<{
               isInGrid ? 'w-full h-full' : 'w-full h-full min-h-[180px]',
             )}
           >
-            <div className='bg-card rounded-lg p-3 shadow-sm border border-border'>{docIcon}</div>
+            <div className='bg-card rounded-lg p-3 shadow-xs border border-border'>{docIcon}</div>
             <div className='text-center'>
               <div className='text-sm font-semibold text-foreground'>{ext}</div>
               <div className='text-xs text-muted-foreground'>{size}</div>
@@ -431,7 +431,7 @@ const Preview: React.FC<{
   if (compact) {
     return (
       <div className='w-full h-full bg-muted flex flex-col items-center justify-center gap-2 p-2'>
-        <div className='bg-card rounded-lg p-2 shadow-sm border border-border'>{icon}</div>
+        <div className='bg-card rounded-lg p-2 shadow-xs border border-border'>{icon}</div>
       </div>
     );
   }
@@ -443,7 +443,7 @@ const Preview: React.FC<{
         !isInGrid && 'min-h-[256px]',
       )}
     >
-      <div className='bg-card rounded-lg p-3 shadow-sm border border-border'>{icon}</div>
+      <div className='bg-card rounded-lg p-3 shadow-xs border border-border'>{icon}</div>
       <div className='text-center'>
         <div className='text-sm font-semibold text-foreground'>{extension}</div>
         <div className='text-xs text-muted-foreground'>{formattedSize}</div>
@@ -482,7 +482,7 @@ const ActionTray: React.FC<{
   return (
     <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
       {!isMobile && (
-        <div className='flex items-center justify-between bg-background/90 backdrop-blur-sm rounded-lg p-1 shadow-lg border border-border'>
+        <div className='flex items-center justify-between bg-background/90 backdrop-blur-xs rounded-lg p-1 shadow-lg border border-border'>
           {imageBlob && (
             <button
               onClick={e => {
@@ -1033,7 +1033,7 @@ const InlineVideoPlayer: React.FC<{
       <Menu.Trigger>
         <button
           type='button'
-          className='p-1.5 rounded-md bg-background/90 backdrop-blur-sm text-foreground transition-colors opacity-0 group-hover:opacity-100 border border-border'
+          className='p-1.5 rounded-md bg-background/90 backdrop-blur-xs text-foreground transition-colors opacity-0 group-hover:opacity-100 border border-border'
           title='More options'
           aria-label={`More options for ${fileName}`}
         >
@@ -1132,7 +1132,7 @@ const InlineVideoPlayer: React.FC<{
         }
       >
         <div
-          className={`relative bg-black rounded-lg overflow-hidden border border-border shadow-sm w-full h-full ${isInGrid ? '' : 'max-w-md'}`}
+          className={`relative bg-black rounded-lg overflow-hidden border border-border shadow-xs w-full h-full ${isInGrid ? '' : 'max-w-md'}`}
         >
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
@@ -1181,7 +1181,7 @@ const InlineVideoPlayer: React.FC<{
                     }
                   }}
                   onTouchStart={e => e.stopPropagation()}
-                  className='p-1 flex items-center justify-center gap-1 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
+                  className='p-1 flex items-center justify-center gap-1 rounded-md bg-black/60 backdrop-blur-xs text-white hover:bg-black/80 transition-colors'
                   title='Play video'
                   aria-label='Play video'
                   data-track-category='MESSAGE_ATTACHMENT'
@@ -1202,7 +1202,7 @@ const InlineVideoPlayer: React.FC<{
                       e.stopPropagation();
                       openModal();
                     }}
-                    className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
+                    className='p-1.5 rounded-md bg-black/60 backdrop-blur-xs text-white hover:bg-black/80 transition-colors'
                     title='Expand video'
                     aria-label='Expand video'
                     data-track-category='MESSAGE_ATTACHMENT'
@@ -1403,7 +1403,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     <>
       <div
         className={cn(
-          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition duration-200 cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
           compact
             ? 'w-16 h-16 '
             : isInGrid

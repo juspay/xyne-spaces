@@ -505,7 +505,7 @@ const getMessageBubbleClassName = (
     isHighlighted && 'highlight-message',
     isXyneBot && 'pt-5',
     isPrivateSystemNotice && 'bg-muted pt-3',
-    contentOnly && '!px-0',
+    contentOnly && 'px-0!',
   ]
     .flat()
     .filter(Boolean)
@@ -1942,7 +1942,7 @@ export const ReactionView = ({
               content={tooltipContent}
               side='top'
               showArrow={false}
-              className='w-max max-w-[calc(100vw-2rem)] whitespace-normal break-words border border-border bg-popover text-center text-popover-foreground text-wrap shadow-md sm:max-w-md'
+              className='w-max max-w-[calc(100vw-2rem)] whitespace-normal wrap-break-word border border-border bg-popover text-center text-popover-foreground text-wrap shadow-md sm:max-w-md'
             >
               <button
                 type='button'

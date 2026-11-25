@@ -974,7 +974,7 @@ const ActivityListView = (): ReactElement => {
             {/* Unread-only filter */}
             <label
               htmlFor='activity-unread-toggle'
-              className='flex h-7 items-center gap-2 px-2 rounded-[10px] cursor-pointer select-none transition-colors hover:bg-foreground/[6%]'
+              className='flex h-7 items-center gap-2 px-2 rounded-[10px] cursor-pointer select-none transition-colors hover:bg-foreground/6'
             >
               <span className='text-sm font-medium text-muted-foreground'>Unread</span>
               <Switch.Root
@@ -990,12 +990,12 @@ const ActivityListView = (): ReactElement => {
                   'relative inline-flex h-3.5 w-6 shrink-0 items-center rounded-full',
                   'bg-sidebar-border transition-colors duration-200',
                   'data-[state=checked]:bg-primary',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
                 )}
               >
                 <Switch.Thumb
                   className={cn(
-                    'block size-2.5 rounded-full bg-white shadow-sm',
+                    'block size-2.5 rounded-full bg-white shadow-xs',
                     'transition-transform duration-200',
                     'translate-x-0.5 data-[state=checked]:translate-x-3',
                   )}
@@ -1007,7 +1007,7 @@ const ActivityListView = (): ReactElement => {
             <div
               role='radiogroup'
               aria-label='Filter activity by actor'
-              className='flex items-center gap-0.5 rounded-xl bg-foreground/[6%] p-0.5'
+              className='flex items-center gap-0.5 rounded-xl bg-foreground/6 p-0.5'
             >
               {ACTOR_FILTER_OPTIONS.map(option => {
                 const isActive = option.value === actorFilter;
@@ -1031,9 +1031,9 @@ const ActivityListView = (): ReactElement => {
                     className={cn(
                       'flex items-center rounded-[10px] pl-2 pr-2.5 py-1',
                       'transition-[background-color,color,box-shadow] duration-300 ease-in-out',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                      'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
                       isActive
-                        ? 'bg-background text-foreground shadow-sm'
+                        ? 'bg-background text-foreground shadow-xs'
                         : 'text-muted-foreground hover:text-foreground',
                     )}
                     data-track-category='ACTIVITY'
@@ -1111,8 +1111,8 @@ const ActivityListView = (): ReactElement => {
                   className={cn(
                     'absolute right-1 top-1 size-1.5 rounded-full bg-primary transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
                     channelFilter.length > 0
-                      ? 'scale-100 opacity-100 blur-0'
-                      : 'scale-[0.25] opacity-0 blur-[4px]',
+                      ? 'scale-100 opacity-100 blur-none'
+                      : 'scale-[0.25] opacity-0 blur-xs',
                   )}
                 />
               </button>
@@ -1169,12 +1169,12 @@ const ActivityListView = (): ReactElement => {
                         'relative inline-flex h-5 w-9 items-center rounded-full',
                         'bg-sidebar-border transition-colors duration-200',
                         'data-[state=checked]:bg-primary',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
                       )}
                     >
                       <Switch.Thumb
                         className={cn(
-                          'block h-4 w-4 rounded-full bg-white shadow-sm',
+                          'block h-4 w-4 rounded-full bg-white shadow-xs',
                           'transition-transform duration-200',
                           'translate-x-0.5 data-[state=checked]:translate-x-4',
                         )}
@@ -1284,9 +1284,9 @@ const ActivityListView = (): ReactElement => {
                         data-track-name={`TAB_CHANGE`}
                         data-track-metadata={JSON.stringify({ tab: tab.value })}
                         className={cn(
-                          'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none',
+                          'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/6 focus-visible:bg-foreground/6 focus-visible:outline-hidden',
                           activeTab === tab.value
-                            ? 'bg-foreground/[6%]'
+                            ? 'bg-foreground/6'
                             : 'bg-sidebar-accent-foreground/50',
                         )}
                       >
@@ -1324,7 +1324,7 @@ const ActivityListView = (): ReactElement => {
                               'ml-1.5 shrink-0 text-[0.625rem] px-1 rounded-md font-bold tabular-nums transition-colors',
                               activeTab === tab.value
                                 ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                                : 'bg-foreground/[6%] text-muted-foreground',
+                                : 'bg-foreground/6 text-muted-foreground',
                             )}
                           >
                             {count > 99 ? '99+' : count}
@@ -1352,7 +1352,7 @@ const ActivityListView = (): ReactElement => {
                 position: 'relative',
                 marginTop: 16,
               }}
-              className='focus-visible:outline-none'
+              className='focus-visible:outline-hidden'
             >
               {renderActivityList(groupedActivities)}
             </Tabs.Content>

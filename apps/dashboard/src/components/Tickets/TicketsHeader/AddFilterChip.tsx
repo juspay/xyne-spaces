@@ -51,7 +51,7 @@ export const AddFilterChip = ({
           align='start'
           sideOffset={6}
           onCloseAutoFocus={e => e.preventDefault()}
-          className='z-[60] w-[262px] overflow-hidden rounded-[9px] border border-border bg-background shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
+          className='z-60 w-[262px] overflow-hidden rounded-[9px] border border-border bg-background shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
         >
           <div className='flex h-[42px] items-center gap-2.5 border-b border-border/60 px-[13px]'>
             <Search className='size-[17px] shrink-0 text-muted-foreground/80' />
@@ -60,7 +60,7 @@ export const AddFilterChip = ({
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder='Filter by…'
-              className='min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground/60'
+              className='min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-hidden placeholder:text-muted-foreground/60'
               data-track-category='Tickets'
               data-track-name='SearchFilterFields'
             />

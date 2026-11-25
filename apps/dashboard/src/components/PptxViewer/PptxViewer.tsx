@@ -173,7 +173,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
             // Show PowerPoint icon when no slide data
             <button
               onClick={enterPresent}
-              className='w-full relative overflow-hidden rounded bg-gradient-to-br from-orange-50 to-orange-100 border border-border flex items-center justify-center hover:opacity-90 transition-opacity'
+              className='w-full relative overflow-hidden rounded bg-linear-to-br from-orange-50 to-orange-100 border border-border flex items-center justify-center hover:opacity-90 transition-opacity'
               style={{ aspectRatio: '16/9', maxHeight: '200px' }}
               data-track-category='XyneAI'
               data-track-name='PPTX_ICON_PREVIEW'

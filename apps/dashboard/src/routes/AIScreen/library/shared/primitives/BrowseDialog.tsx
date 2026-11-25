@@ -209,7 +209,7 @@ export function BrowseDialog({
                     aria-label={`Search ${title}`}
                     data-track-category='Claw Agents'
                     data-track-name='Create agent v2: browse search'
-                    className='min-w-0 flex-1 bg-transparent text-sm font-medium leading-5 tracking-[-0.28px] text-foreground placeholder:text-muted-foreground focus:outline-none'
+                    className='min-w-0 flex-1 bg-transparent text-sm font-medium leading-5 tracking-[-0.28px] text-foreground placeholder:text-muted-foreground focus:outline-hidden'
                   />
                 </div>
                 {onFilterChange && (
@@ -245,7 +245,7 @@ export function BrowseDialog({
                   onClick={onRetry}
                   data-track-category='Claw Agents'
                   data-track-name='Create agent v2: browse retry'
-                  className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
+                  className='text-sm font-medium text-(--mention-color) underline underline-offset-2'
                 >
                   Retry
                 </button>

@@ -151,7 +151,7 @@ export const TopicsFilterBar = ({
         align='start'
         sideOffset={6}
         collisionPadding={8}
-        className='z-[10000] min-w-[220px] rounded-lg border border-border bg-popover p-1 shadow-xl'
+        className='z-10000 min-w-[220px] rounded-lg border border-border bg-popover p-1 shadow-xl'
         trigger={
           <button
             type='button'

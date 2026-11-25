@@ -1063,7 +1063,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           aria-label='Ask AI'
           data-track-category='knowledge-base'
           data-track-name='kb-open-ai-chat'
-          className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
+          className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-xs transition hover:bg-muted'
         >
           <XyneAIStar size={22} />
         </button>
@@ -1076,7 +1076,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         <button
           type='button'
           onClick={() => setIsCreateModalOpen(true)}
-          className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-sm transition hover:bg-muted'
+          className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-xs transition hover:bg-muted'
           data-track-category='knowledge-base'
           data-track-name='new-collection'
         >
@@ -1089,7 +1089,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
             <DropdownMenuTrigger asChild>
               <button
                 type='button'
-                className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-sm transition hover:bg-muted'
+                className='inline-flex h-10 items-center gap-1.5 rounded-full border border-border bg-background px-4 text-[13px] font-medium text-foreground shadow-xs transition hover:bg-muted'
                 data-track-category='knowledge-base'
                 data-track-name='open-new-menu'
               >
@@ -1278,7 +1278,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   <button
                     type='button'
                     className={cn(
-                      'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium shadow-sm transition',
+                      'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium shadow-xs transition',
                       typeFilter === 'ALL'
                         ? 'border-border bg-background text-foreground hover:bg-muted'
                         : 'border-primary/20 bg-primary/10 text-foreground hover:bg-primary/15',
@@ -1341,7 +1341,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   <button
                     type='button'
                     className={cn(
-                      'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium shadow-sm transition',
+                      'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-medium shadow-xs transition',
                       statusFilter === 'ALL'
                         ? 'border-border bg-background text-foreground hover:bg-muted'
                         : 'border-primary/20 bg-primary/10 text-foreground hover:bg-primary/15',

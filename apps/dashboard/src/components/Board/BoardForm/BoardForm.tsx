@@ -601,7 +601,7 @@ export const BoardForm = ({
           placeholder='Enter board description (optional)'
           disabled={isLoading}
           rows={3}
-          className='w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-muted disabled:cursor-not-allowed resize-none'
+          className='w-full px-3 py-2 border border-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-muted disabled:cursor-not-allowed resize-none'
           data-track-category='Board_Form'
           data-track-name='Enter_Description'
         />
@@ -620,7 +620,7 @@ export const BoardForm = ({
             value={projectId}
             onChange={e => setProjectId(e.target.value)}
             disabled={isLoading || loadingProjects || isEdit}
-            className='w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+            className='w-full px-3 py-2 border border-input rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
             data-track-event='change'
             data-track-category='Board_Form'
             data-track-name='Select_Project'
@@ -651,7 +651,7 @@ export const BoardForm = ({
                 value={selectedTemplate}
                 onChange={e => setSelectedTemplate(e.target.value as StageTemplateType)}
                 disabled={isLoading}
-                className='px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+                className='px-3 py-1.5 text-sm border border-input rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                 data-track-event='change'
                 data-track-category='Board_Form'
                 data-track-name='Select_Stage_Template'
@@ -759,7 +759,7 @@ export const BoardForm = ({
                           )
                         }
                         disabled={isLoading}
-                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-hidden focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Status'
@@ -815,7 +815,7 @@ export const BoardForm = ({
                           updateStage(index, 'formId', e.target.value);
                         }}
                         disabled={isLoading || !stageForms}
-                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-hidden focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Form'

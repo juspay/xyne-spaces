@@ -136,7 +136,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
             className={cn(
               'flex items-center w-full min-h-[40px] px-3 py-2 text-sm text-left border border-input rounded-md bg-background',
               'transition-colors hover:bg-accent',
-              'focus:border-ring focus:ring-1 focus:ring-ring focus:outline-none',
+              'focus:border-ring focus:ring-1 focus:ring-ring focus:outline-hidden',
               disabled ? 'bg-muted cursor-not-allowed opacity-50' : 'cursor-pointer',
             )}
           >
@@ -213,7 +213,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
             side='bottom'
             align='start'
             sideOffset={4}
-            className='z-[100] w-full max-w-[350px] rounded-md border border-border bg-background shadow-lg'
+            className='z-100 w-full max-w-[350px] rounded-md border border-border bg-background shadow-lg'
             onOpenAutoFocus={e => {
               e.preventDefault();
               searchInputRef.current?.focus();
@@ -231,7 +231,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                   setFocusedIndex(-1);
                 }}
                 placeholder='Search options...'
-                className='w-full px-2 py-1.5 text-sm border border-input rounded bg-background text-foreground placeholder:text-muted-foreground outline-none focus:border-ring'
+                className='w-full px-2 py-1.5 text-sm border border-input rounded bg-background text-foreground placeholder:text-muted-foreground outline-hidden focus:border-ring'
               />
             </div>
 
@@ -269,7 +269,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                       data-track-name='TOGGLE_OPTION'
                       onMouseEnter={() => setFocusedIndex(index)}
                       className={cn(
-                        'flex w-full cursor-pointer select-none items-center gap-3 rounded-sm px-3 py-2 text-sm outline-none transition-colors',
+                        'flex w-full cursor-pointer select-none items-center gap-3 rounded-sm px-3 py-2 text-sm outline-hidden transition-colors',
                         isFocused
                           ? 'bg-accent text-foreground'
                           : 'hover:bg-accent hover:text-foreground',

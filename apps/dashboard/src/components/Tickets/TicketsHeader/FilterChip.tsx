@@ -67,7 +67,7 @@ export const FilterChip = ({
           <PopoverPrimitive.Trigger asChild>
             <button
               type='button'
-              className='inline-flex outline-none'
+              className='inline-flex outline-hidden'
               data-testid='filter-chip-value'
               data-track-category='Tickets'
               data-track-name='OpenFilterChipValue'
@@ -80,7 +80,7 @@ export const FilterChip = ({
               side='bottom'
               align='start'
               sideOffset={6}
-              className='z-[60] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
+              className='z-60 outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
             >
               {picker}
             </PopoverPrimitive.Content>

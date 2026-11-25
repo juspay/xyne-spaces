@@ -134,7 +134,7 @@ export const ShareViewDialog = ({
                   type='button'
                   onClick={() => toggleUser(u.id)}
                   className={cn(
-                    'w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none text-left',
+                    'w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-hidden text-left',
                     isSelected
                       ? 'bg-accent text-accent-foreground'
                       : 'hover:bg-muted text-foreground',

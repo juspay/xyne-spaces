@@ -174,7 +174,7 @@ export const ExternalInviteesInput: React.FC<ExternalInviteesInputProps> = ({
         <input
           ref={inputRef}
           type='text'
-          className='flex-1 min-w-[180px] h-7 outline-none bg-transparent text-sm placeholder:text-muted-foreground'
+          className='flex-1 min-w-[180px] h-7 outline-hidden bg-transparent text-sm placeholder:text-muted-foreground'
           placeholder={
             chips.length === 0 && !hasInvalid ? 'Guest emails — paste a list to add several' : ''
           }

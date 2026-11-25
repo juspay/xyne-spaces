@@ -184,10 +184,10 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
   if (terminal) {
     return (
       <section
-        className='flex w-[428px] max-w-full flex-col rounded-2xl bg-foreground/[0.06]'
+        className='flex w-[428px] max-w-full flex-col rounded-2xl bg-foreground/6'
         style={node.style}
       >
-        <div className='flex flex-col gap-4 rounded-2xl border border-foreground/[0.06] bg-background px-4 py-3'>
+        <div className='flex flex-col gap-4 rounded-2xl border border-foreground/6 bg-background px-4 py-3'>
           {questions.map((question, index) => (
             <React.Fragment key={question.id}>
               {index > 0 && <div className='h-px w-full shrink-0 bg-foreground/10' />}
@@ -221,10 +221,10 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
 
   return (
     <section
-      className='flex w-[428px] max-w-full flex-col rounded-2xl bg-foreground/[0.06]'
+      className='flex w-[428px] max-w-full flex-col rounded-2xl bg-foreground/6'
       style={node.style}
     >
-      <div className='flex items-start rounded-2xl border border-foreground/[0.06] bg-background p-3'>
+      <div className='flex items-start rounded-2xl border border-foreground/6 bg-background p-3'>
         <div className='flex min-w-0 flex-1 flex-col gap-4'>
           <div className='flex h-6 items-center pl-1'>
             <div className='flex items-center gap-1 text-sm font-semibold leading-5 text-foreground/60'>
@@ -252,7 +252,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                   placeholder={activeQuestion.placeholder ?? 'Type your answer…'}
                   disabled={disabled}
                   rows={3}
-                  className='w-full resize-y rounded-lg border border-foreground/10 bg-transparent px-1.5 py-1.5 text-sm font-medium leading-5 text-foreground outline-none placeholder:text-foreground/40 focus:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-60'
+                  className='w-full resize-y rounded-lg border border-foreground/10 bg-transparent px-1.5 py-1.5 text-sm font-medium leading-5 text-foreground outline-hidden placeholder:text-foreground/40 focus:border-foreground/20 disabled:cursor-not-allowed disabled:opacity-60'
                 />
               )}
 
@@ -271,8 +271,8 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                     className={cn(
                       'flex w-full items-start gap-1.5 rounded-lg border p-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                       chosen
-                        ? 'border-foreground/10 bg-foreground/[0.08]'
-                        : 'border-foreground/10 hover:border-foreground/[0.06] hover:bg-foreground/[0.04]',
+                        ? 'border-foreground/10 bg-foreground/8'
+                        : 'border-foreground/10 hover:border-foreground/6 hover:bg-foreground/4',
                     )}
                   >
                     <OptionCheck checked={chosen} />
@@ -292,7 +292,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
 
               {activeQuestion.type !== 'open_ended' &&
                 (customActive ? (
-                  <div className='flex w-full items-start gap-1.5 rounded-lg border border-foreground/10 bg-foreground/[0.08] p-1.5'>
+                  <div className='flex w-full items-start gap-1.5 rounded-lg border border-foreground/10 bg-foreground/8 p-1.5'>
                     <OptionCheck checked />
                     <textarea
                       ref={customInputRef}
@@ -312,7 +312,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                       placeholder='Type your own answer…'
                       disabled={disabled}
                       rows={1}
-                      className='min-w-0 flex-1 resize-none self-center bg-transparent text-sm font-semibold leading-5 text-foreground outline-none placeholder:font-semibold placeholder:text-foreground/60 disabled:cursor-not-allowed'
+                      className='min-w-0 flex-1 resize-none self-center bg-transparent text-sm font-semibold leading-5 text-foreground outline-hidden placeholder:font-semibold placeholder:text-foreground/60 disabled:cursor-not-allowed'
                     />
                   </div>
                 ) : (
@@ -325,7 +325,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
                       window.requestAnimationFrame(() => customInputRef.current?.focus());
                     }}
                     disabled={disabled}
-                    className='flex w-full items-start gap-1.5 rounded-lg border border-dashed border-foreground/10 px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60'
+                    className='flex w-full items-start gap-1.5 rounded-lg border border-dashed border-foreground/10 px-1.5 py-2 text-left transition-colors hover:bg-foreground/4 disabled:cursor-not-allowed disabled:opacity-60'
                   >
                     <span className='flex size-5 shrink-0 items-center justify-center'>
                       <PencilLine className='size-3.5 text-foreground/60' strokeWidth={2} />
@@ -347,7 +347,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
           data-track-name='SKIP_QUESTION'
           onClick={skip}
           disabled={disabled}
-          className='flex h-7 items-center rounded-[10px] px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/[0.06] disabled:cursor-not-allowed disabled:opacity-60'
+          className='flex h-7 items-center rounded-[10px] px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/6 disabled:cursor-not-allowed disabled:opacity-60'
         >
           <span className='px-1'>Skip</span>
         </button>
@@ -359,7 +359,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
               data-track-name='PREVIOUS_QUESTION'
               onClick={() => setActiveIndex(activeIndex - 1)}
               disabled={disabled}
-              className='flex h-7 items-center rounded-[10px] px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/[0.06] disabled:cursor-not-allowed disabled:opacity-60'
+              className='flex h-7 items-center rounded-[10px] px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/6 disabled:cursor-not-allowed disabled:opacity-60'
             >
               <span className='px-1'>Back</span>
             </button>
@@ -370,7 +370,7 @@ export const UserQuestionNode: React.FC<UserQuestionNodeProps> = ({ node }) => {
             data-track-name={isLast ? 'SUBMIT_ANSWERS' : 'NEXT_QUESTION'}
             onClick={advance}
             disabled={disabled}
-            className='flex h-7 items-center rounded-lg border border-foreground/10 bg-background px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60'
+            className='flex h-7 items-center rounded-lg border border-foreground/10 bg-background px-1.5 text-sm font-semibold leading-5 text-foreground transition-colors hover:bg-foreground/4 disabled:cursor-not-allowed disabled:opacity-60'
             data-ph-capture-attribute-track-id='user_question_submit'
           >
             <span className='px-1'>{isLast ? 'Submit' : 'Next'}</span>

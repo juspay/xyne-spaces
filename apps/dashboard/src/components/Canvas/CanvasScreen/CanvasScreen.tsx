@@ -1294,7 +1294,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
   // Shared metrics for the header's 28px icon buttons.
   const headerIconButtonClass =
-    'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+    'relative flex size-7 shrink-0 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring';
 
   return (
     <div className='relative h-full bg-muted flex' data-component='CanvasScreen'>
@@ -1370,7 +1370,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           trigger={
                             <button
                               type='button'
-                              className='flex shrink-0 items-center justify-center rounded-lg py-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                              className='flex shrink-0 items-center justify-center rounded-lg py-2 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
                               aria-label='Canvas details'
                               data-testid='canvas-details-button'
                               data-track-category='CANVAS'
@@ -1662,7 +1662,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
               {/* Decorative scroll fade below the header row */}
               <div
                 aria-hidden='true'
-                className='h-3 w-full shrink-0 bg-gradient-to-b from-background to-transparent'
+                className='h-3 w-full shrink-0 bg-linear-to-b from-background to-transparent'
               />
             </div>
 

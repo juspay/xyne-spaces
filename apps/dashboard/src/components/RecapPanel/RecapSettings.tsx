@@ -157,7 +157,7 @@ const ChannelListItem = ({
                 value={localDraft}
                 onChange={e => setLocalDraft(e.target.value.slice(0, MAX_CUSTOM_PROMPT_LENGTH))}
                 rows={3}
-                className='w-full bg-muted/50 border border-input rounded-md px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none leading-relaxed'
+                className='w-full bg-muted/50 border border-input rounded-md px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground/60 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring resize-none leading-relaxed'
                 data-track-category='RECAP_SETTINGS'
                 data-track-name='CUSTOM_PROMPT_INPUT'
               />

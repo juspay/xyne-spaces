@@ -78,7 +78,7 @@ export const QAOwnerPicker = ({
     >
       <input
         ref={searchInputRef}
-        className='w-full px-3 py-2 text-xs border-b border-border outline-none bg-transparent'
+        className='w-full px-3 py-2 text-xs border-b border-border outline-hidden bg-transparent'
         placeholder='Search users…'
         value={search}
         onChange={e => setSearch(e.target.value)}

@@ -292,8 +292,8 @@ export const TagDecisionPane = ({
                 placeholder='Describe when this type applies, as if instructing someone who has never seen the thread.'
                 className={cn(
                   'w-full resize-y rounded-[10px] border border-border bg-background px-3 py-2',
-                  'text-sm text-foreground outline-none placeholder:text-muted-foreground',
-                  'focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-[2px]',
+                  'text-sm text-foreground outline-hidden placeholder:text-muted-foreground',
+                  'focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-2',
                 )}
               />
             </Field>
@@ -306,7 +306,7 @@ export const TagDecisionPane = ({
 
             <Field label='Preview'>
               <span
-                className='inline-flex w-fit items-center rounded-full px-1.5 py-[1px] text-[11px] font-medium leading-[16px]'
+                className='inline-flex w-fit items-center rounded-full px-1.5 py-px text-[11px] font-medium leading-[16px]'
                 style={{ backgroundColor: `${color}1f`, color }}
               >
                 {label.trim() || promoted}

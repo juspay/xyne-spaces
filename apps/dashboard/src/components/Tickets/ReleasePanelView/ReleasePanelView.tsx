@@ -93,7 +93,7 @@ export const ReleasePanelView = ({ ticketId }: ReleasePanelViewProps): React.Rea
         data-track-category='Tickets'
         data-track-name='OpenReleaseViewFromReleaseTab'
         data-testid='open-release-view-from-tab'
-        className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-sm disabled:hover:border-border'
+        className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-xs hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-xs disabled:hover:border-border'
       >
         <span className='inline-flex items-center gap-3'>
           <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>

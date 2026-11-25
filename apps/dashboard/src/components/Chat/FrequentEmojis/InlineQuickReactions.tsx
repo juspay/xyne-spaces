@@ -53,7 +53,7 @@ export const InlineQuickReactions = ({
             data-track-metadata={trackMetadata}
             className={cn(
               'flex size-7 items-center justify-center rounded',
-              'hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'hover:bg-accent focus-visible:bg-accent focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
               // Mirrors the reaction chip so an already-applied reaction reads as "on"
               // rather than silently toggling off on the next click.
               reacted && 'border border-action-primary bg-accent',

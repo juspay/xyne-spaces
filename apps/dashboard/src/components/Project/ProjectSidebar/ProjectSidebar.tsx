@@ -62,7 +62,7 @@ const ProjectSidebar = ({ onToggleCollapse }: ProjectSidebarProps): ReactElement
               onChange={e => setSearchQuery(e.target.value)}
               placeholder='Search views...'
               aria-label='Search views'
-              className='min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground'
+              className='min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-hidden placeholder:text-muted-foreground'
               data-track-event='blur'
               data-track-category='Projects'
               data-track-name='SearchViewsInput'

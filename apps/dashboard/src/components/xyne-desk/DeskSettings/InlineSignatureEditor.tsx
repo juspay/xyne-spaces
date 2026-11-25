@@ -52,7 +52,7 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
     editorProps: {
       attributes: {
         class:
-          'tiptap signature-editor prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[90px] px-3 py-2 text-sm text-foreground',
+          'tiptap signature-editor prose prose-sm dark:prose-invert max-w-none focus:outline-hidden min-h-[90px] px-3 py-2 text-sm text-foreground',
       },
       handlePaste(view, event) {
         const items = Array.from(event.clipboardData?.items ?? []);
@@ -109,7 +109,7 @@ export const InlineSignatureEditor: React.FC<InlineSignatureEditorProps> = ({
             autoComplete='off'
             data-1p-ignore
             data-lpignore='true'
-            className='w-full text-sm text-foreground placeholder:text-muted-foreground bg-transparent focus:outline-none'
+            className='w-full text-sm text-foreground placeholder:text-muted-foreground bg-transparent focus:outline-hidden'
             data-track-category='DeskSettings'
             data-track-name='SignatureNameInput'
           />

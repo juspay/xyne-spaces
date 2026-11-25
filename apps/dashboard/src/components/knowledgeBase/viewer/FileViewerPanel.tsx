@@ -335,7 +335,7 @@ export const FileViewerPanel: React.FC<{
               aria-label='Ask AI'
               data-track-category='knowledge-base'
               data-track-name='file-viewer-open-ai-chat'
-              className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
+              className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-xs transition hover:bg-muted'
             >
               <XyneAIStar size={22} />
             </button>

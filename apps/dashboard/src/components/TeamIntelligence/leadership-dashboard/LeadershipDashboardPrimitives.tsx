@@ -23,7 +23,7 @@ export const EmptyState = ({ title, text }: { title: string; text: string }): Re
 
 export const LoadingState = ({ label }: { label: string }): ReactElement => (
   <div className='flex min-h-[420px] items-center justify-center'>
-    <div className='flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm'>
+    <div className='flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-xs'>
       <Loader2Icon className='size-4 animate-spin' />
       {label}
     </div>
@@ -214,14 +214,14 @@ export const SignalCard = ({ signal }: { signal: Signal }): ReactElement => {
           : undefined
       }
       className={cn(
-        'rounded-xl border bg-card p-4 shadow-sm transition-all',
+        'rounded-xl border bg-card p-4 shadow-xs transition-all',
         style.divider,
         signal.targetId &&
-          'cursor-pointer hover:-translate-y-0.5 hover:border-action-accent/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action-accent focus-visible:ring-offset-2',
+          'cursor-pointer hover:-translate-y-0.5 hover:border-action-accent/40 hover:shadow-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-action-accent focus-visible:ring-offset-2',
       )}
     >
       <div className='flex items-center justify-between gap-2'>
-        <p className='text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground'>
+        <p className='text-[11px] font-semibold uppercase tracking-widest text-muted-foreground'>
           {signal.label}
         </p>
         <span
@@ -299,7 +299,7 @@ export const ExpandableList = ({
     });
   };
   return (
-    <div className='overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm'>
+    <div className='overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs'>
       {orderedItems.map((item, index) => {
         const itemIndex = index;
         const key = item.id ?? `${itemTitle(item)}-${itemIndex}`;

@@ -149,7 +149,7 @@ export const FlowDecisionConfigPanel: React.FC<FlowDecisionConfigPanelProps> = (
               data-track-category='flow_plan_editor'
               data-track-name='input_decision_comparison'
               placeholder='Comparison text'
-              className='rounded-lg border border-border bg-background px-3 py-2 text-[12px] outline-none focus:border-amber-500'
+              className='rounded-lg border border-border bg-background px-3 py-2 text-[12px] outline-hidden focus:border-amber-500'
             />
           </div>
         )}

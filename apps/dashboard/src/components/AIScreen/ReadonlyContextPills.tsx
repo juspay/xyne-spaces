@@ -139,7 +139,7 @@ function SentMention({
   open: (() => void) | null;
 }): ReactElement {
   const pill =
-    'inline-block max-w-[260px] truncate align-bottom rounded-[5px] bg-[var(--mention-bg)] px-1 font-medium text-[color:var(--mention-color)]';
+    'inline-block max-w-[260px] truncate align-bottom rounded-[5px] bg-(--mention-bg) px-1 font-medium text-(--mention-color)';
   if (!open) {
     return (
       <span className={pill} title={item.title}>
@@ -154,7 +154,7 @@ function SentMention({
       title={`Open ${item.title}`}
       className={cn(
         pill,
-        'cursor-pointer underline-offset-2 transition-colors hover:bg-[var(--mention-bg-hover)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--mention-color)]/40',
+        'cursor-pointer underline-offset-2 transition-colors hover:bg-(--mention-bg-hover) hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-(--mention-color)/40',
       )}
       data-track-category='XyneAI'
       data-track-name='OPEN_SENT_MENTION'

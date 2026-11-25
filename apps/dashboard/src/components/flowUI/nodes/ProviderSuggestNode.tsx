@@ -35,7 +35,7 @@ interface ProviderSuggestProps {
   totalCount?: number;
 }
 
-const LINK_BUTTON = '!text-foreground !no-underline hover:!text-foreground';
+const LINK_BUTTON = 'text-foreground! no-underline! hover:text-foreground!';
 
 export const ProviderSuggestNode: React.FC<{ node: FlowComponent; children?: React.ReactNode }> = ({
   node,
@@ -85,7 +85,7 @@ export const ProviderSuggestNode: React.FC<{ node: FlowComponent; children?: Rea
             return (
               <div
                 key={item.provider}
-                className='-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-foreground/[0.04]'
+                className='-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-foreground/4'
               >
                 <div className='flex min-w-0 flex-1 flex-col'>
                   <span className='truncate text-sm font-medium leading-5 text-foreground'>

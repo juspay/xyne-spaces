@@ -129,14 +129,14 @@ export const RecordingContentTabs = ({
         data-track-category='RecordingDetailV2'
         data-track-name={trackName}
         className={cn(
-          'relative inline-flex h-8 items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
+          'relative inline-flex h-8 items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-70',
           isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
         )}
       >
         {isActive && (
           <motion.span
             layoutId={TAB_INDICATOR_ID}
-            className='absolute inset-0 rounded-full bg-background shadow-sm ring-1 ring-border/60'
+            className='absolute inset-0 rounded-full bg-background shadow-xs ring-1 ring-border/60'
             transition={pillTransition}
             aria-hidden='true'
           />
@@ -167,7 +167,7 @@ export const RecordingContentTabs = ({
     const indicator = isActive ? (
       <motion.span
         layoutId={TAB_INDICATOR_ID}
-        className='absolute inset-0 rounded-full bg-background shadow-sm ring-1 ring-border/60'
+        className='absolute inset-0 rounded-full bg-background shadow-xs ring-1 ring-border/60'
         transition={pillTransition}
         aria-hidden='true'
       />
@@ -198,7 +198,7 @@ export const RecordingContentTabs = ({
         data-track-category='RecordingDetailV2'
         data-track-name='open_summary_templates'
         className={cn(
-          'relative inline-flex h-8 items-center gap-2 rounded-full pl-5 pr-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'relative inline-flex h-8 items-center gap-2 rounded-full pl-5 pr-4 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
           isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
           isRegenerating && 'cursor-wait',
         )}

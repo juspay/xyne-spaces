@@ -393,7 +393,7 @@ export function AIShell({
               onClick={onExpandWorkspace}
               aria-label='Open workspace'
               title='Open workspace'
-              className='absolute right-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-secondary/60 hover:text-foreground'
+              className='absolute right-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-xs backdrop-blur-sm transition-colors hover:bg-secondary/60 hover:text-foreground'
               data-track-category='AskAI'
               data-track-name='workspace-open'
             >

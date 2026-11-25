@@ -13,7 +13,7 @@ export function LinkPreview(props: {
   return (
     <div
       aria-hidden='true'
-      className='pointer-events-none fixed z-[3] truncate rounded-md border border-border bg-popover px-2 py-0.5 text-[11.5px] text-popover-foreground shadow-sm'
+      className='pointer-events-none fixed z-3 truncate rounded-md border border-border bg-popover px-2 py-0.5 text-[11.5px] text-popover-foreground shadow-xs'
       style={{
         left: props.page.left + 6,
         top: props.page.top + props.page.height - 28,

@@ -26,7 +26,7 @@ interface OtherUserEventBlockProps {
   onOpenChange?: ((open: boolean) => void) | undefined;
   /** Inline offset around the 2px gutter (default 2px, use 1px for week view) */
   gutterPx?: number;
-  /** z-index class (default 'z-[3]') */
+  /** z-index class (default 'z-3') */
   zClass?: string;
   /**
    * When true the outer div receives pointer events (cursor-default) so that
@@ -56,7 +56,7 @@ export function OtherUserEventBlock({
   open,
   onOpenChange,
   gutterPx = 2,
-  zClass = 'z-[3]',
+  zClass = 'z-3',
   interactive = false,
   onClick,
   onPointerDown,

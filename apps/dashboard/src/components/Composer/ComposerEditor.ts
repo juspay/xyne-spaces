@@ -54,7 +54,7 @@ export const ContextMention = Node.create({
         contenteditable: 'false',
         class:
           // One unbroken pill: a long name truncates rather than splitting across lines.
-          'inline-block max-w-[260px] truncate align-bottom rounded-[5px] bg-[var(--mention-bg)] px-1 font-medium text-[color:var(--mention-color)]',
+          'inline-block max-w-[260px] truncate align-bottom rounded-[5px] bg-(--mention-bg) px-1 font-medium text-(--mention-color)',
       }),
       mentionToken(kind, mention),
     ];

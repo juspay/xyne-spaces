@@ -197,7 +197,7 @@ const BrowseChannels = (): ReactElement => {
                     key={channel.id}
                     type='button'
                     onClick={() => handleChannelClick(channel.id)}
-                    className='w-full flex items-center p-3 rounded-lg border border-border hover:bg-accent transition-colors cursor-pointer text-left focus:outline-none focus:ring-2 focus:ring-ring'
+                    className='w-full flex items-center p-3 rounded-lg border border-border hover:bg-accent transition-colors cursor-pointer text-left focus:outline-hidden focus:ring-2 focus:ring-ring'
                     aria-label={`${isPrivate ? 'Private channel' : 'Channel'}: ${channel.name}`}
                     data-track-category='CHANNEL_SEARCH'
                     data-track-name='SELECT_CHANNEL'
@@ -219,7 +219,7 @@ const BrowseChannels = (): ReactElement => {
                           {channel.name}
                         </div>
                         {channel.description && (
-                          <div className='text-xs text-muted-foreground break-words'>
+                          <div className='text-xs text-muted-foreground wrap-break-word'>
                             {channel.description}
                           </div>
                         )}

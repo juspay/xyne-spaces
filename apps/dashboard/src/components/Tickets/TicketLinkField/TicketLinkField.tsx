@@ -544,7 +544,7 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
         <>
           <div
             className={cn(
-              'flex w-full items-center gap-2 rounded-lg border bg-background px-3 shadow-sm transition-colors',
+              'flex w-full items-center gap-2 rounded-lg border bg-background px-3 shadow-xs transition-colors',
               showErrorState
                 ? 'border-red-500 focus-within:ring-2 focus-within:ring-red-200'
                 : 'border-input focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30',
@@ -564,7 +564,7 @@ export const TicketLinkField: React.FC<TicketLinkFieldProps> = ({
               onFocus={() => setIsDropdownOpen(true)}
               onKeyDown={handleKeyDown}
               placeholder='Search, paste a link, or create a ticket'
-              className='min-w-0 flex-1 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed'
+              className='min-w-0 flex-1 bg-transparent py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed'
               data-track-category='Tickets'
               data-track-name={trackName}
             />

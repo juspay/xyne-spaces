@@ -407,7 +407,7 @@ export const CustomField = ({
             projectId={projectId}
             inputRef={inputRef}
             placeholder={mode === 'create' ? 'Custom Field' : 'Field name'}
-            className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-none focus:ring-0 placeholder:text-muted-foreground'
+            className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-hidden focus:ring-0 placeholder:text-muted-foreground'
             onSelectExisting={suggestion => {
               setFieldName(suggestion.fieldName);
               setFieldType(mapFromFormFieldType(suggestion.fieldType) as FieldType);
@@ -444,7 +444,7 @@ export const CustomField = ({
               <ChevronDown className='h-4 w-4 text-muted-foreground' />
             </button>
             {fieldTypeDropdownOpen && (
-              <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-[100] overflow-hidden max-h-[240px] overflow-y-auto'>
+              <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-100 overflow-hidden max-h-[240px] overflow-y-auto'>
                 {fieldTypeOptions.map(option => (
                   <button
                     key={option.value}
@@ -541,7 +541,7 @@ export const CustomField = ({
                 onBlur={() => tryApplyBulkDraft()}
                 placeholder='One option per line. Paste from a spreadsheet, comma-separated list, etc.'
                 rows={8}
-                className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
+                className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-hidden focus:ring-1 focus:ring-[#6276be]/40'
                 data-track-category='form'
                 data-track-name='bulk_options_textarea'
               />
@@ -593,7 +593,7 @@ export const CustomField = ({
                             prev.map((opt, i) => (i === idx ? { ...opt, value: newValue } : opt)),
                           );
                         }}
-                        className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-none'
+                        className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-hidden'
                         data-track-category='form'
                         data-track-name='edit-option'
                       />
@@ -803,7 +803,7 @@ export const CustomField = ({
                         ? 'Add another option (paste multiple at once)'
                         : 'Add option (paste multiple at once)'
                     }
-                    className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none'
+                    className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-hidden'
                     data-track-category='form'
                     data-track-name='option-input'
                   />

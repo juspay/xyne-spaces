@@ -248,7 +248,7 @@ const ProfileView = ({
           <div className='relative' ref={presenceDropdownRef}>
             <button
               onClick={() => setIsPresenceDropdownOpen(!isPresenceDropdownOpen)}
-              className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
+              className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
               data-track-category='PROFILE'
               data-track-name='TogglePresenceDropdown'
               data-track-metadata={JSON.stringify({ isOpen: !isPresenceDropdownOpen })}
@@ -515,7 +515,7 @@ const ProfileView = ({
       <div className='space-y-2'>
         <Button
           type='button'
-          className='!text-white w-full !bg-destructive rounded-3xl h-[44px] active:scale-[0.97] transition-transform duration-200'
+          className='text-white! w-full bg-destructive! rounded-3xl h-[44px] active:scale-[0.97] transition-transform duration-200'
           onClick={handleLogout}
           trackId='logout'
           data-track-category='PROFILE'

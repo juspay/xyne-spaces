@@ -552,11 +552,11 @@ export const ShareCollectionModal = ({
                   }
                   data-track-category='knowledge-base'
                   data-track-name='share-collection-search-input'
-                  className='w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+                  className='w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-hidden focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
                 />
               </div>
               {query.trim() && (
-                <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md p-1'>
+                <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-60 max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md p-1'>
                   {results.length > 0 ? (
                     results.map(c => (
                       <button

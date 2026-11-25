@@ -178,7 +178,7 @@ export const UploadModal = ({
             data-track-category='Claw Agents'
             data-track-name='Digital Twin upload content preview'
             rows={6}
-            className='w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-muted-foreground focus:border-ring focus:outline-none'
+            className='w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-muted-foreground focus:border-ring focus:outline-hidden'
           />
         </div>
       )}

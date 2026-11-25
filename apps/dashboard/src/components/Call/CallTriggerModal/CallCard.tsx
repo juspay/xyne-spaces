@@ -145,8 +145,8 @@ export const CallCard: React.FC<CallCardProps> = ({
       <div
         className={cn(
           'flex items-center gap-3 px-6 py-4',
-          isCurrentCall ? 'rounded-tl-lg rounded-tr-lg border-b border-border' : '!bg-background',
-          isMobileLiveCall ? 'flex-col !pb-8 !pt-6 !border-none' : 'bg-[#F3FEF1]',
+          isCurrentCall ? 'rounded-tl-lg rounded-tr-lg border-b border-border' : 'bg-background!',
+          isMobileLiveCall ? 'flex-col pb-8! pt-6! border-none!' : 'bg-[#F3FEF1]',
         )}
       >
         {/* Avatars */}
@@ -176,7 +176,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 data-track-category='CALLS'
                 data-track-name='OpenThreadFromCallCard'
                 className={cn(
-                  'text-sm font-semibold text-foreground text-left bg-transparent border-0 p-0 cursor-pointer hover:underline focus-visible:underline focus:outline-none',
+                  'text-sm font-semibold text-foreground text-left bg-transparent border-0 p-0 cursor-pointer hover:underline focus-visible:underline focus:outline-hidden',
                   isMobileLiveCall ? 'text-md mb-1' : '',
                 )}
               >
@@ -243,7 +243,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 <span
                   className={cn(
                     'text-sm font-semibold text-white bg-red-500 rounded-full px-4 py-2',
-                    isMobileLiveCall ? 'mt-6 !px-8' : '',
+                    isMobileLiveCall ? 'mt-6 px-8!' : '',
                   )}
                 >
                   Leave

@@ -67,7 +67,7 @@ export const RemoveProfilePictureButton = ({
           disabled={isDisabled}
           className={cn(
             'absolute top-1 right-1 z-10 flex size-6 items-center justify-center rounded-full',
-            'border border-border/60 bg-background/90 backdrop-blur-sm text-muted-foreground shadow-sm',
+            'border border-border/60 bg-background/90 backdrop-blur-xs text-muted-foreground shadow-xs',
             'hover:bg-destructive hover:text-white hover:border-destructive transition-all',
             'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100',
             open && 'opacity-100',

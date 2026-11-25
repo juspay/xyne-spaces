@@ -3,17 +3,6 @@ import { XYNE_FOUNDATION_TOKENS } from './src/themes/XYNE_FOUNDATION_TOKENS.tsx'
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ['class'],
-  content: [
-    './pages/**/*.{ts,tsx}',
-    './components/**/*.{ts,tsx}',
-    './app/**/*.{ts,tsx}',
-    './src/**/*.{ts,tsx}',
-    './index.html',
-    // Shipped as text to the artifact sandbox, which runs its own Tailwind. Its
-    // `[&>svg+div]:` / `>svg` variants would put every div and svg in the host's
-    // universal `--tw-*` defaults.
-    '!./src/components/AIScreen/ReactArtifact/shadcnPreamble.generated.ts',
-  ],
   prefix: '',
   theme: {
     container: {

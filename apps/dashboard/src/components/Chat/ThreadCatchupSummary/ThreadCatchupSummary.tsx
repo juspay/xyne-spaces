@@ -43,7 +43,7 @@ export function ThreadCatchupSummaryButton({
         data-track-category='THREAD_PANEL'
         data-track-name='TOGGLE_CATCHUP_SUMMARY'
         className={cn(
-          'relative flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-border',
+          'relative flex items-center justify-between gap-2 border rounded-lg p-2! transition-all duration-100 text-foreground bg-background border-border',
           isRecommended && 'ring-2 ring-pink-400',
         )}
       >

@@ -27,7 +27,7 @@ const rowPillClass =
   'flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[7px] border px-2 text-[12px] font-medium transition-colors hover:bg-muted hover:text-foreground';
 
 const menuClass =
-  'z-[60] p-[5px] bg-background border border-border shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1';
+  'z-60 p-[5px] bg-background border border-border shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1';
 
 const menuRowClass =
   'flex h-[31px] w-full items-center gap-2 rounded-[7px] px-[9px] text-left text-[12.5px] text-foreground/80 transition-colors hover:bg-muted hover:text-foreground';
@@ -278,7 +278,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                       data-track-name='SaveViewNameInput'
                       className={cn(
                         'h-8 px-2 rounded-md border border-input bg-background text-[13px]',
-                        'text-foreground outline-none placeholder:text-muted-foreground',
+                        'text-foreground outline-hidden placeholder:text-muted-foreground',
                         'focus-visible:ring-[3px] focus-visible:ring-ring/50',
                       )}
                     />
@@ -395,7 +395,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                           collisionPadding={12}
                           onOpenAutoFocus={e => e.preventDefault()}
                           // Opens left: this pill sits at the header's right edge.
-                          className={cn(menuClass, 'z-[70] w-[196px] rounded-[9px]')}
+                          className={cn(menuClass, 'z-70 w-[196px] rounded-[9px]')}
                         >
                           <div className='max-h-[306px] overflow-y-auto'>
                             {customGroupChoices.map(choice => {

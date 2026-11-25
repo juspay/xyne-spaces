@@ -92,7 +92,7 @@ function Field({
           </Tooltip>
         )}
       </span>
-      <span className='min-w-0 break-words'>{children}</span>
+      <span className='min-w-0 wrap-break-word'>{children}</span>
     </div>
   );
 }
@@ -273,7 +273,7 @@ function Overview({ config }: { config: ProfileConfig }): ReactElement {
                     </div>
                   )}
                   {(step.type === 'install' ? step.packages.length > 0 : step.cmd) && (
-                    <pre className='mt-2 whitespace-pre-wrap break-words rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-5'>
+                    <pre className='mt-2 whitespace-pre-wrap wrap-break-word rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-5'>
                       {step.type === 'install' ? step.packages.join(' ') : step.cmd}
                     </pre>
                   )}
@@ -286,7 +286,7 @@ function Overview({ config }: { config: ProfileConfig }): ReactElement {
                           ? 'it prints all-up'
                           : 'every line is Up / healthy'}
                       </div>
-                      <pre className='mt-1.5 whitespace-pre-wrap break-words font-mono text-xs leading-5'>
+                      <pre className='mt-1.5 whitespace-pre-wrap wrap-break-word font-mono text-xs leading-5'>
                         {step.healthCheck.cmd}
                       </pre>
                     </div>
@@ -331,7 +331,7 @@ function RawConfig({ config }: { config: ProfileConfig }): ReactElement {
         {copied ? <Check className='size-3.5' /> : <Copy className='size-3.5' />}
         {copied ? 'Copied' : 'Copy'}
       </Button>
-      <pre className='whitespace-pre-wrap break-words rounded-xl bg-zinc-950 p-5 pr-24 font-mono text-xs leading-6 text-zinc-100'>
+      <pre className='whitespace-pre-wrap wrap-break-word rounded-xl bg-zinc-950 p-5 pr-24 font-mono text-xs leading-6 text-zinc-100'>
         {json}
       </pre>
     </div>
@@ -355,7 +355,7 @@ function SandboxPanel({
   const { config } = profile;
 
   return (
-    <div className='h-full overflow-y-auto bg-background [scrollbar-gutter:stable]'>
+    <div className='h-full overflow-y-auto bg-background scrollbar-gutter-stable'>
       <header className='flex items-start gap-3 px-6 pb-4 pt-5'>
         <span className='flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary'>
           <Server className='size-5' />
@@ -720,7 +720,7 @@ export function EnvironmentsView({
   return (
     <ResizableGroup orientation='horizontal' className='flex h-full w-full bg-background'>
       <Panel id='environments-list' minSize='35%'>
-        <div className='h-full overflow-y-auto [scrollbar-gutter:stable]'>
+        <div className='h-full overflow-y-auto scrollbar-gutter-stable'>
           {/* Inside an SDLC hub it takes the hub pages' width; the AI screen keeps its own. */}
           <div
             className={cn(

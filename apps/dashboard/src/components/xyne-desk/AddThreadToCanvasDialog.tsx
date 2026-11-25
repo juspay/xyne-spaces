@@ -203,7 +203,7 @@ export const AddThreadToCanvasDialog = ({
             maxLength={MAX_LABEL_LENGTH}
             disabled={labels.length >= MAX_LABELS}
             placeholder='Type a label and press Enter'
-            className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary'
+            className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-hidden focus:border-primary'
             data-track-category='Support'
             data-track-name='AddThreadToCanvasLabelInput'
           />

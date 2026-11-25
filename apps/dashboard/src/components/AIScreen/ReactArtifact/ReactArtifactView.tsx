@@ -359,7 +359,7 @@ export const ReactArtifactView = ({
                   onClick={() => setTab(value)}
                   className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium capitalize transition-colors ${
                     tab === value
-                      ? 'bg-card text-foreground shadow-sm'
+                      ? 'bg-card text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                   data-track-category='AskAI'

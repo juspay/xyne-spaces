@@ -230,7 +230,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
         <div className='relative z-10 h-full w-full flex items-center justify-center'>
           {!imageLoaded && (
             <div className='absolute inset-0 flex items-center justify-center z-10'>
-              <div className='text-gray-300 bg-black/60 px-4 py-2 rounded backdrop-blur-sm'>
+              <div className='text-gray-300 bg-black/60 px-4 py-2 rounded backdrop-blur-xs'>
                 Loading image...
               </div>
             </div>
@@ -298,13 +298,13 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
           pinch={{ step: 5 }}
         >
           <TransformComponent
-            wrapperClass='!w-full !h-full'
-            contentClass='!w-full !h-full flex items-center justify-center'
+            wrapperClass='w-full! h-full!'
+            contentClass='w-full! h-full! flex items-center justify-center'
           >
             <div className='relative w-full h-full flex items-center justify-center'>
               {!imageLoaded && (
                 <div className='absolute inset-0 flex items-center justify-center z-10'>
-                  <div className='text-muted bg-black/60 px-4 py-2 rounded backdrop-blur-sm'>
+                  <div className='text-muted bg-black/60 px-4 py-2 rounded backdrop-blur-xs'>
                     Loading image...
                   </div>
                 </div>
@@ -330,7 +330,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({
         <>
           {/* Zoom Controls - Bottom Left */}
           <div
-            className={`absolute bg-gradient-to-t from-black/60 to-transparent gap-6 p-6 w-full bottom-0 left-0 z-20 flex transition-opacity duration-300 ${
+            className={`absolute bg-linear-to-t from-black/60 to-transparent gap-6 p-6 w-full bottom-0 left-0 z-20 flex transition-opacity duration-300 ${
               isHovered ? 'opacity-100' : 'opacity-0'
             }`}
           >

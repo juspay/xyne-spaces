@@ -130,8 +130,8 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
       title='Desk Settings'
       className={cn(
         'left-auto right-0 top-0 bottom-0 translate-x-0 translate-y-0 h-screen w-[80vw] max-w-none max-h-none rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
-        'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
-        'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+        'data-[state=open]:zoom-in-100! data-[state=open]:slide-in-from-top-[0%]! data-[state=open]:slide-in-from-right-full!',
+        'data-[state=closed]:zoom-out-100! data-[state=closed]:slide-out-to-top-[0%]! data-[state=closed]:slide-out-to-right-full!',
       )}
     >
       {!channelId ? null : (
@@ -140,7 +140,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
             type='button'
             aria-label='Close desk settings'
             onClick={requestClose}
-            className='absolute right-4 top-4 z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
+            className='absolute right-4 top-4 z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-desk-border bg-popover text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground dark:border-border'
             data-track-category='DeskSettings'
             data-track-name='CloseButton'
           >
@@ -239,7 +239,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                     type='button'
                     onClick={cancel}
                     disabled={saving}
-                    className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+                    className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-xs hover:bg-muted/40 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='CancelAll'
                   >
@@ -250,7 +250,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                     onClick={() => void save(activeTab)}
                     disabled={saving || !!saveBlockedReason}
                     title={saveBlockedReason ?? undefined}
-                    className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+                    className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-xs hover:opacity-90 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
                     data-track-category='DeskSettings'
                     data-track-name='SaveAll'
                     data-ph-capture-attribute-track-id='desk_settings_save'
@@ -282,7 +282,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
             <button
               type='button'
               onClick={() => setConfirmDiscardOpen(false)}
-              className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent'
+              className='rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-xs hover:bg-muted/40 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent'
               data-track-category='DeskSettings'
               data-track-name='KeepEditing'
             >
@@ -294,7 +294,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                 setConfirmDiscardOpen(false);
                 onClose();
               }}
-              className='rounded-[10px] border border-red-500 bg-red-500 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-red-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-red-500'
+              className='rounded-[10px] border border-red-500 bg-red-500 px-3 py-1.5 text-sm font-medium text-white shadow-xs hover:bg-red-600 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-red-500'
               data-track-category='DeskSettings'
               data-track-name='DiscardChanges'
             >

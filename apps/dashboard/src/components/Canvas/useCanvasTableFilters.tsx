@@ -10,8 +10,8 @@ const FILTERS_PER_ROW = 3;
 const MAX_TABLE_FILTERS = 6;
 const MAX_AUTOCOMPLETE_OPTIONS = 50;
 const MAX_FILTER_DISPLAY_CHARS = 60;
-const TABLE_FILTER_READY_PADDING_CLASS = '!pt-12';
-const TABLE_FILTER_OPEN_PADDING_CLASS = '!pt-36';
+const TABLE_FILTER_READY_PADDING_CLASS = 'pt-12!';
+const TABLE_FILTER_OPEN_PADDING_CLASS = 'pt-36!';
 const TABLE_FILTER_MOUNT_CLASS = 'pointer-events-none absolute right-7 top-2 z-20';
 
 let nextTableFilterId = 1;
@@ -710,7 +710,7 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
       {!isOpen ? (
         <button
           type='button'
-          className='inline-flex size-7 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground data-[active=true]:border-ring/30 data-[active=true]:bg-accent data-[active=true]:text-foreground'
+          className='inline-flex size-7 cursor-pointer items-center justify-center rounded-md border bg-popover text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground data-[active=true]:border-ring/30 data-[active=true]:bg-accent data-[active=true]:text-foreground'
           data-active={hasActiveFilters ? 'true' : 'false'}
           data-track-category='CANVAS'
           data-track-name='table_filter_open'
@@ -864,7 +864,7 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                           </button>
                           {openColumnFilterId === filter.id && (
                             <div
-                              className='absolute left-0 top-8 z-[110] max-h-44 w-44 overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-popover-foreground shadow-md'
+                              className='absolute left-0 top-8 z-110 max-h-44 w-44 overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-popover-foreground shadow-md'
                               role='listbox'
                               aria-label='Filter table column'
                             >
@@ -887,7 +887,7 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                                     focusFilterInput(filter.id);
                                   }}
                                 >
-                                  <span className='min-w-0 whitespace-normal break-words'>
+                                  <span className='min-w-0 whitespace-normal wrap-break-word'>
                                     {option.label}
                                   </span>
                                 </button>
@@ -908,7 +908,7 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                                 if (index === 0) inputRef.current = node;
                               }}
                               value={filter.query}
-                              className='h-[26px] min-w-0 border-0 bg-transparent px-0.5 text-xs leading-4 tracking-normal text-popover-foreground shadow-none outline-none placeholder:text-muted-foreground placeholder:opacity-80 focus-visible:border-0 focus-visible:ring-0'
+                              className='h-[26px] min-w-0 border-0 bg-transparent px-0.5 text-xs leading-4 tracking-normal text-popover-foreground shadow-none outline-hidden placeholder:text-muted-foreground placeholder:opacity-80 focus-visible:border-0 focus-visible:ring-0'
                               placeholder='Filter rows'
                               aria-label='Filter table rows'
                               onFocus={() => {
@@ -938,7 +938,7 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                             <X size={14} strokeWidth={2} />
                           </button>
                           {showAutocomplete && (
-                            <div className='absolute left-0 top-8 z-[100] max-h-44 w-full overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-popover-foreground shadow-md'>
+                            <div className='absolute left-0 top-8 z-100 max-h-44 w-full overflow-y-auto overscroll-contain rounded-md border bg-popover p-1 text-popover-foreground shadow-md'>
                               {autocompleteOptions.map(option => (
                                 <button
                                   key={option}
@@ -953,7 +953,7 @@ const CanvasTableFilterWidget: FC<TableFilterWidgetProps> = ({ blockContent, tab
                                     setFocusedFilterId(null);
                                   }}
                                 >
-                                  <span className='min-w-0 whitespace-normal break-words'>
+                                  <span className='min-w-0 whitespace-normal wrap-break-word'>
                                     {truncateFilterDisplayText(option)}
                                   </span>
                                 </button>

@@ -23,7 +23,7 @@ export function RecordingReconnectingOverlay(): ReactElement {
     <div
       role='status'
       aria-live='polite'
-      className='absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/90 dark:bg-gray-900/90 backdrop-blur-sm animate-in fade-in duration-200'
+      className='absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/90 dark:bg-gray-900/90 backdrop-blur-xs animate-in fade-in duration-200'
     >
       <div className='text-center px-4'>
         <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-t-2 border-yellow-500 mx-auto mb-4' />
@@ -59,7 +59,7 @@ export function RecordingConnectionWarningModal({
       role='dialog'
       aria-modal='true'
       aria-labelledby='recording-conn-warning-title'
-      className='fixed inset-0 z-[70] flex items-center justify-center'
+      className='fixed inset-0 z-70 flex items-center justify-center'
     >
       {/* Backdrop */}
       <div className='absolute inset-0 bg-black/50 animate-in fade-in duration-200' />

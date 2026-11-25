@@ -251,7 +251,7 @@ export function TranscriptSidePanel({
               onKeyDown={search.handleKeyDown}
               placeholder='Search transcript...'
               aria-label='Search transcript'
-              className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+              className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
               data-track-category='TranscriptPanel'
               data-track-name='search_transcript'
             />
@@ -318,7 +318,7 @@ export function TranscriptSidePanel({
                 {isTranslating ? (
                   <Spinner
                     size={16}
-                    className='shrink-0 text-muted-foreground !animate-spin'
+                    className='shrink-0 text-muted-foreground animate-spin!'
                     aria-hidden='true'
                   />
                 ) : (
@@ -436,8 +436,8 @@ export function TranscriptSidePanel({
                       itemIndex={index}
                       currentMatchIndex={search.currentIndex}
                       matchRefs={search.matchRefs}
-                      currentMatchClassName='bg-primary text-background [[data-theme=midnight]_&]:text-foreground py-0.5'
-                      otherMatchClassName='bg-yellow-200 [[data-theme=midnight]_&]:bg-yellow-300 text-yellow-950 py-0.5'
+                      currentMatchClassName='bg-primary text-background in-data-[theme=midnight]:text-foreground py-0.5'
+                      otherMatchClassName='bg-yellow-200 in-data-[theme=midnight]:bg-yellow-300 text-yellow-950 py-0.5'
                     />
                   </p>
                 </div>

@@ -110,9 +110,7 @@ function highlightMatch(name: string, q: string): React.ReactNode {
   return (
     <>
       {before}
-      <span className='rounded-sm bg-foreground/10 px-[1px] font-medium text-foreground'>
-        {match}
-      </span>
+      <span className='rounded-sm bg-foreground/10 px-px font-medium text-foreground'>{match}</span>
       {after}
     </>
   );

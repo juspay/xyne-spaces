@@ -229,7 +229,7 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
       <button
         type='button'
         onClick={() => setIsEditing(true)}
-        className='inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
         aria-label='Edit submitted form'
         data-track-category='Tickets'
         data-track-name='EditSubmittedInlineStageForm'
@@ -253,10 +253,10 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
         <div
           className={
             submittedHeader && !isEditing
-              ? 'z-20 shrink-0 rounded-t-lg border-b border-emerald-500/15 bg-emerald-500/[0.05] px-3 py-2.5'
+              ? 'z-20 shrink-0 rounded-t-lg border-b border-emerald-500/15 bg-emerald-500/5 px-3 py-2.5'
               : embedded
                 ? 'z-20 shrink-0 rounded-t-lg border-b border-border bg-background px-4 py-3'
-                : 'sticky -top-[20px] z-20 rounded-t-lg border-b border-border bg-background px-4 py-3'
+                : 'sticky top-[-20px] z-20 rounded-t-lg border-b border-border bg-background px-4 py-3'
           }
         >
           <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
@@ -359,7 +359,7 @@ export const StageFormInlinePanel: React.FC<StageFormInlinePanelProps> = ({
             className={
               embedded
                 ? 'z-20 flex shrink-0 justify-end rounded-b-lg border-t border-border bg-background px-4 py-3'
-                : 'sticky -bottom-[20px] z-20 flex justify-end rounded-b-lg border-t border-border bg-background px-4 py-3'
+                : 'sticky bottom-[-20px] z-20 flex justify-end rounded-b-lg border-t border-border bg-background px-4 py-3'
             }
           >
             {actions}

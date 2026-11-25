@@ -87,7 +87,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             variant='ghost'
             size='sm'
             onClick={handleClose}
-            className='!p-2 border border-border rounded-md hover:bg-accent'
+            className='p-2! border border-border rounded-md hover:bg-accent'
             title='Close'
             aria-label='Close'
             data-track-category='PROFILE'
@@ -158,7 +158,7 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
             variant='ghost'
             size='sm'
             onClick={handleClose}
-            className='!p-2 border border-border rounded-md hover:bg-accent'
+            className='p-2! border border-border rounded-md hover:bg-accent'
             title='Close'
             aria-label='Close'
             data-track-category='PROFILE'

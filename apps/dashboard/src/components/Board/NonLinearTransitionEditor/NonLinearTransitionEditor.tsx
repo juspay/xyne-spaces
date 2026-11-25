@@ -119,7 +119,7 @@ type HighlightState = 'selected' | 'connected' | 'dull' | 'normal';
 const NODE_HIGHLIGHT_CLASSES: Record<HighlightState, string> = {
   selected: 'border-[#6276be] ring-2 ring-[#6276be]/30 bg-[#6276be]/5',
   connected: 'border-[#6276be]/60 bg-[#6276be]/5',
-  dull: 'border-border opacity-40 grayscale-[40%]',
+  dull: 'border-border opacity-40 grayscale-40',
   normal: 'border-border',
 };
 
@@ -140,13 +140,13 @@ const StageNodeComponent: React.FC<NodeProps<StageNodeData>> = ({ data }) => {
       <Handle
         type='target'
         position={Position.Left}
-        className='!w-3 !h-3 !bg-[#6276be] !border-2 !border-background !rounded-full'
+        className='w-3! h-3! bg-[#6276be]! border-2! border-background! rounded-full!'
         style={{ left: -7 }}
       />
       <Handle
         type='source'
         position={Position.Right}
-        className='!w-3 !h-3 !bg-[#6276be] !border-2 !border-background !rounded-full'
+        className='w-3! h-3! bg-[#6276be]! border-2! border-background! rounded-full!'
         style={{ right: -7 }}
       />
 
@@ -188,7 +188,7 @@ const AllBubbleNodeComponent: React.FC<NodeProps<AllBubbleNodeData>> = ({ data }
 
   return (
     <div
-      className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-opacity cursor-grab active:cursor-grabbing ${
+      className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-xs transition-opacity cursor-grab active:cursor-grabbing ${
         isHighlighted
           ? 'border-[#6276be] bg-[#6276be]/10 text-[#6276be]'
           : 'border-[#6276be]/40 bg-[#6276be]/5 text-[#6276be]'
@@ -198,7 +198,7 @@ const AllBubbleNodeComponent: React.FC<NodeProps<AllBubbleNodeData>> = ({ data }
       <Handle
         type='source'
         position={Position.Right}
-        className='!w-2 !h-2 !bg-[#6276be] !border-2 !border-background !rounded-full'
+        className='w-2! h-2! bg-[#6276be]! border-2! border-background! rounded-full!'
         style={{ right: -5 }}
       />
       <span className='select-none'>All</span>
@@ -484,7 +484,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
             onClick={() => data?.onSelectEdge(id)}
             data-track-category='board_stage_config'
             data-track-name='open_transition_config'
-            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium shadow-sm transition-colors ${
+            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium shadow-xs transition-colors ${
               isHighlighted
                 ? 'bg-[#6276be] border-[#6276be] text-white'
                 : 'bg-background border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be]'
@@ -579,7 +579,7 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
             placeholder='Stage name...'
             data-track-category='board_stage_config'
             data-track-name='input_stage_name'
-            className='w-full text-[12px] font-medium text-foreground bg-background border border-border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+            className='w-full text-[12px] font-medium text-foreground bg-background border border-border rounded-lg px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-[#6276be]'
           />
         </div>
 
@@ -589,14 +589,14 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
             Status
           </p>
           <DropdownMenu>
-            <DropdownMenuTrigger className='w-full flex items-center justify-between gap-2 text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground hover:border-[#6276be] transition-colors outline-none'>
+            <DropdownMenuTrigger className='w-full flex items-center justify-between gap-2 text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground hover:border-[#6276be] transition-colors outline-hidden'>
               <span className='flex items-center gap-2'>
                 {statusOption.icon}
                 {statusOption.label}
               </span>
               <ChevronDown size={14} className='text-muted-foreground' />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='start' className='w-[240px] z-[9999]'>
+            <DropdownMenuContent align='start' className='w-[240px] z-9999'>
               {STATUS_OPTIONS.map(opt => (
                 <DropdownMenuItem
                   key={opt.status}
@@ -634,7 +634,7 @@ const StageActionsPanel: React.FC<StageActionsPanelProps> = ({
                 placeholder='Hours'
                 data-track-category='board_stage_config'
                 data-track-name='input_stage_eta'
-                className='flex-1 text-[12px] text-foreground bg-transparent border-none focus:outline-none p-0'
+                className='flex-1 text-[12px] text-foreground bg-transparent border-none focus:outline-hidden p-0'
               />
               <span className='text-[12px] text-muted-foreground'>hrs</span>
             </div>
@@ -920,7 +920,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                     className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer border-none p-0 ${meta.requiresApproval ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
                   >
                     <div
-                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${meta.requiresApproval ? 'translate-x-4' : 'translate-x-0.5'}`}
+                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${meta.requiresApproval ? 'translate-x-4' : 'translate-x-0.5'}`}
                     />
                   </button>
                   <span className='text-[12px] text-foreground'>Requires approval</span>
@@ -960,7 +960,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                             className={`relative w-8 h-4 rounded-full transition-colors border-none p-0 shrink-0 mt-0.5 ${formAttached ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${entryOn ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
                           >
                             <div
-                              className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${entryOn ? 'translate-x-4' : 'translate-x-0.5'}`}
+                              className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${entryOn ? 'translate-x-4' : 'translate-x-0.5'}`}
                             />
                           </button>
                           <div>
@@ -1024,7 +1024,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                   Visit SLA
                 </p>
                 <select
-                  className='w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+                  className='w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-hidden focus:ring-1 focus:ring-[#6276be]'
                   data-track-category='transition_config'
                   data-track-name='select_visit_sla'
                   value={meta.visitSlaMode}
@@ -1046,7 +1046,7 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
                     placeholder='Hours'
                     data-track-category='transition_config'
                     data-track-name='input_fixed_eta_hours'
-                    className='mt-2 w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+                    className='mt-2 w-full text-[12px] bg-background border border-border rounded-lg px-2.5 py-1.5 text-foreground focus:outline-hidden focus:ring-1 focus:ring-[#6276be]'
                     value={meta.fixedEtaHours ?? ''}
                     onChange={e =>
                       onUpdateMeta({
@@ -1776,7 +1776,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color='hsl(var(--border))' />
-        <Controls showInteractive={false} className='!bg-background !border-border !shadow-md' />
+        <Controls showInteractive={false} className='bg-background! border-border! shadow-md!' />
 
         {/* Toolbar: Rearrange + Condense/Expand */}
         <Panel position='top-left'>
@@ -1794,7 +1794,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
               }}
               data-track-category='board_stage_config'
               data-track-name='rearrange_stages'
-              className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
+              className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow-sm text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
               title='Auto-arrange stages'
             >
               <LayoutGrid size={13} />
@@ -1805,7 +1805,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
               onClick={selectedEdge?.isAllEdge ? handleExpandSelected : handleCondenseEdges}
               data-track-category='board_stage_config'
               data-track-name={selectedEdge?.isAllEdge ? 'expand_all_edge' : 'condense_edges'}
-              className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
+              className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow-sm text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
               title={
                 selectedEdge?.isAllEdge
                   ? 'Show individual transitions for this "All" group'
@@ -1821,7 +1821,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         {/* Hint + Add Stage */}
         <Panel position='bottom-center'>
           <div className='flex items-center gap-3'>
-            <div className='flex items-center gap-1.5 bg-background/90 border border-border rounded-lg px-2.5 py-1.5 shadow text-[11px] text-muted-foreground'>
+            <div className='flex items-center gap-1.5 bg-background/90 border border-border rounded-lg px-2.5 py-1.5 shadow-sm text-[11px] text-muted-foreground'>
               <span>Drag handle → to connect</span>
               <span className='opacity-40'>·</span>
               <span>Hover a stage to trace it</span>
@@ -1833,7 +1833,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
               onClick={onAddStage}
               data-track-category='board_stage_config'
               data-track-name='add_stage'
-              className='flex items-center gap-1.5 bg-background border border-dashed border-[#6276be]/50 hover:border-[#6276be] rounded-lg px-3 py-1.5 shadow text-[12px] text-[#6276be] hover:text-[#4f61a8] transition-colors font-medium'
+              className='flex items-center gap-1.5 bg-background border border-dashed border-[#6276be]/50 hover:border-[#6276be] rounded-lg px-3 py-1.5 shadow-sm text-[12px] text-[#6276be] hover:text-[#4f61a8] transition-colors font-medium'
             >
               <Plus size={13} />
               Add Stage

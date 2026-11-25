@@ -141,7 +141,7 @@ export const RecordingsV2LivePill = ({
   return (
     <section
       className={cn(
-        'flex w-full items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 shadow-sm',
+        'flex w-full items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 shadow-xs',
         'transition-[border-color,box-shadow] duration-200 hover:border-primary/50 hover:shadow-[0_5px_20px_rgb(0,0,0,0.08)]',
       )}
       aria-label={`${displayTitle}, recording in progress`}
@@ -347,7 +347,7 @@ const RecordingsV2Pill = ({
       tabIndex={0}
       onClick={handleOpen}
       onKeyDown={handleRowKeyDown}
-      className='group flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+      className='group flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
       aria-label={
         titleState.kind === 'generating'
           ? 'Open recording — title is being generated'
@@ -413,7 +413,7 @@ const RecordingsV2Pill = ({
                   variant='ghost'
                   size='iconSm'
                   className={cn(
-                    'shrink-0 rounded-xl size-8 bg-muted text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-border hover:text-foreground data-[state=open]:bg-border group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
+                    'shrink-0 rounded-xl size-8 bg-muted text-muted-foreground opacity-0 transition-opacity duration-150 hover:bg-border hover:text-foreground data-[state=open]:bg-border group-hover:opacity-100 group-has-focus-visible:opacity-100',
                     menuOpen && 'opacity-100',
                   )}
                   onClick={event => event.stopPropagation()}

@@ -375,7 +375,7 @@ export const CallCard = ({
                         <MoreVertical className='size-4' />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-48 shadow-sm'>
+                    <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-48 shadow-xs'>
                       <DropdownMenuItem
                         onClick={e => {
                           e.stopPropagation();
@@ -521,7 +521,7 @@ export const CallCard = ({
                       <MoreVertical className='size-4' />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-48 shadow-sm'>
+                  <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-48 shadow-xs'>
                     <DropdownMenuItem
                       onClick={e => {
                         e.stopPropagation();

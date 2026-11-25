@@ -169,7 +169,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           <EditorContent
             editor={editor}
             className={`
-              chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-relaxed break-words text-[15px]
+              chat-input-field w-full resize-none border-0 outline-hidden bg-transparent leading-relaxed wrap-break-word text-[15px]
               text-foreground
               ${emojiSizeClass}
               [&_p.is-editor-empty:before]:hidden

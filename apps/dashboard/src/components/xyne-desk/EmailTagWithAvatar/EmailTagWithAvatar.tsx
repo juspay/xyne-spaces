@@ -53,7 +53,7 @@ export const EmailTagWithAvatar = ({
             userId={user.id}
             size='sm'
             showActiveStatus={false}
-            className='!size-4 !text-[9px] !rounded-[3px]'
+            className='size-4! text-[9px]! rounded-[3px]!'
           />
         ) : (
           <div className='shrink-0 flex items-center justify-center overflow-hidden bg-border w-4 h-4 rounded-[3px] aspect-square'>

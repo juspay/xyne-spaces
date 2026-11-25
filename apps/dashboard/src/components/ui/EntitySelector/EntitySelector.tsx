@@ -189,7 +189,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   const renderUnassignRow = () => (
     <button
       type='button'
-      className='relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left cursor-pointer text-foreground hover:bg-accent'
+      className='relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-hidden transition-colors rounded text-left cursor-pointer text-foreground hover:bg-accent'
       onClick={() => {
         onSelect?.(null);
         handleOpenChange(false);
@@ -218,7 +218,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
       <button
         type='button'
         disabled={option.disabled}
-        className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
+        className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-hidden transition-colors rounded text-left ${
           option.disabled
             ? 'cursor-not-allowed opacity-50 text-muted-foreground'
             : isHighlighted
@@ -290,7 +290,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {/* Label: Show selected option's label or placeholder */}
         <span
           className={cn(
-            'text-left break-words whitespace-normal',
+            'text-left wrap-break-word whitespace-normal',
             selectedOption ? 'text-foreground' : 'text-muted-foreground',
             noBorder ? 'py-0' : 'py-1',
           )}
@@ -358,7 +358,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           data-testid={testId ? `${testId}-input` : undefined}
           style={{ fieldSizing: 'content' }}
           className={cn(
-            'border-none focus-visible:ring-0 text-[13px] outline-none bg-muted max-w-40 min-w-9 truncate',
+            'border-none focus-visible:ring-0 text-[13px] outline-hidden bg-muted max-w-40 min-w-9 truncate',
             selectedOption
               ? 'text-foreground placeholder:text-foreground'
               : 'text-muted-foreground placeholder:text-muted-foreground',
@@ -437,7 +437,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           side='bottom'
           align={align}
           sideOffset={4}
-          className='z-[100] w-auto max-w-96 max-h-96 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-background shadow-lg'
+          className='z-100 w-auto max-w-96 max-h-96 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-background shadow-lg'
           style={{
             maxHeight: 360,
             overflowY: 'auto',
@@ -515,7 +515,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                       handleOpenChange(false);
                     }
                   }}
-                  className='w-full pl-7 pr-3 rounded-md text-sm ring-none outline-none bg-transparent text-foreground placeholder:text-muted-foreground'
+                  className='w-full pl-7 pr-3 rounded-md text-sm ring-none outline-hidden bg-transparent text-foreground placeholder:text-muted-foreground'
                 />
               </div>
             </div>

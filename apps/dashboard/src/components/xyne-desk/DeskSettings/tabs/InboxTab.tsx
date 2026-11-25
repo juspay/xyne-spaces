@@ -273,7 +273,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             readOnly={!canManage}
             disabled={!canManage}
             aria-invalid={!!sendAsAliasError}
-            className={`h-[36px] w-full max-w-[300px] rounded-[10px] border bg-background px-[14px] py-[10px] text-sm text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0 ${
+            className={`h-[36px] w-full max-w-[300px] rounded-[10px] border bg-background px-[14px] py-[10px] text-sm text-foreground placeholder:text-muted-foreground shadow-xs focus:outline-hidden focus:ring-1 disabled:cursor-not-allowed disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0 ${
               sendAsAliasError
                 ? 'border-red-500 focus:ring-red-500'
                 : 'border-border focus:ring-desk-accent'
@@ -299,7 +299,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             </div>
           </div>
           <div
-            className={`flex w-full max-w-[500px] flex-wrap items-center gap-1.5 rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-sm focus-within:ring-1 focus-within:ring-desk-accent ${
+            className={`flex w-full max-w-[500px] flex-wrap items-center gap-1.5 rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-xs focus-within:ring-1 focus-within:ring-desk-accent ${
               !canManage ? 'cursor-not-allowed bg-muted/40 opacity-60' : ''
             }`}
           >
@@ -338,7 +338,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               placeholder={dlAliases.length === 0 ? 'support.global@yourcompany.io' : ''}
               readOnly={!canManage}
               disabled={!canManage}
-              className='h-[24px] min-w-[180px] flex-1 border-0 bg-transparent px-[6px] text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed'
+              className='h-[24px] min-w-[180px] flex-1 border-0 bg-transparent px-[6px] text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden disabled:cursor-not-allowed'
               data-track-category='DeskSettings'
               data-track-name='DlAliasInput'
             />
@@ -356,7 +356,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           </div>
           <div className='relative'>
             <div
-              className={`flex w-full items-center gap-1.5 overflow-x-auto rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-sm scrollbar-none focus-within:ring-1 focus-within:ring-desk-accent ${
+              className={`flex w-full items-center gap-1.5 overflow-x-auto rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-xs scrollbar-none focus-within:ring-1 focus-within:ring-desk-accent ${
                 !canManage ? 'cursor-not-allowed bg-muted/40 opacity-60' : ''
               }`}
             >
@@ -420,7 +420,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                 placeholder={ccEmails.length === 0 ? 'Add email recipients' : ''}
                 readOnly={!canManage}
                 disabled={!canManage}
-                className='min-w-[80px] flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-desk-helper disabled:cursor-not-allowed'
+                className='min-w-[80px] flex-1 bg-transparent text-sm text-foreground outline-hidden placeholder:text-desk-helper disabled:cursor-not-allowed'
               />
             </div>
 
@@ -447,7 +447,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                         userId={user.id}
                         size='sm'
                         showActiveStatus={false}
-                        className='!size-6 shrink-0 !rounded-full'
+                        className='size-6! shrink-0 rounded-full!'
                       />
                       <span className='min-w-0 flex-1 truncate text-[13px] leading-[18px]'>
                         <span className='font-medium text-foreground'>{user.name}</span>
@@ -609,7 +609,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                     aria-label='Custom duplicate detection window in days'
                     data-track-category='DeskSettings'
                     data-track-name='EditDuplicateLookbackCustomDays'
-                    className='h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+                    className='h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
                   />
                   <span className='text-sm text-desk-muted'>days</span>
                 </div>
@@ -700,7 +700,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                     trigger={
                       <button
                         type='button'
-                        className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+                        className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-xs transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
                         disabled={
                           !canManage || !duplicateDetectionEnabled || duplicateScopeFieldCapReached
                         }
@@ -827,7 +827,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
 
               <button
                 type='button'
-                className='inline-flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+                className='inline-flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-xs transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
                 disabled={!signatureAutoAppendEnabled}
                 onClick={() => {
                   setEditingSignature(undefined);
@@ -844,7 +844,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             <div
               className={`flex flex-col gap-[4px] transition-opacity duration-300 ${signatureAutoAppendEnabled ? 'opacity-100' : 'opacity-40'}`}
             >
-              <div className='flex flex-col max-h-[120px] rounded-[14px] p-[6px] gap-[6px] border border-border bg-background overflow-y-auto shadow-sm scrollbar-none'>
+              <div className='flex flex-col max-h-[120px] rounded-[14px] p-[6px] gap-[6px] border border-border bg-background overflow-y-auto shadow-xs scrollbar-none'>
                 {(signatures ?? []).map(sig => (
                   <div
                     key={sig.id}
@@ -916,7 +916,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               <div className='flex justify-end'>
                 <button
                   type='button'
-                  className='inline-flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+                  className='inline-flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-xs transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
                   disabled={!signatureAutoAppendEnabled}
                   onClick={() => {
                     setEditingSignature(undefined);

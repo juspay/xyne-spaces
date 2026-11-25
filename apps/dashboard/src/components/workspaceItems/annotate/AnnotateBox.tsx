@@ -92,7 +92,7 @@ export function useAnnotation({
         'grid size-7 shrink-0 place-items-center self-center rounded-md',
         picking
           ? 'bg-primary text-primary-foreground'
-          : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground',
+          : 'text-muted-foreground hover:bg-foreground/8 hover:text-foreground',
       )}
       title={
         picking
@@ -146,7 +146,7 @@ export function useAnnotation({
         autoFocus
         data-track-category='AskAI'
         data-track-name='workspace-page-annotate-draft'
-        className='mt-1.5 w-full resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-none focus:border-ring'
+        className='mt-1.5 w-full resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-hidden focus:border-ring'
       />
 
       <div className='mt-1.5 flex items-center gap-1.5'>

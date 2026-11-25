@@ -60,7 +60,7 @@ export function ChartTooltip({
       : null;
 
   return (
-    <div className='min-w-[120px] max-w-[280px] rounded-lg border border-border bg-popover/95 backdrop-blur-sm px-3 py-2 shadow-lg'>
+    <div className='min-w-[120px] max-w-[280px] rounded-lg border border-border bg-popover/95 backdrop-blur-xs px-3 py-2 shadow-lg'>
       {heading !== null && (
         <div className='mb-1.5 text-[11px] font-medium text-muted-foreground'>{heading}</div>
       )}

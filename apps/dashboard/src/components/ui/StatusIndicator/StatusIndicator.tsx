@@ -72,7 +72,7 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
             className='z-50 bg-popover text-popover-foreground px-3 py-2 rounded-lg shadow-lg max-w-48'
           >
             <div className='text-sm text-center'>
-              <div className='font-medium text-popover-foreground break-words flex items-center justify-center gap-1'>
+              <div className='font-medium text-popover-foreground wrap-break-word flex items-center justify-center gap-1'>
                 {renderEmoji(status.emoji)} {status.content}
               </div>
               {status.expiryAt && (

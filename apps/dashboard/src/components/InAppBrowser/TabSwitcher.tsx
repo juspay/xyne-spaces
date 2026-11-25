@@ -55,7 +55,7 @@ function RowAction(props: {
         event.stopPropagation();
         props.onClick();
       }}
-      className='hidden size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10 focus-visible:text-foreground group-hover:grid group-aria-selected:grid'
+      className='hidden size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10 focus-visible:text-foreground group-hover:grid group-aria-selected:grid'
       data-track-category={props.trackCategory}
       data-track-name={props.trackName}
     >
@@ -65,7 +65,7 @@ function RowAction(props: {
 }
 
 const GROUP_CLASS =
-  '[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground';
+  '**:[[cmdk-group-heading]]:px-3 **:[[cmdk-group-heading]]:pb-1 **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground';
 
 export function TabSwitcher(props: {
   open: boolean;
@@ -145,10 +145,10 @@ export function TabSwitcher(props: {
   return (
     <DialogPrimitive.Root open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/50 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0' />
+        <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/50 backdrop-blur-xs data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0' />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className='fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(600px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl duration-100 focus:outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
+          className='fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(600px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl duration-100 focus:outline-hidden data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
         >
           <DialogPrimitive.Title className='sr-only'>Open tabs</DialogPrimitive.Title>
           <Command
@@ -169,7 +169,7 @@ export function TabSwitcher(props: {
               <Command.Input
                 autoFocus
                 placeholder='Search open tabs…'
-                className='h-12 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground'
+                className='h-12 min-w-0 flex-1 bg-transparent text-[15px] outline-hidden placeholder:text-muted-foreground'
                 data-track-category={props.trackCategory}
                 data-track-name='FolderTabListSearched'
               />
@@ -213,7 +213,7 @@ export function TabSwitcher(props: {
                   props.onOpenChange(false);
                   props.onCloseAll();
                 }}
-                className='ml-auto rounded-md px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground'
+                className='ml-auto rounded-md px-2 py-1 text-xs text-muted-foreground outline-hidden transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground'
                 data-track-category={props.trackCategory}
                 data-track-name='FolderTabsAllClosed'
               >

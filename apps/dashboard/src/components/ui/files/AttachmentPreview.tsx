@@ -466,7 +466,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
     <>
       {videoLightboxUrl && (
         <div
-          className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/80'
+          className='fixed inset-0 z-9999 flex items-center justify-center bg-black/80'
           role='dialog'
           aria-modal='true'
         >
@@ -502,7 +502,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
       )}
       <div
         data-testid='attachment-preview'
-        className='relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border border-border hover:border-input shadow-sm hover:shadow-md transition-all duration-200'
+        className='relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border border-border hover:border-input shadow-xs hover:shadow-md transition-all duration-200'
         style={{ width: '64px', height: '64px' }}
         onClick={() => {
           if (category === 'video' && isBrowserFile(file)) {
@@ -536,7 +536,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
 
         {/* Upload loading overlay */}
         {isUploading && (
-          <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-background/80 rounded-xl z-10'>
+          <div className='absolute inset-0 flex items-center justify-center backdrop-blur-xs bg-background/80 rounded-xl z-10'>
             <Loader2 className='h-8 w-8 text-foreground animate-spin' />
           </div>
         )}

@@ -389,8 +389,8 @@ function ReleaseCard({
       type='button'
       onClick={onOpen}
       className={cn(
-        'flex w-full gap-4 rounded-[10px] border border-border bg-background px-4 py-3.5 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm',
-        highlighted && 'border-primary bg-primary/5 shadow-sm hover:border-primary',
+        'flex w-full gap-4 rounded-[10px] border border-border bg-background px-4 py-3.5 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-xs',
+        highlighted && 'border-primary bg-primary/5 shadow-xs hover:border-primary',
       )}
       data-track-category={TRACK_CATEGORY}
       data-track-name='ReleaseOpened'

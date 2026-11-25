@@ -187,7 +187,7 @@ export function InlineCommentThread({
             autoFocus
             data-track-category='AskAI'
             data-track-name='inline-comment-reply-draft'
-            className='min-h-0 flex-1 resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-none focus:border-ring'
+            className='min-h-0 flex-1 resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-hidden focus:border-ring'
           />
           <button
             type='button'

@@ -12,18 +12,18 @@ interface IncomingCallActionsProps {
 
 const CIRCLE =
   'flex h-14 w-14 items-center justify-center rounded-full border-none p-0 ' +
-  'cursor-pointer transition-colors duration-[120ms] ease-out ' +
+  'cursor-pointer transition-colors duration-120 ease-out ' +
   // Colour only on hover — the design system forbids transform on these.
-  'focus-visible:outline-none';
+  'focus-visible:outline-hidden';
 
 const DECLINE_COLORS =
-  'bg-[var(--call-decline-bg)] text-[var(--call-decline-fg)] ' +
-  'hover:bg-[var(--call-decline-bg-hover)] active:bg-[var(--call-decline-bg-active)] ' +
+  'bg-(--call-decline-bg) text-(--call-decline-fg) ' +
+  'hover:bg-(--call-decline-bg-hover) active:bg-(--call-decline-bg-active) ' +
   'focus-visible:shadow-[0_0_0_2px_hsl(var(--popover)),0_0_0_5px_rgb(224_30_30/0.5)]';
 
 const ACCEPT_COLORS =
-  'bg-[var(--call-accept-bg)] text-[var(--call-accept-fg)] ' +
-  'hover:bg-[var(--call-accept-bg-hover)] active:bg-[var(--call-accept-bg-active)] ' +
+  'bg-(--call-accept-bg) text-(--call-accept-fg) ' +
+  'hover:bg-(--call-accept-bg-hover) active:bg-(--call-accept-bg-active) ' +
   'focus-visible:shadow-[0_0_0_2px_hsl(var(--popover)),0_0_0_5px_rgb(from_var(--call-accept-bg)_r_g_b/0.5)]';
 
 const LABEL = 'mt-2 text-xs font-medium text-muted-foreground';
@@ -78,8 +78,8 @@ export function IncomingCallActions({
           onClick={onAccept}
           className={
             'flex h-14 cursor-pointer items-center gap-[9px] rounded-full border-none ' +
-            'px-[26px] text-sm font-semibold transition-colors duration-[120ms] ease-out ' +
-            `focus-visible:outline-none ${ACCEPT_COLORS}`
+            'px-[26px] text-sm font-semibold transition-colors duration-120 ease-out ' +
+            `focus-visible:outline-hidden ${ACCEPT_COLORS}`
           }
           data-ph-capture-attribute-track-id='accept_incoming_call'
           data-track-category='CALLS_NOTIFICATIONS'

@@ -280,7 +280,7 @@ const AttachmentSearchResultItem = ({
                   e.stopPropagation();
                   onPreview(result);
                 }}
-                className='p-1 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-none focus-visible:ring-0'
+                className='p-1 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-hidden focus-visible:ring-0'
                 title='Preview file'
                 aria-label='Preview file'
                 data-track-category='GLOBAL_SEARCH'

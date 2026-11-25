@@ -20,7 +20,7 @@ export function CanvasCommentDeleteDialog({
       }}
       title='Delete comment?'
       description='This comment will be permanently deleted. This action cannot be undone.'
-      zIndexClassName='z-[110]'
+      zIndexClassName='z-110'
       mobileVariant='dialog'
       onEscapeKeyDown={event => event.stopPropagation()}
     >

@@ -486,7 +486,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           value={statusText}
           onChange={handleTextChange}
           placeholder='Update your status'
-          className='flex-1 bg-transparent border-none outline-none text-sm text-foreground'
+          className='flex-1 bg-transparent border-none outline-hidden text-sm text-foreground'
           maxLength={100}
           data-track-category='STATUS'
           data-track-name='EditStatusText'
@@ -511,7 +511,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
         <span className='text-sm font-medium text-foreground'>Remove status after</span>
         <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
           <Select.Trigger
-            className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'
+            className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring'
             data-track-category='STATUS'
             data-track-name='SelectExpiryOption'
           >
@@ -528,7 +528,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
                   <Select.Item
                     key={option.value}
                     value={option.value}
-                    className='relative flex items-center px-3 py-2 rounded-md text-sm text-foreground cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
+                    className='relative flex items-center px-3 py-2 rounded-md text-sm text-foreground cursor-pointer hover:bg-muted outline-hidden select-none data-highlighted:bg-muted'
                   >
                     <Select.ItemText>{option.label}</Select.ItemText>
                     <Select.ItemIndicator className='absolute right-2'>
@@ -552,7 +552,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
             showClearButton={false}
             placeholder='Select date'
             inputClassName='h-9 flex-1 w-full'
-            contentClassName='z-[100]'
+            contentClassName='z-100'
           />
 
           <div className='px-3 py-2 border border-input rounded-lg bg-background'>

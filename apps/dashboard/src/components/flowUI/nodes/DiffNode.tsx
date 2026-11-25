@@ -47,8 +47,8 @@ function isRenderablePatch(patch: string): boolean {
 function rawLineClass(line: string): string {
   if (line.startsWith('@@')) return 'text-muted-foreground';
   if (line.startsWith('+++ ') || line.startsWith('--- ')) return 'text-muted-foreground';
-  if (line.startsWith('+')) return 'text-[var(--diff-stat-add-fg)]';
-  if (line.startsWith('-')) return 'text-[var(--diff-stat-del-fg)]';
+  if (line.startsWith('+')) return 'text-(--diff-stat-add-fg)';
+  if (line.startsWith('-')) return 'text-(--diff-stat-del-fg)';
   return 'text-foreground';
 }
 
@@ -67,8 +67,8 @@ const RawPatch: React.FC<{ patch: string }> = ({ patch }) => (
 
 const DiffStat: React.FC<{ added: number; removed: number }> = ({ added, removed }) => (
   <span className='shrink-0 font-mono text-xs tabular-nums'>
-    <span className='text-[var(--diff-stat-add-fg)]'>+{added}</span>{' '}
-    <span className='text-[var(--diff-stat-del-fg)]'>−{removed}</span>
+    <span className='text-(--diff-stat-add-fg)'>+{added}</span>{' '}
+    <span className='text-(--diff-stat-del-fg)'>−{removed}</span>
   </span>
 );
 

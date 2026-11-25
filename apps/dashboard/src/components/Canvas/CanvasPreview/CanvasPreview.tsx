@@ -135,7 +135,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
         {onClose && (
           <button
             type='button'
-            className='absolute top-2 right-2 z-10 p-1 rounded-full bg-muted/80 hover:bg-muted transition-colors duration-150 focus:outline-none'
+            className='absolute top-2 right-2 z-10 p-1 rounded-full bg-muted/80 hover:bg-muted transition-colors duration-150 focus:outline-hidden'
             onClick={handleClose}
             aria-label='Close preview'
             data-track-category='CANVAS'
@@ -161,7 +161,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
   if (!canvas.content || canvas.isCollaborative) {
     return (
       <div
-        className='relative flex items-center gap-3 p-3 bg-card rounded-2xl border border-border w-full max-w-[460px] hover:shadow-sm transition-shadow cursor-pointer'
+        className='relative flex items-center gap-3 p-3 bg-card rounded-2xl border border-border w-full max-w-[460px] hover:shadow-xs transition-shadow cursor-pointer'
         onClick={handleNavigate}
         role='button'
         tabIndex={0}
@@ -177,7 +177,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
         {onClose && (
           <button
             type='button'
-            className='absolute top-2 right-2 z-10 p-1 rounded-full bg-muted/80 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-border'
+            className='absolute top-2 right-2 z-10 p-1 rounded-full bg-muted/80 hover:bg-muted focus:outline-hidden focus:ring-2 focus:ring-border'
             onClick={handleClose}
             aria-label='Close preview'
             data-track-category='CANVAS'
@@ -216,7 +216,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
 
   return (
     <div
-      className='relative flex flex-col bg-card rounded-2xl border border-border w-full max-w-[460px] hover:shadow-sm transition-shadow cursor-pointer overflow-hidden'
+      className='relative flex flex-col bg-card rounded-2xl border border-border w-full max-w-[460px] hover:shadow-xs transition-shadow cursor-pointer overflow-hidden'
       onClick={handleNavigate}
       data-track-category='CANVAS'
       data-track-name='Navigate_To_Canvas'
@@ -232,7 +232,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
       {onClose && (
         <button
           type='button'
-          className='absolute top-2 right-2 z-10 p-1 rounded-full bg-muted/80 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-border'
+          className='absolute top-2 right-2 z-10 p-1 rounded-full bg-muted/80 hover:bg-muted focus:outline-hidden focus:ring-2 focus:ring-border'
           onClick={handleClose}
           aria-label='Close preview'
           data-track-category='CANVAS'
@@ -270,7 +270,7 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
             />
           </div>
           {/* Subtle gradient overlay at the very bottom */}
-          <div className='absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-card to-transparent pointer-events-none' />
+          <div className='absolute bottom-0 left-0 right-0 h-12 bg-linear-to-t from-card to-transparent pointer-events-none' />
         </div>
       </div>
     </div>

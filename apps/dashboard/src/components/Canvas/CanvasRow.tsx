@@ -52,7 +52,7 @@ export const HighlightedText: React.FC<{ text: string; query?: string | undefine
     parts.push(
       <mark
         key={`${matchIndex}-${matchEnd}`}
-        className='rounded bg-[var(--search-result-highlight-bg)] px-0.5 text-foreground'
+        className='rounded bg-(--search-result-highlight-bg) px-0.5 text-foreground'
       >
         {text.slice(matchIndex, matchEnd)}
       </mark>,
@@ -147,7 +147,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
               content={canvas.title || 'Untitled'}
               side='top'
               align='start'
-              className='max-w-xs break-words'
+              className='max-w-xs wrap-break-word'
             >
               <span className='min-w-0 flex-1 truncate block text-sm font-medium tracking-[-0.14px]'>
                 <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />

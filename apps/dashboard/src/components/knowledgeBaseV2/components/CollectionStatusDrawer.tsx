@@ -135,7 +135,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
         <DrawerPrimitive.Content
           className={cn(
             'fixed inset-y-0 right-0 z-50 flex w-full max-w-[480px] flex-col',
-            'bg-background shadow-2xl focus:outline-none',
+            'bg-background shadow-2xl focus:outline-hidden',
           )}
         >
           <DrawerPrimitive.Title className='sr-only'>

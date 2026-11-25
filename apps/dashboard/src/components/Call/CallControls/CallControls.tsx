@@ -913,7 +913,7 @@ export function CallControls({
   // secondary centre controls, keeping the bar to one row on a phone.
 
   const menuItemClass =
-    'cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-[#e3e3e3] focus:bg-white/10 focus:text-white data-[disabled]:opacity-50';
+    'cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-[#e3e3e3] focus:bg-white/10 focus:text-white data-disabled:opacity-50';
   const menuIcon = (iconComponent: React.ElementType, isActive = false): React.ReactElement => {
     const Icon = iconComponent;
     return (

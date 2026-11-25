@@ -139,7 +139,7 @@ export function RecordingCanvasPane({
               }}
               className={cn(
                 'h-6 rounded text-sm font-semibold text-foreground',
-                'outline-none transition-colors duration-150',
+                'outline-hidden transition-colors duration-150',
                 isEditingTitle
                   ? 'bg-accent text-foreground'
                   : 'bg-transparent hover:bg-muted/50 cursor-pointer',

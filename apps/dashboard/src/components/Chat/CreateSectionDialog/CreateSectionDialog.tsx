@@ -284,7 +284,7 @@ export const CreateSectionDialog = ({
             aria-invalid={showError}
             data-track-category='CHAT_SIDEBAR'
             data-track-name='CREATE_SECTION_NAME'
-            className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
           />
         </div>
         {showError && <p className='text-sm text-destructive'>{nameError}</p>}
@@ -302,7 +302,7 @@ export const CreateSectionDialog = ({
             autoComplete='off'
             data-track-category='CHAT_SIDEBAR'
             data-track-name='CREATE_SECTION_FILTER_CHANNELS'
-            className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
           />
         </div>
 

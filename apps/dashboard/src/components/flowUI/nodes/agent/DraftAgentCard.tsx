@@ -135,12 +135,12 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   const ghostButton = cn(
     'inline-flex h-7 items-center gap-1.5 rounded-[10px] px-1.5',
     'text-sm font-semibold leading-5 text-foreground',
-    'hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
+    'hover:bg-foreground/4 disabled:cursor-not-allowed disabled:opacity-60',
   );
   const primaryButton = cn(
     'inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-1.5',
     'text-sm font-semibold leading-5 text-foreground',
-    'hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
+    'hover:bg-foreground/4 disabled:cursor-not-allowed disabled:opacity-60',
   );
 
   // Decline / Edit / Create Agent — shared by the compact footer AND the
@@ -202,7 +202,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
               // page to open, so the dialog stays the way to see the spec.
               <Link
                 to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
-                className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
+                className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 text-muted-foreground! no-underline! transition-colors hover:bg-accent hover:text-foreground!'
                 data-track-category='AGENT_ARTIFACT'
                 data-track-name='VIEW_AGENT_FROM_DRAFT_CARD'
               >
@@ -224,7 +224,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
 
         <div className='flex flex-col gap-3'>
           <div className='flex min-w-0 flex-col pl-1 gap-1'>
-            <p className='break-words text-sm font-semibold leading-5 text-foreground'>
+            <p className='wrap-break-word text-sm font-semibold leading-5 text-foreground'>
               {agent.name}
             </p>
             <span className='block truncate text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
@@ -241,14 +241,14 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
               <p className='truncate text-sm font-semibold leading-5 text-foreground'>
                 Description
               </p>
-              <span className='block break-words text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
+              <span className='block wrap-break-word text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
                 {agent.description}
               </span>
             </div>
           )}
 
           {props.note && (
-            <span className='block break-words px-1 text-xs leading-4 text-muted-foreground'>
+            <span className='block wrap-break-word px-1 text-xs leading-4 text-muted-foreground'>
               {props.note}
             </span>
           )}

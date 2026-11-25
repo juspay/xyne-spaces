@@ -283,13 +283,13 @@ function CollapsedBar({
         aria-label='Expand AI replies'
         data-track-category='twin-dock'
         data-track-name='expand'
-        className='flex w-full select-none items-center gap-1.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/[0.04]'
+        className='flex w-full select-none items-center gap-1.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/4'
       >
         <span className='flex shrink-0 items-center gap-1'>
-          <span className='flex h-4 w-4 items-center justify-center text-[color:var(--mention-color)]'>
+          <span className='flex h-4 w-4 items-center justify-center text-(--mention-color)'>
             <PencilEditAi size={12} />
           </span>
-          <span className='text-sm font-semibold leading-[22px] tracking-[-0.1px] text-[color:var(--mention-color)]'>
+          <span className='text-sm font-semibold leading-[22px] tracking-[-0.1px] text-(--mention-color)'>
             {replyCount === 1 ? '1 AI reply ready' : `${replyCount} AI replies ready`}
           </span>
         </span>
@@ -307,7 +307,7 @@ function CollapsedBar({
       aria-label='Expand'
       data-track-category='twin-dock'
       data-track-name='expand'
-      className='flex w-full select-none items-center gap-2.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/[0.04]'
+      className='flex w-full select-none items-center gap-2.5 px-3.5 pb-5 pt-2 text-left transition-colors hover:bg-foreground/4'
     >
       <span className='text-sm font-semibold leading-[22px] tracking-[-0.1px] text-foreground'>
         {recapLabel}
@@ -364,7 +364,7 @@ function ExpandedHeader({
           Thread recap
         </span>
       ) : (
-        <span className='pointer-events-none relative flex min-w-0 items-center gap-2 text-sm font-semibold leading-[22px] text-[color:var(--mention-color)]'>
+        <span className='pointer-events-none relative flex min-w-0 items-center gap-2 text-sm font-semibold leading-[22px] text-(--mention-color)'>
           <span className='flex shrink-0'>
             <XyneAIStar size={14} />
           </span>
@@ -626,7 +626,7 @@ function SourcePreview({ source }: { source: TwinSourceInfo }): ReactElement | n
         clickable && 'cursor-pointer',
       )}
     >
-      <span className='w-[3px] shrink-0 self-stretch rounded-[2px] bg-[color:var(--mention-color)]' />
+      <span className='w-[3px] shrink-0 self-stretch rounded-[2px] bg-(--mention-color)' />
       <SourceAvatar
         {...(source.userId && { userId: source.userId })}
         {...(source.name && { name: source.name })}
@@ -794,7 +794,7 @@ function ReplyCard({
             onChange={e => setEditText(e.target.value)}
             data-track-category='twin-dock'
             data-track-name='edit-draft'
-            className='h-[120px] w-full resize-none rounded-md bg-background px-2 py-1.5 text-sm leading-[22px] text-foreground outline-none ring-1 ring-border focus:ring-foreground/40'
+            className='h-[120px] w-full resize-none rounded-md bg-background px-2 py-1.5 text-sm leading-[22px] text-foreground outline-hidden ring-1 ring-border focus:ring-foreground/40'
           />
         ) : (
           <DraftBody draft={draft} />

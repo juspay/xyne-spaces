@@ -111,14 +111,14 @@ function GroupSubmenu({
                   }
                 }}
                 placeholder={`Search ${group.title.toLowerCase()}...`}
-                className='w-full bg-transparent pl-7 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+                className='w-full bg-transparent pl-7 pr-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
                 data-track-category='Claw Agents'
                 data-track-name={`${trackName}: search ${group.title}`}
               />
             </div>
           </div>
         )}
-        <div className='max-h-72 overflow-y-auto p-1 [scrollbar-width:thin]'>
+        <div className='max-h-72 overflow-y-auto p-1 scrollbar-thin'>
           {visible.map(option => {
             const selected = isActiveIn(group, option);
             return (

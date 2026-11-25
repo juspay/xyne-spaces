@@ -331,7 +331,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onChange={e => setEditValue(e.target.value)}
               onBlur={() => handleSave()}
               onKeyDown={handleKeyDown}
-              className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
+              className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-hidden focus:border-blue-500'
               data-track-category='Tickets'
               data-track-name='EditDateField'
               data-track-metadata={JSON.stringify({ fieldName })}
@@ -412,7 +412,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
           >
             {fieldName}
           </span>
-          <div className='flex-1 bg-background border border-input rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
+          <div className='flex-1 bg-background border border-input rounded outline-hidden focus:border-blue-500 focus-within:border-blue-500'>
             <SearchUserV2
               options={usersSearchResults || []}
               selectedUsers={selectedUsers}
@@ -439,7 +439,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
           >
             {fieldName}
           </span>
-          <div className='flex-1 bg-background border border-input rounded outline-none focus:border-blue-500 focus-within:border-blue-500'>
+          <div className='flex-1 bg-background border border-input rounded outline-hidden focus:border-blue-500 focus-within:border-blue-500'>
             <TicketFieldSelector
               selectedValue={selectedTicketValue || null}
               onSelect={ticketXyneId => {
@@ -468,7 +468,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             onChange={e => setEditValue(e.target.value)}
             onBlur={() => handleSave()}
             onKeyDown={handleKeyDown}
-            className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
+            className='w-full text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-hidden focus:border-blue-500'
             data-track-category='Tickets'
             data-track-name='EditTextField'
             data-track-metadata={JSON.stringify({ fieldName, fieldType })}
@@ -532,7 +532,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
         </span>
         <ReadModeValue
           readOnly={readOnly}
-          className='min-w-0 break-words rounded px-1 py-0.5 text-[13px]'
+          className='min-w-0 wrap-break-word rounded px-1 py-0.5 text-[13px]'
           onEdit={beginEdit}
           trackName='EditTicketField'
           trackMetadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
@@ -559,7 +559,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       </span>
       <ReadModeValue
         readOnly={readOnly}
-        className='min-w-0 break-words rounded px-1 py-0.5 text-[13px]'
+        className='min-w-0 wrap-break-word rounded px-1 py-0.5 text-[13px]'
         onEdit={beginEdit}
         trackName='EditField'
         trackMetadata={JSON.stringify({ fieldName, fieldType, fieldValue })}

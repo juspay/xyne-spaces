@@ -294,9 +294,9 @@ export const RCAForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl'>
+      <div className='bg-background shadow-xs border border-border rounded-xl'>
         {/* Header */}
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
+        <div className='px-8 py-6 border-b border-border bg-linear-to-r from-muted/40 to-background'>
           <div className='flex items-center gap-3'>
             <div className='h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center'>
               <svg
@@ -374,7 +374,7 @@ export const RCAForm = ({
               data-track-name='RcaTitleInput'
               placeholder='Short RCA title...'
               readOnly={!isRcaEditable}
-              className='w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500'
+              className='w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-blue-500'
             />
             {renderFieldError(getFieldError('title'), showErrors || isTouched('title'))}
           </div>
@@ -440,7 +440,7 @@ export const RCAForm = ({
                 data-track-category='RCA'
                 data-track-name='RcaSeveritySelect'
                 disabled={!isRcaEditable}
-                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
               >
                 {severityOptions.map(option => (
                   <option key={option.value} value={option.value}>
@@ -466,7 +466,7 @@ export const RCAForm = ({
                 data-track-category='RCA'
                 data-track-name='RcaBugTypeSelect'
                 disabled={!isRcaEditable}
-                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
               >
                 <option value=''>Select bug type</option>
                 {bugTypeOptions.map(option => (
@@ -491,7 +491,7 @@ export const RCAForm = ({
                   data-track-category='RCA'
                   data-track-name='RcaCategoryTypeSelect'
                   disabled={!isRcaEditable}
-                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
                 >
                   <option value=''>Select category</option>
                   {filteredCategories.map(option => (
@@ -520,7 +520,7 @@ export const RCAForm = ({
                   data-track-category='RCA'
                   data-track-name='RcaIssueCategorySelect'
                   disabled={!isRcaEditable}
-                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
                 >
                   <option value=''>Select issue category</option>
                   {filteredIssueCategoryOptions.map(option => (
@@ -553,13 +553,13 @@ export const RCAForm = ({
                 data-track-category='RCA'
                 data-track-name='RcaIssueStartInput'
                 disabled={!isRcaEditable}
-                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
               />
             </div>
           </div>
 
           {/* Footer */}
-          <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+          <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur-sm border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
             <div className='text-xs text-muted-foreground'>
               Created {formatDate(selectedRecord.createdAt)} - Updated{' '}
               {formatDate(selectedRecord.updatedAt)}

@@ -46,7 +46,7 @@ export function CompareSelectRow({
       className={cn(
         'group/cmp flex items-stretch gap-2 rounded-2xl transition',
         hasDebug ? 'cursor-pointer' : 'cursor-not-allowed opacity-55',
-        selected ? 'ring-1 ring-primary bg-primary/[0.04]' : hasDebug && 'hover:bg-muted/40',
+        selected ? 'ring-1 ring-primary bg-primary/4' : hasDebug && 'hover:bg-muted/40',
       )}
     >
       {/* Selection rail */}

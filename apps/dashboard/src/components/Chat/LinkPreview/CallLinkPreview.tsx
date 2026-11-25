@@ -203,7 +203,7 @@ const CallLinkPreviewComponent: React.FC<CallLinkPreviewProps> = ({ metadata, on
     <div className='absolute -right-2 -top-2 z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover/call-card:opacity-100 group-focus-within/call-card:opacity-100'>
       <button
         type='button'
-        className='call-link-preview__copy-button rounded-full border border-border bg-card p-0.5 shadow-sm hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
+        className='call-link-preview__copy-button rounded-full border border-border bg-card p-0.5 shadow-xs hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring'
         onClick={handleCopy}
         aria-label='Copy call link'
         title='Copy call link'
@@ -215,7 +215,7 @@ const CallLinkPreviewComponent: React.FC<CallLinkPreviewProps> = ({ metadata, on
       {onClose && (
         <button
           type='button'
-          className='call-link-preview__close-button rounded-full border border-border bg-card p-0.5 shadow-sm hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
+          className='call-link-preview__close-button rounded-full border border-border bg-card p-0.5 shadow-xs hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring'
           onClick={handleClose}
           aria-label='Close call preview'
           data-track-category='MESSAGE'
@@ -230,7 +230,7 @@ const CallLinkPreviewComponent: React.FC<CallLinkPreviewProps> = ({ metadata, on
   return (
     <>
       <div
-        className='call-link-preview group/call-card relative flex w-full max-w-[520px] items-center gap-3 rounded-lg border border-border bg-card px-2 py-1 shadow-sm'
+        className='call-link-preview group/call-card relative flex w-full max-w-[520px] items-center gap-3 rounded-lg border border-border bg-card px-2 py-1 shadow-xs'
         aria-label={`Call preview: ${title}${presentation ? ` (${presentation.label})` : ''}`}
       >
         {/* Matches the "Join call" chip above. */}
@@ -352,7 +352,7 @@ const CallLinkPreviewComponent: React.FC<CallLinkPreviewProps> = ({ metadata, on
           <button
             type='button'
             onClick={openDetail}
-            className='shrink-0 rounded text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+            className='shrink-0 rounded text-muted-foreground hover:text-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
             aria-label={`Open call ${title}`}
             data-track-category='MESSAGE'
             data-track-name='OPEN_ENDED_CALL_LINK_PREVIEW'

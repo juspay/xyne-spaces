@@ -263,7 +263,7 @@ const UnreadsInbox = (): ReactElement => {
                       }}
                       // One small step darker than the card in any theme: the card colour with a
                       // 4% dark wash on top. Opaque, so the sticky header hides rows under it.
-                      className={`px-2 py-1 cursor-pointer flex items-center bg-card bg-[linear-gradient(rgb(0_0_0/0.04),rgb(0_0_0/0.04))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 border-b border-border/20' : 'hover:bg-accent'}`}
+                      className={`px-2 py-1 cursor-pointer flex items-center bg-card bg-[linear-gradient(rgb(0_0_0/0.04),rgb(0_0_0/0.04))] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${isOpen ? 'sticky top-0 z-20 border-b border-border/20' : 'hover:bg-accent'}`}
                       data-track-category='UNREADS_INBOX'
                       data-track-name='TOGGLE_CHANNEL_ACCORDION'
                     >
@@ -276,7 +276,7 @@ const UnreadsInbox = (): ReactElement => {
                             <Button
                               variant='secondary'
                               size='sm'
-                              className='h-7 w-7 p-0 pointer-events-auto rounded-md opacity-80 hover:opacity-100 shadow-sm'
+                              className='h-7 w-7 p-0 pointer-events-auto rounded-md opacity-80 hover:opacity-100 shadow-xs'
                               aria-label='Mark as read'
                               onClick={e => {
                                 e.stopPropagation();

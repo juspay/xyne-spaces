@@ -154,12 +154,12 @@ const ToggleSwitch = ({
     }}
     data-track-category='board_config'
     data-track-name={trackName}
-    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+    className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-hidden ${
       disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
     } ${checked ? 'bg-[#6276be]' : 'bg-muted'}`}
   >
     <span
-      className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform duration-200 ${
+      className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transition-transform duration-200 ${
         checked ? 'translate-x-4' : 'translate-x-0'
       }`}
     />
@@ -248,7 +248,7 @@ const LinearStageCard = ({
             data-track-name='add_stage_before_first'
             variant='ghost'
             size='iconSm'
-            className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
+            className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-xs h-auto w-auto'
           >
             <Plus size={12} className='text-foreground' />
           </Button>
@@ -265,7 +265,7 @@ const LinearStageCard = ({
             {/* Status Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger
-                className='flex items-center gap-[6px] outline-none'
+                className='flex items-center gap-[6px] outline-hidden'
                 data-track-category='board_config'
                 data-track-name='change_stage_status'
               >
@@ -325,7 +325,7 @@ const LinearStageCard = ({
                     data-track-category='board_config'
                     data-track-name='edit_eta_input'
                     placeholder='ETA'
-                    className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50'
+                    className='w-10 text-[14px] font-[450] text-foreground bg-transparent border-none focus:outline-hidden focus:ring-0 p-0 placeholder:text-muted-foreground/50'
                   />
                   <span className='text-[14px] font-[450] text-foreground'>hrs</span>
                 </div>
@@ -363,7 +363,7 @@ const LinearStageCard = ({
                 data-track-category='board_config'
                 data-track-name='edit_stage_name'
                 placeholder='Stage name...'
-                className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-none focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
+                className='flex-1 text-[12px] font-semibold text-foreground bg-transparent border-none focus:outline-hidden focus:ring-0 placeholder:text-muted-foreground/50 uppercase tracking-[0.72px] leading-[18px] text-left'
               />
             </div>
 
@@ -380,7 +380,7 @@ const LinearStageCard = ({
                     data-track-name='edit_condition'
                   >
                     <GitBranch size={14} className='text-muted-foreground shrink-0' />
-                    <span className='text-[14px] font-medium text-foreground break-words whitespace-normal text-left leading-[18px]'>
+                    <span className='text-[14px] font-medium text-foreground wrap-break-word whitespace-normal text-left leading-[18px]'>
                       {condition.name || `Condition ${condIdx + 1}`}
                     </span>
                   </Button>
@@ -457,7 +457,7 @@ const LinearStageCard = ({
 
       {/* Condition Builder - positioned absolutely to the right */}
       {isConditionModalOpen && selectedStageForCondition === stage.tempId && (
-        <div className='absolute left-1/4 top-1/4 -translate-y-[250px] ml-[16px] z-50'>
+        <div className='absolute left-1/4 top-1/4 translate-y-[-250px] ml-[16px] z-50'>
           <ConditionBuilder
             isOpen={true}
             onClose={handleCloseConditionModal}
@@ -496,7 +496,7 @@ const LinearStageCard = ({
           data-track-name='add_stage_between'
           variant='ghost'
           size='iconSm'
-          className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-sm h-auto w-auto'
+          className='bg-background border border-border rounded-[6px] p-[4px] flex items-center justify-center hover:bg-muted transition-colors shadow-xs h-auto w-auto'
         >
           <Plus size={12} className='text-foreground' />
         </Button>
@@ -2814,7 +2814,7 @@ const BoardStageConfigScreen = ({
             )}
             {/* NON_LINEAR: Edge Condition Builder */}
             {boardType === BoardType.NON_LINEAR && isEdgeConditionModalOpen && (
-              <div className='absolute left-1/4 top-1/4 -translate-y-[250px] ml-[16px] z-50'>
+              <div className='absolute left-1/4 top-1/4 translate-y-[-250px] ml-[16px] z-50'>
                 <ConditionBuilder
                   isOpen={true}
                   onClose={handleCloseEdgeConditionModal}
@@ -2840,7 +2840,7 @@ const BoardStageConfigScreen = ({
             )}
             {/* NON_LINEAR: Create Form Slide Out (from edge condition) */}
             {boardType === BoardType.NON_LINEAR && isEdgeCreateFormOpen && (
-              <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+              <div className='fixed right-16 top-[250px] bottom-20 z-60'>
                 <CreateFormSlideOut
                   isOpen={true}
                   onClose={handleCloseEdgeCreateForm}
@@ -2856,7 +2856,7 @@ const BoardStageConfigScreen = ({
                 <div className='h-full flex items-stretch justify-center min-w-max px-8 relative'>
                   {/* Dotted grid pattern background - at top level */}
                   <div
-                    className='absolute inset-0 pointer-events-none z-[20]'
+                    className='absolute inset-0 pointer-events-none z-20'
                     style={{
                       backgroundImage:
                         'radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px)',
@@ -2917,7 +2917,7 @@ const BoardStageConfigScreen = ({
             {boardType !== BoardType.NON_LINEAR &&
               isCreateFormOpen &&
               selectedStageForCondition !== null && (
-                <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                <div className='fixed right-16 top-[250px] bottom-20 z-60'>
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseCreateForm}
@@ -2929,7 +2929,7 @@ const BoardStageConfigScreen = ({
             {boardType !== BoardType.NON_LINEAR &&
               isDirectFormOpen &&
               selectedStageForDirectForm !== null && (
-                <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                <div className='fixed right-16 top-[250px] bottom-20 z-60'>
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseDirectForm}
@@ -2943,7 +2943,7 @@ const BoardStageConfigScreen = ({
               isEditFormOpen &&
               selectedStageForEditForm !== null &&
               editingFormData && (
-                <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+                <div className='fixed right-16 top-[250px] bottom-20 z-60'>
                   <CreateFormSlideOut
                     isOpen={true}
                     onClose={handleCloseEditForm}
@@ -2958,7 +2958,7 @@ const BoardStageConfigScreen = ({
               )}
             {/* Edge form slide-out for NON_LINEAR per-edge forms */}
             {isEdgeFormOpen && edgeFormTarget && (
-              <div className='fixed right-16 top-[250px] bottom-20 z-[60]'>
+              <div className='fixed right-16 top-[250px] bottom-20 z-60'>
                 <CreateFormSlideOut
                   isOpen={true}
                   onClose={handleCloseEdgeForm}
@@ -2976,7 +2976,7 @@ const BoardStageConfigScreen = ({
               </div>
             )}
             {conditionDeleteDialog && (
-              <div className='fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4'>
+              <div className='fixed inset-0 z-90 flex items-center justify-center bg-black/50 px-4'>
                 <div className='w-full max-w-[420px] rounded-lg border border-border bg-background p-5 shadow-xl'>
                   <h2 className='text-base font-semibold text-foreground'>
                     {conditionDeleteDialog.kind === 'blocked'

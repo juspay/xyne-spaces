@@ -455,7 +455,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 value={statusText}
                 onChange={handleTextChange}
                 placeholder='Update your status'
-                className='flex-1 bg-transparent border-none outline-none text-sm text-foreground'
+                className='flex-1 bg-transparent border-none outline-hidden text-sm text-foreground'
                 maxLength={100}
                 data-track-event='blur'
                 data-track-category='Update_User_Status_Modal'
@@ -481,7 +481,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             <div className='space-y-2'>
               <span className='text-sm font-medium text-foreground'>Remove status after</span>
               <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
-                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'>
+                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring'>
                   <Select.Value />
                   <Select.Icon>
                     <ChevronDown className='size-4' />
@@ -492,14 +492,14 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   <Select.Content
                     position='popper'
                     sideOffset={4}
-                    className='bg-background rounded-lg border border-border shadow-lg overflow-hidden z-50 w-[var(--radix-select-trigger-width)] max-h-[var(--radix-select-content-available-height)]'
+                    className='bg-background rounded-lg border border-border shadow-lg overflow-hidden z-50 w-(--radix-select-trigger-width) max-h-(--radix-select-content-available-height)'
                   >
                     <Select.Viewport className='p-1'>
                       {EXPIRY_OPTIONS.map(option => (
                         <Select.Item
                           key={option.value}
                           value={option.value}
-                          className='relative flex items-center px-3 py-2 rounded-md text-sm text-foreground cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
+                          className='relative flex items-center px-3 py-2 rounded-md text-sm text-foreground cursor-pointer hover:bg-muted outline-hidden select-none data-highlighted:bg-muted'
                         >
                           <Select.ItemText>{option.label}</Select.ItemText>
                           <Select.ItemIndicator className='absolute right-2'>
@@ -523,7 +523,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   showClearButton={false}
                   placeholder='Select date'
                   inputClassName='h-9 flex-1 w-full'
-                  contentClassName='z-[100]'
+                  contentClassName='z-100'
                 />
 
                 <div className='px-3 py-2 border border-input rounded-lg bg-background'>

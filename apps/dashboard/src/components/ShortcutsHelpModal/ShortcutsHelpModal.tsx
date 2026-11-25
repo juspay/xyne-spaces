@@ -110,7 +110,7 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
                           {keyList.map((key, idx) => (
                             <kbd
                               key={idx}
-                              className='inline-flex items-center justify-center px-2 py-1 text-xs font-medium font-mono bg-background dark:bg-gray-700 text-foreground dark:text-gray-200 rounded-md border border-border dark:border-gray-600 shadow-sm min-w-[28px]'
+                              className='inline-flex items-center justify-center px-2 py-1 text-xs font-medium font-mono bg-background dark:bg-gray-700 text-foreground dark:text-gray-200 rounded-md border border-border dark:border-gray-600 shadow-xs min-w-[28px]'
                             >
                               {formatShortcut(key, isMac)}
                             </kbd>
@@ -129,7 +129,7 @@ export const ShortcutsHelpModal = ({ isOpen, onClose }: ShortcutsHelpModalProps)
         <div className='px-6 py-3 border-t border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-b-lg'>
           <div className='flex items-center justify-center gap-2 text-xs text-muted-foreground dark:text-muted-foreground'>
             <span>Press</span>
-            <kbd className='inline-flex items-center justify-center px-2 py-0.5 font-mono font-medium bg-background dark:bg-gray-700 text-muted-foreground dark:text-muted rounded border border-border dark:border-gray-600 shadow-sm'>
+            <kbd className='inline-flex items-center justify-center px-2 py-0.5 font-mono font-medium bg-background dark:bg-gray-700 text-muted-foreground dark:text-muted rounded border border-border dark:border-gray-600 shadow-xs'>
               Esc
             </kbd>
             <span>to close</span>

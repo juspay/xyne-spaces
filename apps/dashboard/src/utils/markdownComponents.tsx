@@ -128,7 +128,7 @@ const FencedCodeBlock = ({
       <button
         type='button'
         onClick={handleCopy}
-        className='absolute right-2 top-2 z-10 flex items-center rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-100 shadow-sm transition-opacity hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
+        className='absolute right-2 top-2 z-10 flex items-center rounded-md border border-border bg-background p-0.5 text-muted-foreground opacity-100 shadow-xs transition-opacity hover:text-foreground md:opacity-0 group-hover/code-block:opacity-100 focus-visible:opacity-100'
         aria-label='Copy code snippet'
         title='Copy code snippet'
         data-track-category='MESSAGE'
@@ -205,7 +205,7 @@ const CodeBlock = ({
   // ── Fenced code block ──
   return (
     <FencedCodeBlock codeText={codeString}>
-      <pre className='bg-muted m-0 px-4 py-3 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[0.875rem] leading-5 text-foreground'>
+      <pre className='bg-muted m-0 px-4 py-3 overflow-x-auto whitespace-pre-wrap wrap-break-word font-mono text-[0.875rem] leading-5 text-foreground'>
         <code className={className} style={{ color: 'inherit' }} {...props}>
           {children}
         </code>

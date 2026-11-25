@@ -588,7 +588,7 @@ const AppSidebar = (): ReactElement => {
                 <li
                   ref={railDrag.gapRef}
                   aria-hidden
-                  className='pointer-events-none absolute left-0 top-0 size-8 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                  className='pointer-events-none absolute left-0 top-0 size-8 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/2 opacity-0'
                 />
                 {railEntries.map((entry, index) => {
                   const shortcutIndex =
@@ -621,7 +621,7 @@ const AppSidebar = (): ReactElement => {
                         <span
                           data-rail-socket
                           aria-hidden
-                          className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                          className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/2 opacity-0'
                         />
                         <Tooltip content={appTooltip} side='right' delayDuration={0}>
                           <Link
@@ -751,7 +751,7 @@ const AppSidebar = (): ReactElement => {
                       <span
                         data-rail-socket
                         aria-hidden
-                        className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                        className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/2 opacity-0'
                       />
                       {item.path === '/calls' ? (
                         <CallsRailHoverCard tooltip={tooltipContent}>{navLink}</CallsRailHoverCard>
@@ -815,7 +815,7 @@ const AppSidebar = (): ReactElement => {
                         data-track-name='Sidebar_More_Toggle'
                         className={cn(
                           'size-8 flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-[color,background-color,border-color,transform]',
-                          'group-data-[drop-target]/more:scale-105 group-data-[drop-target]/more:bg-sidebar-accent group-data-[drop-target]/more:border-sidebar-border group-data-[drop-target]/more:text-sidebar-accent-foreground',
+                          'group-data-drop-target/more:scale-105 group-data-drop-target/more:bg-sidebar-accent group-data-drop-target/more:border-sidebar-border group-data-drop-target/more:text-sidebar-accent-foreground',
                           isMoreActive || isMoreOpen
                             ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
                             : 'bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
@@ -1052,7 +1052,7 @@ const SidebarMoreMenu = ({
       aria-hidden
       className='relative h-0 overflow-hidden transition-[height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]'
     >
-      <span className='absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02]' />
+      <span className='absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/2' />
     </li>
   );
   return (
@@ -1079,7 +1079,7 @@ const SidebarMoreMenu = ({
                   <span
                     data-rail-socket
                     aria-hidden
-                    className='pointer-events-none absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+                    className='pointer-events-none absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/2 opacity-0'
                   />
                   <Link
                     to={prefixWs(item.path)}
@@ -1134,7 +1134,7 @@ const SidebarMoreMenu = ({
         data-testid='more-customize-toolbar'
         data-track-category='App_Sidebar'
         data-track-name='Sidebar_Customize_Toolbar'
-        className='block w-full rounded-md px-2.5 py-2 text-left text-sm font-medium text-[color:var(--mention-color)] transition-colors hover:bg-accent'
+        className='block w-full rounded-md px-2.5 py-2 text-left text-sm font-medium text-(--mention-color) transition-colors hover:bg-accent'
       >
         Customize toolbar
       </button>

@@ -222,7 +222,7 @@ export function UpcomingCallRowV2({
                 <ThreeDotsMenuHorizontal className='size-4' />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-44 shadow-sm'>
+            <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-44 shadow-xs'>
               {canEdit && onEditCall && (
                 <DropdownMenuItem
                   onClick={e => {

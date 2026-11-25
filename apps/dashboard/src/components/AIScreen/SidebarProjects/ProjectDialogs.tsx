@@ -166,7 +166,7 @@ export function ProjectDialogs({
                   if (event.key === 'Enter') submit();
                 }}
                 placeholder='Ex: Billing revamp'
-                className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+                className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
                 data-track-category='XyneAI'
                 data-track-name='EDIT_PROJECT_NAME'
               />

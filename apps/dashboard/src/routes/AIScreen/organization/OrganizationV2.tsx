@@ -337,7 +337,7 @@ const OrganizationV2 = (): ReactElement => {
                             disabled={busyUserId !== null}
                             label={`Role for ${displayName}`}
                             trackName='Organization: set member role'
-                            triggerClassName='h-8 !w-32 rounded-md border-0 bg-transparent px-3 text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent [&>svg]:text-current [&>svg]:opacity-100'
+                            triggerClassName='h-8 w-32! rounded-md border-0 bg-transparent px-3 text-muted-foreground shadow-none hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:ring-0 dark:bg-transparent [&>svg]:text-current [&>svg]:opacity-100'
                             onChange={next => {
                               if (isOrgRole(next)) void changeRole(member, next);
                             }}

@@ -61,7 +61,7 @@ export function AddStepRow({
             className={cn(
               'flex items-center justify-center rounded-full border border-border bg-background',
               'text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
               variant === 'full' ? 'size-8' : 'size-6',
             )}
           >
@@ -80,7 +80,7 @@ export function AddStepRow({
             placeholder='Search steps…'
             data-track-category='automation-builder'
             data-track-name='add-step-search'
-            className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+            className='flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
           />
         </div>
         <div className='flex-1 overflow-y-auto py-1'>

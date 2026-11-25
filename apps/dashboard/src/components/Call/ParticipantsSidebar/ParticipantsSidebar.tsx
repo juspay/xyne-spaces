@@ -720,7 +720,7 @@ export function ParticipantsSidebar({
                 align='end'
                 sideOffset={6}
                 collisionPadding={12}
-                className='z-[80] w-80 overflow-hidden rounded-2xl border border-border bg-background p-0 text-foreground shadow-2xl'
+                className='z-80 w-80 overflow-hidden rounded-2xl border border-border bg-background p-0 text-foreground shadow-2xl'
                 trigger={
                   <button
                     type='button'
@@ -819,7 +819,7 @@ export function ParticipantsSidebar({
               aria-label='Search for people'
               data-track-category='CALLS'
               data-track-name='SEARCH_CALL_PARTICIPANTS'
-              className='min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+              className='min-w-0 flex-1 bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
             />
             {searchQuery && (
               <button

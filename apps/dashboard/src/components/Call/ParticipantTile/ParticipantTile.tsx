@@ -262,7 +262,7 @@ export function ParticipantTile({
               data-track-category='CALLS'
               data-track-name='Expand_Participant_Tile'
               data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
-              className='flex h-7 items-center gap-1 rounded-full px-2 text-xs font-medium text-white outline-none transition-colors hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-white/60'
+              className='flex h-7 items-center gap-1 rounded-full px-2 text-xs font-medium text-white outline-hidden transition-colors hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-white/60'
             >
               <Pin className='h-3.5 w-3.5' />
               <span>Pin</span>
@@ -473,7 +473,7 @@ export function ParticipantTile({
           align='end'
           sideOffset={8}
           collisionPadding={8}
-          className='z-[90] rounded-xl border-0 bg-[#1e1f20] p-0 text-[#e3e3e3] shadow-2xl ring-1 ring-white/10'
+          className='z-90 rounded-xl border-0 bg-[#1e1f20] p-0 text-[#e3e3e3] shadow-2xl ring-1 ring-white/10'
           trigger={
             <button
               type='button'
@@ -533,12 +533,12 @@ export function ParticipantTile({
           data-track-name='TOGGLE_HAND_RAISE_TILE'
           data-track-metadata={JSON.stringify({ raised: !isHandRaised })}
           className={cn(
-            'absolute z-10 flex items-center justify-center rounded-full shadow-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/60',
+            'absolute z-10 flex items-center justify-center rounded-full shadow-md outline-hidden transition-colors focus-visible:ring-2 focus-visible:ring-white/60',
             compact ? 'bottom-1 p-1' : 'bottom-1 p-1.5 sm:bottom-2 sm:p-2',
             // Camera on → blur button holds the corner, so offset left; else take the corner.
             hasVideo
               ? compact
-                ? 'right-[1.625rem]'
+                ? 'right-6.5'
                 : 'right-10 sm:right-12'
               : compact
                 ? 'right-1'

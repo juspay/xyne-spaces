@@ -50,7 +50,7 @@ function ClawMarkdownLink({
 
 const components: Components = {
   p: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
-    <p className='mb-2 whitespace-pre-wrap break-words last:mb-0'>{children}</p>
+    <p className='mb-2 whitespace-pre-wrap wrap-break-word last:mb-0'>{children}</p>
   ),
   ul: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
     <ul className='mb-2 list-disc space-y-1 pl-5 last:mb-0'>{children}</ul>

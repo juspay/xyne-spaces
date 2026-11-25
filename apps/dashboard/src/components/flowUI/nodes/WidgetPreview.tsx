@@ -86,9 +86,7 @@ export const WidgetPreview: React.FC<WidgetPreviewProps> = ({
           <div className='mx-auto flex max-w-3xl flex-col gap-5'>{children}</div>
         </div>
         {footer && (
-          <div className='shrink-0 border-t border-border bg-foreground/[0.03] px-6 py-3'>
-            {footer}
-          </div>
+          <div className='shrink-0 border-t border-border bg-foreground/3 px-6 py-3'>{footer}</div>
         )}
       </div>
     </>

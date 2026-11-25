@@ -95,10 +95,10 @@ export function PreviewButton(props: {
       disabled={props.disabled}
       onClick={props.onClick}
       className={cn(
-        'outline-none flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-40',
+        'outline-hidden flex size-7 shrink-0 items-center justify-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-40',
         props.pressed
           ? 'bg-muted text-foreground'
-          : 'text-muted-foreground hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground',
+          : 'text-muted-foreground hover:bg-foreground/8 focus-visible:bg-foreground/8 hover:text-foreground focus-visible:text-foreground',
       )}
       data-track-category='FilePreview'
       data-track-name={props.trackName}
@@ -129,9 +129,9 @@ export function PreviewSegmented<T extends string>(props: {
           aria-checked={props.value === option.value}
           onClick={() => props.onChange(option.value)}
           className={cn(
-            'outline-none h-6 rounded-[5px] px-2.5 text-xs font-medium transition-colors',
+            'outline-hidden h-6 rounded-[5px] px-2.5 text-xs font-medium transition-colors',
             props.value === option.value
-              ? 'bg-background text-foreground shadow-sm'
+              ? 'bg-background text-foreground shadow-xs'
               : 'text-muted-foreground hover:text-foreground focus-visible:text-foreground',
           )}
           data-track-category='FilePreview'
@@ -169,7 +169,7 @@ export function PreviewMessage(props: {
             type='button'
             onClick={action.onClick}
             className={cn(
-              'outline-none flex h-8 items-center rounded-lg px-3.5 text-[13px] font-medium transition-colors',
+              'outline-hidden flex h-8 items-center rounded-lg px-3.5 text-[13px] font-medium transition-colors',
               action.primary
                 ? 'bg-foreground text-background hover:opacity-90 focus-visible:opacity-90'
                 : 'border border-border text-foreground hover:bg-muted focus-visible:bg-muted',
@@ -231,7 +231,7 @@ export function PreviewSkeletonView(props: {
       )}
       {props.note && (
         <div className='absolute inset-x-0 bottom-8 flex justify-center'>
-          <span className='rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground shadow-sm'>
+          <span className='rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground shadow-xs'>
             {props.note}
           </span>
         </div>

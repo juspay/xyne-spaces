@@ -72,7 +72,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
               onChange={e => setQuery(e.target.value)}
               placeholder='Search agents…'
               autoFocus
-              className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
+              className='flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground/60'
               data-track-category='DeskSettings'
               data-track-name='SearchAddAgent'
             />

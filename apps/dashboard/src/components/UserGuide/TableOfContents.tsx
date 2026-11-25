@@ -88,7 +88,7 @@ export const TableOfContents = ({
                       data-track-name='JUMP_TO_FEATURE'
                       className={`w-full text-left py-1 px-2 rounded text-[12px] transition-colors duration-100 truncate ${
                         isFeatureActive
-                          ? 'text-foreground font-medium bg-primary/[0.06]'
+                          ? 'text-foreground font-medium bg-primary/6'
                           : 'text-foreground/60 hover:text-foreground hover:bg-muted/50'
                       }`}
                     >

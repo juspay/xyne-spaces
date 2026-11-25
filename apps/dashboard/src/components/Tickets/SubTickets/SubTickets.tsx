@@ -186,11 +186,11 @@ export function SubTicketsTree(props: SubTicketsTreeProps): ReactElement | null 
         aria-hidden
         className={cn(
           TREE_LINE,
-          'absolute -left-[13px] -top-1.5 h-[calc(50%+6px)] w-3 rounded-bl-[7px] border-b-[1.5px]',
+          'absolute left-[-13px] -top-1.5 h-[calc(50%+6px)] w-3 rounded-bl-[7px] border-b-[1.5px]',
         )}
       />
       {continues && (
-        <span aria-hidden className={cn(TREE_LINE, 'absolute -bottom-1 -left-[13px] top-1/2')} />
+        <span aria-hidden className={cn(TREE_LINE, 'absolute -bottom-1 left-[-13px] top-1/2')} />
       )}
     </>
   );

@@ -568,7 +568,7 @@ export const ImpactForm = ({
               }}
               data-track-category='RCA'
               data-track-name='ImpactTypeSelect'
-              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
+              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
             >
               <option value=''>Select impact type</option>
               {impactTypeOptions.map(option => (
@@ -699,7 +699,7 @@ export const ImpactForm = ({
   if (!isImpactEnabled) {
     return (
       <div className='max-w-4xl mx-auto'>
-        <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden p-8'>
+        <div className='bg-background shadow-xs border border-border rounded-xl overflow-hidden p-8'>
           <div className='flex items-center gap-4 mb-4'>
             <div className='h-12 w-12 rounded-xl bg-muted flex items-center justify-center'>
               <svg
@@ -739,8 +739,8 @@ export const ImpactForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl'>
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
+      <div className='bg-background shadow-xs border border-border rounded-xl'>
+        <div className='px-8 py-6 border-b border-border bg-linear-to-r from-muted/40 to-background'>
           <div className='flex items-center gap-3'>
             <div className='h-10 w-10 rounded-lg bg-orange-600 flex items-center justify-center'>
               <svg
@@ -833,7 +833,7 @@ export const ImpactForm = ({
           )}
 
           {!isLocked && (
-            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur-sm border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
               <div className='text-xs text-muted-foreground'>
                 {(pendingImpactValues?.length ?? 0) > 0
                   ? `${pendingImpactValues?.length ?? 0} pending impact(s)`

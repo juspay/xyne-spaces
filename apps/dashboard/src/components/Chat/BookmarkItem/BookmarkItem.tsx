@@ -274,7 +274,7 @@ export const BookmarkItem = ({
 
       {/* Action Toolbar - shown on hover, hidden on mobile */}
       {isActionToolbarVisible && (
-        <div className='absolute top-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-sm p-1'>
+        <div className='absolute top-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-xs p-1'>
           <Tooltip content='Mark as done'>
             <button
               type='button'
@@ -374,7 +374,7 @@ export const BookmarkItem = ({
               onSelect={setCustomReminderDate}
               placeholder='Select date'
               minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-              inputClassName='w-full !h-9'
+              inputClassName='w-full h-9!'
               showClearButton={false}
             />
           </div>

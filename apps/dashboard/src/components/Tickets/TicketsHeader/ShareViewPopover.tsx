@@ -223,7 +223,7 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
           side='bottom'
           align='end'
           sideOffset={4}
-          className='z-[60] w-[312px] overflow-hidden rounded-[12px] border border-border bg-background shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
+          className='z-60 w-[312px] overflow-hidden rounded-[12px] border border-border bg-background shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
         >
           <div className='flex h-10 items-center gap-2 border-b border-border/60 px-3 text-muted-foreground/80'>
             <Search className='size-[14px] shrink-0' />
@@ -232,7 +232,7 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder='Add people or channels…'
-              className='min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/60'
+              className='min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-hidden placeholder:text-muted-foreground/60'
               data-track-category='Projects'
               data-track-name='SearchShareViewUsers'
             />

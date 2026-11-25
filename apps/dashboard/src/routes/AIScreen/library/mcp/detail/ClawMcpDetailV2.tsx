@@ -334,7 +334,7 @@ const ClawMcpDetailV2 = (): ReactElement => {
                   />
                 }
               >
-                <pre className='w-full overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground/80'>
+                <pre className='w-full overflow-x-auto whitespace-pre-wrap wrap-break-word font-mono text-xs leading-5 text-foreground/80'>
                   {configJson}
                 </pre>
               </Field>

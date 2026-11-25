@@ -35,8 +35,7 @@ export function LoadingBar(props: { loading: boolean }): ReactElement | null {
       <div
         className={cn(
           'relative h-full overflow-hidden bg-primary motion-reduce:transition-none',
-          phase === 'run' &&
-            'transition-[width] duration-[8000ms] ease-[cubic-bezier(0.1,0.7,0.2,1)]',
+          phase === 'run' && 'transition-[width] duration-8000 ease-[cubic-bezier(0.1,0.7,0.2,1)]',
           phase === 'done' &&
             'opacity-0 transition-[width,opacity] duration-200 [transition-delay:0ms,180ms]',
         )}
@@ -44,7 +43,7 @@ export function LoadingBar(props: { loading: boolean }): ReactElement | null {
       >
         {/* A shine running along it while the page loads: it is working, not stuck. */}
         {phase === 'run' && (
-          <span className='absolute inset-y-0 left-0 w-1/3 animate-[xyne-bar-shine_1.1s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/80 to-transparent motion-reduce:hidden' />
+          <span className='absolute inset-y-0 left-0 w-1/3 animate-[xyne-bar-shine_1.1s_ease-in-out_infinite] bg-linear-to-r from-transparent via-white/80 to-transparent motion-reduce:hidden' />
         )}
       </div>
     </div>

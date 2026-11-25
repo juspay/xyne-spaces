@@ -134,7 +134,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
         type='text'
         ref={inputRef}
         className={cn(
-          'border-none focus-visible:ring-0 text-[13px] outline-none bg-transparent max-w-40 min-w-8 truncate cursor-pointer',
+          'border-none focus-visible:ring-0 text-[13px] outline-hidden bg-transparent max-w-40 min-w-8 truncate cursor-pointer',
           selectedValues.length > 0
             ? 'text-foreground placeholder:text-foreground'
             : 'text-muted-foreground placeholder:text-muted-foreground',
@@ -264,7 +264,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             }}
             onClick={e => e.stopPropagation()}
             onKeyDown={e => e.stopPropagation()}
-            className='z-[100] w-auto max-w-64 max-h-96 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
+            className='z-100 w-auto max-w-64 max-h-96 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
             // Never narrower than the trigger, matching EntitySelector. A compact
             // trigger still lets the content size the popover as before.
             style={{
@@ -289,7 +289,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                       setSearchValue(e.target.value);
                       onSearchChange?.(e.target.value);
                     }}
-                    className='w-full pl-6 pr-2 text-sm rounded outline-none bg-transparent text-foreground'
+                    className='w-full pl-6 pr-2 text-sm rounded outline-hidden bg-transparent text-foreground'
                   />
                 </div>
               </div>

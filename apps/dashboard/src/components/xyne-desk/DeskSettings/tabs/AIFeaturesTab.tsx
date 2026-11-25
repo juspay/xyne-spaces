@@ -367,7 +367,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
             <button
               type='button'
               disabled={!canManage}
-              className='inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent active:border-border disabled:pointer-events-none disabled:opacity-50'
+              className='inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-xs hover:bg-muted/40 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent active:border-border disabled:pointer-events-none disabled:opacity-50'
               onClick={e => {
                 e.currentTarget.blur();
                 openPriorityConfig();
@@ -400,7 +400,7 @@ export const AIFeaturesTab: React.FC<AIFeaturesTabProps> = ({ channelId, form, s
             <button
               type='button'
               disabled={!canManage}
-              className='inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent active:border-border disabled:pointer-events-none disabled:opacity-50'
+              className='inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-xs hover:bg-muted/40 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent active:border-border disabled:pointer-events-none disabled:opacity-50'
               onClick={e => {
                 e.currentTarget.blur();
                 openClassificationConfig();
@@ -713,7 +713,7 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
           <button
             type='button'
             data-ph-capture-attribute-track-id='run_ai_sync'
-            className='inline-flex h-auto items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+            className='inline-flex h-auto items-center justify-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-xs hover:bg-muted/40 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
             onClick={() => {
               void handleRunSync();
             }}

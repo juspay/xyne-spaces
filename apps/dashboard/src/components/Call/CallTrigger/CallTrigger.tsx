@@ -158,7 +158,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             isMobile &&
               (usesCustomTriggerStyle
                 ? 'w-full rounded-full'
-                : 'p-3 rounded-full border-border bg-background shadow-sm hover:bg-accent'),
+                : 'p-3 rounded-full border-border bg-background shadow-xs hover:bg-accent'),
             // Active call in channel (started by someone else): green filled
             hasActiveCallInChannel &&
               !isUserInCurrentChannelCall &&
@@ -174,12 +174,12 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             <PhoneCancel
               size={16}
               className={cn(
-                isMobile && '!h-6 !w-6',
+                isMobile && 'h-6! w-6!',
                 !usesCustomTriggerStyle && isMobile ? 'text-foreground' : 'text-destructive',
               )}
             />
           ) : (
-            <PhoneDefault size={16} className={cn(isMobile && '!h-6 !w-6')} />
+            <PhoneDefault size={16} className={cn(isMobile && 'h-6! w-6!')} />
           )}
         </button>
       </Tooltip>

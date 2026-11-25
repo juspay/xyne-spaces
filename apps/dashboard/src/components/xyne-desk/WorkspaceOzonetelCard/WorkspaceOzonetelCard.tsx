@@ -22,7 +22,7 @@ import { useAllChannels } from '../../../hooks/useChannels';
 import { PhoneDefault } from '@xyne/icons';
 
 const inputClass =
-  'w-full rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent';
+  'w-full rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-xs focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent';
 
 function getSaveErrorMessage(
   err: unknown,
@@ -270,7 +270,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
             <button
               type='button'
               onClick={() => setIsOpen(true)}
-              className='inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
+              className='inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted'
               data-track-category='workspace-ozonetel'
               data-track-name='OpenConfigModal'
             >
@@ -481,7 +481,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                                 )
                               }
                               aria-label='Remove phone field'
-                              className='inline-flex shrink-0 items-center justify-center rounded-[10px] border border-border px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
+                              className='inline-flex shrink-0 items-center justify-center rounded-[10px] border border-border px-3 py-1.5 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted'
                               data-track-category='workspace-ozonetel'
                               data-track-name='RemovePhoneFieldName'
                             >
@@ -492,7 +492,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                         <button
                           type='button'
                           onClick={() => setPhoneFieldNames(current => [...current, ''])}
-                          className='inline-flex w-fit items-center gap-2 rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
+                          className='inline-flex w-fit items-center gap-2 rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted'
                           data-track-category='workspace-ozonetel'
                           data-track-name='AddPhoneFieldName'
                         >
@@ -618,7 +618,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                           campaignRoutes.map((route, index) => (
                             <div
                               key={`${index}-${route.campaignName}-${route.channelId}`}
-                              className='grid items-center gap-2 rounded-[14px] border border-border bg-card/90 p-3 shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]'
+                              className='grid items-center gap-2 rounded-[14px] border border-border bg-card/90 p-3 shadow-xs md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]'
                             >
                               <EntitySelector
                                 options={Array.from(
@@ -650,7 +650,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                                 placeholder='Select Ozonetel campaign'
                                 searchPlaceholder='Search campaigns'
                                 width='100%'
-                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                               />
                               <EntitySelector
                                 options={callDeskOptions}
@@ -667,7 +667,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                                 placeholder='Select call desk'
                                 searchPlaceholder='Search call desks'
                                 width='100%'
-                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                               />
                               <button
                                 type='button'
@@ -677,7 +677,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                                     current.filter((_, entryIndex) => entryIndex !== index),
                                   )
                                 }
-                                className='inline-flex shrink-0 items-center justify-center rounded-[10px] border border-border px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
+                                className='inline-flex shrink-0 items-center justify-center rounded-[10px] border border-border px-3 py-1.5 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted'
                                 data-track-category='workspace-ozonetel'
                                 data-track-name='RemoveCampaignRoute'
                               >
@@ -695,7 +695,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                               { campaignName: '', channelId: '' },
                             ])
                           }
-                          className='inline-flex w-fit items-center gap-2 rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
+                          className='inline-flex w-fit items-center gap-2 rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted'
                           data-track-category='workspace-ozonetel'
                           data-track-name='AddCampaignRoute'
                         >
@@ -726,7 +726,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                 type='button'
                 onClick={onSave}
                 disabled={!canSave || mutation.isPending}
-                className='rounded-[12px] border border-desk-accent bg-desk-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+                className='rounded-[12px] border border-desk-accent bg-desk-accent px-4 py-2 text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='workspace-ozonetel'
                 data-track-name='SaveConfig'
                 data-ph-capture-attribute-track-id='save_ozonetel_config'
@@ -790,7 +790,7 @@ function SectionCard({
 
 function SummaryCard({ label, value }: { label: string; value: string }): ReactElement {
   return (
-    <div className='rounded-[16px] border border-border bg-background/90 px-3 py-3 shadow-sm'>
+    <div className='rounded-[16px] border border-border bg-background/90 px-3 py-3 shadow-xs'>
       <div className='text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground'>
         {label}
       </div>
@@ -823,7 +823,7 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'rounded-[12px] border px-3 py-2 text-sm font-medium shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        'rounded-[12px] border px-3 py-2 text-sm font-medium shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50',
         'border-border bg-background text-foreground hover:bg-muted',
       )}
       data-track-category='workspace-ozonetel'
@@ -847,7 +847,7 @@ function ToggleRow({
   trackName: string;
 }): ReactElement {
   return (
-    <label className='flex items-center justify-between gap-4 rounded-[12px] border border-border bg-background/80 px-3 py-2.5 shadow-sm'>
+    <label className='flex items-center justify-between gap-4 rounded-[12px] border border-border bg-background/80 px-3 py-2.5 shadow-xs'>
       <span className='text-sm text-foreground'>{label}</span>
       <input
         type='checkbox'
@@ -873,7 +873,7 @@ function CopyField({
   placeholder: string;
 }): ReactElement {
   return (
-    <div className='max-w-[720px] rounded-[14px] border border-border bg-background px-3 py-2 shadow-sm'>
+    <div className='max-w-[720px] rounded-[14px] border border-border bg-background px-3 py-2 shadow-xs'>
       <div className='flex items-start gap-3'>
         <code className='min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-xs text-foreground'>
           {value || placeholder}

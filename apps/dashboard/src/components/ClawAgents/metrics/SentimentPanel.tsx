@@ -93,7 +93,7 @@ export const SentimentPanel = ({ sentiment }: { sentiment: AgentSentiment }): Re
                 {comment.rating === 'up' ? '👍' : '👎'}
               </span>
               <div className='min-w-0 flex-1'>
-                <p className='whitespace-pre-wrap break-words text-sm text-foreground'>
+                <p className='whitespace-pre-wrap wrap-break-word text-sm text-foreground'>
                   {comment.comment}
                 </p>
                 <p className='mt-1 font-mono text-xs text-muted-foreground'>

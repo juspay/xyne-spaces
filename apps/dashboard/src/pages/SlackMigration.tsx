@@ -392,7 +392,7 @@ function JobCard({
 }): React.JSX.Element {
   const isDm = job.type === 'DM';
   return (
-    <div className='rounded-xl border border-border bg-card p-4 shadow-xs'>
+    <div className='rounded-xl border border-border bg-card p-4 shadow-2xs'>
       <div className='flex items-start justify-between gap-3'>
         <div className='flex items-center gap-2.5'>
           <span
@@ -463,14 +463,14 @@ function JobCard({
       {job.status === 'FAILED' && job.error && (
         <div className='mt-3 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive'>
           <TriangleAlert className='mt-0.5 size-3.5 shrink-0' />
-          <span className='break-words'>{job.error}</span>
+          <span className='wrap-break-word'>{job.error}</span>
         </div>
       )}
 
       {job.stopReason && (job.status === 'STOPPED' || job.stopRequested) && (
         <div className='mt-3 flex items-start gap-2 rounded-lg bg-orange-500/10 px-3 py-2 text-xs text-orange-600 dark:text-orange-400'>
           <Info className='mt-0.5 size-3.5 shrink-0' />
-          <span className='break-words'>
+          <span className='wrap-break-word'>
             {job.stopReason === 'system'
               ? 'Stopped after a system restart — an admin can resume it.'
               : 'An admin stopped this migration — not a failure. An admin can resume it.'}
@@ -486,7 +486,7 @@ function JobCard({
           </div>
           <ul className='mt-1.5 space-y-1 pl-5'>
             {job.issues.map((issue, i) => (
-              <li key={`${issue.conversationId}-${i}`} className='break-words'>
+              <li key={`${issue.conversationId}-${i}`} className='wrap-break-word'>
                 <span className='font-medium'>{issue.label ?? issue.conversationId}</span>
                 <span className='text-amber-600/70 dark:text-amber-400/70'> — {issue.reason}</span>
               </li>
@@ -553,7 +553,7 @@ function RailCard({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className='rounded-xl border border-border bg-card p-4 shadow-xs'>
+    <div className='rounded-xl border border-border bg-card p-4 shadow-2xs'>
       <h3 className='mb-3 flex items-center gap-2 text-sm font-semibold text-foreground'>
         <span className='text-muted-foreground'>{icon}</span>
         {title}
@@ -660,7 +660,7 @@ function GuideRail({
 }
 
 const inputCls =
-  'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/10 outline-none';
+  'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground shadow-2xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/10 outline-hidden';
 
 // Channel-migration draft: persisted per workspace in localStorage so the form survives
 // navigating away, and one workspace's draft never leaks into another's. Cleared on submit.
@@ -922,14 +922,16 @@ export default function SlackMigration(): React.JSX.Element {
               {announcement && (
                 <div className='flex items-start gap-2.5 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-700 dark:text-blue-300'>
                   <Megaphone className='mt-0.5 size-4 shrink-0' />
-                  <p className='whitespace-pre-line break-words leading-relaxed'>{announcement}</p>
+                  <p className='whitespace-pre-line wrap-break-word leading-relaxed'>
+                    {announcement}
+                  </p>
                 </div>
               )}
 
               {unreachable && (
                 <div className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-sm text-amber-600 dark:text-amber-400'>
                   <CloudOff className='mt-0.5 size-4 shrink-0' />
-                  <span className='break-words'>
+                  <span className='wrap-break-word'>
                     The migration service is unreachable — the pod may be starting up or briefly
                     down. This page keeps retrying; new submissions are paused until it’s back.
                   </span>
@@ -939,12 +941,12 @@ export default function SlackMigration(): React.JSX.Element {
               {error && !unreachable && (
                 <div className='flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive'>
                   <TriangleAlert className='mt-0.5 size-4 shrink-0' />
-                  <span className='break-words'>{error}</span>
+                  <span className='wrap-break-word'>{error}</span>
                 </div>
               )}
 
               {/* Start a migration */}
-              <div className='rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5'>
+              <div className='rounded-xl border border-border bg-card p-4 shadow-2xs sm:p-5'>
                 <div className='mb-4 inline-flex rounded-lg bg-muted p-0.5'>
                   {(['dm', 'channel'] as const).map(k => (
                     <button
@@ -955,7 +957,7 @@ export default function SlackMigration(): React.JSX.Element {
                       className={cn(
                         'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                         tab === k
-                          ? 'bg-background text-foreground shadow-xs'
+                          ? 'bg-background text-foreground shadow-2xs'
                           : 'text-muted-foreground hover:text-foreground',
                       )}
                     >
@@ -1184,7 +1186,7 @@ function IngestionControl({
 }): React.JSX.Element {
   const t = TONE[status.running ? 'green' : 'orange'];
   return (
-    <div className='flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-xs'>
+    <div className='flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-2xs'>
       <span className={cn('flex size-8 items-center justify-center rounded-lg', t.pill)}>
         {status.running ? <Play className='size-4' /> : <Square className='size-4' />}
       </span>

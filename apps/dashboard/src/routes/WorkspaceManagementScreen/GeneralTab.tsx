@@ -21,7 +21,7 @@ const Card = ({
   children: React.ReactNode;
   className?: string;
 }): ReactElement => (
-  <div className={cn('rounded-xl border border-border bg-card shadow-sm', className)}>
+  <div className={cn('rounded-xl border border-border bg-card shadow-xs', className)}>
     {children}
   </div>
 );
@@ -179,7 +179,7 @@ export const GeneralTab = ({ isActive = false }: GeneralTabProps): ReactElement 
                 className={cn(
                   'w-full max-w-lg px-3 py-2 rounded-md border border-input bg-background',
                   'text-sm text-foreground placeholder:text-muted-foreground',
-                  'focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring',
+                  'focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-ring',
                   'resize-none',
                 )}
               />

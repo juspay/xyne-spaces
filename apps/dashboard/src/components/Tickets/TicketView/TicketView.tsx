@@ -128,7 +128,7 @@ const TicketView = (): ReactElement => {
               </Panel>
 
               <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
+                <div id='panel-resize-divider' className='w-px h-full bg-border'></div>
               </Separator>
 
               <Panel id='ticket-thread' defaultSize='47%' minSize='40%'>

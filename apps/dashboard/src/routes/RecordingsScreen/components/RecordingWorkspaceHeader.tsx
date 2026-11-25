@@ -14,7 +14,7 @@ import {
 
 const layoutTabClassName = (isActive: boolean): string =>
   [
-    'flex h-8 items-center gap-1.5 rounded-lg border-0 px-3 text-[12.5px] font-semibold leading-none transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+    'flex h-8 items-center gap-1.5 rounded-lg border-0 px-3 text-[12.5px] font-semibold leading-none transition-colors duration-150 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40',
     isActive
       ? 'bg-background text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.12)]'
       : 'bg-transparent text-muted-foreground hover:text-foreground',

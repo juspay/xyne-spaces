@@ -46,7 +46,7 @@ export const FrequentEmojiRow = ({
             data-track-metadata={trackMetadata}
             className={cn(
               'flex size-7 items-center justify-center rounded',
-              'hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'hover:bg-accent focus-visible:bg-accent focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
             )}
           >
             {renderEmoji(emoji, 'w-5 h-5', 'text-lg')}

@@ -43,19 +43,19 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
         <div
           className={cn(
             CARD_BASE,
-            'bg-[var(--cc-bg2)] border-[var(--cc-bd)] shadow-none',
-            'hover:border-[var(--cc-t6)] hover:shadow-none',
+            'bg-(--cc-bg2) border-(--cc-bd) shadow-none',
+            'hover:border-(--cc-t6) hover:shadow-none',
           )}
           aria-disabled='true'
         >
-          <span className='shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
+          <span className='shrink-0 inline-flex self-start mt-px text-(--cc-t6)'>
             <XCircle size={ICON_SIZE} strokeWidth={1.8} aria-hidden='true' />
           </span>
           <div className='flex-1 min-w-0 flex flex-col gap-[2px]'>
-            <span className='text-[13.5px] font-semibold tracking-[-0.2px] text-[var(--cc-t4)] whitespace-nowrap overflow-hidden text-ellipsis'>
+            <span className='text-[13.5px] font-semibold tracking-[-0.2px] text-(--cc-t4) whitespace-nowrap overflow-hidden text-ellipsis'>
               {metadata.movedCallTitle ?? 'Scheduled call'}
             </span>
-            <span className='flex gap-[5px] font-mono text-[11.5px] text-[var(--cc-t5)] whitespace-nowrap'>
+            <span className='flex gap-[5px] font-mono text-[11.5px] text-(--cc-t5) whitespace-nowrap'>
               {movedToName ? `Moved to #${movedToName}` : 'Moved to another channel'}
             </span>
           </div>
@@ -71,14 +71,14 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
         <div
           className={cn(
             CARD_BASE,
-            'bg-[var(--cc-bg2)] border-[var(--cc-bd)] shadow-none',
-            'hover:border-[var(--cc-t6)] hover:shadow-none',
+            'bg-(--cc-bg2) border-(--cc-bd) shadow-none',
+            'hover:border-(--cc-t6) hover:shadow-none',
           )}
         >
-          <span className='shrink-0 inline-flex self-start mt-[1px] text-[var(--cc-t6)]'>
+          <span className='shrink-0 inline-flex self-start mt-px text-(--cc-t6)'>
             <Calendar size={ICON_SIZE} strokeWidth={1.6} aria-hidden='true' />
           </span>
-          <span className='flex-1 min-w-0 text-[13.5px] font-semibold tracking-[-0.2px] text-[var(--cc-t4)] whitespace-nowrap overflow-hidden text-ellipsis'>
+          <span className='flex-1 min-w-0 text-[13.5px] font-semibold tracking-[-0.2px] text-(--cc-t4) whitespace-nowrap overflow-hidden text-ellipsis'>
             Scheduled call
           </span>
         </div>
@@ -114,24 +114,24 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
         className={cn(
           CARD_BASE,
           isActive
-            ? 'bg-[var(--cc-call-bg)] border-[var(--cc-call-bd)] shadow-[0_1px_3px_rgba(20,22,26,0.07)] hover:border-[var(--cc-call-bd)] hover:shadow-[0_1px_3px_rgba(20,22,26,0.07)]'
+            ? 'bg-(--cc-call-bg) border-(--cc-call-bd) shadow-[0_1px_3px_rgba(20,22,26,0.07)] hover:border-(--cc-call-bd) hover:shadow-[0_1px_3px_rgba(20,22,26,0.07)]'
             : isSettled
-              ? 'bg-[var(--cc-bg2)] border-[var(--cc-bd)] shadow-none hover:border-[var(--cc-t6)] hover:shadow-none'
-              : 'bg-[var(--cc-bg)] border-[var(--cc-bd)] shadow-[0_1px_3px_rgba(20,22,26,0.07)] hover:border-[var(--cc-t6)] hover:shadow-[0_5px_18px_rgba(0,0,0,0.06)]',
+              ? 'bg-(--cc-bg2) border-(--cc-bd) shadow-none hover:border-(--cc-t6) hover:shadow-none'
+              : 'bg-(--cc-bg) border-(--cc-bd) shadow-[0_1px_3px_rgba(20,22,26,0.07)] hover:border-(--cc-t6) hover:shadow-[0_5px_18px_rgba(0,0,0,0.06)]',
         )}
       >
         {isActive ? (
           <span
-            className='shrink-0 self-start mt-[7px] w-[7px] h-[7px] rounded-full bg-[var(--cc-call)]'
+            className='shrink-0 self-start mt-[7px] w-[7px] h-[7px] rounded-full bg-(--cc-call)'
             aria-hidden='true'
           />
         ) : (
           <span
             className={cn(
-              'shrink-0 inline-flex self-start mt-[1px]',
-              state === 'ENDED' && 'text-[var(--cc-t5)]',
-              state === 'CANCELLED' && 'text-[var(--cc-t6)]',
-              state === 'SCHEDULED' && 'text-[var(--cc-t4)]',
+              'shrink-0 inline-flex self-start mt-px',
+              state === 'ENDED' && 'text-(--cc-t5)',
+              state === 'CANCELLED' && 'text-(--cc-t6)',
+              state === 'SCHEDULED' && 'text-(--cc-t4)',
             )}
           >
             {state === 'ENDED' ? <PhoneDefault size={ICON_SIZE} aria-hidden='true' /> : null}
@@ -149,10 +149,10 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
             className={cn(
               'text-[13.5px] font-semibold tracking-[-0.2px] whitespace-nowrap overflow-hidden text-ellipsis',
               state === 'ENDED'
-                ? 'text-[var(--cc-t2)]'
+                ? 'text-(--cc-t2)'
                 : state === 'CANCELLED'
-                  ? 'text-[var(--cc-t4)]'
-                  : 'text-[var(--cc-t1)]',
+                  ? 'text-(--cc-t4)'
+                  : 'text-(--cc-t1)',
             )}
           >
             {call.title ?? 'Scheduled Call'}
@@ -161,10 +161,10 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
           <span
             className={cn(
               'flex gap-[5px] font-mono text-[11.5px] whitespace-nowrap',
-              state === 'CANCELLED' ? 'text-[var(--cc-t5)]' : 'text-[var(--cc-t4)]',
+              state === 'CANCELLED' ? 'text-(--cc-t5)' : 'text-(--cc-t4)',
             )}
           >
-            <span className={cn(isActive && 'text-[var(--cc-call-text)]')}>
+            <span className={cn(isActive && 'text-(--cc-call-text)')}>
               {PILL_STATUS_LABEL[state]} ·
             </span>
             {when && <span className={cn(state === 'CANCELLED' && 'line-through')}>{when}</span>}
@@ -177,11 +177,11 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
           className={cn(
             'shrink-0 inline-flex items-center justify-center gap-2 h-[30px] px-[13px]',
             'border rounded-md text-[13px] font-semibold tracking-[-0.1px] cursor-pointer whitespace-nowrap',
-            'transition-[background,border-color,opacity] duration-[120ms]',
-            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cc-call)]',
+            'transition-[background,border-color,opacity] duration-120',
+            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--cc-call)',
             isActive
-              ? 'bg-[var(--cc-call)] text-white border-transparent hover:bg-[var(--cc-call-hover)]'
-              : 'bg-[var(--cc-bg)] text-[var(--cc-t1)] border-[var(--cc-bd)] hover:border-[var(--cc-t1)] hover:bg-[var(--cc-bg2)]',
+              ? 'bg-(--cc-call) text-white border-transparent hover:bg-(--cc-call-hover)'
+              : 'bg-(--cc-bg) text-(--cc-t1) border-(--cc-bd) hover:border-(--cc-t1) hover:bg-(--cc-bg2)',
           )}
           data-track-category='CALLS'
           data-track-name={

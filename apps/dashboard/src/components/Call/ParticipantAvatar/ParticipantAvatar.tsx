@@ -39,7 +39,7 @@ export function ParticipantAvatar({
     <div
       className={cn(
         'rounded-full flex items-center justify-center text-white font-bold shadow-lg visual-regression-hide overflow-hidden',
-        !backgroundColor && 'bg-gradient-to-br',
+        !backgroundColor && 'bg-linear-to-br',
         !backgroundColor && gradientFrom,
         !backgroundColor && gradientTo,
         showBorder && 'ring-2 ring-white/20',

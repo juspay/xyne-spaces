@@ -118,13 +118,13 @@ function Thumbnail(props: {
       onClick={() => props.onSelect(page)}
       aria-label={`Page ${page}`}
       aria-current={props.current ? 'page' : undefined}
-      className='group flex w-full flex-col items-center gap-1.5 rounded-md px-3 py-2 outline-none focus-visible:bg-foreground/[0.06]'
+      className='group flex w-full flex-col items-center gap-1.5 rounded-md px-3 py-2 outline-hidden focus-visible:bg-foreground/6'
       data-track-category='FilePreview'
       data-track-name='PdfThumbnailSelected'
     >
       <span
         className={cn(
-          'block overflow-hidden rounded-[3px] bg-white shadow-sm ring-1 transition-shadow',
+          'block overflow-hidden rounded-[3px] bg-white shadow-xs ring-1 transition-shadow',
           props.current ? 'ring-2 ring-primary' : 'ring-black/10 group-hover:ring-black/25',
         )}
         style={{ width: THUMB_WIDTH, ...(!url && { height: THUMB_WIDTH * props.aspect }) }}

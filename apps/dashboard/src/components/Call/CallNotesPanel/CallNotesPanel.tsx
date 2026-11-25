@@ -111,7 +111,7 @@ export function CallNotesPanel({
             autoFocus
             placeholder='Add notes for this call. They are used as context for the call summary.'
             onFileUpload={handleFileUpload}
-            className='h-full w-full [&_.bn-editor]:!px-4'
+            className='h-full w-full [&_.bn-editor]:px-4!'
           />
         )}
       </div>

@@ -400,7 +400,7 @@ function RenameField(props: {
         const next = draft.trim();
         props.onDone(abandoned.current || !next || next === props.name ? null : next);
       }}
-      className='h-7 min-w-0 flex-1 rounded-md bg-background px-1.5 text-sm text-foreground outline-none ring-1 ring-ring'
+      className='h-7 min-w-0 flex-1 rounded-md bg-background px-1.5 text-sm text-foreground outline-hidden ring-1 ring-ring'
       data-track-category='SdlcHub'
       data-track-name='ExplorerItemRenamed'
     />
@@ -498,7 +498,7 @@ function TreeRow(
           'group/row flex h-9 items-center gap-1 rounded-[10px] border border-transparent pr-1.5 text-sm transition-colors',
           isActive
             ? 'border-sidebar-border bg-sidebar-accent font-medium text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-[:focus-visible]:bg-sidebar-accent has-[:focus-visible]:text-sidebar-accent-foreground',
+            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-focus-visible:bg-sidebar-accent has-focus-visible:text-sidebar-accent-foreground',
           props.cursorId === node.id && !isActive && 'bg-sidebar-accent/70',
           dragOver && 'bg-primary/15',
           props.cutIds.has(node.id) && 'opacity-50',
@@ -552,7 +552,7 @@ function TreeRow(
               }
               props.onOpen({ kind: node.kind, id: node.id });
             }}
-            className='outline-none flex h-full min-w-0 flex-1 items-center gap-2 text-left'
+            className='outline-hidden flex h-full min-w-0 flex-1 items-center gap-2 text-left'
             data-track-category='SdlcHub'
             data-track-name={isFolder ? 'FolderTreeToggled' : 'FolderTreeItemOpened'}
             data-track-metadata={JSON.stringify({ id: node.id })}
@@ -600,7 +600,7 @@ function TreeRow(
           aria-pressed={props.discussingId === node.id}
           onClick={() => props.onDiscuss({ type: node.kind, id: node.id, name: node.name })}
           className={cn(
-            'outline-none flex size-6 shrink-0 items-center justify-center rounded-md transition-opacity hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground',
+            'outline-hidden flex size-6 shrink-0 items-center justify-center rounded-md transition-opacity hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground',
             props.discussingId === node.id
               ? 'bg-sidebar-border/70 text-sidebar-accent-foreground opacity-100'
               : 'text-sidebar-foreground/70 opacity-0 focus:opacity-100 group-hover/row:opacity-100',
@@ -688,7 +688,7 @@ function AddMenu(props: {
         setOpen(false);
         run();
       }}
-      className='outline-none flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted focus-visible:bg-muted'
+      className='outline-hidden flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted focus-visible:bg-muted'
       data-track-category='SdlcHub'
       data-track-name={trackName}
     >
@@ -708,7 +708,7 @@ function AddMenu(props: {
           type='button'
           title='Add to this folder'
           aria-label='Add to this folder'
-          className='outline-none flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
+          className='outline-hidden flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
           data-track-category='SdlcHub'
           data-track-name='FolderPageAddOpened'
         >
@@ -947,7 +947,7 @@ function FolderLanding(props: {
                   <button
                     type='button'
                     onClick={() => props.onOpen({ kind: item.kind, id: item.id })}
-                    className='flex h-11 w-full items-center gap-3 px-3.5 text-left text-[13px] transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none'
+                    className='flex h-11 w-full items-center gap-3 px-3.5 text-left text-[13px] transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-hidden'
                     data-track-category='SdlcHub'
                     data-track-name='FolderLandingItemOpened'
                     data-track-metadata={JSON.stringify({ kind: item.kind })}
@@ -1515,7 +1515,7 @@ export function SdlcFolderPage(props: {
               title='New browsing tab — look things up without saving them'
               aria-label='New browsing tab'
               onClick={openBrowsingTab}
-              className='outline-none flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
+              className='outline-hidden flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/8 focus-visible:bg-foreground/8 hover:text-foreground focus-visible:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='ScratchBrowserOpened'
             >
@@ -1538,10 +1538,10 @@ export function SdlcFolderPage(props: {
                 })
               }
               className={cn(
-                'outline-none flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                'outline-hidden flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
                 commentsOpen
                   ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground',
+                  : 'text-muted-foreground hover:bg-foreground/8 focus-visible:bg-foreground/8 hover:text-foreground focus-visible:text-foreground',
               )}
               data-track-category='SdlcHub'
               data-track-name='FolderCommentsToggled'
@@ -1558,10 +1558,10 @@ export function SdlcFolderPage(props: {
               aria-keyshortcuts='Meta+P'
               onClick={() => setTabListOpen(true)}
               className={cn(
-                'flex size-7 shrink-0 items-center justify-center rounded-md outline-none transition-colors',
+                'flex size-7 shrink-0 items-center justify-center rounded-md outline-hidden transition-colors',
                 tabListOpen
                   ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground focus-visible:bg-foreground/[0.08] focus-visible:text-foreground',
+                  : 'text-muted-foreground hover:bg-foreground/8 hover:text-foreground focus-visible:bg-foreground/8 focus-visible:text-foreground',
               )}
               data-track-category='SdlcHub'
               data-track-name='FolderTabListOpened'
@@ -1882,7 +1882,7 @@ export function SdlcFolderPage(props: {
             setTreeFocused(false);
           }
         }}
-        className='scrollbar-none min-h-0 flex-1 overflow-y-auto py-1.5 outline-none'
+        className='scrollbar-none min-h-0 flex-1 overflow-y-auto py-1.5 outline-hidden'
         style={
           stackBottom > 0
             ? {
@@ -1981,7 +1981,7 @@ export function SdlcFolderPage(props: {
       <div
         aria-hidden='true'
         className={cn(
-          'pointer-events-none absolute inset-x-0 h-2 bg-gradient-to-b from-black/[0.12] to-transparent transition-opacity duration-300 ease-out motion-reduce:transition-none',
+          'pointer-events-none absolute inset-x-0 h-2 bg-linear-to-b from-black/12 to-transparent transition-opacity duration-300 ease-out motion-reduce:transition-none',
           pinnedFolders.length > 0 ? 'opacity-100' : 'opacity-0',
         )}
         style={{ top: stackBottom > 0 ? stackBottom : TREE_ROW_HEIGHT }}
@@ -2036,7 +2036,7 @@ export function SdlcFolderPage(props: {
               aria-label={explorerCollapsed ? 'Show explorer' : 'Hide explorer'}
               aria-expanded={!explorerCollapsed}
               onClick={() => setUserPreference('sdlcExplorerCollapsed', !explorerCollapsed)}
-              className='outline-none -ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
+              className='outline-hidden -ml-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/8 focus-visible:bg-foreground/8 hover:text-foreground focus-visible:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='ExplorerCollapsed'
             >
@@ -2205,7 +2205,7 @@ function LinkCard({ link }: { link: SdlcLinkItem }): ReactElement {
       <button
         type='button'
         onClick={event => openFromTab(link.url, event)}
-        className='outline-none mt-1 rounded-md bg-primary px-4 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:opacity-90'
+        className='outline-hidden mt-1 rounded-md bg-primary px-4 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:opacity-90'
         data-track-category='SdlcHub'
         data-track-name='FolderTabLinkOpened'
       >
@@ -2341,7 +2341,7 @@ function HomePageSetting(props: {
             setInvalid(false);
             setEditing(props.homePage);
           }}
-          className='rounded px-0.5 text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline'
+          className='rounded px-0.5 text-muted-foreground underline-offset-2 outline-hidden hover:text-foreground hover:underline focus-visible:text-foreground focus-visible:underline'
           data-track-category='SdlcHub'
           data-track-name='BrowserHomePageEditOpened'
         >
@@ -2385,7 +2385,7 @@ function HomePageSetting(props: {
           aria-invalid={invalid}
           spellCheck={false}
           className={cn(
-            'h-8 min-w-0 flex-1 rounded-lg border bg-background px-2.5 text-[12.5px] text-foreground outline-none focus:ring-1',
+            'h-8 min-w-0 flex-1 rounded-lg border bg-background px-2.5 text-[12.5px] text-foreground outline-hidden focus:ring-1',
             invalid ? 'border-destructive focus:ring-destructive' : 'border-border focus:ring-ring',
           )}
           data-track-category='SdlcHub'
@@ -2393,7 +2393,7 @@ function HomePageSetting(props: {
         />
         <button
           type='submit'
-          className='h-8 rounded-lg bg-foreground px-3 text-[12.5px] font-medium text-background outline-none transition-opacity hover:opacity-90 focus-visible:opacity-90'
+          className='h-8 rounded-lg bg-foreground px-3 text-[12.5px] font-medium text-background outline-hidden transition-opacity hover:opacity-90 focus-visible:opacity-90'
           data-track-category='SdlcHub'
           data-track-name='BrowserHomePageSaved'
         >
@@ -2402,7 +2402,7 @@ function HomePageSetting(props: {
         <button
           type='button'
           onClick={() => setEditing(null)}
-          className='h-8 rounded-lg px-2.5 text-[12.5px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted'
+          className='h-8 rounded-lg px-2.5 text-[12.5px] text-muted-foreground outline-hidden transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted'
           data-track-category='SdlcHub'
           data-track-name='BrowserHomePageEditCancelled'
         >
@@ -2532,7 +2532,7 @@ function BrowserStartPage(props: {
                   type='button'
                   onClick={() => props.onOpen(tab)}
                   title={tab.url}
-                  className='flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:bg-muted/70'
+                  className='flex min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left outline-hidden transition-colors hover:bg-muted/70 focus-visible:bg-muted/70'
                   data-track-category='SdlcHub'
                   data-track-name='BrowserStartTabOpened'
                 >
@@ -2678,9 +2678,9 @@ function EmbeddedPage(props: {
                   : `Back to the saved page: ${props.saved.name}`
               }
               className={cn(
-                'flex h-6 max-w-[200px] shrink-0 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium outline-none transition-colors',
+                'flex h-6 max-w-[200px] shrink-0 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium outline-hidden transition-colors',
                 onSaved
-                  ? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
+                  ? 'bg-background text-foreground shadow-xs ring-1 ring-border/70'
                   : 'bg-background text-muted-foreground ring-1 ring-border/70 hover:text-foreground focus-visible:text-foreground',
               )}
               data-track-category='SdlcHub'

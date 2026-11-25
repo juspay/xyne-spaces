@@ -260,7 +260,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
                   updateDateTime(value || new Date(), finalHour, minute, period);
                 }}
                 className={cn(
-                  'w-full border rounded-md py-2 text-center text-sm font-medium focus:ring-1 focus:ring-black outline-none transition-colors',
+                  'w-full border rounded-md py-2 text-center text-sm font-medium focus:ring-1 focus:ring-black outline-hidden transition-colors',
                   isPast ? 'border-red-300 bg-red-50 text-red-900' : 'border-border bg-background',
                 )}
                 maxLength={2}
@@ -285,7 +285,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
                   updateDateTime(value || new Date(), hour, finalMinute, period);
                 }}
                 className={cn(
-                  'w-full border rounded-md py-2 text-center text-sm font-medium focus:ring-1 focus:ring-black outline-none transition-colors',
+                  'w-full border rounded-md py-2 text-center text-sm font-medium focus:ring-1 focus:ring-black outline-hidden transition-colors',
                   isPast ? 'border-red-300 bg-red-50 text-red-900' : 'border-border bg-background',
                 )}
                 maxLength={2}
@@ -338,7 +338,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
       <Popover.Trigger asChild>
         <button
           className={cn(
-            'flex items-center gap-2 w-full px-3 py-2 text-sm border rounded-[8px] transition-colors text-left focus:outline-none',
+            'flex items-center gap-2 w-full px-3 py-2 text-sm border rounded-[8px] transition-colors text-left focus:outline-hidden',
             isPast ? 'border-red-200 bg-red-50' : 'border-border bg-background hover:bg-accent',
           )}
         >

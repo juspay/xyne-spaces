@@ -334,7 +334,7 @@ export const CallCard = ({
                     }}
                     data-track-category='CALLS'
                     data-track-name='call-back'
-                    className='flex h-7 max-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-lg border border-primary !bg-primary/70 hover:!bg-primary px-0 text-sm font-medium text-background opacity-0 transition-all duration-200 group-hover:mr-1.5 group-hover:max-w-40 group-hover:px-3 group-hover:opacity-100'
+                    className='flex h-7 max-w-0 shrink-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-lg border border-primary bg-primary/70! hover:bg-primary! px-0 text-sm font-medium text-background opacity-0 transition-all duration-200 group-hover:mr-1.5 group-hover:max-w-40 group-hover:px-3 group-hover:opacity-100'
                   >
                     Call back
                   </Button>
@@ -353,7 +353,7 @@ export const CallCard = ({
                       <ThreeDotsMenuHorizontal className='size-4' />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-48 shadow-sm'>
+                  <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-48 shadow-xs'>
                     <DropdownMenuItem
                       onClick={e => {
                         e.stopPropagation();

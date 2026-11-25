@@ -553,7 +553,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       <div
         ref={containerRef}
         className={cn(
-          'relative h-full w-full flex items-center justify-center group bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2',
+          'relative h-full w-full flex items-center justify-center group bg-black focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2',
         )}
         onMouseLeave={() => {
           if (controlsTimeoutRef.current) {
@@ -647,8 +647,8 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
               'absolute left-0 right-0 z-20 transition-opacity duration-300',
               showControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
               isImmersiveMode
-                ? 'bg-gradient-to-t from-black/90 via-black/50 to-transparent p-6 bottom-0'
-                : `bg-gradient-to-t from-black/80 via-black/40 to-transparent bottom-0 ${
+                ? 'bg-linear-to-t from-black/90 via-black/50 to-transparent p-6 bottom-0'
+                : `bg-linear-to-t from-black/80 via-black/40 to-transparent bottom-0 ${
                     isCompactControls ? 'pt-4' : 'pt-8'
                   }`,
             )}
@@ -773,7 +773,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                       <div
                         className={cn(
                           showVerticalVolumeSlider &&
-                            'flex h-24 w-6 items-center justify-center rounded-lg bg-black/90 backdrop-blur-sm border border-gray-700 shadow-lg',
+                            'flex h-24 w-6 items-center justify-center rounded-lg bg-black/90 backdrop-blur-xs border border-gray-700 shadow-lg',
                         )}
                       >
                         <div
@@ -846,7 +846,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                       side='top'
                       align='end'
                       sideOffset={8}
-                      className='z-[100] bg-black/90 backdrop-blur-sm rounded-lg shadow-lg border border-gray-700 p-1 min-w-[120px] pointer-events-auto'
+                      className='z-100 bg-black/90 backdrop-blur-xs rounded-lg shadow-lg border border-gray-700 p-1 min-w-[120px] pointer-events-auto'
                     >
                       <Menu.Popup>
                         {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => (
@@ -854,7 +854,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                             key={rate}
                             onClick={() => handlePlaybackRateChange(rate)}
                             className={cn(
-                              `px-3 py-2 text-sm text-white hover:bg-white/15 rounded-md transition-colors cursor-pointer flex items-center justify-between outline-none ${playbackRate === rate ? 'bg-white/20' : ''}`,
+                              `px-3 py-2 text-sm text-white hover:bg-white/15 rounded-md transition-colors cursor-pointer flex items-center justify-between outline-hidden ${playbackRate === rate ? 'bg-white/20' : ''}`,
                             )}
                           >
                             <span>{rate}x</span>

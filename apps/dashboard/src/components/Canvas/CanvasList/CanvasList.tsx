@@ -1945,9 +1945,9 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         role='button'
         tabIndex={0}
         className={cn(
-          'group relative flex min-h-[50px] cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 transition-colors hover:bg-background hover:text-sidebar-accent-foreground hover:shadow-sm',
+          'group relative flex min-h-[50px] cursor-pointer items-start gap-2 rounded-md px-1.5 py-1.5 transition-colors hover:bg-background hover:text-sidebar-accent-foreground hover:shadow-xs',
           isMenuOpen || isSelected
-            ? 'bg-background text-sidebar-accent-foreground shadow-sm'
+            ? 'bg-background text-sidebar-accent-foreground shadow-xs'
             : 'text-sidebar-foreground',
         )}
         onClick={e => onSelect(e, canvas)}
@@ -2021,7 +2021,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               side='top'
               align='start'
               delayDuration={400}
-              className='max-w-xs break-words'
+              className='max-w-xs wrap-break-word'
             >
               <h3
                 className={cn(
@@ -2127,7 +2127,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const renderCanvasEmptyState = (): React.ReactNode => (
     <div className='flex h-full flex-col items-center justify-center px-4 py-16 text-center'>
       <FileText className='mb-4 size-16 shrink-0 text-muted-foreground' />
-      <h3 className='mb-2 max-w-[240px] break-words text-lg font-medium leading-6 text-foreground'>
+      <h3 className='mb-2 max-w-[240px] wrap-break-word text-lg font-medium leading-6 text-foreground'>
         {canvasEmptyStateCopy.title}
       </h3>
       <p className='max-w-[240px] text-sm text-muted-foreground'>
@@ -2457,7 +2457,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 onClick={() => setActiveFilter('all')}
                 className={`h-6 rounded-md px-2.5 text-[12px] font-medium leading-none transition-colors ${
                   activeFilter === 'all'
-                    ? 'bg-background text-sidebar-accent-foreground shadow-sm'
+                    ? 'bg-background text-sidebar-accent-foreground shadow-xs'
                     : 'text-sidebar-foreground/55 hover:text-sidebar-accent-foreground'
                 }`}
                 data-testid='canvas-filter-all'
@@ -2474,7 +2474,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 onClick={() => setActiveFilter('created_by_me')}
                 className={`h-6 rounded-md px-2.5 text-[12px] font-medium leading-none transition-colors ${
                   activeFilter === 'created_by_me'
-                    ? 'bg-background text-sidebar-accent-foreground shadow-sm'
+                    ? 'bg-background text-sidebar-accent-foreground shadow-xs'
                     : 'text-sidebar-foreground/55 hover:text-sidebar-accent-foreground'
                 }`}
                 data-testid='canvas-filter-created-by-me'
@@ -2501,7 +2501,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                     type='button'
                     className={`inline-flex h-6 items-center gap-1 rounded-md px-2.5 text-[12px] font-medium leading-none transition-colors ${
                       activeFilter === 'shared'
-                        ? 'bg-background text-sidebar-accent-foreground shadow-sm'
+                        ? 'bg-background text-sidebar-accent-foreground shadow-xs'
                         : 'text-sidebar-foreground/55 hover:text-sidebar-accent-foreground'
                     }`}
                     data-testid='canvas-filter-shared'
@@ -2607,7 +2607,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 <button
                   type='button'
                   className={cn(
-                    'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-sidebar-border bg-background px-2.5 text-[12px] font-medium text-sidebar-accent-foreground shadow-sm transition-colors hover:bg-sidebar-accent',
+                    'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-sidebar-border bg-background px-2.5 text-[12px] font-medium text-sidebar-accent-foreground shadow-xs transition-colors hover:bg-sidebar-accent',
                     selectedLabel && 'bg-sidebar-accent',
                   )}
                   data-testid='canvas-label-filter'
@@ -2662,7 +2662,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               <button
                 type='button'
                 onClick={() => setSelectedLabel(null)}
-                className='inline-flex h-7 max-w-full items-center gap-1 rounded-full bg-sidebar-accent-foreground px-2.5 text-[12px] font-medium text-background shadow-sm'
+                className='inline-flex h-7 max-w-full items-center gap-1 rounded-full bg-sidebar-accent-foreground px-2.5 text-[12px] font-medium text-background shadow-xs'
                 data-track-category='CANVAS'
                 data-track-name='CLEAR_CANVAS_LABEL_FILTER'
                 data-track-metadata={JSON.stringify({ label: selectedLabel })}

@@ -18,7 +18,7 @@ export const ChartTypeSelect = ({
     <select
       value={value}
       onChange={e => onChange(e.target.value as QueryVisualizationType)}
-      className='appearance-none bg-transparent outline-none pr-1 cursor-pointer'
+      className='appearance-none bg-transparent outline-hidden pr-1 cursor-pointer'
       data-track-category='COMPONENT_EDITOR'
       data-track-name='Chart_Type_Change'
     >

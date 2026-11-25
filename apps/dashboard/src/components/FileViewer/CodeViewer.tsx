@@ -258,7 +258,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
           <button
             type='button'
             onClick={() => setMarkdownMode('raw')}
-            className='px-3 py-1.5 rounded-md bg-background/80 dark:bg-black/40 backdrop-blur border border-border text-foreground text-xs hover:bg-accent transition-colors'
+            className='px-3 py-1.5 rounded-md bg-background/80 dark:bg-black/40 backdrop-blur-sm border border-border text-foreground text-xs hover:bg-accent transition-colors'
             data-track-category='FileViewer'
             data-track-name='ToggleMarkdownRaw'
             data-track-metadata={JSON.stringify({ fileName })}
@@ -316,7 +316,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
           <button
             type='button'
             onClick={() => setMarkdownMode('rendered')}
-            className='rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-foreground backdrop-blur transition-colors hover:bg-accent'
+            className='rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-foreground backdrop-blur-sm transition-colors hover:bg-accent'
             data-track-category='FileViewer'
             data-track-name='ToggleMarkdownRendered'
             data-track-metadata={JSON.stringify({ fileName })}
@@ -404,7 +404,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
                         matchesByRow.get(virtualRow.index) ?? [],
                       ),
                     }}
-                    className='flex-1 whitespace-pre-wrap break-words leading-5'
+                    className='flex-1 whitespace-pre-wrap wrap-break-word leading-5'
                   />
                 </div>
               </div>
@@ -422,7 +422,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
                   dangerouslySetInnerHTML={{
                     __html: line ? injectMarks(line, matchesByRow.get(index) ?? []) : '\u00A0',
                   }}
-                  className='flex-1 whitespace-pre-wrap break-words leading-5'
+                  className='flex-1 whitespace-pre-wrap wrap-break-word leading-5'
                 />
               </div>
             ))}

@@ -81,14 +81,14 @@ export const PieChart: React.FC<PieChartProps> = ({
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/40 bg-gradient-to-br from-background via-background/90 to-background/80 p-6',
-        'shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm',
+        'rounded-xl border border-border/40 bg-linear-to-br from-background via-background/90 to-background/80 p-6',
+        'shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-xs',
         className,
       )}
     >
       {/* Header */}
       <div className='mb-6 pb-4 border-b border-border/30'>
-        <h3 className='text-base font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent'>
+        <h3 className='text-base font-bold bg-linear-to-r from-foreground to-foreground/80 bg-clip-text text-transparent'>
           {title}
         </h3>
         {queryLabel && (
@@ -100,7 +100,7 @@ export const PieChart: React.FC<PieChartProps> = ({
 
       <div className='flex flex-col items-center gap-6'>
         {/* Pie Chart */}
-        <div className='flex items-center justify-center p-4 rounded-lg bg-muted/20 backdrop-blur-sm'>
+        <div className='flex items-center justify-center p-4 rounded-lg bg-muted/20 backdrop-blur-xs'>
           <svg
             width={config.diameter}
             height={config.diameter}
@@ -128,7 +128,7 @@ export const PieChart: React.FC<PieChartProps> = ({
 
         {/* Legend */}
         {showLegend && (
-          <div className='w-full flex flex-col gap-2.5 p-4 rounded-lg bg-muted/20 backdrop-blur-sm border border-border/30'>
+          <div className='w-full flex flex-col gap-2.5 p-4 rounded-lg bg-muted/20 backdrop-blur-xs border border-border/30'>
             {data.map((item, index) => {
               const percentage = ((item.value / total) * 100).toFixed(1);
               const color = item.color || colors[index];
@@ -145,7 +145,7 @@ export const PieChart: React.FC<PieChartProps> = ({
                     />
                     <span className='text-foreground/80 font-medium truncate'>{item.label}</span>
                   </div>
-                  <span className='font-bold text-foreground/90 ml-2 shrink-0 bg-gradient-to-r from-primary/20 to-primary/10 px-2 py-0.5 rounded'>
+                  <span className='font-bold text-foreground/90 ml-2 shrink-0 bg-linear-to-r from-primary/20 to-primary/10 px-2 py-0.5 rounded'>
                     {percentage}%
                   </span>
                 </div>
@@ -159,7 +159,7 @@ export const PieChart: React.FC<PieChartProps> = ({
           <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
             Total
           </p>
-          <p className='text-3xl font-bold bg-gradient-to-r from-primary via-primary/80 to-primary/60 bg-clip-text text-transparent'>
+          <p className='text-3xl font-bold bg-linear-to-r from-primary via-primary/80 to-primary/60 bg-clip-text text-transparent'>
             {total}
           </p>
         </div>

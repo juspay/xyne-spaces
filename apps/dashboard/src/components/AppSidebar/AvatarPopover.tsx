@@ -52,7 +52,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
         <Popover.Trigger asChild>
           <Button
             variant='ghost'
-            className='focus:outline-none flex flex-col items-center gap-1 p-0 h-auto'
+            className='focus:outline-hidden flex flex-col items-center gap-1 p-0 h-auto'
           >
             {hasDisplayStatus && (
               <div className='h-4 flex items-center justify-center bg-muted rounded-full px-2 min-w-[16px]'>
@@ -99,7 +99,7 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                     )}
                   </div>
                   <div className='flex-1 min-w-0'>
-                    <p className='text-sm font-medium text-foreground break-words'>
+                    <p className='text-sm font-medium text-foreground wrap-break-word'>
                       {statusContent}
                     </p>
                     {statusExpiryAt && (

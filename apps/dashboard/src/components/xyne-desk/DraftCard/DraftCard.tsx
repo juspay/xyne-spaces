@@ -332,7 +332,7 @@ export const DraftCard = ({
             type='button'
             onMouseDown={e => e.preventDefault()}
             onClick={handleRefineSelection}
-            className='inline-flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur hover:bg-muted transition-colors'
+            className='inline-flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur-sm hover:bg-muted transition-colors'
             data-track-category='AIDraft'
             data-track-name='RefineSelection'
           >
@@ -342,7 +342,7 @@ export const DraftCard = ({
         </div>
       )}
       <div className='flex flex-col h-full min-h-0'>
-        <div className='flex items-center justify-between px-4 py-2.5 min-h-[3rem] shrink-0 border-b border-border'>
+        <div className='flex items-center justify-between px-4 py-2.5 min-h-12 shrink-0 border-b border-border'>
           <div className='flex items-center gap-2.5'>
             <div
               className='relative flex items-center justify-center w-6 h-6 rounded-lg'
@@ -441,7 +441,7 @@ export const DraftCard = ({
                     <div className='text-[11px] font-semibold uppercase tracking-[0.08em] text-red-700 dark:text-red-300'>
                       Refining selected text
                     </div>
-                    <p className={cn('mt-1 text-sm text-foreground/90 break-words')}>
+                    <p className={cn('mt-1 text-sm text-foreground/90 wrap-break-word')}>
                       &ldquo;{selectedTextPreview}&rdquo;
                     </p>
                   </div>

@@ -52,8 +52,8 @@ export const DeskInsightsPanel = ({
     title='Insights'
     className={cn(
       'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
-      'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
-      'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+      'data-[state=open]:zoom-in-100! data-[state=open]:slide-in-from-top-[0%]! data-[state=open]:slide-in-from-right-full!',
+      'data-[state=closed]:zoom-out-100! data-[state=closed]:slide-out-to-top-[0%]! data-[state=closed]:slide-out-to-right-full!',
     )}
   >
     <div className='flex h-full w-full'>
@@ -80,7 +80,7 @@ export const DeskInsightsPanel = ({
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
                     'group flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left transition-colors',
-                    isActive ? 'bg-background shadow-sm' : 'hover:bg-accent',
+                    isActive ? 'bg-background shadow-xs' : 'hover:bg-accent',
                   )}
                   data-track-category='Support'
                   data-track-name='SelectDeskInsightsSection'

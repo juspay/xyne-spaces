@@ -112,7 +112,7 @@ export const ApproverSelector = ({
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder={tab === 'USERS' ? 'Search User' : 'Search Role'}
-          className='w-full h-10 pl-10 pr-3 border border-border rounded-lg text-[14px] text-foreground placeholder:text-muted-foreground/50 bg-background focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+          className='w-full h-10 pl-10 pr-3 border border-border rounded-lg text-[14px] text-foreground placeholder:text-muted-foreground/50 bg-background focus:outline-hidden focus:ring-1 focus:ring-[#6276be]'
           data-track-category='board_config'
           data-track-name={tab === 'USERS' ? 'search_user' : 'search_role'}
         />

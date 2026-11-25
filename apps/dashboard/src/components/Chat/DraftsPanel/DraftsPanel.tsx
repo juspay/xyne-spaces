@@ -236,7 +236,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 type='button'
                 onClick={() => void performDelete()}
                 data-testid='confirm-delete-draft'
-                className='text-sm font-bold px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
+                className='text-sm font-bold px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='confirm-delete-draft'
                 data-ph-capture-attribute-track-id='delete_draft'
@@ -292,7 +292,7 @@ const DraftRow = ({ draft }: { draft: DraftWithAttachments }): ReactElement => {
                 type='button'
                 onClick={() => void performSend()}
                 data-testid='confirm-send-draft'
-                className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
+                className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
                 data-track-category='DRAFTS_PANEL'
                 data-track-name='confirm-send-draft'
                 data-ph-capture-attribute-track-id='send_draft'

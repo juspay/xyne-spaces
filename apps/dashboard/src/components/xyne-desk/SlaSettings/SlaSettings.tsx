@@ -250,7 +250,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                     onClick={() => !disabled && handleToggleActive(priority)}
                     disabled={disabled}
                     className={cn(
-                      'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none',
+                      'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-hidden',
                       disabled && 'opacity-50 cursor-not-allowed',
                       isActive ? 'bg-[#6276be] dark:bg-[#7986d0]' : 'bg-secondary',
                     )}
@@ -261,7 +261,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                   >
                     <span
                       className={cn(
-                        'pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform duration-200',
+                        'pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-xs transition-transform duration-200',
                         isActive ? 'translate-x-4' : 'translate-x-0',
                       )}
                     />
@@ -329,7 +329,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESPONSE_HOURS'
-                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <span className='text-xs text-muted-foreground'>:</span>
                         <input
@@ -347,7 +347,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESPONSE_MINUTES'
-                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <select
                           value={draft.responseTime.period}
@@ -362,7 +362,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESPONSE_PERIOD'
-                          className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
+                          className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
                         >
                           <option value='AM'>AM</option>
                           <option value='PM'>PM</option>
@@ -389,7 +389,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESOLUTION_HOURS'
-                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <span className='text-xs text-muted-foreground'>:</span>
                         <input
@@ -407,7 +407,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESOLUTION_MINUTES'
-                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                          className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                         />
                         <select
                           value={draft.resolutionTime.period}
@@ -422,7 +422,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           disabled={disabled}
                           data-track-category='BOARD_SLA_SETTINGS'
                           data-track-name='EDIT_RESOLUTION_PERIOD'
-                          className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
+                          className='h-8 px-2 rounded-md border border-input bg-transparent text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 cursor-pointer'
                         >
                           <option value='AM'>AM</option>
                           <option value='PM'>PM</option>
@@ -465,7 +465,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           onValueChange={v => updateDraft(priority, { timezone: v })}
                           disabled={disabled}
                         >
-                          <Select.Trigger className='flex items-center justify-between gap-2 w-44 h-8 px-2.5 rounded-md border border-input bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-ring data-[disabled]:opacity-50'>
+                          <Select.Trigger className='flex items-center justify-between gap-2 w-44 h-8 px-2.5 rounded-md border border-input bg-transparent text-sm focus:outline-hidden focus:ring-1 focus:ring-ring data-disabled:opacity-50'>
                             <Select.Value />
                             <Select.Icon>
                               <ChevronDown size={12} className='text-muted-foreground' />
@@ -474,14 +474,14 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                           <Select.Portal>
                             <Select.Content
                               position='popper'
-                              className='z-[100] w-44 rounded-md border border-border bg-background shadow-md'
+                              className='z-100 w-44 rounded-md border border-border bg-background shadow-md'
                             >
                               <Select.Viewport className='p-1 max-h-56 overflow-y-auto'>
                                 {COMMON_TIMEZONES.map(tz => (
                                   <Select.Item
                                     key={tz}
                                     value={tz}
-                                    className='flex items-center px-3 py-1.5 text-sm rounded cursor-pointer hover:bg-muted focus:bg-muted outline-none'
+                                    className='flex items-center px-3 py-1.5 text-sm rounded cursor-pointer hover:bg-muted focus:bg-muted outline-hidden'
                                   >
                                     <Select.ItemText>{tz}</Select.ItemText>
                                   </Select.Item>
@@ -508,7 +508,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                             disabled={disabled}
                             data-track-category='BOARD_SLA_SETTINGS'
                             data-track-name='EDIT_WORKDAY_START'
-                            className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                            className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                           />
                           <span className='text-xs text-muted-foreground'>to</span>
                           <input
@@ -524,7 +524,7 @@ export const SlaSettings: React.FC<SlaSettingsProps> = ({ boardId, disabled = fa
                             disabled={disabled}
                             data-track-category='BOARD_SLA_SETTINGS'
                             data-track-name='EDIT_WORKDAY_END'
-                            className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                            className='w-14 h-8 px-2 rounded-md border border-input bg-transparent text-sm focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                           />
                         </div>
                       </div>

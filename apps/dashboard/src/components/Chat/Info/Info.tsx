@@ -348,7 +348,7 @@ const Info = ({
           onClick={handleStarToggle}
           className={[
             headerLinkContainerStyle,
-            channelUserStatus?.isStarred ? 'bg-muted !border-border' : '',
+            channelUserStatus?.isStarred ? 'bg-muted border-border!' : '',
           ].join(' ')}
           data-track-category='CHAT_INFO'
           data-track-name='TOGGLE_STAR'
@@ -486,7 +486,7 @@ const Info = ({
         </Tabs.List>
         <Tabs.Content
           value='about'
-          className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden'
+          className='outline-hidden flex-1 min-h-0 rounded-b-lg overflow-hidden'
         >
           <AboutChannel
             channel={channel}
@@ -501,7 +501,7 @@ const Info = ({
         {!isDM && (
           <Tabs.Content
             value='members'
-            className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden'
+            className='outline-hidden flex-1 min-h-0 rounded-b-lg overflow-hidden'
           >
             <ChannelMembers
               channel={channel}
@@ -516,7 +516,7 @@ const Info = ({
         {!isDM && (
           <Tabs.Content
             value='agents-apps'
-            className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden'
+            className='outline-hidden flex-1 min-h-0 rounded-b-lg overflow-hidden'
           >
             <ChannelMembers
               channel={channel}
@@ -529,7 +529,7 @@ const Info = ({
           </Tabs.Content>
         )}
         {isDefaultChannel && (
-          <Tabs.Content value='settings' className='outline-none flex-1 min-h-0 overflow-y-auto'>
+          <Tabs.Content value='settings' className='outline-hidden flex-1 min-h-0 overflow-y-auto'>
             <ChannelSettings
               channel={channel}
               isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
@@ -542,7 +542,7 @@ const Info = ({
         {/* Disabled (LLM) */}
         {
           // {isDefaultChannel && (
-          //   <Tabs.Content value='ai-features' className='outline-none flex-1 min-h-0 overflow-y-auto'>
+          //   <Tabs.Content value='ai-features' className='outline-hidden flex-1 min-h-0 overflow-y-auto'>
           //     <div className='flex flex-col gap-3 p-4'>
           //       <div className='flex flex-col gap-0.5'>
           //         <div className='text-[15px] font-semibold text-foreground'>Call settings</div>
@@ -567,7 +567,7 @@ const Info = ({
         {isParticipant && !isSelfDM && (isDM || isGroupDM || !!channelUserStatus) && (
           <Tabs.Content
             value='notifications'
-            className='outline-none flex-1 min-h-0 overflow-y-auto'
+            className='outline-hidden flex-1 min-h-0 overflow-y-auto'
           >
             <NotificationsTab channel={channel} isParticipant={isParticipant} />
           </Tabs.Content>
@@ -575,7 +575,7 @@ const Info = ({
         {canManageScheduledMessages && (
           <Tabs.Content
             value='scheduled-messages'
-            className='outline-none flex-1 min-h-0 overflow-hidden'
+            className='outline-hidden flex-1 min-h-0 overflow-hidden'
           >
             <ScheduledMessagesTab channelId={channel.id} />
           </Tabs.Content>
@@ -711,7 +711,7 @@ const ParticipantListItem = ({
               sideOffset={8}
               align='end'
               {...(popoverContainer ? { container: popoverContainer } : {})}
-              className='p-1 border border-border rounded-lg shadow-lg overflow-hidden z-[100]'
+              className='p-1 border border-border rounded-lg shadow-lg overflow-hidden z-100'
             >
               <div>
                 {canManageThisUser &&
@@ -1002,7 +1002,7 @@ const ChannelMembers = ({
             autoFocus={!isMobile}
             value={searchQuery}
             onChange={handleSearchChange}
-            className='h-[52px] rounded-[12px] pl-10 pr-3 text-base md:text-base placeholder:text-muted-foreground text-foreground border border-border focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+            className='h-[52px] rounded-[12px] pl-10 pr-3 text-base md:text-base placeholder:text-muted-foreground text-foreground border border-border focus:outline-hidden focus:ring-1 focus:ring-primary focus:border-transparent'
           />
         </div>
       </div>

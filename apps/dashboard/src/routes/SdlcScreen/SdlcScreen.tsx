@@ -2043,7 +2043,7 @@ export default function SdlcScreen(): ReactElement {
         return (
           <span
             title={`On ${selectedTrack.name}`}
-            className='inline-flex min-w-[3.75rem] max-w-[9rem] shrink items-center gap-1 rounded bg-foreground/[0.06] px-1 py-px text-[10.5px] font-medium text-muted-foreground'
+            className='inline-flex min-w-15 max-w-36 shrink items-center gap-1 rounded bg-foreground/6 px-1 py-px text-[10.5px] font-medium text-muted-foreground'
           >
             {trackIcon ? (
               <AppIcon name={trackIcon} size={11} aria-hidden='true' />
@@ -2065,7 +2065,7 @@ export default function SdlcScreen(): ReactElement {
           onClick={() => openItemConversations({ type: item.kind, id: item.id, name })}
           title={`Conversations on ${name}`}
           aria-label={`Conversations on ${name}`}
-          className='inline-flex min-w-[3.75rem] max-w-[9rem] shrink items-center gap-1 rounded bg-foreground/[0.06] px-1 py-px text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.11] hover:text-foreground'
+          className='inline-flex min-w-15 max-w-36 shrink items-center gap-1 rounded bg-foreground/6 px-1 py-px text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/11 hover:text-foreground'
           data-track-category='SdlcHub'
           data-track-name='FolderConversationsOpenedFromList'
           data-track-metadata={JSON.stringify({ ownerType: item.kind })}
@@ -2207,7 +2207,7 @@ export default function SdlcScreen(): ReactElement {
     return (
       <div className='mb-6 flex items-center justify-between gap-6 border-b pb-5'>
         <div className='flex min-w-0 flex-1 items-center gap-3'>
-          <div className='grid size-10 shrink-0 place-items-center rounded-xl border bg-background text-primary shadow-sm'>
+          <div className='grid size-10 shrink-0 place-items-center rounded-xl border bg-background text-primary shadow-xs'>
             <Icon size={19} />
           </div>
           <div className='min-w-0'>
@@ -2460,7 +2460,7 @@ export default function SdlcScreen(): ReactElement {
   if (!channelId && channels.length === 0) {
     return (
       <div className='h-full bg-muted/30 grid place-items-center p-8'>
-        <div className='max-w-lg rounded-2xl border bg-background p-10 text-center shadow-sm'>
+        <div className='max-w-lg rounded-2xl border bg-background p-10 text-center shadow-xs'>
           <div className='mx-auto mb-5 grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary'>
             <GitBranch size={26} />
           </div>
@@ -3079,7 +3079,7 @@ export default function SdlcScreen(): ReactElement {
                     onFocus={() => setRelatedListOpen(true)}
                     onBlur={() => setTimeout(() => setRelatedListOpen(false), 120)}
                     placeholder='Search artifacts in this track…'
-                    className='h-6 min-w-0 flex-1 border-none bg-transparent text-[13.5px] outline-none'
+                    className='h-6 min-w-0 flex-1 border-none bg-transparent text-[13.5px] outline-hidden'
                     data-track-category='SdlcHub'
                     data-track-name='RelatedArtifactSearch'
                   />
@@ -3142,7 +3142,7 @@ export default function SdlcScreen(): ReactElement {
                           key={id}
                           className='inline-flex h-[26px] items-center gap-1.5 rounded-md border bg-muted/60 pl-2.5 pr-1.5 text-[12.5px]'
                         >
-                          <span className='max-w-[10rem] truncate'>{title}</span>
+                          <span className='max-w-40 truncate'>{title}</span>
                           <button
                             type='button'
                             aria-label='Remove related artifact'
@@ -3333,7 +3333,7 @@ export default function SdlcScreen(): ReactElement {
             }
           }}
           onInput={event => sizeNameFieldToText(event.currentTarget)}
-          className='min-w-0 max-w-[min(48rem,55vw)] rounded border-0 bg-muted/40 px-1 text-xl font-semibold leading-8 tracking-tight text-foreground outline-none ring-0 transition-colors duration-150 focus:bg-muted/60 focus:outline-none motion-reduce:transition-none'
+          className='min-w-0 max-w-[min(48rem,55vw)] rounded border-0 bg-muted/40 px-1 text-xl font-semibold leading-8 tracking-tight text-foreground outline-hidden ring-0 transition-colors duration-150 focus:bg-muted/60 focus:outline-hidden motion-reduce:transition-none'
           data-track-category='SdlcHub'
           data-track-name='TrackNameEdited'
         />
@@ -3352,7 +3352,7 @@ export default function SdlcScreen(): ReactElement {
         trigger={
           <button
             type='button'
-            className='flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            className='flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
             aria-label={`Track status: ${
               TRACK_STATUS_OPTIONS.find(o => o.value === track.status)?.label ?? track.status
             }. Change status`}
@@ -3423,7 +3423,7 @@ export default function SdlcScreen(): ReactElement {
             key={tab.value}
             value={tab.value}
             className={cn(
-              'flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors duration-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
               trackTab === tab.value
                 ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -3815,7 +3815,7 @@ export default function SdlcScreen(): ReactElement {
                                       setRenameTypeName('');
                                     }
                                   }}
-                                  className='h-6 min-w-0 flex-1 rounded-[6px] border border-sidebar-accent-ring bg-background px-1.5 text-sm outline-none'
+                                  className='h-6 min-w-0 flex-1 rounded-[6px] border border-sidebar-accent-ring bg-background px-1.5 text-sm outline-hidden'
                                   data-track-category='SdlcHub'
                                   data-track-name='ArtifactTypeRenamed'
                                 />
@@ -3947,7 +3947,7 @@ export default function SdlcScreen(): ReactElement {
           >
             <div
               className={cn(
-                'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-gradient-to-b from-transparent via-primary to-transparent transition-opacity duration-150',
+                'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-linear-to-b from-transparent via-primary to-transparent transition-opacity duration-150',
                 draggingWidth === null ? 'opacity-0 group-hover:opacity-70' : 'opacity-100',
               )}
               aria-hidden='true'
@@ -3973,7 +3973,7 @@ export default function SdlcScreen(): ReactElement {
           >
             <header
               className={cn(
-                'z-10 flex h-[52px] shrink-0 items-center justify-between gap-4 border-b bg-background/95 backdrop-blur',
+                'z-10 flex h-[52px] shrink-0 items-center justify-between gap-4 border-b bg-background/95 backdrop-blur-sm',
                 // On a track's page the bar is the page's heading, so it lines up with
                 // the page, and the tab row under it draws the rule.
                 onTrackPage
@@ -4027,7 +4027,7 @@ export default function SdlcScreen(): ReactElement {
                       <button
                         type='button'
                         onClick={closeCanvas}
-                        className='min-w-10 max-w-[14rem] truncate text-sm text-muted-foreground transition-colors hover:text-foreground'
+                        className='min-w-10 max-w-56 truncate text-sm text-muted-foreground transition-colors hover:text-foreground'
                         data-track-category='SdlcHub'
                         data-track-name='CanvasClosedInline'
                         data-track-metadata={JSON.stringify({ canvasId: selectedCanvasId })}
@@ -4135,7 +4135,7 @@ export default function SdlcScreen(): ReactElement {
                     has none: it starts calls itself, and a ticket or Ask AI there
                     would be about nothing on it. */}
                 {showRightPanel || section === 'calls' ? null : (
-                  <div className='flex min-w-0 items-center gap-1.5 overflow-hidden [&_button]:!size-7 [&_button]:!rounded-lg'>
+                  <div className='flex min-w-0 items-center gap-1.5 overflow-hidden [&_button]:size-7! [&_button]:rounded-lg!'>
                     {panelScopeActions('header')}
                   </div>
                 )}
@@ -4650,7 +4650,7 @@ export default function SdlcScreen(): ReactElement {
             value={trackName}
             onChange={event => setTrackName(event.target.value)}
             maxLength={120}
-            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
+            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-hidden focus:ring-2 focus:ring-ring'
             placeholder='e.g. Payments revamp'
             data-track-category='SdlcHub'
             data-track-name='TrackNameChanged'
@@ -4663,7 +4663,7 @@ export default function SdlcScreen(): ReactElement {
             value={trackDescription}
             onChange={event => setTrackDescription(event.target.value)}
             maxLength={2000}
-            className='mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-none focus:ring-2 focus:ring-ring'
+            className='mt-2 min-h-24 w-full rounded-md border bg-background p-3 outline-hidden focus:ring-2 focus:ring-ring'
             placeholder='What is this workstream about?'
             data-track-category='SdlcHub'
             data-track-name='TrackDescriptionChanged'
@@ -5011,7 +5011,7 @@ export default function SdlcScreen(): ReactElement {
                       data-track-name='NewArtifactTypeChosen'
                       data-track-metadata={JSON.stringify({ typeId: folder.id })}
                     >
-                      <span className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.06]'>
+                      <span className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground/6'>
                         <FileText className='size-4 text-muted-foreground' />
                       </span>
                       <span className='min-w-0 truncate font-medium'>{folder.name}</span>
@@ -5031,7 +5031,7 @@ export default function SdlcScreen(): ReactElement {
                 <div className='flex flex-1 flex-col pb-5'>
                   <label
                     htmlFor='sdlc-upload-input'
-                    className='flex min-h-[240px] flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center transition-colors hover:bg-foreground/[0.03]'
+                    className='flex min-h-[240px] flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center transition-colors hover:bg-foreground/3'
                     onDragOver={event => event.preventDefault()}
                     onDrop={event => {
                       event.preventDefault();
@@ -5069,7 +5069,7 @@ export default function SdlcScreen(): ReactElement {
                       {pendingUploads.map((file, index) => (
                         <li
                           key={`${file.name}-${index}`}
-                          className='flex items-center gap-2 rounded-md bg-foreground/[0.05] px-2.5 py-1.5 text-[12.5px]'
+                          className='flex items-center gap-2 rounded-md bg-foreground/5 px-2.5 py-1.5 text-[12.5px]'
                         >
                           <FileText className='size-3.5 shrink-0 text-muted-foreground' />
                           <span className='min-w-0 flex-1 truncate'>{file.name}</span>
@@ -5135,7 +5135,7 @@ export default function SdlcScreen(): ReactElement {
                     onChange={event => setLinkUrl(event.target.value)}
                     onBlur={event => void fetchLinkSuggestion(event.target.value)}
                     placeholder='https://'
-                    className='mb-4 h-9 w-full rounded-md border bg-background px-3 text-[13px] outline-none focus:ring-2 focus:ring-ring'
+                    className='mb-4 h-9 w-full rounded-md border bg-background px-3 text-[13px] outline-hidden focus:ring-2 focus:ring-ring'
                     data-track-category='SdlcHub'
                     data-track-name='LinkUrlEntered'
                   />
@@ -5150,7 +5150,7 @@ export default function SdlcScreen(): ReactElement {
                     value={linkTitle}
                     onChange={event => setLinkTitle(event.target.value)}
                     placeholder={linkLoading ? 'Reading the page…' : 'What this link is'}
-                    className='h-9 w-full rounded-md border bg-background px-3 text-[13px] outline-none focus:ring-2 focus:ring-ring'
+                    className='h-9 w-full rounded-md border bg-background px-3 text-[13px] outline-hidden focus:ring-2 focus:ring-ring'
                     data-track-category='SdlcHub'
                     data-track-name='LinkTitleEdited'
                   />
@@ -5158,7 +5158,7 @@ export default function SdlcScreen(): ReactElement {
                     Suggested from the page, and yours to change.
                   </p>
                   {(linkLoading || linkPreview?.favicon || linkPreview?.description) && (
-                    <div className='mt-4 flex items-start gap-3 rounded-lg border border-border bg-foreground/[0.03] p-3'>
+                    <div className='mt-4 flex items-start gap-3 rounded-lg border border-border bg-foreground/3 p-3'>
                       {linkPreview?.favicon ? (
                         <img
                           src={linkPreview.favicon}
@@ -5285,7 +5285,7 @@ export default function SdlcScreen(): ReactElement {
             aria-label='Close preview'
             onClick={closeReader}
             className={cn(
-              'flex-1 bg-black/50 backdrop-blur-sm duration-200',
+              'flex-1 bg-black/50 backdrop-blur-xs duration-200',
               readerClosing ? 'animate-out fade-out' : 'animate-in fade-in',
             )}
             data-track-category='SdlcHub'
@@ -5554,7 +5554,7 @@ function ArtifactCard({
           onOpen();
         }
       }}
-      className='group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+      className='group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
     >
       {/* Ancestry breadcrumb: Track (always) • PRD (when present) • current type. */}
       <div className='flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.13em]'>

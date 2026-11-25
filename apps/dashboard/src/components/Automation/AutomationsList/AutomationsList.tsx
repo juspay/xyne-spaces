@@ -695,7 +695,7 @@ function AutomationRow({
         className={cn(
           'group flex cursor-pointer flex-col gap-2 rounded-xl border border-border bg-background px-4 py-3 transition-colors',
           'hover:border-foreground/20 hover:bg-muted/40',
-          'focus-visible:outline-none focus-visible:bg-muted/40',
+          'focus-visible:outline-hidden focus-visible:bg-muted/40',
         )}
       >
         <div className='flex items-start gap-3'>
@@ -716,7 +716,7 @@ function AutomationRow({
             data-track-name='row-title-open'
             className={cn(
               'flex flex-1 flex-col gap-1 min-w-0 cursor-pointer text-left',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 rounded-md',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40 rounded-md',
             )}
           >
             <div className='flex flex-wrap items-center gap-2'>
@@ -791,7 +791,7 @@ function AutomationRow({
                   className={cn(
                     'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                     'hover:text-foreground hover:bg-accent/40',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                    'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
                   )}
                 >
                   <ThreeDotsMenuHorizontal className='size-4' aria-hidden='true' />

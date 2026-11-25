@@ -44,7 +44,7 @@ export const UserActivityPanel = ({
 }: UserActivityPanelProps): ReactElement | null => {
   const { isMobile } = usePlatform();
   const mobileActionButtonClass =
-    'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent aspect-square';
+    'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-xs transition-colors hover:bg-accent aspect-square';
   const { activities, isLoading, hasMore, loadMore, refresh } = useUserActivity();
   const {
     aliases,
@@ -262,7 +262,7 @@ export const UserActivityPanel = ({
               onClick={() => setAliasManagerOpen(true)}
               data-track-category='XYNE_AI_SIDEBAR'
               data-track-name='OPEN_ALIAS_MANAGER'
-              className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2 overflow-hidden hover:bg-accent transition-colors'
+              className='p-2 rounded-lg outline-solid outline-1 -outline-offset-1 outline-border flex justify-center items-center gap-2 overflow-hidden hover:bg-accent transition-colors'
               title='Manage activity aliases'
               aria-label='Manage activity aliases'
               type='button'
@@ -276,7 +276,7 @@ export const UserActivityPanel = ({
               onClick={handleXyneAIClose}
               data-track-category='XYNE_AI_SIDEBAR'
               data-track-name='CLOSE_XYNE_AI'
-              className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+              className='p-2 rounded-lg outline-solid outline-1 -outline-offset-1 outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             >
               <X className='w-4 h-4 text-muted-foreground' />
             </button>

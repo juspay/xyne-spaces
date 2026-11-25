@@ -303,9 +303,9 @@ export const ReleaseMappingForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl'>
+      <div className='bg-background shadow-xs border border-border rounded-xl'>
         {/* Header Section */}
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
+        <div className='px-8 py-6 border-b border-border bg-linear-to-r from-muted/40 to-background'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-3'>
               <div className='h-10 w-10 rounded-lg bg-indigo-600 flex items-center justify-center'>
@@ -523,7 +523,7 @@ export const ReleaseMappingForm = ({
           </div>
 
           {/* Footer */}
-          <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex justify-end'>
+          <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur-sm border-t border-border flex justify-end'>
             <Button
               type='button'
               onClick={handleContinue}

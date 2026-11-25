@@ -177,7 +177,7 @@ const Settings = ({
 
           <Popover
             trigger={
-              <button className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
+              <button className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
                 {livePresenceStatus === 'ONLINE' ? (
                   <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-background' />
                 ) : (

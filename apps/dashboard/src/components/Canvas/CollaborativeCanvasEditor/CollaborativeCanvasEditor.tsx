@@ -807,7 +807,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           {(connectionFailed || isReconnecting) && (
             <div
-              className='absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive shadow-sm'
+              className='absolute right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive shadow-xs'
               title={
                 isReconnecting
                   ? 'Reconnecting to the canvas...'

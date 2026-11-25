@@ -87,7 +87,7 @@ const DigitalTwinSettingsTab = (): ReactElement => {
             maxLength={MAX_SUFFIX_LEN}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin response suffix'
-            className='w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none'
+            className='w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-hidden'
           />
           {suffix.trim().length > 0 && (
             <div className='rounded-lg border border-border bg-muted/40 p-3'>

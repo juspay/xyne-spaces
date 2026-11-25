@@ -432,7 +432,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           sideOffset={4}
           align='start'
         >
-          <div className='sticky top-0 z-10 bg-background pt-2.5 border-b border-border shadow-sm'>
+          <div className='sticky top-0 z-10 bg-background pt-2.5 border-b border-border shadow-xs'>
             <div className='grid grid-cols-7 gap-1 px-3'>
               {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
                 <div

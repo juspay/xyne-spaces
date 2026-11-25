@@ -205,7 +205,7 @@ export function BriefFeaturesDialog({
                       className={cn(
                         'flex h-9 items-center rounded-[10px] px-2.5 transition-colors duration-200 ease-out',
                         isActive
-                          ? 'bg-accent text-foreground shadow-sm'
+                          ? 'bg-accent text-foreground shadow-xs'
                           : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                       )}
                     >
@@ -255,7 +255,7 @@ export function BriefFeaturesDialog({
                 animate={enter.to}
                 exit={enter.from}
                 transition={{ duration: EXIT_DURATION, ease: CONTENT_EASE }}
-                className='col-start-1 row-start-1 text-center text-base font-normal leading-[1.5] tracking-[-0.1px] text-foreground'
+                className='col-start-1 row-start-1 text-center text-base font-normal leading-normal tracking-[-0.1px] text-foreground'
               >
                 {DESCRIPTIONS[tab]}
               </motion.p>

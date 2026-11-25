@@ -256,7 +256,7 @@ export const FilePill: React.FC<FilePillProps> = ({
     <div
       className={cn(
         'group relative flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-card',
-        'hover:border-input hover:shadow-sm transition-all duration-200',
+        'hover:border-input hover:shadow-xs transition-all duration-200',
         'min-w-[200px] max-w-[320px]',
         onClick && 'cursor-pointer',
         isUploading && 'opacity-70',

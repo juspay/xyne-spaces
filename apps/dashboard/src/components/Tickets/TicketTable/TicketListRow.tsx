@@ -141,7 +141,7 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
         </span>
       )}
 
-      <span className='w-[4.5rem] shrink-0 truncate font-mono text-xs font-medium text-muted-foreground'>
+      <span className='w-18 shrink-0 truncate font-mono text-xs font-medium text-muted-foreground'>
         {ticket.xyneId}
       </span>
 
@@ -294,7 +294,7 @@ export const TicketListRowLine: React.FC<TicketListRowLineProps> = ({
   <div className={`flex h-full min-w-0 items-center px-3 ${isComfortView ? 'gap-2.5' : 'gap-2'}`}>
     <span className='w-4 shrink-0' />
     {visibleColumns.has('priority') && <span className='w-5 shrink-0' />}
-    <span className='w-[4.5rem] shrink-0' />
+    <span className='w-18 shrink-0' />
     {connector}
     {children}
   </div>

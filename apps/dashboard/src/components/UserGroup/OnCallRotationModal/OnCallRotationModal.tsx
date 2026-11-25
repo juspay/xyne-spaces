@@ -277,7 +277,7 @@ export const OnCallRotationModal = ({
           {sets.map(set => (
             <div
               key={set.setNumber}
-              className={`shrink-0 w-[350px] flex flex-col rounded-xl shadow-sm bg-background transition-all ${
+              className={`shrink-0 w-[350px] flex flex-col rounded-xl shadow-xs bg-background transition-all ${
                 set.isActive ? 'ring-2 ring-[#6276BE] border-transparent' : 'border border-border'
               }`}
             >

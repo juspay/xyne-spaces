@@ -241,7 +241,7 @@ export const DateRangeFilter = ({
                     value={startDate}
                     onChange={handleStartDateChange}
                     max={endDate || new Date().toISOString().split('T')[0]}
-                    className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                    className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                     data-track-category='Tickets'
                     data-track-name='FilterStartDate'
                   />
@@ -261,7 +261,7 @@ export const DateRangeFilter = ({
                     onChange={handleEndDateChange}
                     min={startDate || ''}
                     max={new Date().toISOString().split('T')[0]}
-                    className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                    className='w-full px-3 py-2 text-sm border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                     data-track-category='Tickets'
                     data-track-name='FilterEndDate'
                   />

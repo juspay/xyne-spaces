@@ -129,7 +129,7 @@ export function AddOrgMemberDialog({
           disabled={saving}
           label='Role for the people being added'
           trackName='Organization: set new member role'
-          triggerClassName='border-border shadow-none focus-visible:ring-[2px] focus-visible:ring-ring/10'
+          triggerClassName='border-border shadow-none focus-visible:ring-2 focus-visible:ring-ring/10'
           onChange={next => {
             if (isAddableOrgRole(next)) setRole(next);
           }}

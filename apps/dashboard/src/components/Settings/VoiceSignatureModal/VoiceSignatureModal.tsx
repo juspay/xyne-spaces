@@ -167,7 +167,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 bg-black/50 backdrop-blur-sm z-50',
+            'fixed inset-0 bg-black/50 backdrop-blur-xs z-50',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           )}
@@ -178,7 +178,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50',
             'w-full max-w-md',
             'bg-popover rounded-xl shadow-xl border border-border',
-            'focus:outline-none',
+            'focus:outline-hidden',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
@@ -266,7 +266,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                       className={cn(
                         'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
                         activeTab === tab
-                          ? 'bg-background text-foreground shadow-sm'
+                          ? 'bg-background text-foreground shadow-xs'
                           : 'text-muted-foreground hover:text-foreground',
                       )}
                     >

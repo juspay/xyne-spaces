@@ -235,7 +235,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source, searchable }) => {
                   <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 shrink-0 select-none'>
                     {virtualRow.index + 1}
                   </span>
-                  <span className='flex-1 whitespace-pre-wrap break-words'>
+                  <span className='flex-1 whitespace-pre-wrap wrap-break-word'>
                     <HighlightedText
                       text={lines[virtualRow.index] || ''}
                       ranges={matchesByRow.get(virtualRow.index)}
@@ -253,7 +253,7 @@ const TxtViewer: React.FC<BaseViewerProps> = memo(({ source, searchable }) => {
                 <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 shrink-0 select-none'>
                   {index + 1}
                 </span>
-                <span className='flex-1 whitespace-pre-wrap break-words'>
+                <span className='flex-1 whitespace-pre-wrap wrap-break-word'>
                   {/* Non-breaking space keeps empty lines from collapsing */}
                   <HighlightedText
                     text={line}

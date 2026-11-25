@@ -83,7 +83,7 @@ export function ClawCitationGroup({
     const it = items[0]!;
     const chipClass =
       'claw-citation-chip inline-flex items-center gap-1 align-middle ' +
-      'px-1.5 h-[1.25rem] max-w-[180px] mx-[2px] rounded ' +
+      'px-1.5 h-5 max-w-[180px] mx-[2px] rounded ' +
       'text-[10px] font-medium leading-none ' +
       'bg-muted/60 border border-border/50 hover:bg-accent hover:border-border transition-colors';
     const inner = (
@@ -148,7 +148,7 @@ export function ClawCitationGroup({
       aria-label={`${items.length} sources`}
       className={
         'claw-citation-chip inline-flex items-center align-middle gap-0.5 ' +
-        'h-[1.25rem] pl-1 pr-1.5 mx-[2px] rounded-full cursor-pointer ' +
+        'h-5 pl-1 pr-1.5 mx-[2px] rounded-full cursor-pointer ' +
         'bg-muted/60 border border-border/50 hover:bg-accent hover:border-border transition-colors'
       }
     >

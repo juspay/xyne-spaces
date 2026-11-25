@@ -58,19 +58,19 @@ const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disab
       }}
       disabled={disabled}
     >
-      <Select.Trigger className='flex w-full items-center justify-between rounded-[8px] border border-border bg-background px-3 py-2 text-sm text-muted-foreground select-none disabled:cursor-not-allowed disabled:opacity-70 focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent hover:bg-accent data-[popup-open]:ring-1 data-[popup-open]:ring-primary'>
+      <Select.Trigger className='flex w-full items-center justify-between rounded-[8px] border border-border bg-background px-3 py-2 text-sm text-muted-foreground select-none disabled:cursor-not-allowed disabled:opacity-70 focus:outline-hidden focus:ring-1 focus:ring-primary focus:border-transparent hover:bg-accent data-popup-open:ring-1 data-popup-open:ring-primary'>
         <Select.Value placeholder='Select policy' />
         <Select.Icon className='flex'>
           <ChevronDown className='h-4 w-4 text-muted-foreground' />
         </Select.Icon>
       </Select.Trigger>
-      <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className='z-[100]'>
-        <Select.Popup className='w-[var(--anchor-width)] rounded-[8px] border border-border bg-card shadow-md py-1'>
+      <Select.Positioner sideOffset={4} alignItemWithTrigger={false} className='z-100'>
+        <Select.Popup className='w-(--anchor-width) rounded-[8px] border border-border bg-card shadow-md py-1'>
           {POLICY_OPTIONS.map(option => (
             <Select.Item
               key={option.value}
               value={option.value}
-              className='grid grid-cols-[1rem_1fr] items-center gap-2 px-3 py-2 text-sm text-muted-foreground outline-none data-[highlighted]:bg-accent cursor-pointer'
+              className='grid grid-cols-[1rem_1fr] items-center gap-2 px-3 py-2 text-sm text-muted-foreground outline-hidden data-highlighted:bg-accent cursor-pointer'
             >
               <Select.ItemIndicator>
                 <Check className='h-3.5 w-3.5 text-primary' />

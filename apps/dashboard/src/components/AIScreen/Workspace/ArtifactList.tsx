@@ -63,7 +63,7 @@ function ArtifactRow({ artifact, onOpen, onPatch }: ArtifactRowProps): ReactElem
                 setEditing(false);
               }
             }}
-            className='w-full rounded border border-border bg-background px-1 py-0.5 text-[13px] text-foreground outline-none'
+            className='w-full rounded border border-border bg-background px-1 py-0.5 text-[13px] text-foreground outline-hidden'
             data-track-category='AskAI'
             data-track-name='workspace-artifact-rename-input'
           />

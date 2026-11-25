@@ -252,7 +252,7 @@ const ValueListbox = ({
             data-track-category='Tickets'
             data-track-name={trackName}
             className={cn(
-              'flex cursor-pointer select-none items-center rounded-[7px] outline-none transition-colors duration-100 hover:bg-muted focus-visible:bg-muted',
+              'flex cursor-pointer select-none items-center rounded-[7px] outline-hidden transition-colors duration-100 hover:bg-muted focus-visible:bg-muted',
               option.selected && 'bg-muted',
               optionClassName,
             )}
@@ -371,7 +371,7 @@ export const StatusPill = ({
           title='Change stage'
           className={cn(
             statusPillClass,
-            'transition-[opacity,transform] duration-150 ease-out hover:opacity-[0.88] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:active:scale-100',
+            'transition-[opacity,transform] duration-150 ease-out hover:opacity-[0.88] active:scale-[0.96] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:active:scale-100',
             className,
           )}
           data-testid='ticket-detail-status-selector'
@@ -489,7 +489,7 @@ export const DuplicatesPill = ({
   onClick?: () => void;
 }): React.ReactElement => {
   const className =
-    'inline-flex h-[25px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-500/35 bg-amber-500/[0.08] pl-2 pr-2.5 text-[12.5px] font-medium text-amber-700 [[data-theme=midnight]_&]:text-amber-400';
+    'inline-flex h-[25px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-amber-500/35 bg-amber-500/8 pl-2 pr-2.5 text-[12.5px] font-medium text-amber-700 in-data-[theme=midnight]:text-amber-400';
   const label = (
     <>
       <CopyDefault size={14} className='shrink-0' />
@@ -504,7 +504,7 @@ export const DuplicatesPill = ({
       title='Show in Relationships'
       className={cn(
         className,
-        'transition-[background-color,border-color,transform] duration-150 ease-out hover:border-amber-500/55 hover:bg-amber-500/[0.14] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 motion-reduce:active:scale-100',
+        'transition-[background-color,border-color,transform] duration-150 ease-out hover:border-amber-500/55 hover:bg-amber-500/[0.14] active:scale-[0.96] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-amber-500/40 motion-reduce:active:scale-100',
       )}
       data-track-category='Tickets'
       data-track-name='ShowPossibleDuplicates'
@@ -567,7 +567,7 @@ export const TicketMoreMenu = ({
           type='button'
           aria-label='More actions'
           className={cn(
-            'flex shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground',
+            'flex shrink-0 items-center justify-center text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground',
             triggerClassName,
           )}
           data-track-category='Tickets'
@@ -656,20 +656,20 @@ export const formatChipDate = (timestamp: number): string => {
 export type EtaTone = 'danger' | 'warning' | 'neutral';
 
 export const ETA_BREACHED_CHIP =
-  'border-destructive/25 bg-destructive/[0.06] hover:border-destructive/45';
+  'border-destructive/25 bg-destructive/6 hover:border-destructive/45';
 
 export const etaToneTextClass = (tone?: EtaTone): string =>
   tone === 'danger'
     ? 'text-destructive'
     : tone === 'warning'
-      ? 'text-amber-700 [[data-theme=midnight]_&]:text-amber-400'
+      ? 'text-amber-700 in-data-[theme=midnight]:text-amber-400'
       : 'text-foreground';
 
 export const etaToneIconClass = (tone?: EtaTone): string =>
   tone === 'danger'
     ? 'text-destructive'
     : tone === 'warning'
-      ? 'text-amber-600 [[data-theme=midnight]_&]:text-amber-400'
+      ? 'text-amber-600 in-data-[theme=midnight]:text-amber-400'
       : 'text-muted-foreground';
 
 const calendarDaysFromToday = (timestamp: number): number =>

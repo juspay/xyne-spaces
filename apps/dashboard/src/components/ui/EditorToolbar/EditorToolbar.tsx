@@ -432,7 +432,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                           onKeyDown={e => e.key === 'Enter' && insertImageFromUrl()}
                           placeholder='https://example.com/image.png'
                           autoFocus // eslint-disable-line jsx-a11y/no-autofocus
-                          className='w-full px-2.5 py-1.5 text-xs border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring'
+                          className='w-full px-2.5 py-1.5 text-xs border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-ring'
                         />
                         <button
                           type='button'

@@ -18,7 +18,7 @@ export function SiteTile(props: {
 }): ReactElement {
   const [broken, setBroken] = useState(false);
   return (
-    <span className='flex size-12 shrink-0 items-center justify-center rounded-xl bg-muted ring-1 ring-border/60 transition-shadow group-hover:shadow-sm'>
+    <span className='flex size-12 shrink-0 items-center justify-center rounded-xl bg-muted ring-1 ring-border/60 transition-shadow group-hover:shadow-xs'>
       {props.favicon && !broken ? (
         <img
           src={props.favicon}
@@ -52,7 +52,7 @@ export function SiteTiles(props: {
             type='button'
             onClick={() => props.onOpen(site.key)}
             title={`${site.name}\n${site.url}`}
-            className='group flex min-w-0 flex-col items-center gap-2 rounded-xl px-2 py-3 text-center outline-none transition-colors hover:bg-muted/70 focus-visible:bg-muted/70'
+            className='group flex min-w-0 flex-col items-center gap-2 rounded-xl px-2 py-3 text-center outline-hidden transition-colors hover:bg-muted/70 focus-visible:bg-muted/70'
             data-track-category={props.trackCategory}
             data-track-name={props.trackName}
           >

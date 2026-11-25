@@ -150,8 +150,8 @@ const SearchFeedbackForm = ({
         data-testid='search-feedback-input'
         className={cn(
           'w-full rounded-xl border border-border bg-transparent px-4 py-3 text-sm',
-          'placeholder:text-muted-foreground resize-none outline-none',
-          'focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-[2px]',
+          'placeholder:text-muted-foreground resize-none outline-hidden',
+          'focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-2',
           'disabled:opacity-50 disabled:cursor-not-allowed transition-[color,box-shadow]',
           textareaClassName,
         )}
@@ -272,7 +272,7 @@ export const CmdkFeedbackView = ({
               type='button'
               onClick={onBack}
               aria-label='Back to results'
-              className='p-1.5 rounded-lg text-foreground bg-muted hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-0'
+              className='p-1.5 rounded-lg text-foreground bg-muted hover:bg-accent transition-colors focus-visible:outline-hidden focus-visible:ring-0'
               data-track-category='COMMAND_MENU'
               data-track-name='SEARCH_FEEDBACK_BACK'
             >
@@ -287,7 +287,7 @@ export const CmdkFeedbackView = ({
             <button
               type='button'
               onClick={onBack}
-              className='flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-0'
+              className='flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-hidden focus-visible:ring-0'
               data-track-category='COMMAND_MENU'
               data-track-name='SEARCH_FEEDBACK_CANCEL'
             >
@@ -356,7 +356,7 @@ export const SearchFeedbackPopover = ({
                   <h2 className='text-base font-semibold text-foreground'>Feedback on search</h2>
                   <Popover.Close
                     aria-label='Close'
-                    className='p-1 -m-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-0'
+                    className='p-1 -m-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-hidden focus-visible:ring-0'
                   >
                     <X size={16} />
                   </Popover.Close>

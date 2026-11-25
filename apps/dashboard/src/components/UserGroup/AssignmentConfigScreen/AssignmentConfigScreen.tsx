@@ -1237,7 +1237,7 @@ export const AssignmentConfigScreen = ({
               className={cn(
                 'flex-1 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
                 activeTab === 'availability'
-                  ? 'bg-card text-foreground shadow-sm'
+                  ? 'bg-card text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
               )}
               data-track-category='UserGroups'
@@ -1251,7 +1251,7 @@ export const AssignmentConfigScreen = ({
               className={cn(
                 'flex-1 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors',
                 activeTab === 'visibility'
-                  ? 'bg-card text-foreground shadow-sm'
+                  ? 'bg-card text-foreground shadow-xs'
                   : 'text-muted-foreground hover:text-foreground',
               )}
               data-track-category='UserGroups'
@@ -1747,7 +1747,7 @@ export const AssignmentConfigScreen = ({
                 <h3 className='mb-2 text-sm font-semibold text-foreground'>
                   How auto-assignment works
                 </h3>
-                <ul className='list-inside list-disc space-y-1 text-[13px] leading-[1.5] text-muted-foreground'>
+                <ul className='list-inside list-disc space-y-1 text-[13px] leading-normal text-muted-foreground'>
                   <li>
                     <strong className='font-medium text-foreground'>Eligibility</strong>: people
                     must be Active. On-Call is preferred but not required. Where expertise is set,
@@ -1835,7 +1835,7 @@ export const AssignmentConfigScreen = ({
         title='Reassign their open tickets?'
       >
         <div className='p-6'>
-          <p className='text-[13px] leading-[1.5] text-muted-foreground'>
+          <p className='text-[13px] leading-normal text-muted-foreground'>
             {reassignPromptUser ? getUserDisplayName(reassignPromptUser) : 'This member'} will stop
             receiving new tickets in this group once you save. Their open tickets can be handed to
             another eligible member — if none is available, the tickets stay with them.
@@ -1881,7 +1881,7 @@ export const AssignmentConfigScreen = ({
         title='Restart the share window?'
       >
         <div className='p-6'>
-          <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
+          <p className='mb-6 text-[13px] leading-normal text-muted-foreground'>
             You changed the share window from {savedShareWindowDays} to {localShareWindowDays} days.
             Restart counting from today, or keep the current start date
             {savedShareWindowStartAt !== null &&
@@ -1923,7 +1923,7 @@ export const AssignmentConfigScreen = ({
         title='Disable auto-rotation?'
       >
         <div className='p-6'>
-          <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
+          <p className='mb-6 text-[13px] leading-normal text-muted-foreground'>
             Disabling auto-rotation clears every set configuration for this group. Re-enabling it
             later means building the on-call sets again from scratch.
           </p>

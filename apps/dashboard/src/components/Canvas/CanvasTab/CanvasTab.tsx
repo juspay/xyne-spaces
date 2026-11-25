@@ -868,7 +868,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId, getCanvasRoute }): Rea
             <h3 className='text-lg font-semibold text-foreground' data-testid='canvas-list-header'>
               Channel Canvases
             </h3>
-            <div className='flex h-9 max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-background p-0.5 shadow-sm'>
+            <div className='flex h-9 max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-background p-0.5 shadow-xs'>
               <Tooltip
                 content={showStarredOnly ? 'Show all items' : 'Show starred only'}
                 className='px-2 py-1 text-[10px]'

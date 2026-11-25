@@ -1,5 +1,4 @@
-import tailwindcss from 'tailwindcss';
-import autoprefixer from 'autoprefixer';
+import tailwindcss from '@tailwindcss/postcss';
 import isPseudoClass from '@csstools/postcss-is-pseudo-class';
 
 // Our own stylesheet only: third-party CSS (BlockNote, pdf.js) is
@@ -18,6 +17,5 @@ export default {
     // ancestor bloom filter can't see through `:is()`, so the unexpanded form walks
     // every ancestor of every candidate element on each style recalc.
     onlyGlobalCss(isPseudoClass({ preserve: false })),
-    autoprefixer,
   ],
 };

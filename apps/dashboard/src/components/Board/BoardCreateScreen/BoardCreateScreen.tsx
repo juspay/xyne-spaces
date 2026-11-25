@@ -217,7 +217,7 @@ const BoardCreateScreen = ({
                       placeholder='Search boards...'
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
-                      className='pl-[36px] pr-[12px] py-[8px] text-[14px] text-foreground bg-background border border-border rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#6276be]'
+                      className='pl-[36px] pr-[12px] py-[8px] text-[14px] text-foreground bg-background border border-border rounded-[10px] focus:outline-hidden focus:ring-2 focus:ring-[#6276be]'
                       data-track-category='BOARD_CREATE'
                       data-track-name='SEARCH_BOARDS'
                     />

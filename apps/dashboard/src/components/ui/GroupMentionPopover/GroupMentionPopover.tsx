@@ -84,7 +84,7 @@ export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, c
           <div className='flex flex-col min-w-0 flex-1'>
             <div className='flex items-center gap-2'>
               <span
-                className={`font-semibold text-lg break-words ${userGroup.isActive === false ? 'text-muted-foreground' : 'text-foreground'}`}
+                className={`font-semibold text-lg wrap-break-word ${userGroup.isActive === false ? 'text-muted-foreground' : 'text-foreground'}`}
               >
                 {userGroup.name}
               </span>
@@ -96,7 +96,7 @@ export const GroupHoverWrapper: React.FC<GroupHoverWrapperProps> = ({ groupId, c
             </div>
 
             {userGroup.description && (
-              <div className='mt-1 text-sm text-foreground leading-relaxed break-words line-clamp-2'>
+              <div className='mt-1 text-sm text-foreground leading-relaxed wrap-break-word line-clamp-2'>
                 {userGroup.description}
               </div>
             )}

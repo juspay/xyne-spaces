@@ -731,7 +731,7 @@ const PermissionsSection = ({
                 role='button'
                 tabIndex={locked ? -1 : 0}
                 aria-pressed={selected.has(scope)}
-                className={`flex items-start gap-2.5 group px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                className={`flex items-start gap-2.5 group px-3 py-2 outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${
                   locked ? 'cursor-not-allowed' : 'cursor-pointer'
                 }`}
                 onClick={() => {

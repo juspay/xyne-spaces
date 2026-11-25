@@ -218,7 +218,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                   data-track-category='MESSAGE'
                   data-track-name='START_EDIT_PULSE_MERCHANT'
                   disabled={submitting}
-                  className='border border-border rounded-lg px-3 py-2 text-sm text-foreground bg-muted hover:bg-accent transition-colors flex items-center justify-between text-left focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-60 disabled:cursor-not-allowed w-full'
+                  className='border border-border rounded-lg px-3 py-2 text-sm text-foreground bg-muted hover:bg-accent transition-colors flex items-center justify-between text-left focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-60 disabled:cursor-not-allowed w-full'
                 >
                   <div className='flex items-center'>
                     <span>{localMerchant.name}</span>
@@ -252,7 +252,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                       value={merchantSearch}
                       onChange={e => setMerchantSearch(e.target.value)}
                       placeholder='Search alternative organisation…'
-                      className='w-full text-xs px-2 py-1.5 border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                      className='w-full text-xs px-2 py-1.5 border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
                     />
                   </div>
                   <div className='max-h-40 overflow-y-auto'>
@@ -323,7 +323,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               onChange={e => setTitle(e.target.value)}
               disabled={submitting}
               required
-              className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition disabled:opacity-60'
+              className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-transparent transition disabled:opacity-60'
               placeholder='Actionable title'
             />
           </div>
@@ -342,7 +342,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               onChange={e => setDescription(e.target.value)}
               disabled={submitting}
               rows={3}
-              className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition resize-none disabled:opacity-60'
+              className='border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-transparent transition resize-none disabled:opacity-60'
               placeholder='Add more context (optional)'
             />
           </div>

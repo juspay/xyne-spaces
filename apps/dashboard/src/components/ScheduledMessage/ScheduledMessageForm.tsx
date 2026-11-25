@@ -715,7 +715,7 @@ const ScheduledMessageForm = ({
                 {...field}
                 type='time'
                 disabled={!canEdit && isEditMode}
-                className='text-foreground dark:[color-scheme:dark]'
+                className='text-foreground dark:scheme-dark'
               />
             )}
           />

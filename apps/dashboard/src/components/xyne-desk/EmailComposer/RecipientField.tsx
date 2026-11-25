@@ -176,7 +176,7 @@ export const RecipientField = ({
               onFocus={() => focusSuggest(field)}
               onBlur={handleBlur}
               placeholder={emails.length === 0 ? 'Add recipients...' : ''}
-              className='text-sm py-1 outline-none bg-transparent'
+              className='text-sm py-1 outline-hidden bg-transparent'
               disabled={disabled}
               data-track-category={trackCategory}
               data-track-name={`Edit${label}Field`}

@@ -165,7 +165,7 @@ export const CanvasCodeCopyButton = ({
   return (
     <div
       ref={toolbarRef}
-      className='canvas-code-toolbar fixed z-50 flex -translate-x-full items-center gap-1 rounded-md border border-border bg-card p-1 shadow-sm'
+      className='canvas-code-toolbar fixed z-50 flex -translate-x-full items-center gap-1 rounded-md border border-border bg-card p-1 shadow-xs'
       style={{ top: position.top, left: position.left }}
     >
       {/* updateBlock writes through the API too, so a reader could otherwise
@@ -179,7 +179,7 @@ export const CanvasCodeCopyButton = ({
           title='Code language'
           data-track-category='CANVAS'
           data-track-name='Change_Code_Block_Language'
-          className='h-[26px] max-w-32 rounded px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground'
+          className='h-[26px] max-w-32 rounded px-2 text-xs text-muted-foreground outline-hidden transition-colors hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground'
         >
           {CANVAS_CODE_LANGUAGES.map(option => (
             <option key={option.value || 'auto'} value={option.value}>

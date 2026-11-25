@@ -164,7 +164,7 @@ const RecipientLine = ({
         ref={rowRef}
         role='button'
         tabIndex={0}
-        className='relative flex min-h-8 flex-wrap items-center gap-1.5 rounded-md py-0.5 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring/70'
+        className='relative flex min-h-8 flex-wrap items-center gap-1.5 rounded-md py-0.5 focus-within:outline-hidden focus-within:ring-2 focus-within:ring-ring/70'
         onClick={() => inputRef.current?.focus()}
         data-track-category={trackCategory}
         data-track-name={`recording_email_${field}_recipients_focus`}
@@ -199,7 +199,7 @@ const RecipientLine = ({
           onFocus={() => setSuggestionsOpen(true)}
           onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 100)}
           onKeyDown={handleKeyDown}
-          className='min-w-[126px] flex-1 bg-transparent py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+          className='min-w-[126px] flex-1 bg-transparent py-1 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
           aria-label={`${label} recipients`}
           data-track-category={trackCategory}
           data-track-name={`recording_email_${field}_input`}
@@ -493,7 +493,7 @@ export const PostRecordingToEmailModal = ({
             type='text'
             value={subject}
             onChange={event => setSubject(event.target.value)}
-            className='min-w-0 bg-transparent py-1 text-sm font-medium text-foreground outline-none placeholder:text-muted-foreground'
+            className='min-w-0 bg-transparent py-1 text-sm font-medium text-foreground outline-hidden placeholder:text-muted-foreground'
             placeholder='Add a subject'
             aria-label='Email subject'
             data-track-category={trackCategory}

@@ -42,10 +42,10 @@ export function SdlcHubSwitcher(props: {
   return (
     <DialogPrimitive.Root open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/50 backdrop-blur-sm data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0' />
+        <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-black/50 backdrop-blur-xs data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0' />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className='fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(560px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl duration-100 focus:outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
+          className='fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(560px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl duration-100 focus:outline-hidden data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
         >
           <DialogPrimitive.Title className='sr-only'>Switch hub</DialogPrimitive.Title>
           <Command label='Switch hub' loop>
@@ -54,7 +54,7 @@ export function SdlcHubSwitcher(props: {
               <Command.Input
                 autoFocus
                 placeholder='Search hubs…'
-                className='h-12 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground'
+                className='h-12 min-w-0 flex-1 bg-transparent text-[15px] outline-hidden placeholder:text-muted-foreground'
                 data-track-category='SdlcHub'
                 data-track-name='HubSwitcherSearched'
               />
@@ -66,7 +66,7 @@ export function SdlcHubSwitcher(props: {
                 }}
                 title='New hub'
                 aria-label='New hub'
-                className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                className='flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
                 data-track-category='SdlcHub'
                 data-track-name='NewHubOpened'
                 data-track-metadata={JSON.stringify({ place: 'hub-switcher' })}

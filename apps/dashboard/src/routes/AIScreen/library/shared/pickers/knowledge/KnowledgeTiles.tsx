@@ -17,7 +17,7 @@ function Tile({ icon, size }: { icon: KbIconComponent; size: KbTileSize }): Reac
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center border-[0.8px] border-border bg-card text-muted-foreground shadow-sm',
+        'flex shrink-0 items-center justify-center border-[0.8px] border-border bg-card text-muted-foreground shadow-xs',
         TILE[size].box,
       )}
       aria-hidden

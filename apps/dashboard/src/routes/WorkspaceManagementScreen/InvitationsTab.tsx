@@ -40,7 +40,7 @@ const Card = ({
   children: React.ReactNode;
   className?: string;
 }): ReactElement => (
-  <div className={cn('rounded-xl border border-border bg-card shadow-sm', className)}>
+  <div className={cn('rounded-xl border border-border bg-card shadow-xs', className)}>
     {children}
   </div>
 );
@@ -303,7 +303,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                   setEntityType(e.target.value);
                   setEntityId('');
                 }}
-                className='px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary min-w-[140px]'
+                className='px-3 py-2 border border-border rounded-lg bg-background text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary min-w-[140px]'
                 data-track-category='workspace-management'
                 data-track-name='SelectGuestInvitationEntityType'
               >

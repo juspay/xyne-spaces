@@ -151,7 +151,7 @@ export const AIComposerPanel = ({
               disabled={disabled}
               placeholder='What do you need?'
               rows={1}
-              className='flex-1 bg-transparent text-sm outline-none resize-none leading-snug placeholder:text-muted-foreground/50 min-h-[20px] max-h-[120px] py-0.5'
+              className='flex-1 bg-transparent text-sm outline-hidden resize-none leading-snug placeholder:text-muted-foreground/50 min-h-[20px] max-h-[120px] py-0.5'
               data-track-category='Support'
               data-track-name='AIComposerTextareaKeydown'
             />

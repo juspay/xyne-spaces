@@ -426,7 +426,7 @@ function FileSection({
         disabled={file.lines.length === 0}
         data-track-category='AskAI'
         data-track-name='review-file-toggle'
-        className='sticky top-0 z-[1] flex w-full min-w-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-left hover:bg-secondary/40'
+        className='sticky top-0 z-1 flex w-full min-w-0 items-center gap-2 border-b border-border bg-background px-3 py-2 text-left hover:bg-secondary/40'
       >
         {file.lines.length === 0 ? (
           <span className='h-3.5 w-3.5 shrink-0' />

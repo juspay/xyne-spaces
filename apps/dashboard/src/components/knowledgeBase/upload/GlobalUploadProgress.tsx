@@ -139,7 +139,7 @@ export function GlobalUploadProgress(): React.ReactElement | null {
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
       whileDrag={{ cursor: 'grabbing' }}
-      className='fixed z-[60] w-80 shadow-2xl border border-gray-200 bg-white overflow-hidden rounded-md'
+      className='fixed z-60 w-80 shadow-2xl border border-gray-200 bg-white overflow-hidden rounded-md'
       style={{
         bottom: `${DEFAULT_MARGIN}px`,
         left: `${window.innerWidth - CARD_WIDTH - DEFAULT_MARGIN}px`,

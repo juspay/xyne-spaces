@@ -348,7 +348,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                   ) : (
                     <button
                       type='button'
-                      className='py-1 break-words text-left cursor-pointer hover:text-primary group flex items-center gap-1 w-full'
+                      className='py-1 wrap-break-word text-left cursor-pointer hover:text-primary group flex items-center gap-1 w-full'
                       onClick={() => {
                         setEditingField(key);
                         setEditingFieldValue(value);

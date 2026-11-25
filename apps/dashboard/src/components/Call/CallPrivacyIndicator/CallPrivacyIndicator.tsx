@@ -137,7 +137,7 @@ export function CallPrivacyIndicator({
         data-track-metadata={JSON.stringify(trackMetadata ?? {})}
         className={cn(
           'flex h-10 items-center gap-2 rounded-full pl-3.5 pr-2.5 text-sm font-medium transition-colors',
-          'outline-none focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314]',
+          'outline-hidden focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314]',
           isOpen ? 'bg-[#a8c7fa] text-[#062e6f]' : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
         )}
       >
@@ -168,7 +168,7 @@ export function CallPrivacyIndicator({
         <div
           role='dialog'
           aria-label='Transcription details'
-          className='absolute left-0 top-[calc(100%+0.5rem)] z-[80] w-[min(92vw,360px)] overflow-hidden rounded-2xl bg-[#1e1f20] text-[#e3e3e3] shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-white/10 animate-in fade-in slide-in-from-top-1 duration-150'
+          className='absolute left-0 top-[calc(100%+0.5rem)] z-80 w-[min(92vw,360px)] overflow-hidden rounded-2xl bg-[#1e1f20] text-[#e3e3e3] shadow-[0_12px_40px_rgba(0,0,0,0.55)] ring-1 ring-white/10 animate-in fade-in slide-in-from-top-1 duration-150'
         >
           {/* Header */}
           <div className='flex items-center gap-3 px-4 pb-3 pt-4'>
@@ -210,7 +210,7 @@ export function CallPrivacyIndicator({
           </p>
 
           {/* What's being captured right now */}
-          <div className='mx-4 mt-3 divide-y divide-white/5 overflow-hidden rounded-xl bg-white/[0.04]'>
+          <div className='mx-4 mt-3 divide-y divide-white/5 overflow-hidden rounded-xl bg-white/4'>
             <ActivityRow
               icon={Captions}
               title='Live transcript'

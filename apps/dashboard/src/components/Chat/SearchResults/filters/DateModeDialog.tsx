@@ -126,7 +126,7 @@ export function DateModeDialog({
       }}
       title={title}
       className='max-w-[380px]'
-      zIndexClassName='z-[70]'
+      zIndexClassName='z-70'
     >
       <div className='flex items-center justify-between px-5 pb-2 pt-4'>
         <h3 className='text-base font-bold'>{title}</h3>

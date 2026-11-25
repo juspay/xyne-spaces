@@ -12,7 +12,7 @@ import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 
 const LABEL = 'text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground';
 const FIELD =
-  'w-full rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
+  'w-full rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring';
 
 const TYPE_OPTIONS = [
   { value: 'json', label: 'JSON' },

@@ -388,7 +388,7 @@ export default function RecordingDetailScreen(): ReactElement {
                       void handleSaveTitle();
                     }
                   }}
-                  className='flex-1 px-3 py-2 text-2xl font-bold bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring'
+                  className='flex-1 px-3 py-2 text-2xl font-bold bg-background border border-input rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring'
                   // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
                   data-track-category='RecordingDetail'
@@ -537,7 +537,7 @@ export default function RecordingDetailScreen(): ReactElement {
         {recording.hasSummary && recording.aiSummary && (
           <div className='mb-6 bg-background rounded-lg border border-border p-6'>
             <div className='flex items-center gap-2 mb-4'>
-              <div className='w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded' />
+              <div className='w-5 h-5 bg-linear-to-br from-purple-500 to-pink-500 rounded' />
               <h2 className='text-lg font-semibold text-foreground'>AI Summary</h2>
             </div>
             <div className='bot-markdown-content-call-summary' style={{ marginLeft: '10px' }}>

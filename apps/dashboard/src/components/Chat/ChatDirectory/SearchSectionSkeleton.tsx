@@ -73,7 +73,7 @@ const SearchSectionSkeleton = ({
           return (
             <div
               key={index}
-              className='flex items-center gap-3 rounded-md border bg-card px-3 py-1.5 shadow-sm'
+              className='flex items-center gap-3 rounded-md border bg-card px-3 py-1.5 shadow-xs'
             >
               <Bar className='h-3.5 w-16 shrink-0' />
               <div className='flex h-5 min-w-0 flex-1 items-center'>

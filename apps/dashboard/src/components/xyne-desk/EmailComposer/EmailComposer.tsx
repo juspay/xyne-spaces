@@ -2316,7 +2316,7 @@ export const EmailComposer = ({
           </div>
         )}
         {showSendConfirm && (
-          <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-foreground/30 p-4 backdrop-blur-sm'>
+          <div className='fixed inset-0 z-9999 flex items-center justify-center bg-foreground/30 p-4 backdrop-blur-xs'>
             <div className='flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl'>
               <div className='flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4'>
                 <div className='flex flex-col gap-0.5'>
@@ -2349,7 +2349,7 @@ export const EmailComposer = ({
                     <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                       To
                     </span>
-                    <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
+                    <span className='flex-1 wrap-break-word text-sm text-foreground wrap-anywhere'>
                       {toEmails.join(', ')}
                     </span>
                   </div>
@@ -2358,7 +2358,7 @@ export const EmailComposer = ({
                       <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Cc
                       </span>
-                      <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
+                      <span className='flex-1 wrap-break-word text-sm text-foreground wrap-anywhere'>
                         {ccEmails.join(', ')}
                       </span>
                     </div>
@@ -2368,7 +2368,7 @@ export const EmailComposer = ({
                       <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Bcc
                       </span>
-                      <span className='flex-1 break-words text-sm text-foreground [overflow-wrap:anywhere]'>
+                      <span className='flex-1 wrap-break-word text-sm text-foreground wrap-anywhere'>
                         {bccEmails.join(', ')}
                       </span>
                     </div>
@@ -2378,7 +2378,7 @@ export const EmailComposer = ({
                       <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Subject
                       </span>
-                      <span className='flex-1 break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]'>
+                      <span className='flex-1 wrap-break-word text-sm font-medium text-foreground wrap-anywhere'>
                         {isComposeMode ? composeSubject.trim() : ticketSubject?.trim()}
                       </span>
                     </div>
@@ -2388,7 +2388,7 @@ export const EmailComposer = ({
                 <div className='px-5 py-4'>
                   {hasEmailBody ? (
                     <div
-                      className='prose prose-sm dark:prose-invert max-w-none break-words text-sm text-foreground [overflow-wrap:anywhere]'
+                      className='prose prose-sm dark:prose-invert max-w-none wrap-break-word text-sm text-foreground wrap-anywhere'
                       dangerouslySetInnerHTML={{
                         __html: DOMPurify.sanitize(emailContent),
                       }}
@@ -2403,7 +2403,7 @@ export const EmailComposer = ({
                     if (!activeSig) return null;
                     return (
                       <div
-                        className='prose prose-sm dark:prose-invert mt-4 break-words border-t border-border pt-4 text-sm text-muted-foreground [overflow-wrap:anywhere]'
+                        className='prose prose-sm dark:prose-invert mt-4 wrap-break-word border-t border-border pt-4 text-sm text-muted-foreground wrap-anywhere'
                         dangerouslySetInnerHTML={{
                           __html: sanitizeSignatureHtml(activeSig.content),
                         }}
@@ -2453,7 +2453,7 @@ export const EmailComposer = ({
                     type='button'
                     onClick={runSendEmail}
                     disabled={isSending}
-                    className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
+                    className='inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60'
                     data-track-category='Support'
                     data-track-name='ConfirmTwoStepSend'
                     data-ph-capture-attribute-track-id='send_email_confirm'
@@ -2896,7 +2896,7 @@ export const EmailComposer = ({
                 setComposeSubject(e.target.value);
               }}
               placeholder='Subject'
-              className='flex-1 text-sm py-1 outline-none bg-transparent'
+              className='flex-1 text-sm py-1 outline-hidden bg-transparent'
               disabled={isSending}
               aria-label='Subject'
               data-track-category='Support'
@@ -2996,7 +2996,7 @@ export const EmailComposer = ({
                   {/* Your draft rendered as plain text above the inline AI card (Gmail-style). */}
                   {hasEmailBody && (
                     <div
-                      className='px-1 pb-3 text-sm leading-relaxed text-foreground/90 break-words [&_p]:my-1'
+                      className='px-1 pb-3 text-sm leading-relaxed text-foreground/90 wrap-break-word [&_p]:my-1'
                       dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(emailContent) }}
                     />
                   )}
@@ -3111,7 +3111,7 @@ export const EmailComposer = ({
                     }
                   }}
                   placeholder={`Tell ${draftAgentName} what to write…`}
-                  className='flex-1 min-w-0 bg-transparent outline-none text-[15px] text-foreground placeholder:text-muted-foreground/70'
+                  className='flex-1 min-w-0 bg-transparent outline-hidden text-[15px] text-foreground placeholder:text-muted-foreground/70'
                   data-track-category='Support'
                   data-track-name='AIPromptInput'
                   aria-label={`Tell ${draftAgentName} what to write`}

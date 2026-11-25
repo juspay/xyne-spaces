@@ -2,3 +2,6 @@
  * Imports the dashboard's global.css which contains all theme CSS vars + tailwind directives
  */
 @import '../../dashboard/src/global.css';
+
+@source './**/*.{ts,tsx}';
+@source '../index.html';

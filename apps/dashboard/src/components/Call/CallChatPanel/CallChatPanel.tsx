@@ -106,7 +106,7 @@ function MessageItem({ msg, showHeader }: { msg: ChatMessage; showHeader: boolea
             <span className='text-[10px] text-muted-foreground'>{formatTime(msg.createdAt)}</span>
           </div>
         )}
-        <div className='text-sm text-foreground prose prose-sm dark:prose-invert max-w-none break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-0.5 [&_pre]:my-1 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-muted [&_code]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre]:bg-muted [&_pre]:rounded-md [&_pre]:p-3 [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground'>
+        <div className='text-sm text-foreground prose prose-sm dark:prose-invert max-w-none wrap-break-word [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-0.5 [&_pre]:my-1 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-muted [&_code]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre]:bg-muted [&_pre]:rounded-md [&_pre]:p-3 [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground'>
           <Markdown remarkPlugins={[remarkGfm]}>{msg.message}</Markdown>
         </div>
       </div>
@@ -233,7 +233,7 @@ export function CallChatPanel({
             onKeyDown={handleKeyDown}
             placeholder='Type a message...'
             rows={1}
-            className='flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none max-h-32 overflow-y-auto'
+            className='flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring resize-none max-h-32 overflow-y-auto'
             style={{ minHeight: '38px' }}
             disabled={isSending}
             onInput={e => {

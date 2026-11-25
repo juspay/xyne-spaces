@@ -1005,7 +1005,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         </h2>
         <button
           type='button'
-          className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
+          className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
           onClick={onCancel}
           data-track-category='FORWARD_MESSAGE_MODAL'
           data-track-name='CLOSE_FORWARD_MODAL'
@@ -1322,7 +1322,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                         className='flex min-w-0 flex-col gap-1'
                         renderNote={noteHtml => (
                           <div
-                            className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(noteHtml)}`}
+                            className={`text-foreground whitespace-pre-wrap wrap-break-word ${getEmojiFontSizeClass(noteHtml)}`}
                           >
                             <RenderMessageWithHTML message={noteHtml} />
                           </div>
@@ -1330,7 +1330,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                       />
                     ) : previewContent ? (
                       <div
-                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
+                        className={`text-foreground whitespace-pre-wrap wrap-break-word ${getEmojiFontSizeClass(previewContent)}`}
                       >
                         <RenderMessageWithHTML message={previewContent} />
                       </div>

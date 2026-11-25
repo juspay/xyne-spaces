@@ -240,7 +240,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
           }}
           trigger={
             <button
-              className='flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm'
+              className='flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-xs'
               data-track-category='CHANNEL_LINKS'
               data-track-name='OpenAddLinkDialog'
             >
@@ -269,7 +269,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   placeholder='https://example.com'
                   required
                   disabled={!!linkToEdit}
-                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground disabled:bg-muted disabled:cursor-not-allowed'
+                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground disabled:bg-muted disabled:cursor-not-allowed'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkUrl'
                   data-track-metadata={JSON.stringify({
@@ -297,7 +297,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   onChange={e => setFormData({ ...formData, title: e.target.value })}
                   placeholder='Link title'
                   required
-                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground'
+                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkTitle'
                   data-track-metadata={JSON.stringify({
@@ -320,7 +320,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
                   placeholder='Optional description'
                   rows={3}
-                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground resize-none'
+                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-foreground resize-none'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkDescription'
                   data-track-metadata={JSON.stringify({
@@ -424,7 +424,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
           <div className='grid grid-cols-2 gap-4 p-4 h-full'>
             {/* Shared Links Column */}
             <div className='flex flex-col bg-card rounded-lg border border-border overflow-hidden'>
-              <div className='flex items-center gap-2 px-4 py-3 border-b border-border bg-gradient-to-r from-blue-50 to-blue-100'>
+              <div className='flex items-center gap-2 px-4 py-3 border-b border-border bg-linear-to-r from-blue-50 to-blue-100'>
                 <Globe size={16} className='text-blue-600' />
                 <h3 className='text-sm font-semibold text-blue-900'>Public Links</h3>
                 <span className='ml-auto text-xs text-blue-600 bg-blue-200 px-2 py-0.5 rounded-full'>
@@ -445,7 +445,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
 
             {/* Personal/Shared Links Column */}
             <div className='flex flex-col bg-card rounded-lg border border-border overflow-hidden'>
-              <div className='flex items-center gap-2 px-4 py-3 border-b border-border bg-gradient-to-r from-purple-50 to-purple-100'>
+              <div className='flex items-center gap-2 px-4 py-3 border-b border-border bg-linear-to-r from-purple-50 to-purple-100'>
                 <Lock size={16} className='text-purple-600' />
                 <h3 className='text-sm font-semibold text-purple-900'>Personal Links</h3>
                 <span className='ml-auto text-xs text-purple-600 bg-purple-200 px-2 py-0.5 rounded-full'>

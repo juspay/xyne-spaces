@@ -471,9 +471,9 @@ const TOOLTIP_DELAY_MS = 600;
 // The toolbar's actions are icons, named by their tooltips: the place's name is
 // already in the breadcrumbs beside them.
 const TOOLBAR_ICON =
-  'flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border text-foreground transition-colors hover:bg-muted focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring';
 const TOOLBAR_ICON_PRIMARY =
-  'flex size-[30px] shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1';
+  'flex size-[30px] shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1';
 
 const MENU_ITEM =
   'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted';
@@ -496,7 +496,7 @@ function FilesMenuItem({
 }
 
 const ROW_ACTION =
-  'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+  'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring';
 
 type MovingItem = { type: SdlcItemKind; id: string };
 
@@ -1272,7 +1272,7 @@ export function SdlcFileList(props: {
           event.preventDefault();
           setContextMenu({ x: event.clientX, y: event.clientY, row: null, open: true });
         }}
-        className='flex min-h-0 flex-1 flex-col outline-none'
+        className='flex min-h-0 flex-1 flex-col outline-hidden'
       >
         <div
           style={{ gridTemplateColumns }}
@@ -1475,7 +1475,7 @@ export function SdlcFileList(props: {
                             props.onRenameItem({ kind: row.kind, id: row.id }, next);
                           }
                         }}
-                        className='relative z-10 min-w-0 flex-1 rounded border-0 bg-background px-1 text-sm font-medium text-foreground outline-none ring-1 ring-ring'
+                        className='relative z-10 min-w-0 flex-1 rounded border-0 bg-background px-1 text-sm font-medium text-foreground outline-hidden ring-1 ring-ring'
                         data-track-category='SdlcHub'
                         data-track-name='FilesItemRenamed'
                       />
@@ -1533,7 +1533,7 @@ export function SdlcFileList(props: {
                         }}
                         title={row.name}
                         className={cn(
-                          'min-w-0 truncate text-left outline-none after:absolute after:inset-0 after:rounded-lg',
+                          'min-w-0 truncate text-left outline-hidden after:absolute after:inset-0 after:rounded-lg',
                           row.kind === 'FOLDER' && 'font-medium',
                         )}
                         data-track-category='SdlcHub'
@@ -1585,7 +1585,7 @@ export function SdlcFileList(props: {
                       onClick={() => discussRow(row)}
                       className={cn(
                         ROW_ACTION,
-                        discussing && 'bg-background text-foreground shadow-xs',
+                        discussing && 'bg-background text-foreground shadow-2xs',
                       )}
                       data-track-category='SdlcHub'
                       data-track-name='FilesRowChatOpened'

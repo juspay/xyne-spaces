@@ -573,7 +573,7 @@ interface TicketDetailsProps {
 //       data-track-category='Tickets'
 //       data-track-name={config.trackName}
 //       data-testid={config.testId}
-//       className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground shadow-sm hover:shadow-md hover:border-border transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+//       className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground shadow-xs hover:shadow-md hover:border-border transition-all disabled:opacity-50 disabled:cursor-not-allowed'
 //     >
 //       <span className='inline-flex items-center gap-3'>
 //         <span
@@ -3383,7 +3383,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         {allowEdit ? (
           <div className='relative inline-flex shrink-0 items-center'>
             <select
-              className='h-[21px] cursor-pointer appearance-none rounded-[5px] border border-border bg-muted pl-2 pr-5 text-[10.5px] font-semibold uppercase tracking-[0.3px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='h-[21px] cursor-pointer appearance-none rounded-[5px] border border-border bg-muted pl-2 pr-5 text-[10.5px] font-semibold uppercase tracking-[0.3px] text-muted-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               value={reference.relationType}
               onChange={event =>
                 handleReferenceRelationChange(
@@ -3483,7 +3483,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         {allowEdit && (
           <button
             type='button'
-            className='flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100'
+            className='flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100'
             onClick={() => handleRemoveReference(reference.id)}
             data-ph-capture-attribute-track-id='remove_ticket_reference'
             aria-label={`Unlink ${relatedTicket?.xyneId ?? 'ticket'}`}
@@ -3607,7 +3607,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             mappedTicketId: subTicket.mappedTicketId,
             depth: node.depth,
           })}
-          className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
           style={{ marginLeft: node.depth * 18 }}
         >
           <div className='flex items-center gap-2 flex-1 min-w-0'>
@@ -3784,7 +3784,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           }
         }}
         data-testid={`parent-ticket-item-${parentTicket.id}`}
-        className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
         data-track-category='Tickets'
         data-track-name='ViewParentTicket'
         data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
@@ -3951,7 +3951,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       {expandedView && (
         <div
           className={cn(
-            'sticky top-0 z-10 -mx-[20px] flex h-14 items-center gap-2.5 bg-background px-[20px] transition-shadow duration-200',
+            'sticky top-0 z-10 mx-[-20px] flex h-14 items-center gap-2.5 bg-background px-[20px] transition-shadow duration-200',
             metaPinned && 'shadow-[0_1px_0_hsl(var(--border))]',
           )}
         >
@@ -3962,7 +3962,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   type='button'
                   onClick={handleBackFromExpandedView}
                   aria-label='Back'
-                  className='-ml-2 flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground/80 transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  className='-ml-2 flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground/80 transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                   data-track-category='Tickets'
                   data-track-name='BackFromExpandedView'
                 >
@@ -3979,7 +3979,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       });
                     }}
                     aria-label={`Copy ticket ID ${ticket.xyneId}`}
-                    className='-mx-1.5 shrink-0 rounded-[7px] px-1.5 py-[3px] font-mono text-[13px] font-medium text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                    className='-mx-1.5 shrink-0 rounded-[7px] px-1.5 py-[3px] font-mono text-[13px] font-medium text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                     data-track-category='Tickets'
                     data-track-name='COPY_TICKET_ID'
                   >
@@ -4000,7 +4000,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 type='button'
                 onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
                 title='Back to ticket properties'
-                className='flex shrink-0 items-center gap-2 rounded-lg py-1 pl-1 pr-1.5 duration-150 animate-in fade-in-0 slide-in-from-left-1 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                className='flex shrink-0 items-center gap-2 rounded-lg py-1 pl-1 pr-1.5 duration-150 animate-in fade-in-0 slide-in-from-left-1 hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                 data-track-category='Tickets'
                 data-track-name='ScrollToTicketProperties'
               >
@@ -4072,18 +4072,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
         {/* Approval banner — the one thing an approver must act on, above the fold. */}
         {pendingApprovalForMe && (
-          <div className='mt-4 overflow-hidden rounded-[11px] border border-amber-500/40 bg-amber-500/[0.09]'>
+          <div className='mt-4 overflow-hidden rounded-[11px] border border-amber-500/40 bg-amber-500/9'>
             <button
               type='button'
               onClick={() => setApprovalBannerOpen(prev => !prev)}
               aria-expanded={approvalBannerOpen}
-              className='flex min-h-[38px] w-full items-center gap-[9px] px-[11px] py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='flex min-h-[38px] w-full items-center gap-[9px] px-[11px] py-2 text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               data-track-category='Tickets'
               data-track-name='ToggleApprovalBanner'
             >
               <Clock
                 size={15}
-                className='shrink-0 text-amber-700 [[data-theme=midnight]_&]:text-amber-400'
+                className='shrink-0 text-amber-700 in-data-[theme=midnight]:text-amber-400'
               />
               <span className='whitespace-nowrap text-[12.5px] font-medium text-foreground'>
                 Move to {pendingApprovalForMe.stageName}
@@ -4102,7 +4102,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </button>
             {approvalBannerOpen && (
               <div className='px-[11px] pb-[11px] duration-150 animate-in fade-in slide-in-from-top-1'>
-                <p className='mb-[11px] text-[13px] leading-[1.6] text-muted-foreground [text-wrap:pretty]'>
+                <p className='mb-[11px] text-[13px] leading-[1.6] text-muted-foreground text-pretty'>
                   Approve to move this ticket into {pendingApprovalForMe.stageName}, or request
                   changes to send it back to the requester.
                 </p>
@@ -4190,7 +4190,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     setEditingTitle(false);
                   }
                 }}
-                className='flex-1 -mx-[7px] rounded-lg bg-muted/50 px-[7px] py-[3px] text-[24px] font-semibold leading-[1.32] tracking-[-0.5px] text-foreground outline-none ring-1 ring-inset ring-border'
+                className='flex-1 mx-[-7px] rounded-lg bg-muted/50 px-[7px] py-[3px] text-[24px] font-semibold leading-[1.32] tracking-[-0.5px] text-foreground outline-hidden ring-1 ring-inset ring-border'
                 data-track-category='Tickets'
                 data-track-name='EditTicketTitle'
                 data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -4200,7 +4200,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <div
               role='button'
               tabIndex={0}
-              className='flex-1 -mx-[7px] cursor-text rounded-lg px-[7px] py-[3px] text-[24px] font-semibold leading-[1.32] tracking-[-0.5px] text-foreground break-words transition-colors duration-150 hover:bg-muted/50'
+              className='flex-1 mx-[-7px] cursor-text rounded-lg px-[7px] py-[3px] text-[24px] font-semibold leading-[1.32] tracking-[-0.5px] text-foreground wrap-break-word transition-colors duration-150 hover:bg-muted/50'
               onClick={() => setEditingTitle(true)}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -4216,7 +4216,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           )}
         </div>
 
-        <div className='mt-[10px] -mx-[5px] flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-muted-foreground'>
+        <div className='mt-[10px] mx-[-5px] flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-muted-foreground'>
           <span className='px-[5px]' title={new Date(ticket.createdAt).toLocaleString()}>
             Created {formatChipDate(ticket.createdAt)} by{' '}
             {getUserDisplayName(createdByUser) || 'Merchant User'}
@@ -4245,7 +4245,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 type='button'
                 title='Board · move this ticket to another board'
                 className={cn(
-                  'flex items-center gap-1.5 rounded-[5px] px-[5px] py-[2px] transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'flex items-center gap-1.5 rounded-[5px] px-[5px] py-[2px] transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
                   boardDropdownOpen && 'bg-muted text-foreground',
                 )}
                 data-track-category='Tickets'
@@ -4261,7 +4261,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <button
               type='button'
               onClick={() => void navigate(buildChannelRoute(channel.id))}
-              className='rounded-[5px] px-[5px] py-[2px] transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='rounded-[5px] px-[5px] py-[2px] transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               title='Source channel · created from a message here'
               data-track-category='Tickets'
               data-track-name='OpenSourceChannel'
@@ -4372,7 +4372,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       setEditingStageETA(false);
                     }
                   }}
-                  className='h-[27px] rounded-full border border-input bg-background px-3 text-[12.5px] outline-none focus:border-border'
+                  className='h-[27px] rounded-full border border-input bg-background px-3 text-[12.5px] outline-hidden focus:border-border'
                   data-track-category='Tickets'
                   data-track-name='StageETAInput'
                   data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -4439,7 +4439,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     setEditingETA(false);
                   }
                 }}
-                className='h-[27px] rounded-full border border-input bg-background px-3 text-[12.5px] text-foreground outline-none focus:border-border'
+                className='h-[27px] rounded-full border border-input bg-background px-3 text-[12.5px] text-foreground outline-hidden focus:border-border'
                 data-track-category='Tickets'
                 data-track-name='StageETAInput'
                 data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -4607,7 +4607,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     onChange={e => setTagSearchQuery(e.target.value)}
                     onKeyDown={handleTagKeyDown}
                     placeholder='Search or create label...'
-                    className='w-full px-2.5 py-1.5 text-sm border text-foreground bg-background border-input rounded outline-none focus:border-border'
+                    className='w-full px-2.5 py-1.5 text-sm border text-foreground bg-background border-input rounded outline-hidden focus:border-border'
                     data-track-category='Tickets'
                     data-track-name='SearchTags'
                   />
@@ -4741,7 +4741,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     value={acknowledgeReason}
                     onChange={e => setAcknowledgeReason(e.target.value)}
                     placeholder='Reason for keeping the current dates...'
-                    className='flex-1 text-sm bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
+                    className='flex-1 text-sm bg-background border border-input rounded px-2 py-1 outline-hidden focus:border-border'
                     data-testid='acknowledge-eta-risk-reason'
                     data-track-category='TicketDetails'
                     data-track-name='AcknowledgeEtaRiskReasonInput'
@@ -4768,7 +4768,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               )}
             </div>
           )}
-        <div className='-mx-[9px] rounded-xl border border-transparent bg-background transition-colors hover:border-border'>
+        <div className='mx-[-9px] rounded-xl border border-transparent bg-background transition-colors hover:border-border'>
           {editingDescription ? (
             <div className='rounded-xl border border-border bg-background'>
               <textarea
@@ -4787,7 +4787,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     setEditingDescription(false);
                   }
                 }}
-                className='min-h-[150px] w-full resize-none overflow-y-auto bg-transparent px-[15px] py-[11px] text-[14px] leading-[1.7] text-foreground outline-none'
+                className='min-h-[150px] w-full resize-none overflow-y-auto bg-transparent px-[15px] py-[11px] text-[14px] leading-[1.7] text-foreground outline-hidden'
                 data-track-category='Tickets'
                 data-track-name='EditDescription'
                 data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -4845,14 +4845,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     <p
                       ref={descriptionRef}
                       className={cn(
-                        'whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-muted-foreground [text-wrap:pretty]',
+                        'whitespace-pre-wrap wrap-break-word text-[14px] leading-[1.7] text-muted-foreground text-pretty',
                         !showFullDescription && 'overflow-hidden line-clamp-5 sm:line-clamp-5',
                       )}
                     >
                       <RenderMessageWithHTML message={resolveTicketDescription(ticket)} />
                     </p>
                     {!showFullDescription && needsReadMore && (
-                      <div className='pointer-events-none absolute inset-x-0 bottom-0 h-[62px] bg-gradient-to-b from-transparent to-background' />
+                      <div className='pointer-events-none absolute inset-x-0 bottom-0 h-[62px] bg-linear-to-b from-transparent to-background' />
                     )}
                   </div>
                   {(needsReadMore || showFullDescription) && (
@@ -4985,7 +4985,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 locked
                 note='no longer defined on this board'
               >
-                <span className='break-words text-[13px] font-medium text-muted-foreground'>
+                <span className='wrap-break-word text-[13px] font-medium text-muted-foreground'>
                   {formatLeftoverFieldValue(field, leftoverFieldUserById)}
                 </span>
               </DetailFieldRow>
@@ -5548,7 +5548,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               data-track-category='Tickets'
               data-track-name='OpenReleaseViewFromTicket'
               data-testid='open-release-view-button'
-              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-sm disabled:hover:border-border'
+              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-xs hover:shadow-md hover:border-input transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-xs disabled:hover:border-border'
             >
               <span className='inline-flex items-center gap-3'>
                 <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
@@ -5600,7 +5600,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   type='button'
                   onClick={() => setRelationshipsOpen(prev => !prev)}
                   aria-expanded={relationshipsOpen}
-                  className='flex items-center gap-[9px] rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  className='flex items-center gap-[9px] rounded-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                   data-track-category='Tickets'
                   data-track-name='ToggleRelationshipsSection'
                 >
@@ -5860,7 +5860,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               onChange={e => setNonFormReviewComment(e.target.value)}
               placeholder='Explain your decision…'
               rows={3}
-              className='w-full px-3 py-2 border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y'
+              className='w-full px-3 py-2 border border-input rounded-md text-sm focus:outline-hidden focus:ring-2 focus:ring-ring resize-y'
               data-track-category='Tickets'
               data-track-name='NonFormStageReviewerCommentInput'
             />

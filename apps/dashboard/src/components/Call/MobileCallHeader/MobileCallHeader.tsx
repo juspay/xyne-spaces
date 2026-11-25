@@ -64,7 +64,7 @@ export function MobileCallHeader({
   }, [participants]);
 
   return (
-    <div className='md:hidden fixed top-0 left-0 right-0 z-[60] bg-background border-b border-border shadow-sm'>
+    <div className='md:hidden fixed top-0 left-0 right-0 z-60 bg-background border-b border-border shadow-xs'>
       <div className='flex items-center justify-between px-3 py-2.5'>
         {/* Left: Mic Toggle */}
         <Button
@@ -119,7 +119,7 @@ export function MobileCallHeader({
           data-track-category='CALLS'
           data-track-name='Mobile_End_Call'
         >
-          <PhoneDefault size={18} className='rotate-[135deg]' />
+          <PhoneDefault size={18} className='rotate-135' />
         </Button>
       </div>
     </div>

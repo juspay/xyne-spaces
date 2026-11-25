@@ -57,7 +57,7 @@ export function DesignShareButton({
       align='end'
       sideOffset={6}
       collisionPadding={12}
-      className='z-[80] w-[340px] rounded-xl border border-border bg-popover p-0 shadow-lg'
+      className='z-80 w-[340px] rounded-xl border border-border bg-popover p-0 shadow-lg'
       trigger={trigger}
     >
       {open && conversationId && attachmentId && (

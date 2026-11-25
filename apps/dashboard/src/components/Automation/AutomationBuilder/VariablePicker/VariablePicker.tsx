@@ -118,7 +118,7 @@ export function VariablePicker({
           placeholder='Search variables…'
           data-track-category='automation-builder'
           data-track-name='variable-picker-search'
-          className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+          className='flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
         />
       </div>
       <div className='flex-1 overflow-y-auto py-1'>

@@ -3098,14 +3098,14 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
       >
         <DropdownMenu.Item
           onSelect={() => void handleFlowRunExport('excel')}
-          className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+          className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-hidden data-highlighted:bg-muted'
         >
           <FileSpreadsheet className='h-4 w-4 text-emerald-600' />
           Excel (.xlsx)
         </DropdownMenu.Item>
         <DropdownMenu.Item
           onSelect={() => void handleFlowRunExport('pdf')}
-          className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-none data-[highlighted]:bg-muted'
+          className='flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-xs text-foreground outline-hidden data-highlighted:bg-muted'
         >
           <FileText className='h-4 w-4 text-red-500' />
           PDF (.pdf)
@@ -4731,7 +4731,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                     placeholder={`Search ${noun.singular} ID or title`}
                     data-track-category='flow_board'
                     data-track-name='search_flow_run'
-                    className='h-9 w-full rounded-[10px] border border-border bg-muted/40 pl-[34px] pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+                    className='h-9 w-full rounded-[10px] border border-border bg-muted/40 pl-[34px] pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40'
                   />
                 </label>
                 <Tooltip content='Ask AI' side='bottom'>
@@ -4886,7 +4886,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                             forgetRunUiState(root.key);
                             setSelectedGraphRootTicketId(root.key);
                           }}
-                          className='flex h-full flex-col gap-2 rounded-xl border border-border bg-background p-4 text-left shadow-sm transition-all hover:-translate-y-px hover:border-[#6276be]/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+                          className='flex h-full flex-col gap-2 rounded-xl border border-border bg-background p-4 text-left shadow-xs transition-all hover:-translate-y-px hover:border-[#6276be]/50 hover:shadow-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50'
                         >
                           <div className='flex items-center justify-between gap-2'>
                             <span className='font-mono text-[11px] font-medium text-muted-foreground'>
@@ -4974,7 +4974,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                               {summary.pending.slice(0, 2).map(step => (
                                 <div
                                   key={step.id}
-                                  className='flex w-full items-center gap-2 rounded-md bg-[#6276be]/[0.06] px-2.5 py-1.5 text-[11px]'
+                                  className='flex w-full items-center gap-2 rounded-md bg-[#6276be]/6 px-2.5 py-1.5 text-[11px]'
                                 >
                                   <span className='inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[#6276be]' />
                                   <span className='min-w-0 flex-1 truncate text-foreground/80'>
@@ -5008,7 +5008,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                               {summary.backlogged.slice(0, 2).map(step => (
                                 <div
                                   key={step.id}
-                                  className='flex w-full items-center gap-2 rounded-md bg-amber-500/[0.06] px-2.5 py-1.5 text-[11px]'
+                                  className='flex w-full items-center gap-2 rounded-md bg-amber-500/6 px-2.5 py-1.5 text-[11px]'
                                 >
                                   <Archive size={12} className='shrink-0 text-amber-600' />
                                   <span className='min-w-0 flex-1 truncate text-foreground/80'>
@@ -5028,7 +5028,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                                 </div>
                               ))}
                               {summary.backlogged.length > 2 && (
-                                <div className='flex w-full items-center justify-center rounded-md bg-amber-500/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-amber-700/80'>
+                                <div className='flex w-full items-center justify-center rounded-md bg-amber-500/4 px-2.5 py-1.5 text-[11px] font-medium text-amber-700/80'>
                                   +{summary.backlogged.length - 2} more
                                 </div>
                               )}
@@ -5042,7 +5042,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                               {summary.cancelled.slice(0, 2).map(step => (
                                 <div
                                   key={step.id}
-                                  className='flex w-full items-center gap-2 rounded-md bg-red-500/[0.06] px-2.5 py-1.5 text-[11px]'
+                                  className='flex w-full items-center gap-2 rounded-md bg-red-500/6 px-2.5 py-1.5 text-[11px]'
                                 >
                                   <XCircle size={12} className='shrink-0 text-red-500' />
                                   <span className='min-w-0 flex-1 truncate text-foreground/80'>
@@ -5062,7 +5062,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                                 </div>
                               ))}
                               {summary.cancelled.length > 2 && (
-                                <div className='flex w-full items-center justify-center rounded-md bg-red-500/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-red-500/80'>
+                                <div className='flex w-full items-center justify-center rounded-md bg-red-500/4 px-2.5 py-1.5 text-[11px] font-medium text-red-500/80'>
                                   +{summary.cancelled.length - 2} more cancelled
                                 </div>
                               )}
@@ -5076,7 +5076,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                               {summary.skipped.slice(0, 2).map(step => (
                                 <div
                                   key={step.id}
-                                  className='flex w-full items-center gap-2 rounded-md bg-teal-500/[0.06] px-2.5 py-1.5 text-[11px]'
+                                  className='flex w-full items-center gap-2 rounded-md bg-teal-500/6 px-2.5 py-1.5 text-[11px]'
                                 >
                                   <SkipForward size={12} className='shrink-0 text-teal-600' />
                                   <span className='min-w-0 flex-1 truncate text-foreground/80'>
@@ -5096,7 +5096,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                                 </div>
                               ))}
                               {summary.skipped.length > 2 && (
-                                <div className='flex w-full items-center justify-center rounded-md bg-teal-500/[0.04] px-2.5 py-1.5 text-[11px] font-medium text-teal-700/80'>
+                                <div className='flex w-full items-center justify-center rounded-md bg-teal-500/4 px-2.5 py-1.5 text-[11px] font-medium text-teal-700/80'>
                                   +{summary.skipped.length - 2} more skipped
                                 </div>
                               )}
@@ -5175,7 +5175,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                   />
                   <Panel
                     position='top-left'
-                    className='!bottom-0 flex min-h-0 flex-col items-start'
+                    className='bottom-0! flex min-h-0 flex-col items-start'
                   >
                     <div
                       className={cn(
@@ -5313,7 +5313,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                               return (
                                 <React.Fragment key={activity.id}>
                                   {showDate && (
-                                    <div className='sticky top-0 z-10 -mx-1 bg-muted/95 py-1.5 pl-10 pr-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground backdrop-blur-sm'>
+                                    <div className='sticky top-0 z-10 -mx-1 bg-muted/95 py-1.5 pl-10 pr-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground backdrop-blur-xs'>
                                       {timestamp.toLocaleDateString(undefined, {
                                         month: 'short',
                                         day: 'numeric',
@@ -5325,7 +5325,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                                     </div>
                                   )}
                                   <div className='group relative flex gap-3 py-2.5 after:absolute after:bottom-0 after:left-[13px] after:top-8 after:w-px after:bg-border/70 last:after:hidden'>
-                                    <span className='relative z-[1] flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/80 bg-background shadow-sm'>
+                                    <span className='relative z-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/80 bg-background shadow-xs'>
                                       {getActivityIcon(activity)}
                                     </span>
                                     <div className='min-w-0 flex-1 pb-1'>
@@ -5348,7 +5348,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                                           })}
                                         </time>
                                       </div>
-                                      <p className='break-words text-[12px] leading-[1.45] text-muted-foreground'>
+                                      <p className='wrap-break-word text-[12px] leading-[1.45] text-muted-foreground'>
                                         {!hideActorName && (
                                           <span className='font-semibold text-foreground/90'>
                                             {actorName}{' '}

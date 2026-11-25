@@ -11,7 +11,7 @@ function TableNodeBase({ data }: NodeProps<TableNodeData>): ReactElement {
   return (
     <div
       style={{ width: NODE_W }} // pinned to the layout's NODE_W so edges line up
-      className={`rounded-xl border border-border bg-card shadow-sm overflow-hidden transition-opacity ${
+      className={`rounded-xl border border-border bg-card shadow-xs overflow-hidden transition-opacity ${
         matched ? 'opacity-100' : 'opacity-40'
       }`}
     >

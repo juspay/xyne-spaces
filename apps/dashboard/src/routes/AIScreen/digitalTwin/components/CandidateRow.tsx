@@ -136,7 +136,7 @@ export const CandidateRow = ({
             disabled={isBusy}
             rows={3}
             autoFocus
-            className='w-full resize-none rounded-lg border border-primary bg-background px-2.5 py-1.5 text-sm leading-relaxed text-foreground focus:outline-none disabled:opacity-60'
+            className='w-full resize-none rounded-lg border border-primary bg-background px-2.5 py-1.5 text-sm leading-relaxed text-foreground focus:outline-hidden disabled:opacity-60'
           />
         ) : (
           <TruncatedTooltip content={committed}>

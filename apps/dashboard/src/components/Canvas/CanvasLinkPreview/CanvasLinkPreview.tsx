@@ -22,7 +22,7 @@ export const CanvasLinkPreview: React.FC<CanvasLinkPreviewProps> = ({ canvas, on
 
   return (
     <div
-      className='flex items-center gap-3 p-3 bg-card border border-border rounded-lg shadow-sm w-fit max-w-md'
+      className='flex items-center gap-3 p-3 bg-card border border-border rounded-lg shadow-xs w-fit max-w-md'
       data-testid='canvas-link-preview'
     >
       {/* Canvas Icon */}

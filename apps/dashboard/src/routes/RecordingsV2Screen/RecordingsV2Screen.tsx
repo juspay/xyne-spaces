@@ -664,7 +664,7 @@ const RecordingsV2Screen = (): ReactElement => {
                 <Button
                   type='button'
                   onClick={refreshRecordings}
-                  className='mt-5 rounded-3xl px-4 font-semibold shadow-sm'
+                  className='mt-5 rounded-3xl px-4 font-semibold shadow-xs'
                   data-track-category='RecordingsV2'
                   data-track-name='retry_load_recordings'
                 >

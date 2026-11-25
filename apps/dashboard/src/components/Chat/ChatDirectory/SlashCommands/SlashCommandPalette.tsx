@@ -10,7 +10,7 @@ import type { UseSlashCommandsReturn, GotoExtra } from './useSlashCommands';
 // cmdk group-heading style (uppercase mono muted) so the palette matches the menu's
 // other sections.
 const COMMAND_GROUP_HEADING_CLASS =
-  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono';
+  '**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono';
 
 // The whole slash-command controller is handed in as one prop. The palette reads the slice it needs
 // (below); the parent no longer forwards a prop per field, so a new command that adds palette data

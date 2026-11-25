@@ -926,7 +926,7 @@ export function ToolboxPicker({
             aria-label='Describe tools to add'
             rows={3}
             autoFocus
-            className='w-full resize-none rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40'
+            className='w-full resize-none rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/40'
           />
         </div>
         <div className='flex justify-end gap-2 px-6 py-5'>
@@ -971,7 +971,7 @@ export function ToolboxPicker({
             data-track-name='Select research agent product'
             value={researchAgent.productId}
             onChange={e => researchAgent.onProductIdChange(e.target.value)}
-            className='min-w-0 w-full rounded-lg bg-muted px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40'
+            className='min-w-0 w-full rounded-lg bg-muted px-3 py-2 text-[12px] text-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/40'
           >
             <option value=''>No product</option>
             {researchAgent.products.map(p => (
@@ -985,7 +985,7 @@ export function ToolboxPicker({
             data-track-name='Select research agent repository'
             value={researchAgent.repositoryId}
             onChange={e => researchAgent.onRepositoryIdChange(e.target.value)}
-            className='min-w-0 w-full rounded-lg bg-muted px-3 py-2 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40'
+            className='min-w-0 w-full rounded-lg bg-muted px-3 py-2 text-[12px] text-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/40'
           >
             <option value=''>No repository</option>
             {researchAgent.repositories.map(r => (
@@ -1195,7 +1195,7 @@ export function ToolboxPicker({
                     onChange={e => setToolSearch(e.target.value)}
                     placeholder='Search tools…'
                     aria-label='Search tools'
-                    className='w-full rounded-lg bg-muted px-3 py-1.5 pr-8 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 transition-[box-shadow] [&::-webkit-search-cancel-button]:hidden'
+                    className='w-full rounded-lg bg-muted px-3 py-1.5 pr-8 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/40 transition-shadow [&::-webkit-search-cancel-button]:hidden'
                   />
                   {toolSearch && (
                     <button
@@ -1444,7 +1444,7 @@ export function ToolboxPicker({
                         {activeDetail.name}
                       </span>
                       <span
-                        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] ml-auto ${
+                        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ml-auto ${
                           activeDetail.riskLevel === 'read'
                             ? 'bg-emerald-100 text-emerald-700'
                             : activeDetail.riskLevel === 'write'
@@ -1552,7 +1552,7 @@ export function ToolboxPicker({
                             data-track-name='Remove selected tool'
                             onClick={onRemove}
                             aria-label={`Remove ${label}`}
-                            className='shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 focus-visible:opacity-100 focus-visible:outline-none transition-all'
+                            className='shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 focus-visible:opacity-100 focus-visible:outline-hidden transition-all'
                           >
                             <X size={12} />
                           </button>
@@ -1631,7 +1631,7 @@ export function ToolboxPicker({
                         <span
                           key={key}
                           role='listitem'
-                          className='inline-flex items-center gap-1 rounded-full border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-2 py-0.5 text-[11px] text-[var(--claw-ai-fg)]'
+                          className='inline-flex items-center gap-1 rounded-full border border-(--claw-ai-border) bg-(--claw-ai-surface) px-2 py-0.5 text-[11px] text-(--claw-ai-fg)'
                         >
                           <span
                             className={`h-1.5 w-1.5 shrink-0 rounded-full ${riskDotCls(riskLevel)}`}
@@ -1644,7 +1644,7 @@ export function ToolboxPicker({
                             data-track-name='Remove selected tool'
                             onClick={onRemove}
                             aria-label={`Remove ${label}`}
-                            className='ml-0.5 rounded-full hover:text-red-500 transition-colors focus-visible:outline-none'
+                            className='ml-0.5 rounded-full hover:text-red-500 transition-colors focus-visible:outline-hidden'
                           >
                             <X size={10} />
                           </button>
@@ -1666,7 +1666,7 @@ export function ToolboxPicker({
               onChange={e => setToolSearch(e.target.value)}
               placeholder='Search tools…'
               aria-label='Search tools'
-              className='w-full rounded-lg border border-border bg-card px-3 py-2 pr-8 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition-[border-color,box-shadow] [&::-webkit-search-cancel-button]:hidden'
+              className='w-full rounded-lg border border-border bg-card px-3 py-2 pr-8 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:border-ring focus:ring-2 focus:ring-ring/30 transition-[border-color,box-shadow] [&::-webkit-search-cancel-button]:hidden'
             />
             {toolSearch && (
               <button
@@ -1725,7 +1725,7 @@ export function ToolboxPicker({
                       data-track-name='Filter tools by category'
                       onClick={() => setToolTab(key)}
                       aria-pressed={active}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition ${active ? 'border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] text-[var(--claw-ai-fg)]' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition ${active ? 'border-(--claw-ai-border) bg-(--claw-ai-surface) text-(--claw-ai-fg)' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
                     >
                       {dot && (
                         <span
@@ -1735,7 +1735,7 @@ export function ToolboxPicker({
                       )}
                       {label}
                       <span
-                        className={`tabular-nums ${active ? 'text-[var(--claw-ai-fg)]' : 'text-muted-foreground'}`}
+                        className={`tabular-nums ${active ? 'text-(--claw-ai-fg)' : 'text-muted-foreground'}`}
                         aria-hidden='true'
                       >
                         {count}
@@ -1764,7 +1764,7 @@ export function ToolboxPicker({
                     {humanizeToolName(pinnedDetail.name)}
                   </span>
                   <span
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] ml-auto ${
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ml-auto ${
                       pinnedDetail.riskLevel === 'read'
                         ? 'bg-emerald-100 text-emerald-700'
                         : pinnedDetail.riskLevel === 'write'
@@ -1899,7 +1899,7 @@ export function ToolboxPicker({
                             onBlur={() => hoverDetail(null)}
                             title={sa.name}
                             aria-pressed={selected}
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition ${selected ? 'border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] text-[var(--claw-ai-fg)]' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] transition ${selected ? 'border-(--claw-ai-border) bg-(--claw-ai-surface) text-(--claw-ai-fg)' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
                           >
                             <span
                               className={`h-1.5 w-1.5 shrink-0 rounded-full ${riskDotCls('read')}`}
@@ -2030,7 +2030,7 @@ export function ToolboxPicker({
                                   onBlur={() => hoverDetail(null)}
                                   title={t.name}
                                   aria-pressed={selected}
-                                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] transition ${selected ? 'border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] text-[var(--claw-ai-fg)]' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
+                                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] transition ${selected ? 'border-(--claw-ai-border) bg-(--claw-ai-surface) text-(--claw-ai-fg)' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
                                 >
                                   <span
                                     className={`h-1.5 w-1.5 shrink-0 rounded-full ${riskDotCls(risk)}`}
@@ -2141,7 +2141,7 @@ export function ToolboxPicker({
                                   onBlur={() => hoverDetail(null)}
                                   title={t.name}
                                   aria-pressed={selected}
-                                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] transition ${selected ? 'border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] text-[var(--claw-ai-fg)]' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
+                                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] transition ${selected ? 'border-(--claw-ai-border) bg-(--claw-ai-surface) text-(--claw-ai-fg)' : 'border-border bg-card text-foreground/80 hover:border-muted-foreground/40'}`}
                                 >
                                   <span
                                     className={`h-1.5 w-1.5 shrink-0 rounded-full ${riskDotCls(risk)}`}

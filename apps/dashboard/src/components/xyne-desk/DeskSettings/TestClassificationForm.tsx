@@ -55,7 +55,7 @@ export const TestClassificationForm: React.FC<TestClassificationFormProps> = ({
           value={subjectValue}
           onChange={e => onSubjectChange(e.target.value)}
           placeholder={subjectPlaceholder}
-          className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent'
+          className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent'
           data-track-category={trackCategory}
           data-track-name={subjectTrackName}
         />
@@ -70,7 +70,7 @@ export const TestClassificationForm: React.FC<TestClassificationFormProps> = ({
           onChange={e => onBodyChange(e.target.value)}
           placeholder={bodyPlaceholder}
           rows={4}
-          className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent'
+          className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent'
           data-track-category={trackCategory}
           data-track-name={bodyTrackName}
         />

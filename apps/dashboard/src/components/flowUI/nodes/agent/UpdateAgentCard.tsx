@@ -22,7 +22,7 @@ const PromptDiff: React.FC<{ before: string; after: string }> = ({ before, after
             <span
               key={`${row.type}-${index}`}
               className={cn(
-                'whitespace-pre-wrap break-words px-2',
+                'whitespace-pre-wrap wrap-break-word px-2',
                 row.type === 'add' && 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
                 row.type === 'del' && 'bg-destructive/10 text-destructive',
                 row.type === 'eq' && 'text-muted-foreground',
@@ -77,10 +77,10 @@ const ChangeValue: React.FC<{ change: AgentChange }> = ({ change }) => {
   }
   return (
     <div className='flex flex-col gap-0.5 text-sm leading-5'>
-      <span className='break-words text-muted-foreground line-through'>
+      <span className='wrap-break-word text-muted-foreground line-through'>
         {change.before ?? 'Not set'}
       </span>
-      <span className='break-words text-foreground'>{change.after ?? 'Not set'}</span>
+      <span className='wrap-break-word text-foreground'>{change.after ?? 'Not set'}</span>
     </div>
   );
 };
@@ -108,12 +108,12 @@ export const UpdateAgentCard: React.FC<{ node: FlowComponent; props: AgentUpdate
   const ghostButton = cn(
     'inline-flex h-7 items-center gap-1.5 rounded-[10px] px-2.5',
     'text-sm font-semibold leading-5 text-foreground',
-    'hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
+    'hover:bg-foreground/4 disabled:cursor-not-allowed disabled:opacity-60',
   );
   const primaryButton = cn(
     'inline-flex h-7 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5',
     'text-sm font-semibold leading-5 text-foreground',
-    'hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
+    'hover:bg-foreground/4 disabled:cursor-not-allowed disabled:opacity-60',
   );
 
   return (
@@ -130,7 +130,7 @@ export const UpdateAgentCard: React.FC<{ node: FlowComponent; props: AgentUpdate
 
         <div className='flex flex-col gap-3'>
           <div className='flex min-w-0 flex-col gap-1 pl-1'>
-            <p className='break-words text-sm font-semibold leading-5 text-foreground'>
+            <p className='wrap-break-word text-sm font-semibold leading-5 text-foreground'>
               {props.agent.name}
             </p>
             <span className='block truncate text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
@@ -139,7 +139,7 @@ export const UpdateAgentCard: React.FC<{ node: FlowComponent; props: AgentUpdate
           </div>
 
           {props.summary && (
-            <span className='block break-words px-1 text-sm leading-5 text-foreground'>
+            <span className='block wrap-break-word px-1 text-sm leading-5 text-foreground'>
               {props.summary}
             </span>
           )}
@@ -154,7 +154,7 @@ export const UpdateAgentCard: React.FC<{ node: FlowComponent; props: AgentUpdate
           ))}
 
           {props.note && (
-            <span className='block break-words px-1 text-xs leading-4 text-muted-foreground'>
+            <span className='block wrap-break-word px-1 text-xs leading-4 text-muted-foreground'>
               {props.note}
             </span>
           )}

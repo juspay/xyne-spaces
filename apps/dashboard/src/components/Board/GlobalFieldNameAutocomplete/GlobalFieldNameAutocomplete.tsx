@@ -198,7 +198,7 @@ export const GlobalFieldNameAutocomplete = ({
             >
               <button
                 type='button'
-                className='shrink-0 cursor-pointer text-[12px] text-muted-foreground transition-colors hover:text-[#6276be] focus-visible:text-[#6276be] focus-visible:outline-none'
+                className='shrink-0 cursor-pointer text-[12px] text-muted-foreground transition-colors hover:text-[#6276be] focus-visible:text-[#6276be] focus-visible:outline-hidden'
                 onClick={onCreateNew}
                 data-track-category='form'
                 data-track-name='create-as-new-global-field'
@@ -271,7 +271,7 @@ export const GlobalFieldNameAutocomplete = ({
                 role='menu'
                 tabIndex={-1}
                 aria-label='Existing fields'
-                className='outline-none'
+                className='outline-hidden'
                 onKeyDown={handlePanelKeyDown}
               >
                 <p className='px-2 pt-1.5 pb-1 text-xs font-medium text-muted-foreground'>
@@ -284,7 +284,7 @@ export const GlobalFieldNameAutocomplete = ({
                         type='button'
                         role='menuitem'
                         data-suggestion
-                        className='flex w-full items-center justify-between gap-3 rounded-[6px] px-2 py-1.5 text-left text-[13px] text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent'
+                        className='flex w-full items-center justify-between gap-3 rounded-[6px] px-2 py-1.5 text-left text-[13px] text-foreground outline-hidden transition-colors hover:bg-accent focus-visible:bg-accent'
                         onClick={() => handleSelect(field)}
                         data-track-category='form'
                         data-track-name='select-global-field-suggestion'

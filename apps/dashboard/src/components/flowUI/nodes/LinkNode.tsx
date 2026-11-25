@@ -40,7 +40,7 @@ export const LinkNode: React.FC<LinkNodeProps> = ({ node }) => {
     <a
       href={href}
       {...externalProps}
-      className={`text-[var(--link-color)] hover:text-[var(--link-hover-color)] break-all ${underlineClass}`}
+      className={`text-(--link-color) hover:text-(--link-hover-color) break-all ${underlineClass}`}
       style={node.style}
     >
       {label}

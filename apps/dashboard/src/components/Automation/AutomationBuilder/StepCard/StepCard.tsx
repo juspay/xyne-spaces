@@ -68,7 +68,7 @@ export function StepCard({
           data-track-name='step-card-toggle-collapse'
           className={cn(
             'flex flex-1 items-start gap-3 rounded-md text-left',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+            'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
           )}
           onClick={() => setCollapsed(prev => !prev)}
         >
@@ -102,7 +102,7 @@ export function StepCard({
             data-track-name='step-card-move-up'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
               index === 1
                 ? 'opacity-40 cursor-not-allowed'
                 : 'hover:text-foreground hover:bg-accent/40',
@@ -119,7 +119,7 @@ export function StepCard({
             data-track-name='step-card-move-down'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
               index === total
                 ? 'opacity-40 cursor-not-allowed'
                 : 'hover:text-foreground hover:bg-accent/40',
@@ -143,7 +143,7 @@ export function StepCard({
                 className={cn(
                   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                   'hover:text-foreground hover:bg-accent/40',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
                 )}
               >
                 <MoreVertical className='size-4' aria-hidden='true' />

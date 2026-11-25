@@ -45,7 +45,7 @@ export function PageSelectionPreview({ selection }: PageSelectionPreviewProps): 
         </button>
       </div>
       {open ? (
-        <pre className='max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-border px-2.5 py-2 font-sans text-xs text-foreground'>
+        <pre className='max-h-64 overflow-auto whitespace-pre-wrap wrap-break-word border-t border-border px-2.5 py-2 font-sans text-xs text-foreground'>
           {selection.text}
         </pre>
       ) : (

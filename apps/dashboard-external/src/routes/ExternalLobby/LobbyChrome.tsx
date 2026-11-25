@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
  */
 export function LobbyShell({ children }: { children: ReactNode }) {
   return (
-    <div className='flex min-h-[100dvh] flex-col bg-[#131314] text-[#e3e3e3]'>
+    <div className='flex min-h-dvh flex-col bg-[#131314] text-[#e3e3e3]'>
       <header className='flex h-16 shrink-0 items-center px-4 sm:px-6'>
         <span className='text-[17px] font-medium tracking-tight text-[#e3e3e3]'>Xyne Call</span>
       </header>
@@ -57,4 +57,4 @@ export function Spinner({ size = 'md' }: { size?: 'sm' | 'md' }) {
 }
 
 export const primaryButtonClass =
-  'inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[#a8c7fa] px-7 text-[15px] font-medium text-[#062e6f] transition-colors hover:bg-[#bcd4fb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314] disabled:cursor-not-allowed disabled:opacity-60';
+  'inline-flex h-12 items-center justify-center gap-2 rounded-full bg-[#a8c7fa] px-7 text-[15px] font-medium text-[#062e6f] transition-colors hover:bg-[#bcd4fb] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314] disabled:cursor-not-allowed disabled:opacity-60';

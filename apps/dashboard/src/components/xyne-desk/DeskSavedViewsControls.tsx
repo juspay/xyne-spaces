@@ -104,7 +104,7 @@ function FilterPreviewCard({
   return (
     <div
       style={style}
-      className='absolute z-[80] w-52 bg-popover border border-border rounded-xl shadow-xl py-3 pointer-events-none'
+      className='absolute z-80 w-52 bg-popover border border-border rounded-xl shadow-xl py-3 pointer-events-none'
     >
       {/* Header */}
       <div className='flex items-center gap-1.5 px-3 pb-2 border-b border-border'>
@@ -385,7 +385,7 @@ export function DeskSavedViewsControls({
           align='end'
           sideOffset={6}
           ref={contentRef}
-          className='z-[60] w-80 bg-popover border border-border rounded-xl shadow-lg flex flex-col relative'
+          className='z-60 w-80 bg-popover border border-border rounded-xl shadow-lg flex flex-col relative'
         >
           {/* Dirty-state banner — non-owner edited a public view */}
           {activeView && !isOwnActiveView && isDirty && !showSaveForm && (
@@ -479,7 +479,7 @@ export function DeskSavedViewsControls({
                 }}
                 data-track-category={trackCategory}
                 data-track-name='DeskSaveViewNameInput'
-                className='h-8 px-2 rounded-md border border-input bg-background text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
+                className='h-8 px-2 rounded-md border border-input bg-background text-[13px] text-foreground outline-hidden placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50'
               />
               {saveError && <p className='text-xs text-destructive'>{saveError}</p>}
               {isChannelAdmin && (
@@ -649,7 +649,7 @@ export function DeskSavedViewsControls({
           if (!open) setViewToDelete(null);
         }}
         title='Delete saved view'
-        zIndexClassName='z-[70]'
+        zIndexClassName='z-70'
         className='max-w-sm'
       >
         {viewToDelete && (

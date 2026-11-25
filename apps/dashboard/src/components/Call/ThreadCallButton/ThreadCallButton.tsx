@@ -68,7 +68,7 @@ export const ThreadCallButton = ({
         align='end'
         side='bottom'
         sideOffset={6}
-        className='rounded-xl p-1.5 shadow-sm text-muted-foreground'
+        className='rounded-xl p-1.5 shadow-xs text-muted-foreground'
       >
         <DropdownMenuItem
           onSelect={onStartCall}

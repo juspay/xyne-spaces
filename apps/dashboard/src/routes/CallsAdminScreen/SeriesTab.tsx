@@ -133,7 +133,7 @@ export function SeriesTab({ scope }: { scope: CallAdminListScope }): ReactElemen
       <AdminTable
         headers={[
           { label: 'Series', width: 'max-w-[20rem]' },
-          { label: 'Organizer', width: 'max-w-[12rem]' },
+          { label: 'Organizer', width: 'max-w-48' },
           { label: 'Schedule', width: 'max-w-[18rem]' },
           { label: 'Next call' },
           { label: 'Status' },
@@ -157,7 +157,7 @@ export function SeriesTab({ scope }: { scope: CallAdminListScope }): ReactElemen
                 </span>
               </div>
             </td>
-            <td className='max-w-[12rem] px-4 py-3 align-top leading-5 text-muted-foreground'>
+            <td className='max-w-48 px-4 py-3 align-top leading-5 text-muted-foreground'>
               <PersonPill
                 userId={series.organizer.id}
                 name={userLabel(series.organizer)}
@@ -169,7 +169,7 @@ export function SeriesTab({ scope }: { scope: CallAdminListScope }): ReactElemen
                 <span className='text-foreground'>
                   {series.startTime}–{series.endTime} {series.timezone}
                 </span>
-                <span className='break-words font-mono'>{series.recurrenceRule}</span>
+                <span className='wrap-break-word font-mono'>{series.recurrenceRule}</span>
               </div>
             </td>
             <td className='whitespace-nowrap px-4 py-3 align-top text-xs leading-5 text-muted-foreground'>

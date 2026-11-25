@@ -341,7 +341,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   }
 
   return (
-    <div className={cn('bg-background rounded-lg shadow-sm border border-border', className)}>
+    <div className={cn('bg-background rounded-lg shadow-xs border border-border', className)}>
       {/* Header Section */}
       <div
         className={cn(
@@ -427,7 +427,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                   }}
                   placeholder='Enter team name'
                   maxLength={20}
-                  className='flex-1 px-2 py-1 text-lg border border-input rounded focus:outline-none focus:border-ring bg-background text-foreground'
+                  className='flex-1 px-2 py-1 text-lg border border-input rounded focus:outline-hidden focus:border-ring bg-background text-foreground'
                   autoFocus={!isMobile}
                 />
                 <button
@@ -618,7 +618,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
           </div>
           {editingField === 'manager' && isOwnProfile ? (
             <div className='space-y-2'>
-              <div className='[&_.bg-blue-600]:bg-gray-700 [&_.bg-blue-600]:text-white [&_.hover\\:bg-blue-600\\/90]:hover:bg-gray-600'>
+              <div className='[&_.bg-blue-600]:bg-gray-700 [&_.bg-blue-600]:text-white hover:[&_.hover\\:bg-blue-600\\/90]:bg-gray-600'>
                 <SearchUser
                   excludeUserIds={[userId]}
                   selectedUsers={selectedManagerUsers}
@@ -776,7 +776,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         }}
                         placeholder='Enter display name'
                         maxLength={50}
-                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
+                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-hidden focus:border-ring'
                         autoFocus={!isMobile}
                       />
                       <button
@@ -853,7 +853,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                         }}
                         placeholder='Enter phone number'
                         maxLength={15}
-                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
+                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-hidden focus:border-ring'
                         autoFocus={!isMobile}
                       />
                       <button
@@ -953,7 +953,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                           if (e.key === 'Escape') handleCancelEdit();
                         }}
                         max={new Date().toISOString().split('T')[0]}
-                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-none focus:border-ring'
+                        className='flex-1 px-2 py-1 text-sm text-foreground bg-background border border-input rounded focus:outline-hidden focus:border-ring'
                         autoFocus={!isMobile}
                       />
                       <button

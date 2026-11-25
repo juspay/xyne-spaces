@@ -62,7 +62,7 @@ export function AutoWidthInput({
         onChange={event => onChange(event.target.value)}
         {...(placeholder === undefined ? {} : { placeholder })}
         style={{ ...measured, ...style }}
-        className={cn('min-w-0 max-w-full bg-transparent focus:outline-none', className)}
+        className={cn('min-w-0 max-w-full bg-transparent focus:outline-hidden', className)}
         {...rest}
       />
     </span>

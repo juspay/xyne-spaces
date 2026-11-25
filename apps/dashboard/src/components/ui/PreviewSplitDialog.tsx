@@ -101,14 +101,14 @@ export const PreviewSplitDialog: React.FC<PreviewSplitDialogProps> = ({
       <Dialog.Portal>
         <Dialog.Overlay
           className={cn(
-            'fixed inset-0 z-[50] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+            'fixed inset-0 z-50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             overlayClassName,
           )}
         />
         <Dialog.Content
           {...(preventDrawer ? { 'data-prevent-drawer': 'true' } : {})}
           className={cn(
-            'fixed z-[50] overflow-hidden focus:outline-none',
+            'fixed z-50 overflow-hidden focus:outline-hidden',
             isMobile ? 'inset-0 w-screen h-screen' : 'inset-0 m-auto w-[95vw] h-[95vh] rounded-2xl',
             contentClassName,
           )}

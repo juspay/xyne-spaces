@@ -71,7 +71,7 @@ const InlineNameCell: React.FC<{
       aria-label='Rename'
       data-track-category='knowledge-base'
       data-track-name='rename-entry-inline'
-      className='h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring'
+      className='h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring'
     />
   );
 };

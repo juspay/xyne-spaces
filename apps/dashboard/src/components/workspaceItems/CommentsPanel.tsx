@@ -178,7 +178,7 @@ export function CommentsPanel({
             }
             data-track-category='Workspace'
             data-track-name='comment-draft'
-            className='w-full resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-none focus:border-ring'
+            className='w-full resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-hidden focus:border-ring'
           />
           <div className='mt-1.5 flex items-center justify-end gap-1.5'>
             {sink && draftAnchor?.quote ? (

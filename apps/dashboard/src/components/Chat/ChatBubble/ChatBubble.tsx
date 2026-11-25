@@ -1256,7 +1256,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         // `data-hovered` on the [data-message-id] root. Applied at the root so
         // every sub-layout (message, link/canvas previews, reply layout) is
         // covered uniformly and stays in sync with the toolbar.
-        'data-[hovered]:bg-muted/50',
+        'data-hovered:bg-muted/50',
         // Keyboard navigation adds an outline on top of the same tint, so a
         // selected row and a hovered row can be on screen together and stay
         // distinct. The outline is drawn by an ::after overlay rather than a
@@ -1266,11 +1266,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         // row's last child, so it sits above them; z-10 clears descendants
         // that raise themselves, and pointer-events-none keeps clicks and
         // hover actions reaching the message underneath.
-        'data-[keyboard-selected]:bg-muted/50',
-        'data-[keyboard-selected]:after:pointer-events-none data-[keyboard-selected]:after:absolute',
-        'data-[keyboard-selected]:after:inset-0 data-[keyboard-selected]:after:z-10',
-        'data-[keyboard-selected]:after:rounded-sm data-[keyboard-selected]:after:ring-2',
-        'data-[keyboard-selected]:after:ring-inset data-[keyboard-selected]:after:ring-primary',
+        'data-keyboard-selected:bg-muted/50',
+        'data-keyboard-selected:after:pointer-events-none data-keyboard-selected:after:absolute',
+        'data-keyboard-selected:after:inset-0 data-keyboard-selected:after:z-10',
+        'data-keyboard-selected:after:rounded-sm data-keyboard-selected:after:ring-2',
+        'data-keyboard-selected:after:ring-inset data-keyboard-selected:after:ring-primary',
       )}
       style={
         isMobile
@@ -1544,7 +1544,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             previewResult.type !== 'call_preview' &&
               'pl-4 border-l-4 border-l-gray-300 dark:border-l-gray-600',
             message.senderId === user?.id && 'max-[500px]:mb-5',
-            'group-data-[hovered]/bubble:bg-accent/50',
+            'group-data-hovered/bubble:bg-accent/50',
           )}
         >
           {previewResult.type === 'message_preview' ? (
@@ -1570,7 +1570,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           className={cn(
             'pr-3 max-w-full pl-4 ml-14 transition-colors rounded-r border-l-4 border-l-gray-300 dark:border-l-gray-600',
             message.senderId === user?.id && 'max-[500px]:mb-5',
-            'group-data-[hovered]/bubble:bg-accent/50',
+            'group-data-hovered/bubble:bg-accent/50',
           )}
         >
           <CanvasPreview canvasId={canvasId} onClose={() => setShowCanvasPreview(false)} />
@@ -1688,7 +1688,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 onSelect={setCustomReminderDate}
                 placeholder='Select date'
                 minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-                inputClassName='w-full !h-9'
+                inputClassName='w-full h-9!'
                 showClearButton={false}
               />
             </div>
@@ -1751,7 +1751,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-border'>
               <h2 className='text-lg font-semibold text-foreground'>Delete message</h2>
               <button
-                className='rounded-sm text-foreground opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
+                className='rounded-sm text-foreground opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
                 onClick={() => setShowDeleteConfirm(false)}
                 data-track-category='CHAT_BUBBLE'
                 data-track-name='CLOSE_DELETE_CONFIRM_DIALOG'

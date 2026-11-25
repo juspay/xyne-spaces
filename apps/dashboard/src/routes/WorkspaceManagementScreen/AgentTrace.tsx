@@ -363,7 +363,7 @@ const Meter = ({ row, mark }: { row: Row; mark: Mark }): ReactElement => {
 };
 
 const Mono = ({ children }: { children: ReactNode }): ReactElement => (
-  <pre className='max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground'>
+  <pre className='max-h-72 overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg bg-muted/50 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground'>
     {children}
   </pre>
 );
@@ -638,7 +638,7 @@ const XorRequest = ({
             aria-label='XOR request'
             data-track-category='workspace-management'
             data-track-name='AGENT_TRACE_XOR_EDIT'
-            className='h-80 w-full resize-y rounded-lg bg-muted/50 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-foreground ring-1 ring-primary/30 focus:outline-none'
+            className='h-80 w-full resize-y rounded-lg bg-muted/50 px-3 py-2.5 font-mono text-[11px] leading-relaxed text-foreground ring-1 ring-primary/30 focus:outline-hidden'
           />
         ) : (
           <>

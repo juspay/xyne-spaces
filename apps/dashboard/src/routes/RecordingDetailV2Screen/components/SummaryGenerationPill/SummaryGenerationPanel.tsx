@@ -138,7 +138,7 @@ export const SummaryGenerationPanel = ({
         className={cn(
           'w-full overflow-hidden border',
           hasFailed
-            ? 'rounded-[11px] border-destructive/[0.22] bg-destructive/[0.055]'
+            ? 'rounded-[11px] border-destructive/22 bg-destructive/5.5'
             : 'rounded-xl border-border/70 bg-card',
         )}
       >
@@ -272,7 +272,7 @@ export const SummaryGenerationPanel = ({
 
               <div className='h-1.5 w-full overflow-hidden rounded-full bg-muted'>
                 <motion.div
-                  className='h-full rounded-full bg-gradient-to-r from-primary/70 to-primary'
+                  className='h-full rounded-full bg-linear-to-r from-primary/70 to-primary'
                   style={{ width: progressWidth }}
                 />
               </div>

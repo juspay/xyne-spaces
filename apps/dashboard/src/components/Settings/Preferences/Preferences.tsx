@@ -212,7 +212,7 @@ const QualitySelect: FC<{
               type='button'
               disabled={disabled}
               aria-labelledby={`${id}-label ${id}`}
-              className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background'
+              className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background'
               data-track-category='PREFERENCES'
               data-track-name={id}
             >
@@ -362,7 +362,7 @@ const NotificationKeywordsCard: FC = () => {
           }
         }}
         placeholder='Add a keyword and press Enter'
-        className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+        className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
         data-track-category='PREFERENCES'
         data-track-name='AddNotificationKeyword'
       />
@@ -870,7 +870,7 @@ const DefaultSummaryTemplateSelect: FC<{
             type='button'
             disabled={isLoading}
             aria-labelledby='default-summary-template-label default-summary-template'
-            className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
             data-track-category='PREFERENCES'
             data-track-name='default-summary-template'
           >
@@ -1191,7 +1191,7 @@ const PasswordSection: FC = () => {
               placeholder='Current password'
               value={currentPassword}
               onChange={e => setCurrentPassword(e.target.value)}
-              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='CurrentPasswordInput'
             />
@@ -1213,7 +1213,7 @@ const PasswordSection: FC = () => {
               placeholder='New password (min 8 characters)'
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
-              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='NewPasswordInput'
             />
@@ -1235,7 +1235,7 @@ const PasswordSection: FC = () => {
               placeholder='Confirm new password'
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
-              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='ConfirmPasswordInput'
             />
@@ -1463,7 +1463,7 @@ const ChannelSelect: FC<{
         side='bottom'
         align='start'
         sideOffset={6}
-        className='w-[var(--radix-popover-trigger-width)] rounded-xl p-1.5'
+        className='w-(--radix-popover-trigger-width) rounded-xl p-1.5'
         trigger={
           <button
             type='button'
@@ -1795,7 +1795,7 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 variant='ghost'
                 size='sm'
                 onClick={onClose}
-                className='!p-2 border border-border rounded-md hover:bg-accent'
+                className='p-2! border border-border rounded-md hover:bg-accent'
                 title='Close'
                 aria-label='Close'
                 data-track-category='PREFERENCES'

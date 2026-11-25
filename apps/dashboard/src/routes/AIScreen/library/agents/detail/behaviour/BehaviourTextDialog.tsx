@@ -82,7 +82,7 @@ export function BehaviourTextDialog({
           placeholder={placeholder}
           data-track-category='Claw Agents'
           data-track-name={`Agent detail v2: ${testId} field`}
-          className='h-[140px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+          className='h-[140px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
         />
         {hint && (
           <span className='text-xs font-normal leading-4 tracking-[-0.24px] text-muted-foreground'>

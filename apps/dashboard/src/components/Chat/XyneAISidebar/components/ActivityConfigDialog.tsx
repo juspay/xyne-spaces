@@ -81,7 +81,7 @@ export const ActivityConfigDialog = ({
   if (!isOpen) return null;
 
   return (
-    <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/50'>
+    <div className='fixed inset-0 z-60 flex items-center justify-center bg-black/50'>
       <div className='bg-popover rounded-lg shadow-lg w-full max-w-md mx-4 overflow-hidden'>
         {/* Header */}
         <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
@@ -170,7 +170,7 @@ export const ActivityConfigDialog = ({
                     value={newEventName}
                     onChange={e => setNewEventName(e.target.value)}
                     placeholder='Enter display name'
-                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
+                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>
 
@@ -187,7 +187,7 @@ export const ActivityConfigDialog = ({
                     value={newEventCategory}
                     onChange={e => setNewEventCategory(e.target.value)}
                     placeholder='Enter display category'
-                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
+                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>
               </div>

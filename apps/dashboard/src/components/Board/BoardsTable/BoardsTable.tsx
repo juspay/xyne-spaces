@@ -265,7 +265,7 @@ export const BoardsTable = ({
   }
 
   return (
-    <div className='bg-background rounded-lg shadow-sm border border-border overflow-hidden'>
+    <div className='bg-background rounded-lg shadow-xs border border-border overflow-hidden'>
       <table className='min-w-full divide-y divide-border'>
         <thead className='bg-muted'>
           <tr>

@@ -87,7 +87,7 @@ function TicketRow({
     </>
   );
   const rowClass =
-    'group/row flex h-7 min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'group/row flex h-7 min-w-0 items-center gap-2 rounded-md px-2 text-left transition-colors duration-150 hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring';
   return link ? (
     <a
       href={`${origin}${link}`}
@@ -194,7 +194,7 @@ export function DuplicateSuggestions({
                     <button
                       type='button'
                       onClick={onUndoSame}
-                      className='flex h-6 items-center rounded-md px-1.5 text-[12px] font-medium text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                      className='flex h-6 items-center rounded-md px-1.5 text-[12px] font-medium text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                       data-track-category='Tickets'
                       data-track-name='DUPLICATE_SUGGESTION_UNDO'
                       data-track-label={lead.tier}
@@ -208,7 +208,7 @@ export function DuplicateSuggestions({
                         type='button'
                         disabled={checking}
                         onClick={() => onSame(lead)}
-                        className='flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]'
+                        className='flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.97]'
                         data-track-category='Tickets'
                         data-track-name='DUPLICATE_SUGGESTION_SAME'
                         data-track-label={lead.tier}
@@ -221,7 +221,7 @@ export function DuplicateSuggestions({
                         type='button'
                         disabled={checking}
                         onClick={() => onNotSame(lead)}
-                        className='flex h-6 items-center rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                        className='flex h-6 items-center rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                         data-track-category='Tickets'
                         data-track-name='DUPLICATE_SUGGESTION_NOT_SAME'
                         data-track-label={lead.tier}
@@ -241,7 +241,7 @@ export function DuplicateSuggestions({
                   type='button'
                   onClick={() => setSimilarOpen(value => !value)}
                   aria-expanded={similarOpen}
-                  className='flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  className='flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                   data-track-category='Tickets'
                   data-track-name='DUPLICATE_SIMILAR_TOGGLE'
                   data-track-label={similarOpen ? 'close' : 'open'}
@@ -286,7 +286,7 @@ export function DuplicateSuggestions({
                                 type='button'
                                 disabled={checking}
                                 onClick={() => onSame(suggestion)}
-                                className='flex h-6 shrink-0 items-center rounded-md px-1.5 text-[12px] text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/similar:opacity-100 [@media(hover:none)]:opacity-100'
+                                className='flex h-6 shrink-0 items-center rounded-md px-1.5 text-[12px] text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring group-hover/similar:opacity-100 [@media(hover:none)]:opacity-100'
                                 data-track-category='Tickets'
                                 data-track-name='DUPLICATE_SUGGESTION_SAME'
                                 data-track-label={suggestion.tier}

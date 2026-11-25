@@ -188,7 +188,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
             className={cn(
               'rounded px-2.5 py-1 text-xs font-medium transition-colors',
               mode === 'raw'
-                ? 'bg-background text-foreground shadow-sm'
+                ? 'bg-background text-foreground shadow-xs'
                 : 'text-muted-foreground hover:text-foreground',
             )}
             data-track-category='AskAI'
@@ -203,7 +203,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
             className={cn(
               'rounded px-2.5 py-1 text-xs font-medium transition-colors',
               mode === 'preview'
-                ? 'bg-background text-foreground shadow-sm'
+                ? 'bg-background text-foreground shadow-xs'
                 : 'text-muted-foreground hover:text-foreground',
             )}
             data-track-category='AskAI'
@@ -227,7 +227,7 @@ function CitationMarkdownView({ doc }: { doc: CitationKbFileDoc }): ReactElement
             <ReadmeViewer source={file} fileName={doc.title} />
           </div>
         ) : (
-          <pre className='h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-sm text-foreground'>
+          <pre className='h-full overflow-auto whitespace-pre-wrap wrap-break-word p-4 font-mono text-sm text-foreground'>
             {rawText ?? ''}
           </pre>
         )}
