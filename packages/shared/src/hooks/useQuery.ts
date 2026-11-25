@@ -97,7 +97,11 @@ function decryptResultData<TData>(
               table: tableName,
             });
           }
-          // Mark as pending even without key - ensures re-processing when key arrives
+          // Replace ciphertext with a non-ciphertext placeholder so raw ciphertext
+          // never reaches the UI. The re-render driven by hasPending (via
+          // decryptionCache.subscribe) picks up the real value once prefetch lands.
+          copy[field] = '';
+          modified = true;
           recordPending = true;
           cacheMisses++;
         }
@@ -395,11 +399,18 @@ export function useQuery<
 
   // Return stable snapshot while decrypting to prevent UI flicker.
   // Only expose new data when fully decrypted (hasPending = false).
-  // On first render with no stable data yet, return current decrypted state.
-  const outputData =
-    hasPending && stableDecryptedRef.current !== null ? stableDecryptedRef.current : decryptedData;
+  // Never expose ciphertext on a cold load: when decryption is still pending and
+  // no clean snapshot exists yet, return undefined so the UI shows its loading
+  // state instead of raw ciphertext (e.g. canvas titles as ENC:v1|... blobs).
+  const outputData = hasPending
+    ? (stableDecryptedRef.current ?? undefined)
+    : decryptedData;
+  // Mark the query incomplete while decryption is pending so consumers (e.g.
+  // CanvasPageSubscription) treat it as loading and do not derive cursors or
+  // accumulate rows from a half-decrypted snapshot.
+  const outputDetails = hasPending && details.type !== 'error' ? { type: 'unknown' } : details;
 
-  return [outputData, details] as unknown as QueryResult<TReturn>;
+  return [outputData, outputDetails] as unknown as QueryResult<TReturn>;
 }
 
 /**
@@ -491,9 +502,16 @@ export function useRawQuery<
 
   // Return stable snapshot while decrypting to prevent UI flicker.
   // Only expose new data when fully decrypted (hasPending = false).
-  // On first render with no stable data yet, return current decrypted state.
-  const outputData =
-    hasPending && stableDecryptedRef.current !== null ? stableDecryptedRef.current : decryptedData;
+  // Never expose ciphertext on a cold load: when decryption is still pending and
+  // no clean snapshot exists yet, return undefined so the UI shows its loading
+  // state instead of raw ciphertext (e.g. canvas titles as ENC:v1|... blobs).
+  const outputData = hasPending
+    ? (stableDecryptedRef.current ?? undefined)
+    : decryptedData;
+  // Mark the query incomplete while decryption is pending so consumers (e.g.
+  // CanvasPageSubscription) treat it as loading and do not derive cursors or
+  // accumulate rows from a half-decrypted snapshot.
+  const outputDetails = hasPending && details.type !== 'error' ? { type: 'unknown' } : details;
 
-  return [outputData, details] as unknown as QueryResult<TReturn>;
+  return [outputData, outputDetails] as unknown as QueryResult<TReturn>;
 }

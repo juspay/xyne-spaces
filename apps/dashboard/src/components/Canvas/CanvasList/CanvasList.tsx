@@ -472,6 +472,7 @@ const areCanvasItemsEqual = (left: Canvas, right: Canvas | undefined): boolean =
   return (
     right.id === left.id &&
     right.updatedAt === left.updatedAt &&
+    right.title === left.title &&
     right.isStarred === left.isStarred &&
     getCanvasLabelsKey(right) === getCanvasLabelsKey(left)
   );
