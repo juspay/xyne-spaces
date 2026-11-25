@@ -30,6 +30,24 @@ export class GenericQueryService {
       ...availableFields.system,
       ...availableFields.custom,
     ];
+    if (availableFields.system.length === 0) {
+      errors.push(`Unsupported entity type: '${query.entityType}'`);
+      return { valid: false, errors };
+    }
+    if (query.projectId && !availableFields.system.some(f => f.name === 'projectId')) {
+      errors.push(`projectId is not supported for entity type '${query.entityType}'`);
+    }
+
+    // Every selected name must be a known scalar or custom field. Without this, a relation
+    // name (e.g. `assignedToUser`, `activities`) or `_count` reaches Prisma's `select` and
+    // returns related rows that the row-level ACL never filters.
+    if (query.select) {
+      for (const field of query.select) {
+        if (!this.findField(allFields, field)) {
+          errors.push(`Unknown field in select: '${field}'`);
+        }
+      }
+    }
 
 
     if (query.filters) {
@@ -78,12 +96,15 @@ export class GenericQueryService {
 
   private findField(allFields: FieldInfo[], fieldName: string): FieldInfo | undefined {
 
+    // Custom fields carry a fieldId and are addressed only as `custom.<fieldId>`. A bare name
+    // must match a system column: otherwise a custom field named like a relation would pass
+    // validation and reach Prisma as that relation.
     if (!fieldName.startsWith('custom.')) {
-      return allFields.find(f => f.name === fieldName);
+      return allFields.find(f => f.fieldId === undefined && f.name === fieldName);
     }
 
-    const fieldId = fieldName.replace('custom.', '');
-    return allFields.find(f => f.fieldId === fieldId);
+    const fieldId = fieldName.slice('custom.'.length);
+    return allFields.find(f => f.fieldId !== undefined && f.fieldId === fieldId);
   }
 
   private isAggregationValidForType(

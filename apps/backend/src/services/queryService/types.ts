@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { FormEntityType } from '@xyne/shared';
 
+/**
+ * The only tables the analytics query route may read. Adding one here exposes every scalar
+ * column of that model to any authenticated user (rows are still filtered by its ACL), so
+ * check the model's columns before extending this list.
+ */
 export const SUPPORTED_ENTITY_TYPES = [
   FormEntityType.TICKET,
-  FormEntityType.SUB_TICKET,
-  FormEntityType.RELEASE_ENV_FORM,
-  FormEntityType.RELEASE_MIGRATION_FORM,
   'USER_WORKLOAD_MAPPING',
 ] as const;
 
@@ -17,9 +19,6 @@ export function isSupportedEntityType(entityType: string): entityType is Support
 
 export const ENTITY_TYPE_TO_PRISMA_MODEL: Record<SupportedEntityType, string> = {
   [FormEntityType.TICKET]: 'Ticket',
-  [FormEntityType.SUB_TICKET]: 'SubTicket',
-  [FormEntityType.RELEASE_ENV_FORM]: "ReleaseChangeType",
-  [FormEntityType.RELEASE_MIGRATION_FORM]: "ReleaseChangeType",
   USER_WORKLOAD_MAPPING: 'UserWorkloadMapping',
 };
 
@@ -206,40 +205,113 @@ export interface QueryResult {
   };
 }
 
-const AggregationSchema = z.object({
-  function: z.enum(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']),
-  field: z.string(),
-  alias: z.string().optional(),
-});
+// ----------------------------------------------------------------------------
+// Request schema. The request body is attacker-controlled and its pieces end up as Prisma
+// arguments, so every list and string is bounded. Unknown keys are stripped rather than
+// rejected (saved dashboards carry UI-only keys such as visualizationType); that is safe
+// because only the parsed output, which holds the keys declared here, reaches the builder.
+// ----------------------------------------------------------------------------
 
-const OrderBySchema = z.object({
-  field: z.string(),
-  direction: z.enum(['ASC', 'DESC']),
-});
+export const MAX_QUERY_LIMIT = 10000;
+const MAX_OFFSET = 100000;
+const MAX_FIELD_NAME_LENGTH = 128;
+const MAX_FILTER_DEPTH = 5;
+const MAX_FILTER_CONDITIONS = 100;
+const MAX_VALUE_LIST_LENGTH = 1000;
 
-const FieldConditionSchema = z.object({
-  field: z.string().min(1),
-  operator: z.enum(COMPARISON_OPERATORS),
-  value: z.unknown(),
-});
+/** A system column name or `custom.<fieldId>`; anything else cannot name a real field. */
+const FieldNameSchema = z
+  .string()
+  .min(1)
+  .max(MAX_FIELD_NAME_LENGTH)
+  .regex(/^(custom\.)?[A-Za-z0-9_-]+$/, 'Invalid field name');
 
-const LogicalFilterSchema = z.object({
-  operator: z.enum(LOGICAL_OPERATORS),
-  conditions: z.array(z.lazy(() => z.union([FieldConditionSchema, LogicalFilterSchema]))).min(1),
-}) as any;
+const ScalarValueSchema = z.union([z.string().max(1000), z.number(), z.boolean(), z.null()]);
 
-const GenericQuerySchema = z.object({
-  entityType: z.string(),
-  projectId: z.string().optional(),
-  select: z.array(z.string()).optional(),
-  filters: LogicalFilterSchema.optional(),
-  aggregations: z.array(AggregationSchema).optional(),
-  groupBy: z.array(z.string()).optional(),
-  orderBy: z.array(OrderBySchema).optional(),
-  limit: z.number().int().positive().optional(),
-  offset: z.number().int().nonnegative().optional(),
-  dateGranularity: z.enum(['hour', 'day', 'week', 'month']).optional(),
-});
+/**
+ * The picker sends `{ id, name }` for user/board/project options (any other keys are
+ * stripped). Only `id` is ever used, and it must be a scalar: an object here would be passed
+ * to Prisma as a filter of its own.
+ */
+const OptionValueSchema = z
+  .object({ id: z.union([z.string().max(1000), z.number()]), name: z.string().max(1000).optional() });
+
+const FilterValueSchema = z.union([
+  ScalarValueSchema,
+  OptionValueSchema,
+  z.array(z.union([ScalarValueSchema, OptionValueSchema])).max(MAX_VALUE_LIST_LENGTH),
+]);
+
+const AggregationSchema = z
+  .object({
+    function: z.enum(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']),
+    field: FieldNameSchema,
+    alias: z.string().max(64).regex(/^[A-Za-z0-9_ .-]+$/, 'Invalid alias').optional(),
+  })
+
+const OrderBySchema = z
+  .object({
+    field: FieldNameSchema,
+    direction: z.enum(['ASC', 'DESC']),
+  })
+
+const FieldConditionSchema = z
+  .object({
+    field: FieldNameSchema,
+    operator: z.enum(COMPARISON_OPERATORS),
+    value: FilterValueSchema.optional(),
+  })
+
+const LogicalFilterSchema: z.ZodType<LogicalFilter> = z.lazy(() =>
+  z
+    .object({
+      operator: z.enum(LOGICAL_OPERATORS),
+      conditions: z
+        .array(z.union([FieldConditionSchema, LogicalFilterSchema]))
+        .min(1)
+        .max(MAX_FILTER_CONDITIONS),
+    }),
+) as z.ZodType<LogicalFilter>;
+
+/** Depth and total size of a filter tree, so one request cannot build an unbounded WHERE. */
+function filterShape(filter: LogicalFilter, depth = 1): { depth: number; conditions: number } {
+  let maxDepth = depth;
+  let conditions = 0;
+  for (const c of filter.conditions) {
+    if (isLogicalFilter(c)) {
+      const inner = filterShape(c, depth + 1);
+      maxDepth = Math.max(maxDepth, inner.depth);
+      conditions += inner.conditions;
+    } else {
+      conditions += 1;
+    }
+  }
+  return { depth: maxDepth, conditions };
+}
+
+const GenericQuerySchema = z
+  .object({
+    entityType: z.enum(SUPPORTED_ENTITY_TYPES),
+    projectId: z.string().max(MAX_FIELD_NAME_LENGTH).optional(),
+    select: z.array(FieldNameSchema).max(200).optional(),
+    filters: LogicalFilterSchema.optional(),
+    aggregations: z.array(AggregationSchema).max(20).optional(),
+    groupBy: z.array(FieldNameSchema).max(5).optional(),
+    orderBy: z.array(OrderBySchema).max(5).optional(),
+    limit: z.number().int().positive().max(MAX_QUERY_LIMIT).optional(),
+    offset: z.number().int().nonnegative().max(MAX_OFFSET).optional(),
+    dateGranularity: z.enum(['hour', 'day', 'week', 'month']).optional(),
+  })
+  .superRefine((q, ctx) => {
+    if (!q.filters) return;
+    const shape = filterShape(q.filters);
+    if (shape.depth > MAX_FILTER_DEPTH) {
+      ctx.addIssue({ code: 'custom', message: `Filters may nest at most ${MAX_FILTER_DEPTH} levels` });
+    }
+    if (shape.conditions > MAX_FILTER_CONDITIONS) {
+      ctx.addIssue({ code: 'custom', message: `Filters may hold at most ${MAX_FILTER_CONDITIONS} conditions` });
+    }
+  });
 
 /**
  * Parse and validate a generic query
@@ -252,5 +324,5 @@ export function parseGenericQuery(data: unknown): { success: boolean; query?: Ge
       error: result.error.issues.map(e => e.message).join(', '),
     };
   }
-  return { success: true, query: result.data };
+  return { success: true, query: result.data as GenericQuery };
 }

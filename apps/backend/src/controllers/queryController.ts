@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { createQueryService } from '@/services/queryService/queryService';
 import { DatabaseClient } from '@/database/client';
+import { logger } from '@/utils/logger';
 
 export class QueryController {
   /**
@@ -32,11 +33,12 @@ export class QueryController {
         data: availableFields,
       });
     } catch (error) {
+      logger.error('[analytics-query] request failed', { error });
       res.status(500).json({
         success: false,
         error: {
           code: 'INTERNAL_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          message: 'Internal error',
         },
       });
     }
@@ -84,11 +86,12 @@ export class QueryController {
 
       res.json(result);
     } catch (error) {
+      logger.error('[analytics-query] request failed', { error });
       res.status(500).json({
         success: false,
         error: {
           code: 'INTERNAL_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          message: 'Internal error',
         },
       });
     }
@@ -132,11 +135,12 @@ export class QueryController {
         valid: true,
       });
     } catch (error) {
+      logger.error('[analytics-query] request failed', { error });
       res.status(500).json({
         success: false,
         error: {
           code: 'INTERNAL_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
+          message: 'Internal error',
         },
       });
     }
