@@ -594,7 +594,9 @@ const envSchema = Joi.object({
   // Ingress transit proxy for the Xyne Apps API. true: bots reach /api/apps only through the
   // proxy, so chat/postMessage and chat/updateMessage always go through their encryption
   // contract and a bot that calls the backend directly is refused (TRANSIT_KEY_REQUIRED).
-  // false (default, no proxy deployed): those routes take plaintext as before.
+  // false (default, no proxy deployed): those routes take plaintext as before, and a request
+  // that came through the proxy is refused (TRANSIT_PROXY_NOT_ENABLED) rather than stored as
+  // transit ciphertext the backend cannot use.
   TRANSIT_PROXY_INGRESS_ENABLED: Joi.boolean().default(false),
   // Egress transit proxy for app event webhooks. Set: external deliveries are sealed by the
   // encryption service and posted by the proxy, never by the backend. Empty = direct (default).
