@@ -7,20 +7,42 @@ const requiredEnv = (name: string): string => {
   return val;
 };
 
-const rootEncryptionKey = Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex");
-if (rootEncryptionKey.length !== 32) {
-  throw new Error("ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hex characters");
+interface EncryptionKeys {
+  root: Buffer;
+  data: Buffer;
+  actionSigning: Buffer;
+  sessionSigning: Buffer;
+  oauthStateSigning: Buffer;
+  legacySessionSigning: Buffer;
 }
 
-const dataEncryptionKey = derivePurposeKey(rootEncryptionKey, "data-encryption/aes-256-gcm/v1");
-const actionSigningKey = derivePurposeKey(rootEncryptionKey, "action-approval/hmac-sha256/v1");
-const sessionSigningKey = derivePurposeKey(rootEncryptionKey, "session-token/hmac-sha256/v1");
-const oauthStateSigningKey = derivePurposeKey(rootEncryptionKey, "oauth-state/hmac-sha256/v1");
-const legacySessionSigningKey = createHmac("sha256", rootEncryptionKey).update("xyne-claw-auth/session-token/v1").digest();
+let derived: EncryptionKeys | undefined;
 
-// Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
-// the derived data key; reads fall back to the legacy root during migration.
-registerDecryptionFallback(dataEncryptionKey, rootEncryptionKey);
+/**
+ * The keys derived from ENCRYPTION_KEY, on first use, so importing this module needs no key
+ * (the image build imports the MCP adapters to prewarm their servers). main.ts calls it at
+ * boot, so a missing or malformed key still stops the service before it serves anything.
+ */
+export function encryptionKeys(): EncryptionKeys {
+  if (derived) return derived;
+  const root = Buffer.from(requiredEnv("ENCRYPTION_KEY"), "hex");
+  if (root.length !== 32) {
+    throw new Error("ENCRYPTION_KEY must be exactly 32 bytes encoded as 64 hex characters");
+  }
+  const data = derivePurposeKey(root, "data-encryption/aes-256-gcm/v1");
+  // Existing rows were encrypted directly with ENCRYPTION_KEY. New writes use
+  // the derived data key; reads fall back to the legacy root during migration.
+  registerDecryptionFallback(data, root);
+  derived = {
+    root,
+    data,
+    actionSigning: derivePurposeKey(root, "action-approval/hmac-sha256/v1"),
+    sessionSigning: derivePurposeKey(root, "session-token/hmac-sha256/v1"),
+    oauthStateSigning: derivePurposeKey(root, "oauth-state/hmac-sha256/v1"),
+    legacySessionSigning: createHmac("sha256", root).update("xyne-claw-auth/session-token/v1").digest(),
+  };
+  return derived;
+}
 
 export const CONFIG = {
   port: Number(process.env["AUTH_SERVICE_PORT"] ?? 3003),
@@ -40,13 +62,27 @@ export const CONFIG = {
   // traffic off the public ingress (~100k+ progress events/day in prod).
   // Falls back to `selfUrl` so single-node / dev deployments keep working.
   internalUrl: process.env["AUTH_SERVICE_INTERNAL_URL"] ?? process.env["AUTH_SERVICE_URL"] ?? `http://localhost:${process.env["AUTH_SERVICE_PORT"] ?? 3003}`,
-  encryptionKey: dataEncryptionKey,
-  actionSigningKey,
-  sessionSigningKey,
-  oauthStateSigningKey,
-  legacyActionSigningKey: rootEncryptionKey,
-  legacySessionSigningKey,
-  legacyOauthStateSigningKey: rootEncryptionKey,
+  get encryptionKey(): Buffer {
+    return encryptionKeys().data;
+  },
+  get actionSigningKey(): Buffer {
+    return encryptionKeys().actionSigning;
+  },
+  get sessionSigningKey(): Buffer {
+    return encryptionKeys().sessionSigning;
+  },
+  get oauthStateSigningKey(): Buffer {
+    return encryptionKeys().oauthStateSigning;
+  },
+  get legacyActionSigningKey(): Buffer {
+    return encryptionKeys().root;
+  },
+  get legacySessionSigningKey(): Buffer {
+    return encryptionKeys().legacySessionSigning;
+  },
+  get legacyOauthStateSigningKey(): Buffer {
+    return encryptionKeys().root;
+  },
   // Spaces' AES-256-CBC key — must equal xyne-spaces backend's ENCRYPTION_KEY
   // value (the two services are independently keyed). Used ONLY to decrypt
   // `installed_apps.signingSecret` read from the Spaces DB during the

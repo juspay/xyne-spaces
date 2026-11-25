@@ -61,6 +61,15 @@ WORKDIR /repo/apps/xyne-claw-auth/backend
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs --create-home clawauth
 
+# Grafana's MCP server (a Python wheel carrying the Go binary), installed at build time:
+# prod can't reach PyPI and its root filesystem is read-only, so uvx can't fetch it there.
+# Keep the version in step with GRAFANA_MCP_VERSION in src/mcp/adapters/grafana.ts.
+RUN UV_TOOL_DIR=/opt/mcp-tools UV_TOOL_BIN_DIR=/usr/local/bin UV_CACHE_DIR=/tmp/uv-cache \
+    uv tool install mcp-grafana==1.6.1 \
+    && test -x /usr/local/bin/mcp-grafana \
+    && rm -rf /tmp/uv-cache
+ENV MCP_GRAFANA_BIN=/usr/local/bin/mcp-grafana
+
 COPY --from=builder --chown=clawauth:nodejs /repo /repo
 
 USER clawauth
@@ -71,10 +80,11 @@ USER clawauth
 ENV MCP_STORE_ROOT=/home/clawauth/.mcp-store
 
 # Prewarm the store: bake the built-in npx MCP servers into an immutable image
-# layer so they launch as `node <entrypoint>` with no request-time npx install
-# and no shared-cache corruption. Best-effort — a flaky registry never fails the
-# build; the runtime provisioner installs on demand and self-heals.
-RUN node --import tsx/esm scripts/prewarm-mcp.ts || true
+# layer so they launch as `node <entrypoint>`. Prod can't install them at runtime
+# (read-only root filesystem, npm registry not allowed by the egress proxy), so a
+# required server (scripts/prewarm-mcp.ts REQUIRED) that fails to install fails
+# the build.
+RUN node --import tsx/esm scripts/prewarm-mcp.ts
 
 EXPOSE 3003
 
