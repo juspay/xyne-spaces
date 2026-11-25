@@ -1313,15 +1313,13 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             },
           });
         }
+        // The agent's app token works only on the app route (the user route reads only a
+        // user's session cookie); Spaces checks the app's files:read permission and that its
+        // bot can see the attachment's conversation.
         if (safeAttachmentId) {
           sources.push({
             label: "apps-route",
-            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${safeAttachmentId}/download`,
-            headers: { Authorization: `Bearer ${agent.appToken}` },
-          });
-          sources.push({
-            label: "user-route",
-            url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
+            url: `${CONFIG.spacesInternalUrl}/api/apps/files/download/${safeAttachmentId}`,
             headers: { Authorization: `Bearer ${agent.appToken}` },
           });
         }
