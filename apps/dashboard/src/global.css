@@ -3,8 +3,6 @@
 @import "tailwindcss" source(none);
 @import "tw-animate-css";
 
-@config '../tailwind.config.js';
-
 @source './**/*.{ts,tsx}';
 @source '../index.html';
 @source not './components/AIScreen/ReactArtifact/shadcnPreamble.generated.ts';
@@ -256,6 +254,429 @@
   --color-rose-800: #9f1239;
   --color-rose-900: #881337;
   --color-rose-950: #4c0519;
+}
+
+@theme {
+  --font-sans: Inter, sans-serif;
+  --font-mono: "Geist Mono", monospace;
+  --font-code:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-serif: "Libre Baskerville", Georgia, serif;
+}
+
+@theme inline reference {
+  --container-ai-content: 50rem;
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --color-xyne-gray-0: #ffffff;
+  --color-xyne-gray-25: #fcfcfd;
+  --color-xyne-gray-50: #f5f7fa;
+  --color-xyne-gray-100: #f2f4f8;
+  --color-xyne-gray-150: #eceff3;
+  --color-xyne-gray-200: #e1e4ea;
+  --color-xyne-gray-300: #cacfd8;
+  --color-xyne-gray-400: #99a0ae;
+  --color-xyne-gray-500: #717784;
+  --color-xyne-gray-600: #525866;
+  --color-xyne-gray-700: #2b303b;
+  --color-xyne-gray-800: #222530;
+  --color-xyne-gray-900: #181b25;
+  --color-xyne-gray-950: #0e121b;
+  --color-xyne-gray-1000: #050506;
+  --color-xyne-primary-50: #eff6ff;
+  --color-xyne-primary-100: #dbeafe;
+  --color-xyne-primary-200: #bedbff;
+  --color-xyne-primary-300: #8ec5ff;
+  --color-xyne-primary-400: #51a2ff;
+  --color-xyne-primary-500: #2b7fff;
+  --color-xyne-primary-600: #0561e2;
+  --color-xyne-primary-700: #1447e6;
+  --color-xyne-primary-800: #193cb8;
+  --color-xyne-primary-900: #1c398e;
+  --color-xyne-primary-950: #162456;
+  --color-xyne-purple-50: #faf5ff;
+  --color-xyne-purple-100: #f3e8ff;
+  --color-xyne-purple-200: #e9d4ff;
+  --color-xyne-purple-300: #dab2ff;
+  --color-xyne-purple-400: #c27aff;
+  --color-xyne-purple-500: #ad46ff;
+  --color-xyne-purple-600: #9810fa;
+  --color-xyne-purple-700: #8200db;
+  --color-xyne-purple-800: #6e11b0;
+  --color-xyne-purple-900: #59168b;
+  --color-xyne-purple-950: #3c0366;
+  --color-xyne-orange-50: #fff7ed;
+  --color-xyne-orange-100: #ffedd4;
+  --color-xyne-orange-200: #ffd6a8;
+  --color-xyne-orange-300: #ffb86a;
+  --color-xyne-orange-400: #ff8904;
+  --color-xyne-orange-500: #ff6900;
+  --color-xyne-orange-600: #f54a00;
+  --color-xyne-orange-700: #ca3500;
+  --color-xyne-orange-800: #9f2d00;
+  --color-xyne-orange-900: #7e2a0c;
+  --color-xyne-orange-950: #441306;
+  --color-xyne-red-50: #fef2f2;
+  --color-xyne-red-100: #ffe2e2;
+  --color-xyne-red-200: #ffc9c9;
+  --color-xyne-red-300: #ffa2a2;
+  --color-xyne-red-400: #ff6467;
+  --color-xyne-red-500: #fb2c36;
+  --color-xyne-red-600: #e7000b;
+  --color-xyne-red-700: #c10007;
+  --color-xyne-red-800: #9f0712;
+  --color-xyne-red-900: #82181a;
+  --color-xyne-red-950: #460809;
+  --color-xyne-green-50: #f0fdf4;
+  --color-xyne-green-100: #dcfce7;
+  --color-xyne-green-200: #b9f8cf;
+  --color-xyne-green-300: #7bf1a8;
+  --color-xyne-green-400: #00d492;
+  --color-xyne-green-500: #00c951;
+  --color-xyne-green-600: #00a63e;
+  --color-xyne-green-700: #008236;
+  --color-xyne-green-800: #016630;
+  --color-xyne-green-900: #0d542b;
+  --color-xyne-green-950: #052e16;
+  --color-xyne-yellow-50: #fefce8;
+  --color-xyne-yellow-100: #fef9c2;
+  --color-xyne-yellow-200: #fff085;
+  --color-xyne-yellow-300: #ffdf20;
+  --color-xyne-yellow-400: #fcc800;
+  --color-xyne-yellow-500: #efb100;
+  --color-xyne-yellow-600: #d08700;
+  --color-xyne-yellow-700: #a65f00;
+  --color-xyne-yellow-800: #894b00;
+  --color-xyne-yellow-900: #733e0a;
+  --color-xyne-yellow-950: #432004;
+  --color-xyne-surface: var(--color-xyne-surface);
+  --color-xyne-surface-subtle: var(--color-xyne-surface-subtle);
+  --color-xyne-surface-sunken: var(--color-xyne-surface-sunken);
+  --color-xyne-fg-primary: var(--color-xyne-fg-primary);
+  --color-xyne-fg-secondary: var(--color-xyne-fg-secondary);
+  --color-xyne-fg-tertiary: var(--color-xyne-fg-tertiary);
+  --color-xyne-fg-muted: var(--color-xyne-fg-muted);
+  --color-xyne-fg-inverse: var(--color-xyne-fg-inverse);
+  --color-xyne-border: var(--color-xyne-border);
+  --color-xyne-border-subtle: var(--color-xyne-border-subtle);
+  --color-xyne-border-strong: var(--color-xyne-border-strong);
+  --color-xyne-brand: var(--color-xyne-brand);
+  --color-xyne-brand-ghost: var(--color-xyne-brand-ghost);
+  --color-border: hsl(var(--border));
+  --color-root-border: var(--root-border);
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-action-primary: var(--action-primary);
+  --color-action-accent: hsl(var(--action-accent));
+  --color-action-primary-foreground: var(--action-primary-foreground);
+  --color-chat-composer-border: var(--chat-composer-border);
+  --color-chat-composer-border-active: var(--chat-composer-border-active);
+  --color-activity-sidebar-primary: var(--activity-sidebar-primary);
+  --color-activity-chip: var(--activity-chip);
+  --color-activity-chip-hover: var(--activity-chip-hover);
+  --color-desk-helper: var(--desk-helper-foreground);
+  --color-desk-muted: var(--desk-muted-foreground);
+  --color-desk-border: var(--desk-border);
+  --color-desk-accent: var(--desk-accent);
+  --color-desk-accent-hover: var(--desk-accent-hover);
+  --color-desk-accent-foreground: var(--desk-accent-foreground);
+  --color-desk-accent-subtle: var(--desk-accent-subtle);
+  --color-desk-accent-badge: var(--desk-accent-badge-bg);
+  --color-desk-destructive: var(--desk-destructive);
+  --color-desk-switch-off: var(--desk-switch-track-off);
+  --color-status-new: var(--status-new);
+  --color-status-pending: var(--status-pending);
+  --color-status-scheduled: var(--status-scheduled);
+  --color-status-success: var(--status-success);
+  --color-status-failure: var(--status-failure);
+  --color-status-paused: var(--status-paused);
+  --color-claw-ai-fg: var(--claw-ai-fg);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-border-muted: var(--sidebar-border-muted);
+  --color-sidebar-accent-ring: var(--sidebar-accent-ring);
+  --color-stage-todo: hsl(var(--stage-todo-bg));
+  --color-stage-todo-border: hsl(var(--stage-todo-border));
+  --color-stage-completed: hsl(var(--stage-completed-bg));
+  --color-stage-completed-border: hsl(var(--stage-completed-border));
+  --color-stage-cancelled: hsl(var(--stage-cancelled-bg));
+  --color-stage-cancelled-border: hsl(var(--stage-cancelled-border));
+}
+
+@theme inline {
+  --animate-streams-column-flash: streams-column-flash 300ms cubic-bezier(0.23, 1, 0.32, 1);
+  --animate-cmdk-banner-pulse: cmdk-banner-pulse 1.6s cubic-bezier(0.4, 0, 0.2, 1) 300ms 2 backwards;
+  --animate-call-radar: call-radar 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  --animate-live-ping: live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  --animate-live-pulse: live-pulse 2s ease-in-out infinite;
+  --animate-call-audio-bar: call-audio-bar 0.9s ease-in-out infinite;
+  --animate-call-overlay-in: call-overlay-in 150ms linear;
+  --animate-slide-in-up: slide-in-up 0.2s ease-in forwards;
+  --animate-slide-in-from-right: slide-in-from-right 0.3s ease-out forwards;
+  --animate-slide-in-from-left: slide-in-from-left 0.3s ease-out forwards;
+  --animate-shine: shine var(--duration) infinite linear;
+  --animate-ai-pop: ai-pop 700ms ease-in-out;
+  --animate-slide-up-in: slideUpIn 280ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
+  --animate-slide-up-out: slideUpOut 280ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
+  --animate-fade-in-up: fadeInUp 220ms ease-out both;
+  --animate-fade-in: fadeIn 220ms ease-out both;
+
+  @keyframes streams-column-flash {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+    }
+    25%,
+    75% {
+      box-shadow: 0 0 0 3px hsl(var(--primary) / 0.55);
+    }
+  }
+
+  @keyframes cmdk-banner-pulse {
+    0% {
+      border-color: rgba(255, 105, 0, 0.35);
+      box-shadow: 0 0 0 0 rgba(255, 105, 0, 0);
+    }
+    25% {
+      border-color: #ff6900;
+      box-shadow: 0 0 0 3px rgba(255, 105, 0, 0.18);
+    }
+    100% {
+      border-color: rgba(255, 105, 0, 0.35);
+      box-shadow: 0 0 0 6px rgba(255, 105, 0, 0);
+    }
+  }
+
+  @keyframes call-radar {
+    0% {
+      transform: scale(1);
+      opacity: 0.45;
+    }
+    100% {
+      transform: scale(1.92);
+      opacity: 0;
+    }
+  }
+
+  @keyframes live-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    70%,
+    100% {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+
+  @keyframes live-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  @keyframes call-audio-bar {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+
+  @keyframes call-overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fadeUp {
+    0% {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeLeft {
+    0% {
+      opacity: 0;
+      transform: translateX(32px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes railTravel {
+    0% {
+      left: 0%;
+      opacity: 0;
+    }
+    12% {
+      opacity: 1;
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      left: 100%;
+      opacity: 0;
+    }
+  }
+
+  @keyframes railTravelVertical {
+    0% {
+      top: 0%;
+      opacity: 0;
+    }
+    12% {
+      opacity: 1;
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      top: 100%;
+      opacity: 0;
+    }
+  }
+
+  @keyframes slide-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slide-in-from-right {
+    from {
+      transform: translateX(100%);
+      opacity: 0.5;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slide-in-from-left {
+    from {
+      transform: translateX(-100%);
+      opacity: 0.5;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes shine {
+    0% {
+      background-position: 0% 0%;
+    }
+    50% {
+      background-position: 100% 100%;
+    }
+    to {
+      background-position: 0% 0%;
+    }
+  }
+
+  @keyframes ai-pop {
+    0% {
+      transform: scale(1) rotate(0deg);
+    }
+    50% {
+      transform: scale(1.15) rotate(180deg);
+    }
+    100% {
+      transform: scale(1) rotate(360deg);
+    }
+  }
+
+  @keyframes slideUpIn {
+    0% {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideUpOut {
+    0% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-100%);
+    }
+  }
+
+  @keyframes fadeInUp {
+    0% {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeIn {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
 }
 
 @layer base {
