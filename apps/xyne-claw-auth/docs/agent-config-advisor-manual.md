@@ -54,7 +54,7 @@ config.tools = {
 `config.outputFormat` (`type: json|markdown`, `schema`, `template`,
 `requireToolsBeforeSubmit[]`), `config.memoryEnabled`, `config.memoryApprovalStrategy`,
 `config.verifyResponses`, `config.citationReflection`, `config.skillTriggers[]`,
-`config.sandboxRepo`, `config.promptInjection`, `config.provider` / `config.providerOrder`
+`config.sandboxRepo`, `config.provider` / `config.providerOrder`
 / `config.providerAlwaysOn` (see §3).
 
 Related tables: `AgentSkill` (skills), `AgentCollection` (KB grants),
@@ -330,3 +330,5 @@ Repos: `xyne-claw-auth` (gateway + DB + MCP), `xyne-claw` (agent runtime),
 
 Rule of thumb: **manual first** for the concept, **bitbucket subagent** to confirm
 specifics or answer anything uncovered. Read-only — never modify the repos.
+
+External per-turn reminder configuration (`config.promptInjection` and `config.promptInjections`) is retired. Do not recommend or write these keys; system-generated reminders remain runtime-owned.

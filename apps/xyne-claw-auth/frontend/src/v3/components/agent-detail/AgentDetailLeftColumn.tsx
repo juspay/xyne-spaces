@@ -347,7 +347,7 @@ function Section({
   children,
 }: {
   /** ReactNode so callers can inline a small technical hint next to the
-      friendly heading (e.g. "Constant Reminders <code>promptInjection</code>"). */
+      friendly heading (e.g. "Plan mode <code>planMode</code>"). */
   title: React.ReactNode;
   description?: string;
   action?: React.ReactNode;
@@ -1505,11 +1505,6 @@ interface Props {
     prompt: string;
   }>>>;
 
-  // Behavior — Constant Reminders. Lives on agent.config.promptInjection
-  // and gets appended as a [System Reminder] user message each turn.
-  draftPromptInjection: string;
-  onDraftPromptInjectionChange: (v: string) => void;
-
   // Sandbox repo pin (agent.config.sandboxRepo). When set, the runtime forces
   // sandbox-repo-setup onto this repo so the agent can't pick the wrong one.
   draftSandboxRepo: string;
@@ -1755,8 +1750,6 @@ export function AgentDetailLeftColumn({
   onDraftKbScopeChange,
   skillTriggers,
   onSkillTriggersChange,
-  draftPromptInjection,
-  onDraftPromptInjectionChange,
   draftSandboxRepo,
   onDraftSandboxRepoChange,
   draftForceReadOnlySandbox,
@@ -1941,9 +1934,7 @@ export function AgentDetailLeftColumn({
   // Skill triggers live under Knowledge alongside Skills (they're both
   // "what reference material can flow into the conversation"), so they
   // contribute to the Knowledge count, not Behavior.
-  const hasReminder = draftPromptInjection.trim().length > 0;
   const knowledgeCount = draftSkillIds.length + skillTriggers.length;
-  const behaviorCount = hasReminder ? 1 : 0;
   const toggleToolGroup = (group: string) => {
     setToolGroupOpen((prev) => ({ ...prev, [group]: !prev[group] }));
   };
@@ -2700,7 +2691,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAnswerFromContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
+        summary={draftSuggestGoal || draftPrefetchContext || draftAnswerFromContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -3099,29 +3090,6 @@ export function AgentDetailLeftColumn({
         title="Context"
         description="What the agent is told, and what it looks up, before it starts."
       >
-        {canEdit && (
-          <SettingRow
-            title="Constant reminders"
-            summary="A system message appended on every turn (e.g. &lsquo;always respond in JSON&rsquo;)."
-            detail="The model always sees it, regardless of the conversation topic. Use it for global rules the agent must never break — output format requirements, language preferences, safety guardrails, or compliance constraints."
-            enabled={draftPromptInjection.trim().length > 0}
-            control={
-              <span className="text-[11px] tabular-nums text-xyne-fg-tertiary">
-                {draftPromptInjection.trim() ? `${draftPromptInjection.trim().length} chars` : "None"}
-              </span>
-            }
-          >
-            <textarea
-              value={draftPromptInjection}
-              onChange={(e) => onDraftPromptInjectionChange(e.target.value)}
-              placeholder="Add a constant reminder…"
-              rows={3}
-              readOnly={!canEdit}
-              className="min-w-0 w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
-            />
-          </SettingRow>
-        )}
-
         {(canEdit || draftPrefetchContext) && (
           <SettingRow
             title="Prefetch context"

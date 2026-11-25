@@ -169,7 +169,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   const [draftKbScope, setDraftKbScope] = useState<"COLLECTIONS" | "USER">("COLLECTIONS");
   const [draftProvider, setDraftProvider] = useState<AgentProvider>("spaces");
   const [draftModel, setDraftModel] = useState<string | null>(null);
-  const [draftPromptInjection, setDraftPromptInjection] = useState("");
   // Sandbox repo pin (REPO_CONFIGS key). When set, the runtime forces
   // sandbox-repo-setup onto this repo. "" = agent chooses.
   const [draftSandboxRepo, setDraftSandboxRepo] = useState("");
@@ -339,8 +338,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftKbScope(agentData.kbScope === "USER" ? "USER" : "COLLECTIONS");
         setDraftProvider(provider);
         setDraftModel(model);
-        const promptInj = (agentData.config as { promptInjection?: string }).promptInjection ?? "";
-        setDraftPromptInjection(promptInj);
         setDraftSandboxRepo((agentData.config as { sandboxRepo?: string }).sandboxRepo ?? "");
         setDraftForceReadOnlySandbox((agentData.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true);
         setDraftAllowWriteInReadOnlyJob((agentData.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true);
@@ -453,7 +450,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const kbChanged = baseKb.length !== draftKb.length || baseKb.some((k, i) => k !== draftKb[i]);
     const baseKbScope: "COLLECTIONS" | "USER" = agent.kbScope === "USER" ? "USER" : "COLLECTIONS";
     const kbScopeChanged = draftKbScope !== baseKbScope;
-    const basePromptInjection = (agent.config as { promptInjection?: string }).promptInjection ?? "";
     const baseSandboxRepo = (agent.config as { sandboxRepo?: string }).sandboxRepo ?? "";
     const baseForceReadOnlySandbox = (agent.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true;
     const baseAllowWriteInReadOnlyJob = (agent.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true;
@@ -503,7 +499,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       kbScopeChanged ||
       draftProvider !== config.provider ||
       (draftModel ?? null) !== (config.model ?? null) ||
-      draftPromptInjection !== basePromptInjection ||
       draftSandboxRepo !== baseSandboxRepo ||
       draftForceReadOnlySandbox !== baseForceReadOnlySandbox ||
       draftAllowWriteInReadOnlyJob !== baseAllowWriteInReadOnlyJob ||
@@ -534,7 +529,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftHideLivePreview, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftAnswerFromContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftHideLivePreview, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftAnswerFromContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -583,11 +578,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       } else {
         delete nextConfig.tools;
       }
-      if (draftPromptInjection) {
-        nextConfig.promptInjection = draftPromptInjection;
-      } else {
-        delete nextConfig.promptInjection;
-      }
+      delete nextConfig.promptInjection;
+      delete nextConfig.promptInjections;
       if (draftSandboxRepo) {
         nextConfig.sandboxRepo = draftSandboxRepo;
       } else {
@@ -789,7 +781,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftHideLivePreview, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftAnswerFromContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftHideLivePreview, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftAnswerFromContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1155,8 +1147,6 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftKbScopeChange={setDraftKbScope}
             skillTriggers={skillTriggers}
             onSkillTriggersChange={setSkillTriggers}
-            draftPromptInjection={draftPromptInjection}
-            onDraftPromptInjectionChange={setDraftPromptInjection}
             draftSandboxRepo={draftSandboxRepo}
             onDraftSandboxRepoChange={setDraftSandboxRepo}
             sandboxRepoOptions={sandboxRepoOptions}

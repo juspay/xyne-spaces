@@ -61,7 +61,8 @@ describe("/design task command", () => {
     expect(result.injection.id).toBe("__design-system-brand-contract");
     expect(result.injection.label).toBe("## Design System — binding brand contract");
     expect(result.injection.content).toContain("MUST comply");
-    expect(result.injection.content).toContain("# Brand\nUse #123456");
+    expect(result.referenceData).toContain("# Brand\nUse #123456");
+    expect(result.injection.content).not.toContain("# Brand");
   });
 
   it("injects the same design system contract for /dashboard runs", () => {

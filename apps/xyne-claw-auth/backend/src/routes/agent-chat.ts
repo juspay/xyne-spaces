@@ -2053,7 +2053,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       ...(researchContext ? { researchContext } : {}),
       // Ship the agent's JSONB config so xyne-claw can enable per-agent
       // features that read from it: memoryEnabled, toolPermissions,
-      // skillTriggers, promptInjections, custom-tool config values.
+      // skillTriggers, custom-tool config values.
       // Without this, those features silently default to "off" on V2
       // dashboard chat (same bug existed for webhook + scheduled jobs).
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),

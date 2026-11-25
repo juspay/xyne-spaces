@@ -263,9 +263,7 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
   const [saved, setSaved] = useState(false);
   const [aiIntent, setAiIntent] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [promptInjections, setPi] = useState<Array<{ id: string; label: string; content: string; enabled: boolean }>>(
-    (agent.config?.promptInjections as Array<{ id: string; label: string; content: string; enabled: boolean }>) ?? [],
-  );
+
   const [skillTriggers, setSt] = useState<Array<{ toolName: string; skillSlug: string; when: "before" | "after"; prompt: string }>>(
     ((agent.config?.skillTriggers as Array<{ toolName: string; skillSlug: string; when: string; prompt?: string }>) ?? [])
       .map((t) => ({ ...t, when: t.when as "before" | "after", prompt: t.prompt ?? "" })),
@@ -305,8 +303,8 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
       if (toolsCfg) cfg.tools = toolsCfg; else delete cfg.tools;
       const activeTriggers = skillTriggers.filter((t) => t.toolName && t.skillSlug);
       if (activeTriggers.length) cfg.skillTriggers = activeTriggers; else delete cfg.skillTriggers;
-      const activeInj = promptInjections.filter((p) => p.content.trim());
-      if (activeInj.length) cfg.promptInjections = activeInj; else delete cfg.promptInjections;
+      delete cfg.promptInjection;
+      delete cfg.promptInjections;
       const activeSaSk = Object.fromEntries(Object.entries(saSkills).filter(([, ids]) => ids.length > 0));
       if (Object.keys(activeSaSk).length) cfg.subagentSkills = activeSaSk; else delete cfg.subagentSkills;
       await updateAgent(agent.slug, { systemPrompt: prompt, skills: skillIds, config: cfg });
@@ -495,27 +493,6 @@ function AgentConfigEditor({ agent, userId, onSave }: { agent: Agent; userId: st
           onClose={() => setTriggerModalOpen(false)}
         />
       )}
-
-      {/* Prompt Injections */}
-      <div className="rounded-xl bg-white p-4">
-        <h3 className="mb-1 text-sm font-semibold text-zinc-800">Prompt Injections</h3>
-        <p className="mb-3 text-xs text-zinc-400">Text injected as a [System Reminder] before every response.</p>
-        {promptInjections.map((inj, idx) => (
-          <div key={inj.id} className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <input value={inj.label} onChange={(e) => setPi((p) => p.map((x, i) => i === idx ? { ...x, label: e.target.value } : x))} placeholder="Label" className="flex-1 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 placeholder-zinc-300 focus:outline-none" />
-              <label className="flex items-center gap-1.5 text-xs text-zinc-500">
-                <input type="checkbox" checked={inj.enabled} onChange={(e) => setPi((p) => p.map((x, i) => i === idx ? { ...x, enabled: e.target.checked } : x))} className="rounded border-zinc-300" /> Enabled
-              </label>
-              <button onClick={() => setPi((p) => p.filter((_, i) => i !== idx))} className="rounded p-1 text-zinc-400 hover:text-red-500"><X size={14} /></button>
-            </div>
-            <textarea value={inj.content} onChange={(e) => setPi((p) => p.map((x, i) => i === idx ? { ...x, content: e.target.value } : x))} placeholder="Instruction text…" rows={3} className="w-full rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 placeholder-zinc-300 focus:outline-none" />
-          </div>
-        ))}
-        <button onClick={() => setPi((p) => [...p, { id: crypto.randomUUID(), label: "", content: "", enabled: true }])} className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50">
-          <Plus size={14} /> Add Injection
-        </button>
-      </div>
 
       {/* Save */}
       <div className="fixed bottom-0 left-56 right-0 flex items-center justify-between border-t-2 border-zinc-50 bg-white px-6 py-6">

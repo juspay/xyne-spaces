@@ -1,3 +1,4 @@
+import { sanitizeAgentWriteArgs } from "./lib/retired-prompt-config.js";
 import { PrismaClient } from "@prisma/client";
 import { withRetry, retryForever } from "./retry.js";
 import { createLogger } from "./logger.js";
@@ -9,7 +10,8 @@ const basePrisma = new PrismaClient();
 export const prisma = basePrisma.$extends({
   query: {
     $allOperations({ operation, model, args, query }) {
-      return withRetry(() => query(args), `prisma.${model ?? "raw"}.${operation}`);
+      const safeArgs = sanitizeAgentWriteArgs(model, operation, args);
+      return withRetry(() => query(safeArgs), `prisma.${model ?? "raw"}.${operation}`);
     },
   },
 });
