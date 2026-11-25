@@ -12,6 +12,7 @@
  */
 
 import { MutationACLError } from '@/zero/acl/core/types';
+import { MutationEncryptionError } from '@/zero/encryptedMutation';
 import { ZodError } from 'zod';
 
 export const ERROR_CODES = [
@@ -22,6 +23,7 @@ export const ERROR_CODES = [
   'not_connected',
   'rate_limited',
   'internal',
+  'unavailable',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -74,6 +76,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     retryable: true,
     description:
       'Anything else: an unexpected server error, an unconfigured dependency, or a downstream outage. The message is replaced with a generic string; the cause is logged against `request_id`.',
+  },
+  unavailable: {
+    status: 503,
+    retryable: false,
+    description:
+      'The API version or feature is not available: a retired API version (`reason: api_version_retired`, upgrade the SDK), or server-side encryption that is not configured for this operation (`reason: ENC_NOT_CONFIGURED`).',
   },
 };
 
@@ -162,6 +170,16 @@ export function toSdkApiError(err: unknown): SdkApiError {
 
   if (err instanceof MutationACLError) {
     return new SdkApiError('forbidden', err.message, { cause: err });
+  }
+
+  // Transit-encryption verdicts on a client-encrypted mutation. The service's code is the
+  // `reason`, so a client can tell a stale manifest (refetch it and resend) from a missing
+  // transit key (register again) without parsing the message.
+  if (err instanceof MutationEncryptionError) {
+    return new SdkApiError(err.code === 'ENC_NOT_CONFIGURED' ? 'unavailable' : 'validation_failed', err.message, {
+      reason: err.code,
+      cause: err,
+    });
   }
 
   // @rocicorp/zero's ApplicationError carries a structured `details` payload.

@@ -245,6 +245,7 @@ import clawInternalRoutes from '@/routes/clawInternal';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
+import { RETIRED_SDK_VERSIONS, createSdkRetiredRouter } from '@/api/sdk/retired';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
@@ -377,6 +378,13 @@ export class App {
     // Request-body decryption needs the auth session (JWT sid), so the auth middlewares run
     // it after authenticating instead of it being mounted here.
     this.app.use(encryptResponseBodyMiddleware);
+
+    // Retired SDK API versions (v1: @xyne/spaces-sdk 0.1.x, v2: 0.2.x) answer 503 whether or
+    // not the SDK API is enabled, and before authentication, so an old client always gets the
+    // upgrade message rather than a 404 or a 401.
+    for (const version of RETIRED_SDK_VERSIONS) {
+      this.app.use(`/api/sdk/${version}`, createSdkRetiredRouter(version));
+    }
 
     // Public SDK API. Uses the same cookie-based auth as the dashboard via
     // authMiddleware.authenticate. When disabled, nothing is mounted here
