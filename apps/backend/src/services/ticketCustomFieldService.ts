@@ -405,7 +405,7 @@ export const buildPartialCustomFieldWritePayload = async (
  * carrying both the new value and its previous value so downstream side effects
  * can compute deltas.
  */
-type ChangedCustomField = {
+export type ChangedCustomField = {
   fieldId: string;
   fieldName: string;
   newActualValue: Prisma.InputJsonValue;
@@ -470,7 +470,7 @@ const customFieldValuesEqual = (a: unknown, b: unknown): boolean => {
  * side-effect failure must never fail the caller's request. Activity rows are
  * NOT emitted here — `syncCustomFieldValues` already writes them.
  */
-const emitCustomFieldWriteSideEffects = async (
+export const emitCustomFieldWriteSideEffects = async (
   ticketId: string,
   changedFields: ChangedCustomField[],
   updatedBy: string,

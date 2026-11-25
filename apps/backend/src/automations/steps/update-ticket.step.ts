@@ -1,16 +1,15 @@
 import { extractPlainTextFromHtml, sanitizeMessageContent } from '@/utils/contentUtils';
 import { z } from 'zod';
-import { TicketStatusV2, TicketPriority, BoardType, ActivityType } from '@xyne/shared';
+import { TicketStatusV2, TicketPriority } from '@xyne/shared';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
-import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
-import { ActivitySource } from '@/types/ticket';
 import { logger } from '@/utils/logger';
 import { handleTicketAssignmentChange } from '@/utils/workloadUtils';
+import { moveTicketToStage } from './stage-move';
 
 const UpdateTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -66,39 +65,7 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     }
 
     if (config.stageName !== undefined) {
-      const ticket = await prisma.ticket.findUnique({
-        where: { id: ticketId },
-        select: { stageName: true, board: { select: { boardType: true } } },
-      });
-
-      if (ticket?.board?.boardType === BoardType.NON_LINEAR) {
-        const newStageName = config.stageName as string;
-        const result = await ticketStageTransitionService.transitionTicket(
-          ticketId,
-          updatedBy,
-          newStageName,
-          { isAutomation: true, activitySource: ActivitySource.AUTOMATION },
-        );
-        if (!result.success) {
-          throw new Error(result.message ?? 'Stage transition failed');
-        }
-        prisma.ticketActivity.create({
-          data: {
-            ticketId,
-            updatedBy,
-            workspaceId: context.automation.workspaceId,
-            activityType: ActivityType.STAGE_NAME,
-            value: { field: 'stageName', oldValue: ticket.stageName ?? null, newValue: newStageName, source: ActivitySource.AUTOMATION, isAutomation: true },
-          },
-        }).catch(err => logger.warn(`[automations] UPDATE_TICKET stage audit write failed ticketId=${ticketId}:`, err));
-      } else {
-        await repositories.tickets.updateTicketStage(
-          ticketId,
-          config.stageName as string,
-          updatedBy,
-          ActivitySource.AUTOMATION,
-        );
-      }
+      await moveTicketToStage({ ticketId, stageName: config.stageName as string, context, stepType: this.type });
     }
 
     const fields: Parameters<typeof repositories.tickets.updateTicketFields>[1] = {};
