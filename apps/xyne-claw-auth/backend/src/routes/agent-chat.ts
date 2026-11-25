@@ -49,7 +49,7 @@ import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository, chatProjectRepository } from "../repositories/index.js";
+import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, chatProjectRepository } from "../repositories/index.js";
 import { brandAttachmentsRouter } from "./brand-attachments.js";
 import {
   chatProjectsRouter,
@@ -1862,10 +1862,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
 
     const allCreds = await userProviderCredentialsRepository.listByUser(userId).catch(() => []);
     const agentCreds = await agentProviderCredentialsRepository.listByAgent(agent.id).catch(() => []);
-    const subagentConfigs = await userSubagentConfigRepository.listByUser(userId).catch(() => []);
-    const subagentProviders: Record<string, string> = {};
-    for (const s of subagentConfigs) subagentProviders[s.subagentName] = s.provider;
-
     // buildProviderConfig + KNOWN_PROVIDERS come from the shared resolver module
     // (lib/agent-provider-config.ts) — one source of truth for the per-provider
     // default models + OAuth-bundle extraction, so adding a provider is a
@@ -2032,7 +2028,6 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       __persistedByCaller: true,
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
-      ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
       callbackUrl,
       progressUrl,

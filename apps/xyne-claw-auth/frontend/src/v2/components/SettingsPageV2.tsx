@@ -3,9 +3,6 @@ import {
   listProviderCredentials,
   upsertProviderCredential,
   deleteProviderCredential,
-  listSubagentRouting,
-  upsertSubagentRouting,
-  deleteSubagentRouting,
   initiateCopilotGitHubLogin,
   pollCopilotGitHubLogin,
   listCopilotModelsForUser,
@@ -14,12 +11,9 @@ import {
   startCodexOauth,
   exchangeCodexOauth,
   type ProviderCredential,
-  type SubagentRouting,
   type GitHubDeviceCode,
   type ClaudeModelInfo,
 } from "../../lib/api";
-
-const SUBAGENTS = ["spaces", "bitbucket", "grafana", "deepwiki", "context7"] as const;
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; defaultBaseUrl: string }> = {
   copilot: { label: "GitHub Copilot", defaultModel: "gpt-4o", defaultBaseUrl: "https://api.githubcopilot.com" },
@@ -538,7 +532,6 @@ interface Props {
 
 export function SettingsPageV2({ userId }: Props) {
   const [creds, setCreds] = useState<ProviderCredential[]>([]);
-  const [routing, setRouting] = useState<SubagentRouting[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -546,12 +539,8 @@ export function SettingsPageV2({ userId }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, r] = await Promise.all([
-        listProviderCredentials(userId),
-        listSubagentRouting(userId),
-      ]);
+      const c = await listProviderCredentials(userId);
       setCreds(c);
-      setRouting(r);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load settings");
@@ -563,8 +552,6 @@ export function SettingsPageV2({ userId }: Props) {
   useEffect(() => { load(); }, [load]);
 
   const credByProvider = new Map(creds.map((c) => [c.provider, c] as const));
-  const routingBySubagent = new Map(routing.map((r) => [r.subagentName, r.provider] as const));
-  const availableProviders = ["default", ...creds.filter((c) => c.hasApiKey).map((c) => c.provider)];
 
   return (
     <div className="space-y-8">
@@ -628,61 +615,6 @@ export function SettingsPageV2({ userId }: Props) {
                 }}
               />
             ))}
-          </div>
-        )}
-      </section>
-
-      {/* Subagent Routing */}
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-zinc-900">Subagent Provider Routing</h3>
-        <p className="mb-4 text-xs text-zinc-500">
-          Choose which provider each subagent should use. "Default" means use whatever the parent agent is using.
-        </p>
-        {loading ? (
-          <div className="py-8 text-center text-sm text-zinc-400">Loading…</div>
-        ) : (
-          <div className="space-y-2">
-            {SUBAGENTS.map((name) => {
-              const current = routingBySubagent.get(name) ?? "default";
-              return (
-                <div
-                  key={name}
-                  className="flex items-center justify-between rounded-2xl bg-zinc-100 px-5 py-4"
-                >
-                  <div>
-                    <p className="text-sm font-semibold capitalize text-zinc-900">{name}</p>
-                    <p className="text-xs text-zinc-500">{name} subagent</p>
-                  </div>
-                  <select
-                    value={current}
-                    disabled={saving === `sa:${name}`}
-                    onChange={async (e) => {
-                      const choice = e.target.value;
-                      setSaving(`sa:${name}`);
-                      try {
-                        if (choice === "default") {
-                          await deleteSubagentRouting(userId, name);
-                        } else {
-                          await upsertSubagentRouting(userId, name, choice);
-                        }
-                        await load();
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : "Save failed");
-                      } finally {
-                        setSaving(null);
-                      }
-                    }}
-                    className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none disabled:opacity-50"
-                  >
-                    {availableProviders.map((p) => (
-                      <option key={p} value={p}>
-                        {p === "default" ? "Default (parent agent)" : (PROVIDER_META[p]?.label ?? p)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              );
-            })}
           </div>
         )}
       </section>
