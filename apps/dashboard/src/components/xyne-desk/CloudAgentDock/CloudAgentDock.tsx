@@ -78,7 +78,31 @@ function getFloatingDockSnapshot(): FloatingDockState {
   return floatingDockState;
 }
 
+// By content: each open builds new arrays.
+function sameConnections(a: SoftphoneConnection[], b: SoftphoneConnection[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (connection, index) =>
+        connection.id === b[index]?.id &&
+        connection.url === b[index]?.url &&
+        connection.name === b[index]?.name,
+    )
+  );
+}
+
 function setFloatingDockState(next: FloatingDockState): void {
+  const current = floatingDockState;
+  // Nothing changed: keep the same snapshot so the dock doesn't re-render.
+  if (
+    current.isOpen === next.isOpen &&
+    current.activeId === next.activeId &&
+    current.onClose === next.onClose &&
+    sameConnections(current.opened, next.opened) &&
+    sameConnections(current.available, next.available)
+  ) {
+    return;
+  }
   floatingDockState = next;
   emitFloatingDockChange();
 }
