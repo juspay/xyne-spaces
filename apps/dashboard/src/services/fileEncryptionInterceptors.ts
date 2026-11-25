@@ -5,26 +5,35 @@ import {
   decryptDownloadedFile,
   encryptFileForUpload,
   hasFileContainerMagic,
+  isClientEncryptedFileRoute,
   isValidFileChunkSize,
 } from '@xyne/shared';
 import { getEncryptionState, isEncryptionReady } from '../machines/encryptionMachine';
 
 /**
- * Routes mounted with the backend's clientFileEncryption: uploads to them are sent as transit
- * containers and downloads from them come back as transit containers. Every other route keeps
- * sending and receiving plaintext files.
+ * Files travel as transit containers on every route but @xyne/shared's PLAINTEXT_FILE_ROUTES
+ * (the list the backend marks requests by): the files of a multipart upload are encrypted,
+ * and a file download (blob or arraybuffer response) is asked for as a container. JSON and
+ * other requests are left alone.
  */
-const UPLOAD_ROUTES = [/\/conversations\/[^/]+\/messages$/, /\/drafts\/attachments\/upload$/];
-const DOWNLOAD_ROUTES = [/\/attachments\/[^/]+\/(download|thumbnail)$/];
-
 function pathOf(config: InternalAxiosRequestConfig): string {
   return new URL(config.url ?? '', 'http://localhost').pathname;
 }
 
-function fileEncryptionActive(): boolean {
+/** Whether files on the client-encrypted routes are encrypted and decrypted here. */
+export function fileEncryptionActive(): boolean {
   if (!isEncryptionReady()) return false;
   const { keyring, apiClientEncryptionEnabled, fileChunkSize } = getEncryptionState();
   return keyring !== null && apiClientEncryptionEnabled && isValidFileChunkSize(fileChunkSize);
+}
+
+/** Whether `data` is a multipart body holding at least one file. */
+function hasFiles(data: FormData): boolean {
+  let found = false;
+  data.forEach(value => {
+    if (typeof value !== 'string') found = true;
+  });
+  return found;
 }
 
 /** The FormData with every file replaced by its transit container (same name and type). */
@@ -57,9 +66,10 @@ export async function fileEncryptionRequestInterceptor(
   const path = pathOf(config);
 
   if (
-    method === 'post' &&
+    (method === 'post' || method === 'put' || method === 'patch') &&
     config.data instanceof FormData &&
-    UPLOAD_ROUTES.some(r => r.test(path))
+    hasFiles(config.data) &&
+    isClientEncryptedFileRoute(method, path)
   ) {
     config.data = await encryptFormDataFiles(config.data);
     config.headers.set(FILE_ENCRYPTION_HEADER, FILE_ENCRYPTION_HEADER_VALUE);
@@ -69,7 +79,7 @@ export async function fileEncryptionRequestInterceptor(
   if (
     method === 'get' &&
     (config.responseType === 'blob' || config.responseType === 'arraybuffer') &&
-    DOWNLOAD_ROUTES.some(r => r.test(path))
+    isClientEncryptedFileRoute('GET', path)
   ) {
     config.headers.set(FILE_ENCRYPTION_HEADER, FILE_ENCRYPTION_HEADER_VALUE);
   }
@@ -104,4 +114,38 @@ export async function fileEncryptionResponseInterceptor(
       ? plaintext.buffer
       : new Blob([plaintext], { type: contentType });
   return response;
+}
+
+/** Whether a service worker can stream encrypted attachments for this page (public/sw.js). */
+export function fileStreamWorkerReady(): boolean {
+  return typeof navigator !== 'undefined' && Boolean(navigator.serviceWorker?.controller);
+}
+
+/**
+ * Answers the service worker that streams encrypted attachments (public/sw.js): whether file
+ * encryption is on, and the transit key for a key id. The key goes over as the keyring's
+ * non-extractable CryptoKey, so it never leaves the browser and cannot be read as bytes.
+ */
+export function answerFileStreamWorker(): void {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    const port = event.ports[0];
+    const data = event.data as { type?: unknown; keyId?: unknown } | null;
+    if (!port || !data) return;
+    if (data.type === 'file-encryption-state') {
+      port.postMessage({ active: fileEncryptionActive() });
+      return;
+    }
+    if (data.type === 'file-encryption-key' && typeof data.keyId === 'string') {
+      const { keyring } = getEncryptionState();
+      if (!fileEncryptionActive() || !keyring) {
+        port.postMessage({ key: null });
+        return;
+      }
+      keyring.forKeyId(data.keyId).then(
+        key => port.postMessage({ key }),
+        () => port.postMessage({ key: null }),
+      );
+    }
+  });
 }

@@ -7,6 +7,7 @@ import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReporting } from './bootstrap/errorReporting';
 import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';
 import { logger, Event } from './utils/logger';
+import { answerFileStreamWorker } from './services/fileEncryptionInterceptors';
 
 // Expose app version to window for Electron access
 window.__APP_VERSION__ = __APP_VERSION__;
@@ -17,6 +18,8 @@ installErrorReporting();
 // Note: Service Workers are not supported on custom protocols (xyne-spaces://, xyne-spaces-dev://, etc.)
 const isCustomProtocol = window.location.protocol.startsWith('xyne-spaces');
 if ('serviceWorker' in navigator && !isCustomProtocol) {
+  // The worker streams encrypted attachments with the page's transit key.
+  answerFileStreamWorker();
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')
