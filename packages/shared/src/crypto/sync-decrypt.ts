@@ -22,11 +22,13 @@ export type SyncKeyring = TransitKeyring | null | 'disabled';
 type KeyringSource = () => SyncKeyring;
 
 /**
- * Tables decrypted as they sync: those the client filters on. Other tables keep the decrypt
- * that `useQuery` runs on results, so a large table (messages) isn't decrypted row by row on
- * first sync.
+ * Tables decrypted as they sync: those the client filters on, and `conversations`, whose
+ * `initial_message_md` client mutators read through `resolveMessage` (a channel's root
+ * messages are not in the local `messages` table, so with ciphertext there every mutator on
+ * one fails with "not found"). Other tables keep the decrypt that `useQuery` runs on results,
+ * so a large table (messages) isn't decrypted row by row on first sync.
  */
-export const SYNC_DECRYPTED_TABLES: readonly string[] = ['form_entity_values'];
+export const SYNC_DECRYPTED_TABLES: readonly string[] = ['form_entity_values', 'conversations'];
 
 /** How many times in a row an undecryptable message closes the socket for a resync before it is let through. */
 const MAX_RESYNC_ATTEMPTS = 3;
