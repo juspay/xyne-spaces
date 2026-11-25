@@ -2444,7 +2444,7 @@ function ChatThreadInner({
                       keyExtractor={keyExtractor}
                       estimatedItemSize={estimatedThreadItemSize}
                       getItemType={getThreadItemType}
-                      drawDistance={THREAD_LIST_DRAW_DISTANCE}
+                      drawDistance={renderers?.listDrawDistance ?? THREAD_LIST_DRAW_DISTANCE}
                       initialScrollAtEnd={shouldUseThreadInitialScrollAtEnd}
                       {...(shouldExposeInitialScrollIndex ? { initialScrollIndex } : {})}
                       onItemSizeChanged={handleThreadItemSizeChanged}

@@ -73,6 +73,12 @@ export type ChatRowRenderers = {
    * (ChatList). `previous` is the message row directly above, when there is one.
    */
   estimateMessageHeight?: ((row: ChatPaintRow, previous?: ChatPaintRow) => number) | undefined;
+  /**
+   * How far past the screen the list keeps rows drawn (ChatList and
+   * ChatThread), so a fast fling lands on rows rather than blank space. Unset
+   * keeps each list's own value.
+   */
+  listDrawDistance?: number | undefined;
   /** Replaces each block of skeleton rows the list shows while it first opens (ChatList and ChatThread). */
   Skeleton?: ComponentType | undefined;
   /**

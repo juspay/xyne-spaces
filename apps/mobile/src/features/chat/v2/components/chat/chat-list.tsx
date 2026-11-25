@@ -3011,7 +3011,7 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
       contentInsetAdjustmentBehavior='never'
       contentInsetEndAdjustment={composerGeometry.extraHeight}
       data={displayRows}
-      drawDistance={CHAT_LIST_DRAW_DISTANCE}
+      drawDistance={renderers?.listDrawDistance ?? CHAT_LIST_DRAW_DISTANCE}
       {...(freeze ? { freeze } : {})}
       key={listInstanceKey}
       recycleItems

@@ -9,7 +9,7 @@ import { ConversationThreadMessageRow } from './components/thread-message-row';
 import { RoomEmpty } from './components/room-empty';
 import { RoomNotice } from './components/room-notice';
 import { RoomSkeleton } from './components/room-skeleton';
-import { DIVIDER_HEIGHT } from './constants';
+import { CONVERSATION_LIST_DRAW_DISTANCE, DIVIDER_HEIGHT } from './constants';
 import { estimateFlatMessageHeight, flatTextLayout } from './model/row-estimate';
 
 export const CONVERSATION_RENDERERS: ChatRowRenderers = {
@@ -26,6 +26,7 @@ export const CONVERSATION_RENDERERS: ChatRowRenderers = {
   unreadDividerHeight: DIVIDER_HEIGHT,
   estimateMessageHeight: (row, previous) =>
     estimateFlatMessageHeight(row, flatTextLayout(Dimensions.get('window').width), previous),
+  listDrawDistance: CONVERSATION_LIST_DRAW_DISTANCE,
   Skeleton: RoomSkeleton,
   ListNotice: RoomNotice,
   ListEmpty: RoomEmpty,

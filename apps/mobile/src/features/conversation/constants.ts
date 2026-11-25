@@ -604,6 +604,12 @@ export const TRAY_SHADOW = {
 
 /** The horizontal inset the thread list puts around every row. */
 export const THREAD_LIST_INSET = 12;
+/**
+ * The room and thread lists keep rows drawn this far past each edge (about a
+ * screen), so a hard fling lands on rows, not blank space. Opening stays cheap:
+ * LegendList draws only the visible rows first and widens to this once ready.
+ */
+export const CONVERSATION_LIST_DRAW_DISTANCE = 1000;
 
 /** The rule under the thread's root message: 1 thick, inset 16, 12 above and below. */
 export const REPLY_RULE_THICKNESS = 1;
