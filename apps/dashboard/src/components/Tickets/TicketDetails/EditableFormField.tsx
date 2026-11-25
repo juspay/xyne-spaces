@@ -127,12 +127,17 @@ const ReadModeValue = ({
 
 export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   fieldName,
-  fieldValue,
+  fieldValue: rawFieldValue,
   fieldType,
   fieldEnum,
   onSave,
   readOnly = false,
 }) => {
+  // DATE values are read as full ISO strings; the date input and the change check use YYYY-MM-DD.
+  const fieldValue =
+    fieldType === FormFieldType.DATE && typeof rawFieldValue === 'string'
+      ? rawFieldValue.slice(0, 10)
+      : rawFieldValue;
   const [isEditing, setIsEditing] = useState(false);
   const beginEdit = (): void => {
     if (readOnly) return;

@@ -13,12 +13,11 @@ export class FormEntityValueItemsACL extends BaseQueryACL<
     return { workspaceId: this.ctx.workspaceId }
   }
 
+  // Items are written only by formEntityValueRepository, in the same transaction as their
+  // form_entity_values row, which has already passed its own ACL. That row isn't committed yet,
+  // so it can't be looked up here (this.prisma is outside the transaction).
   async canCreate(data: Prisma.FormEntityValueItemsUncheckedCreateInput): Promise<boolean> {
-    const value = await this.prisma.formEntityValues.findFirst({
-      where: { id: data.valueId, workspaceId: this.ctx.workspaceId },
-      select: { id: true },
-    })
-    return value !== null
+    return data.workspaceId === this.ctx.workspaceId
   }
 
   async getWhereClause(): Promise<Prisma.FormEntityValueItemsWhereInput> {

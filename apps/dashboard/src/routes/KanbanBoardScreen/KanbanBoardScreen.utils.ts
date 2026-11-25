@@ -11,9 +11,17 @@ import { TicketStatusV2 } from '@xyne/shared';
 import { parseAssigneeFilter } from '../../zero/queries';
 import type { Stage } from './KanbanBoardScreen.types';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
-import { FormFieldType, type FieldEnumOption, type FormFields } from '@xyne/shared';
+import {
+  FormFieldType,
+  readFormEntityValue,
+  type FieldEnumOption,
+  type FormFields,
+  type TypedFormEntityValueRow,
+} from '@xyne/shared';
 import { resolveDisplayFormFields } from '../../utils/board/resolveDisplayFormFields';
 import { matchesDynamicFieldValue } from '../../utils/board/dynamicFieldFilters';
+
+export type TicketFormEntityValue = FormEntityValues & { items: TypedFormEntityValueRow['items'] };
 
 /**
  * Returns the color for a given stage name
@@ -333,7 +341,7 @@ export const applyTicketFilters = (
   tickets: Ticket[],
   filters: TicketFilters,
   tagsByTicketId?: Map<string, TicketTag[]>,
-  formValuesByTicketId?: Map<string, FormEntityValues[]>,
+  formValuesByTicketId?: Map<string, TicketFormEntityValue[]>,
   formFieldsById?: Map<string, { fieldType: FormFieldType; fieldEnum?: FieldEnumOption[] | null }>,
   currentUserId?: string,
 ): Ticket[] => {
@@ -507,7 +515,11 @@ export const applyTicketFilters = (
         // Per-type value matching lives in the shared matcher (also used by the
         // Support desk's client-side refinement) so the semantics stay identical.
         if (
-          !matchesDynamicFieldValue(fieldInfo.fieldType, filterValue, fieldValue.actualFieldValue)
+          !matchesDynamicFieldValue(
+            fieldInfo.fieldType,
+            filterValue,
+            readFormEntityValue(fieldValue),
+          )
         ) {
           return false;
         }
@@ -531,7 +543,7 @@ interface FormFieldGroup {
 export const groupTicketsByFormField = (
   tickets: Ticket[],
   criterion: FormFieldGroup,
-  formValuesByTicketId: Map<string, FormEntityValues[]>,
+  formValuesByTicketId: Map<string, TicketFormEntityValue[]>,
   userNamesById: Map<string, string>,
 ): Record<string, Ticket[]> => {
   const { fieldId, fieldType } = criterion;
@@ -546,11 +558,9 @@ export const groupTicketsByFormField = (
     if (!formValues) return;
     const fieldEntry = formValues.find(v => v.fieldId === fieldId);
 
-    // Use actualFieldValue which contains the properly typed value
-    const actualValue = fieldEntry?.actualFieldValue;
+    const actualValue = readFormEntityValue(fieldEntry);
 
     if (fieldType === FormFieldType.MULTI_SELECT && actualValue) {
-      // Multi-select: actualFieldValue is already an array of strings
       const values = Array.isArray(actualValue) ? actualValue : [];
       if (values.length === 0) {
         const groupKey = 'No Value';
@@ -565,7 +575,6 @@ export const groupTicketsByFormField = (
       }
     } else {
       if (fieldType === FormFieldType.USER) {
-        // User field: actualFieldValue is an array of user IDs
         const userIds = Array.isArray(actualValue) ? actualValue : [];
         if (userIds.length === 0) {
           const groupKey = 'Unassigned';
@@ -580,7 +589,6 @@ export const groupTicketsByFormField = (
           });
         }
       } else {
-        // Single select and others: actualFieldValue is the value
         let val: string | null = null;
         if (actualValue !== undefined && actualValue !== null) {
           if (typeof actualValue === 'string') {

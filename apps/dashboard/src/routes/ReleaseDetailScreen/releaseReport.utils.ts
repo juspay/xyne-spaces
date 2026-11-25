@@ -1,4 +1,9 @@
-import { serializeCsv, type ReleaseReportDevTicket } from '@xyne/shared';
+import {
+  readFormEntityValue,
+  serializeCsv,
+  type ReleaseReportDevTicket,
+  type TypedFormEntityValueRow,
+} from '@xyne/shared';
 import type { ChangeCounts } from '../../components/Release/releaseChanges.utils';
 import { repoWebUrl } from '../../components/Release/repoVisual';
 
@@ -43,11 +48,7 @@ interface ArtRowInput {
           | undefined;
         readonly tags?: readonly { readonly name?: string | null | undefined }[] | null | undefined;
         readonly formEntityValues?:
-          | readonly {
-              readonly fieldId: string;
-              readonly fieldValue?: string | null | undefined;
-              readonly actualFieldValue?: unknown;
-            }[]
+          | readonly (TypedFormEntityValueRow & { readonly fieldId: string })[]
           | null
           | undefined;
       }
@@ -158,17 +159,9 @@ export function buildReleaseDetailDevTicketRows(
     const changeCounts = changeCountsByDevTicket.get(ticketId);
     const customValuesByFieldId = new Map<string, string>();
     for (const fev of devTicket?.formEntityValues ?? []) {
-      const actual = fev.actualFieldValue;
-      const actualStr =
-        typeof actual === 'string'
-          ? actual
-          : actual === null || actual === undefined
-            ? ''
-            : JSON.stringify(actual);
-      // actualFieldValue is the source of truth the ticket UI reads/writes;
-      // fieldValue is a legacy column kept empty by the form mutators, used
-      // only as a fallback for older rows.
-      const value = actualStr || fev.fieldValue;
+      const actual = readFormEntityValue(fev);
+      const value =
+        typeof actual === 'string' ? actual : actual === null ? '' : JSON.stringify(actual);
       if (value) customValuesByFieldId.set(fev.fieldId, value);
     }
     // Dev owner precedence: assignee -> creator (reporter) -> 'Unknown'.

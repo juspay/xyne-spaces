@@ -44,6 +44,21 @@ export const assertFormFieldType = (fieldType: unknown, fieldId: string): FormFi
   return fieldType as FormFieldType;
 };
 
+/**
+ * A saved field keeps its type: its stored values sit in the typed column for that type, so
+ * changing it would hide them. Definitions with no stored type (legacy rows linked to a global
+ * field) are not checked.
+ */
+export const assertFieldTypeUnchanged = (
+  savedType: string | null | undefined,
+  nextType: string,
+  fieldName: string,
+): void => {
+  if (savedType && savedType !== nextType) {
+    throw new Error(`The type of "${fieldName}" can't be changed once it's saved. Create a new field instead.`);
+  }
+};
+
 /** Lowercased and trimmed, so "Kalyan" and "kalyan " hash the same. */
 export const normalizeTextForHash = (value: string): string => value.trim().toLowerCase();
 
@@ -182,6 +197,17 @@ export const readFormEntityValue = (row: TypedFormEntityValueRow | null | undefi
   // Every write fills the typed columns and actualFieldValue together, so an empty typed value
   // with a set actualFieldValue only happens on rows written before the typed columns existed.
   return legacyValue(row.actualFieldValue);
+};
+
+/**
+ * A value in the shape it reads back after being stored for this field type ("2026-11-20"
+ * becomes the ISO date, "42.50" becomes 42.5), so a submitted value compares equal to the
+ * stored one. A value that doesn't fit the type is returned unchanged.
+ */
+export const asStoredFormEntityValue = (fieldType: FormFieldType | string, value: unknown): unknown => {
+  const typed = toTypedFormEntityValue(fieldType, value);
+  const read = readFormEntityValue({ ...typed.columns, items: typed.items.map(item => ({ item })) });
+  return read === null ? value : read;
 };
 
 const canonicalFormEntityValue = (value: unknown): string => {

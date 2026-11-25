@@ -1,7 +1,12 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
 import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
-import { FormFieldType, isFieldActive, parseFieldOptionValues } from '@xyne/shared';
-import type { FormEntityValues, MessageAttachment } from '@xyne/shared';
+import {
+  FormFieldType,
+  isFieldActive,
+  parseFieldOptionValues,
+  readFormEntityValue,
+} from '@xyne/shared';
+import type { FormEntityValues, MessageAttachment, TypedFormEntityValueRow } from '@xyne/shared';
 import { StageFormDocField } from '../StageFormModal/StageFormDocField';
 import { MultiSelect } from '../../ui/MultiSelect/MultiSelect';
 import { TicketFieldSelector } from '../TicketFieldSelector/TicketFieldSelector';
@@ -18,6 +23,7 @@ import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDispl
 
 export type StageFormDocLocalChange = { file: File } | { removed: true };
 type FormEntityValueForRender = FormEntityValues & {
+  readonly items: TypedFormEntityValueRow['items'];
   readonly attachments?: readonly MessageAttachment[] | null;
 };
 
@@ -83,7 +89,7 @@ export const StageFormFields = ({
         valuesForRender
           .filter(value => value.fieldId === field.id && value.contextId === targetStageId)
           .forEach(value => {
-            stringValuesFromJson(value.actualFieldValue).forEach(attachmentId => {
+            stringValuesFromJson(readFormEntityValue(value)).forEach(attachmentId => {
               attachmentIds.add(attachmentId);
             });
           });
@@ -383,7 +389,7 @@ export const StageFormFields = ({
                   const savedAttachmentId =
                     fieldValue[0] ??
                     (showPersistedDocValues
-                      ? stringValuesFromJson(latestValue?.actualFieldValue)[0]
+                      ? stringValuesFromJson(readFormEntityValue(latestValue))[0]
                       : undefined);
                   const persistedAttachment =
                     latestValue?.attachments?.[0] ??

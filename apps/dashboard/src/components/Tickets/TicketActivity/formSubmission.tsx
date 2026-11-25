@@ -1,5 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText } from '@xyne/icons';
+import { readFormEntityValue, type TypedFormEntityValueRow } from '@xyne/shared';
 
 /**
  * Shared form-submission rendering + matching used by BOTH the Details activity timeline
@@ -7,11 +8,9 @@ import { ChevronDown, ChevronRight, FileText } from '@xyne/icons';
  * "Form submission · N fields" block stays visually and behaviourally identical in both places.
  */
 
-export type FormValueEntry = {
+export type FormValueEntry = TypedFormEntityValueRow & {
   id: string;
   fieldId: string;
-  fieldValue?: unknown;
-  actualFieldValue?: unknown;
   formField?: { fieldName?: string | null } | null;
   globalField?: { fieldName?: string | null } | null;
   // Used by buildStageVisitFormValues (grouping/timestamps); not needed for rendering.
@@ -87,10 +86,13 @@ export const matchFormVisit = (
 };
 
 const renderFormFieldValue = (fv: FormValueEntry): string => {
-  const raw = fv.actualFieldValue ?? fv.fieldValue;
-  if (raw === null || raw === undefined) return '—';
+  const raw = readFormEntityValue(fv);
+  if (raw === null) return '—';
+  if (typeof raw === 'string' && fv.dateValue !== null && fv.dateValue !== undefined) {
+    return raw.slice(0, 10);
+  }
   if (typeof raw === 'object') return JSON.stringify(raw);
-  return String(raw as string | number | boolean);
+  return String(raw);
 };
 
 /**

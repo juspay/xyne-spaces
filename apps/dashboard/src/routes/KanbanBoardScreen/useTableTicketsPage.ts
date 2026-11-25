@@ -151,6 +151,7 @@ export const useTableTicketsPage = (
           dynamicFieldScalarFilters: getDynamicFieldScalarFilters(
             options.filters,
             options.zeroOnlyDynamicFieldIds,
+            options.dynamicFieldTypes,
           ),
           filters: toQueryFilters(options.filters),
           formEntityValueFieldIds: options.formEntityValueFieldIds,
@@ -170,6 +171,7 @@ export const useTableTicketsPage = (
       options.groupKey,
       options.filters,
       options.zeroOnlyDynamicFieldIds,
+      options.dynamicFieldTypes,
       options.formEntityValueFieldIds,
       options.showOverdueOnly,
       options.channelId,
