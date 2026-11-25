@@ -1,4 +1,3 @@
-import tailwindcssAnimate from 'tailwindcss-animate';
 import { XYNE_FOUNDATION_TOKENS } from './src/themes/XYNE_FOUNDATION_TOKENS.tsx';
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -339,7 +338,6 @@ export default {
       },
     },
   },
-  plugins: [tailwindcssAnimate],
   // Scope the ~40 `--tw-*` custom properties to elements that use transform /
   // shadow / ring / filter utilities, instead of declaring them on every element.
   experimental: {

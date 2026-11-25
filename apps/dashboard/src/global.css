@@ -1,6 +1,7 @@
 @layer workflow-ui, theme, base, vendor, components, utilities;
 
 @import "tailwindcss" source(none);
+@import "tw-animate-css";
 
 @config '../tailwind.config.js';
 
