@@ -49,6 +49,28 @@ jest.mock('@/apps/middelware/authenticator', () => ({
     next();
   },
 }));
+// Slack-compatible login: logs the bot in like authenticateApp and answers errors the Slack way
+// (200 `{ ok: false, ... }`), as slackAuthenticateApp does.
+jest.mock('@/apps/platform-adapters/slack/middleware', () => ({
+  slackAuthenticateApp: (req: Request, res: Response, next: NextFunction) => {
+    const originalStatus = res.status.bind(res);
+    const originalJson = res.json.bind(res);
+    let statusCode = 200;
+    res.status = ((code: number) => {
+      statusCode = code;
+      return originalStatus(code);
+    }) as Response['status'];
+    res.json = ((body?: unknown) => {
+      if (statusCode >= 400) {
+        originalStatus(200);
+        return originalJson({ ok: false, ...(body as object) });
+      }
+      return originalJson(body);
+    }) as Response['json'];
+    req.user = { id: 'bot-1', workspaceId: 'ws-1' } as Request['user'];
+    next();
+  },
+}));
 // Stand-in for the encryption pipeline: records that it ran and hands over derived facts.
 const encryptionRuns: string[] = [];
 jest.mock('@/middleware/encryptedRoute', () => ({
@@ -153,6 +175,23 @@ api.route(defineRoute({ method: 'GET', path: '/test/boom', response: z.object({}
   handle: async () => {
     throw new Error('boom');
   },
+});
+
+const slackStyle = defineRoute({
+  method: 'POST',
+  path: '/test/slack/chat.thing',
+  body: z.object({ ts: z.string().min(1) }),
+  response: z.object({ ok: z.literal(true), ts: z.string() }),
+});
+api.route(slackStyle, {
+  auth: 'slack-app',
+  invalidRequest: () => new ContractError(200, { ok: false, error: 'invalid_arguments' }),
+  access: {
+    gone: async ({ body }: { body: unknown }) => {
+      if ((body as { ts: string }).ts === 'gone') throw new ContractError(404, { error: 'message_not_found' });
+    },
+  },
+  handle: async ({ body }) => ({ ok: true as const, ts: body.ts }),
 });
 
 beforeEach(() => {
@@ -308,6 +347,28 @@ describe('with the ingress transit proxy deployed', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ facts: ['u-9'] });
     expect(encryptionRuns).toEqual(['/apps/test/proxied']);
+  });
+});
+
+describe('Slack-compatible routes', () => {
+  it('answer a body that breaks the contract with the route\'s invalidRequest, not the default 400', async () => {
+    const res = await request(makeApp()).post('/api/test/slack/chat.thing').send({});
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: false, error: 'invalid_arguments' });
+  });
+
+  it('answer refusals the Slack way (HTTP 200, ok: false) and success as the handler returns it', async () => {
+    const app = makeApp();
+    const refused = await request(app).post('/api/test/slack/chat.thing').send({ ts: 'gone' });
+    expect(refused.status).toBe(200);
+    expect(refused.body).toEqual({ ok: false, error: 'message_not_found' });
+    const ok = await request(app).post('/api/test/slack/chat.thing').send({ ts: '123.456' });
+    expect(ok.body).toEqual({ ok: true, ts: '123.456' });
+  });
+
+  it('match a dotted Slack method name exactly', () => {
+    expect(findContract('POST', '/api/test/slack/chat.thing')).toBe(slackStyle);
+    expect(findContract('POST', '/api/test/slack/chatxthing')).toBeUndefined();
   });
 });
 

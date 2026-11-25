@@ -5,6 +5,7 @@ import {
   appsChatPostMessage,
   appsChatUpdateMessage,
 } from './contracts/apps.js';
+import { appsSlackChatDelete } from './contracts/appsSlack.js';
 
 /**
  * Every REST API that has a route contract, grouped the way the backend serves them. The
@@ -21,6 +22,10 @@ export const API = {
       updateMessage: appsChatUpdateMessage,
       deleteMessage: appsChatDeleteMessage,
       agentProgress: appsChatAgentProgress,
+    },
+    /** The Slack-compatible API, /apps/slack/<method>. */
+    slack: {
+      chatDelete: appsSlackChatDelete,
     },
   },
 } as const;

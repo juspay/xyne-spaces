@@ -17,6 +17,7 @@ import { encryptedRoute } from '@/middleware/encryptedRoute';
 import { encryptResponseBodyMiddleware } from '@/middleware/decryptionMiddleware';
 import { errorHandler } from '@/middleware/errorHandler';
 import { authenticateApp } from '@/apps/middelware/authenticator';
+import { slackAuthenticateApp } from '@/apps/platform-adapters/slack/middleware';
 import { requireTransitProxyIngress } from '@/apps/middelware/requireTransitProxy';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
@@ -41,13 +42,17 @@ export class ContractError extends Error {
  * `public` route stands out in review.
  * - `session`: a dashboard user (authMiddleware.authenticate).
  * - `app`: a Xyne App's bot token (authenticateApp).
+ * - `slack-app`: the same bot token, for the Slack-compatible API (/apps/slack/...):
+ *   slackAuthenticateApp, which also answers every error the Slack way (HTTP 200,
+ *   `{ ok: false, error }`), as Slack SDKs expect.
  * - `public`: nobody; the route checks the caller itself (webhook secret, signed state...).
  */
-export type RouteAuth = 'session' | 'app' | 'public';
+export type RouteAuth = 'session' | 'app' | 'slack-app' | 'public';
 
 const AUTH_STEPS: Record<RouteAuth, RequestHandler[]> = {
   session: [authMiddleware.authenticate as RequestHandler],
   app: [authenticateApp as RequestHandler],
+  'slack-app': [slackAuthenticateApp as RequestHandler],
   public: [],
 };
 
@@ -108,6 +113,13 @@ export type RouteImpl<C extends AnyRouteContract, A extends AccessChecks = Recor
   access?: A;
   /** Status of the success response. Default 200. */
   successStatus?: number;
+  /**
+   * The answer to a request that breaks the contract (params, query or body), when the API's
+   * wire format is not the default 400 `{ error: 'Validation error', code: 'VALIDATION_ERROR',
+   * details }`; e.g. Slack's 200 `{ ok: false, error: 'invalid_arguments' }`. The request is
+   * refused either way.
+   */
+  invalidRequest?: () => ContractError;
   handle: (input: HandlerInput<C, A>) => Promise<RouteResponse<C>>;
 } & (C extends { encryption: RequestContract } ? { encryption: EncryptionImpl<C> } : { encryption?: never });
 
@@ -164,15 +176,20 @@ function throughGate(contract: AnyRouteContract): RequestHandler {
 }
 
 /** Checks params, query and body against the contract; everything after gets the checked copies. */
-function validate(contract: AnyRouteContract): RequestHandler {
+function validate(contract: AnyRouteContract, invalidRequest?: () => ContractError): RequestHandler {
   return function validateMiddleware(req, res, next) {
+    const refuse = (issues: z.core.$ZodIssue[]): void => {
+      if (!invalidRequest) return validationError(res, issues);
+      const answer = invalidRequest();
+      res.status(answer.status).json(answer.body);
+    };
     const params = contract.params ? (contract.params as z.ZodType).safeParse(req.params) : undefined;
-    if (params && !params.success) return validationError(res, params.error.issues);
+    if (params && !params.success) return refuse(params.error.issues);
     const query = contract.query ? (contract.query as z.ZodType).safeParse(req.query) : undefined;
-    if (query && !query.success) return validationError(res, query.error.issues);
+    if (query && !query.success) return refuse(query.error.issues);
     if (contract.body) {
       const body = (contract.body as z.ZodType).safeParse(req.body ?? {});
-      if (!body.success) return validationError(res, body.error.issues);
+      if (!body.success) return refuse(body.error.issues);
       req.body = body.data;
     }
     checked.set(req, { params: params?.data, query: query?.data, access: {} });
@@ -284,12 +301,12 @@ function build<C extends AnyRouteContract, A extends AccessChecks>(contract: C, 
     encryptResponseBodyMiddleware as RequestHandler,
     ...AUTH_STEPS[auth],
     ...(impl.upload ? [impl.upload] : []),
-    validate(contract),
+    validate(contract, impl.invalidRequest),
     ...(impl.access ? [runAccess(impl.access)] : []),
     ...(contract.encryption && encryption
       ? encryptedRoute(contract.encryption as RequestContract, {
           resolveWorkspaceId: encryption.resolveWorkspaceId,
-          transitProxyIngress: auth === 'app',
+          transitProxyIngress: auth === 'app' || auth === 'slack-app',
         })
       : []),
     respond(contract, impl),

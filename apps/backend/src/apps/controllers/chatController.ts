@@ -25,6 +25,7 @@ import {
 import { ContractError } from '@/framework/api';
 import { validateFlowDefinition, formatValidationErrors, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
+import { checkBotMessageDelete } from '../core/botMessageDelete';
 import { ContentFormat, type ChatActionResponse } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { sanitizeMessageContent, isAlphanumericId, encodeHtmlAttr } from '@/utils/contentUtils';
@@ -535,18 +536,13 @@ export class ChatController {
       }
 
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
-      const message = await repositories.messages.findById(messageId);
-      if (!message) {
+      // The same check as the Slack-compatible chat.delete (core/botMessageDelete).
+      const check = await checkBotMessageDelete(messageId, resolvedChannelId, userId);
+      if (!check.ok) {
+        if (check.reason === 'not_own') {
+          throw new ContractError(403, { error: 'You can only delete bot messages posted by this app', code: 'FORBIDDEN' });
+        }
         throw new ContractError(404, { error: 'Message not found', code: 'NOT_FOUND' });
-      }
-
-      const conversation = await repositories.conversations.findById(message.conversationId);
-      if (!conversation || conversation.channelId !== resolvedChannelId) {
-        throw new ContractError(404, { error: 'Message not found', code: 'NOT_FOUND' });
-      }
-
-      if (message.senderId !== userId || message.msgType !== MessageType.BOT) {
-        throw new ContractError(403, { error: 'You can only delete bot messages posted by this app', code: 'FORBIDDEN' });
       }
 
       return await deleteConversationMessage(messageId, userId);

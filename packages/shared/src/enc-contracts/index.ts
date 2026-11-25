@@ -52,3 +52,4 @@ export {
 export { ROUTE_METHODS, defineRoute, routeContracts, routeSpecProblems } from './api-route.js';
 export type { AnyRouteContract, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteResponse } from './api-route.js';
 export { API } from './api.js';
+export { appsSlackChatDelete, appsSlackChatDeleteBodySchema, appsSlackChatDeleteResponseSchema } from './contracts/appsSlack.js';

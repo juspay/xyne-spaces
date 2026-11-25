@@ -85,6 +85,16 @@ test('apps deleteMessage and agentProgress bodies keep the controller checks', (
   assert.deepEqual(progress.safeParse({ conversationId: 'cv1' }).data, { conversationId: 'cv1', status: 'working' });
 });
 
+test('Slack-compatible chat.delete: typed, no encryption, Slack arguments', () => {
+  const route = API.apps.slack.chatDelete;
+  assert.equal(route.key, 'POST /apps/slack/chat.delete');
+  assert.equal(route.encryption, undefined);
+  assert.equal(route.body.safeParse({ channel: 'C1' }).success, false, 'no ts');
+  // channel may be missing here: the channel check answers channel_not_found, as before.
+  assert.equal(route.body.safeParse({ ts: '1' }).success, true);
+  assert.deepEqual(route.response.safeParse({ ok: true, channel: 'c1', ts: 'm1' }).success, true);
+});
+
 test('apps postMessage body keeps the controller checks', () => {
   const body = API.apps.chat.postMessage.body;
   assert.equal(body.safeParse({ channelId: 'c1' }).success, false, 'no content');
