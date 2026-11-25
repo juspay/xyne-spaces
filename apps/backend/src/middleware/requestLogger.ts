@@ -35,6 +35,8 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
       clientPlatform: (req.headers['x-platform'] as string) || undefined,
       deviceIdPresent: !!deviceId,
       legacyClientSessionIdPresent: !!legacyClientSessionId,
+      // Temporary: confirm the Istio sidecar forwards x-forwarded-client-cert to the app.
+      xfcc: (req.headers['x-forwarded-client-cert'] as string) || null,
     });
 
     res.on('finish', () => {
