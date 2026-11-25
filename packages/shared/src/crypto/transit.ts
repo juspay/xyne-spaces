@@ -7,6 +7,8 @@ export interface EncryptionConfig {
   encryptedFields: Record<string, EncryptedTableConfig>;
   clientEncryptionEnabled: boolean;
   apiClientEncryptionEnabled: boolean;
+  /** Plaintext bytes per chunk of a file uploaded as a transit container (file-container). */
+  fileChunkSize: number;
 }
 
 export async function fetchEncryptionConfig(): Promise<EncryptionConfig> {
@@ -21,6 +23,7 @@ export async function fetchEncryptionConfig(): Promise<EncryptionConfig> {
     encryptedFields: data.encryptedFields ?? {},
     clientEncryptionEnabled: data.clientEncryptionEnabled ?? false,
     apiClientEncryptionEnabled: data.apiClientEncryptionEnabled ?? false,
+    fileChunkSize: data.fileChunkSize ?? 0,
   };
 }
 

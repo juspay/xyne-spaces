@@ -513,6 +513,10 @@ const envSchema = Joi.object({
   ENABLE_DB_DECRYPTION: Joi.boolean().default(false),
   ENABLE_STORAGE_ENCRYPTION: Joi.boolean().default(false),
   ENABLE_STORAGE_DECRYPTION: Joi.boolean().default(false),
+  // Plaintext bytes per chunk of an encrypted file (@xyne/shared file-container), for files
+  // encrypted from now on: each file records its own chunk size, so changing this leaves
+  // existing files readable.
+  STORAGE_FILE_CHUNK_SIZE: Joi.number().integer().min(4 * 1024).max(4 * 1024 * 1024).default(1024 * 1024),
   // How long the encrypted-fields config fetched from the encryption service is
   // cached before a background refresh; the rollout latency of a config change.
   ENCRYPTED_FIELDS_CACHE_TTL_MS: Joi.number().integer().min(1000).default(15 * 60 * 1000),
@@ -1425,6 +1429,7 @@ export const config = {
     enableDbDecryption: envVars.ENABLE_DB_DECRYPTION as boolean,
     enableStorageEncryption: envVars.ENABLE_STORAGE_ENCRYPTION as boolean,
     enableStorageDecryption: envVars.ENABLE_STORAGE_DECRYPTION as boolean,
+    storageFileChunkSize: envVars.STORAGE_FILE_CHUNK_SIZE as number,
     encryptedFieldsCacheTtlMs: envVars.ENCRYPTED_FIELDS_CACHE_TTL_MS as number,
     orgProvisionEnabled: envVars.ENC_ORG_PROVISION as boolean,
     workspaceProvisionEnabled: envVars.ENC_WORKSPACE_PROVISION as boolean,

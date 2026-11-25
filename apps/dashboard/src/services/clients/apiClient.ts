@@ -21,6 +21,10 @@ import {
 } from './sessionRefresh';
 import { stateMachineActor } from '../../machines/stateMachine';
 import {
+  fileEncryptionRequestInterceptor,
+  fileEncryptionResponseInterceptor,
+} from '../fileEncryptionInterceptors';
+import {
   encryptionRequestInterceptor,
   encryptionResponseInterceptor,
   retryOnStaleClientManifest,
@@ -66,6 +70,9 @@ const apiConfig: AxiosInstance = axios.create({
 
 // Add encryption request interceptor (must be first to encrypt before other transformations)
 apiConfig.interceptors.request.use(encryptionRequestInterceptor);
+
+// Files to and from the client-file-encryption routes travel as transit containers.
+apiConfig.interceptors.request.use(fileEncryptionRequestInterceptor);
 
 // Add a request interceptor
 apiConfig.interceptors.request.use(
@@ -147,6 +154,7 @@ apiConfig.interceptors.request.use(
 
 // Add a response interceptor
 apiConfig.interceptors.response.use(encryptionResponseInterceptor);
+apiConfig.interceptors.response.use(fileEncryptionResponseInterceptor);
 
 apiConfig.interceptors.response.use(
   (response: AxiosResponse) => {

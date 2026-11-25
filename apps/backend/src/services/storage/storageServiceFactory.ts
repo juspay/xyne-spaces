@@ -42,19 +42,22 @@ function buildStorageConfig(): StorageConfig {
   };
 }
 
-/** Buckets whose objects get per-object CSEK encryption (GCS only). */
-function isEncryptedBucket(bucketName: string): boolean {
-  return bucketName === config.gcs.bucketName || bucketName === config.gcs.sessionRecordingBucketName;
-}
+/**
+ * GCS buckets whose new objects stay unencrypted, each with the reason. Every other GCS bucket
+ * is wrapped in SafeStorageService, so a file written through getStorageService() is encrypted
+ * under its workspace storage key unless its bucket is listed here.
+ */
+const UNENCRYPTED_BUCKETS: ReadonlyMap<string, string> = new Map<string, string>([]);
 
 function withEncryption(service: StorageService, bucketName: string): StorageService {
-  const { enableStorageEncryption, enableStorageDecryption } = config.enc;
-  if (storageProvider() !== 'gcs' || !isEncryptedBucket(bucketName)) return service;
+  const { enableStorageEncryption, enableStorageDecryption, storageFileChunkSize } = config.enc;
+  if (storageProvider() !== 'gcs' || UNENCRYPTED_BUCKETS.has(bucketName)) return service;
   if (!enableStorageEncryption && !enableStorageDecryption) return service;
   return new SafeStorageService(service, {
     encryptWrites: enableStorageEncryption,
     // Objects this process encrypts must stay readable by it.
     decryptReads: enableStorageEncryption || enableStorageDecryption,
+    chunkSize: storageFileChunkSize,
   });
 }
 

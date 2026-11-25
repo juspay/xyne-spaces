@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 import { TRANSIT_KEY_COOKIE } from '@/services/encryption/types';
 import { deviceCookieOptions } from '@/services/authSessionService';
@@ -33,7 +34,10 @@ function serviceUnavailable(res: Response, what: string, req: Request, err: unkn
 // The router is mounted behind authMiddleware.authenticate; only `register` needs the session.
 router.get('/config', async (_req: Request, res: Response) => {
   try {
-    res.json(await getEncryptionProvider().getClientConfig());
+    res.json({
+      ...(await getEncryptionProvider().getClientConfig()),
+      fileChunkSize: config.enc.enableStorageEncryption ? config.enc.storageFileChunkSize : 0,
+    });
   } catch {
     res.status(502).json({ error: 'Encryption service unavailable' });
   }

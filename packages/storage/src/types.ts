@@ -32,12 +32,13 @@ export interface StorageConfig {
 }
 
 /**
- * GCS customer-supplied encryption key (CSEK) for one object. GCS keeps only the key's hash,
- * so every later read, copy or move of the object must present the same key.
+ * How one object is encrypted: a GCS customer-supplied encryption key (CSEK), or none for
+ * bytes the caller encrypted itself, which only need `customMetadata` to say how. GCS keeps
+ * only a CSEK's hash, so every later read, copy or move of such an object must present it.
  */
 export interface ObjectEncryption {
-  /** 32-byte AES-256 key. */
-  key: Buffer;
+  /** 32-byte AES-256 CSEK; omitted when the bytes are already encrypted. */
+  key?: Buffer;
   /** Written to the object's custom metadata, which stays readable without the key. */
   customMetadata: Record<string, string>;
 }

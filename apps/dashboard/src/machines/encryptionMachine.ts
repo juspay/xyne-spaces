@@ -7,6 +7,7 @@ export interface EncryptionState {
   encryptedFields: Record<string, { fields: string[]; enforceClientEncryption: boolean }>;
   clientEncryptionEnabled: boolean;
   apiClientEncryptionEnabled: boolean;
+  fileChunkSize: number;
 }
 
 interface EncryptionContext {
@@ -26,6 +27,7 @@ const INITIAL_STATE: EncryptionState = {
   encryptedFields: {},
   clientEncryptionEnabled: false,
   apiClientEncryptionEnabled: false,
+  fileChunkSize: 0,
 };
 
 const encryptionMachine = createMachine({
@@ -49,6 +51,7 @@ const encryptionMachine = createMachine({
               encryptedFields: event.config.encryptedFields,
               clientEncryptionEnabled: event.config.clientEncryptionEnabled,
               apiClientEncryptionEnabled: event.config.apiClientEncryptionEnabled,
+              fileChunkSize: event.config.fileChunkSize,
             }),
           }),
         },
